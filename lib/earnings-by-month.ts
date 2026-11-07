@@ -21,8 +21,14 @@
  * record without an id of its own provider (a PayPal sale given as Stripe is
  * never counted twice), and a kind of money the provider has that was neither
  * read, said unread nor said left out (EXPECTED_KINDS: a missing refund list
- * is never a confirmed zero). Kinds read only in part are said (PARTLY_READ:
- * PayPal's partial refunds are never recorded). Every net is worked out
+ * is never a confirmed zero). Only kinds a provider's reading truly cannot
+ * hold may be said left out (MAY_LEAVE_OUT: disputes and money given back);
+ * a sale, renewal or refund said left out makes the source unknown. A record
+ * whose id holds another provider's prefix ("stripe:paypal:…") is not its
+ * source's own, and the same id in two sources makes each month it lands in
+ * unknown for those sources. Kinds read only in part are said (PARTLY_READ:
+ * PayPal's partial refunds are never recorded), and `netWords` says what a
+ * difference is after, never "after disputes" without them. Every net is worked out
  * exactly, never rounded. A month's total is given only when every source of
  * that month was read. A month read in full with nothing in it is a confirmed
  * zero (no lines), apart from unknown. A time zone in which a month could
@@ -84,7 +90,7 @@ export type ListReading =
 
 /**
  * A provider's lists; `notRead` names kinds it has that are never read
- * (PayPal's disputes), said on every month. Every kind of EXPECTED_KINDS for
+ * (PayPal's disputes), said on every month, only from MAY_LEAVE_OUT. Every kind of EXPECTED_KINDS for
  * the provider is either in a list (read or unread) or in `notRead`, never
  * both; several lists of one kind are added (Stripe's checkouts and extras are
  * two of "sale"), and the ids keep a record from being added twice.
@@ -100,6 +106,18 @@ export type ProviderReading = { source: "stripe" | "paypal"; lists: ListReading[
 export const EXPECTED_KINDS: Readonly<Record<"stripe" | "paypal", readonly MoneyKind[]>> = {
   stripe: ["sale", "renewal", "refund", "dispute", "reinstated"],
   paypal: ["sale", "refund", "dispute"],
+};
+
+/**
+ * The kinds a provider's reading may say are never read and still give the
+ * month a total, said beside it (pre-review of #2941 at 925ae7d9ec): Stripe's
+ * disputes and money given back, PayPal's disputes. Money in (sales, renewals)
+ * and refunds may never be left out: a reading that says so is unknown, never
+ * a total "after refunds" without them, and never a confirmed zero.
+ */
+export const MAY_LEAVE_OUT: Readonly<Record<"stripe" | "paypal", readonly MoneyKind[]>> = {
+  stripe: ["dispute", "reinstated"],
+  paypal: ["dispute"],
 };
 
 /**
@@ -278,10 +296,18 @@ function add(into: Map<string, Map<string, Sums>>, month: string, currency: stri
 const validCents = (cents: unknown, positive: boolean): cents is number =>
   typeof cents === "number" && Number.isSafeInteger(cents) && (positive ? cents > 0 : cents >= 0);
 
-/** An entry's id: optional only where `required` is false; never the same twice; with `prefix`, its provider's own. */
+/** Every provider's id prefix: a provider's id never holds one after its own ("stripe:paypal:…"). */
+const PROVIDER_PREFIX = /^(stripe|paypal):/i;
+
+/**
+ * An entry's id: optional only where `required` is false; never the same twice;
+ * with `prefix`, its provider's own, the rest never starting with a provider's
+ * prefix again (a PayPal row of readPaidSales prefixed by a caller is not Stripe's).
+ */
 const validId = (id: unknown, seen: Set<string>, required: boolean, prefix = ""): boolean => {
   if (id === undefined) return !required;
   if (typeof id !== "string" || id.length <= prefix.length || !id.startsWith(prefix) || seen.has(id)) return false;
+  if (prefix && PROVIDER_PREFIX.test(id.slice(prefix.length))) return false;
   seen.add(id);
   return true;
 };
@@ -293,14 +319,18 @@ const realDate = (date: string): boolean => {
   return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === date;
 };
 
-/** A source's months: read with its sums, or unknown with why, for each month shown. */
-type SourceResult = { source: EarningsSource; months: Map<string, SourceMonth> };
+/**
+ * A source's months: read with its sums, or unknown with why, for each month
+ * shown; `ids` holds every id it read, with the month shown it was added to
+ * (null: outside the months shown), so an id in two sources is caught.
+ */
+type SourceResult = { source: EarningsSource; months: Map<string, SourceMonth>; ids: Map<string, string | null> };
 
 function unknownEverywhere(source: EarningsSource, months: string[], why: UnknownWhy): SourceResult {
-  return { source, months: new Map(months.map((m) => [m, { source, state: "unknown", why }])) };
+  return { source, months: new Map(months.map((m) => [m, { source, state: "unknown", why }])), ids: new Map() };
 }
 
-function finish(source: EarningsSource, months: string[], sums: Map<string, Map<string, Sums>>, known: (month: string) => UnknownWhy | null, leftOut: MoneyKind[], partly: readonly MoneyKind[]): SourceResult {
+function finish(source: EarningsSource, months: string[], sums: Map<string, Map<string, Sums>>, ids: Map<string, string | null>, known: (month: string) => UnknownWhy | null, leftOut: MoneyKind[], partly: readonly MoneyKind[]): SourceResult {
   const out = new Map<string, SourceMonth>();
   for (const month of months) {
     const why = known(month);
@@ -311,7 +341,7 @@ function finish(source: EarningsSource, months: string[], sums: Map<string, Map<
     const lines = linesOf(sums.get(month) ?? new Map());
     out.set(month, lines ? { source, state: "read", lines, leftOut: [...leftOut], partly: [...partly] } : { source, state: "unknown", why: "too_large" });
   }
-  return { source, months: out };
+  return { source, months: out, ids };
 }
 
 function providerMonths(provider: ProviderReading, months: string[], format: Intl.DateTimeFormat, at: number): SourceResult {
@@ -322,11 +352,14 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
   const oldestFloor = monthFloor(oldest);
   const sums = new Map<string, Map<string, Sums>>();
   const seen = new Set<string>();
+  const ids = new Map<string, string | null>();
   const read: { since: number; complete: boolean; reachedBack: number | null }[] = [];
   // Every kind the provider has is in a list or said not read, never both, and only kinds the rule knows (Claude 2 on #2941).
   if (!Array.isArray(provider.lists) || (provider.notRead !== undefined && !Array.isArray(provider.notRead))) return unknownEverywhere(source, months, "invalid");
   const notRead = [...new Set(provider.notRead ?? [])];
   if (!notRead.every(isKind)) return unknownEverywhere(source, months, "invalid");
+  // A kind it must read, said not read: the source was not read, never a total without it (pre-review of #2941).
+  if (!notRead.every((kind) => MAY_LEAVE_OUT[source].includes(kind))) return unknownEverywhere(source, months, "unread");
   const listed = new Set(provider.lists.map((list) => (list && typeof list === "object" ? list.kind : undefined)));
   if (notRead.some((kind) => listed.has(kind))) return unknownEverywhere(source, months, "invalid");
   if (!EXPECTED_KINDS[source].every((kind) => listed.has(kind) || notRead.includes(kind))) return unknownEverywhere(source, months, "invalid");
@@ -347,6 +380,7 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
       if (typeof event.at !== "number" || !inDateRange(event.at) || !validCents(event.cents, false)) return unknownEverywhere(source, months, "invalid");
       // The current month runs to the reading's time: a record after it is not money so far (Codex J on #2941).
       if (event.at > at) return unknownEverywhere(source, months, "invalid");
+      ids.set(event.id as string, null);
       // Read only because the reading begins at the oldest month's floor: before every month shown, in any zone.
       if (event.at < oldestFloor) continue;
       const currency = typeof event.currency === "string" ? event.currency.toLowerCase() : "";
@@ -356,6 +390,7 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
       if (month > newest) return unknownEverywhere(source, months, "invalid");
       // Read only because the reading begins at the oldest month's floor: outside the months shown.
       if (month < oldest || !shown.has(month)) continue;
+      ids.set(event.id as string, month);
       add(sums, month, currency, FIELD[list.kind], event.cents);
     }
   }
@@ -368,7 +403,7 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
     }
     return null;
   };
-  return finish(source, months, sums, reached, notRead, PARTLY_READ[source]);
+  return finish(source, months, sums, ids, reached, notRead, PARTLY_READ[source]);
 }
 
 function manualMonths(entries: ManualEntry[] | null, months: string[], today: string): SourceResult {
@@ -378,6 +413,7 @@ function manualMonths(entries: ManualEntry[] | null, months: string[], today: st
   const newest = months[0];
   const sums = new Map<string, Map<string, Sums>>();
   const seen = new Set<string>();
+  const ids = new Map<string, string | null>();
   for (const entry of entries) {
     if (!entry || typeof entry !== "object" || !validId(entry.id, seen, true)) return unknownEverywhere(source, months, "invalid");
     if (typeof entry.date !== "string" || !realDate(entry.date) || !validCents(entry.cents, true)) return unknownEverywhere(source, months, "invalid");
@@ -386,13 +422,62 @@ function manualMonths(entries: ManualEntry[] | null, months: string[], today: st
     const month = entry.date.slice(0, 7);
     // An entry dated after the reading's own day, in the store's zone, is not money so far (Codex J on #2941).
     if (month > newest || entry.date > today) return unknownEverywhere(source, months, "invalid");
+    ids.set(entry.id, shown.has(month) ? month : null);
     if (!shown.has(month)) continue;
     add(sums, month, currency, "enteredCents", entry.cents);
   }
-  return finish(source, months, sums, () => null, [], []);
+  return finish(source, months, sums, ids, () => null, [], []);
 }
 
 const PROVIDERS: ReadonlySet<string> = new Set(["stripe", "paypal"]);
+
+/**
+ * The same id in two sources (an ES1 entry of a Stripe payment the Stripe
+ * reading already holds) is one payment that would be added twice: in every
+ * month shown where any of its copies landed, each source holding it is
+ * unknown, so the month has no total (pre-review of #2941 at 925ae7d9ec).
+ */
+function refuseSharedIds(results: SourceResult[]): void {
+  const holders = new Map<string, SourceResult[]>();
+  for (const result of results) {
+    for (const id of result.ids.keys()) holders.set(id, [...(holders.get(id) ?? []), result]);
+  }
+  for (const [id, holding] of holders) {
+    if (holding.length < 2) continue;
+    const landed = holding.flatMap((r) => {
+      const month = r.ids.get(id);
+      return month ? [month] : [];
+    });
+    for (const result of holding) {
+      for (const month of landed) result.months.set(month, { source: result.source, state: "unknown", why: "invalid" });
+    }
+  }
+}
+
+const listWords = (names: string[]): string => (names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+
+/**
+ * What a difference is after, in plain words, from the sources it adds (one
+ * source's line, or a month's sources for its total): only what was taken off
+ * is named, and what was not read is said (pre-review of #2941 at 925ae7d9ec).
+ * Unknown sources are not in a difference, so they are not counted here.
+ */
+export function netWords(sources: readonly SourceMonth[]): string {
+  const read = sources.filter((s): s is Extract<SourceMonth, { state: "read" }> => s.state === "read" && s.source !== "manual");
+  if (!read.length) return "Nothing taken off: no Stripe or PayPal reading in it.";
+  const name = (s: { source: EarningsSource }) => SOURCE_WORDS[s.source];
+  const taken = read.filter((s) => !s.leftOut.includes("dispute")).map(name);
+  const notTaken = read.filter((s) => s.leftOut.includes("dispute")).map(name);
+  const sentences: string[] = [];
+  if (!notTaken.length) sentences.push("After refunds and disputes.");
+  else if (!taken.length) sentences.push(`After refunds, before disputes: ${listWords(notTaken)} disputes are not read, so they are not taken off.`);
+  else sentences.push(`After refunds and ${listWords(taken)} disputes, before ${listWords(notTaken)} disputes, which are not read.`);
+  const noBack = read.filter((s) => s.leftOut.includes("reinstated")).map(name);
+  if (noBack.length) sentences.push(`Money given back by ${listWords(noBack)} is not read, so it is not added.`);
+  const partRefunds = read.filter((s) => s.partly.includes("refund")).map(name);
+  if (partRefunds.length) sentences.push(`Partial ${listWords(partRefunds)} refunds are not recorded, so they are not taken off.`);
+  return sentences.join(" ");
+}
 
 /**
  * The twelve months by source and currency; null for an unknown zone or
@@ -411,6 +496,7 @@ export function earningsByMonth(input: EarningsInput): Earnings | null {
     return [given.lastIndexOf(p.source) === i ? providerMonths(p, months, format, input.at) : unknownEverywhere(p.source, months, "invalid")];
   });
   const results = [...providers, manualMonths(input.manual, months, dayIn(format, input.at))];
+  refuseSharedIds(results);
   return {
     timeZone: input.timeZone,
     at: input.at,

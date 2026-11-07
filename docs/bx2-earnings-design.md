@@ -22,7 +22,8 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
     money that comes back is "given back" in the month it came back (a refund that failed, the
     same). So a month already shown is never rewritten: `DISPUTE_TAKES` of
     lib/retained-revenue.ts, which drops a dispute once won, is for the 7/30/90-day columns,
-    not for this page.
+    not for this page. Money given back has no reading of its own yet (see the table below),
+    so until it has one every Stripe month says it is not read and not added.
   - **PayPal**, only for a store that sells through it: sales and full refunds written down as
     they were paid (lib/paypal-sales.ts, exact amounts in the smallest unit). PayPal's
     partial refunds are not recorded anywhere in the product (a capture is written down as refunded
@@ -35,11 +36,16 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
     "entered by you", never as verified.
   - **Sponsorships** (355 [ES1]) are not built, so they are not shown. When ES1 exists, a
     sponsorship paid through the creator's Stripe is already in "Stripe" and is never added
-    again: ES1 records carry the Stripe payment id, and the rule refuses a duplicate id.
+    again: ES1 records carry the Stripe payment id, and the rule refuses the same id in two sources
+    (each month where a copy of it lands has those sources unknown, so no total).
 - **Per currency**: amounts are never added across currencies and nothing is converted. A
   month with dollars and euros shows two lines.
 - **What a number is**: money in (sales, renewals, money given back, entered), money out
-  (refunds, disputes), and the difference, called "after refunds and disputes". A sale is what
+  (refunds, disputes), and the difference, whose words come from the rule (`netWords`), never
+  typed by the page: "After refunds and disputes." only when every source's disputes were read
+  and taken off; otherwise it names whose disputes were taken off and says the rest plainly
+  (disputes not read, so not taken off; money given back not read, so not added; partial PayPal
+  refunds not recorded, so not taken off), so a total never claims what it did not take off. A sale is what
   the buyer paid, including any tax collected from buyers on top of the price (which the creator
   owes to the tax office, lib/tax.ts), and the page says so. The difference is before Stripe's
   and PayPal's fees and before the creator's own taxes, and the page says that it is not profit.
@@ -61,8 +67,12 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
   reading must give each one as a list, as unread, or as not read (said left out), never two
   of these; a kind just missing makes the source unknown, never a confirmed zero. Each record
   of a provider carries that provider's own id (`stripe:…`, `paypal:…`): a record without one,
-  or with another provider's (a PayPal sale given as Stripe), makes the source unknown, so a
-  sale is never added twice.
+  or with another provider's (a PayPal sale given as Stripe), or with another provider's prefix
+  after its own (`stripe:paypal:…`), makes the source unknown, so a sale is never added twice.
+  Only kinds a reading truly cannot hold may be said left out (`MAY_LEAVE_OUT`, pre-review of
+  #2941 at 925ae7d9ec): Stripe disputes and money given back, PayPal disputes. Sales, renewals
+  and refunds said left out make the source unknown: never a total "after refunds" without them,
+  never a confirmed zero.
 - **561 [NE1] (no earnings claims), respected**: no "best month", no growth percentage, no
   projection, no goal celebration, no comparison with other creators, no badge, level or status
   by revenue. The rule's output has no such field (held by a test). The page carries the NE1
@@ -78,7 +88,7 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
 | Checkouts, extras | The Stripe lists inside `readPaidSales` (lib/stats.ts): checkout sessions and one-click payment intents on the creator's account, 20 pages of 100 each. Never `readPaidSales` itself, which adds the store's PayPal sales to the same list: those are PayPal's, and would be counted twice, once as Stripe | Only to 180 days in `readSales`; the lists take any `since` |
 | Paid invoices of memberships | `readRenewals`, 10 pages, keeps only `subscription_cycle`. The year reading takes every paid invoice of the store's memberships and payment plans, dated by payment: period renewals (`subscription_cycle`), a plan change charged at once (`subscription_update`, lib/tier-switch.ts and lib/yearly-switch.ts), and any other reason, except `subscription_create`, whose payment the checkout already counted (a creator's memberships are opened only by the store's checkout today; one opened another way would have its first invoice counted) | 90 days in `readSales` |
 | Refunds | `readRefunds` / `readStoreRefunds`, 5 pages | 90 days |
-| Disputes, money given back | `readDisputes`, 3 pages, keeps `DISPUTE_TAKES`. The rule takes every dispute that took money, in the month of its debit, and the money a won dispute gave back (or a refund that failed), in the month of its credit, each from its own balance transaction. No code of this repository reads a dispute's balance transactions, so their shape is not confirmed here: until it is, the year reading (unit 2) does not read the disputes list and says Stripe disputes and money given back not read (`notRead`) on every Stripe month, never `DISPUTE_TAKES` and never zero | 90 days |
+| Disputes, money given back | `readDisputes`, 3 pages, keeps `DISPUTE_TAKES`. The rule takes every dispute that took money, in the month of its debit, and the money a won dispute gave back (or a refund that failed), in the month of its credit, each from its own balance transaction. No code of this repository reads a dispute's balance transactions, so their shape is not confirmed here: until it is, the year reading (unit 2) does not read the disputes list and says Stripe disputes and money given back not read (`notRead`) on every Stripe month, never `DISPUTE_TAKES` and never zero. Money given back (a won dispute, a refund that failed) has no reading of its own either: a dispute list runs by the dispute's date, so a dispute opened before the reading began and won after it is never read, and its `reachedBack` would come from the dispute's date, not the credit's. Until a reading of its own exists, listing the credits by their own date with its pages added to the cost line first, the year reading (unit 2) says `reinstated` not read, and every Stripe month says the money given back is not added | 90 days |
 | PayPal sales, refunds | `readPayPalSales`, `readPayPalRefundsWithCoverage` | Any `since`, record-capped |
 | Kept copy | `keptReading` (lib/store-readings.ts), kind `sales`, 10 min fresh, a day kept | 90 days |
 

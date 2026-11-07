@@ -31,6 +31,15 @@ async function outcome(work: () => Promise<unknown>): Promise<string> {
   }
 }
 
+async function pageOutcome(): Promise<string> {
+  try {
+    const rendered = renderToStaticMarkup(await TransparencyPage());
+    return rendered.includes(UNREAD) ? "unread" : "no unread message";
+  } catch (error) {
+    return error instanceof Error ? `${error.name}: ${error.message}` : "other error";
+  }
+}
+
 let checks = 0;
 let failures = 0;
 function equal(name: string, actual: unknown, expected: unknown): void {
@@ -55,10 +64,7 @@ async function main(): Promise<void> {
   );
   equal(
     "the public page turns an impossible day into the honest unread message",
-    await answering("GET", () => ["2026-99-99"], async () => {
-      const rendered = await outcome(async () => renderToStaticMarkup(await TransparencyPage()));
-      return rendered.includes(UNREAD) ? "unread" : rendered;
-    }),
+    await answering("GET", () => ["2026-99-99"], pageOutcome),
     "unread",
   );
   equal(
@@ -85,6 +91,11 @@ async function main(): Promise<void> {
     "unknown reply",
   );
 
+  equal(
+    "a rejected start day can pass the page unread assertion",
+    await answering("GET", () => [7], pageOutcome),
+    "unread",
+  );
   equal(
     "confirmed absence remains confirmed absence",
     await answering("GET", () => [null], () => transparencyCounts(NOW)),

@@ -37,13 +37,16 @@ export type FocusKey = {
   isComposing: boolean;
   typing: boolean;
   fullScreen: boolean;
+  /** A dialog is open on the page (the store's chat or assistant, say): Esc closes it first. */
+  dialogOpen: boolean;
 };
 
 /**
  * Whether a key leaves focus mode: Esc, while it is on, unless it was typed
  * into a field, was part of a word being composed, was already used by
- * something on the page, or is leaving a video's full screen.
+ * something on the page, is leaving a video's full screen, or belongs to a
+ * dialog open on the page.
  */
 export function leavesFocus(on: boolean, press: FocusKey): boolean {
-  return on && press.key === "Escape" && !press.defaultPrevented && !press.isComposing && !press.typing && !press.fullScreen;
+  return on && press.key === "Escape" && !press.defaultPrevented && !press.isComposing && !press.typing && !press.fullScreen && !press.dialogOpen;
 }

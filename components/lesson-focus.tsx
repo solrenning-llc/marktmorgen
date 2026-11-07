@@ -5,7 +5,10 @@
  * hides the course's path, the list of lessons and the comments, so only the
  * lesson shows: its video with the player's own controls, its text, its
  * downloads, its quiz or task, and the button that marks it done. The same
- * button, now "Exit focus mode", brings them back; so does Esc.
+ * button, now "Exit focus mode", brings them back; so does Esc, unless a
+ * dialog is open on the page (the store's chat or assistant), whose Esc
+ * closes that dialog only. Turning it on or off is announced; a lesson opened
+ * with it kept on shows the note without announcing it.
  *
  * The hidden parts stay on the page with the hidden attribute, never taken
  * off it, so a comment being typed is still there afterward. The button stays
@@ -40,6 +43,8 @@ type Parts = {
 const PATH_ID = "lesson-focus-path";
 const LIST_ID = "lesson-focus-list";
 const COMMENTS_ID = "lesson-focus-comments";
+/** A dialog open on the page, such as the store's chat or assistant panel: its Esc closes it, not focus mode. */
+const OPEN_DIALOG = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], dialog[open]';
 
 /** The page around a lesson, with focus mode off or on. Pure, so the test draws both. */
 export function FocusLayout({
@@ -64,12 +69,13 @@ export function FocusLayout({
           type="button"
           aria-controls={controls}
           onClick={onToggle}
-          className="st-footer-link ml-auto inline-flex min-h-11 min-w-11 items-center text-sm font-semibold"
+          className="btn st-btn-ghost btn-sm ml-auto min-h-11 min-w-11"
         >
           {on ? words.exit : words.enter}
         </button>
       </div>
-      <p role="status" className={on ? "st-note mt-3 text-sm" : "sr-only"}>
+      {on ? <p className="st-note mt-3 text-sm">{words.onNote}</p> : null}
+      <p role="status" className="sr-only">
         {message}
       </p>
       <div className={on ? "mx-auto mt-4 grid max-w-3xl gap-6" : "mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]"}>
@@ -105,13 +111,13 @@ export function LessonFocus({ words, ...parts }: Parts & { words: FocusWords }) 
       } catch {
         // Storage blocked: focus mode stays off.
       }
+      // Turned on quietly: the note shows, but only a press is announced, not every lesson opened.
       if (kept) {
         setOn(true);
-        setMessage(words.onNote);
       }
     }, 0);
     return () => window.clearTimeout(first);
-  }, [words.onNote]);
+  }, []);
 
   const choose = useCallback(
     (next: boolean) => {
@@ -138,6 +144,7 @@ export function LessonFocus({ words, ...parts }: Parts & { words: FocusWords }) 
         isComposing: event.isComposing,
         typing: target ? typingInto(target.tagName, target.isContentEditable, target.getAttribute("type") ?? undefined) : false,
         fullScreen: Boolean(document.fullscreenElement),
+        dialogOpen: Boolean(document.querySelector(OPEN_DIALOG)),
       };
       if (leavesFocus(true, press)) choose(false);
     };

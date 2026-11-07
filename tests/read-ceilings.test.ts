@@ -36,7 +36,9 @@ import {
 } from "@/lib/read-ceilings";
 import { TOP_BUYERS } from "@/lib/stats";
 import { COMMENT_ADDRESSES, SHOWN_COMMENTS } from "@/lib/membership-numbers";
-import { STORE_PAGE_SIZE } from "@/lib/catalog";
+import { LISTINGS_PER_MGET, STORE_PAGE_SIZE } from "@/lib/catalog";
+import { ROOM_KEYS_PER_MGET } from "@/lib/call-rooms";
+import { MOVES_PER_MGET } from "@/lib/call-moves-read";
 import { MAX_BUMPS } from "@/lib/product-extras";
 import { createHash } from "node:crypto";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
@@ -291,9 +293,13 @@ async function main(): Promise<void> {
     is(`each booking adds what the count gives it (${perBooking.toFixed(2)} <= ${CALENDAR_BUILD_PER_BOOKING})`, perBooking <= CALENDAR_BUILD_PER_BOOKING, true);
     is(`forty bookings, measured (${forty}), within the count for forty (${calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands})`, forty <= calendarBuildCommands(0, 40) + CALENDAR_POLL_SHAPE.commands, true);
     // Measured, not the shape's own expression again (review C4-33 (c)): the fixed part measured here, with every
-    // listing (one GET each) and every booking at the measured rate, is within the shape.
+    // listing (LISTINGS_PER_MGET at one MGET), every booking's moves (MOVES_PER_MGET at one MGET) and room keys (four a
+    // booking, ROOM_KEYS_PER_MGET at one MGET), every booking's room made (SET NX and GET) and every booking at the
+    // measured rate, is within the shape. tests/calendar-batch-reads.test.ts measures that worst making whole.
     const fixedMeasured = forty - 40 * perBooking - CALENDAR_POLL_SHAPE.commands;
-    is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + MAX_PRODUCTS + perBooking * CALENDAR_STRIPE_PAGES * 100, true);
+    const calls = CALENDAR_STRIPE_PAGES * 100;
+    const worstReads = Math.ceil(MAX_PRODUCTS / LISTINGS_PER_MGET) + Math.ceil(calls / MOVES_PER_MGET) + Math.ceil((4 * calls) / ROOM_KEYS_PER_MGET);
+    is(`the shape holds the measured fixed part (${fixedMeasured.toFixed(0)}), every listing and every booking at its worst`, CALENDAR_BUILD_SHAPE.commands >= fixedMeasured + worstReads + 2 * calls + perBooking * calls, true);
   }
 
   part("A store from before lists gets one the first time a reading would name someone, tried once a day: measured, within its shape, priced every day (reviews of fe4cb5e56 and 2c1af02e0)");

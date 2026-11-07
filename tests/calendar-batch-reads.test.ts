@@ -14,8 +14,9 @@ import { createHash } from "node:crypto";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import { newFeedToken } from "@/lib/calendar-sync";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
-import { KIND } from "@/lib/catalog";
-import { CALENDAR_BUILD_SHAPE, CALENDAR_CALLS, CALENDAR_POLL_SHAPE, calendarBuildCommands } from "@/lib/read-ceilings";
+import { KIND, LISTINGS_PER_MGET, readListings } from "@/lib/catalog";
+import { ROOM_KEYS_PER_MGET, roomsFor } from "@/lib/call-rooms";
+import { CALENDAR_BUILD_SHAPE, CALENDAR_CALLS, CALENDAR_POLL_SHAPE, LISTING_READ_BYTES, calendarBuildCommands } from "@/lib/read-ceilings";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -129,6 +130,15 @@ async function main(): Promise<void> {
   is("listings: a number among the replies fails the making, nothing kept", await broken(LISTING_KEY, "number"), [503, false, null]);
   is("rooms: a reply one short fails the making, nothing kept", await broken(ROOM_KEY, "short"), [503, false, null]);
   is("rooms: a number among the replies fails the making, nothing kept", await broken(ROOM_KEY, "number"), [503, false, null]);
+
+  part("Each reply stays within 1 MiB at the bytes it is priced at; the other readers keep their GETs");
+  is("50 listings at LISTING_READ_BYTES, 400 room keys at 1,024 bytes: each MGET's reply within 1 MiB", [LISTINGS_PER_MGET * LISTING_READ_BYTES <= 1_048_576, ROOM_KEYS_PER_MGET * 1_024 <= 1_048_576], [true, true]);
+  {
+    const ids = [productId(0), productId(1), productId(2)];
+    const plain = await counted(() => readListings(store, ids));
+    const rooms = await counted(() => roomsFor(CALLS_ID, [{ product: productId(0), setup: listing(0).call as never, session: "cs_test_other", start: hour + 3_600_000, end: hour + 5_400_000 }]));
+    is("readListings and roomsFor, for every other reader, still send one GET a key", [plain.value.length, plain.sent.map((c) => c[0]), rooms.sent.slice(0, 4).map((c) => c[0])], [3, ["GET", "GET", "GET"], ["GET", "GET", "GET", "GET"]]);
+  }
   done();
 }
 

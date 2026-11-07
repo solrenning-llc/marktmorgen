@@ -36,6 +36,10 @@ import { DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/sta
 import { CALENDAR_FILE_MAX_BYTES, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-sync";
 import { READING_COPY_MAX_BYTES } from "@/lib/store-readings";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { LISTINGS_PER_MGET } from "@/lib/catalog";
+import { ROOM_KEYS_PER_MGET } from "@/lib/call-rooms";
+import { moveReads } from "@/lib/call-moves-read";
+import { mgetCommands } from "@/lib/redis-mget";
 
 export type ReadShape = {
   /** Wall seconds, held at 2 GB. */
@@ -96,10 +100,12 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * 3 when the copy's step found a deleted person instead, a making that did not fail); the store (its handle and its record: 2 GET) and its settings
  * written again when it was renamed (lib/calendar-sync.ts, ensureFeedToken:
  * GET and SET, 2); its Stripe pages; every call listing (one GET each, up to
- * MAX_PRODUCTS, the catalog's head aside); each booking's moves
- * (lib/call-records.ts, readMoves: one GET a booking); four reads of each
- * booking's room and, for a video room not made yet, its making (SET NX and
- * GET: lib/call-rooms.ts, roomsFor); the copy kept (lib/calendar-sync.ts,
+ * MAX_PRODUCTS, the catalog's head aside, read LISTINGS_PER_MGET at one MGET:
+ * lib/catalog.ts, readListingsBatched); the bookings' moves (lib/call-records.ts,
+ * readMoves: MOVES_PER_MGET at one MGET, lib/call-moves-read.ts, moveReads);
+ * the four keys of each booking's room (ROOM_KEYS_PER_MGET at one MGET:
+ * lib/call-rooms.ts, roomsForMany) and, for a video room not made yet, its
+ * making (SET NX and GET, a booking each); the copy kept (lib/calendar-sync.ts,
  * KEEP_COPY: the EVAL and the EXISTS, the HMGET of the bookers' prints among
  * the store's deleted people and the SET or DEL it runs, billed one by one: 4);
  * and the store kept in the list whose refunds are read (ZSCORE and ZADD: 2,
@@ -107,14 +113,24 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  */
 /** A store with no list, before anyone is named: the day's try mark (SET NX), whether or not the try is its own (listForNaming). */
 export const LIST_TRY_COMMANDS = 1;
-/** Commands one booking adds to a making: its moves (GET), its room's four reads and its room's making (SET NX and GET). */
-export const CALENDAR_BUILD_PER_BOOKING = 1 + 4 + 2;
-/** Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts measures it). */
+/**
+ * Commands one booking adds to a making on its own: its room's making (SET NX and GET). Its moves and its room's four
+ * keys are read in MGETs shared with other bookings (calendarBuildCommands counts those by the chunk).
+ */
+export const CALENDAR_BUILD_PER_BOOKING = 2;
+/** The four keys of a booking's room read by the making (lib/call-rooms.ts, roomsForMany). */
+export const ROOM_KEYS_PER_BOOKING = 4;
+/**
+ * Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts and
+ * tests/calendar-batch-reads.test.ts measure it). A count that is not a number is never priced low.
+ */
 export function calendarBuildCommands(listings: number, calls: number): number {
+  if (!Number.isFinite(listings) || !Number.isFinite(calls)) return Number.POSITIVE_INFINITY;
   // + 1: the bookers looked up among the store's deleted people (withoutErasedBookers, one HMGET); the copy kept, 4:
   // KEEP_COPY looks them up again where it writes (review of #2111). + LIST_TRY_COMMANDS: a store with no list, the
   // day's try mark (lib/store-readings.ts, listForNaming; the try itself is priced once a day in store-readings).
-  return 4 + 8 + 4 + 3 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 4 + 2 + 1 + LIST_TRY_COMMANDS;
+  const reads = mgetCommands(listings, LISTINGS_PER_MGET) + moveReads(calls) + mgetCommands(ROOM_KEYS_PER_BOOKING * calls, ROOM_KEYS_PER_MGET);
+  return 4 + 8 + 4 + 3 + 2 + 2 + reads + CALENDAR_BUILD_PER_BOOKING * calls + 4 + 2 + 1 + LIST_TRY_COMMANDS;
 }
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,

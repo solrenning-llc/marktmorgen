@@ -48,7 +48,7 @@ import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fe
 import { type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
 import { type Listing, type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
 import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
-import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
+import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor, roomsForMany } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
 import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";
 import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR, CALENDAR_RETRIES_PER_DAY } from "@/lib/calendar-limits";
@@ -580,6 +580,25 @@ export function bookedCalendar(
  * for bookedCalendar: one question to Redis for all of them (lib/call-rooms.ts).
  */
 export async function slotRooms(store: Store, calls: BookedCall[], listings: Listing[]): Promise<Map<string, string | null>> {
+  return slotRoomsWith(store, calls, listings, roomsFor);
+}
+
+/**
+ * slotRooms, for the feed's making (app/api/store/calendar/[token]/route.ts):
+ * the rooms' keys read in chunked MGETs (lib/call-rooms.ts, roomsForMany),
+ * a reply not whole failing the making as an unknown (UnreadableMget), never
+ * a room taken for absent. Priced in CALENDAR_BUILD_SHAPE (lib/read-ceilings.ts).
+ */
+export async function slotRoomsBatched(store: Store, calls: BookedCall[], listings: Listing[]): Promise<Map<string, string | null>> {
+  return slotRoomsWith(store, calls, listings, roomsForMany);
+}
+
+async function slotRoomsWith(
+  store: Store,
+  calls: BookedCall[],
+  listings: Listing[],
+  rooms: (callsId: string | null, asks: RoomAsk[]) => Promise<(string | null)[]>,
+): Promise<Map<string, string | null>> {
   const firsts = new Map<string, BookedCall>();
   for (const call of calls) {
     const key = `${call.product}|${call.start}`;
@@ -590,8 +609,8 @@ export async function slotRooms(store: Store, calls: BookedCall[], listings: Lis
     const setup = listings.find((p) => p.id === call.product)?.call;
     if (setup) asks.push({ key, ask: { product: call.product, setup, session: call.session, start: call.start, end: call.end } });
   }
-  const rooms = await roomsFor(store.callsId, asks.map((a) => a.ask));
-  return new Map(asks.map((a, i) => [a.key, rooms[i]]));
+  const found = await rooms(store.callsId, asks.map((a) => a.ask));
+  return new Map(asks.map((a, i) => [a.key, found[i]]));
 }
 
 /**

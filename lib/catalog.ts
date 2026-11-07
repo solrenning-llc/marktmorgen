@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { mgetWhole } from "@/lib/redis-mget";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -704,6 +705,43 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
     });
   }
   return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
+}
+
+/**
+ * Listings read at one MGET by readListingsBatched: 50 at LISTING_READ_BYTES
+ * (16,384 bytes, the review ceiling lib/read-ceilings.ts prices a listing at)
+ * is 819,200 bytes a reply, under 1 MiB with room for the escaping its JSON
+ * text takes in the REST answer (tests/calendar-batch-reads.test.ts holds it).
+ */
+export const LISTINGS_PER_MGET = 50;
+
+/**
+ * readListings, for a reader that may read every product of a store at once
+ * (the booking calendar's making, lib/calendar-sync.ts): the records read
+ * LISTINGS_PER_MGET at one MGET (lib/redis-mget.ts), not one GET each. A
+ * reply not whole, or holding anything but text or nothing, throws
+ * UnreadableMget: the reading fails, never a listing taken for absent. A key
+ * that is gone, or a record that does not parse, is left out as readListings
+ * leaves it out. readListings itself is unchanged for its other readers.
+ */
+export async function readListingsBatched(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+  }
+  if (asked.length === 0) return [];
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length && catalog.id && isRedisConfigured()) {
+    const raws = await mgetWhole(missing.map((id) => listingKey(catalog.id!, id)), LISTINGS_PER_MGET);
+    missing.forEach((id, i) => {
+      const listing = parseListing(parseJson(raws[i]));
+      if (listing && listing.id === id) found.set(id, listing);
+    });
+  }
+  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
 }
 
 /**

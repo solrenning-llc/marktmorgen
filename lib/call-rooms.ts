@@ -40,6 +40,7 @@
  */
 import { whereOf } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { mgetWhole } from "@/lib/redis-mget";
 import { type CallSetup, isGroup, roomFor } from "@/lib/call-setup";
 import { callScope, givenLink, parseRecord, recordKey } from "@/lib/meet-records";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -96,10 +97,39 @@ export function fallbackSetup(setup: CallSetup, start: number): CallSetup {
  * own link. Two round trips at most, however many.
  */
 export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise<(string | null)[]> {
+  return roomsReadWith(callsId, asks, readByGets);
+}
+
+/**
+ * Booking room keys read at one MGET by roomsForMany: 100 bookings' four
+ * keys. At the 1,024 bytes a key the booking calendar's making is priced at
+ * (lib/read-ceilings.ts, CALENDAR_BUILD_SHAPE) a reply is 409,600 bytes.
+ */
+export const ROOM_KEYS_PER_MGET = 400;
+
+/**
+ * roomsFor, for a reader that may ask about every booking of a store at once
+ * (the booking calendar's making, lib/calendar-sync.ts, slotRoomsBatched):
+ * the four keys of each booking read ROOM_KEYS_PER_MGET at one MGET
+ * (lib/redis-mget.ts), not one GET each. A reply not whole, or holding
+ * anything but text or nothing, throws UnreadableMget: the reading fails,
+ * never a room taken for absent (and so never a new one made in its place).
+ * The rooms still to make are made as roomsFor makes them (SET NX and GET).
+ */
+export async function roomsForMany(callsId: string | null, asks: RoomAsk[]): Promise<(string | null)[]> {
+  return roomsReadWith(callsId, asks, readByMgets);
+}
+
+/** How the keys of the rooms asked about are read: each with its own GET, in one trip (roomsFor). */
+const readByGets = (keys: string[]): Promise<unknown[]> => redisPipeline(keys.map((key) => ["GET", key]));
+/** Or ROOM_KEYS_PER_MGET at one MGET, read only when whole (roomsForMany). */
+const readByMgets = (keys: string[]): Promise<unknown[]> => mgetWhole(keys, ROOM_KEYS_PER_MGET);
+
+async function roomsReadWith(callsId: string | null, asks: RoomAsk[], readKeys: (keys: string[]) => Promise<unknown[]>): Promise<(string | null)[]> {
   // In person (lib/call-place.ts): no room, not even one kept from when it was online; the others are asked as before.
   if (asks.some((a) => whereOf(a.setup).kind === "place")) {
     const online = asks.map((a, i) => ({ a, i })).filter(({ a }) => whereOf(a.setup).kind !== "place");
-    const found = await roomsFor(callsId, online.map(({ a }) => a));
+    const found = await roomsReadWith(callsId, online.map(({ a }) => a), readKeys);
     const out: (string | null)[] = asks.map(() => null);
     online.forEach(({ i }, k) => {
       out[i] = found[k];
@@ -107,15 +137,15 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
     return out;
   }
   if (!callsId || !isRedisConfigured() || asks.length === 0) return asks.map((a) => roomFor(a.setup, a.start));
-  const read = await redisPipeline(
+  const read = await readKeys(
     asks.flatMap((a) => [
-      ["GET", bookingKey(callsId, a.session)],
-      ["GET", timeKey(callsId, a.product, a.start)],
+      bookingKey(callsId, a.session),
+      timeKey(callsId, a.product, a.start),
       // Asked for every booking, not only those of a product set to make
       // meetings now, and under both of its possible names, since a call can
       // go from one seat to several: a booking keeps the link it was given.
-      ["GET", recordKey(callScope(callsId, { group: false, session: a.session, product: a.product, start: a.start }))],
-      ["GET", recordKey(callScope(callsId, { group: true, session: a.session, product: a.product, start: a.start }))],
+      recordKey(callScope(callsId, { group: false, session: a.session, product: a.product, start: a.start })),
+      recordKey(callScope(callsId, { group: true, session: a.session, product: a.product, start: a.start })),
     ]),
   );
   const found: (string | null)[] = asks.map((_, i) => {

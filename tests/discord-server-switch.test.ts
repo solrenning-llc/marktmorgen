@@ -101,6 +101,10 @@ async function main(): Promise<void> {
   const OLD_KEPT = [OLD, 2, ANA, BEN, true, true];
   const SWITCHED = [NEW, 0, null, null, false, false];
   const leaves = () => asked.filter((call) => call === `DELETE /users/@me/guilds/${OLD}`).length;
+  // The application has "Requires OAuth2 Code Grant" on (lib/discord.ts, authorizeUrl): Discord adds the bot to the
+  // server picked only when the code is swapped. So a refusal before the swap adds the bot nowhere.
+  const swaps = () => asked.filter((call) => call === "POST /oauth2/token").length;
+  const leftNew = () => asked.filter((call) => call === `DELETE /users/@me/guilds/${NEW}`).length;
   /** The creator comes back from Discord's page; the notice it lands on, or "threw" for a bare 500. */
   const comeBack = async (): Promise<string> => {
     const state = await startTrip({ k: "install", sid: store.sid, by: OWNER, redirect });
@@ -127,6 +131,9 @@ async function main(): Promise<void> {
   leaveStatus = 500;
   is("the creator hears \"server\", never \"connected\"", await comeBack(), "server");
   is("the old server stays connected with its people and their address links", await kept(), OLD_KEPT);
+  // Claude 4's focal return on #3017 (LEVE): here the bot is already in the new server. It is not told to leave it:
+  // no record says which stores use a server, so the bot may be there for another store; the notice says so instead.
+  is("the bot is not told to leave the new server (it may serve another store there)", leftNew(), 0);
 
   const ODD_SERVER: [unknown, string][] = [
     [[42], "GET answers a number"],
@@ -141,6 +148,7 @@ async function main(): Promise<void> {
     unbend();
     is(`${label}: "unavailable", never "connected" over the old server`, notice, "unavailable");
     is(`${label}: the bot is not told to leave anything`, leaves(), 0);
+    is(`${label}: the code is never swapped, so Discord adds the bot to no server ("nothing was connected" is true)`, swaps(), 0);
     is(`${label}: the old server, its people and their address links are all kept`, await kept(), OLD_KEPT);
   }
 
@@ -151,6 +159,7 @@ async function main(): Promise<void> {
   unbend();
   is("the creator hears \"not_finished\", not a bare 500", unfinished, "not_finished");
   is("the bot did leave the old server", leaves(), 1);
+  is("the bot is not told to leave the new server", leftNew(), 0);
   is("the old server is still kept, with its people and their address links, for the next try", await kept(), OLD_KEPT);
   is("the next try (Discord answers 404: already out) connects the new server", await comeBack(), "connected");
   is("and only then is the old server's data forgotten", await kept(), SWITCHED);
@@ -160,6 +169,13 @@ async function main(): Promise<void> {
   is("unavailable: could not read, nothing connected", /unavailable: \{ tone: "error", text: "[^"]*could not read[^"]*" \}/.test(page), true);
   is("server: the old server is still connected", /server: \{ tone: "error", text: "[^"]*old server is still connected[^"]*" \}/.test(page), true);
   is("not_finished: the bot left the old server, try again", /not_finished: \{ tone: "error", text: "[^"]*bot left your old server[^"]*[Tt]ry again[^"]*" \}/.test(page), true);
+  // Claude 4's focal return on #3017 (LEVE): on these two the code was swapped, so the bot is in the server just
+  // picked; the notice says it is there and how to take it out, never only "your old server is still connected".
+  const NEW_SERVER = /The bot is now in the server you just picked[^"]*remove it there in Discord's server settings/;
+  const words = (status: string) => page.match(new RegExp(`\\n  ${status}: \\{ tone: "error", text: "([^"]*)" \\}`))?.[1] ?? "";
+  is("server: says the bot is now in the server just picked, and how to remove it", NEW_SERVER.test(words("server")), true);
+  is("not_finished: says the bot is now in the server just picked, and how to remove it", NEW_SERVER.test(words("not_finished")), true);
+  is("unavailable: says nothing was connected (the bot was added nowhere)", /nothing was connected/.test(words("unavailable")), true);
   done();
 }
 main();

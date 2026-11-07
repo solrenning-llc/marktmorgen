@@ -4875,3 +4875,8 @@ void main();
 
 ### Entrega do parecer e canal pendente — 07/11/2026,20h36 Fortaleza
 M5815582088 publicado noEXATOc56698c00839189dfde7b5462105ef84e3af987d, FULLbodyrelidoEXATO;247PASS/types8400/lint0/scannerparcial39810. CanalCXM-20261107-2036-C1-2 tentouCAS:409NÃOAPLICADO por outro commit concorrente, não publicado. Aguardar>=120s/relerFULL+IDausente antesretry; não refazer testes/review por isso. Delta atéC6-2035/G-2033/C4-2035 lido, nenhum novo nominal M. Fonte/hash de todos arquivos preservados. #3135N+P não Mterceiro; #3136irmãoC6 aindaSEMPR atébaseadmitida; pausaSUSPENSA2014. Sem vigia em fundo/automação alterada.
+
+
+### Recibo final reconciliado — 07/11/2026
+CXM-20261107-2036-C1-2 entregue em06395fb2631d9aa85baca78c8bd3068a3b0beb58,blob02e2d14b35459a3697b1b8b8bad2ccf6597f525d,FULL4652518 caracteres com readbackEXATO. DuasCAS409anterioresNÃOAPLICADAS; terceiroenvioapós122s(23:39:33→23:41:35UTC), FULLfresco4650371/IDausente/prefixointeiro+append. Semmensagempendente. ParecerM5815582088exatoheadc566/247PASS/escopos e limitações intactos,nenhumreplaydeverdes.
+Últimodelta:3137pedidoC2játemoriginaisR1relatados(H2preflightsemclaim), nãoMrevisãofaltanteinferida; C2WG14b1ocupado/b2b3custodonoaguarda,nãoMoverwrite. C3-2041diz2840C4jáfixe336/focalC1pendente, nãoMgrant. Gnominais3037/3121/3123preservados;3135N/Pnão3ªM. Mainfila57a00hunkslidos/pausaSUSPENSA2014; semCI/ref/mainmerge/enqueue/merge/pushproduto/subagentes/provedores. Próximo retornoMourecortepedidolivreapóspreflight. Revisão3136entregue,nãofimprojetonemfilaesgotada;continuidadeinalterada/semvigiaemfundo.

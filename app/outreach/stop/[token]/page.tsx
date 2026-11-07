@@ -29,13 +29,32 @@ export default async function OutreachStopPage({ params, searchParams }: Params)
       })
     : null;
   const who = found?.storeName || "this creator";
+  // What the last press did (app/api/outreach/stop): saved, or not saved (Claude 5 on #2968). A press that did not
+  // go through is said so, never left looking like a first visit.
+  const saved = query.done === "1";
+  const failed = query.done === "0";
+  const notSaved = failed ? (
+    <p className="notice notice-error mt-3" role="alert">
+      Your request did not go through just now, so nothing new was stopped. Press a button below again in a moment, or reply to
+      the email and say you would rather not hear from them.
+    </p>
+  ) : null;
 
   return (
     <main id="content" className="min-h-screen bg-paper px-4 py-20 text-ink">
       <div className="card mx-auto max-w-md p-7 sm:p-9">
-        {unread ? (
+        {unread && saved ? (
+          <>
+            <h1 className="t-h3">Your request to stop these emails was saved</h1>
+            <p className="notice notice-info mt-3" role="status">
+              The rest of this page could not be loaded just now. You can also close your address to every store here.
+            </p>
+            <StopForms token={token} who={who} store={false} />
+          </>
+        ) : unread ? (
           <>
             <h1 className="t-h3">This link could not be read just now</h1>
+            {notSaved}
             <p className="notice notice-info mt-3" role="status">
               We could not check whether these emails are already stopped. Nothing was changed. You can still stop them below, or
               reply to the email and say you would rather not hear from them: they are asked to stop at that, too.
@@ -58,13 +77,14 @@ export default async function OutreachStopPage({ params, searchParams }: Params)
           </>
         ) : (
           <>
-            <h1 className="t-h3">{found.stopped || query.done === "1" ? `${who} cannot write to you again` : `Stop emails from ${who}?`}</h1>
+            <h1 className="t-h3">{found.stopped || saved ? `${who} cannot write to you again` : `Stop emails from ${who}?`}</h1>
+            {notSaved}
             <p className="mt-3 text-ink-soft">
-              {found.stopped || query.done === "1"
+              {found.stopped || saved
                 ? `Their store can no longer prepare an email to ${found.domain}. You can also close ${found.domain} to every store here.`
                 : `${who} wrote to ${found.domain} from their own mailbox, with a draft prepared here. One press and their store can never prepare another.`}
             </p>
-            <StopForms token={token} who={who} store={!(found.stopped || query.done === "1")} />
+            <StopForms token={token} who={who} store={!(found.stopped || saved)} />
           </>
         )}
         <p className="mt-6 text-sm text-ink-mute">

@@ -183,6 +183,42 @@ test("control: with no contact list, healthy marks send once", async () => {
   assert.deepEqual(sent.slice(before), [email]);
 });
 
+test("an unknown stop link write leaves no stop link behind, with the address in it (Claude 5's LOW on #2951)", async () => {
+  // The write may have landed although its reply is unknown; every pass that tries again would leave one more link,
+  // kept 400 days with the address in it, that is never sent and that erasure may not find.
+  const isLink = (commands: Commands) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:recover:link:");
+  for (const [label, value] of [["QUEUED", "QUEUED"], ["nothing", null], ["a number", 1]] as const) {
+    const store = await shop();
+    const { id, email } = fresh();
+    let key = "";
+    await assert.rejects(
+      intercept(isLink, async (commands, real) => {
+        key = String(commands[0][1]);
+        const replies = await real(commands);
+        replies[0] = value as never;
+        return replies;
+      }, () => remindAbandoned(store, left(id, email))),
+      UnknownReplyError,
+      `${label}: must be unknown`,
+    );
+    assert.ok(key, `${label}: the stop link was written`);
+    assert.equal((await redis.pipeline([["GET", key]]))[0], null, `${label}: the stop link that was never sent is still there`);
+  }
+});
+
+test("control: a stop link written whole stays for the reminder it is sent in", async () => {
+  const store = await shop();
+  const { id, email } = fresh();
+  let key = "";
+  const isLink = (commands: Commands) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:recover:link:");
+  await intercept(isLink, async (commands, real) => {
+    key = String(commands[0][1]);
+    return real(commands);
+  }, () => remindAbandoned(store, left(id, email)));
+  assert.ok(key, "the stop link was written");
+  assert.notEqual((await redis.pipeline([["GET", key]]))[0], null, "the sent reminder's stop link is kept");
+});
+
 test("a claim reply other than OK or nothing is unknown: nothing is sent", async () => {
   for (const value of [undefined, "Ok", "ok", "", 1, 0, true, ["OK"], { ok: true }]) {
     await refuses(isClaims, slotAs(0, value), `sent claim ${String(value)}`);

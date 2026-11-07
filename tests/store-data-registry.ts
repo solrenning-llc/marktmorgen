@@ -651,7 +651,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
   // A one-off email's poll (125 [F2-EMAIL-POLLS]): its record and the list's polls capped, each answer written by the public request that pressed it.
   "nl:mpoll:@lib/mail-poll-votes.ts": { what: "A one-off email's poll: its question, answers and when", parts: [capped(MAX_POLLS_KEPT * POLL_RECORD_BYTES, "MAX_POLLS_KEPT polls a list, each its record at its largest.", src("lib/mail-poll-votes.ts", "MAX_POLLS_KEPT", "POLL_RECORD_BYTES"))] },
-  "nl:mpoll:ix:@lib/mail-poll-votes.ts": { what: "A list's polls, by when they were first sent", parts: [capped(KEY + MAX_POLLS_KEPT * ENTRY_BYTES, "MAX_POLLS_KEPT members, the oldest deleted whole past them.", src("lib/mail-poll-votes.ts", "MAX_POLLS_KEPT"))] },
+  "nl:mpoll:ix:@lib/mail-poll-votes.ts": { what: "A list's polls, by when they are gone, at most MAX_POLLS_KEPT at once", parts: [capped(KEY + MAX_POLLS_KEPT * ENTRY_BYTES, "MAX_POLLS_KEPT members, the oldest deleted whole past them.", src("lib/mail-poll-votes.ts", "MAX_POLLS_KEPT"))] },
   "nl:mpoll:v:@lib/mail-poll-votes.ts": short("A reader's answer to a poll, gone with it ninety days after its email first went", "request", 90, ENTRY_BYTES, REQ("poll answer")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },
   "nl:mail:drafts:@lib/mail-drafts.ts": { what: "Email drafts", parts: [capped(MAX_DRAFTS * (MAX_MAIL_BODY * 3 + 2 * KB), "MAX_DRAFTS drafts.", src("lib/mail-drafts.ts", "MAX_DRAFTS"), src("lib/mail.ts", "MAX_MAIL_BODY"))] },

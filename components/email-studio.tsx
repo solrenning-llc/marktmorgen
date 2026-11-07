@@ -50,6 +50,8 @@ const MESSAGES: Record<string, string> = {
   subject: "Write a subject line.",
   body: "Write the email itself.",
   placeholder: "Part of the template is still in ⟦brackets⟧. Replace each with your own words, or remove it, before it can go out.",
+  poll_full: "Your list keeps 20 polls, the most at once. A poll leaves the count 90 days after its email first went out. Send this email without its poll for now, or later.",
+  poll_unknown: "Your polls could not be counted just now. Nothing was made. Try again in a moment.",
   poll: "The poll is not complete. Design shows what to change: one question after @poll, then 2 to 5 different answers, one a line starting with \"- \". An email holds one poll.",
   when: "Pick a time between now and a year from now.",
   broadcast_cancel_unconfirmed: "The cancellation could not be confirmed. The campaign may still go out. Reload Sent and scheduled to check its current status.",

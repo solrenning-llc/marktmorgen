@@ -15,7 +15,8 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
-import { pollProblem } from "@/lib/mail-poll";
+import { hasPoll, pollProblem } from "@/lib/mail-poll";
+import { MAX_POLLS_KEPT, POLL_KEEP_DAYS, POLL_OPEN_DAYS, pollsKept } from "@/lib/mail-poll-votes";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { needData, takeData } from "@/lib/store-data";
@@ -308,11 +309,14 @@ export function whoOf(store: Store, kind: Who): { kind: Who; paid: ReadonlySet<s
   return kind === "all" ? undefined : { kind, paid: new Set(idsOfKind(store, "paid")) };
 }
 
+/** Why an email with a poll did not go: its list keeps the most polls at once (lib/mail-poll-votes.ts). */
+export const POLL_FULL_NOTE = `Not sent: your list keeps ${MAX_POLLS_KEPT} polls, the most at once. A poll leaves the count ${POLL_OPEN_DAYS + POLL_KEEP_DAYS} days after its email first went out. Send this email again without its poll, or once a poll has left the count.`;
+
 export type CreateResult =
   // `keep`: the narrowing read and counted here, for a send that starts in the same request (advanceBroadcast's `given`).
   // `startsNow`: it is due already, so the request that wrote it starts it (the scheduled job takes up the rest).
   | { ok: true; broadcast: Broadcast; keep: ((email: string) => boolean) | undefined; startsNow: boolean }
-  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" | "poll" }
+  | { ok: false; reason: "subject" | "body" | "when" | "product" | "empty" | "allowance" | "setup" | "plan" | "test_subject" | "test_small" | "test_links" | "placeholder" | "poll" | "poll_full" | "poll_unknown" }
   // Its readings of the buyers could not be held (lib/store-allowance.ts holdAllowanceAt): the sentence says why.
   | { ok: false; reason: "studio_used"; message: string };
 
@@ -360,6 +364,13 @@ export async function createBroadcast(
   if (hasPlaceholder(subject) || hasPlaceholder(body)) return { ok: false, reason: "placeholder" };
   // A poll goes only whole and as it can be answered (lib/mail-poll.ts); its problem in words is the designer's to show.
   if (pollProblem(body) !== null) return { ok: false, reason: "poll" };
+  // A list keeps at most MAX_POLLS_KEPT polls at once, and none is deleted to make room: one more is refused here,
+  // and again when it goes if the list filled up meanwhile (POLL_FULL_NOTE). Unread is refused, never taken as room.
+  if (hasPoll(body)) {
+    const kept = await pollsKept(store.listId);
+    if (kept === null) return { ok: false, reason: "poll_unknown" };
+    if (kept >= MAX_POLLS_KEPT) return { ok: false, reason: "poll_full" };
+  }
   const productId = typeof input.productId === "string" && input.productId ? input.productId : null;
   if (productId && !hasProduct(store, productId)) return { ok: false, reason: "product" };
   const notProductId = typeof input.notProductId === "string" && input.notProductId ? input.notProductId : null;
@@ -740,6 +751,18 @@ export async function advanceBroadcast(
         // This store's own addresses (lib/mail-health.ts): it waits its week
         // out, and the scheduled job takes it up again.
         b = { ...b, status: "waiting", note: result.pause ? pauseNote(result.pause) : "Paused for now. The rest go out by themselves." };
+        break;
+      }
+      if (result.stopped === "poll_full") {
+        // Nothing kept is deleted to make room (lib/mail-poll-votes.ts): this one does not go.
+        b = { ...b, status: "failed", note: POLL_FULL_NOTE, finishedAt: now };
+        break;
+      }
+      if (result.stopped === "poll_failed") {
+        const failures = b.failures + 1;
+        b = failures >= 5
+          ? { ...b, status: "failed", failures, note: "Its poll could not be written down, so nothing more was sent. Send it again to try once more.", finishedAt: now }
+          : { ...b, status: "sending", failures, note: "Paused for a moment: its poll could not be written down. It is tried again by itself." };
         break;
       }
       if (result.stopped) {

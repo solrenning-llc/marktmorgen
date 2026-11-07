@@ -14,6 +14,11 @@
  *     more." when its list of stores came back out of shape
  *     (lib/buyer-library.ts storesBoughtFrom), and left out, without a word,
  *     a store whose record could not be read (app/library/page.tsx).
+ *   - Since Claude 5's review of #2910: the coming-soon state out of shape
+ *     (no reply, a word, a 2) as well as failed; a library link whose
+ *     address did not read said it had expired (libraryOwner); and asking
+ *     for a link said "on its way" with nothing sent when no store read
+ *     (requestLibraryLink).
  *
  * Each unknown case is checked against a control where the same thing is
  * truly absent, which keeps its old answer. Synthetic store; one reply
@@ -27,7 +32,7 @@ import EmbedJoin from "@/app/embed/[handle]/join/page";
 import LibraryPage from "@/app/library/page";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { storesBoughtFrom } from "@/lib/buyer-library";
+import { requestLibraryLink, storesBoughtFrom } from "@/lib/buyer-library";
 import { personWrite } from "@/lib/joined-stores";
 import { wordsIn } from "@/lib/buyer-words";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
@@ -118,7 +123,17 @@ async function main(): Promise<void> {
   const soonRead = (c: Command) => c[0] === "SISMEMBER" && c[1] === `nl:wl:${store.statsId}:soon`;
   inject = { when: soonRead, reply: () => [1, null] };
   is("control: a coming-soon product leads to its waitlist", (await card("emblibunknown", fromHead)).includes(w.joinWaitlist), true);
-  for (const [name, reply] of [["a failed request", failed]] as const) {
+  inject = { when: soonRead, reply: () => [0, null] };
+  is("control: a product confirmed not coming soon shows its buy button", (await card("emblibunknown", fromHead)).includes(w.buyFor("$40")), true);
+  // Out of shape is unknown too, not only a failed request (Claude 5 on #2910): soonOne reads the SISMEMBER exactly
+  // (lib/preorders.ts, #2846), so the card's catch covers these as well.
+  for (const [name, reply] of [
+    ["a failed request", failed],
+    ["no membership answer", () => [null, null]],
+    ["no reply at all", () => []],
+    ["a word for the membership", () => ["QUEUED", null]],
+    ["a membership of 2", () => [2, null]],
+  ] as const) {
     inject = { when: soonRead, reply };
     const soonUnread = await card("emblibunknown", fromHead);
     inject = null;
@@ -167,6 +182,43 @@ async function main(): Promise<void> {
     is(`${name}: never says nothing is listed`, shown.includes("Nothing is listed for this address"), false);
     is(`${name}: says the stores could not be read just now`, shown.includes("could not be read just now"), true);
   }
+
+  part("The library: a link whose address could not be read");
+  const expired = "That link has expired or was already replaced.";
+  is("control: a link that does not exist has expired", text(await html((await LibraryPage({ searchParams: Promise.resolve({ token: "cd".repeat(32) }) } as never)) as React.ReactElement)).includes(expired), true);
+  for (const [name, reply] of [
+    ["no reply at all", () => []],
+    ["a number for the address", () => [7]],
+    ["a list for the address", () => [["x"]]],
+    ["a failed request", failed],
+  ] as const) {
+    inject = { when: getOf("nl:lib:link:"), reply };
+    const shown = await library().catch(() => "the page threw");
+    inject = null;
+    is(`${name}: never says the link has expired`, shown.includes("expired"), false);
+    is(`${name}: says the link could not be read just now`, shown.includes("That link could not be read just now"), true);
+  }
+
+  part("The library: asking for a link when no store could be read");
+  // A link is made (its SET) only on the way to emailing it; the email itself is not sent here (no sender in tests).
+  const made: Command[] = [];
+  const watched = redis.pipeline;
+  redis.pipeline = (async (batch: Command[]) => {
+    made.push(...batch.filter((c) => c[0] === "SET" && typeof c[1] === "string" && c[1].startsWith("nl:lib:link:")));
+    return watched(batch);
+  }) as typeof redis.pipeline;
+  process.env.RESEND_API_KEY = "re_test_embed_library_stand_in";
+  const ask = (email: string, ip: string) => requestLibraryLink({ email, ip, origin: "https://marktmorgen.com" });
+  await ask(buyer, "203.0.113.21");
+  is("control: a store that reads: a link is made for its buyer", made.length, 1);
+  is("control: an address that bought nothing: the same answer, and no link", [await ask("nobody-here@example.test", "203.0.113.22"), made.length], ["sent", 1]);
+  inject = { when: getOf("nl:store:id:"), reply: failed };
+  const unreadAsk = await ask(buyer, "203.0.113.23");
+  inject = null;
+  is("a store whose record could not be read: never says a link is on its way", unreadAsk, "error");
+  is("a store whose record could not be read: and makes no link", made.length, 1);
+  delete process.env.RESEND_API_KEY;
+  redis.pipeline = watched;
 
   inject = { when: getOf("nl:store:id:"), reply: failed };
   const storeGone = await library();

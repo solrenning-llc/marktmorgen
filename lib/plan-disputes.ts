@@ -52,8 +52,12 @@ export type DisputeCounts = { seen: number; recorded: number; unmatched: number;
 
 const objectOf = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-/** Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing. */
-const isOwnReply = (reply: Record<string, unknown>, id: string): boolean => Object.hasOwn(reply, "id") && reply.id === id;
+/**
+ * Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing.
+ * A reply that is not an object (a JSON null, a string, a number) is not its own either, never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 const idOf = (value: unknown): string => (typeof value === "string" ? value : typeof objectOf(value)?.id === "string" ? String(objectOf(value)!.id) : "");
 
 async function remember(id: string, what: string): Promise<void> {

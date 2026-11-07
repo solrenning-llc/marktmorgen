@@ -23,6 +23,7 @@ import { dropReviews, forgetReviewsPerson, parseReview, readReview, reviewId } f
 import * as summaryRules from "@/lib/review-summary";
 import { REVIEW_NOTICES } from "@/components/review-form";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
+import { PERSON_DATA } from "@/lib/person-data";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { blobControl } from "./review-photo-limit-blob";
@@ -178,6 +179,11 @@ async function main() {
   is("control: the count is kept on its own hash", redis.keys().includes(countKey), true);
   await dropReviews(statsId, productId);
   is("dropReviews deletes it with the reviews", redis.keys().includes(countKey), false);
+  is(
+    "what a person's erasure keeps says so, for the person's own page",
+    PERSON_DATA.some((line) => line.file === "lib/reviews.ts" && line.how === "kept" && "only" in line && line.only === "person" && /new photos/.test(line.what)),
+    true,
+  );
 
   part("The counter as kept");
   const raw = (extra: Record<string, unknown>) =>

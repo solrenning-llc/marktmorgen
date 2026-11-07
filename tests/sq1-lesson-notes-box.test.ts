@@ -170,6 +170,25 @@ async function main() {
     is("the student is not told to try again in a minute when retrying cannot help", box.status() !== en.failed, true);
     is("and what they wrote stays in the box", box.value(), "A note.");
   }
+
+  part("Third review of #3031, L2: Undo leaves focus in the box, not on the page");
+  {
+    const box = mount({ state: "kept", text: "Lamination notes." });
+    let focused = 0;
+    const area = box.find("textarea")[0];
+    const ref = area?.props.ref as { current: unknown } | undefined;
+    if (ref && typeof ref === "object") ref.current = { focus: () => { focused++; } };
+    box.type("");
+    const saving = box.submit();
+    box.answer(200, { ok: true, text: "" });
+    await saving;
+    const undo = box.find("button").find((e) => e.props.type !== "submit");
+    const back = undo ? (undo.props.onClick as () => Promise<void>)() : Promise.resolve();
+    if (undo) box.answer(200, { ok: true, text: "Lamination notes." });
+    await back;
+    is("the box has a ref the page can focus", Boolean(ref && typeof ref === "object" && "current" in ref), true);
+    is("after Undo, whose button goes away, focus is moved to the box", focused > 0, true);
+  }
 }
 
 main().then(done);

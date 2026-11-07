@@ -17,8 +17,10 @@ type Params = { params: Promise<{ code: string }> };
  *
  * A link set to change on a date (510 [CK2] unit 1) opens its own page before
  * it and the other one from it on, read from the same record at the same
- * moment, and the CDN keeps the answer only until the date (linkCache), so
- * nobody is sent to the old page after it.
+ * moment. An answer given while a date is set is kept by the CDN only until
+ * the date (linkCache); one kept before the date was set lives five minutes
+ * and a minute stale at most, which runs out before the soonest date a
+ * creator may set (MIN_THEN_MS, ten minutes).
  */
 export async function GET(_request: NextRequest, { params }: Params) {
   const { code: raw } = await params;

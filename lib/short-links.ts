@@ -30,7 +30,7 @@
  */
 import { randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { CODE, CODE_LETTERS, MAX_LINKS, MIN_THEN_MS, type ShortLink, keptThen, linkName, linkPlace, readTarget, readThen } from "@/lib/short-link-rules";
+import { CODE, CODE_LETTERS, MAX_LINKS, MIN_THEN_MS, type ShortLink, keptThen, linkName, linkPlace, readTarget, readThen, settledAt } from "@/lib/short-link-rules";
 
 export { type LinkTarget, type LinkThen, type ShortLink, shortUrl, landingUrl } from "@/lib/short-link-rules";
 
@@ -150,33 +150,40 @@ async function change(statsId: string, raw: string, next: Kept): Promise<ChangeR
   return { ok: true, links: await readLinks(statsId) };
 }
 
-/** Changes where a link goes; the post it is in keeps working, and a date it changes on stays. */
-export async function retarget(statsId: string, code: unknown, target: unknown, isProduct: (id: string) => boolean): Promise<ChangeResult> {
+/**
+ * Changes where a link goes now; the post it is in keeps working. Before its
+ * date the date stays; after it the date is spent, so the page chosen is the
+ * one the link opens (settledAt).
+ */
+export async function retarget(statsId: string, code: unknown, target: unknown, isProduct: (id: string) => boolean, now = Date.now()): Promise<ChangeResult> {
   const found = await keptOf(statsId, code);
   if (!found) return { ok: false, reason: "gone" };
   const next = readTarget(target, isProduct);
   if (!next) return { ok: false, reason: "target" };
-  return change(statsId, found.raw, { ...found.kept, target: next });
+  return change(statsId, found.raw, { ...settledAt(found.kept, now), target: next });
 }
 
 /**
  * 510 [CK2] unit 1: from a date on, the link opens another page of the store
  * (`then`, read by readThen against `now`), or, with null, no longer changes.
- * Never the page it already opens: that would change nothing.
+ * Never the page it opens now: that would change nothing. A date already
+ * past is spent first (settledAt), so taking it back keeps the page the link
+ * opens now, and a new date starts from that page.
  */
 export async function setThen(statsId: string, code: unknown, then: unknown, isProduct: (id: string) => boolean, now = Date.now()): Promise<ChangeResult> {
   const found = await keptOf(statsId, code);
   if (!found) return { ok: false, reason: "gone" };
+  const current = settledAt(found.kept, now);
   if (then === null) {
-    const rest: Kept = { ...found.kept };
+    const rest: Kept = { ...current };
     delete rest.then;
     return change(statsId, found.raw, rest);
   }
   const next = readThen(then, isProduct, now);
   // Which part is wrong, so the studio says the right thing: the date, or where it goes.
   if (!next) return { ok: false, reason: then && typeof then === "object" && readThen({ ...then, at: now + MIN_THEN_MS }, isProduct, now) ? "when" : "target" };
-  if (JSON.stringify(next.target) === JSON.stringify(found.kept.target)) return { ok: false, reason: "same" };
-  return change(statsId, found.raw, { ...found.kept, then: next });
+  if (JSON.stringify(next.target) === JSON.stringify(current.target)) return { ok: false, reason: "same" };
+  return change(statsId, found.raw, { ...current, then: next });
 }
 
 /** Ends a link: from now on it opens the page that says so. */

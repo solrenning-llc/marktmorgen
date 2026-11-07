@@ -1,11 +1,11 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { POST_PLACES, qrFileName, qrSvg } from "@/lib/share-links";
-import { type LinkTarget, type LinkThen, MAX_LINKS, MAX_NAME, type ShortLink, linkName, shortUrl } from "@/lib/short-link-rules";
+import { type LinkTarget, type LinkThen, MAX_LINKS, MAX_NAME, type ShortLink, linkName, shortUrl, targetNow } from "@/lib/short-link-rules";
 import { useOwnZone } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
 
@@ -13,13 +13,14 @@ type Result = { visits: number; sales: number; cents: number };
 
 const REASONS: Record<string, string> = {
   same: "The link already goes there. Choose another page for after the date.",
-  when: "Choose a date and time at least a minute from now and at most two years away.",
+  when: "Choose a date and time at least ten minutes from now and at most two years away.",
   changed: "This link was changed somewhere else a moment ago. Reload the page to see it, then try again.",
   gone: "That link is no longer in your store. Reload the page to see your links.",
 
   name: "Give the post a name, like october-reel.",
   taken: "Another link already has that name. Each post's link needs its own, so its results are its own.",
   target: "Choose where the link goes.",
+  network: "That did not save. Check your connection and try again.",
   full: `A store can have ${MAX_LINKS} links. End one you no longer use to make another.`,
 };
 
@@ -107,7 +108,9 @@ function WhenWords({ ms }: { ms: number }) {
 /**
  * 510 [CK2] unit 1: the date a link changes where it goes, and the page it
  * opens from then. The date is typed on the creator's own clock and sent as a
- * moment; the server checks it is a minute to two years away.
+ * moment; the server checks it is ten minutes to two years away. A refusal is
+ * said here, beside the fields, focused, with the field it is about marked,
+ * never only in a toast that goes away (3.3.1, 2.2.3).
  */
 function ChangeOnDate({
   link,
@@ -120,7 +123,8 @@ function ChangeOnDate({
   /** The pages it may change to: never the one it opens now. */
   options: { value: string; label: string }[];
   busy: boolean;
-  onSave: (then: LinkThen) => Promise<boolean>;
+  /** Null when saved; otherwise why not, a key of REASONS. */
+  onSave: (then: LinkThen) => Promise<string | null>;
   onCancel: () => void;
 }) {
   const id = useId();
@@ -128,6 +132,19 @@ function ChangeOnDate({
   const [when, setWhen] = useState("");
   const [to, setTo] = useState(options[0]?.value ?? "");
   const [problem, setProblem] = useState("");
+  /** Which reason the problem is: "when" marks the date, "same" or "target" the page. */
+  const [problemOn, setProblemOn] = useState("");
+  const [tries, setTries] = useState(0);
+  const problemRef = useRef<HTMLParagraphElement>(null);
+  // Each refusal, even the same one again, is moved to so it is read at once.
+  useEffect(() => {
+    if (problem) problemRef.current?.focus();
+  }, [problem, tries]);
+  const refuse = (reason: string) => {
+    setProblem(REASONS[reason] ?? "That did not save. Try again.");
+    setProblemOn(reason);
+    setTries((n) => n + 1);
+  };
   if (!options.length) {
     return (
       <p className="mt-2 text-xs text-ink-soft">
@@ -143,13 +160,14 @@ function ChangeOnDate({
         event.preventDefault();
         const at = when ? new Date(when).getTime() : NaN;
         if (!Number.isFinite(at)) {
-          setProblem("Choose a date and a time.");
+          refuse("when");
           return;
         }
-        setProblem("");
         const target = targetFrom(to);
         if (target.kind === "cart") return;
-        if (await onSave({ at, target })) onCancel();
+        const refused = await onSave({ at, target });
+        if (refused === null) onCancel();
+        else refuse(refused);
       }}
     >
       <p id={`${id}-title`} className="text-sm font-semibold text-ink sm:col-span-2">{`Change where “${link.name}” goes on a date`}</p>
@@ -160,24 +178,30 @@ function ChangeOnDate({
           className="field mt-1 w-full py-2"
           required
           value={when}
-          aria-describedby={`${id}-help${problem ? ` ${id}-problem` : ""}`}
-          aria-invalid={problem ? true : undefined}
+          aria-describedby={`${id}-help${problemOn === "when" ? ` ${id}-problem` : ""}`}
+          aria-invalid={problemOn === "when" || undefined}
           onChange={(e) => setWhen(e.target.value)}
         />
       </label>
       <label className="min-w-0">
         <span className="field-label">Then it goes to</span>
-        <select className="field mt-1 w-full py-2" value={to} onChange={(e) => setTo(e.target.value)}>
+        <select
+          className="field mt-1 w-full py-2"
+          value={to}
+          aria-describedby={problemOn === "same" || problemOn === "target" ? `${id}-problem` : undefined}
+          aria-invalid={problemOn === "same" || problemOn === "target" || undefined}
+          onChange={(e) => setTo(e.target.value)}
+        >
           {options.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
       </label>
       <p id={`${id}-help`} className="text-xs text-ink-soft sm:col-span-2">
-        {`On your own clock${zone ? ` (${zone})` : ""}. At least a minute from now and at most two years away. Until then the link opens the page it opens now. The visits and sales stay on this link's line. You can cancel the change at any time before it happens.`}
+        {`On your own clock${zone ? ` (${zone})` : ""}. At least ten minutes from now and at most two years away. Until then the link opens the page it opens now. The visits and sales stay on this link's line. You can cancel the change at any time before it happens.`}
       </p>
       {problem ? (
-        <p id={`${id}-problem`} role="alert" className="text-xs font-semibold text-ink sm:col-span-2">
+        <p id={`${id}-problem`} ref={problemRef} tabIndex={-1} role="alert" className="text-xs font-semibold text-ink sm:col-span-2">
           {problem}
         </p>
       ) : null}
@@ -217,26 +241,47 @@ export function ShortLinks({
   const [busy, setBusy] = useState(false);
   const [qr, setQr] = useState("");
   const [dating, setDating] = useState("");
+  // The moment the panel reads a link's date against: when it was drawn, and again after each change.
+  const [now, setNow] = useState(() => Date.now());
+  /** The link whose date control takes the focus back once its form closes. */
+  const focusDate = useRef("");
+  useEffect(() => {
+    if (!focusDate.current) return;
+    document.getElementById(`short-link-date-${focusDate.current}`)?.focus();
+    focusDate.current = "";
+  });
   const named = linkName(name);
 
-  async function send(body: Record<string, unknown>, done: string): Promise<boolean> {
+  /**
+   * Sends a change. Null when it saved; otherwise why not (a key of REASONS),
+   * said in a toast unless `quiet`, where the caller says it beside its fields.
+   */
+  async function send(body: Record<string, unknown>, done: string, { quiet = false } = {}): Promise<string | null> {
     setBusy(true);
+    let reason = "network";
     try {
       const response = await fetch("/api/store/short-links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; links?: ShortLink[]; error?: string };
       if (answer.ok && answer.links) {
         setLinks(answer.links);
+        setNow(Date.now());
         toast(done);
-        return true;
+        return null;
       }
-      toast(REASONS[answer.error ?? ""] ?? "That did not save. Try again.");
+      reason = answer.error ?? "";
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      reason = "network";
     } finally {
       setBusy(false);
     }
-    return false;
+    if (!quiet) toast(REASONS[reason] ?? "That did not save. Try again.");
+    return reason;
   }
+
+  const closeDate = (code: string) => {
+    focusDate.current = code;
+    setDating("");
+  };
 
   async function copy(text: string) {
     try {
@@ -266,7 +311,7 @@ export function ShortLinks({
         className="mt-3 grid gap-2 sm:grid-cols-2"
         onSubmit={async (event) => {
           event.preventDefault();
-          if (await send({ action: "add", name, place, target: targetFrom(target) }, "Short link made.")) setName("");
+          if ((await send({ action: "add", name, place, target: targetFrom(target) }, "Short link made.")) === null) setName("");
         }}
       >
         <label className="min-w-0 sm:col-span-2">
@@ -303,12 +348,14 @@ export function ShortLinks({
           {links.map((link) => {
             const url = shortUrl(link.code);
             const result = results?.[link.name];
+            const opens = targetNow(link, now);
+            const passed = Boolean(link.then && now >= link.then.at);
             return (
               <li key={link.code} className="px-3 py-3" data-short-link={link.code}>
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="min-w-0 text-sm">
                     <span className="font-semibold text-ink [overflow-wrap:anywhere]">{link.name}</span>
-                    <span className="ml-2 text-ink-soft">{`${placeName(link.place)} · to ${where(link.target)}`}</span>
+                    <span className="ml-2 text-ink-soft">{`${placeName(link.place)} · to ${where(targetNow(link, now))}`}</span>
                   </p>
                   {results ? (
                     <p className="text-xs tabular-nums text-ink-soft">
@@ -332,7 +379,7 @@ export function ShortLinks({
                     <span className="field-label">Goes to</span>
                     <select
                       className="field mt-1 py-2"
-                      value={targetValue(link.target)}
+                      value={targetValue(targetNow(link, now))}
                       disabled={busy}
                       onChange={(e) => void send({ action: "target", code: link.code, target: targetFrom(e.target.value) }, "Changed. The post now opens the new page.")}
                     >
@@ -340,7 +387,8 @@ export function ShortLinks({
                       {products.map((p) => (
                         <option key={p.id} value={`product:${p.id}`}>{p.title}</option>
                       ))}
-                      {link.target.kind === "product" && !products.some((p) => p.id === (link.target as { id: string }).id) ? <option value={targetValue(link.target)}>A product no longer listed</option> : null}
+                      {opens.kind === "product" && !products.some((p) => p.id === (opens as { id: string }).id) ? <option value={targetValue(opens)}>A product no longer listed</option> : null}
+                      {/* The link's own ready cart stays a choice, after its date too, to go back to it. */}
                       {link.target.kind === "cart" ? <option value={targetValue(link.target)}>{`A ready cart of ${link.target.ids.length} products`}</option> : null}
                     </select>
                   </label>
@@ -348,7 +396,7 @@ export function ShortLinks({
                     End link
                   </button>
                 </div>
-                {link.then ? (
+                {link.then && !passed ? (
                   <div className="mt-2 flex flex-wrap items-baseline gap-2">
                     <p className="min-w-0 text-xs text-ink">
                       {"From "}
@@ -356,33 +404,51 @@ export function ShortLinks({
                       {`, it goes to ${where(link.then.target)}.`}
                     </p>
                     <button
+                      id={`short-link-date-${link.code}`}
                       type="button"
                       className="btn btn-ghost btn-sm"
                       disabled={busy}
-                      aria-label={`Cancel the change for ${link.name}`}
-                      onClick={() => void send({ action: "then", code: link.code, then: null }, `Canceled. The link goes to ${where(link.target)}.`)}
+                      aria-label={`Cancel the change for ${link.name}: it keeps going to ${where(link.target)}`}
+                      onClick={async () => {
+                        if ((await send({ action: "then", code: link.code, then: null }, `Canceled. The link keeps going to ${where(link.target)}.`)) === null) focusDate.current = link.code;
+                      }}
                     >
                       Cancel the change
                     </button>
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm mt-2 ring-1 ring-line"
-                    aria-expanded={dating === link.code}
-                    aria-label={`Change on a date where the link for ${link.name} goes`}
-                    onClick={() => setDating(dating === link.code ? "" : link.code)}
-                  >
-                    Change on a date
-                  </button>
+                  <>
+                    {link.then ? (
+                      // After the date nothing is left to cancel: "Goes to" above changes the page it opens.
+                      <p className="mt-2 text-xs text-ink">
+                        {"Since "}
+                        <WhenWords ms={link.then.at} />
+                        {`, it goes to ${where(link.then.target)} instead of ${where(link.target)}.`}
+                      </p>
+                    ) : null}
+                    <button
+                      id={`short-link-date-${link.code}`}
+                      type="button"
+                      className="btn btn-ghost btn-sm mt-2 ring-1 ring-line"
+                      aria-expanded={dating === link.code}
+                      aria-label={`Change on a date where the link for ${link.name} goes`}
+                      onClick={() => setDating(dating === link.code ? "" : link.code)}
+                    >
+                      Change on a date
+                    </button>
+                  </>
                 )}
-                {dating === link.code && !link.then ? (
+                {dating === link.code && (!link.then || passed) ? (
                   <ChangeOnDate
                     link={link}
                     busy={busy}
-                    options={[{ value: "store", label: "Your store" }, ...products.map((p) => ({ value: `product:${p.id}`, label: p.title }))].filter((o) => o.value !== targetValue(link.target))}
-                    onSave={(then) => send({ action: "then", code: link.code, then }, `Saved. On that date the link starts going to ${where(then.target)}.`)}
-                    onCancel={() => setDating("")}
+                    options={[{ value: "store", label: "Your store" }, ...products.map((p) => ({ value: `product:${p.id}`, label: p.title }))].filter((o) => o.value !== targetValue(opens))}
+                    onSave={async (then) => {
+                      const refused = await send({ action: "then", code: link.code, then }, `Saved. On that date the link starts going to ${where(then.target)}.`, { quiet: true });
+                      if (refused === null) focusDate.current = link.code;
+                      return refused;
+                    }}
+                    onCancel={() => closeDate(link.code)}
                   />
                 ) : null}
               </li>

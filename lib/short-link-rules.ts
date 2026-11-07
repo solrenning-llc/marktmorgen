@@ -44,8 +44,13 @@ export type ShortLink = {
 /** Where a link goes from a date on: the store or one of its own products, never a cart and never an error page. */
 export type LinkThen = { at: number; target: { kind: "store" } | { kind: "product"; id: string } };
 
-/** The soonest a change may be set: a minute from now, so it is never already past when it is saved. */
-export const MIN_THEN_MS = 60_000;
+/**
+ * The soonest a change may be set: ten minutes from now. An answer the CDN
+ * kept before the date was set lives five minutes fresh and a minute stale at
+ * most (CACHE_SECONDS, STALE_SECONDS), so it has run out before the soonest
+ * date: nobody is sent to the old page after the date because of it.
+ */
+export const MIN_THEN_MS = 10 * 60_000;
 /** The latest: two years from now. */
 export const MAX_THEN_MS = 731 * 86_400_000;
 /** How long the CDN may serve a kept answer while it fetches a fresh one. */
@@ -134,6 +139,17 @@ export function keptThen(raw: unknown): LinkThen | null {
   return target ? { at: v.at, target } : null;
 }
 
+/**
+ * A link as it stands at `now` once its date has passed: the page it opens
+ * from then made its own, the date spent. Before the date, as it is. Pure.
+ */
+export function settledAt<T extends Pick<ShortLink, "target" | "then">>(link: T, now: number): T {
+  if (!link.then || now < link.then.at) return link;
+  const settled: T = { ...link, target: link.then.target };
+  delete settled.then;
+  return settled;
+}
+
 /** Where a link goes at `now`: its own page, or from its date on the other one. Pure. */
 export function targetNow(link: Pick<ShortLink, "target" | "then">, now: number): LinkTarget {
   return link.then && now >= link.then.at ? link.then.target : link.target;
@@ -142,8 +158,8 @@ export function targetNow(link: Pick<ShortLink, "target" | "then">, now: number)
 /**
  * The Cache-Control of a link's answer at `now`. Five minutes and a minute
  * stale, as always, unless the link changes sooner: then the CDN keeps it,
- * stale part included, only until the change, so nobody is sent to the old
- * page after it. Pure.
+ * stale part included, only until the change. An answer kept before the date
+ * was set runs out before the soonest date (MIN_THEN_MS). Pure.
  */
 export function linkCache(link: Pick<ShortLink, "then"> | null, now: number): string {
   const left = link?.then && link.then.at > now ? Math.floor((link.then.at - now) / 1000) : Infinity;

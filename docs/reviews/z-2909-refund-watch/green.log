@@ -1,0 +1,270 @@
+paypal-handover-refunded.test.ts
+
+Control: handed over by the sweep, then refunded: the refund takes it back
+  ok    handed over once by the sweep
+  ok    the refund is marked and the purchase taken back
+
+The return could not read the product, then the creator refunded: the retry never hands it over
+  ok    paid, nothing handed over, in the hand-over list
+  ok    the refund is marked
+  ok    nothing handed over: no purchase, nothing counted as cleared
+  ok    and it left the hand-over list
+  ok    later sweeps hand nothing over either
+
+The refund already marked while the product could not be read for hours: the retry never hands it over
+  ok    nothing handed over, out of the list
+
+The refund mark read as the text "abc": kept in the list, nothing handed over; read healthy, handed over once
+  ok    kept, nothing handed over
+  ok    the next healthy sweep hands it over once
+
+The refund mark read as a number: kept in the list, nothing handed over; read healthy, handed over once
+  ok    kept, nothing handed over
+  ok    the next healthy sweep hands it over once
+
+The refund mark read as no reply at all: kept in the list, nothing handed over; read healthy, handed over once
+  ok    kept, nothing handed over
+  ok    the next healthy sweep hands it over once
+
+The refund mark's write answered no reply at all, not written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  ok    after three healthy sweeps: marked refunded and nothing held
+
+The refund mark's write answered one reply of two, not written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  ok    after three healthy sweeps: marked refunded and nothing held
+
+The refund mark's write answered the text "1" and 1, not written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  ok    after three healthy sweeps: marked refunded and nothing held
+
+The refund mark's write answered an impossible count 2 and 1, not written: the refunded order is never kept handed over
+  FAIL  the faulty write was met
+        expected 1
+        got      0
+  FAIL  after three healthy sweeps: marked refunded and nothing held
+        expected [true,0]
+        got      [false,1]
+
+The refund mark's write answered 1 and the text "x", not written: the refunded order is never kept handed over
+Error: no order: error
+    at buy (/tmp/z-points-yYroZN/paypal-handover-refunded.test.ts.cjs:62758:26)
+    at async main (/tmp/z-points-yYroZN/paypal-handover-refunded.test.ts.cjs:62863:19)
+paypal-handover-queue-exact.test.ts
+
+Healthy control: handed over once on the return, nothing left for the sweep
+  ok    handed over on the return
+  ok    nothing left in the hand-over list
+  ok    the sweep hands nothing over again
+
+Claude 5: the product read times out on the return, and the hand-over list's own ZADD times out too
+  ok    paid, written down, nothing handed over yet
+  ok    the order is in the hand-over list all the same
+  ok    the next sweep hands it over, once
+  ok    and never again
+
+Claude 5: the product read times out on the return, and the hand-over list's own ZADD answers nothing
+  ok    paid, written down, nothing handed over yet
+  ok    the order is in the hand-over list all the same
+  ok    the next sweep hands it over, once
+  ok    and never again
+
+Claude 5: the product read times out on the return, and the hand-over list's own ZADD answers in another shape
+  ok    paid, written down, nothing handed over yet
+  ok    the order is in the hand-over list all the same
+  ok    the next sweep hands it over, once
+  ok    and never again
+
+Claude 6: an order waiting in the hand-over list, its paid record read as wrapped in an object: kept, then handed over once
+  ok    nothing handed over on the return
+  ok    that sweep keeps it in the list, nothing handed over
+  ok    two healthy sweeps hand it over once
+
+Claude 6: an order waiting in the hand-over list, its paid record read as a number: kept, then handed over once
+  ok    nothing handed over on the return
+  ok    that sweep keeps it in the list, nothing handed over
+  ok    two healthy sweeps hand it over once
+
+Claude 6: an order waiting in the hand-over list, its paid record read as no reply at all: kept, then handed over once
+  ok    nothing handed over on the return
+  ok    that sweep keeps it in the list, nothing handed over
+  ok    two healthy sweeps hand it over once
+
+Confirmed absence: an order in the list whose paid record Redis says is not there leaves it, nothing handed over
+  ok    it left the list
+
+25 checks, all passing.
+COUNTED_MEMORY_COMMANDS 1416
+COUNTED_MOCK_HTTP 93
+paypal-handover-cost.test.ts
+
+The registry states the hand-over list's commands
+  ok    PAYPAL_HAND_OVER_RETRY is in tests/plan-cost-registry.ts
+  ok    NOT_A_COST says why the batch is bounded, naming handOverAgain
+  ok    lib/paypal-delivery.ts exports the batch the registry cites
+
+Each PayPal sale: the list's ZADD when settled and its ZREM once handed over
+  ok    a healthy return sends two commands to the list
+  ok    as the registry states
+
+One sweep with nothing due: one read of the list
+  ok    the list read and nothing else
+  ok    as the registry states
+
+The retry's own commands for each order it tries, path by path
+  ok    paid record gone: GET and ZREM
+  ok    refunded: GET, ZSCORE and ZREM
+  ok    refund mark unknown: GET, ZSCORE and ZADD
+  ok    product unreadable: GET, ZSCORE and two ZADDs
+  ok    handed over: GET, ZSCORE and ZREM
+  ok    and it left the list
+  ok    the most on any path is four
+  ok    as the registry states
+
+One sweep tries at most HAND_OVER_BATCH orders
+  ok    the list read asks for the batch
+  ok    orders tried in one sweep
+  ok    as the registry states
+  ok    the rest wait for the next sweep
+
+19 checks, all passing.
+COUNTED_MEMORY_COMMANDS 1136
+COUNTED_MOCK_HTTP 28
+catalog-read-exact.test.ts
+✔ a listing past the first page reads, in the order asked (69.409156ms)
+✔ a listing whose record is confirmed gone (GET nil) is no such product (0.884212ms)
+✔ readListings: no replies throws, never "no such product" (0.536858ms)
+✔ readListings: one reply short throws, never "no such product" (0.338332ms)
+✔ readListings: a reply too many throws, never "no such product" (0.600961ms)
+✔ readListings: a number where a record was throws, never "no such product" (0.290672ms)
+✔ readListings: each reply wrapped in an object throws, never "no such product" (0.537228ms)
+✔ readListings: a stored record that is not JSON throws, never left out (0.45091ms)
+✔ readListings: a stored record that is JSON that is not a listing throws, never left out (0.294284ms)
+✔ readListings: another product's record under this one's key throws (0.460429ms)
+✔ handOverPayPal: a bundle's item that does not read hands nothing over, and throws (3.004357ms)
+COUNTED_MEMORY_COMMANDS 967
+COUNTED_MOCK_HTTP 0
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 86.837518
+f-paypal-listing-unknown.test.ts
+
+Setting
+  ok    the guide is read from its own record, not from the head
+
+Healthy control: paid and handed over
+        healthy: {"paidWritten":true,"delivered":1,"again":1,"sweptLater":1}
+  ok    a healthy read hands it over
+
+A product record that is not JSON (RED: money taken, nothing handed over, ever)
+        malformed: {"paidWritten":true,"delivered":0,"again":0,"sweptLater":1}
+  ok    an unknown product read is never answered as 'the product is gone': the buyer gets what they paid for once the read heals
+
+A Redis reply in another shape (RED: same)
+        wrong shape: {"paidWritten":true,"delivered":0,"again":0,"sweptLater":1}
+  ok    an unknown product read is never answered as 'the product is gone': the buyer gets what they paid for once the read heals
+
+handOverPayPal itself
+  ok    an unknown read throws (fails closed), never answers 'product gone'
+
+5 checks, all passing.
+COUNTED_MEMORY_COMMANDS 1051
+COUNTED_MOCK_HTTP 7
+handing over a PayPal purchase failed UnknownReplyError: Redis answered a product's listing in an unknown shape
+    at listingRead (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11755:44)
+    at /tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11793:23
+    at Array.forEach (<anonymous>)
+    at readListingsMeasured (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11792:13)
+    at async readListings (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11776:11)
+    at async readListing (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11801:11)
+    at async handOverPayPal (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:62526:15)
+    at async GET (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:62698:23)
+    at async buy (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:62762:3)
+    at async main (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:62802:133)
+handing over a PayPal purchase failed UnknownReplyError: Redis answered a product's listing in an unknown shape
+    at listingRead (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11755:44)
+    at /tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11793:23
+    at Array.forEach (<anonymous>)
+    at readListingsMeasured (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11792:13)
+    at async readListings (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11776:11)
+    at async readListing (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:11801:11)
+    at async handOverPayPal (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:62526:15)
+    at async GET (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:62698:23)
+    at async buy (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:62762:3)
+    at async main (/tmp/z-points-yYroZN/f-paypal-listing-unknown.test.ts.cjs:62804:133)
+plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (74.688042ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (116.237128ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (51.261912ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.494432ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.299541ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.299157ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.680882ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (108.820391ms)
+✔ every store figure taken in the code is a kind a line prices (67.667554ms)
+✔ every email sent names a meter, and each file only the meters it may use (145.77166ms)
+✔ the units a figure is taken in cost at least what they stand for (18.0608ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (9.073375ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.29962ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.973878ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.243696ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.179248ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.649084ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (4.649336ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.133137ms)
+✔ Path push fits its reserved studio requests (0.114221ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.257783ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.079211ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.414862ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (52.817316ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 688.526436
+store-data-registry.test.ts
+creator: room 18 MB; outside it 121.4 MB on average, 294.6 MB at once
+pro: room 135 MB; outside it 288.2 MB on average, 804.3 MB at once
+scale: room 250 MB; outside it 704.6 MB on average, 2473.6 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (162.219576ms)
+✔ each family is bounded one way at least, and what it says can be checked (125.028576ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (8.837068ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.173199ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.424648ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (6.829628ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.210657ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 324.174407

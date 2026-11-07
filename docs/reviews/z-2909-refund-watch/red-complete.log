@@ -1,0 +1,68 @@
+paypal-handover-refunded.test.ts
+
+Control: handed over by the sweep, then refunded: the refund takes it back
+  ok    handed over once by the sweep
+  ok    the refund is marked and the purchase taken back
+
+The return could not read the product, then the creator refunded: the retry never hands it over
+  ok    paid, nothing handed over, in the hand-over list
+  ok    the refund is marked
+  ok    nothing handed over: no purchase, nothing counted as cleared
+  ok    and it left the hand-over list
+  ok    later sweeps hand nothing over either
+
+The refund already marked while the product could not be read for hours: the retry never hands it over
+  ok    nothing handed over, out of the list
+
+The refund mark read as the text "abc": kept in the list, nothing handed over; read healthy, handed over once
+  ok    kept, nothing handed over
+  ok    the next healthy sweep hands it over once
+
+The refund mark read as a number: kept in the list, nothing handed over; read healthy, handed over once
+  ok    kept, nothing handed over
+  ok    the next healthy sweep hands it over once
+
+The refund mark read as no reply at all: kept in the list, nothing handed over; read healthy, handed over once
+  ok    kept, nothing handed over
+  ok    the next healthy sweep hands it over once
+
+The refund mark's write answered no reply at all, not written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  FAIL  after three healthy sweeps: marked refunded and nothing held
+        expected [true,0]
+        got      [false,1]
+
+The refund mark's write answered one reply of two, not written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  FAIL  after three healthy sweeps: marked refunded and nothing held
+        expected [true,0]
+        got      [false,1]
+
+The refund mark's write answered the text "1" and 1, not written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  FAIL  after three healthy sweeps: marked refunded and nothing held
+        expected [true,0]
+        got      [false,1]
+
+The refund mark's write answered an impossible count 2 and 1, not written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  FAIL  after three healthy sweeps: marked refunded and nothing held
+        expected [true,0]
+        got      [false,1]
+
+The refund mark's write answered 1 and the text "x", not written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  FAIL  after three healthy sweeps: marked refunded and nothing held
+        expected [true,0]
+        got      [false,1]
+
+The refund mark's write answered no reply at all, written: the refunded order is never kept handed over
+  ok    the faulty write was met
+  ok    after three healthy sweeps: marked refunded and nothing held
+
+Control: the refund mark written and confirmed, nothing granted: nothing handed over, off the list
+  ok    marked, nothing handed over, out of the list
+
+27 checks, 5 failing.
+COUNTED_MEMORY_COMMANDS 1812
+COUNTED_MOCK_HTTP 160

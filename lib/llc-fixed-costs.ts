@@ -8,7 +8,8 @@
  * Native-currency amounts are source observations, not approved USD ceilings.
  * No network, contract or operational activation occurs here.
  */
-export const LLC_FIXED_COST_ALLOCATION = { marktmorgenBps: 10000, hazelsongBps: 0, decision: "2026-10-22T05:10:00-03:00" } as const;
+import { SHORT_LINK_UNPAID_PER_HOUR } from "@/lib/short-link-open-rules";
+export const LLC_FIXED_COST_ALLOCATION ={ marktmorgenBps: 10000, hazelsongBps: 0, decision: "2026-10-22T05:10:00-03:00" } as const;
 /** TX4/SR: cost-review categories, not a claim that every filing/service applies.
  * Each conditional absence needs evidence; unknown cost is never zero.
  * No form, account, submission, paid service or operational IO is prepared here. */
@@ -16,7 +17,7 @@ export const LLC_COMPLIANCE_COST_IDS = [
  "us-form-5472", "us-pro-forma-1120", "br-irpf", "br-cbe", "vat-oss-and-local-compliance",
  "itin-and-acceptance-agent", "us-resident-representative", "us-business-address",
 ] as const;
-export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
+export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "short-link-unpaid-opens", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
 export type FixedCostId = typeof LLC_FIXED_COST_IDS[number];
 export type FixedCostCeiling = { id: FixedCostId; fullMonthlyUsdCents: number | null; fullAnnualUsdCents: number | null; evidence: string; reserveReviewed: boolean };
 /** Public observations checked22 October2026; discounts/free periods never reduce worst-case cost. */
@@ -29,6 +30,11 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
   * a Class A for each object's deletion and two listings a run, Upstash at every command and byte the caps allow (200
   * SCAN pages a run at the most), no free quota. Not a reviewed ceiling: BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
  backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", approvedCeiling: false },
+ /** Short links opened that no store pays for (a code nobody has, a store that cannot take one more request): a company
+  * cost under MR item 2, at most SHORT_LINK_UNPAID_PER_HOUR an hour for the whole site, counted before anything is read
+  * (lib/short-link-open.ts); its worst month priced at every Redis wait's timeout in tests/short-link-open-cap.test.ts.
+  * Not a reviewed ceiling: the owner has not approved a monthly cost. */
+ shortLinkUnpaidOpens: { currency: "USD", perHour: SHORT_LINK_UNPAID_PER_HOUR, model: "lib/short-link-open.ts", review: "tests/short-link-open-cap.test.ts", checked: "2026-11-07", approvedCeiling: false },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
  californiaFee: { currency: "USD", maximumAnnualMinor: 1179000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

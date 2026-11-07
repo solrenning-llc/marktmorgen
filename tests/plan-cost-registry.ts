@@ -109,7 +109,8 @@ import {
   PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS } from "@/lib/short-link-open-rules";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -355,7 +356,14 @@ export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_B
  * (CERTIFICATE_PDF_MAX_BYTES; 146 KB measured with the longest words in every look). Taken as CERTIFICATE_PDF_UNITS
  * public requests before it is drawn, held above it in tests/plan-cost-registry.test.ts.
  */
-export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + (16 + 2 * (1 + SHARE_COMMANDS_PER_REQUEST)) * COMMAND + 64_000 * DB_BYTE + CERTIFICATE_PDF_MAX_BYTES * ORIGIN_PER_BYTE;
+/**
+ * One short link that opens (app/l/[code]/route.ts, lib/short-link-open.ts): its CDN request and the proxy's call, a
+ * heavy request's wait and CPU, its count in the hour, the link and the store's whole record read, and its DECR
+ * off the hour; the store's own count is REQUEST_COMMANDS of the line. Taken as SHORT_LINK_OPEN_UNITS public requests,
+ * held above it in tests/plan-cost-registry.test.ts.
+ */
+export const SHORT_LINK_OPEN_READ = CDN_PER_REQUEST + CALL + request("heavy", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REFUND_COMMANDS, MAX_STORE_BYTES + 4_096) + 1_000 * ORIGIN_PER_BYTE;
+export const CERTIFICATE_PDF_READ =CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + (16 + 2 * (1 + SHARE_COMMANDS_PER_REQUEST)) * COMMAND + 64_000 * DB_BYTE + CERTIFICATE_PDF_MAX_BYTES * ORIGIN_PER_BYTE;
 /**
  * What one next product after a purchase costs besides the model (lib/next-offer.ts),
  * at the most: its commands and its counting, the listings it reads (a product's
@@ -1143,6 +1151,11 @@ export const COST_LINES: CostLine[] = [
       // is kept by the CDN five minutes (C3, 4 November 2026; CERTIFICATE_PDF_READ in tests/plan-cost-registry.test.ts).
       { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
+      // A short link that opens takes one after its link and store are read, and comes off the site's hour of unpaid opens
+      // (Claude 5, 7 November 2026; SHORT_LINK_OPEN_READ in tests/plan-cost-registry.test.ts).
+      { file: "app/l/[code]/route.ts", names: ["admitShortLinkOpen(code,", "payShortLinkOpen(store, code, admission)"] },
+      { file: "lib/short-link-open.ts", names: ["takePublicRequest(store, \"public\", now, SHORT_LINK_OPEN_UNITS)", "[\"DECR\", admission.key]"] },
+      { file: "lib/short-link-open-rules.ts", names: ["SHORT_LINK_OPEN_UNITS", "SHORT_LINK_COUNT_COMMANDS", "SHORT_LINK_READ_COMMANDS", "SHORT_LINK_REFUND_COMMANDS", "SHORT_LINK_OPENS_PER_ADDRESS"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
       // An affiliate's own page and the store's map read in proportion to the store: counted first, paid before they read (4 November 2026).
@@ -1574,7 +1587,8 @@ export const NOT_A_COST: Record<string, string> = {
   FORGET_TRIES: "lib/store-forget-retry.ts permits eight total attempts per deleted store, including the original deletion. Up to seven later company attempts can repeat assistant-note cleanup. This bounded work count is not a funded global case/retention or read-byte ceiling; costs remain unknown, never zero.",
   FORGET_PER_RUN: "lib/store-forget-retry.ts limits work to twenty-five stores per daily closing run, but first reads the entire active queue with HGETALL. The synthetic 2,000-row expired-deadline control produces a 166,893-byte JSON-serialized stub reply (not RESP, wire or billed bytes) and does no cleanup work. Twenty-five is not a queue-read byte bound. Complete queue, Lua, runtime, retention and company funding remain unknown; no finite fixed-cost or plan margin certification follows from this classification.",
   STATUS_VIEWS_PER_HOUR: "Requests in an hour, for the whole site, that read the runs on the public status page (247 [SP4] unit 2, lib/status-page.ts): not a plan's cost, since the page belongs to no store; a company cost under MR item 2, every kind of request priced at the rates of lib/spend-cost-table.ts and tests/traffic-cost.ts, held by tests/status-page.test.ts.",
-  STATUS_COUNTS_PER_ADDRESS_PER_HOUR: "Times one address may make one server instance count a request on the public status page in an hour (247 [SP4] unit 2, lib/status-page.ts, lib/local-limit.ts): a pace that only refuses, held in memory at no cost, so one client cannot use up the hour's reads; the page's cost is the company's, priced in tests/status-page.test.ts.",
+  SHORT_LINK_UNPAID_PER_HOUR: "Short links opened in an hour, for the whole site, that no store pays for and that read the database (a code nobody has, a store that cannot take one more request; lib/short-link-open.ts, counted before anything is read): not a plan's cost, since no store is known or pays; a company cost under MR item 2, a line of lib/llc-fixed-costs.ts (short-link-unpaid-opens), its worst month priced at every Redis wait's timeout in tests/short-link-open-cap.test.ts. A link that opens is its store's public request (public-requests, SHORT_LINK_OPEN_READ) and comes off the hour.",
+  STATUS_COUNTS_PER_ADDRESS_PER_HOUR:"Times one address may make one server instance count a request on the public status page in an hour (247 [SP4] unit 2, lib/status-page.ts, lib/local-limit.ts): a pace that only refuses, held in memory at no cost, so one client cannot use up the hour's reads; the page's cost is the company's, priced in tests/status-page.test.ts.",
   STORE_FORGET_MONTH_READ_COMMANDS: "The unwired monthly owner-report reader in lib/store-forget-retry.ts sends exactly four Redis commands per invocation. It has no production caller today; before it is wired, its frequency and non-zero command cost must be included in the reviewed company fixed-cost ceiling. Unknown funding stays unknown, never zero, and this is not a store plan allowance.",
   BACKUP_RUNS_PER_MONTH: "The daily backup of the whole database is a company cost, never a plan's (273 [BK1], inbox C4-44): its worst month is priced from a review's caps by lib/backup-cost.ts and counted once among the LLC fixed costs (lib/llc-fixed-costs.ts, line backup, 100% Marktmorgen under FX275), whose reviewed ceiling stays unknown, never zero, while BACKUP_COST_UNKNOWNS are open.",
   BACKUP_DAYS_PER_MONTH: "The UTC days a billing month touches for the daily backup, a company cost (273 [BK1], inbox C4-49): its worst month is priced by lib/backup-cost.ts among the LLC fixed costs (lib/llc-fixed-costs.ts, line backup, 100% Marktmorgen under FX275), never a plan's allowance.",

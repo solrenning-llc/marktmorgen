@@ -27,6 +27,18 @@ import { addLink } from "@/lib/short-links";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { CODE_LETTERS } from "@/lib/short-link-rules";
 import { GET } from "@/app/l/[code]/route";
+import { MAX_STORE_BYTES } from "@/lib/store";
+import {
+  SHORT_LINK_COUNT_COMMANDS, SHORT_LINK_OPENS_PER_ADDRESS, SHORT_LINK_READ_COMMANDS, SHORT_LINK_REFUND_COMMANDS, SHORT_LINK_UNKNOWN_PAUSE_MS,
+  SHORT_LINK_UNPAID_PER_HOUR,
+} from "@/lib/short-link-open-rules";
+import { FIXED_COST_SOURCE_OBSERVATIONS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
+import {
+  UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
+  VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
+} from "@/lib/spend-cost-table";
+import { REDIS_TIMEOUT_MS } from "@/lib/fetch-timeout";
+import { CDN_PER_REQUEST, ORIGIN_PER_BYTE } from "./traffic-cost";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -37,10 +49,12 @@ const UNPAID_PER_HOUR = 60;
 const HOUR = 3_600_000;
 
 let commands: string[][] = [];
+let pipelines = 0;
 let inject: ((batch: Command[], values: unknown[]) => unknown[] | null) | null = null;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: Command[]) => {
   commands.push(...batch.map((c) => c.map(String)));
+  pipelines += 1;
   const values = await real(batch);
   return inject?.(batch, values) ?? values;
 }) as typeof redis.pipeline;
@@ -144,8 +158,13 @@ async function main(): Promise<void> {
 
   part("A store that cannot take one more request: nobody is sent on, and the link is not read again at once");
   inject = (batch) => (batch.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:")) ? ["not a count"] : null);
+  commands = [];
+  pipelines = 0;
   const tired = await open(code, fresh(), "?tired");
   inject = null;
+  // The heaviest open no store pays for: counted, the link and the store read, the store's count tried and refused.
+  const unpaidPipelines = pipelines;
+  const unpaidCommands = commands.length;
   is("503, never sent to the store nor told the link ended", [tired.status, tired.to], [503, null]);
   is("never kept by the CDN", tired.cache.includes("no-store"), true);
   commands = [];
@@ -153,6 +172,43 @@ async function main(): Promise<void> {
   is("the same link a moment later is answered from memory, nothing read", [again.status, commands.length], [503, 0]);
   later(61_000);
   is("a minute later it is read again, and opens", (await open(code, fresh(), "?minute")).to?.includes("/@harbor"), true);
+
+  part("The figures the route is held to are the code's");
+  // Added with the fix (rule 23: the RED checks above keep their literals; these hold them to lib/short-link-open-rules.ts).
+  is("opens per address", SHORT_LINK_OPENS_PER_ADDRESS, PER_ADDRESS);
+  is("unpaid opens an hour", SHORT_LINK_UNPAID_PER_HOUR, UNPAID_PER_HOUR);
+
+  part("What the opens no store pays for cost the company at most, a month (MR item 2; lib/llc-fixed-costs.ts)");
+  const micro = (n: number) => n / 1_000_000;
+  const COMMAND = micro(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1e6;
+  const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1e6;
+  const CPU_SECOND = micro(VERCEL_CPU_MICRO_USD_PER_HOUR) / 3600;
+  const MEMORY_SECOND = VERCEL_FUNCTION_GB * micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) / 3600;
+  const DB_BYTE = micro(UPSTASH_MICRO_USD_PER_GB_TRANSFER) / 1e9;
+  // A request at its worst: the CDN's request, two calls (the proxy and the route), half a second of CPU (a redirect
+  // draws nothing), memory held through every Redis wait at its timeout plus a second, a whole store record and a
+  // link read, and a refusal's few hundred bytes sent.
+  const request = (waits: number, sentCommands: number, dbBytes: number) =>
+    CDN_PER_REQUEST + 2 * CALL + 0.5 * CPU_SECOND + (waits * REDIS_TIMEOUT_MS / 1000 + 1) * MEMORY_SECOND
+    + sentCommands * COMMAND + dbBytes * DB_BYTE + 1_000 * ORIGIN_PER_BYTE;
+  is("the heaviest unpaid open was measured", unpaidPipelines >= 3 && unpaidCommands >= SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS, true);
+  // Priced with room: two pipelines and four commands more than measured, so a change in what the store's count sends stays inside.
+  is("the heaviest unpaid open waits on at most 6 pipelines and sends at most 8 commands", [unpaidPipelines <= 6, unpaidCommands <= 8], [true, true]);
+  const unpaid = request(6 + 2, 8 + 4, MAX_STORE_BYTES + 4_096);
+  const counted = request(1, SHORT_LINK_COUNT_COMMANDS, 64);
+  const MONTH_HOURS = 31 * 24;
+  const readMonth = SHORT_LINK_UNPAID_PER_HOUR * MONTH_HOURS * unpaid;
+  // One instance's counts beyond them: one an hour that finds the hour used, and one a minute after a count it could not read.
+  const instanceMonth = (1 + HOUR / SHORT_LINK_UNKNOWN_PAUSE_MS) * MONTH_HOURS * counted;
+  console.log(`  cost  heaviest unpaid open $${unpaid.toFixed(6)} (${unpaidPipelines} pipelines, ${unpaidCommands} commands measured), counted-only $${counted.toFixed(6)}; the site's unpaid opens $${readMonth.toFixed(2)} a month; one instance's counts beyond them $${instanceMonth.toFixed(2)} a month`);
+  is("the site's unpaid opens stay under $15 a month", readMonth < 15, true);
+  is("one instance's counts beyond them stay under $3 a month", instanceMonth < 3, true);
+  is("a paid open's own commands, held in the store's unit (tests/plan-cost-registry.test.ts)", SHORT_LINK_COUNT_COMMANDS + SHORT_LINK_READ_COMMANDS + SHORT_LINK_REFUND_COMMANDS, 6);
+  is("the company's fixed costs carry the line, unreviewed and never zero", [
+    (LLC_FIXED_COST_IDS as readonly string[]).includes("short-link-unpaid-opens"),
+    FIXED_COST_SOURCE_OBSERVATIONS.shortLinkUnpaidOpens.perHour,
+    FIXED_COST_SOURCE_OBSERVATIONS.shortLinkUnpaidOpens.approvedCeiling,
+  ], [true, SHORT_LINK_UNPAID_PER_HOUR, false]);
 
   done();
 }

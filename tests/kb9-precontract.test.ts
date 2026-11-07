@@ -29,16 +29,26 @@
  * tests/kb9-precontract-email.pending.ts, unit 2b's RED: it reads
  * lib/purchase-email.ts, built in its own unit. This file holds the first.
  */
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { DIGITAL_CONSENT_WORDS } from "@/lib/buyer-words/digital-consent";
 import { WITHDRAWAL_WORDS, withdrawalWords } from "@/lib/buyer-words/withdrawal";
-import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
+import { type ConsentKind, EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
+import * as consentEmail from "@/lib/digital-consent-email";
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { WITHDRAW_FROM_CONTRACT, withdrawalWindow } from "@/lib/withdrawal-rules";
+import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { BuyBox } from "@/components/store-product";
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { readListing } from "@/lib/catalog";
+import { store as redis } from "./redis-stub";
+import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
 const LANGUAGES = ["en", "es", "fr", "de", "it", "nl", "pt"] as const;
 
-function main(): void {
+async function main(): Promise<void> {
   part("The box says where the withdrawal function is (art. 6(1)(h), Annex I instruction 3)");
   is("the label in English is the law's own words", WITHDRAWAL_WORDS.en.withdrawLink, WITHDRAW_FROM_CONTRACT);
   // Changed assertion, noted (Claude 5's MEDIUM on #2953): the digital box no longer names the function. Its own "yes"
@@ -89,7 +99,109 @@ function main(): void {
   const today = quoted(`yes:${EU_WITHDRAWAL_CONSENT_VERSION}:m:1790000000`);
   is("today's version: today's sentence, with the label", [today.includes(`“${DIGITAL_CONSENT_WORDS.en.box.membership}” (wording ${EU_WITHDRAWAL_CONSENT_VERSION})`), today.includes(WITHDRAWAL_WORDS.en.withdrawLink)], [true, true]);
 
+  part("The digital box keeps the words buyers saw on 2026-10-30.2 (Claude 5's second MEDIUM on #2953)");
+  // The art. 16(m) sentence is what ends the right; the shortened one lost "as soon as it is available" (the pre-order),
+  // used "damit erlischt" against § 356 BGB's "mit Beginn", and left "nesse momento" / "dan" / "alors" ambiguous.
+  const published = (consentEmail as unknown as { BOX_2026_10_30_2?: Partial<Record<(typeof LANGUAGES)[number], Record<ConsentKind, string>>> }).BOX_2026_10_30_2;
+  is(
+    "every language's digital sentence is exactly the published 2026-10-30.2 one",
+    LANGUAGES.map((lang) => [lang, DIGITAL_CONSENT_WORDS[lang].box.digital === published?.[lang]?.digital]),
+    LANGUAGES.map((lang) => [lang, true]),
+  );
+  is(
+    "and an order kept with 2026-10-30.2 quotes, in every language, the same digital sentence the box shows today",
+    LANGUAGES.map((lang) => [lang, consentEmailLines({ language: lang, currency: "usd" }, { dc: "yes:2026-10-30.2:d:1790000000" }).join("\n").includes(DIGITAL_CONSENT_WORDS[lang].box.digital)]),
+    LANGUAGES.map((lang) => [lang, true]),
+  );
+  is("French: the box's quotation marks are guillemets, as in the rest of the French words", [/[“”]/.test(DIGITAL_CONSENT_WORDS.fr.box.digital), /[“”]/.test(DIGITAL_CONSENT_WORDS.fr.box.membership), DIGITAL_CONSENT_WORDS.fr.box.membership.includes(`« ${WITHDRAWAL_WORDS.fr.withdrawLink} »`)], [false, false, true]);
+
+  part("The checkout says where the withdrawal function is, outside the box's sentence (Claude 5's first MEDIUM on #2953)");
+  // Art. 6(1)(h): before the contract, for every purchase that has the function here (a pre-order, a digital order whose
+  // confirmation is not known sent, a membership, a shipped item). One plain line, conditional, so it never promises the
+  // right to a buyer whose yes closes it at payment; outside the marked sentence, so not in its 220 characters, its
+  // version or its fingerprint.
+  const LINE: Record<(typeof LANGUAGES)[number], string> = {
+    en: "You can withdraw online with ‘Withdraw from contract here’ on your purchases page, while you have that right.",
+    es: "Puedes desistir en línea con «Desistir del contrato aquí» en tus compras, mientras tengas ese derecho.",
+    fr: "Vous pouvez vous rétracter en ligne avec « Se rétracter du contrat ici » dans vos achats, tant que vous disposez de ce droit.",
+    de: "Sie können online mit „Vertrag hier widerrufen“ unter Ihren Käufen widerrufen, solange Ihnen dieses Recht zusteht.",
+    it: "Puoi recedere online con «Recedi dal contratto qui» nei tuoi acquisti, finché hai questo diritto.",
+    nl: "Je kunt online herroepen met ‘Overeenkomst hier herroepen’ bij je aankopen, zolang je dat recht hebt.",
+    pt: "Pode desistir do contrato online com «Desistir do contrato aqui» nas suas compras, enquanto tiver esse direito.",
+  };
+  const whereOf = (lang: (typeof LANGUAGES)[number]) => (withdrawalWords(lang) as unknown as { checkoutWhere?: string }).checkoutWhere;
+  is("the line, in every language, is the withdrawal words' own", LANGUAGES.map((lang) => [lang, whereOf(lang)]), LANGUAGES.map((lang) => [lang, LINE[lang]]));
+  is(
+    "it names the function by the label its purchases page shows, in that language (in English, the law's own words)",
+    [LINE.en.includes(`‘${WITHDRAW_FROM_CONTRACT}’`), ...LANGUAGES.map((lang) => LINE[lang].includes(withdrawalWords(lang).withdrawLink))],
+    [true, ...LANGUAGES.map(() => true)],
+  );
+  is("and says where: the buyer's list of purchases", LANGUAGES.map((lang) => [lang, listWord[lang].test(LINE[lang])]), LANGUAGES.map((lang) => [lang, true]));
+  is(
+    "it is not in either marked sentence, in any language",
+    LANGUAGES.map((lang) => [lang, DIGITAL_CONSENT_WORDS[lang].box.digital.includes(LINE[lang]), DIGITAL_CONSENT_WORDS[lang].box.membership.includes(LINE[lang])]),
+    LANGUAGES.map((lang) => [lang, false, false]),
+  );
+  const KINDS: ConsentKind[] = ["digital", "membership"];
+  const labelOf = (html: string) => html.slice(html.indexOf("<label"), html.indexOf("</label>") + "</label>".length);
+  const boxes = LANGUAGES.flatMap((lang) => KINDS.map((kind) => [lang, kind, renderToStaticMarkup(createElement(DigitalConsentBox, { id: `dc-${lang}-${kind}`, lang, kind }))] as const));
+  is(
+    "every box (digital and membership, every language) draws the line once, outside its label",
+    boxes.map(([lang, kind, html]) => [lang, kind, html.split(LINE[lang]).length - 1, labelOf(html).includes(LINE[lang])]),
+    boxes.map(([lang, kind]) => [lang, kind, 1, false]),
+  );
+
+  redis.clear();
+  process.env.STRIPE_SECRET_KEY = "sk_test_kb9_precontract_only";
+  const OWNER = "kb9where@example.com";
+  await claimHandle(OWNER, "kb9where", "Where Shop", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestKb9Where01", true);
+  await setSubscription(OWNER, { customerId: "cus_Kb9Where001", subscriptionId: "sub_Kb9Where001", active: true, period: paidPeriod() });
+  const mug = await addProduct(OWNER, "Clay mug", "", "30", null);
+  const pack = await addProduct(OWNER, "Recipe pack", "", "27", null);
+  if (!mug.ok || !pack.ok) throw new Error("no products");
+  const shippedSet = await setProductShipping(OWNER, mug.product.id, { cents: 600, region: "eu", countries: [], note: "" });
+  await setProductLink(OWNER, pack.product.id, "https://example.com/pack");
+  const shop = (await storeForEmail(OWNER))!;
+  const shipped = (await readListing(shop, mug.product.id))!;
+  const digital = (await readListing(shop, pack.product.id))!;
+  is("a shipped product is set up", [shippedSet.ok, Boolean(shipped.shipping)], [true, true]);
+  const buyBox = (lang: (typeof LANGUAGES)[number], product: typeof shipped) =>
+    renderToStaticMarkup(createElement(BuyBox, { store: { ...shop, language: lang as typeof shop.language }, product, related: [], remaining: null, writes: false, selling: true }));
+  const formOf = (html: string) => html.slice(html.indexOf("data-checkout"), html.indexOf("</form>"));
+  is(
+    "a shipped item's buy box (no box to check) draws the line once, in its checkout form, in every language",
+    LANGUAGES.map((lang) => {
+      const html = buyBox(lang, shipped);
+      return [lang, html.includes('data-digital-consent=""'), html.split(LINE[lang]).length - 1, formOf(html).includes(LINE[lang])];
+    }),
+    LANGUAGES.map((lang) => [lang, false, 1, true]),
+  );
+  is(
+    "a digital product's buy box draws it once too, with its box, never twice",
+    LANGUAGES.map((lang) => {
+      const html = buyBox(lang, digital);
+      return [lang, html.includes('data-digital-consent=""'), html.split(LINE[lang]).length - 1];
+    }),
+    LANGUAGES.map((lang) => [lang, true, 1]),
+  );
+  const product = readFileSync("components/store-product.tsx", "utf8");
+  is(
+    "the gift, the group and the pre-order draw it where they draw no box (a shipped product), as the buy box does",
+    ["dc-gift-", "dc-group-", "dc-pre-", "dc-${place}"].map((id) => new RegExp(`<DigitalConsentBox id=\\{\`${id.replace(/[$]/g, "\\$")}[^\\n]*\\/> : <WithdrawalWhere lang=`).test(product)),
+    [true, true, true, true],
+  );
+  is(
+    "a cart of shipped products only draws it where a cart with something digital draws the box",
+    /\{digital \? <DigitalConsentBox id=\{`dc-cart-\$\{handle\}`\}[^\n]*\/> : <WithdrawalWhere lang=\{lang\}[^\n]*\/>\}/.test(readFileSync("components/store-cart.tsx", "utf8")),
+    true,
+  );
+
   done();
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

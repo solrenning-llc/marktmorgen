@@ -1614,3 +1614,124 @@ Resultadosdarodada: #3077M5814354925segundafinanceirafec haproblemaoriginal120PA
 ### CANALFINAL ENTREGUE/readback — 07/11/2026 16h14 Fortaleza
 **CXM-20261107-1611-C1-1 entregueapósreconciliação em abc3678f7f0988179237d7c5ec4c9839397b83ed/blob6796dca243df36c3a96c1f7e00bc187b69720e7b FULL4065682charsEXATO/prefixointegralpreservado.** PrimeiraCAS1611foi409NÃOAPLICADA;espera>=120s19:11:49→19:13:55Z,freshFULL/IDausente;retryimediatoapósFULLaplicado/readbackexato. Nenhumclaimnovo/nenhumreparoalheio.
 DeltaúltimoFULLlidoantesenvio: V3093leaseNdocPR665a9b2 pede1reviewN+independente;Sprimeira/Gsegunda3086;**Gprimeira3090ALTOdinheirod5fb87019a**; genéricos3091/3092privacidade/3087lei/3088/3089dinheiro aindaSEMCLAIMM/SEMsourceM. NãoalocarsemnovoFRESHmetadata/comments+FULLclaimscan. C6-1611focal3087C2limpo6711796150+3LOWssãoparecerdele,nãoMcert. NenhumarespostaC1declassificaçãoM3083observadanesteFULL,logoP/N/G/MquatroherdadosseguemC1/R2. Encerrarrodada/Mlivresemvigiainfundo,semalterarautomaçãoenabledagenda. Nãoédeclaraçãodefimdotrabalho/semPRpossível;próximosdependemdareconciliaçãonominal/disponibilidaderealnohorário,mainverde/9headchecksdoautor.
+
+
+## Retomada 07/11/2026 16h37 Fortaleza — revisão documental #3093
+CPFULL12c26910/blob35cd866a281646charsrecuperado;main09dd1ece44482e239e4d10bd690d9e46ab1e2fccDEZnormas/inbox/reservas/filaBYTE-IDanteriores472c/8e85/d989/a8b69/3362/2a44/ed84/1dab/ec5f/3e9. CanalFULLf00de761+blobm1632file4120369charslido;primeirasaída60kfoitruncada, mioloC3-1619..C6-1626relidointegralmente,C1-1623TODOSlotes/decisão1924A+BparaC3lida. NãoassumirúltimoparecerM5de1comovalidaçãohead2606relatadoC3. M3083prova7/3herdadasegueR2/C1classe/C6-1620localfixsemPUSH.NenhumfocalnovoM/produçãoownnovo. Old2388/2402/2415/2421/reservas/2762nãorecriar.
+
+RESCXM-20261107-1633-C1-1 ENTREGUE **77eef51f990822b0fbf1c9721e2731bf20a33a75/blob1f77c574aa3a51c1a2c7d91bde0aad462a3da691 FULL4138611charsEXATO**,ANTESdiff/fonte/teste. PrimeiraCAS409NÃOAPLICADA;clock19:32:49→19:34:57>=120s;freshFULL/IDausente/semclaim3093concorrenteantesretryimediato.PedidoreviewV6711810764/CXV1613, Nownerconfirmation6712000368NÃOéindependenteextra.CanalretryC1-1630DECISÃODO DONO70anual/C2executalidaFULL;Mnenhumteto/preço/flagalterado(C1-1550restosemperdavisível),nãoégrantprodutivoM. C2reviews3094/3095/3096/G+T3090/S+G3086/CXC23009/Z3079/V3093leasespreservados. C2novo3103reviewcreatorpedidoaindasemMclaim,nãolifonte.
+
+### #3093 exato665a9b2a8016b44836f103e6591601749985b2f4/base1d7cbe8dda5d35d049c699def9919b89a6376ef5
+DeltaEXATAMENTEuma linha66codex.md Gitblob8df7b151c172b4604081380a0170028c1f22af5d. OwnerNconfirma6712000368exatohead+blob: sóstandaloneexclusiveerasuretokenremovido, leaseaC4#3066/745ce60a(importstoreForIdExact/allstoresaskunread/emailLinknotice), Nretémrequestguard/admissiongates/counters/one-store/readErasureLink/confirmErasure/outroshunks. Waitlist/takedown/eoutraslinhaspreservadas. Checkeréfile-levelNÃOenforcehunklease: revisãoDOCUMENTALnãoaprova3066produto/lei/nemgrantalheio.
+
+ReproduziMESMAprovaVbodycomSÓadaptaçãodeharness: gitshowoldreftrocadoporreadFileSyncbefore-codex.md(blobbeforeexato3e9fb80fc14284d0edd65627c8f45718e3305939),importrelativepararaizprópria;nenhumaasserçãotrocada. SnapshotDOCcontrolado: beforeapenascodexold+8inputsheadiguais→REDexit1/currentConflicts1/expect0;depoisrestauradohead→GREENexit0/currentConflicts0. Assertionsverificamparsedarraysmudamsóerasure,store-join/inbound-mailcontinuamblocked1,Vpodeeditarowncodexdoc,linha66única/allothersbyteid. 9inputsGitblobshead+beforehashverificados,0mismatch. Ligado node--testreservation-check15PASS/1CI-onlySKIP/0FAIL/exit0. ScannerOFICIAL9tracked/0correções/exit0(snapshotPARCIALnão4304VnemrepoFULL). Semcodeproduto,nãoexigirtipos/lint/browser;nenhumaassertionafrouxada/nemchecker editado. ExecserialMédio0agentes,limitesANTES120s512MiB256KiBporfilho,zeroHTTP/Redis/provider/nãodownload. Prova/logsintegráisabaixo. Nãohásemânticadecustos/limites/flags/pagamentosalterada.
+
+Próximo:finalmetadata/timeline≥5minapóspreflight19:32,semthirdseoutrojáentregou;formalCOMMENTsemachadodocumental,nãoproduto;atualizarcanalcomrecibo+CPFULL/readback.Sobre3093gate9exact/anti-conflitoC1-1217/enqueueéVautor,nãoMmerge.DemaisM3083R2C1pendente/3051Gidentitypending;1924decisãoC1AfoiparaC3nãoMgerirfila.Nãoháconclusãoglobaldeprojeto/nãodesabilitarcontinuidadeporpendênciatemporária.
+
+### proof.mjs
+```
+import assert from 'node:assert/strict';
+import {readFileSync,readdirSync} from 'node:fs';
+import {allReservations,conflicts} from './scripts/reservation-check.mjs';
+const text=readFileSync('docs/reservations.md','utf8');
+const agentFiles=readdirSync('docs/reservations').filter(n=>n.endsWith('.md')).map(n=>({path:`docs/reservations/${n}`,text:readFileSync(`docs/reservations/${n}`,'utf8')}));
+const path='docs/reservations/codex.md';
+const old=readFileSync('before-codex.md','utf8');
+const before=agentFiles.map(f=>f.path===path?{...f,text:old}:f);
+const input={text,branch:'claude4/store-all-exact',changed:['lib/erasure-request.ts']};
+const found=conflicts({...input,agentFiles}).found;
+console.log(JSON.stringify({phase:process.argv[2],currentConflicts:found}));
+assert.equal(conflicts({...input,agentFiles:before}).found.length,1);
+if(process.argv[2]==='red')assert.equal(found.length,0,'authorized erasure lease should no longer be blocked');
+else {
+  assert.deepEqual(found,[]);
+  assert.deepEqual(allReservations(text,agentFiles),allReservations(text,before).filter(r=>r.file!=='lib/erasure-request.ts'));
+  for(const file of ['lib/store-join.ts','lib/inbound-mail.ts'])assert.equal(conflicts({...input,agentFiles,changed:[file]}).found.length,1);
+  assert.deepEqual(conflicts({text,branch:'codex/v-reservations-erasure-3066',changed:[path],agentFiles}).found,[]);
+  const final=readFileSync(path,'utf8').split('\n'), prior=old.split('\n');
+  assert.equal(final.length,prior.length);
+  const changed=final.flatMap((line,i)=>line===prior[i]?[]:[i+1]);
+  assert.deepEqual(changed,[66]);
+  console.log('GREEN: exactly line 66; only erasure exclusive path removed; retained controls blocked; V owns document');
+}
+
+```
+
+### head-pins.json
+```
+{"docs/reservations.md":"33627443418f4bc924217cb5e862688d2735eac2","docs/reservations/claude1.md":"2a440d6e5a64a287855b09a5ed988c9636f254cb","docs/reservations/claude2.md":"ed84f0105b930d3409b06423839f02df4a3140aa","docs/reservations/claude3.md":"1dab1d78e585a0dca7e6d996305a6e76a18f29fe","docs/reservations/claude4.md":"ec5f303e7ead3d8b71ebdd27344af104b7c5269e","docs/reservations/codex.md":"8df7b151c172b4604081380a0170028c1f22af5d","scripts/reservation-check.mjs":"da5cda3257f2adfaa90005986b1d6041b467a2b3","tests/reservation-check.test.ts":"a6ba4a9c1998ee42753c47c2ff2b26a4bc30591b","scripts/check_public_data.py":"a9823fcbc9fec88703f4df39c8f3822c673edbea"}
+```
+
+### verified.json
+```
+{"head_blobs": 9, "before_blob": "3e9fb80fc14284d0edd65627c8f45718e3305939", "mismatch": 0, "scanner": 0}
+```
+
+### red.log
+```
+{"phase":"red","currentConflicts":[{"agent":"codex","item":"SG2(17): remaining paid-email callers fail closed on unknown counter evidence","file":"lib/erasure-request.ts"}]}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: authorized erasure lease should no longer be blocked
+
+1 !== 0
+
+    at file:///workspace/scratch/d1ece80b1417/m-review-3093/proof.mjs:13:35
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 0,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.22.1
+
+```
+
+### green.log
+```
+{"phase":"green","currentConflicts":[]}
+GREEN: exactly line 66; only erasure exclusive path removed; retained controls blocked; V owns document
+
+```
+
+### tests.log
+```
+✔ each branch belongs to the agent with the longest matching prefix (3.414913ms)
+✔ a file reserved by another agent fails, partial reservations included (13.817684ms)
+✔ own reservations, shared queue files and unknown branches pass (2.215668ms)
+✔ each agent's own file: its rows are that agent's, a file of no lane counts for nothing (1.837506ms)
+✔ a file reserved in another agent's own file fails; one's own passes (1.258226ms)
+✔ changing another agent's reservations file fails; one's own, a new one and the shared files pass (2.102948ms)
+✔ a generated file never blocks, even when a row names it (inbox C3-13) (1.486029ms)
+✔ the agent coverage table never blocks: each agent adds the rows of its own routes (inbox C3-14) (0.410356ms)
+✔ the privacy policy never blocks: each agent adds only its own unit's sentences (inbox C3-37) (0.3989ms)
+✔ the cost and test registries never block: each agent adds its own rows (inbox CX-29) (0.784016ms)
+✔ the key-family registries and the tests' Redis emulator never block: each agent adds its own entries (inbox CX-46) (0.681629ms)
+✔ the old table is still read while it exists (2.337872ms)
+✔ the real reservations files parse: one per lane, rows name exact paths (12.85905ms)
+✔ the real reservations file parses: every lane has a prefix and rows name exact paths (1.660008ms)
+✔ the CI inputs carry the agents' own files, so a file another agent reserved there is refused (0.88284ms)
+﹣ this pull request changes no file another agent reserved (0.156388ms) # SKIP
+ℹ tests 16
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 450.749758
+
+```
+
+### scanner.log
+```
+Public data check: 9 tracked files; 0 file(s) require correction.
+
+```

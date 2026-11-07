@@ -93,7 +93,9 @@ export function CourseOutline({
                   const isDone = done.has(lesson.id);
                   const here = lesson.id === current;
                   const mark = isDone ? "✓" : reachable ? "○" : "🔒";
-                  const label = `${lesson.title}${lesson.video ? w.video : ""}`;
+                  // Only the title carries data-find-text: " · video" is drawn
+                  // beside it, so "Find a lesson" searches titles, as its help says.
+                  const suffix = lesson.video ? w.video : "";
                   return (
                     <li key={lesson.id} className="flex items-start gap-2 text-sm" data-find-lesson="">
                       <span aria-hidden="true" className="w-5 shrink-0 text-center">{mark}</span>
@@ -104,12 +106,15 @@ export function CourseOutline({
                             aria-current={here ? "page" : undefined}
                             className={`break-words underline-offset-2 hover:underline ${here ? "font-bold underline" : ""}`}
                             style={{ color: "var(--st-text)" }}
-                            data-find-text=""
                           >
-                            {label}
+                            <span data-find-text="">{lesson.title}</span>
+                            {suffix}
                           </Link>
                         ) : (
-                          <span className="st-muted break-words" data-find-text="">{label}</span>
+                          <span className="st-muted break-words">
+                            <span data-find-text="">{lesson.title}</span>
+                            {suffix}
+                          </span>
                         )}
                         {isDone ? <span className="sr-only">{w.doneHidden}</span> : null}
                         {lesson.quiz ? (

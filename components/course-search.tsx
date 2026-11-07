@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { MAX_COURSE_QUERY, narrowDom } from "@/lib/course-search";
 import { courseSearchWords } from "@/lib/buyer-words/course-search";
 import type { LanguageCode } from "@/lib/store-language";
@@ -11,6 +11,10 @@ const subscribe = () => () => {};
 const clientReady = () => true;
 const serverReady = () => false;
 
+// How long typing must pause before the count is said: the list narrows at
+// every key, but a screen reader hears the count once, not at each letter.
+const ANNOUNCE_AFTER_MS = 500;
+
 /**
  * "Find a lesson" (291 [SQ2], lib/course-search.ts): narrows the course's
  * outline, drawn under the element with the id `outline`, to the lessons
@@ -19,23 +23,40 @@ const serverReady = () => false;
  *
  * Nothing is drawn until the script runs, so a page without JavaScript shows
  * no box that cannot work, and its whole outline as before. Typing changes
- * the list below, never the page or the focus (WCAG 3.2.5); the count is said
- * politely; Escape and the button both empty the field.
+ * the list below, never the page or the focus (WCAG 3.2.5); the count is shown at
+ * once and said politely once typing pauses; Escape and the button both
+ * empty the field.
  */
 export function CourseSearch({ outline, language }: { outline: string; language?: LanguageCode }) {
   const interactive = useSyncExternalStore(subscribe, clientReady, serverReady);
   const [query, setQuery] = useState("");
   const [shown, setShown] = useState<{ matches: number; total: number } | null>(null);
+  const [said, setSaid] = useState("");
+  const wait = useRef<ReturnType<typeof setTimeout> | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const field = useId();
   const hint = useId();
   const w = courseSearchWords(language);
+  useEffect(
+    () => () => {
+      if (wait.current) clearTimeout(wait.current);
+    },
+    [],
+  );
   if (!interactive) return null;
 
+  const sentence = (now: { matches: number; total: number } | null) =>
+    now === null ? w.idle : now.matches === 0 ? w.none : w.some(now.matches, now.total);
   const search = (value: string) => {
     setQuery(value);
     const root = document.getElementById(outline);
-    setShown(root ? narrowDom(root, value) : null);
+    const now = root ? narrowDom(root, value) : null;
+    setShown(now);
+    if (wait.current) clearTimeout(wait.current);
+    wait.current = setTimeout(() => {
+      wait.current = null;
+      setSaid(sentence(now));
+    }, ANNOUNCE_AFTER_MS);
   };
   const clear = () => {
     search("");
@@ -74,8 +95,11 @@ export function CourseSearch({ outline, language }: { outline: string; language?
           </button>
         ) : null}
       </div>
-      <p id={hint} className="st-muted mt-2 text-sm" aria-live="polite">
-        {shown === null ? w.idle : shown.matches === 0 ? w.none : w.some(shown.matches, shown.total)}
+      <p id={hint} className="st-muted mt-2 text-sm">
+        {sentence(shown)}
+      </p>
+      <p className="sr-only" aria-live="polite">
+        {said}
       </p>
     </div>
   );

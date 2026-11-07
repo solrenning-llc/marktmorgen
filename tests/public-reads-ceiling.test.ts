@@ -265,7 +265,7 @@ const SCRIPTS = new Map<string, (k: string[], a: string[]) => Promise<number>>([
   }],
   [BOOK_FORGET, async (k, a) => {
     if (text(await one(["GET", k[3]])) !== a[0]) return 2;
-    await memory([["DEL", k[0], k[1]], ["INCR", k[2]], ["EXPIRE", k[2], a[1]]]);
+    await memory([["DEL", k[0], k[1]], ["SET", k[2], a[2], "EX", a[1]]]);
     return 1;
   }],
 ]);

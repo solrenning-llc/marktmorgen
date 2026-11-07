@@ -22,8 +22,9 @@
  *   nl:aff:<statsId>:book:draft  the token of the draft being written, so the
  *                                next refresh deletes one a stopped refresh left
  *   nl:aff:<statsId>:book:lock   a random token: one refresh at a time
- *   nl:aff:<statsId>:book:ver    raised each time a person is deleted; a
- *                                refresh that read before it keeps nothing
+ *   nl:aff:<statsId>:book:ver    a new random value each time a person is
+ *                                deleted; a refresh that read before it keeps
+ *                                nothing
  *   nl:aff:<statsId>:book:tries  paid refreshes in a row that kept no complete
  *                                book: raised before each one reads, set back
  *                                by a complete one
@@ -272,12 +273,22 @@ redis.call("HSET", KEYS[4], unpack(ARGV, 5))
 redis.call("EXPIRE", KEYS[4], ARGV[3])
 ${WRITTEN}
 return 1`;
-/** Deletes the book (KEYS[1]) and the draft named (KEYS[2]) and raises the version (KEYS[3]); 2 when the draft named changed meanwhile (KEYS[4] no longer ARGV[1]). */
+/** Deletes the book (KEYS[1]) and the draft named (KEYS[2]) and raises the version (KEYS[3]) to a new one (ARGV[3], newVersion); 2 when the draft named changed meanwhile (KEYS[4] no longer ARGV[1]). */
 export const BOOK_FORGET = `if (redis.call("GET", KEYS[4]) or "") ~= ARGV[1] then return 2 end
 redis.call("DEL", KEYS[1], KEYS[2])
-redis.call("INCR", KEYS[3])
-redis.call("EXPIRE", KEYS[3], ARGV[2])
+redis.call("SET", KEYS[3], ARGV[3], "EX", ARGV[2])
 return 1`;
+
+/**
+ * A version no refresh can have read: random, 122 bits (crypto.randomUUID),
+ * compared only for equality (HELD). A count raised with INCR, kept
+ * BOOK_KEEP_SECONDS, started again from 1 once it ran out, so a refresh that
+ * read it before then found it unchanged after a later deletion and kept the
+ * deleted person's (masked) address. One SET, where INCR and EXPIRE were two;
+ * 36 bytes a store at most, gone BOOK_KEEP_SECONDS after the last deletion;
+ * and it says nothing of how many people were deleted.
+ */
+const newVersion = () => crypto.randomUUID();
 
 /** Runs one of the scripts; throws, with nothing written, when the Redis cannot run it or gives no number. */
 async function script(source: string, keys: string[], args: (string | number)[]): Promise<number> {
@@ -287,7 +298,7 @@ async function script(source: string, keys: string[], args: (string | number)[])
   return value;
 }
 
-/** The version a refresh starts from: raised each time a person is deleted (forgetBookSnapshot). */
+/** The version a refresh starts from: a new one each time a person is deleted (forgetBookSnapshot, newVersion). */
 async function bookVersion(statsId: string): Promise<string> {
   const [version] = await redisPipeline([["GET", versionKey(statsId)]]);
   return version === null || version === undefined ? "" : String(version);
@@ -308,13 +319,13 @@ export async function forgetBookSnapshot(statsId: string): Promise<void> {
   const book = snapshotKey(statsId);
   const version = versionKey(statsId);
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const [, , seen, exists] = await redisPipeline([["INCR", version], ["EXPIRE", version, BOOK_KEEP_SECONDS], ["GET", pointerKey(statsId)], ["EXISTS", book]]);
+    const [, seen, exists] = await redisPipeline([["SET", version, newVersion(), "EX", BOOK_KEEP_SECONDS], ["GET", pointerKey(statsId)], ["EXISTS", book]]);
     const token = typeof seen === "string" ? seen : "";
     if (!token && Number(exists) === 0) return;
     const draft = token ? draftKey(statsId, token) : book;
     let done: number;
     try {
-      done = await script(BOOK_FORGET, [book, draft, version, pointerKey(statsId)], [token, BOOK_KEEP_SECONDS]);
+      done = await script(BOOK_FORGET, [book, draft, version, pointerKey(statsId)], [token, BOOK_KEEP_SECONDS, newVersion()]);
     } catch (error) {
       await redisPipeline([["DEL", book, draft]]).catch(() => undefined);
       throw error;

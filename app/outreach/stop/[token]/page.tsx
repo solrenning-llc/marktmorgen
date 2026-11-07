@@ -36,10 +36,12 @@ export default async function OutreachStopPage({ params, searchParams }: Params)
         {unread ? (
           <>
             <h1 className="t-h3">This link could not be read just now</h1>
-            <p className="mt-3 text-ink-soft" role="status">
-              Nothing was changed. Try again in a moment. Or reply to the email and say you would rather not hear from them: they
-              are asked to stop at that, too.
+            <p className="notice notice-info mt-3" role="status">
+              We could not check whether these emails are already stopped. Nothing was changed. You can still stop them below, or
+              reply to the email and say you would rather not hear from them: they are asked to stop at that, too.
             </p>
+            {/* A failed read never takes a way to stop away (Codex K2): pressing either only adds a stop, never says one holds. */}
+            <StopForms token={token} who={who} store />
           </>
         ) : !found ? (
           <>
@@ -62,18 +64,7 @@ export default async function OutreachStopPage({ params, searchParams }: Params)
                 ? `Their store can no longer prepare an email to ${found.domain}. You can also close ${found.domain} to every store here.`
                 : `${who} wrote to ${found.domain} from their own mailbox, with a draft prepared here. One press and their store can never prepare another.`}
             </p>
-            {found.stopped || query.done === "1" ? null : (
-              <form action="/api/outreach/stop" method="post" className="mt-6">
-                <input type="hidden" name="p" value={token} />
-                <input type="hidden" name="scope" value="store" />
-                <button type="submit" className="btn btn-primary btn-block">{`Stop emails from ${who}`}</button>
-              </form>
-            )}
-            <form action="/api/outreach/stop" method="post" className="mt-3">
-              <input type="hidden" name="p" value={token} />
-              <input type="hidden" name="scope" value="all" />
-              <button type="submit" className="btn btn-secondary btn-block">Stop emails from every Marktmorgen store</button>
-            </form>
+            <StopForms token={token} who={who} store={!(found.stopped || query.done === "1")} />
           </>
         )}
         <p className="mt-6 text-sm text-ink-mute">
@@ -86,5 +77,25 @@ export default async function OutreachStopPage({ params, searchParams }: Params)
         </p>
       </div>
     </main>
+  );
+}
+
+/** The two stop buttons: this store (unless it is already stopped), and every store here. */
+function StopForms({ token, who, store }: { token: string; who: string; store: boolean }) {
+  return (
+    <>
+      {store ? (
+        <form action="/api/outreach/stop" method="post" className="mt-6">
+          <input type="hidden" name="p" value={token} />
+          <input type="hidden" name="scope" value="store" />
+          <button type="submit" className="btn btn-primary btn-block">{`Stop emails from ${who}`}</button>
+        </form>
+      ) : null}
+      <form action="/api/outreach/stop" method="post" className="mt-3">
+        <input type="hidden" name="p" value={token} />
+        <input type="hidden" name="scope" value="all" />
+        <button type="submit" className="btn btn-secondary btn-block">Stop emails from every Marktmorgen store</button>
+      </form>
+    </>
   );
 }

@@ -26,7 +26,7 @@ const html = renderToStaticMarkup(createElement(PaymentReceived, { label: "Payme
 is("a status region holds the words", /<div[^>]*role="status"[^>]*>[\s\S]*Payment received/.test(html), true);
 is("the drawing is hidden from screen readers", /<svg[^>]*aria-hidden="true"/.test(html), true);
 is("and is never focusable", /<svg[^>]*focusable="false"/.test(html), true);
-is("it draws in the text's own colour, so forced colours and dark mode follow", (html.match(/stroke="currentColor"/g) ?? []).length, 2);
+is("it draws in the text's own color, so forced colors and dark mode follow", (html.match(/stroke="currentColor"/g) ?? []).length, 2);
 is("a ring and a check, each drawn along its own length", (html.match(/pathLength="1"/g) ?? []).length, 2);
 is("no sound, no picture, no number", /<audio|<video|<img|\$|\d+\.\d\d/.test(html), false);
 

@@ -7,7 +7,7 @@
  * The motion lives in app/globals.css (".mm-paid-*"): the mark is complete
  * by default and is animated only under prefers-reduced-motion:
  * no-preference, so a buyer who asks for less motion sees it already drawn.
- * It strokes in currentColor, so dark mode and forced colours follow the
+ * It strokes in currentColor, so dark mode and forced colors follow the
  * text around it.
  *
  * Show it only for an order Stripe confirmed as paid; the page decides.

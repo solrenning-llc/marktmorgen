@@ -583,7 +583,15 @@ export async function settleAllPayPal(deadline: number): Promise<number> {
   let done = 0;
   for (const sid of Array.isArray(sids) ? (sids as string[]) : []) {
     if (Date.now() >= deadline) break;
-    const store = await storeForId(sid).catch(() => null);
+    let store: Store | null;
+    try {
+      store = await storeForId(sid);
+    } catch (error) {
+      // Not read (rule 24): never "gone". A store with a batch still open stays in the daily job, and its affiliates
+      // are settled on a later day; only a store whose id names no record (null) leaves the set.
+      console.error("a PayPal store's record could not be read; it is tried again next run", error);
+      continue;
+    }
     if (!store) {
       await redisPipeline([["SREM", STORES, sid]]);
       continue;

@@ -92,6 +92,14 @@ async function main(): Promise<void> {
   failing.clear();
   readAs = "null";
   is("no check passes on a null body", await verifyTiers().then((checks) => readBack(checks).filter(Boolean).length, () => 0), 0);
+  subs.clear();
+  failing.clear();
+  const named = await verifyTiers();
+  is(
+    "…and the run completes, each read-back failing by name rather than the whole run failing",
+    [readBack(named), named.filter((c) => !c.ok).every((c) => c.detail.startsWith("Stripe's reply was not sub_"))],
+    [[false, false, false, false], true],
+  );
   readAs = "own";
 }
 

@@ -33,14 +33,16 @@ const CHECKOUT_VERSION = "2025-09-30.clover";
 
 /**
  * A Stripe reply decides only when it is the object asked for (rule 30): it holds its own id, equal to the one
- * requested. A reply for another object, or with no id, says nothing about this add-on.
+ * requested. A reply for another object, or with no id, says nothing about this add-on. A reply that is not an object at all (an HTTP 200 whose JSON body is `null`) is not this object either: it never
+ * throws here.
  */
-const isOwnReply = (reply: Record<string, unknown>, id: string): boolean => Object.hasOwn(reply, "id") && reply.id === id;
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 
-/** Thrown on a reply that is not the subscription asked for: nothing is decided on it, and the next pass reads again. */
+/** Thrown on a reply that is not the object asked for: nothing is decided on it, and the next pass reads again. */
 class NotOwnReply extends Error {
   constructor(id: string) {
-    super(`Stripe's reply was not the subscription asked for (${id})`);
+    super(`Stripe's reply was not the object asked for (${id})`);
   }
 }
 
@@ -147,6 +149,9 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
     if (error instanceof BillingError && error.status === 404) return null;
     throw error;
   }
+  // Another page's reply, or one with no id, grants nothing: the return says "unconfirmed", and the daily job
+  // (billing-sync) reads the add-on again from Stripe's list.
+  if (!isOwnReply(session, sessionId)) throw new NotOwnReply(sessionId);
   const meta = session.metadata as Record<string, string> | null;
   if (session.mode !== "subscription" || meta?.addon !== ADD_ON_MARK || meta.assistant_for !== store.handle) return null;
   if (typeof session.customer !== "string" || session.customer !== store.stripeCustomerId) return null;

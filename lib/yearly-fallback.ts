@@ -166,9 +166,11 @@ const priceGone = (error: unknown) =>
   error instanceof StripeError && (error.code === "resource_missing" || /\binactive\b|no such price/i.test(error.stripeMessage));
 /**
  * A Stripe reply decides only when it is the object asked for (rule 30): it holds its own id, equal to the one
- * requested. A reply for another membership or invoice, or with no id, says nothing about this one.
+ * requested. A reply for another membership or invoice, or with no id, says nothing about this one. A reply that is not an object at all (an HTTP 200 whose JSON body is `null`) is not this object either: it never
+ * throws here, so the read after a failed void still records VOID (Claude 6 on #3098).
  */
-const isOwnReply = (reply: object, id: string): boolean => Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 /** Thrown when a reply is not the object asked for: nothing is decided on it. */
 class NotOwnReply extends Error {
   constructor(id: string) {

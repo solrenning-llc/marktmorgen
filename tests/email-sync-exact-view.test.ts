@@ -115,6 +115,11 @@ async function main(): Promise<void> {
   Object.setPrototypeOf(inherited, inheritedPrototype);
   is("an inherited envelope cell is unknown", await view(inherited), "unknown");
   is("a non-list log reply marks only the log unread", await view([config, null, "not-a-list"]), { provider: "kit", jobs: "unread" });
+  for (const invalid of [42, true, { provider: "kit" }]) {
+    is("a non-text configuration cell is unknown", await view([invalid, null, []]), "unknown");
+  }
+  is("a non-text problem cell is unknown", await view([config, 7, []]), "unknown");
+  is("an absent configuration is known absence", await view([null, null, []]), { provider: null, jobs: [] });
 
   part("The job batch must match every requested log row");
   is("a short job batch marks the log unread, never partial", await view([config, null, ids], [job(ids[0])]), { provider: "kit", jobs: "unread" });
@@ -146,6 +151,45 @@ async function main(): Promise<void> {
     is("testing succeeds and marks only its log unread", tested === "threw" ? tested : [tested.ok, tested.view.connected?.target?.id, tested.view.log], [true, "second", null]);
     const removed = await attempt(() => disconnect(store));
     is("disconnecting succeeds without reading the malformed job", removed === "threw" ? removed : [removed.connected, removed.log], [null, null]);
+
+    part("A completed write survives an unavailable follow-up view (C5 #2824)");
+    const cfgKey = `nl:esync:cfg:${statsId}`;
+    const badKey = `nl:esync:bad:${statsId}`;
+    for (const action of ["connect", "save", "test", "missing-target"] as const) {
+      redis.clear();
+      const seeded = { ...held, target: action === "missing-target" ? { id: "missing", name: "Missing" } : held.target };
+      redis.run(["SET", cfgKey, JSON.stringify(seeded)]);
+      redis.run(["SET", badKey, JSON.stringify({ message: "Previous problem", at: 1 })]);
+      let viewReads = 0;
+      (redis as unknown as { pipeline: Pipeline }).pipeline = async (commands) => {
+        if (commands.length === 3 && commands[0][0] === "GET" && commands[0][1] === cfgKey && commands[2][0] === "LRANGE") {
+          viewReads += 1;
+          return [redis.run(["GET", cfgKey])];
+        }
+        return original(commands);
+      };
+      try {
+        const result = await attempt(async () => {
+          if (action === "connect") return connect(store, "kit", key);
+          if (action === "save") return saveSettings(store, { target: "second", free: false, buyers: "all", products: [], tags: {} });
+          return testConnection(store);
+        });
+        const expectedTarget = action === "save" ? "second" : action === "missing-target" ? "missing" : "audience";
+        is(`${action}: the confirmed action keeps its result and saved connection`,
+          result !== "threw" && "view" in result ? [result.ok, result.view.connected?.provider, result.view.connected?.target?.id, result.view.log] : result,
+          [action !== "missing-target", "kit", expectedTarget, null]);
+        const persisted = JSON.parse(String(redis.run(["GET", cfgKey]))) as { target: { id: string }; free: boolean };
+        is(`${action}: the written setting remains persisted`, [persisted.target.id, persisted.free], [expectedTarget, action !== "save"]);
+        is(`${action}: an unavailable view is not blindly retried`, viewReads, 1);
+        if (action === "missing-target") {
+          is("the negative platform test retains its confirmed problem", String(redis.run(["GET", badKey])).includes("not there anymore"), true);
+        } else if (action === "connect" || action === "test") {
+          is(`${action}: the confirmed problem clear remains applied`, redis.run(["GET", badKey]), null);
+        }
+      } finally {
+        (redis as unknown as { pipeline: Pipeline }).pipeline = original;
+      }
+    }
   } finally {
     setPlatformHooksForTests(undefined);
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

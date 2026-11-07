@@ -141,11 +141,17 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
     // Only the store's own sales of the handle searched (rule 30): a row the search gave that names another handle,
     // or none, is not this store's member, and is never held, let go or written down.
     const listed = listOf(found);
+    // Whether there is more is said exactly, or the page is not known to be the last (Claude 6 on #3108, rule 24):
+    // done on a page that does not say would leave the next pages' members never held, or held for good.
+    const next = typeof found.next_page === "string" ? found.next_page : "";
+    if (typeof found.has_more !== "boolean" || (found.has_more && !next)) {
+      console.error("plan-closing: Stripe's search did not say whether more subscriptions follow; tried again");
+      return false;
+    }
     const rows = listed.filter((row): row is Row => Boolean(row) && typeof row === "object" && (row as Row).metadata?.store === handles[cursor.h]);
     if (rows.length < listed.length) console.error(`plan-closing: Stripe's search gave ${listed.length - rows.length} subscription(s) of another store; left alone`);
     if (!(await each(rows))) return false;
-    const next = typeof found.next_page === "string" ? found.next_page : "";
-    cursor = found.has_more === true && next ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };
+    cursor = found.has_more ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };
     await redisPipeline([["HSET", workKey(folder), field, JSON.stringify(cursor)]]);
   }
   if (cursor.h >= handles.length) {

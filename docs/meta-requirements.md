@@ -10,6 +10,8 @@ The session's network refuses `developers.facebook.com` and `business.whatsapp.c
 - Where two official pages disagreed, both are given and the stricter one is the working assumption.
 - Nothing here certifies a cost, a limit or an approval. Unknown stays unknown; it is never zero.
 
+After the study was written, Codex T's independent review of #2916 opened three official WhatsApp pages directly on November 6, 2026, reached through `whatsappbusiness.com`: the pricing page [S19], the FAQ [S29] and the Business Messaging Policy [S28]. Section 6 cites what the review found on the first two; every other source is still "seen in search" only.
+
 To close the gap, the session network must allow `developers.facebook.com`, `developers.secure.facebook.com`, `business.whatsapp.com` and `www.whatsapp.com` (owner decision, see section 9).
 
 ## 1. Which API path
@@ -66,7 +68,7 @@ Webhook fields: `comments` and `live_comments` (Instagram, both logins), `messag
 
 | Limit | Value seen | Source |
 | --- | --- | --- |
-| Send API, text/link/reaction/sticker | 300 calls per second per Instagram professional account (changelog of October 8, 2024, up from 100). The overview page still says 100 | [S1][S7][S8] |
+| Send API, text/link/reaction/sticker | 300 calls per second per Instagram professional account (changelog of October 8, 2024, up from 100). The overview page still says 100. **Working assumption: 100 calls per second**, the stricter, until both are read on the page and dated | [S1][S7][S8] |
 | Send API, audio/video | 10 calls per second (overview) | [S1] |
 | Private replies, posts and reels | 750 calls per hour. **Discrepancy:** the Graph API page says per Instagram professional account; the Messenger page says per Facebook Page. Use the stricter reading until read | [S8][S17] |
 | Private replies, Live comments | 100 calls per second per account | [S8] |
@@ -76,7 +78,7 @@ The creator's repeat interval (`REPEAT_CHOICES`) is stricter per person than Met
 
 ## 6. WhatsApp
 
-**Pricing (who pays).** Since July 1, 2025 Meta bills **per delivered message**, by category (marketing, utility, authentication, service) and by the recipient's market. Messages from people to the business are not charged. Utility messages inside an open window were free from July 1, 2025, and, per Meta's page, **from October 1, 2026 utility replies and service messages inside the window are charged per message**, at the market's utility/authentication rate, after a free tier of 1,000 service messages per phone number per month. Click-to-WhatsApp ad entry points open a 72-hour free window for templates. The billed party is the **business that owns the WhatsApp Business Account**; on a Solution Partner's credit line the partner is billed. [S14][S18][S19]
+**Pricing (who pays).** Since July 1, 2025 Meta bills **per delivered message**, by category (marketing, utility, authentication, service) and by the recipient's market (search). Messages from people to the business are not charged. **The official sources conflict on replies inside the open window.** The official WhatsApp FAQ, opened directly in Codex T's review on November 6, 2026, says service messages are charged from October 1, 2026, after the first 1,000 service messages per business phone number each month [S29]; the same FAQ still carries an older conversation-based description elsewhere, so it is not wholly current. The official pricing page, opened directly the same day, still says service messages and utility responses to users are not charged [S19]. The October 1, 2026 date and the 1,000-message allowance rest on the FAQ. Whether utility replies inside the window are charged from that date too, and at which rate (search showed the market's utility/authentication rate, from S14 and S18, neither read), is **unverified** and stays unknown until one dated official source settles it; it is not usable for code or for any cost. For planning only, the stricter reading applies: service messages and utility replies inside the window are treated as charged per message, at an amount still unknown. Click-to-WhatsApp ad entry points open a 72-hour free window for templates (search). The billed party is the **business that owns the WhatsApp Business Account**; on a Solution Partner's credit line the partner is billed. [S14][S18][S19][S29]
 
 Consequences for Marktmorgen:
 
@@ -106,7 +108,7 @@ Consequences for Marktmorgen:
 | 7-day comment age; Live only during broadcast | Not checked | Add to `decideReply` from the comment's timestamp |
 | One private reply per comment | Not checked (the repeat interval is per person) | Dedupe by comment id |
 | 24-hour window for any follow-up; no automated HUMAN_AGENT use | Not modeled | Window clock per thread; tag only for human replies |
-| 750/hour private replies (stricter scope) and 300/s send | Not modeled | Per-account and per-Page counters before each call |
+| 750/hour private replies (stricter scope) and 100/s send (the stricter of the overview's 100 and the changelog's 300; both pending a dated read on Meta's page) | Not modeled | Per-account and per-Page counters before each call |
 | Webhook receipt and signature check | Not built | Verify Meta's signature header (name to confirm on the webhooks page), bounded body, idempotent |
 | Bot disclosure, opt-out word, human hand-off | Not built for DMs (`HANDOFF_WORDS` exists for the store assistant) | Reuse hand-over to `lib/inbox.ts`; honor "stop" at once |
 | Commenter id retention (repeat interval) and deletion | Not built | Keep only the id and time for the chosen interval; delete on request and on disconnect |
@@ -128,7 +130,7 @@ Search on November 6, 2026 shows an official TikTok Business Messaging API (busi
 
 ## Sources
 
-All seen on November 6, 2026 **through web search only**; the pages themselves were not opened because the session network refuses Meta's hosts. "Index note" is what the search tool reported about the page's age.
+All seen on November 6, 2026 **through web search only**; the pages themselves were not opened because the session network refuses Meta's hosts. The exceptions are S19, S28 and S29, which Codex T's review of #2916 opened directly the same day (section 0); S29 was added from that review. "Index note" is what the search tool reported about the page's age.
 
 | # | Page | URL | Index note |
 | --- | --- | --- | --- |
@@ -150,7 +152,7 @@ All seen on November 6, 2026 **through web search only**; the pages themselves w
 | S16 | Developer Policies | https://developers.facebook.com/devpolicy/ | — |
 | S17 | Messenger Platform rate limits | https://developers.facebook.com/documentation/business-messaging/messenger-platform/overview/rate-limiting | — |
 | S18 | Upcoming pricing updates (service and utility) | https://developers.facebook.com/documentation/business-messaging/whatsapp/pricing/non-template-messages | — |
-| S19 | WhatsApp Business Platform Pricing | https://business.whatsapp.com/products/platform-pricing | Rate card not read |
+| S19 | WhatsApp Business Platform Pricing | https://business.whatsapp.com/products/platform-pricing | Rate card not read. Opened directly in the review (redirects to whatsappbusiness.com): says service messages and utility responses are not charged |
 | S20 | Become a Tech Provider | https://developers.facebook.com/documentation/business-messaging/whatsapp/solution-providers/get-started-for-tech-providers | — |
 | S21 | Get opt-in for WhatsApp | https://developers.facebook.com/documentation/business-messaging/whatsapp/getting-opt-in | — |
 | S22 | Privacy Policy Expectations | https://developers.facebook.com/documentation/development/terms-and-policies/privacy-policy | — |
@@ -159,8 +161,9 @@ All seen on November 6, 2026 **through web search only**; the pages themselves w
 | S25 | Build and Test | https://developers.secure.facebook.com/documentation/development/build-and-test | ~550 days |
 | S26 | TikTok Business Messaging API | https://business-api.tiktok.com/portal/docs/business-messaging-api/v1.3 | — |
 | S27 | TikTok auto messages (help) | https://ads.tiktok.com/help/article/how-to-set-up-auto-messages-for-business-accounts | ~540 days |
-| S28 | WhatsApp Business Messaging Policy | https://business.whatsapp.com/policy | — |
+| S28 | WhatsApp Business Messaging Policy | https://business.whatsapp.com/policy | Opened directly in the review (redirects to whatsappbusiness.com/policy/); page says last updated September 23, 2026 |
+| S29 | WhatsApp Business FAQ, pricing subsection | https://whatsappbusiness.com/resources/faq/ | Opened directly in the review: service messages charged from October 1, 2026 after 1,000 a month per number; also keeps an older conversation-based description |
 
 ## State
 
-Study written from search-indexed official pages; not read on the pages, not verified against a live app. No feature is available to customers; AutoDM stays off. Accessibility: document only, no interface; steps and decisions 0 → 0.
+Study written from search-indexed official pages; not read on the pages (except the three WhatsApp pages the review opened, section 0), not verified against a live app. No feature is available to customers; AutoDM stays off. Accessibility: document only, no interface; steps and decisions 0 → 0.

@@ -7,7 +7,7 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { UtcAndLocal } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
 import { readEarningsYear } from "@/lib/earnings-read";
-import type { Earnings, EarningsMonth, MonthLine, SourceMonth } from "@/lib/earnings-by-month";
+import { type Earnings, type EarningsMonth, type MonthLine, type SourceMonth, netWords } from "@/lib/earnings-by-month";
 import { readsSales } from "@/lib/stats";
 import type { Store } from "@/lib/store";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, type Kept, NotRead, ReadingFailed, ReadingsUsed, readingsBackAt, readingsLeft } from "@/lib/store-readings";
@@ -52,8 +52,12 @@ const currencyName = (currency: string) => {
 
 const SOURCE_NAMES = { stripe: "Stripe", paypal: "PayPal" } as const;
 
-/** Money in and money out of a line; a confirmed zero said as "None", never as an unknown. */
-const moneyIn = (line: MonthLine) => line.salesCents + line.renewalCents + line.enteredCents;
+/**
+ * Money in and money out of a line; a confirmed zero said as "None", never as
+ * an unknown. Money given back (a dispute won, a refund that failed) is money
+ * in, as the rule of #2941 counts it in the net.
+ */
+const moneyIn = (line: MonthLine) => line.salesCents + line.renewalCents + line.enteredCents + line.reinstatedCents;
 const moneyOut = (line: MonthLine) => line.refundCents + line.disputeCents;
 const amount = (cents: number, currency: string) => (cents === 0 ? "None" : formatMoney(cents, currency));
 
@@ -98,7 +102,13 @@ function SourceRows({ source }: { source: SourceMonth }) {
   return <Lines name={name} lines={source.lines} />;
 }
 
-/** One month: a table with a row for each source and currency, and the sources together within each currency. */
+/**
+ * One month: a table with a row for each source and currency, and the sources
+ * together within each currency. What its differences are after, and what was
+ * not read, is said in the rule's own words (netWords) right under the month's
+ * name and tied to the table (aria-describedby), never a fixed column name that
+ * would say disputes are taken off when they are not read (#2941).
+ */
 function Month({ month }: { month: EarningsMonth }) {
   // "Entered by you" is not built yet (BX2 unit 3 of the design): never shown until it works (VR).
   const sources = month.sources.filter((s) => s.source !== "manual");
@@ -107,15 +117,16 @@ function Month({ month }: { month: EarningsMonth }) {
   return (
     <section aria-labelledby={id} className="card mt-6 p-5 sm:p-8">
       <h2 id={id} className="text-lg font-semibold tracking-[-0.02em] text-ink">{title}</h2>
+      <p id={`${id}-notes`} className="mt-2 max-w-2xl text-sm text-ink-soft">{netWords(sources)}</p>
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm" aria-describedby={`${id}-notes`}>
           <caption className="sr-only">{`${title}: money by source and currency`}</caption>
           <thead>
             <tr className="text-left text-ink-soft">
               <th scope="col" className="py-2 pr-4 font-semibold">Source and currency</th>
-              <th scope="col" className="py-2 pr-4 text-right font-semibold">Sales and renewals</th>
-              <th scope="col" className="py-2 pr-4 text-right font-semibold">Refunds and disputes</th>
-              <th scope="col" className="py-2 text-right font-semibold">Left after refunds and disputes</th>
+              <th scope="col" className="py-2 pr-4 text-right font-semibold">Money in</th>
+              <th scope="col" className="py-2 pr-4 text-right font-semibold">Money out</th>
+              <th scope="col" className="py-2 text-right font-semibold">Left</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -188,7 +199,6 @@ export default async function StudioEarningsPage({ searchParams }: Params) {
   const { store } = view;
   const reading = await read(store);
   const earnings = reading.state === "ok" ? reading.kept.value : null;
-  const payPalLeftOut = Boolean(earnings?.months.some((m) => m.leftOut.some((l) => l.source === "paypal" && l.kinds.includes("dispute"))));
   const backAt = readingsBackAt();
 
   return (
@@ -199,10 +209,19 @@ export default async function StudioEarningsPage({ searchParams }: Params) {
           <p className="eyebrow">Numbers</p>
           <h1 className="t-h2 mt-3">Earnings by month</h1>
           <div className="mt-3 max-w-2xl space-y-3 text-ink-soft">
-            <p>
-              What your own Stripe account and the PayPal sales recorded here show for each of the last 12 months: sales and renewals, minus refunds and
-              disputes. A dispute counts when a bank took the money back or is holding it while the dispute is open.
-            </p>
+            <p>What your own Stripe account and the PayPal sales recorded here show for each of the last 12 months.</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>
+                <strong className="text-ink">Money in:</strong> sales, renewals, and money given back to you after a dispute or a refund that failed.
+              </li>
+              <li>
+                <strong className="text-ink">Money out:</strong> refunds, and money a bank took back for a dispute.
+              </li>
+              <li>
+                <strong className="text-ink">Left:</strong> money in minus money out.
+              </li>
+            </ul>
+            <p>Some of these are not read yet. Each month says, under its name, what its amounts leave out.</p>
             <p>These amounts are before Stripe&apos;s and PayPal&apos;s fees and before taxes, so they are not profit.</p>
             <p>Amounts in different currencies are never added together: each currency has its own line.</p>
             <p>Months start and end at midnight UTC (Coordinated Universal Time).</p>
@@ -255,11 +274,13 @@ export default async function StudioEarningsPage({ searchParams }: Params) {
                   <div className="mt-4 max-w-2xl space-y-3 text-sm text-ink-soft">
                     <p>
                       “Could not be read” means Stripe or PayPal did not answer in full for that month, or your store has more sales than one reading
-                      covers. That month then has no amount, rather than one lower than it really is. The oldest month can say it for Stripe, because a renewal paid
-                      then may have been billed before it. “Nothing recorded” means the month was read in full
-                      and had no money in or out.
+                      covers. That month then has no amount, rather than one lower than it really is.
                     </p>
-                    {payPalLeftOut ? <p>PayPal disputes are not read, so PayPal amounts do not take them out.</p> : null}
+                    <p>
+                      For Stripe, every month says it when your account has more paid invoices than one reading covers. An older invoice could have been
+                      paid in any month, so no month can be shown in full.
+                    </p>
+                    <p>“Nothing recorded” means the month was read in full and had no money in or out.</p>
                   </div>
                   {earnings.months.map((month) => (
                     <Month key={month.month} month={month} />

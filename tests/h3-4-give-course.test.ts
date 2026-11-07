@@ -46,6 +46,8 @@ import { redisPipeline } from "@/lib/redis";
 import { takeManyWithin } from "@/lib/request-guard";
 import { GIVES_PER_DAY } from "@/lib/api-write";
 import { putMember } from "@/lib/team";
+import { buyerProfile } from "@/lib/buyer-profile";
+import { chargedLine } from "@/lib/buyer-orders";
 import { dataUsed } from "@/lib/store-data";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -86,6 +88,12 @@ async function main(): Promise<void> {
   is("not here for 90 days or more, or never", seen("away90"), ["long@example.com", "never@example.com"]);
   is("each choice is said in plain words", Object.values(SEEN_WORDS).every((words) => /^(Here|Not here) /.test(words)), true);
   is("a course that can be given: not a membership, not a call, and a course", [givable({ course: { id: "c" }, recurring: null, call: null }), givable({ course: { id: "c" }, recurring: { interval: "month" }, call: null }), givable({ course: null, recurring: null, call: null })], [true, false, false]);
+  // Pre-review of unit 2, light: a draft (hidden) or a course of limited places was given from here as any other.
+  is(
+    "a draft, or a course of limited places, is not given from here",
+    [givable({ course: { id: "c" }, recurring: null, call: null, hidden: true, stock: null }), givable({ course: { id: "c" }, recurring: null, call: null, hidden: false, stock: 5 }), givable({ course: { id: "c" }, recurring: null, call: null, hidden: false, stock: null })],
+    [false, false, true],
+  );
   is(
     "studio requests, at the most each step can take: every read before reading, every write and read back before writing",
     [giveReadUnits(1), giveReadUnits(18), giveReadUnits(19), giveReadUnits(500), giveWriteUnits(1, "give"), giveWriteUnits(10, "give"), giveWriteUnits(11, "give"), giveWriteUnits(500, "give"), giveWriteUnits(1, "takeback"), giveWriteUnits(500, "takeback")],
@@ -121,6 +129,12 @@ async function main(): Promise<void> {
     "Cake Course taken back from 1 person. 3 were left out: 1 person has it another way (a sale, an import or a gift), which is not taken back here; 1 person's change could not be confirmed, so it may or may not be done. Review again to see; 1 person's change did not land, because something went wrong; try again.",
   );
   is("a gift from the studio is shown as given by the store; an import, a sale or a gift from a buyer is not", [isGivenByStore(STUDIO_GIVE_JOB), isGivenByStore("api:key1"), isGivenByStore("gift:abc"), isGivenByStore("0123456789abcdef01234567")], [true, true, false, false]);
+  // Pre-review of unit 2, light: the list's email said a store's gift was "brought over from another platform".
+  is(
+    "the list's email never says a store's gift was charged, nor brought over",
+    [chargedLine("Giver Shop", [{ kind: "imported", givenByStore: true }]), chargedLine("Giver Shop", [{ kind: "sale" }, { kind: "imported", givenByStore: true }]), chargedLine("Giver Shop", [{ kind: "sale" }])],
+    ["What Giver Shop gave you was not charged.", "Every purchase was charged by Giver Shop on their own Stripe account. What Giver Shop gave you was not charged.", "Every purchase was charged by Giver Shop on their own Stripe account."],
+  );
   is("the buyer's purchases say a studio gift is the store's", readFileSync("lib/buyer-orders.ts", "utf8").includes("isGivenByStore(given.job)"), true);
 
   part("A store with two courses");
@@ -328,6 +342,39 @@ async function main(): Promise<void> {
   redis.pipeline = sends;
   is("a gift rewritten between the read and the delete is never taken back", await given("cas@example.org"), ["api:key9"]);
   await redisPipeline([["HDEL", casKey, to]]);
+
+  part("Light findings of the pre-review of unit 2");
+  // The course was read (readListing) before the studio requests of the read were taken.
+  const order: string[] = [];
+  const finder = async () => (order.push("find"), target);
+  const ask1 = { change: "give" as const, to, emails: ["ana@example.com"], expect: null };
+  const refusedFind = await reviewGive(store, finder, ask1, async () => (order.push("pay"), { ok: false, reason: "used", message: "Used." }));
+  is("refused its studio requests, the course is not even looked up", [refusedFind.kind, [...order]], ["refused", ["pay"]]);
+  order.length = 0;
+  const foundAfter = await reviewGive(store, finder, ask1, async () => (order.push("pay"), { ok: true }));
+  is("the course is looked up only once its reads are paid for", [foundAfter.kind, [...order]], ["review", ["pay", "find"]]);
+  const noCourse = await reviewGive(store, async () => null, ask1, async () => ({ ok: true }));
+  is("a course that is not there, or cannot be given, is refused after paying", [noCourse.kind, noCourse.kind === "refused" ? noCourse.reason : ""], ["refused", "product"]);
+  is("the route reads the course only through the gift", readFileSync("app/api/store/students/route.ts", "utf8").includes("readListing(store, ask.to)"), false);
+
+  // Another member's gift landing between the read and this write: its HSETNX answers 0, so it is not this one's.
+  const rivalKey = importedKey(store.statsId!, "rival@example.org");
+  const passes = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HSETNX" && c[1] === rivalKey)) await passes([["HSET", rivalKey, to, JSON.stringify({ at: now - 5, job: STUDIO_GIVE_JOB, items: null })]]);
+    return passes(commands);
+  };
+  const raced = await applyGive(store, target, { change: "give", to, emails: ["rival@example.org"], expect: 1 }, async () => ({ ok: true }));
+  redis.pipeline = passes;
+  is("a gift another member wrote first is never said as this one's", raced.kind === "done" ? [raced.done.changed, raced.done.already] : raced.kind, [[], ["rival@example.org"]]);
+  await redisPipeline([["HDEL", rivalKey, to]]);
+
+  // The creator's view of a person said a store's gift was "imported".
+  await grantImported(store.statsId!, STUDIO_GIVE_JOB, [{ email: "seen@example.org", productId: to, items: null }], now, store.sid, store);
+  const profile = await buyerProfile(store, "seen@example.org");
+  is("the creator's view of a person says a store's gift is the store's", profile.orders.filter((o) => o.title === "Cake Course").map((o) => o.note), ["store"]);
+  is("in plain words", readFileSync("app/studio/people/page.tsx", "utf8").includes('store: "Given by the store"'), true);
+  await redisPipeline([["HDEL", importedKey(store.statsId!, "seen@example.org"), to]]);
 
   part("The screen");
   const studentLines = [line("ana@example.com", now), line("ben@example.com", now)];

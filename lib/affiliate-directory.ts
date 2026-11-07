@@ -36,6 +36,9 @@
  *   nl:dir:page   the rows, as JSON, kept 10 minutes; dropped whenever a
  *                 creator saves their program, so taking a store out is
  *                 immediate
+ *   nl:dir:build  the build mark (lib/directory-index.ts, DIRECTORY_BUILD):
+ *                 one build at a time, and none for 10 minutes after one
+ *                 that could not finish
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeForId } from "@/lib/store";
@@ -46,7 +49,7 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
-import { DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
@@ -59,6 +62,20 @@ export const PRODUCTS_PER_ROW = 4;
 
 /** How long the rows are kept before they are read again. */
 const KEEP_SECONDS = 600;
+
+/**
+ * How long one build holds the build mark before another may start: past the
+ * longest a healthy build takes, so a build cut short (a function stopped
+ * mid-way) holds the page "unavailable" for at most this long.
+ */
+const BUILD_HOLD_SECONDS = 60;
+
+/**
+ * How long, after a build that could not finish, the page answers "could not
+ * be checked" without building again: the time a kept page is kept, so a
+ * failure that persists costs one build in it, as a kept page does.
+ */
+const FAILED_SECONDS = KEEP_SECONDS;
 
 /** The most programs read for the page: far past what one page lists. */
 const MAX_ROWS = 2_000;
@@ -234,7 +251,20 @@ export function sortRows(rows: DirectoryRow[]): DirectoryRow[] {
   return [...rows].sort((a, b) => b.topRate - a.topRate || b.earning - a.earning || a.name.localeCompare(b.name, "en"));
 }
 
-/** Every listed program, read from the stores themselves, kept a few minutes. */
+/**
+ * Every listed program, read from the stores themselves, kept a few minutes.
+ *
+ * At most one build runs at a time, and none for FAILED_SECONDS after one that
+ * could not finish (a store read that failed, a numbers read that failed, the
+ * SSCAN page ceiling; #2921, CX-116 A1): before building, the build mark
+ * (DIRECTORY_BUILD) is taken with SET NX. A read that finds no kept page and
+ * cannot take the mark throws UnknownReplyError, so the page shows its own
+ * "The program list is unavailable just now" state; it never builds again and
+ * never shows a list that was not read whole. A finished build keeps the page
+ * and drops the mark; one that could not finish sets the mark to "failed" for
+ * FAILED_SECONDS. A failed numbers read still shows that build's rows without
+ * those numbers to the one request that built them, and keeps no page.
+ */
 export async function readDirectory(): Promise<DirectoryRow[]> {
   if (!isRedisConfigured()) return [];
   const [kept] = await redisPipeline([["GET", DIRECTORY_CACHE]]);
@@ -246,6 +276,31 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
       // Read again below.
     }
   }
+  const [claim] = await redisPipeline([["SET", DIRECTORY_BUILD, "building", "EX", BUILD_HOLD_SECONDS, "NX"]]);
+  // null: another build is running, or one could not finish FAILED_SECONDS ago. Any other shape is unknown, and builds nothing either.
+  if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
+  let built: { rows: DirectoryRow[]; partial: boolean };
+  try {
+    built = await buildDirectory();
+  } catch (error) {
+    await markFailed();
+    throw error;
+  }
+  if (built.partial) {
+    await markFailed();
+    return built.rows;
+  }
+  await redisPipeline([["SET", DIRECTORY_CACHE, JSON.stringify(built.rows), "EX", KEEP_SECONDS], ["DEL", DIRECTORY_BUILD]]).catch(() => null);
+  return built.rows;
+}
+
+/** A build that could not finish: the next ones wait FAILED_SECONDS. A mark that cannot be written still ends by its BUILD_HOLD_SECONDS. */
+async function markFailed(): Promise<void> {
+  await redisPipeline([["SET", DIRECTORY_BUILD, "failed", "EX", FAILED_SECONDS]]).catch(() => null);
+}
+
+/** One build of the rows from the listed set and the stores; `partial` when a numbers read failed. */
+async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: boolean }> {
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
@@ -279,6 +334,5 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
       )
     ).filter((row): row is DirectoryRow => row !== null),
   );
-  if (!partial) await redisPipeline([["SET", DIRECTORY_CACHE, JSON.stringify(rows), "EX", KEEP_SECONDS]]).catch(() => null);
-  return rows;
+  return { rows, partial };
 }

@@ -7,12 +7,15 @@ import { LookEditor } from "@/components/look-editor";
 import {
   PALETTE_MAX,
   PALETTE_MAX_BYTES,
+  PALETTE_MAX_PIXELS,
   PALETTE_SIDE,
   PALETTE_TYPES,
   fitInside,
   paletteFromPixels,
   pictureProblem,
+  pictureSize,
   themeForPicture,
+  tooManyPixels,
 } from "@/lib/image-palette";
 import { HEX_PATTERN, isTheme, normaliseHex, parseLook } from "@/lib/store-look";
 
@@ -134,6 +137,58 @@ function picture(width: number, height: number, runs: Array<[string, number, num
   assert.equal(pictureProblem({ type: "image/png", size: Number.NaN }), "empty");
 }
 
+// A picture made only of specks has no colour to offer: null, never an empty list.
+{
+  const steps = [0, 48, 96, 144, 192, 240];
+  const runs: Array<[string, number]> = [];
+  for (const r of steps) for (const g of steps) for (const b of steps) {
+    runs.push([`#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`, 1]);
+  }
+  assert.equal(runs.length, 216);
+  assert.equal(paletteFromPixels(picture(18, 12, runs), 18, 12), null, "216 specks of 0.46% each are noise");
+}
+
+// The size is read from the file's own first bytes before anything is decoded,
+// and a picture with too many pixels is refused (a small file can still unpack
+// into a huge one).
+{
+  const bytes = (...parts: Array<number[] | string>) => Uint8Array.from(parts.flatMap((part) => typeof part === "string" ? [...part].map((ch) => ch.charCodeAt(0)) : part));
+  const be32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  const be16 = (n: number) => [(n >> 8) & 255, n & 255];
+  const le16 = (n: number) => [n & 255, (n >> 8) & 255];
+  const le24 = (n: number) => [n & 255, (n >> 8) & 255, (n >> 16) & 255];
+
+  const png = bytes([0x89], "PNG", [0x0d, 0x0a, 0x1a, 0x0a], be32(13), "IHDR", be32(1920), be32(1080), [8, 6, 0, 0, 0]);
+  assert.deepEqual(pictureSize(png), { width: 1920, height: 1080 });
+  assert.equal(pictureSize(png.slice(0, 20)), null, "a cut header is not guessed");
+
+  const app0 = [0xff, 0xe0, ...be16(16), ..."JFIF".split("").map((c) => c.charCodeAt(0)), 0, 1, 1, 0, 0, 1, 0, 1, 0, 0];
+  const sof2 = [0xff, 0xc2, ...be16(17), 8, ...be16(3000), ...be16(4000), 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1];
+  assert.deepEqual(pictureSize(bytes([0xff, 0xd8], app0, sof2)), { width: 4000, height: 3000 });
+  assert.deepEqual(pictureSize(bytes([0xff, 0xd8, 0xff], app0, sof2)), { width: 4000, height: 3000 }, "fill bytes before a marker are skipped");
+  const sos = [0xff, 0xda, ...be16(8), 1, 1, 0, 0, 63, 0];
+  assert.equal(pictureSize(bytes([0xff, 0xd8], app0, sos, sof2)), null, "image data before the size means the size is unknown");
+  assert.equal(pictureSize(bytes([0xff, 0xd8], app0)), null);
+
+  const vp8 = bytes("RIFF", [0, 0, 0, 0], "WEBP", "VP8 ", [0, 0, 0, 0], [0, 0, 0], [0x9d, 0x01, 0x2a], le16(640), le16(480));
+  assert.deepEqual(pictureSize(vp8), { width: 640, height: 480 });
+  const w = 1000 - 1;
+  const h = 700 - 1;
+  const vp8l = bytes("RIFF", [0, 0, 0, 0], "WEBP", "VP8L", [0, 0, 0, 0], [0x2f], [w & 255, ((w >> 8) & 0x3f) | ((h & 3) << 6), (h >> 2) & 255, (h >> 10) & 0x0f]);
+  assert.deepEqual(pictureSize(vp8l), { width: 1000, height: 700 });
+  const vp8x = bytes("RIFF", [0, 0, 0, 0], "WEBP", "VP8X", [0, 0, 0, 0], [0, 0, 0, 0], le24(16383), le24(8999));
+  assert.deepEqual(pictureSize(vp8x), { width: 16384, height: 9000 });
+
+  assert.equal(pictureSize(bytes("<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>")), null, "an SVG named .png is not a picture here");
+  assert.equal(pictureSize(new Uint8Array(0)), null);
+  assert.equal(pictureSize(bytes([0x89], "PNG", [0x0d, 0x0a, 0x1a, 0x0a], be32(13), "IHDR", be32(0), be32(10))), null, "a zero side is not a size");
+
+  assert.equal(PALETTE_MAX_PIXELS, 40_000_000);
+  assert.equal(tooManyPixels({ width: 8000, height: 5000 }), false);
+  assert.equal(tooManyPixels({ width: 8000, height: 5001 }), true);
+  assert.equal(tooManyPixels({ width: 16384, height: 9000 }), true);
+}
+
 // The studio offers it beside the colour, says the picture stays on the
 // device, and leaves the existing colour choices exactly as they were.
 {
@@ -153,6 +208,26 @@ function picture(width: number, height: number, runs: Array<[string, number, num
   const reader = source.slice(source.indexOf("async function readPicture"), source.indexOf("/** The theme, the colour"));
   assert.ok(reader.length > 0, "the reader is a separate function");
   assert.doesNotMatch(reader, /fetch\(|FormData|toBlob|readAsDataURL/, "the reader never sends or encodes the picture");
+  assert.ok(reader.indexOf("pictureSize(") > 0 && reader.indexOf("pictureSize(") < reader.indexOf(".decode()"), "the size is checked before the picture is decoded");
+  assert.ok(reader.indexOf("tooManyPixels(") > 0 && reader.indexOf("tooManyPixels(") < reader.indexOf(".decode()"), "too many pixels are refused before decoding");
+
+  // The theme suggestion is said in the same polite live region as the result.
+  assert.match(source, /role="status" aria-live="polite"[^>]*>\{pictureNote\}\{pictureSuggestion \? ` \$\{pictureSuggestion\}` : ""\}<\/p>/);
+
+  // A file input hidden inside its label shows focus on the label (2.4.7, 2.4.13):
+  // the new picture button and the photo button that was already there.
+  const labelOf = (words: string) => {
+    const at = html.indexOf(words);
+    assert.ok(at > 0, words);
+    const start = html.lastIndexOf("<label", at);
+    return html.slice(start, html.indexOf(">", start));
+  };
+  for (const words of ["Choose a picture", "Choose a photo"]) {
+    const label = labelOf(words);
+    for (const cls of ["has-[:focus-visible]:outline", "has-[:focus-visible]:outline-2", "has-[:focus-visible]:outline-offset-2", "has-[:focus-visible]:outline-violet-brand"]) {
+      assert.ok(label.includes(cls), `${words}: ${cls}`);
+    }
+  }
 }
 
 console.log("image-palette: colours, refusals, sizes and the studio block passed");

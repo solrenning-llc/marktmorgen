@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   const OWNER = "groupplacehold@example.com";
   await claimHandle(OWNER, "placehold", "Place Hold", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPlaceHold01", true);
+  await setStripeAccount(OWNER, "acct_1TestPlHold01", true);
   await setSubscription(OWNER, { customerId: "cus_PlaceHold0001", subscriptionId: "sub_PlaceHold0001", active: true, period: paidPeriod() });
   const made = await addProduct(OWNER, "Glaze Guide", "", "49", null);
   if (!made.ok) throw new Error("no product");

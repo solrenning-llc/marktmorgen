@@ -30,7 +30,7 @@ import { createBroadcast } from "@/lib/broadcasts";
 import { calendarWindow, windowId } from "@/lib/allowance-window";
 import { poolPlace } from "@/lib/free-pool";
 import { FREE_POOL_BASE_STORES, PAID_STORES_PER_FREE_STORE, PAYING_INDEX } from "@/lib/free-pool-rules";
-import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
+import { MAX_BONDS, bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -178,12 +178,74 @@ test("the affiliate bond: no new bond is written past a cap that could not be re
     await replacing((c) => c[0] === "HLEN" && c[1] === key, reply, () => rememberBuyer(store, email, ANA, "last"));
     assert.equal(await bondFor(store, email), "", `the cap unknown (${label}): no bond written`);
   }
+  // Whether the buyer is known, unknown: on last click the bond is written either way (HSET moves or adds),
+  // so it falls back to the exact cap read; under a cap read healthy, the buyer is bonded (Claude 5 LEVE 1 on #2958).
   for (const [label, reply] of [["2", 2], ["text '0'", "0"], ["null", null]] as [string, unknown][]) {
     const email = `known${(n += 1)}@example.test`;
     await replacing((c) => c[0] === "HEXISTS" && c[1] === key, reply, () => rememberBuyer(store, email, ANA, "last"));
-    assert.equal(await bondFor(store, email), "", `whether the buyer is known unknown (${label}): no bond written`);
+    assert.equal(await bondFor(store, email), ANA, `whether the buyer is known unknown (${label}), the cap read healthy: bonded`);
   }
   // Healthy and confirmed absence: a new buyer under the cap is bonded.
   await rememberBuyer(store, "healthy@example.test", ANA, "last");
   assert.equal(await bondFor(store, "healthy@example.test"), ANA);
+});
+
+test("the affiliate bond on last click: an unknown 'is this buyer known' still moves the bond under a cap read healthy, never past it", async () => {
+  redis.clear();
+  const store = { handle: "numgatesmove", name: "Fictional Bonds", statsId: "st_num_gates_move", affiliates: parseAffiliateSetting({ enabled: true, percent: 20, days: 30, lifetime: true }) } as unknown as Store;
+  const ANA = "a1b2c3d4e5f6";
+  const BOB = "b1b2c3d4e5f6";
+  const key = "nl:aff:st_num_gates_move:bond";
+  const email = "returning.buyer@example.test";
+  await rememberBuyer(store, email, ANA, "last");
+  assert.equal(await bondFor(store, email), ANA, "healthy first bond");
+  for (const [label, reply] of [["text '1'", "1"], ["null", null], ["2", 2], ["object", {}]] as [string, unknown][]) {
+    await rememberBuyer(store, email, ANA, "last");
+    await replacing((c) => c[0] === "HEXISTS" && c[1] === key, reply, () => rememberBuyer(store, email, BOB, "last"));
+    assert.equal(await bondFor(store, email), BOB, `the buyer came back through Bob's link (${label}): the bond moves to Bob`);
+  }
+  // The cap read as full, or unreadable: nothing is written, so the cap is never passed on an unknown answer.
+  for (const [label, hlen] of [["full", MAX_BONDS], ["text", "1"], ["null", null]] as [string, unknown][]) {
+    await rememberBuyer(store, email, ANA, "last");
+    redis.pipeline = (async (commands: Command[]) => {
+      const got = (await real(commands)) as unknown[];
+      return got.map((r, i) => (commands[i][0] === "HEXISTS" ? "1" : commands[i][0] === "HLEN" ? hlen : r));
+    }) as typeof redis.pipeline;
+    try {
+      await rememberBuyer(store, email, BOB, "last");
+    } finally {
+      redis.pipeline = real as typeof redis.pipeline;
+    }
+    assert.equal(await bondFor(store, email), ANA, `whether known unknown and the cap ${label}: nothing written`);
+  }
+});
+
+test("the free pool: an INCR answered in an unknown shape never admits a store or writes a mark (Codex G MEDIO on #2958)", async () => {
+  const now = Date.now();
+  const month = calendarWindow(now).id;
+  const countKey = `nl:free:n:${month}`;
+  const free = (n: number) => ({ sid: `numgatesincr${n}`.padEnd(32, "q"), handle: `numgatesincr${n}`, statsId: null, tier: "creator" as const, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
+  const inKey = (sid: string) => `nl:free:in:${month}:${createHash("sha256").update(`free-pool:${sid}`).digest("hex").slice(0, 32)}`;
+  const isIncr = (c: Command) => c[0] === "INCR" && c[1] === countKey;
+  let n = 0;
+  for (const [label, reply] of [["true", true], ["text '1'", "1"], ["array [1]", [1]], ["null", null], ["fraction", 1.5], ["object", {}]] as [string, unknown][]) {
+    redis.clear();
+    // The base places are taken and nobody pays: the real INCR passes the pool.
+    redis.run(["SET", countKey, String(FREE_POOL_BASE_STORES)]);
+    const store = free((n += 1));
+    assert.equal(await replacing(isIncr, reply, () => poolPlace(store, now)), "unknown", `${label}: not admitted`);
+    assert.equal(redis.run(["GET", inKey(store.sid)]), null, `${label}: no mark written`);
+    assert.equal(await poolPlace(store, now), "full", `${label}: the healthy retry still finds the pool full`);
+  }
+  // A reply missing from the pipeline is not a count either.
+  redis.clear();
+  redis.run(["SET", countKey, String(FREE_POOL_BASE_STORES)]);
+  const short = free((n += 1));
+  assert.equal(await replacing((c) => c[0] === "SCARD", null, () => poolPlace(short, now), true), "unknown", "one reply short: not admitted");
+  assert.equal(redis.run(["GET", inKey(short.sid)]), null, "one reply short: no mark written");
+  // Healthy controls: room is "in", a full pool is "full".
+  redis.clear();
+  assert.equal(await poolPlace(free((n += 1)), now), "in");
+  redis.run(["SET", countKey, String(FREE_POOL_BASE_STORES)]);
+  assert.equal(await poolPlace(free((n += 1)), now), "full");
 });

@@ -172,6 +172,14 @@ export type ConnectionView = {
   broken: string;
 };
 
+/**
+ * What disconnect answers for a connection that read as one: its view, and
+ * `providerAccessRemoved: false` only when the provider did not confirm that
+ * it took the access back (refused, failed, or no token opened). Absent when
+ * it confirmed, so nothing changes then.
+ */
+export type DisconnectedView = ConnectionView & { providerAccessRemoved?: false };
+
 export type MeetProblem = { at: number; provider: MeetProvider; what: string; error: string };
 
 export type MeetView = {
@@ -374,9 +382,10 @@ function grantToken(statsId: string, provider: MeetProvider, sealed: { refresh: 
   return provider === "zoom" ? open("access") : open("refresh") || open("access");
 }
 
-async function giveBack(statsId: string, c: Connection, host = ""): Promise<void> {
+/** Gives a connection's grant back: true only when the provider confirmed it (lib/meet-providers.ts revoke). */
+async function giveBack(statsId: string, c: Connection, host = ""): Promise<boolean> {
   const token = grantToken(statsId, c.provider, c, host);
-  if (token) await revoke(c.provider, token);
+  return token ? await revoke(c.provider, token) : false;
 }
 
 /**
@@ -419,8 +428,14 @@ function confirmCounts(replies: unknown, commands: number, what: string): void {
  * still be live. Text with no token that opens is deleted at once, since the
  * creator asked to end it and nothing in it can be given back. Every deletion
  * is confirmed by its own count, or this throws.
+ *
+ * A connection that reads as one is forgotten here whatever the provider
+ * answers, since the creator asked to end it; when the provider did not
+ * confirm the give-back, the view says so (`providerAccessRemoved: false`),
+ * for the studio and the email to tell the creator how to remove it at the
+ * provider, never that it was removed (G review 5815300198, disposition A).
  */
-export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<ConnectionView | null> {
+export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectedView | null> {
   // Under the renewal lock: a renewal under way finishes first, and none can
   // write the connection back after it is gone.
   return withLock(refreshLockKey(statsId, provider, host), 20, 9_000, async () => {
@@ -449,11 +464,17 @@ export async function disconnect(statsId: string, provider: MeetProvider, host =
       return null;
     }
     // Forgotten here whatever the provider says: a revoke that fails must not
-    // leave a connection the creator asked to end.
-    await giveBack(statsId, c, host).catch((error) => console.error("giving a meeting connection back failed", error));
+    // leave a connection the creator asked to end. One the provider did not
+    // confirm is said in the answer, never taken as given back.
+    const removed = await giveBack(statsId, c, host).catch((error) => {
+      console.error("giving a meeting connection back failed", error);
+      return false;
+    });
+    if (!removed) console.error("a meeting connection was disconnected here without the provider confirming its access was given back", provider, host ? "host" : "store");
+    const view: DisconnectedView = removed ? viewOf(c) : { ...viewOf(c), providerAccessRemoved: false };
     if (host) {
       confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider, host)]]), 1, "a meeting connection's deletion");
-      return viewOf(c);
+      return view;
     }
     confirmCounts(
       await redisPipeline([
@@ -464,7 +485,7 @@ export async function disconnect(statsId: string, provider: MeetProvider, host =
       3,
       "a meeting connection's deletion",
     );
-    return viewOf(c);
+    return view;
   });
 }
 

@@ -18,7 +18,8 @@ export const maxDuration = 30;
  * The store's Google Calendar or Zoom connection, `{ action, provider }`:
  *
  *   disconnect   the access is given back to the provider, the tokens are
- *                deleted, and the owner is told by email (lib/meet-connect.ts)
+ *                deleted, and the owner is told by email (lib/meet-connect.ts);
+ *                `providerAccessRemoved: false` when the provider did not confirm it
  *   test         makes one test meeting on the connected account, or gives
  *                back the one already there (lib/meet-test.ts)
  *   movetest     moves that test meeting an hour later, as a buyer's move does
@@ -70,8 +71,10 @@ export async function POST(request: NextRequest) {
   }
   try {
     const was = await disconnect(store.statsId, provider);
-    if (was) after(() => noticeCreator(store, { kind: "meeting-disconnected", name: ACCOUNT_NAMES[provider], account: was.account }));
-    return Response.json({ ok: true, view: await meetView(store.statsId, store) });
+    // Forgotten here either way; when the provider did not confirm it took the access back, the page and the email say so.
+    const unconfirmed = was?.providerAccessRemoved === false;
+    if (was) after(() => noticeCreator(store, { kind: "meeting-disconnected", name: ACCOUNT_NAMES[provider], account: was.account, ...(unconfirmed ? { provider, providerAccessRemoved: false as const } : {}) }));
+    return Response.json({ ok: true, view: await meetView(store.statsId, store), ...(was?.providerAccessRemoved === false ? { providerAccessRemoved: false } : {}) });
   } catch (error) {
     console.error("disconnecting a meeting account failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

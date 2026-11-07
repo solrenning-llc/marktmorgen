@@ -476,14 +476,18 @@ export async function removeHostIcs(store: Pick<Store, "statsId">, email: string
   await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
 }
 
-/** Disconnects a host's own Google Calendar: access given back to Google, everything kept here forgotten. */
-export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email: string): Promise<void> {
-  if (!store.statsId) return;
+/**
+ * Disconnects a host's own Google Calendar: access given back to Google, everything kept here forgotten.
+ * False when it was forgotten here but Google did not confirm the access was given back (the page says so).
+ */
+export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email: string): Promise<boolean> {
+  if (!store.statsId) return true;
   const host = hostId(email);
-  await disconnect(store.statsId, "google", host);
+  const was = await disconnect(store.statsId, "google", host);
   const config = await readConfig(host);
   if (config) await writeConfig(host, { ...config, read: [], write: "", source: config.source === "google" ? "none" : config.source });
   await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
+  return was?.providerAccessRemoved !== false;
 }
 
 /** Where a host's team bookings are written, when they connected Google Calendar for it: the calendar id ("" is primary). */

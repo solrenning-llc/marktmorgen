@@ -42,6 +42,11 @@ export type Shipping = {
   countries: string[];
   /** When it ships, in the creator's words: "Ships within 3 business days". */
   note: string;
+  /**
+   * Only on the shipping it offers now (lib/physical-legal-ship.ts, shippingNow): the region it was cut from when
+   * its EU/EEA countries are closed, so it is said as that region without them, never as a list of what is left.
+   */
+  before?: Exclude<ShipRegion, "custom">;
   /** Optional creator inventory reference; never replaces a product or price ID. */
   sku?: string;
 };
@@ -147,8 +152,14 @@ export function activeShipping(product: ShipCandidate & { shipping?: Shipping | 
 }
 
 /** "the United States and Canada", "France, Belgium and 3 more", in the reader's language. */
-export function shipsToWords(shipping: Pick<Shipping, "region" | "countries">, locale: string, words: { and: string; more: (n: number) => string; everywhere: string }): string {
+export function shipsToWords(
+  shipping: Pick<Shipping, "region" | "countries" | "before">,
+  locale: string,
+  words: { and: string; more: (n: number) => string; everywhere: string; outsideEu: string },
+): string {
   if (shipping.region === "world") return words.everywhere;
+  // Everywhere but the EU and the EEA (their safety information not filled yet): said as that, never as 200 names.
+  if (shipping.before === "world") return words.outsideEu;
   let names: string[];
   try {
     const display = new Intl.DisplayNames([locale], { type: "region" });

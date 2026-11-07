@@ -34,7 +34,8 @@ import { cartOfferOwner } from "@/lib/cart-offers";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
 import { CartShippingRefused } from "@/lib/cart-checkout";
 import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
-import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
+import { activeShipping, shipsToWords } from "@/lib/shipping";
+import { shipsToShape } from "@/lib/physical-legal-ship";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { deliversDigitally } from "@/lib/digital-consent";
 
@@ -99,11 +100,7 @@ export async function GET(request: NextRequest) {
           amount: sending.cents > 0 ? formatMoney(sending.cents, store.currency, locale) : null,
           label: sending.cents > 0 ? sw.rate : sw.freeRate,
           where: sw.shipsTo(
-            shipsToWords(
-              { region: sending.countries.length === SHIP_REGIONS.world.countries.length ? "world" : "custom", countries: sending.countries },
-              locale,
-              { and: sw.and, more: sw.more, everywhere: sw.everywhere },
-            ),
+            shipsToWords(shipsToShape(sending.countries), locale, { and: sw.and, more: sw.more, everywhere: sw.everywhere, outsideEu: sw.outsideEu }),
           ),
           notTo: country && !sending.countries.includes(country) ? words.notTo(countryName(country)) : null,
         }

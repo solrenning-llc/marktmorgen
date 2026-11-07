@@ -19,8 +19,8 @@
  * product complies with anything. Pure and browser-safe.
  */
 import { type PhysicalLegal } from "./physical-legal-record";
-import { gpsrClosedCountries, safetyGaps } from "./physical-legal";
-import { type ShipCandidate, type Shipping, activeShipping } from "./shipping";
+import { GPSR_AREA, gpsrClosedCountries, safetyGaps } from "./physical-legal";
+import { SHIP_REGIONS, type ShipCandidate, type Shipping, activeShipping } from "./shipping";
 
 export type SafetyCandidate = ShipCandidate & {
   shipping?: Shipping | null;
@@ -55,7 +55,22 @@ export function shippingNow(product: SafetyCandidate): Shipping | null {
   // Not filled: gpsrClosedCountries with nothing filled closes every EU/EEA country it ships to.
   const closed = filled(product) ? [] : gpsrClosedCountries(shipping.countries, null, false);
   if (closed.length === 0) return shipping;
-  return { ...shipping, region: "custom", countries: shipping.countries.filter((code) => !closed.includes(code)) };
+  const countries = shipping.countries.filter((code) => !closed.includes(code));
+  // Said as the region it was cut from, without the EU/EEA (shipsToWords, deliveryWords), never as the list left.
+  return { ...shipping, region: "custom", countries, ...(shipping.region !== "custom" ? { before: shipping.region } : {}) };
+}
+
+const sameCountries = (a: readonly string[], b: readonly string[]) => a.length === b.length && new Set(a).size === a.length && b.every((code) => a.includes(code));
+
+/**
+ * The shape a list of countries is said in, where only the list is known (the cart, which ships an order to where
+ * every product in it goes): everywhere, everywhere but the EU/EEA, or the list itself.
+ */
+export function shipsToShape(countries: readonly string[]): Pick<Shipping, "region" | "countries" | "before"> {
+  const world = SHIP_REGIONS.world.countries;
+  if (sameCountries(countries, world)) return { region: "world", countries: [...countries] };
+  if (sameCountries(countries, world.filter((code) => !GPSR_AREA.includes(code)))) return { region: "custom", countries: [...countries], before: "world" };
+  return { region: "custom", countries: [...countries] };
 }
 
 /** A shipped product with no country it can be sent to now: not sold until its safety fields are filled. */

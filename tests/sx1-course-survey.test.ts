@@ -33,6 +33,7 @@ import { join } from "node:path";
 import {
   answerOfPerson,
   answerSurvey,
+  dropCourseSurvey,
   forgetSurveyPerson,
   readCourseAnswers,
   readMyAnswer,
@@ -58,7 +59,7 @@ import {
 import { COURSE_SURVEY_WORDS, courseSurveyWords } from "@/lib/buyer-words/course-survey";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { emailKey } from "@/lib/learn";
-import { dataUsed } from "@/lib/store-data";
+import { DataRoomError, dataUsed, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { PERSON_DATA } from "@/lib/person-data";
 import { store as redis } from "./redis-stub";
@@ -210,6 +211,82 @@ async function main(): Promise<void> {
   await forgetSurveyPerson(COURSE, ben, ROOM);
   is("all room back", await used(), empty);
 
+  part("A change keeps no more bytes, so a full room never refuses it; a new answer is refused");
+  redis.clear();
+  const SMALL = { ...ROOM, sid: "small-room-store" };
+  await answerSurvey({ room: SMALL, courseId: COURSE, who: ana, score: 6, note: "" });
+  // Fill the rest of this store's room.
+  const left = (await dataUsed(SMALL))!;
+  await needData(SMALL, [{ slot: "filler", bytes: left.room - left.used }]);
+  is("Ana changes hers in a full room", await answerSurvey({ room: SMALL, courseId: COURSE, who: ana, score: 8, note: "Better on a second look." }), { ok: true, changed: true });
+  is("the change is kept", (await readMyAnswer(COURSE, ana))?.score, 8);
+  let refusedNew = false;
+  try {
+    await answerSurvey({ room: SMALL, courseId: COURSE, who: ben, score: 5, note: "" });
+  } catch (error) {
+    refusedNew = error instanceof DataRoomError;
+  }
+  is("Ben's new answer is refused for room", refusedNew, true);
+  is("and nothing of his was written", await readMyAnswer(COURSE, ben), null);
+
+  part("Giving room back failing after an answer was written is unknown, never an error");
+  redis.clear();
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 4, note: "" });
+  const realGive = redis.pipeline.bind(redis);
+  let written = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const script = String(commands[0]?.[1] ?? "");
+    // As if her answer came in between: the change found nothing, the full write found hers.
+    if (commands[0]?.[0] === "EVAL" && script.startsWith("-- marktmorgen:course-survey-change:v1")) return [0];
+    if (written && commands[0]?.[0] === "EVAL" && script.startsWith("-- marktmorgen:store-data:")) throw new Error("Redis is down");
+    const out = await realGive(commands);
+    if (commands[0]?.[0] === "EVAL" && script.startsWith("-- marktmorgen:course-survey-set:v1")) written = true;
+    return out;
+  }) as typeof redis.pipeline;
+  let answered: unknown;
+  try {
+    answered = await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 2, note: "" });
+  } catch (error) {
+    answered = error;
+  }
+  redis.pipeline = realGive;
+  is("the answer says unknown", answered, { ok: false, reason: "unknown" });
+  is("and what was written is kept", (await readMyAnswer(COURSE, ana))?.score, 2);
+
+  part("A course that goes takes its survey with it, giving back only what was confirmed gone");
+  redis.clear();
+  const bare = await used();
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 9, note: "" });
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ben, score: 3, note: "Hm." });
+  await answerSurvey({ room: ROOM, courseId: OTHER, who: ana, score: 7, note: "" });
+  const withTwo = await used();
+  is("both answers of the course go", await dropCourseSurvey(COURSE, ROOM), 2);
+  is("none are left", [await readMyAnswer(COURSE, ana), await readMyAnswer(COURSE, ben), await surveyAnswerCount(COURSE)], [null, null, 0]);
+  is("their room comes back, exactly", withTwo - (await used()), SURVEY_ROOM_BYTES * 2);
+  is("another course's answers stay", (await readMyAnswer(OTHER, ana))?.score, 7);
+  is("dropping again finds nothing", await dropCourseSurvey(COURSE, ROOM), 0);
+  await dropCourseSurvey(OTHER, ROOM);
+  is("all room back", await used(), bare);
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 9, note: "" });
+  const beforeOdd = await used();
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:course-survey-drop-all:v1"))) return ["x"];
+    return realGive(commands);
+  }) as typeof redis.pipeline;
+  let oddDrop = false;
+  try {
+    await dropCourseSurvey(COURSE, ROOM);
+  } catch {
+    oddDrop = true;
+  }
+  redis.pipeline = realGive;
+  is("an odd reply to dropping a course's survey is unknown", oddDrop, true);
+  is("and gives no room back", await used(), beforeOdd);
+  const productRoute = source("app/api/store/product/route.ts");
+  const courseRoute = source("app/api/store/course/route.ts");
+  is("removing a product drops its course's survey, on its own line after the course", /await dropCourse\(removedCourse, removed\.store\)[^\n]*\n\s*await dropCourseSurvey\(removedCourse\.id, removed\.store\)/.test(productRoute), true);
+  is("turning a course off drops its survey, on its own line after the course", /await dropCourse\(course, store\);\n\s*await dropCourseSurvey\(course\.id, store\)/.test(courseRoute), true);
+
   part("The registries: deletion, the copy and the cost line say what the code does");
   const surveyData = PERSON_DATA.filter((entry) => entry.file === "lib/course-survey.ts");
   is("deleting a person erases their answers", surveyData.map((e) => e.how), ["erased"]);
@@ -234,6 +311,8 @@ async function main(): Promise<void> {
   is("an answer is kept only from a student who finished the course", finished > take && finished < answer && /if \(!hasFinished\(course, done, passed\)\) return back\("unfinished"\)/.test(route), true);
   is("removing is not charged a buyer action", /action === "remove"[\s\S]{0,60}removeMyAnswer/.test(route) && route.indexOf("await removeMyAnswer(") < take, true);
   is("a full data room says so", route.includes("error instanceof DataRoomError") && route.includes('back("noroom")'), true);
+  is("removing needs the confirmation, and otherwise asks for it", /form\.get\("sure"\) !== "1"\) return back\("confirm"\)/.test(route), true);
+  is("a student with this course in their pass removes their answer whatever their access is now", route.indexOf("await removeMyAnswer(") < route.indexOf('access.state !== "open"') && /scope === "all" \|\| access\.learner\.scope\.includes\(course\.id\)/.test(route), true);
 
   part("The course page: only the store's owner reads the answers, the studio paid first");
   const page = source("app/[handle]/course/[product]/page.tsx");
@@ -241,7 +320,14 @@ async function main(): Promise<void> {
   is("the count is paid for before it is read", page.indexOf("countStudio(store, null, 1)") > 0 && page.indexOf("countStudio(store, null, 1)") < page.indexOf("await surveyAnswerCount("), true);
   is("the answers are paid for before they are read", paid > 0 && paid < page.indexOf("await readCourseAnswers("), true);
   is("only the owner, and only when asked", /const surveyAsks = open && access\.learner\.owner && query\.survey === "1";/.test(page), true);
-  is("a student's own answer is read only for that student, once finished", /finished \? readMyAnswer\(course\.id, who\)/.test(page), true);
+  is("a student's own answer is read for that student, with this course in their pass", /surveyWho \? readMyAnswer\(course\.id, surveyWho\)/.test(page), true);
+  is("the form only once finished; otherwise only the way to remove a kept answer", /mode=\{finished \? "answer" : "remove"\}/.test(page), true);
+  const box = source("components/course-survey.tsx");
+  is("the notice takes the focus when the page comes back", box.includes("<ArrivalNotice"), true);
+  is("a wrong score marks the scores invalid", /aria-invalid=\{notice === "score"/.test(box), true);
+  is("removing asks first, on its own screen", box.includes('name="sure" value="1"') && box.includes('notice === "confirm"'), true);
+  is("a comment shows only its month and year", /month: "long", year: "numeric"/.test(box) && !/day: "numeric"/.test(box), true);
+  is("showing answers is never prefetched", /prefetch=\{false\}/.test(box), true);
 
   part("Nothing about the survey reaches reviews or other students");
   for (const file of ["lib/course-survey.ts", "lib/course-survey-rules.ts", "app/api/store/course/survey/route.ts", "components/course-survey.tsx"]) {
@@ -257,8 +343,10 @@ async function main(): Promise<void> {
     is(`${code}: each score's line carries its count`, w.countOf(9, 4).includes("9") && w.countOf(9, 4).includes("4"), true);
     is(`${code}: the length hint carries the limit`, w.noteHint(MAX_SURVEY_NOTE).includes(String(MAX_SURVEY_NOTE)), true);
     is(`${code}: each notice has words`, Object.values(w.notices).every((s) => typeof s === "string" && s.length > 3), true);
+    is(`${code}: says what removing and changing need`, typeof w.removeOnly === "string" && w.removeOnly.length > 10 && typeof w.confirm === "string" && typeof w.keep === "string", true);
   }
   is("English asks the exact question", COURSE_SURVEY_WORDS.en.question, SURVEY_QUESTION);
+  is("English never promises a change at any time", /change or remove it at any time/i.test(COURSE_SURVEY_WORDS.en.note), false);
   is("an unknown language speaks English", courseSurveyWords("xx").title, COURSE_SURVEY_WORDS.en.title);
 
   done();

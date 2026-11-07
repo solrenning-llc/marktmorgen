@@ -1,0 +1,828 @@
+
+===== original-red =====
+{"file":"series-count-unknown.test.ts","old":true,"original":true,"exit":1}
+
+Known replies are read as before
+  ok    no series: none running
+  ok    a store with no call diary has none, without asking Redis
+  ok    one series booked: one running
+
+A count in another shape is unknown, never zero
+  FAIL  no reply: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 0"
+  FAIL  null: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 0"
+  FAIL  text: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 0"
+  FAIL  a number as text: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 1"
+  FAIL  an object: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 0"
+  FAIL  a fraction: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 0.5"
+  FAIL  a negative count: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered -1"
+  FAIL  not a number: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 0"
+  FAIL  no replies at all: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 0"
+  FAIL  two replies for one command: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "answered 1"
+  FAIL  not a list: runningSeries throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "threw TypeError: (intermediate value) is not iterable"
+  ok    the series is still in the diary
+
+The currency route refuses, with nothing changed
+  FAIL  no reply: 503 unavailable
+        expected [503,"unavailable"]
+        got      [500,"server_error"]
+  FAIL  null: 503 unavailable
+        expected [503,"unavailable"]
+        got      [200,"ok"]
+  FAIL  text: 503 unavailable
+        expected [503,"unavailable"]
+        got      [200,"ok"]
+  FAIL  the store still charges in dollars
+        expected ["usd",false]
+        got      ["eur",false]
+
+The tax route refuses, with nothing changed
+  FAIL  no reply: 503 unavailable
+        expected [503,"unavailable"]
+        got      [200,"ok"]
+  FAIL  null: 503 unavailable
+        expected [503,"unavailable"]
+        got      [200,"ok"]
+  FAIL  text: 503 unavailable
+        expected [503,"unavailable"]
+        got      [200,"ok"]
+  FAIL  sales tax is still off
+        expected ["usd",false]
+        got      ["eur",true]
+
+Healthy control: the running series still refuses both with "series"
+  FAIL  currency refused
+        expected [409,"series"]
+        got      [200,"ok"]
+  FAIL  tax refused
+        expected [409,"series"]
+        got      [200,"ok"]
+  FAIL  nothing changed
+        expected ["usd",false]
+        got      ["eur",true]
+
+The studio says it honestly
+  FAIL  the tax editor no longer says stores are not switched on for an unread answer
+        expected false
+        got      true
+  FAIL  the tax editor says nothing was saved and to try again
+        expected true
+        got      false
+  FAIL  the currency panel says nothing was changed and to try again
+        expected true
+        got      false
+
+29 checks, 25 failing.
+MemoryRedis dispatches: 206
+changing the store currency failed Error: `after` was called outside a request scope. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context
+    at after2 ([stdin]:4552:15)
+    at POST ([stdin]:51143:30)
+    at async send ([stdin]:51274:22)
+    at async withBent ([stdin]:51249:12)
+    at async main ([stdin]:51308:39)
+
+===== original-green =====
+{"file":"series-count-unknown.test.ts","old":false,"original":true,"exit":0}
+
+Known replies are read as before
+  ok    no series: none running
+  ok    a store with no call diary has none, without asking Redis
+  ok    one series booked: one running
+
+A count in another shape is unknown, never zero
+  ok    no reply: runningSeries throws UnknownReplyError
+  ok    null: runningSeries throws UnknownReplyError
+  ok    text: runningSeries throws UnknownReplyError
+  ok    a number as text: runningSeries throws UnknownReplyError
+  ok    an object: runningSeries throws UnknownReplyError
+  ok    a fraction: runningSeries throws UnknownReplyError
+  ok    a negative count: runningSeries throws UnknownReplyError
+  ok    not a number: runningSeries throws UnknownReplyError
+  ok    no replies at all: runningSeries throws UnknownReplyError
+  ok    two replies for one command: runningSeries throws UnknownReplyError
+  ok    not a list: runningSeries throws UnknownReplyError
+  ok    the series is still in the diary
+
+The currency route refuses, with nothing changed
+  ok    no reply: 503 unavailable
+  ok    null: 503 unavailable
+  ok    text: 503 unavailable
+  ok    the store still charges in dollars
+
+The tax route refuses, with nothing changed
+  ok    no reply: 503 unavailable
+  ok    null: 503 unavailable
+  ok    text: 503 unavailable
+  ok    sales tax is still off
+
+Healthy control: the running series still refuses both with "series"
+  ok    currency refused
+  ok    tax refused
+  ok    nothing changed
+
+The studio says it honestly
+  ok    the tax editor no longer says stores are not switched on for an unread answer
+  ok    the tax editor says nothing was saved and to try again
+  ok    the currency panel says nothing was changed and to try again
+
+29 checks, all passing.
+MemoryRedis dispatches: 157
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15811:11)
+    at async chargeableCurrencies ([stdin]:19521:19)
+    at async POST ([stdin]:51119:24)
+    at async send ([stdin]:51293:22)
+    at async main ([stdin]:51337:27) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+
+===== linked =====
+{"file":"series-count-unknown.test.ts","old":false,"original":false,"exit":0}
+
+Known replies are read as before
+  ok    no series: none running
+  ok    a store with no call diary has none, without asking Redis
+  ok    one series booked: one running
+
+A count in another shape is unknown, never zero
+  ok    no reply: runningSeries throws UnknownReplyError
+  ok    null: runningSeries throws UnknownReplyError
+  ok    text: runningSeries throws UnknownReplyError
+  ok    a number as text: runningSeries throws UnknownReplyError
+  ok    an object: runningSeries throws UnknownReplyError
+  ok    a fraction: runningSeries throws UnknownReplyError
+  ok    a negative count: runningSeries throws UnknownReplyError
+  ok    not a number: runningSeries throws UnknownReplyError
+  ok    no replies at all: runningSeries throws UnknownReplyError
+  ok    two replies for one command: runningSeries throws UnknownReplyError
+  ok    not a list: runningSeries throws UnknownReplyError
+  ok    the series is still in the diary
+
+The currency route refuses, with nothing changed
+  ok    no reply: 503 unavailable
+  ok    null: 503 unavailable
+  ok    text: 503 unavailable
+  ok    the store still charges in dollars
+
+The tax route refuses, with nothing changed
+  ok    no reply: 503 unavailable
+  ok    null: 503 unavailable
+  ok    text: 503 unavailable
+  ok    sales tax is still off
+
+Healthy control: the running series still refuses both with "series"
+  ok    currency refused
+  ok    tax refused
+  ok    nothing changed
+
+The studio says it honestly
+  ok    the tax editor no longer says stores are not switched on for an unread answer
+  ok    the tax editor says nothing was saved and to try again
+  ok    the currency panel says nothing was changed and to try again
+
+29 checks, all passing.
+MemoryRedis dispatches: 157
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51295:22)
+    at async main ([stdin]:51339:27) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+{"file":"call-series-currency-route.test.ts","old":false,"original":false,"exit":0}
+  ok    a weekly call
+
+A series running
+  ok    two running
+  ok    the change is refused, with how many series are running
+  ok    and the store keeps its currency
+  ok    switching sales tax on is refused too, with how many series run (C2-94 review, medium 3)
+  ok    and tax stays off
+  ok    the tax number box alone, with tax off, stays free
+
+A series over
+  ok    one ended early is no longer counted
+  ok    one whose last session has ended is not counted, nor at the moment it ends
+  ok    a store with no call diary has none
+
+What is written
+  ok    an id that is not 32 hex characters, or an end not in milliseconds after now, is refused
+  ok    a write removes the series over first and gives back exactly seriesReleaseBytes() for each one removed, never more than was charged
+  ok    nothing over: nothing given back a second time
+  ok    a series ended early gives its bytes back once, however often it is ended
+
+The studio says why
+  ok    the tax refusal is said in plain words
+  ok    the refusal is said with how many and when it lifts
+
+16 checks, all passing.
+MemoryRedis dispatches: 144
+{"file":"currency-faq.test.ts","old":false,"original":false,"exit":0}
+
+The studio's own words and rules
+  ok    the currency field, its button, its confirm step and its mark only when Stripe answered, as the studio says them
+  ok    for whoever may change settings, with no plan read by its route
+  ok    a new store starts in the default currency
+  ok    the Stripe link only once Stripe is connected
+  ok    every buyer checkout on the creator's account asks Stripe not to convert
+  ok    a payment request keeps the currency it was sent in
+
+The answers, in both states
+  ok    four questions
+  ok    choosing: the start, the studio's words in order, the confirm step, the mark only when Stripe answers
+  ok    own currency: no conversion, never the price as written, the payment request said
+  ok    ways to pay: where Stripe offers them, in Stripe, the button once connected
+  ok    try before paying: the one shared answer
+  ok    one space between sentences, never two
+  ok    no figure but the trial's days, no percent, no result promised
+
+On the currencies page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+  ok    no sentence of the answers said elsewhere on the page, or twice among them
+
+16 checks, all passing.
+MemoryRedis dispatches: 0
+
+===== boundaries =====
+{"file":"p-2965-series-boundaries.proof.ts","old":false,"original":false,"exit":1}
+  ok    missing: typed unknown
+  ok    missing: currency refuses
+  ok    missing: tax refuses
+  ok    missing: settings unchanged
+  ok    null: typed unknown
+  ok    null: currency refuses
+  ok    null: tax refuses
+  ok    null: settings unchanged
+  ok    text zero: typed unknown
+  ok    text zero: currency refuses
+  ok    text zero: tax refuses
+  ok    text zero: settings unchanged
+  ok    fraction: typed unknown
+  ok    fraction: currency refuses
+  ok    fraction: tax refuses
+  ok    fraction: settings unchanged
+  ok    negative: typed unknown
+  ok    negative: currency refuses
+  ok    negative: tax refuses
+  ok    negative: settings unchanged
+  ok    NaN: typed unknown
+  ok    NaN: currency refuses
+  ok    NaN: tax refuses
+  ok    NaN: settings unchanged
+  ok    infinite: typed unknown
+  ok    infinite: currency refuses
+  ok    infinite: tax refuses
+  ok    infinite: settings unchanged
+  ok    unsafe: typed unknown
+  ok    unsafe: currency refuses
+  ok    unsafe: tax refuses
+  ok    unsafe: settings unchanged
+  ok    object: typed unknown
+  ok    object: currency refuses
+  ok    object: tax refuses
+  ok    object: settings unchanged
+  ok    empty: typed unknown
+  ok    empty: currency refuses
+  ok    empty: tax refuses
+  ok    empty: settings unchanged
+  ok    extra: typed unknown
+  ok    extra: currency refuses
+  ok    extra: tax refuses
+  ok    extra: settings unchanged
+  ok    hole: typed unknown
+  ok    hole: currency refuses
+  ok    hole: tax refuses
+  ok    hole: settings unchanged
+  ok    inherited: typed unknown
+  ok    inherited: currency refuses
+  ok    inherited: tax refuses
+  ok    inherited: settings unchanged
+  ok    getter: typed unknown
+  ok    getter: currency refuses
+  ok    getter: tax refuses
+  ok    getter: settings unchanged
+  FAIL  proxy: typed unknown
+        expected "unknown"
+        got      "other"
+  FAIL  proxy: currency refuses
+        expected [503,"unavailable"]
+        got      [500,"server_error"]
+  FAIL  proxy: tax refuses
+        expected [503,"unavailable"]
+        got      [500,"server_error"]
+  ok    proxy: settings unchanged
+  FAIL  no getter or proxy trap evaluated
+        expected 0
+        got      3
+  ok    safe integer 0 retained
+  ok    safe integer 1 retained
+  ok    safe integer 2 retained
+  ok    safe integer 9007199254740991 retained
+  ok    other error keeps currency 500
+  ok    other error keeps tax 500
+  ok    healthy currency still blocked by real series
+  ok    healthy tax still blocked by real series
+Synthetic HTTP replies: 68
+
+69 checks, 4 failing.
+MemoryRedis dispatches: 386
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+changing the store currency failed Error: proxy trap
+    at Object.get ([stdin]:51284:11)
+    at store.pipeline ([stdin]:51312:110)
+    at redisPipeline ([stdin]:9205:41)
+    at runningSeries ([stdin]:19429:36)
+    at POST ([stdin]:51138:26)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51320:40)
+saving the tax setting failed Error: proxy trap
+    at Object.get ([stdin]:51284:11)
+    at store.pipeline ([stdin]:51312:110)
+    at redisPipeline ([stdin]:9205:41)
+    at runningSeries ([stdin]:19429:36)
+    at POST2 ([stdin]:51192:31)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51321:35)
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51334:41) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+changing the store currency failed Error: synthetic connection failure
+    at store.pipeline ([stdin]:51331:73)
+    at redisPipeline ([stdin]:9205:41)
+    at runningSeries ([stdin]:19429:36)
+    at POST ([stdin]:51138:26)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51334:41)
+saving the tax setting failed Error: synthetic connection failure
+    at store.pipeline ([stdin]:51331:73)
+    at redisPipeline ([stdin]:9205:41)
+    at runningSeries ([stdin]:19429:36)
+    at POST2 ([stdin]:51192:31)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51335:36)
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51307:22)
+    at async main ([stdin]:51337:56) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+
+===== qualified-boundaries =====
+{"file":"p-2965-series-boundaries-qualified.proof.ts","old":false,"original":false,"exit":0}
+  ok    missing: typed unknown
+  ok    missing: currency refuses
+  ok    missing: tax refuses
+  ok    missing: settings unchanged
+  ok    null: typed unknown
+  ok    null: currency refuses
+  ok    null: tax refuses
+  ok    null: settings unchanged
+  ok    text zero: typed unknown
+  ok    text zero: currency refuses
+  ok    text zero: tax refuses
+  ok    text zero: settings unchanged
+  ok    fraction: typed unknown
+  ok    fraction: currency refuses
+  ok    fraction: tax refuses
+  ok    fraction: settings unchanged
+  ok    negative: typed unknown
+  ok    negative: currency refuses
+  ok    negative: tax refuses
+  ok    negative: settings unchanged
+  ok    NaN: typed unknown
+  ok    NaN: currency refuses
+  ok    NaN: tax refuses
+  ok    NaN: settings unchanged
+  ok    infinite: typed unknown
+  ok    infinite: currency refuses
+  ok    infinite: tax refuses
+  ok    infinite: settings unchanged
+  ok    unsafe: typed unknown
+  ok    unsafe: currency refuses
+  ok    unsafe: tax refuses
+  ok    unsafe: settings unchanged
+  ok    object: typed unknown
+  ok    object: currency refuses
+  ok    object: tax refuses
+  ok    object: settings unchanged
+  ok    empty: typed unknown
+  ok    empty: currency refuses
+  ok    empty: tax refuses
+  ok    empty: settings unchanged
+  ok    extra: typed unknown
+  ok    extra: currency refuses
+  ok    extra: tax refuses
+  ok    extra: settings unchanged
+  ok    hole: typed unknown
+  ok    hole: currency refuses
+  ok    hole: tax refuses
+  ok    hole: settings unchanged
+  ok    inherited: typed unknown
+  ok    inherited: currency refuses
+  ok    inherited: tax refuses
+  ok    inherited: settings unchanged
+  ok    getter: typed unknown
+  ok    getter: currency refuses
+  ok    getter: tax refuses
+  ok    getter: settings unchanged
+  ok    proxy: typed unknown
+  ok    proxy: currency refuses
+  ok    proxy: tax refuses
+  ok    proxy: settings unchanged
+  ok    no getter or proxy trap evaluated
+  ok    safe integer 0 retained
+  ok    safe integer 1 retained
+  ok    safe integer 2 retained
+  ok    safe integer 9007199254740991 retained
+  ok    other error keeps currency 500
+  ok    other error keeps tax 500
+  ok    healthy currency still blocked by real series
+  ok    healthy tax still blocked by real series
+Synthetic HTTP replies: 68
+
+69 checks, all passing.
+MemoryRedis dispatches: 386
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51321:40) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51335:41) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+changing the store currency failed Error: synthetic connection failure
+    at store.pipeline ([stdin]:51332:73)
+    at redisPipeline ([stdin]:9205:41)
+    at runningSeries ([stdin]:19429:36)
+    at POST ([stdin]:51138:26)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51335:41)
+saving the tax setting failed Error: synthetic connection failure
+    at store.pipeline ([stdin]:51332:73)
+    at redisPipeline ([stdin]:9205:41)
+    at runningSeries ([stdin]:19429:36)
+    at POST2 ([stdin]:51192:31)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51336:36)
+reading the account's currencies failed StripeError: Stripe request failed (404 unknown): Stripe gave no reason.
+    at onAccount ([stdin]:15812:11)
+    at async chargeableCurrencies ([stdin]:19522:19)
+    at async POST ([stdin]:51120:24)
+    at async send ([stdin]:51308:22)
+    at async main ([stdin]:51338:56) {
+  status: 404,
+  code: 'unknown',
+  stripeMessage: 'Stripe gave no reason.'
+}
+
+===== types =====
+
+===== lint =====
+
+===== scanner =====
+Public data check: 4255 tracked files; 0 file(s) require correction.
+
+===== qualified-types =====
+
+===== qualified-lint =====
+
+===== source-diff =====

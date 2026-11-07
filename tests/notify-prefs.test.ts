@@ -30,6 +30,11 @@
  * day or losing the email; the choice moved into the store record, and the
  * assertions on that key's exact reads (unknown shapes, release of the day's
  * look, unconfirmed write) went with it.
+ *
+ * Rule 23 (review of #3013): "it says when the stop link holds" looked for
+ * weeklyOff(store.handle) on the page; the page now reads the stop link
+ * exactly with weeklyStopState(store.handle), so a failed read is said as
+ * not read instead of hidden, and the assertion names that read.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -260,7 +265,7 @@ async function main(): Promise<void> {
   const page = readFileSync("app/studio/notifications/page.tsx", "utf8");
   const panel = readFileSync("components/notify-prefs-panel.tsx", "utf8");
   is("the page is the owner's, and shows the store's own choice", page.includes('if (access.role !== "owner") redirect(') && page.includes("store.alertEmailsOff"), true);
-  is("it says when the stop link holds, with a way to undo it", page.includes("weeklyOff(store.handle)") && panel.includes("Start these emails again"), true);
+  is("it says when the stop link holds, with a way to undo it", page.includes("weeklyStopState(store.handle)") && panel.includes("Start these emails again"), true);
   is("it says when the store does not take payments yet", page.includes("These alerts start once your store takes payments"), true);
   is("a breadcrumb says where the owner is", page.includes('aria-label="Breadcrumb"') && page.includes('aria-current="page"'), true);
   is("nothing is disabled while saving, so focus stays", !panel.includes("disabled=") && panel.includes("aria-busy={busy}"), true);

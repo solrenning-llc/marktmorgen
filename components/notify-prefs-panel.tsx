@@ -23,6 +23,8 @@ function refusal(data: Answer): string {
       return "Nothing was changed. Log in again with your second step, then save.";
     case "store_gone":
       return "Nothing was changed: this store is closed.";
+    case "not_changed":
+      return "Not changed yet: we could not confirm these emails started again. Reload this page to see where they stand, then try again.";
     case "invalid":
     case "always_on":
     case "none":
@@ -37,10 +39,12 @@ function refusal(data: Answer): string {
  * in the store record, lib/notify-prefs-rules.ts): one labeled box per
  * optional alert and one Save; the notices that cannot be switched off are
  * listed as text with their reason, not as boxes that do nothing. While the
- * weekly email's stop link holds, that is said first, with a way to undo it.
+ * weekly email's stop link holds, that is said first, with a way to undo it;
+ * when it could not be read ("unknown"), that is said there instead, with the
+ * same way to start them again, never hidden.
  * Nothing is disabled while saving, so focus stays where the person left it.
  */
-export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { off: OptionalEvent[]; stopped: boolean }) {
+export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { off: OptionalEvent[]; stopped: boolean | "unknown" }) {
   const [saved, setSaved] = useState<OptionalEvent[]>(initial);
   const [off, setOff] = useState<OptionalEvent[]>(initial);
   const [stopped, setStopped] = useState(initiallyStopped);
@@ -72,9 +76,12 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
       setOff(data.off);
       setSaid({
         ok: true,
-        text: stopped
-          ? "Saved. These emails stay stopped by the weekly email's link until you start them again above."
-          : "Saved. Your alert emails follow these choices from now on.",
+        text:
+          stopped === true
+            ? "Saved. These emails stay stopped by the weekly email's link until you start them again above."
+            : stopped === "unknown"
+              ? "Saved. We could not read whether the weekly email's stop link holds; while it does, these emails stay stopped."
+              : "Saved. Your alert emails follow these choices from now on.",
       });
     } else setSaid({ ok: false, text: data ? refusal(data) : UNCONFIRMED });
   }
@@ -95,10 +102,17 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
     <div className="mt-8 max-w-2xl">
       {stopped ? (
         <div className="notice mb-8">
-          <p>
-            All of these alert emails are stopped, because the stop link in a weekly email was used. The weekly, monthly and busy-day emails are
-            stopped too. Your choices below apply once they start again.
-          </p>
+          {stopped === "unknown" ? (
+            <p>
+              We could not read whether the stop link in a weekly email has stopped all of these alert emails, along with the weekly, monthly and
+              busy-day emails. Reload this page to check, or start them again here.
+            </p>
+          ) : (
+            <p>
+              All of these alert emails are stopped, because the stop link in a weekly email was used. The weekly, monthly and busy-day emails are
+              stopped too. Your choices below apply once they start again.
+            </p>
+          )}
           <button type="button" className="btn btn-secondary mt-3 min-h-11" aria-busy={busy} onClick={() => void restart()}>
             Start these emails again
           </button>

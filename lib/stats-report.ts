@@ -22,6 +22,7 @@ import { type Ranked, type StatsData, readSales, readsSales, readStats, sourcesT
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { deriveKey } from "@/lib/secret-box";
 import { formatMoney } from "@/lib/money";
 import { insightsFrom } from "@/lib/insights";
@@ -266,6 +267,24 @@ export function summaryOf(data: StatsData, options: { fullDetails?: boolean } = 
 // ---- The weekly email ------------------------------------------------------------
 
 const OFF = "nl:weekly:off";
+
+/**
+ * Whether the weekly email's stop link holds, read exactly (CX-123 rule 24):
+ * true or false only from a SISMEMBER answer of exactly 1 or 0. Any other
+ * answer, or a read that failed, is "unknown", which the studio says as not
+ * read, never as not stopped (app/studio/notifications, review of #3013).
+ */
+export async function weeklyStopState(handle: string): Promise<boolean | "unknown"> {
+  if (!isRedisConfigured()) return false;
+  try {
+    const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
+    const member = replies ? countOf(replies[0]) : null;
+    return member === 1 ? true : member === 0 ? false : "unknown";
+  } catch (error) {
+    console.error("reading the weekly email's stop link failed", error);
+    return "unknown";
+  }
+}
 const sentKey = (week: string, handle: string) => `nl:weekly:sent:${week}:${handle}`;
 
 /** The week an email belongs to, as the Monday it starts on (UTC). */

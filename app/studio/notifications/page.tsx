@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { standingOf } from "@/lib/plan-standing";
-import { weeklyOff } from "@/lib/stats-report";
+import { weeklyStopState } from "@/lib/stats-report";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { NotifyPrefsPanel } from "@/components/notify-prefs-panel";
@@ -27,8 +27,10 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
  *
  * What would make a choice here do nothing today is said at the top, never
  * hidden behind a box that looks on: the weekly email's stop link (which
- * stops all of these, read through lib/stats-report.ts weeklyOff) and a store
- * that does not take payments yet. Redis: one SISMEMBER for the stop link.
+ * stops all of these, read exactly through lib/stats-report.ts
+ * weeklyStopState; a stop link that could not be read is said as not read,
+ * never hidden) and a store that does not take payments yet. Redis: one
+ * SISMEMBER for the stop link.
  */
 export default async function StudioNotificationsPage({ searchParams }: Params) {
   const query = await searchParams;
@@ -40,7 +42,7 @@ export default async function StudioNotificationsPage({ searchParams }: Params) 
   const { view: access } = found;
   const store = access.store;
   if (access.role !== "owner") redirect(studioPath(store, "team=forbidden"));
-  const stopped = await weeklyOff(store.handle).catch(() => false);
+  const stopped = await weeklyStopState(store.handle);
   const standing = standingOf(store);
   const takesPayments = Boolean(store.stripeAccountId) && (standing === "paid" || standing === "trial");
 

@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { setAlertEmailsOff } from "@/lib/store";
-import { setWeeklyOff } from "@/lib/stats-report";
+import { setWeeklyOff, weeklyStopState } from "@/lib/stats-report";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -14,7 +15,11 @@ const NO_STORE = { "Cache-Control": "no-store" };
  *   `{ restart: true }`    undoes the weekly email's stop link, which stops
  *                          these and the weekly, monthly and busy-day emails
  *                          (lib/stats-report.ts setWeeklyOff, the same as its
- *                          own "Start it again" button).
+ *                          own "Start it again" button). Said as done only
+ *                          when the stop link, read back exactly
+ *                          (weeklyStopState), no longer holds; otherwise, or
+ *                          when Redis answered in an unknown shape, 503
+ *                          "not_changed" (the page says "Not changed yet").
  *
  * The owner's only (app/studio/notifications/page.tsx says why): the request
  * needs the settings permission and then the owner's role. An always-on
@@ -26,7 +31,16 @@ export async function POST(request: NextRequest) {
   if (guarded.role !== "owner") return Response.json({ ok: false, error: "owner_only" }, { status: 403, headers: NO_STORE });
   try {
     if (guarded.body.restart === true) {
-      await setWeeklyOff(guarded.store.handle, false);
+      const notChanged = Response.json({ ok: false, error: "not_changed" }, { status: 503, headers: NO_STORE });
+      try {
+        await setWeeklyOff(guarded.store.handle, false);
+      } catch (error) {
+        if (!(error instanceof UnknownReplyError)) throw error;
+        console.error("starting the weekly emails again: Redis answered in an unknown shape", error);
+        return notChanged;
+      }
+      // Whatever the SREM answered, the emails are said started again only when the stop link no longer holds.
+      if ((await weeklyStopState(guarded.store.handle)) !== false) return notChanged;
       return Response.json({ ok: true, restarted: true }, { headers: NO_STORE });
     }
     const result = await setAlertEmailsOff(guarded.ref, guarded.body.off);

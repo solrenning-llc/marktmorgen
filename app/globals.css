@@ -762,10 +762,14 @@ html {
  * its words stay above 9:1 (--ink-soft on --sand), and the ring outside it
  * keeps its full colour. The dashed edge (--line-off) is light, at 3:1 or
  * more, so an off button never looks louder than the ones that work. Hover
- * does not light it up.
+ * does not light it up. A round icon button (.icon-btn: the page editor's
+ * Move, Duplicate, Earlier and Later) takes the same signs; told off by a
+ * lighter gray alone, it was 1.07:1 from one that works.
  */
 .btn[aria-disabled="true"],
-.btn[aria-disabled="true"]:hover {
+.btn[aria-disabled="true"]:hover,
+.icon-btn[aria-disabled="true"],
+.icon-btn[aria-disabled="true"]:hover {
   opacity: 1;
   cursor: not-allowed;
   transform: none;
@@ -784,7 +788,9 @@ html {
 @media (forced-colors: active) {
   /* The system's colour for an unavailable control, and the dashed border still says "off". */
   .btn[aria-disabled="true"],
-  .btn[aria-disabled="true"]:hover {
+  .btn[aria-disabled="true"]:hover,
+  .icon-btn[aria-disabled="true"],
+  .icon-btn[aria-disabled="true"]:hover {
     color: GrayText;
     border-style: dashed;
     border-color: GrayText;
@@ -793,9 +799,11 @@ html {
    * No color of a button is animated in forced colors. WebKit animates them:
    * a button that turned usable was still drawn, for a moment, in GrayText on
    * the page's own sand (2.78:1, Studio AAA, inbox C4-35). It shows the
-   * system's colors at once instead.
+   * system's colors at once instead. The round icon buttons (.icon-btn) too,
+   * which take GrayText when off and keep Tailwind's transition-colors.
    */
-  .btn {
+  .btn,
+  .icon-btn {
     transition: none;
   }
 }
@@ -1600,8 +1608,10 @@ a.chip {
   flex: none;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  /* A 44 px target (2.5.5) that still sits on the first line of text. */
+  width: 44px;
+  height: 44px;
+  margin: -6px -6px -6px 0;
   border-radius: 8px;
   background: transparent;
   color: #fff;
@@ -1616,12 +1626,38 @@ a.chip {
   outline-offset: 2px;
   border-radius: 8px;
 }
+/*
+ * Focus not obscured (2.4.11, 2.4.12): components/toast.tsx sets data-place to
+ * the first corner that leaves the focused control clear, or to "hidden" when
+ * none does. The move is instant, never animated.
+ */
+.nb-toast-region[data-place^="top"] {
+  top: max(16px, env(safe-area-inset-top));
+  bottom: auto;
+}
+.nb-toast-region[data-place="hidden"] .nb-toast {
+  visibility: hidden;
+}
+@media (forced-colors: active) {
+  .nb-toast {
+    border: 2px solid CanvasText;
+  }
+}
 @media (min-width: 640px) {
   .nb-toast-region {
     left: auto;
     right: 24px;
     bottom: 24px;
     justify-content: flex-end;
+  }
+  .nb-toast-region[data-place^="top"] {
+    top: 24px;
+    bottom: auto;
+  }
+  .nb-toast-region[data-place$="start"] {
+    left: 24px;
+    right: auto;
+    justify-content: flex-start;
   }
   .nb-toast {
     width: auto;

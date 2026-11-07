@@ -14,7 +14,7 @@ const render = (connected: boolean, status: "active" | "pending" | "unknown") =>
   renderToStaticMarkup(createElement(TaxEditor, { tax: { enabled: false, included: false }, status, connected } as Parameters<typeof TaxEditor>[0]));
 const SID = "a".repeat(32);
 const pinned = (status: "active" | "pending" | "unknown") =>
-  renderToStaticMarkup(createElement(StudioStorePin, { sid: SID }, createElement(TaxEditor, { tax: { enabled: false, included: false }, status, connected: true } as Parameters<typeof TaxEditor>[0])));
+  renderToStaticMarkup(createElement(StudioStorePin, { sid: SID } as Parameters<typeof StudioStorePin>[0], createElement(TaxEditor, { tax: { enabled: false, included: false }, status, connected: true } as Parameters<typeof TaxEditor>[0])));
 const link = (html: string) => html.match(/<a[^>]*href="\/studio\/tax"[^>]*>([\s\S]*?)<\/a>/);
 
 part("Connected: one link to the page of tax registrations, whatever Stripe said");

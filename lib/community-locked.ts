@@ -18,7 +18,9 @@
  * (productsBuyableNow, lib/mail-product-sellable.ts): published, not coming
  * soon, not sold out, and a store that can sell it (or give it, when free).
  * With none, the space says access is not available yet; when the products
- * could not be read, it says so, and names nothing.
+ * could not be read, it says so, and names nothing. Only what was read is
+ * judged: a space reaching a product that was not read (past the read cap)
+ * before one on sale is "unknown", never "none".
  *
  * The way in is worked out for every space shown locked at once (unlocksOf),
  * so the studio's "View as a member" (components/community-member-preview.tsx)
@@ -46,9 +48,36 @@ export { type LockedSpace, type Unlock, lockedOf } from "@/lib/community-gate";
 /** The most products read for one page's locked spaces: one collection page's worth, the figure its requests are held to. */
 export const MAX_UNLOCK_PRODUCTS = MAX_COLLECTION_PRODUCTS;
 
-/** The products to read for them: each space's in its order, once each, at most MAX_UNLOCK_PRODUCTS. */
+/**
+ * The products to read for them, once each, at most MAX_UNLOCK_PRODUCTS:
+ * taken in turns, each space's first product, then each one's second, and so
+ * on, so one space with many products cannot leave the next with none read.
+ */
 export function unlockCandidates(locked: readonly { needs: string[] }[]): string[] {
-  return [...new Set(locked.flatMap((entry) => entry.needs))].slice(0, MAX_UNLOCK_PRODUCTS);
+  const picked = new Set<string>();
+  const longest = Math.max(0, ...locked.map((entry) => entry.needs.length));
+  for (let turn = 0; turn < longest; turn++) {
+    for (const { needs } of locked) {
+      if (picked.size >= MAX_UNLOCK_PRODUCTS) return [...picked];
+      if (turn < needs.length) picked.add(needs[turn]);
+    }
+  }
+  return [...picked];
+}
+
+/**
+ * A space's way in from what was read: its first product on sale, in its
+ * order. A product asked for and not returned is gone from the store (read,
+ * not on sale); one reached before any on sale and never asked for makes the
+ * answer "unknown".
+ */
+function unlockOf(needs: readonly string[], read: ReadonlySet<string>, byId: ReadonlyMap<string, Listing>, buyable: ReadonlySet<string>): Listing | "none" | "unknown" {
+  for (const id of needs) {
+    if (!read.has(id)) return "unknown";
+    const product = byId.get(id);
+    if (product && buyable.has(id)) return product;
+  }
+  return "none";
 }
 
 /**
@@ -79,10 +108,11 @@ export async function unlocksOf(
     return {};
   }
   const byId = new Map(listings.map((p) => [p.id, p]));
+  const read = new Set(ids);
   return Object.fromEntries(
     locked.map(({ space, needs }) => {
-      const product = needs.map((id) => byId.get(id)).find((p): p is Listing => Boolean(p && buyable.has(p.id)));
-      const unlock: Unlock = product ? { title: product.title, href: `/@${store.handle}/p/${productSegment(product)}` } : "none";
+      const way = unlockOf(needs, read, byId, buyable);
+      const unlock: Unlock = typeof way === "string" ? way : { title: way.title, href: `/@${store.handle}/p/${productSegment(way)}` };
       return [space.id, unlock];
     }),
   );

@@ -345,6 +345,25 @@ async function main(): Promise<void> {
     is("the second order does not say it is being handed over", html.includes(HANDING_OVER), false);
     is("the second order shows the purchase and its link", html.includes("Glazing guide") && html.includes("Open what you bought"), true);
     is("the second order sends the purchase event", two === "crashed" ? null : two.purchaseEvent, true);
+    // Claude 5's LOW on #2911 @ f7a1d797: standing behind the product proves the payment and that the buyer holds it,
+    // not that this order's own hand-over (its receipt among it) ran, so no receipt is promised for it.
+    const receipt = THANKS_WORDS.en.ppReceipt(again);
+    is("control: the first order, handed over by its own grant, promises its receipt", one === "crashed" ? null : one.html.includes(receipt), true);
+    is("the second order does not promise a receipt its own hand-over has not proven", html.includes(receipt), false);
+
+    part("Claude 5's LOW on #2911: a repeat purchase whose own hand-over has not run promises no receipt");
+    {
+      const opened = await openOrder(store, (await readListing(store, made.product.id))!, BASE, { digitalConsent: TEST_CONSENT });
+      if (!opened.ok) throw new Error(`no order: ${opened.reason}`);
+      captureWith = (o) => ({ status: 201, body: completed(o, "29.00", "COMPLETED", again) });
+      const taken = await captureOrder(store, opened.order);
+      if (!taken.ok) throw new Error(`not paid: ${taken.reason}`);
+      // No handOverPayPal: the hand-over is still to run, or it failed.
+      const three = await open(opened.order);
+      const page = three === "crashed" ? "" : three.html;
+      is("control: the buyer still holds the product (the first grant), so its link is there", page.includes("Open what you bought"), true);
+      is("it promises no receipt for this order", page.includes(receipt), false);
+    }
   }
 
   let giftedOrder = "";
@@ -364,6 +383,7 @@ async function main(): Promise<void> {
     is("it does not say it is being handed over", html.includes(HANDING_OVER), false);
     is("it shows the purchase and its link", html.includes("Open what you bought"), true);
     is("it sends the purchase event", page === "crashed" ? null : page.purchaseEvent, true);
+    is("it does not promise a receipt its own hand-over has not proven", html.includes(THANKS_WORDS.en.ppReceipt(gifted)), false);
   }
 
   part("Another grant holds the product and this order's standing mark cannot be read: could not check, never delivered");

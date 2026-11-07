@@ -65,6 +65,9 @@ async function main(): Promise<void> {
   is("expired work deadline still reads all two thousand queue rows", [commands.length, commands[0][0], result.left, worked], [1, "HGETALL", rows, 0]);
   is("the work caps remain eight tries and twenty-five stores", [FORGET_TRIES, FORGET_PER_RUN], [8, 25]);
   console.log("Observed retry queue rows/wire commands/reply bytes:", rows, commands.length, replyBytes);
+  const route = readFileSync("app/api/store/stores/route.ts", "utf8");
+  const admission = route.indexOf('creatorFrom(request, "delete")');
+  is("the first deletion attempt follows the essential delete admission", admission >= 0 && admission < route.indexOf("await forgetMemory("), true);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   is("the company retry and assistant-delete sources are explicitly classified, with unknown funding preserved", ["MEMORY_FORGET_COMMANDS", "FORGET_TRY_COMMANDS", "FORGET_TRIES", "FORGET_PER_RUN"].every(name => registry.includes(name)), true);
   done();

@@ -130,6 +130,13 @@ class Graph(WithSyntheticSuite):
             "computed import.meta.resolve": {"app/page.tsx": "export default import.meta.resolve(spec);"},
             "computed new URL from import.meta.url": {"components/c.tsx": "export const c = new URL(spec, import.meta.url);",
                                                       "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
+            # Codex G's fourth return on #3037: a quoted prefix joined to more, in every
+            # resolving form, is computed; one rule now covers all call forms at once.
+            "concatenated import.meta.resolve": {"app/page.tsx": "export default import.meta.resolve('../lib/' + leaf);"},
+            "concatenated new URL": {"components/c.tsx": "export const c = new URL('../lib/' + leaf, import.meta.url);",
+                                     "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
+            "concatenated require.resolve": {"app/page.tsx": "export default require.resolve('../lib/' + leaf);"},
+            "template with a hole": {"app/page.tsx": "export default await import(`../lib/${leaf}`);"},
             "method on the specifier": {"app/page.tsx": "export default await import('../lib/b'.concat(x));"},
             "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
@@ -168,6 +175,8 @@ class Graph(WithSyntheticSuite):
     def test_a_whole_literal_dynamic_import_is_still_followed(self):
         for code in ("await import('../lib/b')", "await import( '../lib/b' )", "require('../lib/b')",
                      "require.resolve('../lib/b')", "new URL('./a.png', import.meta.url)",
+                     "import.meta.resolve('../lib/b')", 'require("playwright-core")[engine]',
+                     "new URL('./a.png' , import.meta.url)",
                      "await import('../lib/b', { with: {} })"):
             with self.subTest(code=code):
                 self.assertFalse(ui.COMPUTED.search(code))

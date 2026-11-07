@@ -14,8 +14,8 @@ import { createHash } from "node:crypto";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
 import { newFeedToken } from "@/lib/calendar-sync";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
-import { KIND, LISTINGS_PER_MGET, readListings } from "@/lib/catalog";
-import { ROOM_KEYS_PER_MGET, roomsFor } from "@/lib/call-rooms";
+import { KIND, LISTINGS_PER_MGET, MAX_PRODUCT_BYTES, readListings } from "@/lib/catalog";
+import { ROOM_KEYS_PER_MGET, ROOM_NAME_LENGTH, VIDEO_ROOM_BASE, roomsFor } from "@/lib/call-rooms";
 import { CALENDAR_BUILD_SHAPE, CALENDAR_CALLS, CALENDAR_POLL_SHAPE, LISTING_READ_BYTES, calendarBuildCommands } from "@/lib/read-ceilings";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -130,6 +130,77 @@ async function main(): Promise<void> {
   is("listings: a number among the replies fails the making, nothing kept", await broken(LISTING_KEY, "number"), [503, false, null]);
   is("rooms: a reply one short fails the making, nothing kept", await broken(ROOM_KEY, "short"), [503, false, null]);
   is("rooms: a number among the replies fails the making, nothing kept", await broken(ROOM_KEY, "number"), [503, false, null]);
+
+  part("One MGET's reply fits 1 MiB at the most a record can be written, not at the bytes it is priced at (review: Codex Z, reply size)");
+  {
+    // A listing record is written up to MAX_PRODUCT_BYTES (lib/catalog.ts, with its extras), and its JSON text can double
+    // when the REST answer escapes it (a string of quote characters): an MGET's worst reply is its keys × 2 × that.
+    is("LISTINGS_PER_MGET × 2 × MAX_PRODUCT_BYTES within 1 MiB", [LISTINGS_PER_MGET * 2 * MAX_PRODUCT_BYTES <= 1_048_576, LISTINGS_PER_MGET >= 1], [true, true]);
+    // Real records over LISTING_READ_BYTES in one chunk: 50 call listings, each a valid listing padded with quote
+    // characters (kept by JSON.stringify as \" , escaped again in the answer), far over 16,384 bytes.
+    const big = (i: number) => JSON.stringify({ ...listing(i), padding: '"'.repeat(25_000) });
+    const heavy = Array.from({ length: 50 }, (_, i) => i);
+    for (const i of heavy) redis.run(["SET", `nl:catalog:${CATALOG}:l:${productId(i)}`, big(i)]);
+    is("each planted record is a valid listing over LISTING_READ_BYTES, under MAX_PRODUCT_BYTES", [Buffer.byteLength(big(0)) > LISTING_READ_BYTES, Buffer.byteLength(big(0)) <= MAX_PRODUCT_BYTES, (await readListings(store, [productId(0)]))[0]?.id], [true, true, productId(0)]);
+    fresh();
+    const replyBytes: number[] = [];
+    const made = await counted(ask, (batch, replies) => {
+      if (batch.length === 1 && batch[0][0] === "MGET" && LISTING_KEY.test(String(batch[0][1]))) {
+        replyBytes.push(Buffer.byteLength(JSON.stringify(replies.map((result) => ({ result })))));
+      }
+      return replies;
+    });
+    const file = await made.value.text();
+    is("the file is still made, every booking in it", [made.value.status, file.split("BEGIN:VEVENT").length - 1], [200, CALENDAR_CALLS]);
+    is(`every listing MGET's reply, as the REST answer's JSON, within 1 MiB (largest ${Math.max(...replyBytes)} bytes)`, replyBytes.length > 0 && replyBytes.every((n) => n <= 1_048_576), true);
+    const mgets = made.sent.filter((c) => c[0] === "MGET");
+    // A meeting record (lib/meet-records.ts) has no byte cap where it is written (writeRecord): up to MAX_GUESTS guests'
+    // and added addresses, whose length the code does not bound. No chunk can bound its reply, so none is in an MGET.
+    is("no MGET carries a meeting record's key", mgets.some((c) => c.slice(1).some((k) => /^nl:meet:r:/.test(String(k)))), false);
+    const roomValue = VIDEO_ROOM_BASE.length + ROOM_NAME_LENGTH;
+    const roomMgets = mgets.filter((c) => ROOM_KEY.test(String(c[1])));
+    is("every room MGET carries only room keys, whose worst reply (keys × 2 × a room's address) is within 1 MiB", [roomMgets.length > 0, roomMgets.every((c) => c.slice(1).every((k) => ROOM_KEY.test(String(k))) && (c.length - 1) * 2 * roomValue <= 1_048_576)], [true, true]);
+    for (const i of heavy) redis.run(["SET", `nl:catalog:${CATALOG}:l:${productId(i)}`, JSON.stringify(listing(i))]);
+  }
+
+  /**
+   * A making whose batched reply holds, for the first key matching `what`, a value that is there but is not what was
+   * asked for: refused as an unknown, nothing kept, never a file with that listing or that room taken for absent.
+   */
+  const planted = async (what: RegExp, value: string) => {
+    fresh();
+    let placed = false;
+    const answer = await counted(ask, (batch, replies) => {
+      if (batch.some((c) => c[0] === "SET")) return replies;
+      return batch.map((command, i) => {
+        const reply = replies[i];
+        if (placed) return reply;
+        if (command[0] === "MGET" && Array.isArray(reply)) {
+          const at = command.slice(1).findIndex((k) => what.test(String(k)));
+          if (at < 0) return reply;
+          placed = true;
+          return reply.map((v, j) => (j === at ? value : v));
+        }
+        if (command[0] === "GET" && what.test(String(command[1]))) {
+          placed = true;
+          return value;
+        }
+        return reply;
+      });
+    });
+    const text = await answer.value.text();
+    return [placed, answer.value.status, text.includes("BEGIN:VCALENDAR"), redis.run(["GET", `nl:cal:out:${store.statsId}`]) === null];
+  };
+  part("A batched value that is there but is not the record asked for fails the making as an unknown (review: Codex Z, fail closed)");
+  is("listings: text that is not JSON fails the making (503), nothing kept", await planted(LISTING_KEY, "not json"), [true, 503, false, true]);
+  is("listings: {} fails the making, nothing kept", await planted(LISTING_KEY, "{}"), [true, 503, false, true]);
+  is("listings: empty text fails the making, nothing kept", await planted(LISTING_KEY, ""), [true, 503, false, true]);
+  is("listings: another product's record under this key fails the making, nothing kept", await planted(LISTING_KEY, JSON.stringify(listing(1))), [true, 503, false, true]);
+  is("rooms: a booking's room key holding an address no room here has fails the making, nothing kept", await planted(/^nl:call:room:[0-9a-f]{32}:b:/, "https://example.com/not-a-room"), [true, 503, false, true]);
+  is("meeting records: text that is not JSON fails the making, nothing kept", await planted(/^nl:meet:r:/, "not json"), [true, 503, false, true]);
+  is("meeting records: {} fails the making, nothing kept", await planted(/^nl:meet:r:/, "{}"), [true, 503, false, true]);
+  const otherScope = { provider: "google", scope: `c:${CALLS_ID}:b:cs_test_someone_else`, link: "https://meet.google.com/abc-defg-hij" };
+  is("meeting records: another booking's record under this key fails the making, nothing kept", await planted(/^nl:meet:r:/, JSON.stringify(otherScope)), [true, 503, false, true]);
 
   part("Each reply stays within 1 MiB at the bytes it is priced at; the other readers keep their GETs");
   is("50 listings at LISTING_READ_BYTES, 400 room keys at 1,024 bytes: each MGET's reply within 1 MiB", [LISTINGS_PER_MGET * LISTING_READ_BYTES <= 1_048_576, ROOM_KEYS_PER_MGET * 1_024 <= 1_048_576], [true, true]);

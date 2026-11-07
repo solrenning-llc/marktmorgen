@@ -34,6 +34,8 @@ const realPipeline = redis.pipeline.bind(redis);
 const realFetch = globalThis.fetch;
 const deletes: string[] = [];
 let deleteStatus = 204;
+/** Paths whose DELETE always fails (500), whatever deleteStatus says. */
+const poisoned = new Set<string>();
 
 const path = (name: string) => `vault/${FOLDER}/tasks/${name}.pdf`;
 const stale = () => Date.now() - (DOOR_SECONDS + 60) * 1000;
@@ -45,6 +47,7 @@ beforeEach(() => {
   redis.pipeline = realPipeline;
   deletes.length = 0;
   deleteStatus = 204;
+  poisoned.clear();
   Object.assign(process.env, {
     RESEND_API_KEY: "re_test_task_upload_sweep_stand_in",
     R2_ACCOUNT_ID: ACCOUNT,
@@ -56,8 +59,9 @@ beforeEach(() => {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.hostname === `${ACCOUNT}.r2.cloudflarestorage.com` && init?.method === "DELETE") {
-      deletes.push(decodeURIComponent(url.pathname.slice(`/${BUCKET}/`.length)));
-      return new Response(null, { status: deleteStatus });
+      const key = decodeURIComponent(url.pathname.slice(`/${BUCKET}/`.length));
+      deletes.push(key);
+      return new Response(null, { status: poisoned.has(key) ? 500 : deleteStatus });
     }
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
@@ -193,4 +197,53 @@ test("cost: the healthy sweep is one list read and one pipeline of one ZREM per 
     [["ZRANGEBYSCORE"], ["ZREM", "ZREM", "ZREM"]],
   );
   assert.equal(deletes.length, 3);
+});
+
+// Claude 5's review of #3045 (6704214405).
+test("MEDIUM: a path whose deletion always fails holds only itself, never the rest of the batch", async () => {
+  await noteTaskUpload(path("poison"), stale());
+  await noteTaskUpload(path("good"), stale());
+  poisoned.add(path("poison"));
+  const outcomes = [await run(), await run(), await run()];
+  assert.equal(deletes.filter((d) => d === path("good")).length, 1, "the good file is deleted once, on the first run");
+  assert.equal(onList(path("good")), false, "and its door is gone");
+  assert.equal(onList(path("poison")), true, "the failing one is put back, alone");
+  assert.deepEqual(outcomes.map((o) => o.unusedUploads), [1, 0, 0], "the cron counts what was deleted");
+});
+
+test("LOW: with one ZREM unknown and one won, the cron still counts the won file deleted", async () => {
+  await noteTaskUpload(path("won"), stale());
+  await noteTaskUpload(path("unknown"), stale());
+  const outcome = await watching(
+    (commands, replies) => (isDoorTake(commands) ? commands.map((c, i) => (c[2] === path("unknown") ? "1" : replies[i])) : undefined),
+    run,
+  );
+  assert.equal(outcome.unusedUploads, 1);
+});
+
+test("LOW: the ZREMs go in pipelines of 25, so a reply lost after they ran leaves at most 25 doors off the list", async () => {
+  const names = Array.from({ length: 30 }, (_, i) => `many-${String(i).padStart(2, "0")}`);
+  for (const name of names) await noteTaskUpload(path(name), stale());
+  const sizes: number[] = [];
+  await watching((commands) => {
+    if (isDoorTake(commands)) sizes.push(commands.length);
+    return undefined;
+  }, run);
+  assert.deepEqual(sizes, [25, 5]);
+  assert.equal(deletes.length, 30);
+
+  redis.clear();
+  deletes.length = 0;
+  for (const name of names) await noteTaskUpload(path(name), stale());
+  let first = true;
+  const lost = await watching(async (commands) => {
+    if (isDoorTake(commands) && first) {
+      first = false;
+      throw new Error("the reply was lost after the ZREMs ran");
+    }
+    return undefined;
+  }, run);
+  assert.equal(lost.ok, true, "the job still answers");
+  assert.equal(deletes.length, 5, "the next pipeline's won doors are still deleted");
+  assert.equal(names.filter((n) => onList(path(n))).length, 0, "the 25 of the lost reply left the list (their files may stay, as in community-files)");
 });

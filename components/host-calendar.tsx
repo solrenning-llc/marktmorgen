@@ -7,6 +7,7 @@ import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { HostCalendarView, HostSource, SyncState } from "@/lib/host-calendar";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -105,7 +106,7 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
             {view.sync.lastSuccess ? `Last successful sync: ${when(view.sync.lastSuccess)}.` : "Last successful sync: never."}{" "}
             {view.source === "none"
               ? "Pick a calendar below so meetings you have elsewhere are never booked over."
-              : "Read again at most every 15 minutes while someone is looking at a booking page. If the last good reading is more than 45 minutes old, or your calendar cannot be read, your times are hidden until it can be, and the other hosts' times stay open."}
+              : `Read again at most every ${HOST_SYNC_MINUTES} minutes while someone is looking at a booking page. If the last good reading is more than ${HOST_STALE_MINUTES} minutes old, or your calendar cannot be read, your times are hidden until it can be, and the other hosts' times stay open.`}
           </p>
           {view.sync.message ? (
             <p className={`notice mt-3 ${view.sync.blocked ? "notice-warn" : ""}`} role="status">

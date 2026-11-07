@@ -6,7 +6,9 @@
  *     (lib/headline-test-rules.ts, boundary), so nothing running today changes;
  *   - with three or four versions the line is stricter (Bonferroni over every
  *     pair), so a lead that wins between two versions is "too close" among four;
- *   - money is net of refunds: refunds can turn the leader into the loser;
+ *   - money is net of refunds and of disputes that take the money
+ *     (lib/retained-revenue.ts, DISPUTE_TAKES): either can turn the leader
+ *     into the loser, and an order refunded or disputed is not a kept sale;
  *   - each version needs MIN_VIEWS visitors and MIN_SALES sales that were not
  *     refunded, and the test must have run REFUND_DAYS days;
  *   - an exact tie, a split that is off, mixed currencies and figures that
@@ -36,6 +38,8 @@ const v = (id: string, visitors: number, kept: number, refunded = 0, currency = 
   paidCents: (kept + refunded) * PRICE,
   refundedOrders: refunded,
   refundedCents: refunded * PRICE,
+  disputedOrders: 0,
+  disputedCents: 0,
   netSquares: kept * PRICE * PRICE,
   currency,
 });
@@ -67,7 +71,7 @@ part("two versions: a clear lead wins, figures net of refunds");
   is(
     "words",
     out.words,
-    "Version B is the winner. After refunds, it brought the most money per 100 visitors: $100, against $50 for Version A. Its lead over every other version is large enough that chance alone is unlikely: the rule allows at most a 5% chance of a false winner over the whole test. This shows what happened during the test. It is not a promise of future sales.",
+    "Version B is the winner. After refunds and disputes, it brought the most money per 100 visitors: $100, against $50 for Version A. Its lead over every other version is large enough that chance alone is unlikely: the rule allows at most a 5% chance of a false winner over the whole test. This shows what happened during the test. It is not a promise of future sales.",
   );
   is("comparisons shown with their line", out.comparisons?.map((c) => c.against), ["a"]);
   is("each comparison clears its line", out.comparisons?.every((c) => c.z >= c.line), true);
@@ -87,18 +91,41 @@ part("refunds turn the leader into the loser");
     visitors: 4_000,
     paidOrders: 90,
     refundedOrders: 50,
+    disputedOrders: 0,
     keptOrders: 40,
     paidCents: 450_000,
     refundedCents: 250_000,
+    disputedCents: 0,
     netCents: 200_000,
     netPer100Cents: 5_000,
     currency: "usd",
   });
   // A partial refund lowers money but the sale stays a sale; it does not count toward the minimum.
-  const partial: AbVersion = { id: "c", visitors: 4_000, paidOrders: 2, paidCents: 10_000, refundedOrders: 1, refundedCents: 2_000, netSquares: 5_000 ** 2 + 3_000 ** 2, currency: "usd" };
+  const partial: AbVersion = { id: "c", visitors: 4_000, paidOrders: 2, paidCents: 10_000, refundedOrders: 1, refundedCents: 2_000, disputedOrders: 0, disputedCents: 0, netSquares: 5_000 ** 2 + 3_000 ** 2, currency: "usd" };
   const out2 = abDecision(input([partial, v("d", 4_000, 80)]));
   is("a partly refunded sale is not a kept sale for the minimum", out2.reason, "too_few");
   is("its net is the money minus the refund", out2.figures?.[0].netCents, 8_000);
+}
+
+part("disputes that take the money are not money kept (finding of Claude 3 on #3002)");
+{
+  // B sold 150 but lost 80 of them to disputes; A sold 80 and kept them all.
+  const b: AbVersion = { ...v("b", 4_000, 70), paidOrders: 150, paidCents: 150 * PRICE, disputedOrders: 80, disputedCents: 80 * PRICE };
+  const out = abDecision(input([v("a", 4_000, 80), b]));
+  is("a version that lost more than half its money to disputes is not named the winner", out.winner === "b", false);
+  is("A is the one ahead on money kept (80 against 70 sales is still too close to call)", [out.reason, out.words.includes("Version A is ahead")], ["too_close", true]);
+  const clear = abDecision(input([v("a", 4_000, 80), { ...v("b", 4_000, 45), paidOrders: 145, paidCents: 145 * PRICE, disputedOrders: 100, disputedCents: 100 * PRICE }]));
+  is("with 80 kept sales against 45 kept, A wins although B sold more", [clear.reason, clear.winner], ["clear_lead", "a"]);
+  is("B's kept money leaves out the disputed money", out.figures?.[1].netCents, 70 * PRICE);
+  is("a disputed order is not a kept sale", out.figures?.[1].keptOrders, 70);
+  is("the disputes are shown", [out.figures?.[1].disputedOrders, out.figures?.[1].disputedCents], [80, 80 * PRICE]);
+  const few = abDecision(input([{ ...v("a", 4_000, 5), paidOrders: 15, paidCents: 15 * PRICE, disputedOrders: 10, disputedCents: 10 * PRICE }, v("b", 4_000, 80)]));
+  is("disputed orders do not count toward the minimum", [few.reason, few.short?.[0]?.sales], ["too_few", MIN_SALES - 5]);
+  is(
+    "the minimum says disputes are left out",
+    few.words.startsWith(`No clear winner yet: there is not enough data. Each version needs at least ${MIN_VIEWS} visitors and ${MIN_SALES} sales that were not refunded or disputed.`),
+    true,
+  );
 }
 
 part("four versions: stricter line, named laggards");
@@ -115,7 +142,7 @@ part("four versions: stricter line, named laggards");
   is(
     "words",
     four.words,
-    "No clear winner yet. Version B is ahead after refunds, but its lead over Version A, Version C and Version D is still small enough to be chance. With 4 versions, each lead must be larger than with 2, so that a false winner stays at most 5% likely.",
+    "No clear winner yet. Version B is ahead after refunds and disputes, but its lead over Version A, Version C and Version D is still small enough to be chance. With 4 versions, each lead must be larger than with 2, so that a false winner stays at most 5% likely.",
   );
 
   const mixed = abDecision(input([v("a", 4_000, 40), v("b", 4_000, 90), v("c", 4_000, 80), v("d", 4_000, 40)]));
@@ -129,7 +156,7 @@ part("ties");
   is(
     "words",
     tie.words,
-    "No clear winner yet. Version A and Version B brought exactly the same money per 100 visitors after refunds: $100.",
+    "No clear winner yet. Version A and Version B brought exactly the same money per 100 visitors after refunds and disputes: $100.",
   );
   const topTie = abDecision(input([v("a", 4_000, 40), v("b", 4_000, 90), v("c", 4_000, 90), v("d", 4_000, 40)]));
   is("a tie at the top among four names the two tied", [topTie.reason, topTie.tied], ["tie", ["b", "c"]]);
@@ -146,7 +173,7 @@ part("tiny samples");
   is(
     "words",
     out.words,
-    `No clear winner yet: there is not enough data. Each version needs at least ${MIN_VIEWS} visitors and ${MIN_SALES} sales that were not refunded. Version A needs 50 more visitors. Version B needs 1 more sale.`,
+    `No clear winner yet: there is not enough data. Each version needs at least ${MIN_VIEWS} visitors and ${MIN_SALES} sales that were not refunded or disputed. Version A needs 50 more visitors. Version B needs 1 more sale.`,
   );
   const none = abDecision(input([v("a", 0, 0), v("b", 0, 0)]));
   is("nothing yet is too few, not a tie", none.reason, "too_few");
@@ -203,6 +230,16 @@ part("refused: mixed currencies, bad figures, wrong number of versions");
     ["shares not adding to one", input([v("a", 4_000, 40), v("b", 4_000, 80)], { shares: [0.5, 0.6] })],
     ["shares of the wrong length", input([v("a", 4_000, 40), v("b", 4_000, 80)], { shares: [1] })],
     ["a zero share", input([v("a", 4_000, 40), v("b", 4_000, 80)], { shares: [1, 0] })],
+    // Findings of the first independent review on #3002: refunded orders and refunded money go together.
+    ["refunded money with no refunded order", input([v("a", 4_000, 40), { ...v("b", 4_000, 79), paidOrders: 80, paidCents: 80 * PRICE, refundedCents: 1_000, netSquares: 79 * PRICE * PRICE + 4_000 ** 2 }])],
+    ["refunded orders with no refunded money", input([v("a", 4_000, 40), { ...v("b", 4_000, 80), paidOrders: 82, refundedOrders: 2 }])],
+    // Finding of Claude 3 on #3002 (LEVE 2): paid orders with no money are not sales.
+    ["paid orders with no money", input([{ ...v("a", 4_000, 0), paidOrders: 10 }, v("b", 4_000, 12)])],
+    // Finding of Claude 3 on #3002 (MÉDIO 1): disputes are read, never taken as none.
+    ["disputes not read", input([v("a", 4_000, 40), { ...v("b", 4_000, 80), disputedOrders: undefined, disputedCents: undefined } as unknown as AbVersion])],
+    ["disputed money with no disputed order", input([v("a", 4_000, 40), { ...v("b", 4_000, 79), paidOrders: 80, paidCents: 80 * PRICE, disputedCents: PRICE, netSquares: 80 * PRICE * PRICE }])],
+    ["disputed orders with no disputed money", input([v("a", 4_000, 40), { ...v("b", 4_000, 80), paidOrders: 81, disputedOrders: 1 }])],
+    ["more refunded and disputed than paid", input([v("a", 4_000, 40), { ...v("b", 4_000, 0), paidOrders: 10, paidCents: 10 * PRICE, refundedOrders: 6, refundedCents: 6 * PRICE, disputedOrders: 5, disputedCents: 5 * PRICE, netSquares: 4 * PRICE * PRICE }])],
   ];
   for (const [what, figures] of bad) {
     const out = abDecision(figures);

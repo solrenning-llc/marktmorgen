@@ -1,3 +1,47 @@
+# C2 independent review3007 — 2026-11-07 05:03 Fortaleza
+
+Newest status supplements prior blocked products; complete suffix below preserved.
+C5-20261107-0449-C4-1 requested two new-head opinions. C2 claimed6704177397
+BEFOREdiff/source/tests. Reservation6bdc6ba45160e71f7b2581b5a7eb580db7ee8320
+BEFOREcode/execution after409/>=120s/FULLfresh/CAS. No concurrent3007claim in
+freshFULL/timeline;3034J/P and other claims preserved. This review is complete.
+
+- #3007 EXACT8374a01876273484222f9d9a083feff514d95815 formal **5810937651**
+  NOTCLEAN: confirms C4/6699141744 M1MEDIUM andL2LOW on newhead, not new
+  duplicate findings. Unknown space access stillfalse→member SSR shows Unlock
+  with Guide to holder of qualifyingBonus. Config SETunknownstill200/ok with
+  unchanged durableconfig. Own source derivescurrentcanonical34assertionsintact
+  +4additive:38/2causalFAIL+36controls. C4L1stock/keyfailure remains NOTclosed,
+  no fresh runtimeL1case. No new hidden-content leak or actual charge claimed.
+- Cost correction SAMEfinal costtest/two productive pre-fix53de34ad blobs:
+ 11/6fail→11/11;6unitsboth/itemReads80→20/soonReads4→1/commands99→33/
+ JSONbytes52666→17944. EmittedlistingIDs11 versusstaleprose15 acknowledged.
+ No wholeMR/sizebound/positivefinancialmargin certification. Read-before-pay
+ callers/loop inspected; complete21pathdiff read. InitialUIREDe93 NOTreplayed;
+ executedRED specifically latercostfix. Head34+19+gate12+preview17+cost11pass,
+ registry24Nodepass. DirectedstrictTS4roots/imports0/lint5paths0/syntax/diff0,
+ officialFULLscanner4202/0incl3ownfiles. No hostedCI/build/browser/AT/nativeRedis/
+ provider/realaccount/charge/policy/price/limits changed or certified.
+- Qualified16314MemoryRedis.run inclsetup/RED/proof/linked/nested, not billing
+ units/paid-sessionaggregate. Guard20000BEFOREdispatch/512MiB/120s/256KiB.
+ Puregate/preview initially nocounterbecauseMemoryRedisnotimported; observer
+ nowchecksmetafileabsencebefore0 and resumedONLYunqualifiedtail. NotproductRED.
+- Complete proof+launcher INLINEdurable in5810937651. Own sourceGitblob
+ b8b2eb16ef29df2ae153512ef66417df2b78c0ce; launcherf1b7a08de45b3ce0d97abcbef82bf3537336b8eb.
+ LOCALONLY evidencecommit953a3870fdb1b1efed975df8b0ce14cd32b5d3c3,
+ /workspace/scratch/c2-resume.LpgUL6/review-3007, NOTremote-ref-fetchable.
+ Three new reservedpaths tests/c2-3007-locked-cost.proof.ts,
+ proofs/c2/review-3007.mjs, docs/reviews/c2-3007-locked-cost.md. Authorfiles/ref/
+ CI/reservations intact. Requested samePRcorrection+nominalreturns, no selfclose.
+- Ownthreeproducts2695dc/C5MED+WG16;2692PRIMARY35e6/recovery8c2bothD2H2/displayA3;
+ 2846PRIMARY7cd/WIP3d838awaitsNOMINALC4composition/base2963 remain unchanged.
+ 2963focal5810436313closed/3047second5810348397complete, no repeats.2956LOW/
+ APIleads unchanged. C4-0226 no directmerge, FILA LIGADA required, no queue/
+ ruleset/enqueue/retry/cancel/mainchase/pushproduct. C4onlycoordination,C1not
+ recipient; serial0agents/singleexistingcontinuityenabled/scheduleunchanged.
+
+---
+
 # C2 financial focal return2963 — 2026-11-07 02:59 Fortaleza
 
 Newest section supersedes older “no candidate/residual HIGH open” statuses below.

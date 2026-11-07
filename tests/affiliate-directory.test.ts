@@ -13,7 +13,7 @@
  */
 import { addProduct, claimHandle, setProductExtras, ensureStatsId, setAffiliateSetting, setProductHidden, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
-import { DIRECTORY_BUILD_SECONDS, DIRECTORY_ORDER, DirectoryBusyError, MIN_CLICKS_FOR_RATES, directoryNumbers, directoryRow, readDirectory, sortRows, type DirectoryRow } from "@/lib/affiliate-directory";
+import { DIRECTORY_BUILD_SECONDS, DIRECTORY_ORDER, MIN_CLICKS_FOR_RATES, directoryNumbers, directoryRow, readDirectory, sortRows, type DirectoryRow } from "@/lib/affiliate-directory";
 import { programNumbers } from "@/lib/affiliates";
 import { redisPipeline } from "@/lib/redis";
 import { HOUSE_OWNER } from "@/lib/house-store";
@@ -113,9 +113,9 @@ async function main(): Promise<void> {
 
   part("Taken off at once");
   await setAffiliateSetting(D, parseAffiliateSetting({ ...terms, percent: 40, rates: {}, directory: false }));
-  // Built less than DIRECTORY_BUILD_SECONDS ago, the page is not built again yet: the next read says unavailable,
-  // never the page from before the save (tests/directory-assembly-ceiling.test.ts).
-  is("unchecking the box takes the page down at once: never the list from before", await readDirectory().then(() => "listed", (error) => error instanceof DirectoryBusyError), true);
+  // Built less than DIRECTORY_BUILD_SECONDS ago, the page is not built again yet: the next read shows the last page
+  // without every store no longer in the listed set (tests/directory-held-down.test.ts), never the store just taken out.
+  is("unchecking the box takes the program off at once, inside the build window too", await readDirectory().then((rows) => rows.map((r) => r.handle), (error) => String(error)), ["breadhouse"]);
   advance(DIRECTORY_BUILD_SECONDS * 1000);
   is("unchecking the box leaves the page on the next build, not ten minutes later", (await readDirectory()).map((r) => r.handle), ["breadhouse"]);
 

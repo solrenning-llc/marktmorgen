@@ -93,7 +93,7 @@ async function main(): Promise<void> {
   is("DirectoryBusyError is exported", typeof Busy, "function");
   const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_HOUR ?? "";
   is("the registry prices the build rate by name", line.length > 0, true);
-  is("and states the bounded worst case: commands per build and builds per hour", [line.includes("12,067"), line.includes("60 builds"), line.includes("724,020")], [true, true, true]);
+  is("and states the bounded worst case: commands per build and builds per hour", [line.includes("12,068"), line.includes("60 builds"), line.includes("724,080")], [true, true, true]);
   const scanLine = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_SCAN_PAGES ?? "";
   is("the scan line no longer says the rate is unbounded", scanLine.includes("not bounded yet"), false);
 
@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   await save("baker@example.com");
   is("the save dropped the kept page", await kept(), null);
   const soon = await counted(() => attempt());
-  is("the next visit is told unavailable, not shown the old list", soon.result, "busy");
+  is("the next visit is shown the last page, filtered by the listed set, not built again", soon.result, ["breadhouse"]);
   is("and sends no SSCAN", soon.words.SSCAN ?? 0, 0);
   advance(WINDOW_MS);
   const later = await counted(() => attempt());
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   is("the build fails as unknown", await attempt(), "UnknownReplyError");
   redis.pipeline = original;
   const retry = await counted(() => attempt());
-  is("the next visit does not walk again", [retry.result, retry.words.SSCAN ?? 0], ["busy", 0]);
+  is("the next visit does not walk again: the last good page, filtered", [retry.result, retry.words.SSCAN ?? 0], [["breadhouse"], 0]);
   advance(WINDOW_MS);
   is("after the window, it builds again", await attempt(), ["breadhouse"]);
 
@@ -155,7 +155,7 @@ async function main(): Promise<void> {
   redis.pipeline = original;
   is("the row is shown without numbers, as before, and nothing is kept", [partial.map((r) => r.handle), partial[0]?.numbers, await kept()], [["breadhouse"], null, null]);
   const afterPartial = await counted(() => attempt());
-  is("the next visit does not walk again", [afterPartial.result, afterPartial.words.SSCAN ?? 0], ["busy", 0]);
+  is("the next visit does not walk again: the last good page, filtered", [afterPartial.result, afterPartial.words.SSCAN ?? 0], [["breadhouse"], 0]);
 
   part("The claim's own reply is read exactly (rule 24)");
   for (const [label, reply] of [["missing", undefined], ["QUEUED", "QUEUED"], ["a number", 1], ["a list", []], ["an empty string", ""]] as const) {

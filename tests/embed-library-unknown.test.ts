@@ -125,15 +125,10 @@ async function main(): Promise<void> {
   is("control: a coming-soon product leads to its waitlist", (await card("emblibunknown", fromHead)).includes(w.joinWaitlist), true);
   inject = { when: soonRead, reply: () => [0, null] };
   is("control: a product confirmed not coming soon shows its buy button", (await card("emblibunknown", fromHead)).includes(w.buyFor("$40")), true);
-  // Out of shape is unknown too, not only a failed request (Claude 5 on #2910): soonOne reads the SISMEMBER exactly
-  // (lib/preorders.ts, #2846), so the card's catch covers these as well.
-  for (const [name, reply] of [
-    ["a failed request", failed],
-    ["no membership answer", () => [null, null]],
-    ["no reply at all", () => []],
-    ["a word for the membership", () => ["QUEUED", null]],
-    ["a membership of 2", () => [2, null]],
-  ] as const) {
+  // A failed request is unknown here. An answer out of shape (no membership answer, no reply, a word, a 2) is read by
+  // soonOne (lib/preorders.ts), whose exact read is #2846's change, with its own tests there; the card cases for those
+  // shapes come with it (Claude 5 on #2910), so this PR does not build the same read twice.
+  for (const [name, reply] of [["a failed request", failed]] as const) {
     inject = { when: soonRead, reply };
     const soonUnread = await card("emblibunknown", fromHead);
     inject = null;

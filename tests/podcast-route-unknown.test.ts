@@ -16,7 +16,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, setPodcastEpisodes, storeFolder, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
-import type { Podcast } from "@/lib/podcast-rules";
+import { MAX_EPISODES, type Podcast } from "@/lib/podcast-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { POST as podcastRoute } from "@/app/api/store/podcast/route";
 import { store as redis } from "./redis-stub";
@@ -41,13 +41,16 @@ const original = redis.pipeline.bind(redis);
 const post = (session: string, body: unknown) =>
   podcastRoute(new NextRequest(`${ORIGIN}/api/store/podcast`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
 
+/** A bent reply: built from the podcast's id and, when it needs it, the double's own reply to the same GET. */
+type Bent = (podcastId: string, stored: () => Promise<unknown>) => unknown;
+
 /** Only the next GET of nl:pod:<id> answers `reply`; everything else is the double's own. */
-function bendPodcastGet(podcastId: string, reply: () => unknown) {
+function bendPodcastGet(podcastId: string, reply: Bent) {
   let bent = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (!bent && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:pod:${podcastId}`) {
       bent = true;
-      return reply();
+      return reply(podcastId, () => original(commands));
     }
     return original(commands);
   }) as typeof redis.pipeline;
@@ -72,7 +75,13 @@ async function thrown(run: () => Promise<unknown>): Promise<string> {
   }
 }
 
-const UNKNOWN: [string, () => unknown][] = [
+/** The stored record as the double holds it, so a bent reply can change one part of it and keep the rest. */
+async function storedRecord(stored: () => Promise<unknown>): Promise<{ id: string; episodes: Record<string, unknown>[] }> {
+  const [raw] = (await stored()) as [string];
+  return JSON.parse(raw) as { id: string; episodes: Record<string, unknown>[] };
+}
+
+const UNKNOWN: [string, Bent][] = [
   ["no reply", () => []],
   ["two replies", () => [null, null]],
   ["not a list", () => ({ 0: null })],
@@ -80,6 +89,24 @@ const UNKNOWN: [string, () => unknown][] = [
   ["unparseable text", () => ["{\"id\":"]],
   ["JSON that is not a podcast", () => ["{\"id\":\"not a podcast id\"}"]],
   ["a Proxy", () => new Proxy([null], {})],
+  // This podcast's own id, but episodes that cannot all be read: written back, the unread ones would leave the feed
+  // (independent review on #2982, comment 6698656097).
+  ["this podcast with no episodes list", (id) => [JSON.stringify({ id })]],
+  ["this podcast with episodes that are not a list", (id) => [JSON.stringify({ id, episodes: { a: 1 } })]],
+  ["this podcast with its episodes as JSON text", async (_id, stored) => {
+    const record = await storedRecord(stored);
+    return [JSON.stringify({ id: record.id, episodes: JSON.stringify(record.episodes) })];
+  }],
+  ["this podcast with one episode that does not parse", async (_id, stored) => {
+    const record = await storedRecord(stored);
+    delete record.episodes[1].pathname;
+    return [JSON.stringify(record)];
+  }],
+  ["this podcast with more episodes than MAX_EPISODES", async (_id, stored) => {
+    const record = await storedRecord(stored);
+    const more = Array.from({ length: MAX_EPISODES + 1 - record.episodes.length }, (_, n) => ({ ...record.episodes[0], id: `x${String(n).padStart(11, "0")}` }));
+    return [JSON.stringify({ id: record.id, episodes: [...record.episodes, ...more] })];
+  }],
 ];
 
 async function main(): Promise<void> {

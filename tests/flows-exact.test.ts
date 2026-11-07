@@ -10,6 +10,9 @@
  *    never dropped; once Redis answers again, the step is sent.
  * 3. lib/flow-runs.ts siblings: readRun and runPeople throw on an unknown slot rather than answering "no such run" or
  *    "this run holds no address".
+ * 4. sendDueSteps: a workflows reply that is a string but not a JSON list is unknown too, never "no workflows".
+ * 5. readRun and listRuns: an HGETALL list of odd length (or, in listRuns, of another shape) is unknown, never
+ *    "no such run" or a run left out of the list.
  */
 import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { listRuns, personOf, readRun, runPeople } from "@/lib/flow-runs";
@@ -133,6 +136,62 @@ async function main(): Promise<void> {
   const runPeopleThrows = await rejects(() => runPeople(flowId));
   redis.pipeline = original;
   is("runPeople throws on an unknown HGET slot", runPeopleThrows, true);
+
+  part("4. The workflows GET answers a string that is not a JSON list ('{', '{}', '\"x\"') while Dee's first step is due: the batch stays queued");
+  await upsertContact(list, "dee@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "dee@example.com", { joined: true });
+  const runAt = async (offsetMs: number) => {
+    const clock = Date.now;
+    Date.now = () => clock() + offsetMs;
+    try {
+      return await run();
+    } finally {
+      Date.now = clock;
+    }
+  };
+  // Each attempt comes after the previous put-back's ten-minute wait.
+  let offset = 0;
+  for (const garbled of ["{", "{}", '"x"']) {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:mail:flows:${list}`) return [garbled];
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const garbledCounts = await runAt(offset);
+    redis.pipeline = original;
+    offset += 700_000;
+    is(`GET ${JSON.stringify(garbled)}: Dee's batch is not counted as dropped`, garbledCounts.dropped, 0);
+    const [q] = await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]);
+    const [l] = await original([["ZRANGEBYSCORE", "nl:mail:flowq:lease", "-inf", "+inf"]]);
+    is(`GET ${JSON.stringify(garbled)}: Dee's step is still queued or reserved`, [...(q as string[]), ...(l as string[])].filter((m) => m.endsWith("|dee@example.com")).length, 1);
+    is(`GET ${JSON.stringify(garbled)}: nothing was sent to Dee`, got("Day one", "dee@example.com"), 0);
+  }
+  await runAt(offset);
+  is("Healthy control: with the workflows readable again, Dee gets 'Day one' once", got("Day one", "dee@example.com"), 1);
+
+  part("5. readRun and listRuns: an HGETALL slot of strings with an odd length is unknown, never 'no such run'");
+  for (const odd of [["status"], ["status", "running", "email"]]) {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const reply = await original(commands);
+      if (commands.length === 2 && commands[0][0] === "HGETALL" && String(commands[0][1]).startsWith("nl:wf:run:")) return [odd, reply[1]];
+      return reply;
+    }) as typeof redis.pipeline;
+    const oddThrows = await rejects(() => readRun(flowId, personOf("ana@example.com")));
+    redis.pipeline = original;
+    is(`readRun throws on HGETALL ${JSON.stringify(odd)}`, oddThrows, true);
+  }
+  is("control: readRun still reads Ana's run", (await readRun(flowId, personOf("ana@example.com")))?.run.step, 1);
+  // Rule 30 sibling: listRuns reads the same HGETALL rows; one off-shape row is unknown, never a run that is not there.
+  is("control: listRuns lists four runs", (await listRuns(flowId, 10)).length, 4);
+  for (const bad of ["garbled", ["status"]] as unknown[]) {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const reply = await original(commands);
+      if (commands.length > 1 && commands.every((c) => c[0] === "HGETALL")) return reply.map((r, i) => (i === 0 ? bad : r));
+      return reply;
+    }) as typeof redis.pipeline;
+    const listThrows = await rejects(() => listRuns(flowId, 10));
+    redis.pipeline = original;
+    is(`listRuns throws on an HGETALL row ${JSON.stringify(bad)}`, listThrows, true);
+  }
   done();
 }
 main();

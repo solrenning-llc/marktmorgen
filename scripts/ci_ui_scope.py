@@ -91,8 +91,14 @@ RENAMED_LOADER = re.compile(
     r"""|[=:,(\[?{]\s*require\b(?!\s*(?:[(.\w$]|=(?!=)))""")
 
 
+# require reached through a member or an index (Codex G's sixth return on #3037): require.call,
+# .apply, .bind, require["call"], require?.call. Only require.resolve with one whole literal is
+# followed (COMPUTED reads its argument); any other member of require is computed.
+INDIRECT_REQUIRE = re.compile(r"""\brequire\s*(?:\?\.\s*(?!\()|\.\s*)(?!resolve\b)[A-Za-z_$]|\brequire\s*(?:\?\.\s*)?\[""")
+
+
 def computed(code):
-    if COMPUTED.search(code) or RENAMED_LOADER.search(code):
+    if COMPUTED.search(code) or RENAMED_LOADER.search(code) or INDIRECT_REQUIRE.search(code):
         return True
     if any(not BOUND_TO_REQUIRE.search(code[:m.start()]) and not CALLED_WITH_LITERAL.match(code, m.start())
            for m in CREATE_REQUIRE.finditer(code)):

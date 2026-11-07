@@ -1,0 +1,612 @@
+Raw execution logs; original records are retained in /tmp. Final graph uses exact3e15 except explicit old-module overlays.
+
+===== permanent =====
+J_FOCAL head sz2-physical-legal.test.ts EXACT_TARGET 3e15c17d20e076c08f68080a241fc7222120f2f0
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+GPSR: the area and a complete record
+  ok    the area is the 27 EU states plus Iceland, Liechtenstein and Norway
+  ok    Germany, France and Norway are in it
+  ok    the US, the UK and Switzerland are not
+  ok    a stored record reads back, country upper-cased
+  ok    an EU manufacturer with type, picture and a stated 'no warnings' has no gaps
+  ok    so no country is closed
+
+GPSR: what is missing
+  ok    no record at all lists every gap
+  ok    no picture is a gap (art. 19(c))
+  ok    a manufacturer outside the area needs an EU responsible person
+  ok    its EU/EEA countries close, the rest keep selling
+  ok    a responsible person outside the area does not count
+  ok    an EU responsible person with a web contact page closes the gap
+  ok    a responsible person without postal and electronic address is a gap
+  ok    empty warnings without the 'none' statement is a gap: never inferred
+  ok    warnings text closes it
+  ok    an electronic address that is neither email nor https is a gap
+  ok    http (not https) is not a contact page
+  ok    a field with a control character is dropped, so it becomes a gap
+  ok    whitespace is folded
+  ok    an unknown country is a gap
+  ok    garbage from storage reads as no record
+
+California Proposition 65 text (the creator's, checked, never written by the code)
+  ok    only when the product ships to the US
+  ok    empty is fine: nothing is shown
+  ok    WARNING: with the site
+  ok    CA WARNING: is accepted
+  ok    CALIFORNIA WARNING: is accepted
+  ok    no signal word first
+  ok    the signal word in lower case is not the signal word
+  ok    no P65Warnings site
+  ok    too long
+  ok    a control character
+
+Unit price (computed from the price charged, never typed)
+  ok    250 g at 2.49 is 9.96 per kilogram
+  ok    0.75 L at 12.99 is 17.32 per liter
+  ok    a decimal comma reads the same
+  ok    33 cl at 1.99 is 6.03 per liter (6.0303..., rounded)
+  ok    half a cent rounds up: 2 kg at 0.01
+  ok    1 kg at 5.00 is the selling price itself
+  ok    150 cm² at 3.00 is 200.00 per square meter
+  ok    2.5 m at 10.00 is 4.00 per meter
+  ok    500 cm³ at 1.00 is 2,000.00 per cubic meter
+  ok    zero quantity is not a quantity
+  ok    more than three decimals is refused
+  ok    an unknown unit is refused
+  ok    a negative amount is refused
+  ok    no quantity, no unit price
+  ok    an absurd result is refused rather than shown wrong
+  ok    the unit is written out for screen readers (3.1.4)
+  ok    liter
+
+Prior lowest price (98/6/EC art. 6a; CJEU C-330/23)
+  ok    the same price again adds no step
+  ok    the lowest price of the 30 days before, not the price the day before
+  ok    the sale price itself (from the start) is not part of its prior price
+  ok    a later sale, 45 days in: the 800 ended before its window
+  ok    a window that starts before the first price is flagged incomplete
+  ok    no price before the start: nothing to show
+  ok    an empty history: nothing to show
+  ok    the window is 30 days
+  ok    kept for the window plus the longest sale, so a running sale still finds its prior price
+  ok    on the last day of a long sale its prior price is unchanged
+  ok    steps that ended before the kept period are dropped
+  ok    a clock that goes back never reorders, never drops a price and never stamps one later than any time seen
+  ok    the history never holds more than its cap
+  ok    merging keeps the lower price, so the prior price is never higher than the truth
+  ok    the current price is never merged away
+  ok    a non-integer or negative price is not recorded
+
+Prior lowest price: same-second changes keep their real time (review J5809017387, MEDIUM)
+  ok    no step is stamped later than the clock that recorded it
+  ok    two prices in the same second both stay, in the order applied
+  ok    a sale a second later finds the 20 applied before it, not the 500
+  ok    a sale in the same second counts the prices it replaced in that second
+  ok    the healthy sequential case is unchanged
+
+Prior lowest price: an unreadable history is never a complete subset (review J5809017387, LOW)
+  ok    one unreadable step makes the whole history unreadable, not a complete 1000
+  ok    a history that is not a list is unreadable
+  ok    a step that is not a record is unreadable
+  ok    recording onto an unreadable history keeps it as it came, never filtered
+  ok    so it still reads as unreadable afterward
+
+Proposition 65: the site is named on its own (review J5809017387, LOW)
+  ok    a longer hostname that only starts with the site does not name it
+  ok    the site inside another word does not name it
+  ok    the site as a path on another host does not name it
+  ok    the site with a hyphenated suffix does not name it
+  ok    the site with https and a path names it
+  ok    the site in parentheses names it
+  ok    the site followed by a comma names it
+
+81 checks, all passing.
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0
+
+===== frozen =====
+J_FOCAL head j-2934-physical-legal.proof.ts EXACT_TARGET 3e15c17d20e076c08f68080a241fc7222120f2f0
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+SAME_SECOND_HISTORY [{"at":1790553600,"cents":1000},{"at":1794009600,"cents":500},{"at":1794009600,"cents":20},{"at":1794009601,"cents":10}] {"cents":20,"complete":true}
+✔ healthy unit-price and sequential history controls (8.204848ms)
+✔ two legitimate changes in one second cannot inflate the next sale's prior lowest price (0.866573ms)
+✖ an unreadable history step cannot certify a complete known prior price (2.15718ms)
+✔ warning shape must name the intended site rather than a suffix hostname (0.87634ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22.402741
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j2934-focal-yVIYPr/proof.cjs:158:27
+✖ an unreadable history step cannot certify a complete known prior price (2.15718ms)
+  AssertionError [ERR_ASSERTION]: malformed price evidence must not become a complete known reference
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-yVIYPr/proof.cjs:161:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 1
+
+===== additive =====
+J_FOCAL head j-2934-focal.proof.ts EXACT_TARGET 3e15c17d20e076c08f68080a241fc7222120f2f0
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+✔ healthy sequential history stays complete (2.565623ms)
+✔ same-second changes retain the applied minimum (0.32408ms)
+✔ new explicit unknown contract refuses a malformed dense history (0.342397ms)
+✔ site suffix refused and exact site retained (0.783796ms)
+✖ a missing history slot cannot certify a filtered subset complete (0.519165ms)
+✖ recording must not turn a missing slot into known history (0.263507ms)
+✖ an entirely missing slot is unknown rather than empty history (1.297392ms)
+✔ reading history does not mutate the original entries (0.342958ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 5
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.542539
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j2934-focal-rvaDD8/proof.cjs:135:27
+✖ a missing history slot cannot certify a filtered subset complete (0.519165ms)
+  TypeError: Cannot read properties of undefined (reading 'at')
+      at /dev/shm/j2934-focal-rvaDD8/proof.cjs:107:59
+      at Array.forEach (<anonymous>)
+      at priorLowestPrice (/dev/shm/j2934-focal-rvaDD8/proof.cjs:106:8)
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-rvaDD8/proof.cjs:138:15)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+test at ../../../../dev/shm/j2934-focal-rvaDD8/proof.cjs:142:27
+✖ recording must not turn a missing slot into known history (0.263507ms)
+  TypeError: Cannot read properties of undefined (reading 'at')
+      at recordPrice (/dev/shm/j2934-focal-rvaDD8/proof.cjs:97:35)
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-rvaDD8/proof.cjs:145:32)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at ../../../../dev/shm/j2934-focal-rvaDD8/proof.cjs:149:27
+✖ an entirely missing slot is unknown rather than empty history (1.297392ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - 'unreadable'
+
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-rvaDD8/proof.cjs:151:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'unreadable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 1
+
+===== permanent-old =====
+J_FOCAL old-module sz2-physical-legal.test.ts EXACT_TARGET 3e15c17d20e076c08f68080a241fc7222120f2f0
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+GPSR: the area and a complete record
+  ok    the area is the 27 EU states plus Iceland, Liechtenstein and Norway
+  ok    Germany, France and Norway are in it
+  ok    the US, the UK and Switzerland are not
+  ok    a stored record reads back, country upper-cased
+  ok    an EU manufacturer with type, picture and a stated 'no warnings' has no gaps
+  ok    so no country is closed
+
+GPSR: what is missing
+  ok    no record at all lists every gap
+  ok    no picture is a gap (art. 19(c))
+  ok    a manufacturer outside the area needs an EU responsible person
+  ok    its EU/EEA countries close, the rest keep selling
+  ok    a responsible person outside the area does not count
+  ok    an EU responsible person with a web contact page closes the gap
+  ok    a responsible person without postal and electronic address is a gap
+  ok    empty warnings without the 'none' statement is a gap: never inferred
+  ok    warnings text closes it
+  ok    an electronic address that is neither email nor https is a gap
+  ok    http (not https) is not a contact page
+  ok    a field with a control character is dropped, so it becomes a gap
+  ok    whitespace is folded
+  ok    an unknown country is a gap
+  ok    garbage from storage reads as no record
+
+California Proposition 65 text (the creator's, checked, never written by the code)
+  ok    only when the product ships to the US
+  ok    empty is fine: nothing is shown
+  ok    WARNING: with the site
+  ok    CA WARNING: is accepted
+  ok    CALIFORNIA WARNING: is accepted
+  ok    no signal word first
+  ok    the signal word in lower case is not the signal word
+  ok    no P65Warnings site
+  ok    too long
+  ok    a control character
+
+Unit price (computed from the price charged, never typed)
+  ok    250 g at 2.49 is 9.96 per kilogram
+  ok    0.75 L at 12.99 is 17.32 per liter
+  ok    a decimal comma reads the same
+  ok    33 cl at 1.99 is 6.03 per liter (6.0303..., rounded)
+  ok    half a cent rounds up: 2 kg at 0.01
+  ok    1 kg at 5.00 is the selling price itself
+  ok    150 cm² at 3.00 is 200.00 per square meter
+  ok    2.5 m at 10.00 is 4.00 per meter
+  ok    500 cm³ at 1.00 is 2,000.00 per cubic meter
+  ok    zero quantity is not a quantity
+  ok    more than three decimals is refused
+  ok    an unknown unit is refused
+  ok    a negative amount is refused
+  ok    no quantity, no unit price
+  ok    an absurd result is refused rather than shown wrong
+  ok    the unit is written out for screen readers (3.1.4)
+  ok    liter
+
+Prior lowest price (98/6/EC art. 6a; CJEU C-330/23)
+  ok    the same price again adds no step
+  ok    the lowest price of the 30 days before, not the price the day before
+  ok    the sale price itself (from the start) is not part of its prior price
+  ok    a later sale, 45 days in: the 800 ended before its window
+  ok    a window that starts before the first price is flagged incomplete
+  ok    no price before the start: nothing to show
+  ok    an empty history: nothing to show
+  ok    the window is 30 days
+  ok    kept for the window plus the longest sale, so a running sale still finds its prior price
+  ok    on the last day of a long sale its prior price is unchanged
+  ok    steps that ended before the kept period are dropped
+  FAIL  a clock that goes back never reorders, never drops a price and never stamps one later than any time seen
+        expected [{"at":1800000000,"cents":500},{"at":1800000000,"cents":600}]
+        got      [{"at":1800000000,"cents":500},{"at":1800000001,"cents":600}]
+  ok    the history never holds more than its cap
+  ok    merging keeps the lower price, so the prior price is never higher than the truth
+  ok    the current price is never merged away
+  ok    a non-integer or negative price is not recorded
+
+Prior lowest price: same-second changes keep their real time (review J5809017387, MEDIUM)
+  FAIL  no step is stamped later than the clock that recorded it
+        expected true
+        got      false
+  FAIL  two prices in the same second both stay, in the order applied
+        expected [{"at":1800000000,"cents":1000},{"at":1803456000,"cents":500},{"at":1803456000,"cents":20},{"at":1803456001,"cents":10}]
+        got      [{"at":1800000000,"cents":1000},{"at":1803456000,"cents":500},{"at":1803456001,"cents":20},{"at":1803456002,"cents":10}]
+  FAIL  a sale a second later finds the 20 applied before it, not the 500
+        expected {"cents":20,"complete":true}
+        got      {"cents":500,"complete":true}
+  FAIL  a sale in the same second counts the prices it replaced in that second
+        expected {"cents":20,"complete":true}
+        got      {"cents":1000,"complete":true}
+  ok    the healthy sequential case is unchanged
+
+Prior lowest price: an unreadable history is never a complete subset (review J5809017387, LOW)
+  FAIL  one unreadable step makes the whole history unreadable, not a complete 1000
+        expected "unreadable"
+        got      {"cents":1000,"complete":true}
+  FAIL  a history that is not a list is unreadable
+        expected "unreadable"
+        got      "threw"
+  FAIL  a step that is not a record is unreadable
+        expected "unreadable"
+        got      {"cents":1000,"complete":true}
+  FAIL  recording onto an unreadable history keeps it as it came, never filtered
+        expected [{"at":1800000000,"cents":1000},{"at":1803024000,"cents":"20"}]
+        got      [{"at":1800000000,"cents":1000},{"at":1803456000,"cents":900}]
+  FAIL  so it still reads as unreadable afterward
+        expected "unreadable"
+        got      {"cents":900,"complete":true}
+
+Proposition 65: the site is named on its own (review J5809017387, LOW)
+  FAIL  a longer hostname that only starts with the site does not name it
+        expected "site"
+        got      null
+  FAIL  the site inside another word does not name it
+        expected "site"
+        got      null
+  FAIL  the site as a path on another host does not name it
+        expected "site"
+        got      null
+  FAIL  the site with a hyphenated suffix does not name it
+        expected "site"
+        got      null
+  ok    the site with https and a path names it
+  ok    the site in parentheses names it
+  ok    the site followed by a comma names it
+
+81 checks, 14 failing.
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 1
+
+===== additive-old =====
+J_FOCAL old-module j-2934-focal.proof.ts EXACT_TARGET 3e15c17d20e076c08f68080a241fc7222120f2f0
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+SPARSE_HISTORY {"length":2,"missing":true,"got":{"cents":1000,"complete":true}}
+SPARSE_AFTER_RECORD {"cents":900,"complete":true}
+✔ healthy sequential history stays complete (3.6154ms)
+✖ same-second changes retain the applied minimum (2.206797ms)
+✖ new explicit unknown contract refuses a malformed dense history (0.584055ms)
+✖ site suffix refused and exact site retained (0.588202ms)
+✖ a missing history slot cannot certify a filtered subset complete (0.719894ms)
+✖ recording must not turn a missing slot into known history (0.439989ms)
+✖ an entirely missing slot is unknown rather than empty history (0.279981ms)
+✔ reading history does not mutate the original entries (0.192227ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 2
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25.716209
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j2934-focal-kgoX5B/proof.cjs:114:27
+✖ same-second changes retain the applied minimum (2.206797ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   cents: 500,
+  -   cents: 20,
+      complete: true
+    }
+
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-kgoX5B/proof.cjs:116:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j2934-focal-kgoX5B/proof.cjs:118:27
+✖ new explicit unknown contract refuses a malformed dense history (0.584055ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   cents: 1000,
+  +   complete: true
+  + }
+  - 'unreadable'
+
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-kgoX5B/proof.cjs:120:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unreadable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j2934-focal-kgoX5B/proof.cjs:122:27
+✖ site suffix refused and exact site retained (0.588202ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  null !== 'site'
+
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-kgoX5B/proof.cjs:124:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'site',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j2934-focal-kgoX5B/proof.cjs:126:27
+✖ a missing history slot cannot certify a filtered subset complete (0.719894ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   cents: 1000,
+  +   complete: true
+  + }
+  - 'unreadable'
+
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-kgoX5B/proof.cjs:131:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unreadable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j2934-focal-kgoX5B/proof.cjs:133:27
+✖ recording must not turn a missing slot into known history (0.439989ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   cents: 900,
+  +   complete: true
+  + }
+  - 'unreadable'
+
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-kgoX5B/proof.cjs:138:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unreadable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j2934-focal-kgoX5B/proof.cjs:140:27
+✖ an entirely missing slot is unknown rather than empty history (0.279981ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - 'unreadable'
+
+      at TestContext.<anonymous> (/dev/shm/j2934-focal-kgoX5B/proof.cjs:142:25)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'unreadable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 1
+
+===== english =====
+J_FOCAL head platform-us-english.test.ts EXACT_TARGET 3e15c17d20e076c08f68080a241fc7222120f2f0
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0
+
+===== types =====
+lib/physical-legal.ts(314,63): error TS4104: The type 'readonly PriceStep[]' is 'readonly' and cannot be assigned to the mutable type 'PriceStep[]'.
+
+===== lint =====
+
+===== scanner =====
+Public data check: 4135 tracked files; 0 file(s) require correction.
+
+===== diff =====
+
+===== explicit statuses =====
+{
+  "permanent": 0,
+  "frozen": 1,
+  "additive": 1,
+  "permanent-old": 1,
+  "additive-old": 1,
+  "english": 0,
+  "types": 2,
+  "lint": 0,
+  "scanner": 0,
+  "diff": 0
+}

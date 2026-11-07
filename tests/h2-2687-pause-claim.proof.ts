@@ -1,0 +1,146 @@
+/**
+ * A partial Redis week is not a healthy week (CX-123 rule 24).
+ *
+ * The seven daily HMGET replies are paid reads used to decide whether list
+ * email must pause. Every reply has to be present and every counter has to be
+ * an exact non-negative whole number. Missing or malformed evidence is
+ * unknown, never zero.
+ */
+import { heardFromSender, listHealth, pausedFor } from "@/lib/mail-health";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+const ID = "a".repeat(32);
+const NOW = Date.parse("2026-11-05T12:00:00.000Z");
+const DAY = `nl:mail:health:${ID}:2026-11-05`;
+const emptyDay = () => [null, null, null];
+
+async function outcome(reply: unknown): Promise<"accepted" | "unknown"> {
+  const original = redis.pipeline;
+  try {
+    redis.pipeline = async () => reply as unknown[];
+    await listHealth(ID, NOW);
+    return "accepted";
+  } catch {
+    return "unknown";
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+async function main(): Promise<void> {
+  part("Only the complete seven-day Redis answer is health evidence");
+  is("a short pipeline envelope is unknown", await outcome([null]), "unknown");
+  is(
+    "a short HMGET day is unknown",
+    await outcome([null, ["1000"], ...Array.from({ length: 6 }, emptyDay)]),
+    "unknown",
+  );
+  is(
+    "a malformed counter is unknown, never zero",
+    await outcome([null, ["1000", "not-a-count", "0"], ...Array.from({ length: 6 }, emptyDay)]),
+    "unknown",
+  );
+  is(
+    "the exact reply remains readable",
+    await outcome([null, ["1000", "25", "1"], ...Array.from({ length: 6 }, emptyDay)]),
+    "accepted",
+  );
+  part("The threshold event survives an unknown week read and its redelivery");
+  redis.clear();
+  await redis.pipeline([["HSET", DAY, "s", "1000", "b", "24", "c", "0"]]);
+  const original = redis.pipeline;
+  redis.pipeline = async commands => commands.some(command => command[0] === "HMGET")
+    ? [null]
+    : original.call(redis, commands);
+  let refused = false;
+  const notice = { kind: "bounced" as const, permanent: true, to: "threshold@example.test", store: ID, list: "" };
+  try { await heardFromSender(notice, NOW); } catch { refused = true; }
+  redis.pipeline = original;
+  is("the first unknown health read is refused", refused, true);
+  is("the bounce was counted once before that read", (await listHealth(ID, NOW)).bounced, 25);
+  await heardFromSender(notice, NOW);
+  is("the redelivery re-evaluates and establishes the threshold pause", (await pausedFor(ID, NOW))?.reason, "bounces");
+  const [rawBounces] = await redis.pipeline([["HGET", DAY, "b"]]);
+  is("recovery never counts the same address twice", rawBounces, "25");
+  part("A lost checkpoint answer is recovered without another count");
+  redis.clear();
+  await redis.pipeline([["HSET", DAY, "s", "1000", "b", "0", "c", "0"]]);
+  let loseBegin = true;
+  redis.pipeline = async commands => {
+    const reply = await original.call(redis, commands);
+    if (loseBegin && commands.some(command => command[0] === "EVAL")) {
+      loseBegin = false;
+      throw new Error("synthetic lost begin acknowledgement");
+    }
+    return reply;
+  };
+  const lostNotice = { ...notice, to: "lost-begin@example.test" };
+  try { await heardFromSender(lostNotice, NOW); } catch { /* provider redelivers */ }
+  redis.pipeline = original;
+  is("the redelivery completes the counted event", await heardFromSender(lostNotice, NOW), "counted");
+  const [afterLostBegin] = await redis.pipeline([["HGET", DAY, "b"]]);
+  is("the lost begin acknowledgement still counts once", afterLostBegin, "1");
+  let loseFinish = true;
+  redis.pipeline = async commands => {
+    const reply = await original.call(redis, commands);
+    if (loseFinish && commands.some(command => command[0] === "SET" && command[2] === "done")) {
+      loseFinish = false;
+      throw new Error("synthetic lost finish acknowledgement");
+    }
+    return reply;
+  };
+  const finishedNotice = { ...notice, to: "lost-finish@example.test" };
+  try { await heardFromSender(finishedNotice, NOW); } catch { /* provider redelivers */ }
+  redis.pipeline = original;
+  is("the redelivery recognizes the completed event", await heardFromSender(finishedNotice, NOW), "ignored");
+  const [afterLostFinish] = await redis.pipeline([["HGET", DAY, "b"]]);
+  is("the lost finish acknowledgement still counts once", afterLostFinish, "2");
+  part("An accessor cannot borrow confirmed evidence from a descriptor prototype");
+  let visits = 0;
+  const outer = [null, ...Array.from({ length: 7 }, emptyDay)];
+  const inner = ["1000", "25", "1"];
+  Object.defineProperty(outer, "1", { get: () => { visits += 1; return inner; } });
+  const innerReply = [null, inner, ...Array.from({ length: 6 }, emptyDay)];
+  Object.defineProperty(inner, "1", { get: () => { visits += 1; return "25"; } });
+  const descriptorBefore = Object.getOwnPropertyDescriptor(Object.prototype, "value");
+  let outerResult: "accepted" | "unknown" = "accepted";
+  let innerResult: "accepted" | "unknown" = "accepted";
+  try {
+    Object.defineProperty(Object.prototype, "value", { value: ["1000", "25", "1"], configurable: true });
+    outerResult = await outcome(outer);
+    Object.defineProperty(Object.prototype, "value", { value: "25", configurable: true });
+    innerResult = await outcome(innerReply);
+  } finally {
+    delete (Object.prototype as { value?: unknown }).value;
+    if (descriptorBefore) Object.defineProperty(Object.prototype, "value", descriptorBefore);
+  }
+  is("an outer accessor with inherited descriptor value is unknown", outerResult, "unknown");
+  is("a daily accessor with inherited descriptor value is unknown", innerResult, "unknown");
+  is("no health accessor ran", visits, 0);
+  part("An unconfirmed pause claim cannot reset the health window or portions");
+  for (const [label, reply] of [["missing", []], ["false", [false]], ["extra", ["OK", null]]] as const) {
+    redis.clear();
+    await original.call(redis, [["HSET", DAY, "s", "1000", "b", "24", "c", "0"]]);
+    let commandsUsed = 0;
+    redis.pipeline = async commands => {
+      commandsUsed += commands.length;
+      if (commandsUsed > 128) throw new Error("synthetic command ceiling");
+      // The pause write did NOT land; only its response is unknown. Every
+      // other command, including the real atomic outcome, uses MemoryRedis.
+      if (commands.some(c => c[0] === "SET" && c[1] === `nl:mail:paused:${ID}`)) return reply as unknown as unknown[];
+      return original.call(redis, commands);
+    };
+    let rejected = false;
+    try { await heardFromSender({ ...notice, to: `${label}@example.test` }, NOW); }
+    catch { rejected = true; }
+    finally { redis.pipeline = original; }
+    const [from, ramp] = await original.call(redis, [["GET", `nl:mail:health:${ID}:from`], ["GET", `nl:mail:ramp:${ID}`]]);
+    is(`${label}: the unconfirmed pause is retryable`, rejected, true);
+    is(`${label}: no health reset without a confirmed pause`, from, null);
+    is(`${label}: no portion reset without a confirmed pause`, ramp, null);
+  }
+  done();
+}
+
+void main();

@@ -328,6 +328,95 @@ for (const bad of ["", " ", "x", "bea@example.test", "see www.x.test", "http://x
   is(`${JSON.stringify(bad)} is refused`, readBoardName(bad), null);
 }
 
+part("Money that hides: currency names, payment means, invisible and look-alike letters");
+for (const label of [
+  "100 pounds",
+  "50 quid",
+  "10,000 yen",
+  "500 rupees",
+  "200 pesos",
+  "50 francs",
+  "300 yuan",
+  "1,000 rubles",
+  "100 rand",
+  "50 euros",
+  "A gift-card",
+  "An Amazon voucher",
+  "Store credit of 100",
+  "Visa prepaid card",
+  "Pix de 100",
+  "Paid by Wise",
+  "Apple Pay credit",
+  "A cheque for 200",
+  "A check for 200",
+  "A bank deposit",
+  "Paid via Stripe",
+  "100 USDollars",
+  "100dollars",
+  "50cash",
+  "m0ney for you",
+  "c4sh prize",
+  "Western Union to you",
+  "\u{1F4B5} for the winner",
+  "c\u200Bash prize",
+  "m\u00ADoney",
+  "c\u3164ash prize",
+  "\u0441ash prize",
+  "\u0441\u0430\u0455\u04BB prize",
+  "\uFF43\uFF41\uFF53\uFF48",
+  "\uFF11\uFF10\uFF10 CAD",
+  "\u0661\u0660\u0660 THB",
+  "CAD 100",
+  "ca\u0301sh prize",
+]) {
+  is(`a prize that hides money is refused: ${JSON.stringify(label)}`, refused({ prize: { kind: "product", label } }), "money");
+}
+for (const title of ["c\u200Bash race", "\u0421ash race", "Win 100 pounds", "\u{1F911} sprint"]) {
+  is(`a title that hides money is refused: ${JSON.stringify(title)}`, refused({ title }), "money");
+}
+// Decided, kept refused: "earn" as a whole word promises earnings wherever it stands, and a
+// money word inside a book title has no simple safe rule (quotes would let "cash" through).
+for (const label of ["Learn to earn badge", "The Psychology of Money, signed"]) {
+  is(`kept refused on purpose: ${JSON.stringify(label)}`, refused({ prize: { kind: "product", label } }), "money");
+}
+for (const label of [
+  "A cashmere scarf",
+  "A bag of cashews",
+  "Earnest coaching call",
+  "Earrings from my shop",
+  "3 CAD templates for 3D printing",
+  "Transferable skills workbook",
+  "Sterling silver ring",
+  "Pound cake cookbook",
+  "5 pounds of coffee beans",
+  "Check-in call with me",
+  "Wise words workbook",
+  "Striped tote bag",
+  "Penny Lane print",
+  "T\u30B7\u30E3\u30C4 from my shop",
+  "\u041A\u0443\u0440\u0441 \u043F\u043E Python",
+  "Caf\u00E9 cookbook",
+]) {
+  is(`a neutral prize passes: ${JSON.stringify(label)}`, refused({ prize: { kind: "product", label } }), "accepted");
+}
+for (const title of ["Lose 10 pounds in May", "Spring \u2764\uFE0F push", "\u{1F469}\u200D\u{1F4BB} coding sprint", "Top 3 sellers win"]) {
+  is(`a neutral title passes: ${JSON.stringify(title)}`, refused({ title }), "accepted");
+}
+for (const title of ["Spring\u200Bpush", "\u202Ehsup gnirpS", "Spr\u0456ng push", "Spring\u00ADpush"]) {
+  is(`a title with hidden or look-alike letters is refused: ${JSON.stringify(title)}`, refused({ title }), "title");
+}
+for (const label of ["My c\u043Eurse", "Free\u200Baccess", "\uFF48\uFF54\uFF54\uFF50\uFF53\uFF1A\uFF0F\uFF0Fx.test", "\u2066My course\u2069"]) {
+  is(`a prize with hidden or look-alike letters or a disguised link is refused: ${JSON.stringify(label)}`, refused({ prize: { kind: "product", label } }), "prize");
+}
+
+part("A name on the board that imitates one the board uses");
+for (const bad of ["Y\u043Eu", "\uFF39\uFF4F\uFF55", "Y\u200Bou", "\u0391n affiliate", "\u03A5\u03BF\u03C5", "Y\u00F3u", "Y0u", "Marktrnorgen", "AffiIiate", "You\u3164", "\u3164You"]) {
+  is(`${JSON.stringify(bad)} is refused`, readBoardName(bad), null);
+}
+for (const good of ["\u0410\u043D\u043D\u0430", "\u674E\u5C0F\u9F8D", "\u5C71\u7530\u305F\u308D\u3046", "Youssef", "Bea R."]) {
+  is(`${JSON.stringify(good)} still passes`, readBoardName(good), good);
+}
+
 part("What the page says");
 const words = challengeNotes(c, (c.end + 1) * 1000);
 is("after the end, it says places can still change and when to hand out prizes", words.some((w) => w.includes("refund") && w.includes("can still change")), true);

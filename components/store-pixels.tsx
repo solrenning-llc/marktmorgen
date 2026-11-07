@@ -6,7 +6,7 @@ import { pixelChoiceState, type Pixels } from "@/lib/pixels";
 import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
 import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
 import { ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
-import { CART_CHANGED_EVENT, CART_KEY_PREFIX, type Step, addedToCart, cartIdsOf, stepCalls, stepsAllowed, STEPS_MARK_VALUE, stepsMarkKey } from "@/lib/pixel-steps";
+import { CART_CHANGED_EVENT, CART_KEY_PREFIX, type Step, type StepKind, addedToCart, cartIdsOf, pageLocationOf, stepCalls, stepsAllowed, stepsMarkKey, stepsMarkValue, stepsWords } from "@/lib/pixel-steps";
 
 /**
  * The creator's own ad pixels, on their store's pages.
@@ -49,6 +49,9 @@ const started = new Set<string>();
 
 const consentKey = (handle: string) => `nl_px_consent:${handle}`;
 
+/** Global Privacy Control, a no given in advance by the browser. */
+const gpcOn = () => (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true;
+
 function readChoice(handle: string): "yes" | "no" | null {
   try {
     const value = localStorage.getItem(consentKey(handle));
@@ -69,7 +72,8 @@ function writeChoice(handle: string, value: "yes" | "no" | null) {
 
 /**
  * Whether the yes was given to the words that name a product view and an add
- * to cart (lib/pixel-steps.ts): kept on Allow, removed on every other choice.
+ * to cart, and for which platforms (lib/pixel-steps.ts stepsMarkValue): kept
+ * on Allow, removed on every other choice.
  */
 function readMark(handle: string): string | null {
   try {
@@ -79,9 +83,9 @@ function readMark(handle: string): string | null {
   }
 }
 
-function writeMark(handle: string, on: boolean) {
+function writeMark(handle: string, value: string | null) {
   try {
-    if (on) localStorage.setItem(stepsMarkKey(handle), STEPS_MARK_VALUE);
+    if (value) localStorage.setItem(stepsMarkKey(handle), value);
     else localStorage.removeItem(stepsMarkKey(handle));
   } catch {
     // Without storage there is no mark, so these two steps are never told.
@@ -255,9 +259,13 @@ function startReddit(w: PixelWindow, id: string, limited: boolean, place: Place)
   w.rdt("track", "PageVisit");
 }
 
-/** One step, to each of the creator's pixels that is loaded on this page. */
-function sendStep(w: PixelWindow, pixels: Pixels, step: Step) {
-  for (const [kind, args] of stepCalls(pixels, step)) {
+/**
+ * One step, to each of the creator's pixels that is loaded on this page and
+ * that the visitor's yes named (`allowed`, read just before this is called).
+ */
+function sendStep(w: PixelWindow, pixels: Pixels, step: Step, allowed: StepKind[]) {
+  for (const [kind, args] of stepCalls(pixels, step, pageLocationOf(location.href))) {
+    if (!allowed.includes(kind)) continue;
     if (kind === "meta" && w.fbq) w.fbq(...args);
     else if (kind === "google" && w.gtag) w.gtag(...args);
     else if (kind === "reddit" && w.rdt) w.rdt(...args);
@@ -320,11 +328,25 @@ export function StorePixels({
 
   useEffect(() => {
     const choice = readChoice(handle);
-    const gpc = (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true;
-    const next = pixelChoiceState(choice,askFirst,gpc);
+    const next = pixelChoiceState(choice, askFirst, gpcOn());
     // Read from this browser's storage, which only exists after the page is in it.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setState(next);
+    // A choice changed in another tab of this store counts here at once: a
+    // "Turn off" there stops what this page would send next.
+    const onChoice = (e: StorageEvent) => {
+      if (e.key === null || e.key === consentKey(handle) || e.key === stepsMarkKey(handle)) setState(pixelChoiceState(readChoice(handle), askFirst, gpcOn()));
+    };
+    // A page shown again from the back/forward cache missed those changes.
+    const onBack = (e: PageTransitionEvent) => {
+      if (e.persisted) setState(pixelChoiceState(readChoice(handle), askFirst, gpcOn()));
+    };
+    window.addEventListener("storage", onChoice);
+    window.addEventListener("pageshow", onBack);
+    return () => {
+      window.removeEventListener("storage", onChoice);
+      window.removeEventListener("pageshow", onBack);
+    };
   }, [handle, askFirst]);
 
   useEffect(() => {
@@ -345,6 +367,10 @@ export function StorePixels({
     start("pinterest", pixels.pinterest, startPinterest);
     // Said yes on this store, or only allowed because this country does not ask first.
     const restricted = readChoice(handle) !== "yes";
+    // Read again from storage right before anything is sent after this: the
+    // visitor may have changed the choice in another tab since this started.
+    const stillOn = () => pixelChoiceState(readChoice(handle), askFirst, gpcOn()) === "on";
+    const stepsNow = () => stepsAllowed(pixelChoiceState(readChoice(handle), askFirst, gpcOn()), readChoice(handle), readMark(handle));
     start("x", pixels.x, (win, id) => startX(win, id, restricted));
     start("reddit", pixels.reddit, (win, id) => startReddit(win, id, restricted, place));
 
@@ -368,6 +394,7 @@ export function StorePixels({
     // A buy button leaves the page for Stripe at once. The event is sent
     // first, and the form goes on its way a moment later, exactly as pressed.
     const onSubmit = (e: SubmitEvent) => {
+      if (!stillOn()) return;
       const form = e.target instanceof HTMLFormElement ? e.target : null;
       if (!form || !form.hasAttribute("data-checkout") || form.dataset.sent === "1") return;
       if (typeof form.requestSubmit !== "function") {
@@ -387,42 +414,44 @@ export function StorePixels({
     document.addEventListener("submit", onSubmit, true);
 
     // A product view and an add to cart (601 [KB22] U9), only for a visitor
-    // who pressed Allow on the words that name them.
-    let stopSteps = () => {};
-    if (stepsAllowed(state, readChoice(handle), readMark(handle))) {
-      if (viewed && !started.has(`view:${viewed}`)) {
-        started.add(`view:${viewed}`);
-        sendStep(w, pixels, { type: "view", productId: viewed });
-      }
-      // The cart says when this page changed it (components/store-cart.tsx).
-      // What was in it when this started, put back from a link included, is
-      // not told; taking a product out is not told either.
-      let before = readCart(handle);
-      const onCart = () => {
-        const now = readCart(handle);
-        for (const productId of addedToCart(before, now)) sendStep(w, pixels, { type: "cart", productId });
-        before = now;
-      };
-      // Another tab's change is never told here; it only moves what was there.
-      const onOtherTab = () => {
-        before = readCart(handle);
-      };
-      window.addEventListener(CART_CHANGED_EVENT, onCart);
-      window.addEventListener("storage", onOtherTab);
-      stopSteps = () => {
-        window.removeEventListener(CART_CHANGED_EVENT, onCart);
-        window.removeEventListener("storage", onOtherTab);
-      };
+    // who pressed Allow on the words that name them, only to the platforms
+    // those words named, and checked again at the moment each is sent.
+    if (viewed && !started.has(`view:${viewed}`) && stepsNow().length) {
+      started.add(`view:${viewed}`);
+      sendStep(w, pixels, { type: "view", productId: viewed }, stepsNow());
     }
+    // The cart says when this page changed it (components/store-cart.tsx).
+    // What was in it when this started, put back from a link included, is
+    // not told; taking a product out is not told either.
+    let before = readCart(handle);
+    const onCart = () => {
+      const now = readCart(handle);
+      for (const productId of addedToCart(before, now)) sendStep(w, pixels, { type: "cart", productId }, stepsNow());
+      before = now;
+    };
+    // Another tab's change is never told here; it only moves what was there.
+    const onOtherTab = () => {
+      before = readCart(handle);
+    };
+    // A page shown again from the back/forward cache: the cart may have
+    // changed while it was away, and that is not told either.
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) before = readCart(handle);
+    };
+    window.addEventListener(CART_CHANGED_EVENT, onCart);
+    window.addEventListener("storage", onOtherTab);
+    window.addEventListener("pageshow", onShow);
     return () => {
       document.removeEventListener("submit", onSubmit, true);
-      stopSteps();
+      window.removeEventListener(CART_CHANGED_EVENT, onCart);
+      window.removeEventListener("storage", onOtherTab);
+      window.removeEventListener("pageshow", onShow);
     };
-  }, [state, pixels, event, handle, place, viewed]);
+  }, [state, pixels, event, handle, place, viewed, askFirst]);
 
   if (state === "unknown") return null;
 
-  if ((navigator as Navigator & {globalPrivacyControl?:boolean}).globalPrivacyControl === true) {
+  if (gpcOn()) {
     return <p className="mt-3 text-center text-xs st-footer-link">Your browser’s Global Privacy Control keeps ad measurement off. Manage this signal in your browser settings.</p>;
   }
   if (state === "ask") {
@@ -434,7 +463,14 @@ export function StorePixels({
       >
         <p className="font-bold">{`${storeName} measures its ads`}</p>
         <p className="st-muted mt-1 text-sm leading-relaxed">
-          {`With your permission, this page loads ad measurement from ${names}, which sets cookies, and ${storeName} tells them which products you open and put in your cart, and about your sign-ups and purchases, so it can tell which of its ads bring people here. If you say no, nothing loads, nothing is sent, and the page works just the same.`}{" "}
+          {[
+            `With your permission, this page loads ad measurement from ${names}, which sets cookies.`,
+            `${storeName} tells them about your sign-ups and purchases, so it can see which of its ads bring people here.`,
+            stepsWords(pixels, storeName),
+            "If you say no, nothing loads, nothing is sent, and the page works just the same.",
+          ]
+            .filter(Boolean)
+            .join(" ")}{" "}
           <Link href="/privacy#ads" className="st-footer-link font-semibold">
             More about this
           </Link>
@@ -444,10 +480,10 @@ export function StorePixels({
             type="button"
             className="btn st-btn"
             onClick={() => {
-              const gpc = (navigator as Navigator & {globalPrivacyControl?:boolean}).globalPrivacyControl === true;
+              const gpc = gpcOn();
               writeChoice(handle,gpc ? "no" : "yes");
-              if (gpc) writeMark(handle, false);
-              else writeMark(handle, true);
+              // The yes counts for these steps only on the platforms the words above named.
+              writeMark(handle, gpc ? null : stepsMarkValue(pixels));
               setState(pixelChoiceState("yes",askFirst,gpc));
             }}
           >
@@ -458,7 +494,7 @@ export function StorePixels({
             className="btn st-option !w-auto !py-2.5 font-semibold"
             onClick={() => {
               writeChoice(handle, "no");
-              writeMark(handle, false);
+              writeMark(handle, null);
               setState("off");
             }}
           >
@@ -477,13 +513,13 @@ export function StorePixels({
         onClick={() => {
           if (state === "on") {
             writeChoice(handle, "no");
-            writeMark(handle, false);
+            writeMark(handle, null);
             // Scripts already loaded cannot be unloaded from a page; the next
             // page this store opens loads none.
             window.location.reload();
           } else {
             writeChoice(handle, null);
-            writeMark(handle, false);
+            writeMark(handle, null);
             setState("ask");
           }
         }}

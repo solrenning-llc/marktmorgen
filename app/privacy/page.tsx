@@ -289,9 +289,13 @@ export default function PrivacyPage() {
           the visitor&apos;s country and, when known, region, and the creator
           has to switch off Reddit&apos;s automatic matching of email addresses
           before the pixel can be added. Meta, Google and Reddit are also told
-          which products a visitor opens and puts in the cart, by the
-          product&apos;s id alone, with no amount and nothing about the visitor,
-          and only after the visitor pressed Allow on the words that say so. A
+          which products a visitor opens and puts in the cart. The store
+          sends the product&apos;s id alone, with no name, email, amount or
+          anything the visitor typed; as on any page where it loads, each
+          platform&apos;s own script still sees its cookie, the visitor&apos;s
+          IP address and the page. Google is given the page&apos;s address
+          without its query. This happens only after the visitor pressed
+          Allow on the words that name those platforms, and only for them. A
           visitor who was never asked, or who said yes before those words, is
           not counted this way.
         </p>

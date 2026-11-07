@@ -276,12 +276,27 @@ export async function decline(id: string, who: string, pair: string, room: DataS
   if (!other) return false;
   const [held] = await redisPipeline([["ZSCORE", askedKey(id, who), pair]]);
   if (held === null || held === undefined) return false;
-  await redisPipeline([
-    ["ZREM", askedKey(id, who), pair],
-    ["ZREM", inboxKey(id, other), pair],
-    ["DEL", chatKey(id, pair), readKey(id, pair)],
-    ["SADD", shutKey(id, who), other],
-  ]);
+  // The refusal first, on its own, and read exactly (CX-123 rule 24): an SADD
+  // answers 0 or 1 here, and anything else is unknown, never "declined". It is
+  // thrown before the request is taken away, so the page says it could not
+  // confirm, the request still waits, and a second try finishes it (adding the
+  // same person twice changes nothing).
+  const added = repliesFor(await redisPipeline([["SADD", shutKey(id, who), other]]), 1);
+  const shut = added ? exactCount(added[0]) : null;
+  if (shut !== 0 && shut !== 1) throw new UnknownReplyError("whether a private message request was declined");
+  // Then the request and its messages go; each reply is a count, or what was
+  // said gone is not known to be.
+  const removed = repliesFor(
+    await redisPipeline([
+      ["ZREM", askedKey(id, who), pair],
+      ["ZREM", inboxKey(id, other), pair],
+      ["DEL", chatKey(id, pair), readKey(id, pair)],
+    ]),
+    3,
+  );
+  if (!removed || removed.some((reply) => exactCount(reply) === null)) {
+    throw new UnknownReplyError("whether a declined request was taken away");
+  }
   // The conversation's room comes back; the person declined takes a little,
   // never refused: saying no must always work.
   await giveData(room, [{ slot: PAIR_SLOT(pair), bytes: 0, set: true }]);
@@ -299,8 +314,13 @@ export async function decline(id: string, who: string, pair: string, room: DataS
 
 /** Lets somebody previously declined write again. */
 export async function unblock(id: string, who: string, other: string, room: DataStore): Promise<void> {
-  const [removed] = await redisPipeline([["SREM", shutKey(id, who), other]]);
-  if (Number(removed) === 1) await giveData(room, [{ slot: DECLINED_SLOT, bytes: DECLINED_BYTES }]);
+  // Read exactly (CX-123 rule 24): 0 or 1, and anything else is unknown, never
+  // "they can write to you again". Removing twice changes nothing, so a second
+  // try is safe.
+  const replies = repliesFor(await redisPipeline([["SREM", shutKey(id, who), other]]), 1);
+  const removed = replies ? exactCount(replies[0]) : null;
+  if (removed !== 0 && removed !== 1) throw new UnknownReplyError("whether a declined person may write again");
+  if (removed === 1) await giveData(room, [{ slot: DECLINED_SLOT, bytes: DECLINED_BYTES }]);
 }
 
 /** Everyone this person has declined. */

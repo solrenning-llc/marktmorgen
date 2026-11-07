@@ -162,11 +162,14 @@ export const FUNNEL_TYPES: FunnelType[] = [
   {
     // 576 [FT8]. The bundle's own page already lists what is inside, says what
     // those products cost on their own only when that is more than the bundle
-    // (worthWords), takes the payment and hands over each product as if it was
-    // bought alone (lib/bundle-rules.ts). The type adds no sales page of its own.
+    // (worthWords), takes the payment and hands over what it holds, each product
+    // as if it was bought alone: all of them, or only the ones the buyer chose
+    // when the bundle lets them choose (lib/bundle-rules.ts picks, chosenItems).
+    // So the hint promises what the bundle hands over, never "each product in it".
+    // The type adds no sales page of its own.
     id: "bundle",
     label: "Product bundle",
-    hint: "Your bundle's page, which shows what is in it and its price, then a page that says what happens next. Buyers get each product in it, as if they bought it on its own.",
+    hint: "Your bundle's page, which shows what is in it and its price, then a page that says what happens next. Buyers get what the bundle hands over, each product as if they bought it on its own.",
     slots: [{ kind: "product", key: "bundle", label: "Your bundle: one product that holds two or more of your products", wants: "bundle" }, thanks],
   },
 ];

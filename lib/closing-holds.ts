@@ -120,9 +120,13 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
     query.append("expand[]", "data.customer");
     if (cursor.p) query.set("page", cursor.p);
     const found = await onAccount("GET", account, `/subscriptions/search?${query}`);
-    if (!(await each(Array.isArray(found.data) ? (found.data as Row[]) : []))) return false;
-    const next = typeof found.next_page === "string" ? found.next_page : "";
-    cursor = found.has_more === true && next ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };
+    // Read exactly (Claude 5 on #2560; CX-123 rule 24): a page without its list, or saying there is more with no
+    // page to read it by, throws, so it is never "every member reached" with nobody held.
+    if (!found || typeof found !== "object" || !Array.isArray(found.data) || typeof found.has_more !== "boolean") throw new Error("Stripe's search of a closing store's memberships answered in an unknown shape");
+    if (found.has_more && (typeof found.next_page !== "string" || !found.next_page)) throw new Error("Stripe's search of a closing store's memberships said there is more, and gave no page to read it by");
+    if (!(found.data as unknown[]).every((row) => row !== null && typeof row === "object")) throw new Error("a membership Stripe found answered in an unknown shape");
+    if (!(await each(found.data as Row[]))) return false;
+    cursor = found.has_more ? { h: cursor.h, p: found.next_page as string } : { h: cursor.h + 1, p: "" };
     await redisPipeline([["HSET", workKey(folder), field, JSON.stringify(cursor)]]);
   }
   if (cursor.h >= handles.length) {

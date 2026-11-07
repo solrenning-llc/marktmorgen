@@ -937,8 +937,15 @@ export const renewalsAskToday = (now: number, day: number, asked: number | undef
  * the hold (collection paused with no day to resume, invoices voided) and none
  * left to hold. Never a charge for a closed store; and its records are not kept
  * for ever while each member is held.
+ *
+ * `asked` is what Stripe answered today (stopRenewals), null when it was not
+ * asked or could not be: the hold's own count never sees a paused member (a
+ * trial that ended without a card, which can come back) or one its search did
+ * not list (Claude 5 on #2560), so it closes only on a day Stripe was asked,
+ * every search read to its end, and every renewal found is stopped or held.
  */
-export const renewalsMayClose = (late: boolean, held: boolean, leftToHold: number): boolean => late && held && leftToHold === 0;
+export const renewalsMayClose = (late: boolean, held: boolean, leftToHold: number, asked: { read: boolean; unheld: number } | null): boolean =>
+  late && held && leftToHold === 0 && asked !== null && asked.read && asked.unheld === 0;
 
 /** The members the hold has not reached, or could not reach within its budget, read exactly: an unknown answer is never "none". */
 async function membersLeftToHold(folder: string): Promise<number> {
@@ -963,9 +970,11 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     // SG2 review, C: tried every day for RENEWAL_TRY_DAYS, then once a week, so its searches have a ceiling.
     const late = renewalsLate(now, next.day ?? day);
     let note = "";
+    let asked: { read: boolean; unheld: number } | null = null;
     if (renewalsAskToday(now, next.day ?? day, next.renewalsAsked)) {
       try {
-        const stopped = await stopRenewals(store, until);
+        const stopped = await stopRenewals(store, until, endedAt);
+        asked = stopped;
         if (!stopped.done) note = "the renewals it sold are not all stopped yet";
       } catch (error) {
         console.error("stopping a closing store's renewals failed", error);
@@ -981,8 +990,8 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       // Past the days: it closes only when no member can be charged again: every one of its members was
       // reached by the hold (collection paused, with no day to resume, since its plan ended) and none is left
       // to hold. Otherwise its records wait, and Stripe is asked again once a week.
-      if (!renewalsMayClose(late, Boolean(next.hold), next.hold ? await membersLeftToHold(folder) : 1)) return { key, state: "held", note: `${note}; not every member's charges are held, so it waits` };
-      console.error("plan-closing: a closing store's renewals were not all stopped in its days to try; every member's charges are held, with no day to resume, so it closes");
+      if (!renewalsMayClose(late, Boolean(next.hold), next.hold ? await membersLeftToHold(folder) : 1, asked)) return { key, state: "held", note: `${note}; not every member's charges are held, so it waits` };
+      console.error("plan-closing: a closing store's renewals were not all stopped in its days to try; Stripe was read to the end and every renewal it found is held, with no day to resume, so it closes");
     }
     next = { ...next, renewals: now };
     await save(next);

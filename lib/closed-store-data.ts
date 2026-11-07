@@ -87,6 +87,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { repliesFor } from "@/lib/redis-reply";
+import { chargeable } from "@/lib/closing-buyers-rules";
 import { idsIn } from "@/lib/data-recount";
 import { readAllListingsExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
@@ -1384,9 +1385,17 @@ export function closedDataLine(m: ClosedDataNow | null): string {
  * tests/plan-cost-registry.ts). Bounded by `until`; answers whether every one
  * was reached.
  */
-export async function stopRenewals(store: Store, until: number): Promise<{ done: boolean; stopped: number; subs: string[] }> {
+export async function stopRenewals(store: Store, until: number, heldAt?: number): Promise<{ done: boolean; stopped: number; subs: string[]; read: boolean; unheld: number }> {
   const account = store.stripeAccountId;
-  const out = { done: true, stopped: 0, subs: [] as string[] };
+  // `read`: every search was read to its end this time. `unheld`: renewals found, not ended and not stopped, that the
+  // closing's hold (`heldAt`, the ending it was made for) does not hold: collection paused and voided, with no day
+  // to resume. Past its days of asking, a store closes only when both say no renewal can charge (Claude 5 on #2560).
+  const out = { done: true, stopped: 0, subs: [] as string[], read: true, unheld: 0 };
+  const unread = () => {
+    out.done = false;
+    out.read = false;
+    return out;
+  };
   const seen = new Set<string>();
   if (!account) return out;
   /** One page of Stripe's search, read exactly (CX-123, rule 24): a list, each with its id and status, and a next page whenever there is more. */
@@ -1397,34 +1406,42 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
     const rows = (found.data as unknown[]).map((sub) => {
       const row = sub && typeof sub === "object" ? (sub as Record<string, unknown>) : {};
       if (typeof row.id !== "string" || !row.id || typeof row.status !== "string") throw new ClosedReadError("a renewal Stripe found answered in an unknown shape");
-      return { id: row.id, status: row.status };
+      return { id: row.id, status: row.status, held: heldBy(row, heldAt) };
     });
     return { rows, next: found.has_more ? (found.next_page as string) : "" };
   };
   /** Ends these at Stripe, RENEWALS_AT_ONCE at a time; counted only when Stripe says each ended. Answers false when `until` came first. */
-  const stop = async (ids: string[]) => {
-    for (let i = 0; i < ids.length; i += RENEWALS_AT_ONCE) {
+  const stop = async (rows: { id: string; held: boolean }[]) => {
+    for (let i = 0; i < rows.length; i += RENEWALS_AT_ONCE) {
       if (Date.now() > until) return false;
-      const ended = await Promise.all(ids.slice(i, i + RENEWALS_AT_ONCE).map(async (id) => {
-        const answer = await onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(id)}`, undefined, undefined, `closed-now:${id}`);
-        return answer?.id === id && typeof answer.status === "string" && ENDED.includes(answer.status);
+      const part = rows.slice(i, i + RENEWALS_AT_ONCE);
+      const ended = await Promise.all(part.map(async ({ id }) => {
+        try {
+          const answer = await onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(id)}`, undefined, undefined, `closed-now:${id}`);
+          return answer?.id === id && typeof answer.status === "string" && ENDED.includes(answer.status);
+        } catch (error) {
+          // A cancel Stripe refused is not stopped; it counts against the closing unless the hold holds it.
+          console.error("plan-closing: Stripe refused to end a closing store's renewal; tried again", error);
+          return false;
+        }
       }));
       out.stopped += ended.filter(Boolean).length;
       // Any other answer is not done, and the closing day is tried again.
       if (ended.includes(false)) out.done = false;
+      out.unheld += part.filter((row, at) => !ended[at] && !row.held).length;
     }
     return true;
   };
   /** The ones not stopped yet in these rows: never an ended one, never one twice (the searches may overlap while one changes). */
-  const fresh = (rows: { id: string; status: string }[], take: (status: string) => boolean) => {
-    const ids: string[] = [];
+  const fresh = (rows: { id: string; status: string; held: boolean }[], take: (status: string) => boolean) => {
+    const out2: { id: string; held: boolean }[] = [];
     for (const row of rows) {
       if (!take(row.status) || seen.has(row.id)) continue;
       seen.add(row.id);
       out.subs.push(row.id);
-      ids.push(row.id);
+      out2.push({ id: row.id, held: row.held });
     }
-    return ids;
+    return out2;
   };
   for (const handle of saleHandles(store)) {
     // Only what can still charge is searched for (SG2 review, C): an ended one is never read again, so the pages
@@ -1433,9 +1450,9 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
       let page = "";
       let whole = false;
       for (let round = 0; round < RENEWAL_PAGES; round += 1) {
-        if (Date.now() > until) return { ...out, done: false };
+        if (Date.now() > until) return unread();
         const found = await search(`metadata['store']:'${handle}' AND status:'${status}'`, page);
-        if (!(await stop(fresh(found.rows, (st) => !ENDED.includes(st))))) return { ...out, done: false };
+        if (!(await stop(fresh(found.rows, (st) => !ENDED.includes(st))))) return unread();
         page = found.next;
         if (!page) {
           whole = true;
@@ -1443,7 +1460,7 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
         }
       }
       // Not read to the end within RENEWAL_PAGES: never said all stopped.
-      if (!whole) out.done = false;
+      if (!whole) unread();
     }
     // SG2 second review, F: a status none of these names (one Stripe may add) is never searched for by them. Every
     // page of the address's renewals, with no status asked, is read once in the closing, RENEWAL_PAGES a day, from
@@ -1458,7 +1475,7 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
     if (Number.isFinite(wholeAt) && Date.now() - wholeAt < RESCAN_MS) continue;
     // Stripe refused the page it stopped at SCAN_RESTARTS times: not read again by itself, never "all stopped", and said.
     if (Number(restartsRaw ?? 0) >= SCAN_RESTARTS) {
-      out.done = false;
+      unread();
       continue;
     }
     let page = typeof saved === "string" && !saved.startsWith("whole:") ? saved : "";
@@ -1478,7 +1495,7 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
       }
       const unknown = fresh(any.rows, (st) => !ENDED.includes(st) && !LIVE.includes(st));
       if (unknown.length) console.error(`plan-closing: ${unknown.length} renewals of a closing store are in a status the closing does not name; each is stopped, and counted only when Stripe says it ended`);
-      if (!(await stop(unknown))) return { ...out, done: false };
+      if (!(await stop(unknown))) return unread();
       page = any.next;
       if (!page) {
         whole = true;
@@ -1486,9 +1503,21 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
       }
     }
     await redisPipeline([["HSET", workKey(folder), field, whole ? `whole:${Date.now()}` : page]]);
-    if (!whole) out.done = false;
+    if (!whole) unread();
   }
   return out;
+}
+
+/**
+ * Whether the closing's hold holds this renewal (lib/closing-holds.ts, holdBody): a status the hold reaches, marked
+ * with the ending it was made for, its collection paused with invoices voided and no day to resume. A paused one
+ * (a trial that ended without a card) or any other status is never held: it may come back and charge.
+ */
+function heldBy(row: Record<string, unknown>, heldAt: number | undefined): boolean {
+  if (heldAt === undefined || !chargeable({ status: row.status })) return false;
+  const meta = row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : null;
+  const pause = row.pause_collection && typeof row.pause_collection === "object" ? (row.pause_collection as Record<string, unknown>) : null;
+  return meta?.store_hold === String(heldAt) && pause?.behavior === "void" && (pause.resumes_at === undefined || pause.resumes_at === null);
 }
 
 /** A renewal Stripe says can never charge again. */

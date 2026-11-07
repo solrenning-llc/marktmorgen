@@ -625,7 +625,7 @@ export async function removeStored(key: string, hands: Pick<Hands, "list" | "rem
             const edited = editPodcast(podcast, { op: "remove", id: episode.id });
             if (edited.ok) {
               podcast = edited.podcast;
-              gone.push(episode.pathname);
+              gone.push(...edited.dropped);
             }
           }
           await savePodcast(podcast);

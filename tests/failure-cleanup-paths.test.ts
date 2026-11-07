@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     "page del(gone)": "pictures this page held in the page-picture registry, released after the page was written",
     "file/attach del(result.removed.pathname)": "the file the record held, after the record that replaced it was written",
     "site-page del(gone)": "pictures this site page held in the page-picture registry, released after the page was written",
-    "podcast del(gone.pathname)": "the audio of the episode the record removed, unless the product's file or another episode still uses it, after it was written",
+    "podcast del(pathname)": "a file the record dropped (a removed episode's audio and transcript, or a replaced or removed transcript), unless the product's file or another episode still names it, after it was written",
     "image dropFresh([path, smallPath])": "only the paths this request took from the picture door",
     "image dropFresh([smallPath])": "only the paths this request took from the picture door",
     "image dropFresh(imagePaths(image))": "only the paths this request took from the picture door",

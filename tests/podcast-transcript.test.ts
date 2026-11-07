@@ -30,6 +30,7 @@ import { feedXml, parsePodcast, type Episode, type Podcast } from "@/lib/podcast
 import { feedToken } from "@/lib/podcast-access";
 import { vaultPath } from "@/lib/vault-rules";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
+import { openLockedSession } from "@/lib/two-step";
 import { POST as podcastRoute } from "@/app/api/store/podcast/route";
 import { GET as feedRoute } from "@/app/api/store/podcast/feed/[token]/route";
 import { GET as playRoute } from "@/app/api/store/podcast/play/[token]/[episode]/route";
@@ -47,7 +48,7 @@ process.env.R2_SECRET_ACCESS_KEY = "a-stand-in-secret-access-key-for-tests-only"
 process.env.R2_BUCKET = "stand-in-bucket";
 
 const T = rules as unknown as Record<string, unknown>;
-const MAX = typeof T.MAX_TRANSCRIPT_BYTES === "number" ? T.MAX_TRANSCRIPT_BYTES : 1_000_000;
+const MAX = typeof T.MAX_TRANSCRIPT_BYTES === "number" ? T.MAX_TRANSCRIPT_BYTES : 1024 * 1024;
 
 // Vercel Blob, answered locally: HEAD (GET ?url=) tells the size and type by the file's name; a delete is written down.
 globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
@@ -80,7 +81,11 @@ const ORIGIN = "https://marktmorgen.com";
 const post = (session: string, body: unknown) =>
   podcastRoute(new NextRequest(`${ORIGIN}/api/store/podcast`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify(body) }));
 const answer = async (response: Response) => ({ status: response.status, body: (await response.json()) as { ok: boolean; error?: string; podcast?: Podcast } });
-const transcriptOf = (podcast: Podcast | null | undefined, id: string) => (podcast?.episodes.find((e) => e.id === id) as (Episode & { transcript?: unknown }) | undefined)?.transcript ?? "absent";
+/** An episode's transcript as kept, null for none; "absent" when the episode has no such field at all. */
+const transcriptOf = (podcast: Podcast | null | undefined, id: string) => {
+  const episode = podcast?.episodes.find((e) => e.id === id) as Record<string, unknown> | undefined;
+  return episode && "transcript" in episode ? episode.transcript : "absent";
+};
 
 function oneEpisode(): Podcast {
   const made = editPodcast({ id: "b".repeat(32), episodes: [] }, { op: "add", pathname: "stores/f/p/one.mp3", bytes: 10, contentType: "audio/mpeg", title: "One", notes: "", at: 1 });
@@ -94,7 +99,7 @@ async function main(): Promise<void> {
 
   part("The rules: what a transcript is, and how a kept one is read");
   is("a transcript is a plain text file", [T.TRANSCRIPT_TYPE, T.TRANSCRIPT_ACCEPT], ["text/plain", ".txt"]);
-  is("up to a megabyte: ten hours of speech is well under it", MAX, 1_000_000);
+  is("up to a megabyte: ten hours of speech is well under it", [MAX, T.MAX_TRANSCRIPT_LABEL], [1024 * 1024, "1 MB"]);
   const isType = typeof T.isTranscriptType === "function" ? (T.isTranscriptType as (type: string) => boolean) : () => false;
   is("plain text is taken, with or without its character set; nothing else is", ["text/plain", "text/plain; charset=utf-8", "TEXT/PLAIN", "text/html", "audio/mpeg", ""].map(isType), [true, true, true, false, false, false]);
   const fresh = oneEpisode();
@@ -115,12 +120,12 @@ async function main(): Promise<void> {
   {
     let podcast = oneEpisode();
     const id = podcast.episodes[0].id;
-    const edit = (change: Record<string, unknown>) => editPodcast(podcast, { op: "transcript", id, ...change } as never);
+    const edit = (change: { pathname: string | null; bytes: number; contentType: string }) => editPodcast(podcast, { op: "transcript", id, ...change });
     const wrong = edit({ pathname: "stores/f/p/t.html", bytes: 10, contentType: "text/html" });
     is("only plain text", wrong.ok ? "kept" : wrong.reason, "type");
     const big = edit({ pathname: "stores/f/p/big.txt", bytes: MAX + 1, contentType: "text/plain" });
     is("not over the size", big.ok ? "kept" : big.reason, "too_big");
-    const lost = editPodcast(podcast, { op: "transcript", id: "zzzzzzzzzzzz", pathname: "stores/f/p/t.txt", bytes: 10, contentType: "text/plain" } as never);
+    const lost = editPodcast(podcast, { op: "transcript", id: "zzzzzzzzzzzz", pathname: "stores/f/p/t.txt", bytes: 10, contentType: "text/plain" });
     is("not on an episode that is gone", lost.ok ? "kept" : lost.reason, "unknown");
     const added = edit({ pathname: "stores/f/p/t.txt", bytes: 10, contentType: "text/plain; charset=utf-8" });
     is("added, with nothing to delete", added.ok ? [transcriptOf(added.podcast, id), (added as { dropped?: unknown }).dropped] : added.reason, [{ pathname: "stores/f/p/t.txt", bytes: 10 }, []]);
@@ -145,19 +150,19 @@ async function main(): Promise<void> {
     const podcast = parsePodcast(kept)!;
     const xml = feedXml({
       title: "Show", summary: "", author: "Shop", page: "https://x/p", image: null, episodes: podcast.episodes,
-      audio: (e) => `https://x/play/${e.id}.mp3`,
+      audio: (e: Episode) => `https://x/play/${e.id}.mp3`,
       transcript: { url: (e: Episode) => `https://x/play/${e.id}.txt`, line: (url: string) => `Transcript: ${url}` },
-    } as never);
+    });
     const itemOf = (id: string) => xml.split("<item>").find((one) => one.includes(`<guid isPermaLink="false">${id}</guid>`)) ?? "";
     is("the podcast namespace is declared", xml.includes('xmlns:podcast="https://podcastindex.org/namespace/1.0"'), true);
     is("an episode with one names it for apps that show transcripts", itemOf("aaaaaaaaaaaa").includes('<podcast:transcript url="https://x/play/aaaaaaaaaaaa.txt" type="text/plain"/>'), true);
     is("and in its notes, which every app shows", itemOf("aaaaaaaaaaaa").includes("<description>Transcript: https://x/play/aaaaaaaaaaaa.txt</description>"), true);
     is("an episode without one names none", [itemOf("cccccccccccc").includes("podcast:transcript"), itemOf("cccccccccccc").includes("Transcript:")], [false, false]);
-    const noted = feedXml({ title: "Show", summary: "", author: "Shop", page: "https://x/p", image: null, episodes: [{ ...podcast.episodes[0], notes: "Notes <here>" }], audio: (e) => `https://x/play/${e.id}.mp3`, transcript: { url: (e: Episode) => `https://x/play/${e.id}.txt`, line: (url: string) => `Transcript: ${url}` } } as never);
+    const noted = feedXml({ title: "Show", summary: "", author: "Shop", page: "https://x/p", image: null, episodes: [{ ...podcast.episodes[0], notes: "Notes <here>" }], audio: (e: Episode) => `https://x/play/${e.id}.mp3`, transcript: { url: (e: Episode) => `https://x/play/${e.id}.txt`, line: (url: string) => `Transcript: ${url}` } });
     is("after the episode's own notes, escaped", noted.includes("<description>Notes &lt;here&gt;\n\nTranscript: https://x/play/aaaaaaaaaaaa.txt</description>"), true);
     const words = COURSES_WORDS as unknown as Record<string, { feedTranscript?: (url: string) => string }>;
     is("the line is in every store language", Object.entries(words).map(([code, w]) => [code, typeof w.feedTranscript === "function" ? w.feedTranscript("U") : null]), [
-      ["en", "Transcript: U"], ["es", "Transcripción: U"], ["fr", "Transcription : U"], ["de", "Transkript: U"], ["it", "Trascrizione: U"], ["nl", "Transcript: U"], ["pt", "Transcrição: U"],
+      ["en", "Transcript: U"], ["es", "Transcripción: U"], ["fr", "Transcription\u00a0: U"], ["de", "Transkript: U"], ["it", "Trascrizione: U"], ["nl", "Transcriptie: U"], ["pt", "Transcrição: U"],
     ]);
   }
 
@@ -184,6 +189,13 @@ async function main(): Promise<void> {
   is("nothing was kept or deleted for a refusal", [transcriptOf(await readPodcast(podcastId), episodeId), deleted], [null, []]);
   const first = await send({ pathname: at("words.txt") });
   is("a plain text file is kept, with its size from storage", [first.status, transcriptOf(first.body.podcast, episodeId), transcriptOf(await readPodcast(podcastId), episodeId)], [200, { pathname: at("words.txt"), bytes: 4321 }, { pathname: at("words.txt"), bytes: 4321 }]);
+  // A session let in without the second step (lib/two-step.ts) may add a transcript, never delete one.
+  const locked = await openLockedSession(OWNER, Date.now() + 7 * 86_400_000);
+  const asLocked = (change: Record<string, unknown>) => post(locked, { action: "transcript", id: pid, episode: episodeId, ...change }).then(answer);
+  const lockedReplace = await asLocked({ pathname: at("other.txt") });
+  const lockedRemove = await asLocked({ remove: true });
+  is("a locked session may not replace or remove one: each deletes a file", [lockedReplace.status, lockedReplace.body.error, lockedRemove.status, lockedRemove.body.error], [403, "locked", 403, "locked"]);
+  is("and the transcript and its file are still there", [transcriptOf(await readPodcast(podcastId), episodeId), deleted], [{ pathname: at("words.txt"), bytes: 4321 }, []]);
   const second = await send({ pathname: at("words2.txt") });
   is("replaced: the new one kept, the old file deleted", [transcriptOf(second.body.podcast, episodeId), deleted], [{ pathname: at("words2.txt"), bytes: 4321 }, [at("words.txt")]]);
   const episode2 = await answer(await post(session, { action: "add", id: pid, pathname: at("words2.txt"), title: "Episode two", notes: "" }));
@@ -238,12 +250,13 @@ async function main(): Promise<void> {
       ],
     };
     const html = renderToStaticMarkup(createElement(PodcastEditor, { productId: "p", folder: "f", initial: show }));
-    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    const text = html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
     is("the missing ones are counted, with why they matter", [/2 episodes have no transcript/.test(text), /deaf or hard of hearing/.test(text), /cannot play sound/.test(text)], [true, true, true]);
     is("and where listeners find it", /linked in the episode['’]s notes in each listener['’]s podcast app/.test(text), true);
     is("each episode says so", [(text.match(/No transcript yet/g) ?? []).length, /Transcript added \(2 KB\)/.test(text)], [2, true]);
     is("a file field for it, plain text only, with a visible name", [(html.match(/accept="\.txt"/g) ?? []).length >= 3, /Add a transcript/.test(text), /Replace the transcript/.test(text), /Remove the transcript/.test(text)], [true, true, true, true]);
     is("the new episode form takes one too, optional", /Transcript \(optional\)/.test(text), true);
+    is("the size the studio says is the size the server holds a file to", /up to 1 MB/.test(text), true);
     const all: Podcast = { ...show, episodes: show.episodes.slice(0, 1) };
     const quiet = renderToStaticMarkup(createElement(PodcastEditor, { productId: "p", folder: "f", initial: all })).replace(/<[^>]+>/g, " ");
     is("no count when every episode has one", /have no transcript|has no transcript/.test(quiet), false);

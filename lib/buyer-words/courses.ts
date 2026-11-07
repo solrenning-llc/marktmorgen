@@ -311,6 +311,8 @@ const en = {
   emailMyFeed: "Email me my feed",
   /** What a podcast app shows once a buyer's access has ended. */
   feedEnded: (title: string, store: string) => `Your access to ${title} has ended. It opens again if you buy it again from ${store}.`,
+  /** The line in an episode's notes that gives its transcript's address (274 [AX1] Part B.3). */
+  feedTranscript: (url: string) => `Transcript: ${url}`,
 
   // ---- Emails -------------------------------------------------------------------------------
   sentBy: (store: string) => `Sent by Marktmorgen on behalf of ${store}.`,
@@ -607,6 +609,7 @@ const es: CoursesWords = {
   boughtIt: "¿Lo compraste? Escribe la dirección con la que lo compraste y te enviaremos por email un enlace a tu propio feed.",
   emailMyFeed: "Envíame mi feed por email",
   feedEnded: (title, store) => `Tu acceso a ${title} terminó. Se vuelve a abrir si lo compras de nuevo a ${store}.`,
+  feedTranscript: (url) => `Transcripción: ${url}`,
 
   sentBy: (store) => `Enviado por Marktmorgen en nombre de ${store}.`,
   podcastSubject: (title) => `Tu pódcast privado: ${title}`,
@@ -900,6 +903,7 @@ const fr: CoursesWords = {
   boughtIt: `Vous l'avez acheté${S}? Saisissez l'adresse avec laquelle vous l'avez acheté, et un lien vers votre propre flux vous sera envoyé par e-mail.`,
   emailMyFeed: "Recevoir mon flux par e-mail",
   feedEnded: (title, store) => `Votre accès à ${title} a pris fin. Il se rouvre si vous l'achetez de nouveau auprès de ${store}.`,
+  feedTranscript: (url) => `Transcription${S}: ${url}`,
 
   sentBy: (store) => `Envoyé par Marktmorgen au nom de ${store}.`,
   podcastSubject: (title) => `Votre podcast privé${S}: ${title}`,
@@ -1193,6 +1197,7 @@ const de: CoursesWords = {
   boughtIt: "Schon gekauft? Geben Sie die Adresse ein, mit der Sie ihn gekauft haben, und ein Link zu Ihrem eigenen Feed wird Ihnen per E-Mail gesendet.",
   emailMyFeed: "Meinen Feed per E-Mail senden",
   feedEnded: (title, store) => `Ihr Zugang zu ${title} ist beendet. Er öffnet sich wieder, wenn Sie ihn erneut bei ${store} kaufen.`,
+  feedTranscript: (url) => `Transkript: ${url}`,
 
   sentBy: (store) => `Gesendet von Marktmorgen im Namen von ${store}.`,
   podcastSubject: (title) => `Ihr privater Podcast: ${title}`,
@@ -1485,6 +1490,7 @@ const it: CoursesWords = {
   boughtIt: "L'hai acquistato? Scrivi l'indirizzo con cui l'hai acquistato e ti invieremo per email un link al tuo feed personale.",
   emailMyFeed: "Inviami il mio feed via email",
   feedEnded: (title, store) => `Il tuo accesso a ${title} è terminato. Si riapre se lo acquisti di nuovo da ${store}.`,
+  feedTranscript: (url) => `Trascrizione: ${url}`,
 
   sentBy: (store) => `Inviato da Marktmorgen per conto di ${store}.`,
   podcastSubject: (title) => `Il tuo podcast privato: ${title}`,
@@ -1778,6 +1784,7 @@ const nl: CoursesWords = {
   boughtIt: "Gekocht? Vul het adres in waarmee je hem hebt gekocht, dan krijg je een link naar je eigen feed per e-mail.",
   emailMyFeed: "Mail me mijn feed",
   feedEnded: (title, store) => `Je toegang tot ${title} is afgelopen. Hij gaat weer open als je hem opnieuw koopt bij ${store}.`,
+  feedTranscript: (url) => `Transcriptie: ${url}`,
 
   sentBy: (store) => `Verstuurd door Marktmorgen namens ${store}.`,
   podcastSubject: (title) => `Je privépodcast: ${title}`,
@@ -2071,6 +2078,7 @@ const pt: CoursesWords = {
   boughtIt: "Já o comprou? Introduza o endereço com que o comprou e receberá por email uma ligação para o seu próprio feed.",
   emailMyFeed: "Enviar-me o meu feed por email",
   feedEnded: (title, store) => `O seu acesso a ${title} terminou. Volta a abrir se o comprar novamente a ${store}.`,
+  feedTranscript: (url) => `Transcrição: ${url}`,
 
   sentBy: (store) => `Enviado pela Marktmorgen em nome de ${store}.`,
   podcastSubject: (title) => `O seu podcast privado: ${title}`,

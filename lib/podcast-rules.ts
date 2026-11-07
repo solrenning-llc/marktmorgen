@@ -25,6 +25,36 @@ export const MAX_EPISODE_NOTES = 4_000;
 export const EPISODE_TYPES = ["audio/mpeg", "audio/mp4"] as const;
 export const EPISODE_ACCEPT = ".mp3,.m4a";
 
+/**
+ * An episode's transcript (274 [AX1] Part B.3; WCAG 1.2.1): its words as a plain text file the creator uploads, for
+ * listeners who are deaf or hard of hearing, or who cannot play sound. Kept beside the audio in the product's private
+ * folder, through the same upload door and the same storage room as every sold file; nothing writes it for them.
+ */
+export const TRANSCRIPT_TYPE = "text/plain";
+export const TRANSCRIPT_ACCEPT = ".txt";
+/** One megabyte: ten hours of speech, written down, is well under it. */
+export const MAX_TRANSCRIPT_BYTES = 1024 * 1024;
+export const MAX_TRANSCRIPT_LABEL = "1 MB";
+
+export type Transcript = { pathname: string; bytes: number };
+
+/** Whether a stored file's type is a transcript's: plain text, whatever character set it names. */
+export function isTranscriptType(contentType: string): boolean {
+  return contentType.split(";")[0].trim().toLowerCase() === TRANSCRIPT_TYPE;
+}
+
+/** How many episodes have no transcript yet, for the studio to say. */
+export function untranscribed(episodes: Episode[]): number {
+  return episodes.reduce((n, episode) => n + (episode.transcript ? 0 : 1), 0);
+}
+
+function parseTranscript(raw: unknown): Transcript | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.pathname !== "string" || !v.pathname || typeof v.bytes !== "number" || !Number.isInteger(v.bytes) || v.bytes < 0) return null;
+  return { pathname: v.pathname, bytes: v.bytes };
+}
+
 export type Episode = {
   id: string;
   title: string;
@@ -34,6 +64,8 @@ export type Episode = {
   contentType: string;
   /** When it went out, in seconds: its date in the listener's app. */
   at: number;
+  /** Its words as text, once the creator adds them; null until then. */
+  transcript: Transcript | null;
 };
 
 export type Podcast = { id: string; episodes: Episode[] };
@@ -66,6 +98,7 @@ export function parsePodcast(raw: unknown): Podcast | null {
           bytes: Number(x.bytes) || 0,
           contentType: typeof x.contentType === "string" ? x.contentType : "audio/mpeg",
           at: Number(x.at) || 0,
+          transcript: parseTranscript(x.transcript),
         };
       })
       .filter((e): e is Episode => e !== null)
@@ -96,21 +129,29 @@ export function feedXml(input: {
   audio: (episode: Episode) => string;
   /** The store's language, as RSS writes one ("es-es"); "en-us" unless given. */
   language?: string;
+  /**
+   * Where an episode's transcript is fetched, and the line that names it in the episode's notes, in the store's
+   * language. Given, an episode with a transcript carries it twice: the podcast:transcript tag, for apps that show
+   * transcripts, and that line, because every app shows an episode's notes.
+   */
+  transcript?: { url: (episode: Episode) => string; line: (url: string) => string };
 }): string {
   const items = [...input.episodes]
     .sort((a, b) => b.at - a.at)
-    .map(
-      (e) => `    <item>
+    .map((e) => {
+      const words = e.transcript && input.transcript ? input.transcript.url(e) : null;
+      const notes = words ? [e.notes, input.transcript!.line(words)].filter(Boolean).join("\n\n") : e.notes;
+      return `    <item>
       <title>${xml(e.title)}</title>
-      <description>${xml(e.notes)}</description>
+      <description>${xml(notes)}</description>
       <guid isPermaLink="false">${e.id}</guid>
       <pubDate>${new Date(e.at * 1000).toUTCString()}</pubDate>
       <enclosure url="${xml(input.audio(e))}" length="${e.bytes}" type="${xml(e.contentType)}"/>
-    </item>`,
-    )
+${words ? `      <podcast:transcript url="${xml(words)}" type="${TRANSCRIPT_TYPE}"/>\n` : ""}    </item>`;
+    })
     .join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0">
   <channel>
     <title>${xml(input.title)}</title>
     <link>${xml(input.page)}</link>

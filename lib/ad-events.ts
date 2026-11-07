@@ -51,7 +51,7 @@
  *   nl:adsrv:sent:<id>          an order, renewal or lead already sent (3 days; 40 for renewals)
  *   nl:adsrv:ctx:<token>        the request that opened a checkout (4 days)
  *   nl:adsrv:sub:<subscription> the cookies and clicks a membership's renewals are sent with (400 days), never an address
- *   nl:adsrv:renew:<statsId>    the invoice a pass of renewals stopped at, when there were more (an hour)
+ *   nl:adsrv:renew:<statsId>    the account and invoice a pass of renewals stopped at, when there were more (a day)
  */
 import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -59,7 +59,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
-import { type Store, saleHandles } from "@/lib/store";
+import { STRIPE_ACCOUNT_PATTERN, type Store, saleHandles } from "@/lib/store";
 import { toMajor } from "@/lib/money";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { ADS_SERVER_PLATFORMS, type AdsServerPlatform, LEAD_ID, adsCookieName, readAdsCookie } from "@/lib/ad-consent";
@@ -77,14 +77,22 @@ const ctxKey = (token: string) => `nl:adsrv:ctx:${token}`;
 export const subKey = (sub: string) => `nl:adsrv:sub:${sub}`;
 /**
  * Where a pass of a store's renewals left off in the day's paid invoices, when
- * there were more than one pass reads: Stripe lists them newest first, so
- * without it a store paid more renewals in a day than RENEWAL_PAGES_PER_RUN
- * pages hold would read the same newest pages every pass and never send the
- * rest. An hour at the most: a place that cannot be followed any more ends by
- * itself, and the pass after reads from the newest again.
+ * there were more than one pass reads, as "<account>:<invoice>": Stripe lists
+ * them newest first, so without it a store paid more renewals in a day than
+ * RENEWAL_PAGES_PER_RUN pages hold would read the same newest pages every
+ * pass and never send the rest.
+ *
+ * Kept a day, the window the pass reads (created[gte]): the sweep visits each
+ * store in turn and may come back to one only after more than an hour, and a
+ * place lost on the way would leave the oldest renewals unread. A place that
+ * has fallen out of the window ends by itself: Stripe lists nothing of the
+ * day after it, and the end of the list lets it go. The account it was read
+ * in goes with it: once the creator connects another Stripe account, the old
+ * account's invoice is not one to go on from, and the new account is read
+ * from the newest.
  */
 const renewKey = (statsId: string) => `nl:adsrv:renew:${statsId}`;
-const RENEW_PLACE_SECONDS = 3600;
+const RENEW_PLACE_SECONDS = 86400;
 const INVOICE = /^in_[A-Za-z0-9]{6,80}$/;
 /** Pages of the day's paid invoices, a hundred each, one pass of a store's renewals reads at the most (sendRenewals). */
 export const RENEWAL_PAGES_PER_RUN = 3;
@@ -709,9 +717,15 @@ async function paidInvoices(account: string, statsId: string, since: number, dea
   const key = renewKey(statsId);
   const replies = await redisPipeline([["GET", key]]);
   const kept = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
-  if (kept !== null && !(typeof kept === "string" && INVOICE.test(kept))) throw new Error("the place a pass of renewals stopped at is in an unknown shape");
+  const cut = typeof kept === "string" ? kept.lastIndexOf(":") : -1;
+  const keptAccount = typeof kept === "string" ? kept.slice(0, cut) : "";
+  const keptInvoice = typeof kept === "string" ? kept.slice(cut + 1) : "";
+  if (kept !== null && !(cut > 0 && STRIPE_ACCOUNT_PATTERN.test(keptAccount) && INVOICE.test(keptInvoice))) {
+    throw new Error("the place a pass of renewals stopped at is in an unknown shape");
+  }
   const rows: InvoiceRow[] = [];
-  const from = typeof kept === "string" ? kept : null;
+  // A place read in another account (the creator connected a new one) is not followed: the new account is read from the newest.
+  const from = kept !== null && keptAccount === account ? keptInvoice : null;
   let after = from;
   let more = false;
   for (let page = 0; page < RENEWAL_PAGES_PER_RUN; page += 1) {
@@ -730,7 +744,7 @@ async function paidInvoices(account: string, statsId: string, since: number, dea
     after = last;
   }
   // More left (the cap or the deadline came first): the next pass goes on after the last one read. The end: the place goes.
-  const place = more && after ? ["SET", key, after, "EX", RENEW_PLACE_SECONDS] : from !== null ? ["DEL", key] : null;
+  const place = more && after ? ["SET", key, `${account}:${after}`, "EX", RENEW_PLACE_SECONDS] : kept !== null ? ["DEL", key] : null;
   return {
     rows,
     commit: async () => {
@@ -751,13 +765,21 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
   if (!store.statsId || !store.stripeAccountId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
   const since = Math.floor(now / 1000) - 86400;
   const read = await paidInvoices(store.stripeAccountId, store.statsId, since, deadline);
-  const progress = { stopped: false };
+  // Stopped until sendRenewalRows says it handled every renewal read: a return
+  // on the way (its reads not known, nowhere to send) leaves the place.
+  const progress = { stopped: true };
   const count = await sendRenewalRows(store as Store & { statsId: string }, read.rows, now, deadline, progress);
   if (!progress.stopped) await read.commit();
   return count;
 }
 
-/** The renewals among the invoices read, each sent once; `progress.stopped` when some were left for the next pass. */
+/**
+ * The renewals among the invoices read, each sent once. `progress.stopped`
+ * comes in true and is set false only where every renewal read was handled
+ * (none to send, each already sent, or each gone through): any other return,
+ * one added later included, leaves it true, and the place does not move past
+ * renewals that were never handled.
+ */
 async function sendRenewalRows(store: Store & { statsId: string }, listed: InvoiceRow[], now: number, deadline: number, progress: { stopped: boolean }): Promise<number> {
   const handles = saleHandles(store);
   const rows = listed.filter((row) => {
@@ -765,15 +787,25 @@ async function sendRenewalRows(store: Store & { statsId: string }, listed: Invoi
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     return Boolean(meta.ads) && handles.has(meta.store ?? "") && typeof row.amount_paid === "number" && row.amount_paid > 0;
   });
-  if (!rows.length) return 0;
+  if (!rows.length) {
+    progress.stopped = false;
+    return 0;
+  }
   const subOf = (row: InvoiceRow) => {
     const raw = row.parent?.subscription_details?.subscription ?? row.subscription;
     return typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
   };
+  // Read exactly (CX-123 rule 24): a reply per renewal, each 1 (sent) or 0
+  // (not); anything else is not known, and nothing is sent on it this pass.
   const marks = await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = rows.filter((_, i) => Number(marks[i]) !== 1);
-  if (!left.length) return 0;
+  if (!Array.isArray(marks) || marks.length !== rows.length || marks.some((mark) => mark !== 0 && mark !== 1)) return 0;
+  const left = rows.filter((_, i) => marks[i] === 0);
+  if (!left.length) {
+    progress.stopped = false;
+    return 0;
+  }
   const stored = await readStored(store.statsId);
+  // No platform to send to (the store's tokens not read): the renewals wait, and the place with them.
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
   const kept = await redisPipeline(left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]));
   let count = 0;

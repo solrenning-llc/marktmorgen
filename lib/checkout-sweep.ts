@@ -401,8 +401,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   }
   if (!worthAsking(store, requesting)) return;
   // A membership's renewals, sent to the creator's ad platforms as purchases
-  // of their own (lib/ad-events.ts): one read of the day's invoices, only on
-  // a store that sends from the server.
+  // of their own (lib/ad-events.ts): the day's paid invoices, a few pages a
+  // pass from where the last pass stopped, only on a store that sends from
+  // the server.
   if (store.stripeAccountId && sendsFromServer(store)) {
     await sendRenewals(store, Date.now(), deadline).catch((error) => console.error("sending renewals to ad platforms failed", store.handle, error));
   }

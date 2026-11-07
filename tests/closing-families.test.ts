@@ -35,6 +35,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],
   "nl:adsrv:ctx:": ["lib/ad-events.ts", "CTX_SECONDS"],
   "nl:adsrv:sent:": ["lib/ad-events.ts", "SENT_SECONDS"],
+  // Where a pass of a store's renewals left off (a capped part): set with its own day each time it moves.
+  "nl:adsrv:renew:": ["lib/ad-events.ts", "RENEW_PLACE_SECONDS"],
   // A store's picture uploads not yet put on anything (a capped part): the list expires a window after its last note.
   "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOOR_SECONDS"],
 };

@@ -120,13 +120,14 @@ export function CreatorCardEditor({ initial, held, handle, storeName, words, add
     if (!answer) return;
     const saved = answer.card;
     setKept(true);
+    // What visitors see is the card as the server kept it, whatever was typed since (Claude 5 on #1965).
+    setShown(saved.on);
     if (edits.current !== sentAt) {
       // Changed while it was saving: what was typed since stays on the screen, not yet saved.
       setSaid("Your card is saved as it was when you pressed Save. You changed it since: save again to keep the newer words.");
       return;
     }
     setCard(saved);
-    setShown(saved.on);
     // Said once, in the status line (4.1.3): no toast beside it.
     setSaid(saved.on ? "Your card is saved and shown." : "Your card is saved. It is not shown until you turn it on.");
   }

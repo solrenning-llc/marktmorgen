@@ -1,3 +1,163 @@
+# C2 MAIN VERDE continuation — 2026-11-06 23:01 Fortaleza
+
+Newest status supersedes the historical freeze below; all history is preserved.
+**C4-3100/22:33 explicitly announced MAIN VERDE and ended the freeze.** Main
+5aae97e8a0491952192aa7beefd6741917e6bc28 confirmed by GitHub ref API and git fetch.
+One legitimate main integration plus ONE consolidated normal expected-SHA push
+per PR; no empty push to retry. Any new MAIN VERMELHO suspends sends again.
+Merge requires9NEW exact final successes after main integration plus applicable
+review(s). AV10 budget/serial work, no unnecessary parallel agents.
+
+## #2903 consolidated publication — awaiting T focal and9NEW
+
+- Exact new official head **246209299128ce363c29ead6628fc3aba33a12d2**, tree **8e4ae4e28884e2d26a54fe6f2583f13795143621**. ONE successful normal expected-old69b163ef update, forcefalse, no intermediate PR-head update. Main5aae97e8 is an explicit second parent.
+- Both T LOW wording corrections accumulated locally in93a58ce0 published as ancestor **2e30b75b35228f9e2b564286ee5a265b2e9caab6**, tree77bfd5acd4a864eb532ea9793fc6a199d5f8293d. API metadata changes SHA, not source/tree. Native local main merge **6a681ca9bbe28337b25f76169bd2b314c5ea018a** has EXACT same final tree8e4ae4e2.
+- Only docs/reviews/c2-lot01-e8-cost-triage.md differs from main; exact blob **b0984646b58ee0648cfaf011234798e005f98ce2**. Preserves HX1 service-email category independently of marketing; pending exact counter/atomic complete fan-out/query-render-storage funding stays explicit. Cron soft45s inter-iteration check/25claimed reports accurately distinguished from hard in-flight I/O cutoff.
+- Post-main diff0, scanner **4153files/0corrections**. No runtime RED/GREEN/types/globalCI claimed for the doc. T's focal exact-head return for5808502828 requested in **6700697150**; no self-closure. Nine NEW final aggregators mandatory; no old greens/merge.
+- Initial poll of the local merge was auto-review rejected because it applied historical freeze. C2 reconfirmed exact C4-3100 permission; safe process/status checks proved no live git merge. Removed ONLY own empty stale e8-local index.lock, then authorized native merge succeeded cleanly. No remote update occurred before this permission check; not a product defect/RED. No force, CI retry/cancel or bypass.
+
+## #2956 evidence now durable, not a new run or clean approval
+
+- Published **codex/c-review-2956-invites@1ee8312c4a61d8eab03ac1522157da2f40558c12**, tree **778939079da6c51ca1888cc1f27425659f214b2b** BYTE-IDENTICAL to localc747afb2. Parent exactreviewedea797d8e, three own artifact paths only, no new PR/product ref/CI change. New branch absence confirmed404 before creation.
+- Report/proof/runner are now remotely fetchable. No proof/assertions changed or executed again. Review5808534093 remains: C5 LOW OPEN, own24/2fail+22controls, author+linked108passing. Durability comment **6700705656**; wait nominal corrected product head before focal replay.
+
+## Preserve pending own gates
+
+Products2695/33bb,2692PRIMARY35e6,recovery8c2 and2846PRIMARY7cd/WIP3d838 remain
+unchanged in this continuation. Both recovery-note2692 financial returns are
+present; displayA3#2020 still blocks. #2846 awaits C4 nominal composition/base
+with2963; do not promote WIP or edit C4 helper/child. #2695 must later integrate
+authorized main once and obtain H2/R2 nominal return+9NEW; retries consumed stay
+consumed. #2931 redundant/C4 closure, no more C2 execution. G controls3037 urgent
+review; do not duplicate. CommercialJ/threshold require explicit assignment.
+No new MAIN VERMELHO observed in FULL recovered before publication. Current
+single C2 continuation stays enabled; no new automation, no background watch
+claim. Publish complete checkpoint/PONTO with confirmed receipts.
+
+---
+
+# C2 LOCAL freeze checkpoint — 2026-11-06 21:52 Fortaleza
+
+Newest status supersedes affected statements below; all history is retained.
+FULL channel recovered from blobebcf41cd (2,530,821characters), including
+**C4-3090/21:21**: #2940 mergeddd1756ab1, carrying inventory and stripe-list-lot1.
+C4 explicitly confirms **#2931 redundant** and will close it. C2's final review
+5808256648 is complete; no further replay or merge of that PR is needed.
+#2894 now410e73b6; G confirmed unchanged reviewed blobs6699636396, preserving
+5807353945. These coordinator/reviewer reports are NOT C2 CI certification.
+NO new literal MAIN VERDE announcement. Freeze continues unchanged.
+
+Fresh metadata/timelines: own2695/33bbd1fd,2692/35e670e3,2846/7cd563d7 and
+doc2903/69b163ef allOPEN/unmerged/exact; reviews2956/ea797d8e and2963/528c8262
+also unchanged, no nominal corrected candidate. No new unclaimed review request
+for C2 found. C6's37-case reproduction request to C4 is NOT an assignment to C2;
+do not begin a broad sweep or replace R2 without a nominal disposition.
+Both recovery-note2692 financial returns remain present; displayA3#2020 still
+blocks full clearance. Local2903fix93a58ce0 and2956proofc747afb2 untouched.
+
+Current main CLAUDE/AGENTS/inbox/reservations index/queue SHA checks match the
+previously read c366 blobs. QueueFULL recovered through Git blob after empty
+Contents payload,4,567,624characters; not truncation. No new policy inferred.
+No test/scanner/provider/CI replay, product change, main integration, push/ref,
+merge, retry or cancellation in this continuation. C4-3080/3090 Medium/SERIAL,
+no subagents/large units/long research. Pending coordinator recovery is temporary;
+keep single existing enabled continuity, no new automation or background-watch
+claim. After NEW MAIN VERDE: authorized main once/one consolidated push perPR,
+required applicable reviews and9NEW exact-success workflows.
+
+Local complete checkpoint is committed below; remote canonicaldcde4fcd stays
+unchanged during freeze. Previous PONTO b7d7a06f really published. Fresh FULL/CAS
+will record this point; do not claim publication without the write receipt.
+
+---
+
+# C2 LOCAL recovered nominal return — 2026-11-06 21:01 Fortaleza
+
+Newest state supersedes the outdated pending-D2 statements below. All prior
+history and immutable proofs remain preserved. NO product/evidence/checkpoint
+push, merge, main integration, retry, cancellation or test rerun occurred.
+C4-3080 Medium effort and direct owner freeze remain in force; FULL fresh
+channel showed no new literal MAIN VERDE and no new unclaimed C2 assignment.
+
+- Fresh own-PR metadata/timelines recovered **D2 first financial return6694648181**, posted20:23Fortaleza, on EXACT recovery WIP **8c2eeb29aa85397d412318416401fd1912527483**. D2's MEDIUM6675937365 is **CLOSED in the demonstrated cases**, no new focal finding. This was missing from the older C2 checkpoint; do NOT keep asking for the same return or replay unchanged tests.
+- D2 reports SAME immutable fbbb56fb/blob668ddda25c6396e7e5f89402d80000244c40916f:12checks/6causal failures+6controls on3a61,12/12 on8c2e; author472d53ea two causal subtests+parent failures to12/12;14linked581/581 separately. Directed types1087files0/lint0/scanner3802snapshot overlays0/diffclean. These are D2's recorded independent execution results, NOT a new C2 run. D2 transparently used asserted in-memory exact overlays due full disk.
+- C2 verified the exact Git blobs directly against the named WIP: flow **8ce9432fece8af7de9a0d4b3d7920b01c002d73a**, note test **51bbb142446a1112622b806724bc7438b649272d**, both equal D2's nominal receipt. Report/runner codex/d-review-2692-note-return@8ae18ee16ccec3fac92b27180293e5b2a8c31916, proofs/d2/review-2692-note-return.md.
+- H2 second financial6679942070 remains separate and applicable to this same two-file recovery WIP. **Both recovery-note financial returns are now present.** This does NOT clear display/homepage outage/A3#2020, authorize promotion, or approve the full PR. PRIMARY remains35e670e3; no head/CI moved. After authorized complete composition: both applicable opinions, other dispositions and9NEW exact final successes remain required.
+- Fresh ownPRs remain OPEN/unmerged/exact:2695/33bbd1fd,2692/35e670e3,2846/7cd563d7;doc2903/69b163ef. No new author-corrective return was found for the other pending blockers. Local2903 corrective93a58ce0 and2956 proofc747afb2 remain unchanged; no scanner/tests repeated.
+- Previous PONTO **fa341e014aa699d8a4bf3bc63a7f9964ca62a640** really published after FULL/CAS. This corrects the older LOCAL20:54 section's prospective wording. Remote checkpoint remainsdcde4fcd; new checkpoint commits stay LOCAL until MAIN VERDE.
+
+---
+
+# C2 LOCAL freeze continuation — 2026-11-06 20:54 Fortaleza
+
+This newest section supersedes affected statements below; all older text is
+preserved. C4-3080 was read in the FULL fresh channel: Medium effort, only
+requested independent reviews and LOCAL fixes to received findings; no large
+new units, long research or parallel subagents. No new MAIN VERDE was present.
+The direct owner freeze remains applied, including evidence/checkpoint refs.
+
+## Documentary corrective delta #2903 — LOCAL ONLY
+
+- Remote head stays **69b163ef70f79baa9b538c18535be38136e5aec0**. T's documentary review **5808502828** has no critical/high/medium and two LOW wording findings. Credit and independent closure remain with T; no self-close.
+- Both LOWs are corrected locally on the SAME branch **codex/c-lot01-e8-cost-triage@93a58ce0e7018acc7484793951a73a1e71bdfe27**, tree **77bfd5acd4a864eb532ea9793fc6a199d5f8293d**, parent69b163ef. Worktree /workspace/scratch/c2-resume.LpgUL6/e8-local. One documentation file,20insertions/13deletions, no runtime/config/reservation change; commit NOT pushed or remotely fetchable.
+- HX1 already assigns report email to the store service-email allowance independently of marketing. The corrected text preserves that category and confines pending verification to exact counter mapping, atomic complete fan-out debit and query/render/storage funding. It does not reopen the category or authorize a new allowance.
+- Weekly/monthly cron wording now says at most25 claimed reports and a45-second elapsed check between folder iterations. Skipped folders do not increment claims; current nested I/O can outlast the checkpoint. No hard I/O cutoff is asserted. Existing801/602 arithmetic and provider limits are unchanged.
+- Cross-checked against current queue HX1 decision and actual weekly/monthly loops; diff check0, public-data scanner **4128/0**. No runtime RED/GREEN, TS or CI claimed for this documentation delta. Local result comment **6698965194**; T focused return pending authorized publication.
+- The earlier20h47 PONTO CAS attempt returned409 and wrote NOTHING; after>=2min, FULL fresh blob was recovered, not a truncated Contents body. Await successful append result before claiming the new PONTO published.
+
+## Preserved completed review and next steps
+
+Second financial2956 review **5808534093** below remains complete with C5 LOW
+OPEN; local proof c747afb2 is unchanged. No rerun of unchanged2956/2963/3028
+proofs. Own products2695/2692/2846 remain unchanged, doc2903 does not count.
+First accept only requested review or local received corrective delta; otherwise
+watch within CX127. After NEW literal MAIN VERDE, check ownership, integrate
+legitimate main once and make one consolidated push per same PR, then applicable
+opinions and9NEW exact-success workflows. C4 sole coordinator; C1 off.
+
+---
+
+# C2 LOCAL freeze continuation — 2026-11-06 20:45 Fortaleza
+
+This new top supersedes affected states below. All prior history and REDs are
+preserved. This checkpoint is LOCAL ONLY until the new MAIN VERDE announcement.
+Remote canonical checkpoint remains dcde4fcd6ead7b459f91d5c79ac88357932a8c57.
+Coordination ONLY Claude4; Claude1 off. The owner's direct C4-3050/3070 freeze
+was read and applied: no product/evidence/checkpoint ref push, no new PR,
+integration, merge, CI rerun/retry/cancellation in this continuation.
+
+## Completed local work and reviews
+
+- New SECOND financial review **#2956 exactea797d8e01ddd8162c836d46f08a986b0b001f59**, base8f73f9d3: **5808534093**. Claim6698644702 before diff/source/tests; channel reservation **4399b1c7af75e198ba611a78342fcc526e1db4c3** before new proof/execution. First reviewC5/6697816780 retains credit. No additional critical/high/medium demonstrated; C5's LOW is independently confirmed and remains OPEN. Not unconditional clean approval. Author must repair locally, then request focal final-head return after freeze; two applicable financial reviews+9exact final successes required.
+- C5 LOW reproduced: real SETNX by applies, ACK and GET read-back unknown; recordInvite rejects before ALL/list ZADDs. invitedBy still names inviter; healthy retry already; both indexes absent. Same recordInvite/store/MemoryRedis executed, settlement/claim route only inspected; no actual earned/lost USD claimed.
+- LOCAL evidence branch **codex/c-review-2956-invites@c747afb2b6bc8558618c488d5072bf324d09747e**, tree **778939079da6c51ca1888cc1f27425659f214b2b**. Worktree /workspace/scratch/c2-resume.LpgUL6/review-2956. Three new files only: docs/reviews/c2-2956-invites.md, proofs/c2/review-2956.mjs, tests/c2-2956-invites.proof.ts. NOT remotely fetchable. No author product/ref/shared test configuration changed.
+- Same authorREDfe9d380d1f4bd0754e76a38fb20faf12668c143f gives17/11fail; exactfinal17/17. Linked creator-invites52/random15/registry24=91, author+linked108green. Independent5scenarios24/2fail+22controls on candidate; same24/6fail on prior, not all-green. Healthy/recovered lostACK/nonapplication/other inviter controls pass. Actual strictTS3roots/imports0, lint0, syntax/diff0, scanner4136/0. Logs /tmp/c2-2956-{author-red,author-final,linked,own,own-red,types,lint,scanner}.log.
+- Bounds before dispatch: at most8extra cases,2000attempts/case,16000total,120s/256KiB perprocess. Own observed153 admitted attempts/152MemoryRedis dispatches (one deliberately nonapplied attempt), max33/case. AuthorRED264/final302; linkedcreator226, puregroups0. Fetch blocked before graph, canonical aliases/environment retained. No real payment/provider/nativeRedis/browser/globalTSC/hostedCI/deployment.
+- Nonzero cost boundary: extraGET only after ambiguousSET, maximum1 per claim/no SETretry. Static inviteCode local ceiling15commands, recordInvite own claim/index suffix4 vs3before; unchanged inviter/store lookups excluded. Studio admission before inviteView exists. No certification of complete store-creation/page worst-case funding or later recovery write; extraIO cannot be called free. No new key/retention/policy/commercial setting. These are limited review observations, not new monetary findings without proof.
+- Review typo corrected remotely by6698838166: --red substitutes creator-invites.ts, not a formatter; runner always used correct source and assertions unchanged. Unit result posted channel **9b4577f8b809f06918cfc1ac4d960166f8017922**. No evidence pushed during this freeze continuation.
+
+## New channel events and preserved gates
+
+- C4-3070 order is **#2940 -> #2894**. #2931 becomes redundant only after C4 confirms legitimate composition. C2 final2931review5808256648 already complete; do not repeat tests or claim pending. G likewise reconfirmed2894review complete5807353945/6698135611. Currentmain c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92 unchanged; no MAIN VERDE inferred from older messages. Own product heads and consumed retries remain unchanged.
+- **#2963 exact528c8262** remains NOT RELEASED5807688707. C6 independently reproduced the same HGET/readPreorder residual in her second financial channel report20h40 (four malformed formats, healthycontrol; author11/11+soon4/4+188linked). C2 requested she publish her own nominal PR review; do not post in her name. Preserve original HIGH/P1 creditC4; C6 classified her demonstrated vector MEDIUM. Her LOW queueRelease is in C4/C5/#2991 composition. Neither report closes R2EXEC or author correction. Do not replay unchanged b031 proof. #2846PRIMARY7cd/WIP3d838 still wait nominal composition.
+- **#2903 exact69b163ef** now has documentary controller **CodexT/6698609238**, announced20h35. R2 had not accepted; do not duplicate T. Await his report, no runtime implementation by silence.
+- #3028 remains content-cleared5808294084; K2 acknowledged, no duplicate review needed. The three own products2695/33bb,2692PRIMARY35e6/recovery8c2/displayA3,2846PRIMARY7cd are preserved. Doc2903 does not count as product. CommercialJ/threshold2325 still require explicit assignment. No redeploy of merged products.
+
+## Continue exactly
+
+Keep the single existing enabled C2 task; no new automation. New report/checkpoint
+commits stay LOCAL until literal MAIN VERDE. Channel append/comment progress is
+allowed and records exact local hashes without claiming remote fetchability.
+Before any new unit, audit fresh channel/PR claims and reserve; no duplicate
+second controller. CX127 channel>=2min, ownPR>=5min; no CI retries. Existing
+APIleads7c991 and2963b031 evidence stay unchanged and await nominal events.
+After MAIN VERDE, integrate legitimate main once, combine all causal fixes in
+one push per same PR, obtain required applicable opinions and9NEW exact-success
+workflows before normal expected-SHA merge. Unknown neverzero, ceilingbefore
+paidIO, no price/limit/commission/flag/gate/account/payment/provider/contact/PII.
+
+---
+
 # C2 checkpoint — latest causal section, 2026-11-06 20:16 Fortaleza
 
 This section supersedes older states below; all history, heads, REDs, branches and reviews remain intact. Coordination ONLY Claude4; Claude1 off. PT-BR owner/channel, English code/PR. Preserve the single enabled hourly C2 continuation.

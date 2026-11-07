@@ -32,7 +32,7 @@ import { DIGITAL_CONSENT_WORDS } from "@/lib/buyer-words/digital-consent";
 import { WITHDRAWAL_WORDS, withdrawalWords } from "@/lib/buyer-words/withdrawal";
 import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
-import { WITHDRAW_FROM_CONTRACT } from "@/lib/withdrawal-rules";
+import { WITHDRAW_FROM_CONTRACT, withdrawalWindow } from "@/lib/withdrawal-rules";
 import { done, is, part } from "./check";
 
 const LANGUAGES = ["en", "es", "fr", "de", "it", "nl", "pt"] as const;
@@ -40,12 +40,24 @@ const LANGUAGES = ["en", "es", "fr", "de", "it", "nl", "pt"] as const;
 function main(): void {
   part("The box says where the withdrawal function is (art. 6(1)(h), Annex I instruction 3)");
   is("the label in English is the law's own words", WITHDRAWAL_WORDS.en.withdrawLink, WITHDRAW_FROM_CONTRACT);
-  for (const kind of ["digital", "membership"] as const) {
-    is(
-      `${kind}: every language's sentence names the function by its label, in that language`,
-      LANGUAGES.map((lang) => [lang, DIGITAL_CONSENT_WORDS[lang].box[kind].includes(withdrawalWords(lang).withdrawLink)]),
-      LANGUAGES.map((lang) => [lang, true]),
-    );
+  // Changed assertion, noted (Claude 5's MEDIUM on #2953): the digital box no longer names the function. Its own "yes"
+  // closes the function at payment for everything that is not a pre-order (lib/withdrawal-rules.ts, withdrawalWindow),
+  // so for the typical buyer the sentence pointed at something already shut. The membership box still names it.
+  is(
+    "membership: every language's sentence names the function by its label, in that language",
+    LANGUAGES.map((lang) => [lang, DIGITAL_CONSENT_WORDS[lang].box.membership.includes(withdrawalWords(lang).withdrawLink)]),
+    LANGUAGES.map((lang) => [lang, true]),
+  );
+  is(
+    "digital: no language's sentence names a function that its own yes closes at payment",
+    LANGUAGES.map((lang) => [lang, DIGITAL_CONSENT_WORDS[lang].box.digital.includes(withdrawalWords(lang).withdrawLink)]),
+    LANGUAGES.map((lang) => [lang, false]),
+  );
+  // Claude 5's proof on #2953, kept: a digital "yes" that is not a pre-order leaves no function open, at payment or after.
+  {
+    const PAID = 1_800_000_000;
+    const facts = { kind: "sale", paidAt: PAID, member: false, givenByStore: false, consent: { version: EU_WITHDRAWAL_CONSENT_VERSION, at: PAID - 30, kind: "digital" } } as Parameters<typeof withdrawalWindow>[0];
+    is("a digital yes, not a pre-order: the function is closed at payment and a minute later", [withdrawalWindow(facts, PAID).open, withdrawalWindow(facts, PAID + 60).open], [false, false]);
   }
   // Where it is: the buyer's list of purchases, in each language's word for it.
   const listWord: Record<(typeof LANGUAGES)[number], RegExp> = {
@@ -58,8 +70,8 @@ function main(): void {
     pt: /compras|encomendas/i,
   };
   is(
-    "and says it is on the buyer's list of purchases",
-    LANGUAGES.map((lang) => [lang, (["digital", "membership"] as const).every((kind) => listWord[lang].test(DIGITAL_CONSENT_WORDS[lang].box[kind]))]),
+    "and the membership box says it is on the buyer's list of purchases",
+    LANGUAGES.map((lang) => [lang, listWord[lang].test(DIGITAL_CONSENT_WORDS[lang].box.membership)]),
     LANGUAGES.map((lang) => [lang, true]),
   );
   is("the sentence changed, so its version moved past the one buyers saw before", EU_WITHDRAWAL_CONSENT_VERSION !== "2026-10-30.2", true);

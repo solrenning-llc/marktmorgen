@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { imageFolder } from "@/lib/store";
@@ -63,6 +64,12 @@ export default async function StudioSitePage({ searchParams }: Params) {
           <h1 className="t-h2 mt-3">Pages of your own, beside your products</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`About you, where to start, how to work with you, the questions people ask: each page is built from up to ${MAX_BLOCKS} blocks, follows your store's look, lives at your store's address and on your own domain, and can sit in the menu at the top of your store.`}
+          </p>
+          <p className="mt-2 max-w-2xl text-sm text-ink-soft">
+            {"Also yours: a business card, one address to give anyone you meet, with a button that saves you to their phone's contacts. "}
+            <Link href={studioPath(store, "", "card")} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+              Set up your business card
+            </Link>
           </p>
           <div className="mt-8 grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
             <SitePagesList pages={pages} selected={selected?.id ?? null} sid={store.sid} />

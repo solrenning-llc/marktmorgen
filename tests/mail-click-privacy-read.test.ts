@@ -39,13 +39,24 @@ for (const [label,answer] of [
 });
 for (const [label,answer] of [
  ["missing",[]],["extra",[null,null]],["undefined",[undefined]],["object",[{}]],
- ["broken JSON",["{"]],["null JSON",["null"]],["array JSON",["[]"]],["missing token",['{"agreed":true}']],
- ["bad token type",['{"t":7}']],["bad token value",['{"t":"broken"}']],
+ ["broken JSON",["{"]],["null JSON",["null"]],["array JSON",["[]"]],
 ] as [string,unknown[]][]) test(`erasure preserves its work when contact read is ${label}`,async()=>{
  await seed(); const writes:Command[]=[];
  await assert.rejects(intercept("HGET",answer,()=>forgetClicksPerson(list,email),writes));
  assert.equal(writes.length,0,"no deletion before exact contact/token evidence");
  assert.equal((await real([["GET",marker]]))[0],token);
+});
+for (const [label,row] of [
+ ["missing token", {agreed:false}], ["bad token type", {t:7}], ["bad token value", {t:"broken"}],
+] as [string,Record<string,unknown>][]) test(`legacy ${label} has no possible marker and erases only its used links`,async()=>{
+ await real([["HSET",leadsKey(list),email,JSON.stringify(row)],["SADD",used,campaign],["SET",marker,token]]);
+ const writes:Command[]=[];
+ redis.pipeline=async commands=>{writes.push(...commands.filter(c=>c[0]==="DEL"));return real(commands);};
+ try{
+  assert.equal(await forgetClicksPerson(list,email),1);
+  assert.deepEqual(writes,[["DEL",used]],"only the known person click set is deleted");
+  assert.deepEqual(await real([["EXISTS",used],["GET",marker]]),[0,token],"an unrelated marker is never guessed or deleted");
+ }finally{redis.pipeline=real;}
 });
 test("healthy erasure deletes both token and used links once; repeat is exact zero",async()=>{
  await seed(); assert.equal(await forgetClicksPerson(list,email),2);

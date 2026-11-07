@@ -10,6 +10,7 @@
  * Synthetic data only; no provider is called.
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { keyIndex, linkKeyOf, rememberLinkKeys } from "@/lib/mail-clicks";
 import { leadsKey } from "@/lib/contacts";
@@ -120,3 +121,24 @@ test("control: with nothing failing, the row and the link key go in one erasure"
     globalThis.fetch = oldFetch;
   }
 });
+
+// Lead rows written by lib/free.ts before contacts gained an unsubscribe token.
+for (const [i, fields] of [{}, {t:null}, {t:7}, {t:"broken"}].entries()) {
+ test(`legacy Lead variant ${i} is fully erased and stays erased on retries`, async()=>{
+  redis.clear();
+  const owner=`legacy-erasure-${i}@example.test`;
+  await claimHandle(owner,`legacyerase${i}`,"Legacy erasure","");
+  await ensureStoreId(owner);await ensureStatsId(owner);await ensureListId(owner);
+  await setSubscription(owner,{customerId:`cus_LegacyErase${i}`,subscriptionId:`sub_LegacyErase${i}`,active:true,tier:"pro",period:paidPeriod()});
+  const shop=(await storeForEmail(owner))!;const listId=shop.listId as string;
+  const legacy={agreed:false,agreedAt:"",firstAt:"2026-09-10T12:00:00.000Z",lastAt:"2026-09-10T12:00:00.000Z",titles:["Free guide"],...fields};
+  const clicks=`nl:mail:clk:${listId}:${createHash("sha256").update(`nimbus-clk:${EMAIL}`).digest("hex").slice(0,32)}`;
+  await redisPipeline([["HSET",leadsKey(listId),EMAIL,JSON.stringify(legacy)],["SADD",clicks,"s-0123456789abcdef-fedcba9876543210"]]);
+  for(let attempt=1;attempt<=3;attempt++){
+   const result=await erasePerson(shop,EMAIL,{kind:"person"});
+   assert.equal(result.ok,true,`legacy row erasure attempt ${attempt} completes`);
+   assert.equal((await redisPipeline([["HGET",leadsKey(listId),EMAIL]]))[0],null,"the old contact row is gone");
+   assert.equal(await exists(clicks),false,"its known click set is gone");
+  }
+ });
+}

@@ -8,8 +8,13 @@
  * Now the creator uploads the episode's words as a plain text file, through the same upload door every sold file
  * already uses (the same size, storage and monthly upload room checks; no AI, no new provider). It is kept in the
  * product's own private folder, reaches the buyer through the same signed address and access checks as the episode's
- * audio, and the buyer's feed names it twice: the podcast:transcript tag apps that show transcripts read, and a line
- * with its address in the episode's notes, which every podcast app shows. The studio counts the episodes without one.
+ * audio, and the buyer's feed names it in the podcast:transcript tag that apps showing transcripts read. Its address
+ * carries the buyer's own feed token, so it is never written into the episode's notes, which apps show and share as
+ * text (owner's privacy decision, 07/11/2026). The studio counts the episodes without one.
+ *
+ * Rule 23, assertions changed on 07/11/2026: the feed's "line in the notes" checks, the "line in every store
+ * language" check (feedTranscript is gone) and the studio's "linked in the episode's notes" sentence now assert the
+ * opposite or the new words, because the visible "Transcript: <url>" line exposed the buyer's token.
  *
  * Synthetic only: the in-memory Redis double, a local stand-in for Vercel Blob (HEAD and DELETE), and the private
  * file store's own local signing with stand-in keys. No network, no email, no payment.
@@ -148,22 +153,31 @@ async function main(): Promise<void> {
   part("The feed a buyer's app reads");
   {
     const podcast = parsePodcast(kept)!;
-    const xml = feedXml({
+    // A feed that cannot be written reads as its error, so every check below still runs and says what it found.
+    const feedOf = (input: Parameters<typeof feedXml>[0]) => {
+      try {
+        return feedXml(input);
+      } catch (error) {
+        return `threw: ${String(error)}`;
+      }
+    };
+    const xml = feedOf({
       title: "Show", summary: "", author: "Shop", page: "https://x/p", image: null, episodes: podcast.episodes,
       audio: (e: Episode) => `https://x/play/${e.id}.mp3`,
-      transcript: { url: (e: Episode) => `https://x/play/${e.id}.txt`, line: (url: string) => `Transcript: ${url}` },
+      transcript: { url: (e: Episode) => `https://x/play/${e.id}.txt` },
     });
     const itemOf = (id: string) => xml.split("<item>").find((one) => one.includes(`<guid isPermaLink="false">${id}</guid>`)) ?? "";
     is("the podcast namespace is declared", xml.includes('xmlns:podcast="https://podcastindex.org/namespace/1.0"'), true);
     is("an episode with one names it for apps that show transcripts", itemOf("aaaaaaaaaaaa").includes('<podcast:transcript url="https://x/play/aaaaaaaaaaaa.txt" type="text/plain"/>'), true);
-    is("and in its notes, which every app shows", itemOf("aaaaaaaaaaaa").includes("<description>Transcript: https://x/play/aaaaaaaaaaaa.txt</description>"), true);
+    // Rule 23: was "and in its notes, which every app shows" (true). The address carries the buyer's token.
+    is("never in its notes, which apps show and share as text", [itemOf("aaaaaaaaaaaa").includes("<description></description>"), itemOf("aaaaaaaaaaaa").includes("Transcript:")], [true, false]);
     is("an episode without one names none", [itemOf("cccccccccccc").includes("podcast:transcript"), itemOf("cccccccccccc").includes("Transcript:")], [false, false]);
-    const noted = feedXml({ title: "Show", summary: "", author: "Shop", page: "https://x/p", image: null, episodes: [{ ...podcast.episodes[0], notes: "Notes <here>" }], audio: (e: Episode) => `https://x/play/${e.id}.mp3`, transcript: { url: (e: Episode) => `https://x/play/${e.id}.txt`, line: (url: string) => `Transcript: ${url}` } });
-    is("after the episode's own notes, escaped", noted.includes("<description>Notes &lt;here&gt;\n\nTranscript: https://x/play/aaaaaaaaaaaa.txt</description>"), true);
-    const words = COURSES_WORDS as unknown as Record<string, { feedTranscript?: (url: string) => string }>;
-    is("the line is in every store language", Object.entries(words).map(([code, w]) => [code, typeof w.feedTranscript === "function" ? w.feedTranscript("U") : null]), [
-      ["en", "Transcript: U"], ["es", "Transcripción: U"], ["fr", "Transcription\u00a0: U"], ["de", "Transkript: U"], ["it", "Trascrizione: U"], ["nl", "Transcriptie: U"], ["pt", "Transcrição: U"],
-    ]);
+    const noted = feedOf({ title: "Show", summary: "", author: "Shop", page: "https://x/p", image: null, episodes: [{ ...podcast.episodes[0], notes: "Notes <here>" }], audio: (e: Episode) => `https://x/play/${e.id}.mp3`, transcript: { url: (e: Episode) => `https://x/play/${e.id}.txt` } });
+    // Rule 23: was "after the episode's own notes, escaped" (the line after them). The notes are the creator's alone.
+    is("the episode's own notes are left as they are, escaped", noted.includes("<description>Notes &lt;here&gt;</description>"), true);
+    const words = COURSES_WORDS as unknown as Record<string, { feedTranscript?: unknown }>;
+    // Rule 23: was "the line is in every store language". A line that only carries the address is not kept.
+    is("no store language has a notes line for it", Object.entries(words).filter(([, w]) => "feedTranscript" in w).map(([code]) => code), []);
   }
 
   part("The studio's door: adding, replacing and removing a transcript");
@@ -225,7 +239,10 @@ async function main(): Promise<void> {
     const feed = await feedRoute(new Request(`${ORIGIN}/api/store/podcast/feed/${token}.xml`) as never, { params: Promise.resolve({ token: `${token}.xml` }) });
     const xml = await feed.text();
     const textUrl = `${ORIGIN}/api/store/podcast/play/${token}/aaaaaaaaaaaa.txt`;
-    is("the feed names the transcript by the buyer's own address", [feed.status, xml.includes(`<podcast:transcript url="${textUrl}" type="text/plain"/>`), xml.includes(`Transcript: ${textUrl}`)], [200, true, true]);
+    // Rule 23: the last value was true (the line in the notes). The tag stays; the notes never carry the token.
+    is("the feed names the transcript by the buyer's own address, in its tag only", [feed.status, xml.includes(`<podcast:transcript url="${textUrl}" type="text/plain"/>`), xml.includes(`Transcript: ${textUrl}`)], [200, true, false]);
+    const descriptions = xml.match(/<description>[\s\S]*?<\/description>/g) ?? [];
+    is("no description in the feed carries the buyer's token", [descriptions.length > 0, descriptions.some((d) => d.includes(token))], [true, false]);
     is("and none for the episode without one", xml.includes("bbbbbbbbbbbb.txt"), false);
     const play = (episode: string) => playRoute(new Request(`${ORIGIN}/api/store/podcast/play/${token}/${episode}`) as never, { params: Promise.resolve({ token, episode }) });
     const opened = await play("aaaaaaaaaaaa.txt");
@@ -252,7 +269,8 @@ async function main(): Promise<void> {
     const html = renderToStaticMarkup(createElement(PodcastEditor, { productId: "p", folder: "f", initial: show }));
     const text = html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
     is("the missing ones are counted, with why they matter", [/2 episodes have no transcript/.test(text), /deaf or hard of hearing/.test(text), /cannot play sound/.test(text)], [true, true, true]);
-    is("and where listeners find it", /linked in the episode['’]s notes in each listener['’]s podcast app/.test(text), true);
+    // Rule 23: was "linked in the episode's notes in each listener's podcast app" (no longer true).
+    is("and where listeners find it, honestly", [/podcast apps that show transcripts/i.test(text), /in the episode['’]s notes/.test(text)], [true, false]);
     is("each episode says so", [(text.match(/No transcript yet/g) ?? []).length, /Transcript added \(2 KB\)/.test(text)], [2, true]);
     is("a file field for it, plain text only, with a visible name", [(html.match(/accept="\.txt"/g) ?? []).length >= 3, /Add a transcript/.test(text), /Replace the transcript/.test(text), /Remove the transcript/.test(text)], [true, true, true, true]);
     is("the new episode form takes one too, optional", /Transcript \(optional\)/.test(text), true);

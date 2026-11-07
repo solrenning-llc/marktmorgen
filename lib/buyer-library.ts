@@ -46,6 +46,7 @@ import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { afterAnswer } from "@/lib/after-answer";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
+import { repliesFor as linkSetReplies } from "@/lib/redis-reply";
 
 export const LIBRARY_LINK_SECONDS = 24 * 60 * 60;
 export const LIBRARY_TOKEN = /^[0-9a-f]{64}$/;
@@ -140,7 +141,13 @@ async function sendLibraryLink(email: string, origin: string): Promise<void> {
   const token = randomBytes(32).toString("hex");
   let sent = false;
   try {
-    await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]);
+    // A paid email only with a link Redis said it stored (rule 24): any other answer sends nothing, and the link,
+    // in case it did land, is removed below like any unsent one. The answer was already "sent" for every address.
+    const saved = linkSetReplies(await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]), 1);
+    if (saved?.[0] !== "OK") {
+      console.error("a library link was not stored, so no email was sent");
+      return;
+    }
     const link = `${origin}/library?token=${token}`;
     // One of the access emails of the store the address bought from first in the list (lib/store-allowance-rules.ts).
     sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },

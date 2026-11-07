@@ -39,6 +39,7 @@ import { countLeave } from "@/lib/leave-flow";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { afterAnswer } from "@/lib/after-answer";
+import { repliesFor as linkSetReplies } from "@/lib/redis-reply";
 
 /** How long the emailed link keeps working. */
 export const MANAGE_LINK_SECONDS = 60 * 60;
@@ -225,9 +226,15 @@ async function sendManageLink(store: Store, email: string, origin: string): Prom
   const grant: Grant = { a: store.stripeAccountId as string, c: customer, h: store.handle };
   let sent = false;
   try {
-    await redisPipeline([
+    // A paid email only with a link Redis said it stored (rule 24): any other answer sends nothing, and the link,
+    // in case it did land, is removed below like any unsent one. The answer was already "sent" for every address.
+    const saved = linkSetReplies(await redisPipeline([
       ["SET", key, JSON.stringify(grant), "EX", MANAGE_LINK_SECONDS],
-    ]);
+    ]), 1);
+    if (saved?.[0] !== "OK") {
+      console.error("a membership link was not stored, so no email was sent");
+      return;
+    }
 
     const name = store.name;
     const link = `${origin}/@${store.handle}/manage?token=${token}`;

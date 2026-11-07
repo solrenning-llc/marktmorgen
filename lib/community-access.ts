@@ -521,7 +521,13 @@ async function sendCommunityLink(store: Store, id: string, config: CommunityConf
   const grant: LinkGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle };
   let sent = false;
   try {
-    await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]);
+    // A paid email only with a link Redis said it stored (rule 24): any other answer sends nothing, and the link,
+    // in case it did land, is removed below like any unsent one. The answer was already "sent" for every address.
+    const saved = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]), 1);
+    if (saved?.[0] !== "OK") {
+      console.error("a community link was not stored, so no email was sent");
+      return;
+    }
     const link = `${origin}/api/store/community/open?token=${token}`;
     sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
       from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,

@@ -139,14 +139,15 @@ export type ChangeResult =
 
 /**
  * Whether the server sees the link as the panel did (`seen`, readSeen): the
- * same date, or none, and the same side of it. A request that shows nothing
- * is taken as having seen no date, so it passes only on a link without one.
+ * same date, or none, the same side of it, and the same page after it. A
+ * request that shows nothing is taken as having seen no date, so it passes
+ * only on a link without one.
  */
 function sameView(kept: Kept, seen: unknown, now: number): boolean {
-  const view = seen === undefined ? { at: null, passed: false } : readSeen(seen);
+  const view = seen === undefined ? { at: null, passed: false, to: null } : readSeen(seen);
   if (!view) return false;
   if (!kept.then) return view.at === null;
-  return view.at === kept.then.at && view.passed === now >= kept.then.at;
+  return view.at === kept.then.at && view.passed === now >= kept.then.at && JSON.stringify(view.to) === JSON.stringify(kept.then.target);
 }
 
 /** "changed", with the links as they are, for the panel to show before anything is asked again. */

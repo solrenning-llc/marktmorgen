@@ -171,23 +171,55 @@ export function linkCache(link: Pick<ShortLink, "then"> | null, now: number): st
 
 /**
  * What the studio's panel saw of a link when a change was asked: the date it
- * showed (null for none) and whether that date had passed on its clock. The
+ * showed (null for none), whether that date had passed on its clock, and the
+ * page it showed the date going to (null with no date). The
  * server compares it with its own view before writing, so a panel left open
  * past the date, or on a clock running ahead, never has a change applied to a
  * link other than the one it showed (lib/short-links.ts, sameView).
  */
-export type Seen = { at: number | null; passed: boolean };
+export type Seen = { at: number | null; passed: boolean; to: LinkThen["target"] | null };
 
-/** What the panel saw, as a request sends it, or null when it is not that shape. Pure. */
+/** What the panel saw, as a request sends it, or null when it is not that shape: a date always with its page, none without. Pure. */
 export function readSeen(raw: unknown): Seen | null {
   if (!raw || typeof raw !== "object") return null;
   const v = raw as Record<string, unknown>;
   if (typeof v.passed !== "boolean") return null;
-  if (v.at === null) return { at: null, passed: v.passed };
-  return typeof v.at === "number" && Number.isSafeInteger(v.at) ? { at: v.at, passed: v.passed } : null;
+  if (v.at === null) return v.to === null ? { at: null, passed: v.passed, to: null } : null;
+  if (typeof v.at !== "number" || !Number.isSafeInteger(v.at)) return null;
+  const to = plainTarget(v.to, () => true);
+  return to ? { at: v.at, passed: v.passed, to } : null;
 }
 
 /** What a panel at `now` sees of a link: what it sends with each change. Pure. */
 export function seenAt(link: Pick<ShortLink, "then">, now: number): Seen {
-  return link.then ? { at: link.then.at, passed: now >= link.then.at } : { at: null, passed: false };
+  return link.then ? { at: link.then.at, passed: now >= link.then.at, to: link.then.target } : { at: null, passed: false, to: null };
+}
+
+const samePage = (a: LinkTarget, b: LinkTarget) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Whether the studio's date form still fits a link after a change was refused
+ * because the link changed (`fresh`, as the answer shows it, undefined when it
+ * is gone): no date of its own still to come, and the page chosen in the form
+ * is not the one it opens at `now`. When it fits, the form stays open with what
+ * was typed (3.3.7); when not, it closes and the reason is said beside the link. Pure.
+ */
+export function dateFormFits(fresh: Pick<ShortLink, "target" | "then"> | undefined, chosen: LinkThen["target"], now: number): boolean {
+  if (!fresh) return false;
+  if (fresh.then && now < fresh.then.at) return false;
+  return !samePage(targetNow(fresh, now), chosen);
+}
+
+/** The links whose date the panel's clock passed going from `from` to `to`: said to the creator when they come. Pure. */
+export function datesReached<T extends Pick<ShortLink, "then">>(links: T[], from: number, to: number): T[] {
+  return links.filter((l) => l.then && from < l.then.at && l.then.at <= to);
+}
+
+/**
+ * Whether a change of where a link goes took back its date (`before` as the
+ * panel showed it at `now`, `after` as the answer has it): the page chosen was
+ * the one the date would send it to (lib/short-links.ts, retarget). Pure.
+ */
+export function dateCanceledBy(before: Pick<ShortLink, "then">, after: Pick<ShortLink, "then"> | undefined, now: number): boolean {
+  return Boolean(before.then && now < before.then.at && after && !after.then);
 }

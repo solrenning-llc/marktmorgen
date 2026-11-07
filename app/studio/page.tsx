@@ -1478,6 +1478,7 @@ export default async function StudioPage({
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
                   {may("page") && store.statsId ? (
                     <ShortLinks
+                      now={todayNow()}
                       links={await readLinks(store.statsId).catch(() => [])}
                       products={[...(await readTitles(store).catch(() => new Map<string, string>()))].map(([id, title]) => ({ id, title }))}
                       results={

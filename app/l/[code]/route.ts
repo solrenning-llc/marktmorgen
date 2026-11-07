@@ -25,12 +25,13 @@ type Params = { params: Promise<{ code: string }> };
 export async function GET(_request: NextRequest, { params }: Params) {
   const { code: raw } = await params;
   const code = raw.toLowerCase();
-  const now = Date.now();
-  const ended = () => new Response(null, { status: 302, headers: { Location: `${SITE_URL}/l/ended`, "Cache-Control": linkCache(null, now) } });
+  const ended = () => new Response(null, { status: 302, headers: { Location: `${SITE_URL}/l/ended`, "Cache-Control": linkCache(null, Date.now()) } });
   if (!CODE.test(code)) return ended();
   const link = await findLink(code).catch(() => null);
   const store = link ? await storeForId(link.sid).catch(() => null) : null;
   if (!link || !store || store.statsId !== link.statsId) return ended();
+  // Read once both are in: the clock nearest the answer, so a date reached while they were read is honored.
+  const now = Date.now();
   const target = targetNow(link, now);
   return new Response(null, { status: 302, headers: { Location: landingUrl(storeBase(store), { ...link, target }), "Cache-Control": linkCache(link, now) } });
 }

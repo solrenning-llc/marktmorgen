@@ -82,12 +82,23 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
 }
 
 /**
+ * stockLeft, but null when any lapsed hold's checkout could not be read
+ * (Stripe failed, or answered something that is neither settled nor expired):
+ * the count is then a guess on the safe side, never proof of "Sold out"
+ * (Claude 6's LOW on #1732). Used where a refusal is decided.
+ */
+async function stockLeftKnown(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
+  const count = await countStock(store, product, now, true);
+  return count && count.unknown === 0 ? count.left : null;
+}
+
+/**
  * The count itself. Without `ask` (under a stock lock) Stripe is never asked:
  * a hold that ran out and is not settled yet counts as used, the safe way to
  * be wrong, and is counted in `unresolved` so the caller can have it settled
  * once the lock is let go.
  */
-async function countStock(store: Store, product: Listing, now: number, ask: boolean): Promise<{ left: number; unresolved: number } | null> {
+async function countStock(store: Store, product: Listing, now: number, ask: boolean): Promise<{ left: number; unresolved: number; unknown: number } | null> {
   const limit = limitedStock(product);
   if (limit === null) return null;
   if (!store.statsId || !isRedisConfigured()) throw new Error("Stock reading unavailable");
@@ -95,6 +106,9 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
   let used = 0;
   let checks = 0;
   let unresolved = 0;
+  // Lapsed holds whose checkout could not be read: counted as used (the safe way to be wrong for selling), and
+  // counted here so a refusal is never decided on them (stockLeftKnown).
+  let unknown = 0;
   const writes: (string | number)[][] = [];
   for (const [session, entry] of entries) {
     if (entry.paid || entry.until > now) {
@@ -125,15 +139,18 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
         writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
       } else {
         // An unknown or completed-but-unsettled response is not proof that
-        // this unit can be sold again.
+        // this unit can be sold again. A checkout still open or completed is a
+        // known holder of the unit; any other answer is unknown.
         used += 1;
+        if (found.status !== "open" && found.status !== "complete") unknown += 1;
       }
     } catch {
       used += 1;
+      unknown += 1;
     }
   }
   if (writes.length) await redisPipeline(writes).catch(() => {});
-  return { left: Math.max(0, limit - used), unresolved };
+  return { left: Math.max(0, limit - used), unresolved, unknown };
 }
 
 export type StockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldout" | "busy" };
@@ -388,7 +405,9 @@ export async function withCartStockHolds<T extends { id: string }>(
     // than one wave of MAX_CHECKS × CHECK_MS (CART_STOCK_STRIPE_WAIT_MS). Never "Sold out" on that guess.
     if (round > 0) return { ok: false, reason: "busy" };
     // The holds that ran out are asked about now, with no lock held, every product at once, so the next count is right.
-    const settled = await Promise.all(unsettled.map((product) => stockLeft(store, product).catch(() => null)));
+    const settled = await Promise.all(unsettled.map((product) => stockLeftKnown(store, product).catch(() => null)));
+    // A count that could not be read (Stripe or the database did not answer) is unknown: press again, never "Sold out".
+    if (settled.some((left) => left === null)) return { ok: false, reason: "busy" };
     // Freed: every product refused had nothing but such holds, and each has a unit back now; otherwise it is sold out.
     const freed = unsettled.length === refusal.ids.length && settled.every((left) => left !== null && left > 0);
     if (!freed) return refusal;

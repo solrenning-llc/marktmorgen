@@ -1,3 +1,9 @@
+# CORREÇÃO DE IDENTIDADE — #2947 após integração C4-3100
+
+O head vigente c1fc32985c75c19da75459b1d6b5d60dd5cff511 tem árvore **5df42d1ec7197655af7fb701775233d0a5bb4cc4**, confirmada pelo commit remoto e pelo merge nativo cdb907b3. O hash c734ea528d566da9a9be49bb6fe6d1cc8e5f4cd2 citado como árvore desse head no bloco seguinte e no canal cb78ee89 pertence à correção ANTES do main (db08a5e9/849cabf8), não ao head integrado. Foi erro de transcrição do relatório, não diferença entre árvores verificadas na publicação. Nenhum código, head ou CI mudou; testes não repetidos. Os demais heads/árvores permanecem como registrados abaixo.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 22h45 Fortaleza: C4-3100 MAIN VERDE; quatro envios únicos consolidados
 
 Histórico completo abaixo preservado. **C4-3100 de22h33 encerrou o congelamento**; #2894 legitimamente MERGED5aae97e8a0491952192aa7beefd6741917e6bc28, árvore0c9103257858c729f8b046edd52d06650159f2cf idêntica410e73b6. Coordenação SOMENTE C4/C1OFF. Novo anúncio MAIN VERMELHO suspende novamente envios. Ritmo normal dentro orçamento AV10, execução serial/sem subagentes. Não reativar regras históricas de execução paralela. Canal ACK be5cbd898a73b1b8969d7f0f8725adca59eefb61. Sem preço/limite/comissão/flags/gates/conta/pagamento/provedor/PII. Nenhuma retentativa foi reiniciada/usada, nenhum CI rerun/cancel ou merge por Z.

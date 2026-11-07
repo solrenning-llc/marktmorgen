@@ -51,6 +51,7 @@ const en = {
       body: "The share it offers no longer fits what the store already promises on those products, so nothing was changed. Ask the store to send you a new one.",
     },
     error: { title: "Something went wrong on our side", body: "Nothing was changed. Try again in a moment." },
+    resting: { title: "This store can't take this right now", body: "Accepting checks the store's partners first, and the store can't take that many requests right now. Nothing was changed. Try again later, or write to the store." },
     expired: {
       title: "This link has expired",
       body: "An emailed link works once, within 24 hours. Ask for a new one below; it takes a few seconds.",
@@ -401,6 +402,7 @@ const es: AffiliatesWords = {
       body: "La participación que ofrece ya no cabe en lo que la tienda ya promete sobre esos productos, así que no se cambió nada. Pide a la tienda que te envíe una nueva.",
     },
     error: { title: "Algo salió mal por nuestra parte", body: "No se cambió nada. Inténtalo de nuevo en un momento." },
+    resting: { title: "Esta tienda no puede atender esto ahora", body: "Para aceptar, primero se comprueban los socios de la tienda, y la tienda no puede atender tantas solicitudes en este momento. No se cambió nada. Inténtalo más tarde o escribe a la tienda." },
     expired: {
       title: "Este enlace ha caducado",
       body: "Un enlace enviado por email funciona una sola vez, dentro de las 24 horas. Pide uno nuevo abajo; solo tarda unos segundos.",
@@ -706,6 +708,7 @@ const fr: AffiliatesWords = {
       body: "La part qu'elle propose ne tient plus dans ce que la boutique promet déjà sur ces produits, rien n'a donc été modifié. Demandez à la boutique de vous en envoyer une nouvelle.",
     },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été modifié. Réessayez dans un instant." },
+    resting: { title: "Cette boutique ne peut pas traiter cela pour le moment", body: "Accepter vérifie d'abord les partenaires de la boutique, et la boutique ne peut pas traiter autant de requêtes pour le moment. Rien n'a été modifié. Réessayez plus tard ou écrivez à la boutique." },
     expired: {
       title: "Ce lien a expiré",
       body: `Un lien envoyé par e-mail ne fonctionne qu'une fois, dans les 24${S}heures. Demandez-en un nouveau ci-dessous${S}; cela ne prend que quelques secondes.`,
@@ -1011,6 +1014,7 @@ const de: AffiliatesWords = {
       body: "Die angebotene Beteiligung passt nicht mehr zu dem, was der Shop für diese Produkte schon zugesagt hat, deshalb wurde nichts geändert. Bitten Sie den Shop um eine neue Einladung.",
     },
     error: { title: "Bei uns ist etwas schiefgelaufen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
+    resting: { title: "Dieser Shop kann das gerade nicht bearbeiten", body: "Beim Annehmen werden zuerst die Partner des Shops geprüft, und der Shop kann gerade nicht so viele Anfragen bearbeiten. Es wurde nichts geändert. Versuchen Sie es später erneut oder schreiben Sie dem Shop." },
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Ein per E-Mail gesendeter Link funktioniert einmal, innerhalb von 24 Stunden. Fordern Sie unten einen neuen an; das dauert nur ein paar Sekunden.",
@@ -1324,6 +1328,7 @@ const it: AffiliatesWords = {
       body: "La quota che offre non rientra più in quanto il negozio promette già su quei prodotti, quindi non è stato cambiato nulla. Chiedi al negozio di inviartene uno nuovo.",
     },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è stato cambiato nulla. Riprova tra un momento." },
+    resting: { title: "Questo negozio non può gestirlo in questo momento", body: "Per accettare si controllano prima i partner del negozio, e il negozio non può gestire così tante richieste in questo momento. Non è stato cambiato nulla. Riprova più tardi o scrivi al negozio." },
     expired: {
       title: "Questo link è scaduto",
       body: "Un link inviato per email funziona una sola volta, entro 24 ore. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
@@ -1631,6 +1636,7 @@ const nl: AffiliatesWords = {
       body: "Het aandeel dat ze aanbiedt past niet meer bij wat de winkel al toezegt op die producten, dus er is niets gewijzigd. Vraag de winkel om een nieuwe uitnodiging.",
     },
     error: { title: "Er ging iets mis aan onze kant", body: "Er is niets gewijzigd. Probeer het zo meteen opnieuw." },
+    resting: { title: "Deze winkel kan dit nu niet verwerken", body: "Bij het accepteren worden eerst de partners van de winkel gecontroleerd, en de winkel kan nu niet zoveel aanvragen verwerken. Er is niets gewijzigd. Probeer het later opnieuw of schrijf de winkel." },
     expired: {
       title: "Deze link is verlopen",
       body: "Een gemailde link werkt één keer, binnen 24 uur. Vraag hieronder een nieuwe aan; dat duurt een paar seconden.",
@@ -1943,6 +1949,7 @@ const pt: AffiliatesWords = {
       body: "A participação que oferece já não cabe no que a loja já promete sobre esses produtos, por isso nada foi alterado. Peça à loja um novo convite.",
     },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi alterado. Tente novamente daqui a pouco." },
+    resting: { title: "Esta loja não pode tratar disto agora", body: "Para aceitar, verificam-se primeiro os parceiros da loja, e a loja não consegue tratar tantos pedidos neste momento. Nada foi alterado. Tente novamente mais tarde ou escreva à loja." },
     expired: {
       title: "Esta ligação expirou",
       body: "Uma ligação enviada por email funciona uma vez, no prazo de 24 horas. Peça uma nova abaixo; demora poucos segundos.",

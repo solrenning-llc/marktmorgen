@@ -118,13 +118,21 @@ async function main(): Promise<void> {
   is("decline is refused the same way", (await post({ action: "decline", id: p })).error, "share_term_held");
   is("they stay approved with their share", [(await read(p)).status, (await read(p)).share?.percent], ["approved", 5]);
   is("a share until revoked", await post({ action: "share", id: q, percent: 10, products: [A] }), { ok: true, state: "started" });
-  is("can be removed", [await post({ action: "remove", id: q }), (await read(q)).status, (await read(q)).share], [{ ok: true }, "removed", null]);
-  is("and the step is in its history", (await read(q)).terms?.history.at(-1)?.kind, "revoked");
+  // Only the decision is changed (#2995, tests/affiliate-record-swap.test.ts part 1): the share stays as it was.
+  is("can be removed", [await post({ action: "remove", id: q }), (await read(q)).status, (await read(q)).share], [{ ok: true }, "removed", { percent: 10, products: [A] }]);
+  is("and its history still ends where the agreement started: removing them is a decision, not a step of the share", (await read(q)).terms?.history.at(-1)?.kind, "started");
 
-  part("A share only for someone approved");
+  part("A share only for someone in the program");
   const w = "cccccccccccc";
   for (const status of ["pending", "declined", "removed"]) {
     await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ id: w, email: `${w}@example.com`, code: `c${w}`, status, appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null })]]);
+    if (status === "pending") {
+      // Main's answer (#2995, tests/affiliate-bulk-held.test.ts, tests/affiliate-partner-approve-cap.test.ts): somebody
+      // waiting may hold a share; it counts only once they are approved, checked against the cap then.
+      is(`given to somebody ${status}`, await post({ action: "share", id: w, percent: 10, products: [A], ends: future(30) }), { ok: true, state: "started" });
+      is(`and they still wait, holding it (${status})`, [(await read(w)).status, (await read(w)).share?.percent], ["pending", 10]);
+      continue;
+    }
     is(`refused for somebody ${status}`, (await post({ action: "share", id: w, percent: 10, products: [A], ends: future(30) })).error, "share_not_approved");
     is(`and nothing is written for somebody ${status}`, [(await read(w)).share, (await read(w)).terms], [null, undefined]);
   }
@@ -159,7 +167,7 @@ async function main(): Promise<void> {
   is("the form sends which change it showed", page.includes('name="change" value={changeIdentity(askedChange)}'), true);
   is("the answer's notice is outside the share, so it shows when none is left", page.includes("{affiliate.share || partnerNotice ? (") && page.indexOf("{partnerNotice ? (") > page.indexOf("{affiliate.share ? (\n                      <>"), true);
   is("a store change at the same moment is said, not hidden", page.includes('status === "partner-busy" ? "busy"') && Object.values(AFFILIATES_WORDS).every((words) => words.partnerAnswered.busy.length > 40), true);
-  is("the studio says a share is only for someone approved", studio.includes("Only someone approved in your program can have a partner share."), true);
+  is("the studio says a share is not for someone declined or removed", studio.includes("Someone you declined or removed cannot have a partner share."), true);
   is("a refused removal says what to do instead, in the row's alert", studio.includes("their share runs to a set end date") && studio.includes("press End the partnership; it ends once they accept. Or wait until the end date, then remove them.") && studio.includes('role="alert"'), true);
   const en = AFFILIATES_WORDS.en;
   is("the words say the share stays until the answer", en.partnerAskedKeep("Dec 3, 2026"), "Until you answer, your share stays exactly as it is. If you have not answered by Dec 3, 2026, nothing changes.");

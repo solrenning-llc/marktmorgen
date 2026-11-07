@@ -97,10 +97,12 @@ async function main(): Promise<void> {
   is("remove is refused", await decide(await store(), d, "remove", T + 1), null);
   is("decline is refused too", await decide(await store(), d, "decline", T + 1), null);
   is("they stay approved, with their share and no new step", [(await read(d)).status, (await read(d)).share?.percent, (await read(d)).terms?.history.length], ["approved", 20, 1]);
-  is("in bulk it is never touched either", [await decideMany(await store(), [d], "decline"), (await read(d)).status], [[], "approved"]);
+  is("in bulk it is never touched either", [(await decideMany(await store(), [d], "decline")).before, (await read(d)).status], [[], "approved"]);
   const untilRevoked = await decide(await store(), u, "remove", T + 2);
-  is("a share until revoked can be removed", [untilRevoked?.status, untilRevoked?.share], ["removed", null]);
-  is("and the history says the store ended it", (await read(u)).terms?.history.map((s) => `${s.kind}:${s.by}`), ["started:creator", "revoked:creator"]);
+  // Only the decision is changed (#2995, tests/affiliate-record-swap.test.ts part 1): the share stays as it was, and
+  // counts again only if they are let back in, checked against the cap then.
+  is("a share until revoked can be removed", [untilRevoked?.status, untilRevoked?.share], ["removed", { percent: 20, products: [B] }]);
+  is("and the history keeps the agreement as it was: removing them is a decision, not a step of the share", (await read(u)).terms?.history.map((s) => `${s.kind}:${s.by}`), ["started:creator"]);
   const after = await decide(await store(), x, "remove", T + 61 * DAY);
   is("after the end date it can be removed, the share left as it ended", [after?.status, after?.share?.until], ["removed", T + 60 * DAY]);
   is("with no step saying the store ended it: it ended on its date", (await read(x)).terms?.history.map((s) => s.kind), ["started"]);
@@ -115,15 +117,15 @@ async function main(): Promise<void> {
   part("An undo never sends a partner back to waiting");
   const v = "bcbcbcbcbcbc";
   await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, v, JSON.stringify({ ...person(v), status: "pending", decidedAt: 0 })]]);
-  const before = await decideMany(await store(), [v], "approve");
+  const { before } = await decideMany(await store(), [v], "approve");
   is("approved in bulk", (await read(v)).status, "approved");
   await proposePartnerShare(await store(), v, { percent: 15, products: [A], until: T + 60 * DAY }, T + 3);
-  is("the undo leaves a partner given a dated share since as they are", [await undoMany(await store(), before, "approve"), (await read(v)).status], [0, "approved"]);
+  is("the undo leaves a partner given a dated share since as they are", [(await undoMany(await store(), before, "approve")).undone, (await read(v)).status], [0, "approved"]);
   is("so they cannot then be declined around their term", await decideWhy(await store(), v, "decline", T + 4), { ok: false, reason: "term" });
   const v2 = "cdcdcdcdcdcd";
   await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, v2, JSON.stringify({ ...person(v2), status: "pending", decidedAt: 0 })]]);
-  const before2 = await decideMany(await store(), [v2], "approve");
-  is("an approval with nothing given since is still undone", [await undoMany(await store(), before2, "approve"), (await read(v2)).status], [1, "pending"]);
+  const { before: before2 } = await decideMany(await store(), [v2], "approve");
+  is("an approval with nothing given since is still undone", [(await undoMany(await store(), before2, "approve")).undone, (await read(v2)).status], [1, "pending"]);
 
   part("Someone removed has nothing left to answer");
   const z = "dededededede";
@@ -162,8 +164,10 @@ async function main(): Promise<void> {
   const eSeen = await seen(e);
   await Promise.all([answerShareChange(shop, e, true, eSeen, T + 2, slowYes), decide(shop, e, "remove", T + 2)]);
   const eEnd = await read(e);
-  is("a removal racing a yes is never undone by it: removed, with no share left", [eEnd.status, eEnd.share], ["removed", null]);
-  is("and the history ends with the store ending it", eEnd.terms?.history.at(-1)?.kind, "revoked");
+  // The yes asked first takes this partner's lock first and applies 40%; the removal then changes only the decision
+  // (#2995, tests/affiliate-record-swap.test.ts part 1), so the share stays as the yes left it.
+  is("a removal racing a yes is never undone by it: removed, with the share as the yes left it", [eEnd.status, eEnd.share], ["removed", { percent: 40, products: [B] }]);
+  is("and the history ends with the yes, the removal being a decision, not a step of the share", eEnd.terms?.history.at(-1)?.kind, "changed");
   done();
 }
 

@@ -91,7 +91,9 @@ async function main() {
     });
     const after = (await readAffiliate(store, p))!;
     is("answered busy", answer, { ok: false, reason: "busy" });
-    is("still removed, with no share", [after.status, after.share], ["removed", null]);
+    // Only the decision is changed (#2995, tests/affiliate-record-swap.test.ts part 1): the share in force stays, and the
+    // stalled yes did not replace it.
+    is("still removed, with the share in force before the yes", [after.status, after.share], ["removed", { percent: 30, products: [A] }]);
   }
 
   part("Two partners saying yes at once on the same product never pass the cap together");
@@ -167,7 +169,8 @@ async function main() {
     const { store, statsId } = await fixture();
     await proposePartnerShare(store, p, { percent: 50, products: [A] }, now);
     const opened = await acceptPartnership(store, "late@example.test", { percent: 30, products: [A] });
-    is("refused with cap", opened.ok ? "made" : opened.reason, "cap");
+    // Main's answer for an accepted share over the cap (#2995, tests/affiliate-partner-accept-cap.test.ts).
+    is("refused as over the cap", opened.ok ? "made" : opened.reason, "committed");
     const [byEmail] = await redis.pipeline([["HGET", `nl:aff:${statsId}:emails`, "late@example.test"]]);
     is("the address is not claimed", byEmail, null);
     await proposePartnerShare(store, p, null, now + 5);

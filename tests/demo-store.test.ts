@@ -323,7 +323,7 @@ async function main(): Promise<void> {
   const plans = withoutComments(read("lib/billing-sync.ts"));
   is("the daily check of plans asks only about a store that names a subscription", /if \(!store\.subscriptionActive \|\| !store\.subscriptionId \|\|/.test(plans), true);
   const studio = withoutComments(read("app/studio/page.tsx"));
-  is("and so does the studio", /store\?\.subscriptionId && isBillingConfigured\(\)\s*\?\s*await readSubscription/.test(studio), true);
+  is("and so does the studio", /store\?\.subscriptionId && isBillingConfigured\(\)\s*\?\s*(?:await |early\()readSubscription/.test(studio), true);
 
   part("Its pages are the pages every store has, and say that it is a demo");
   const layout = withoutComments(read("app/[handle]/layout.tsx"));

@@ -42,7 +42,15 @@ import { paidPeriod } from "./billing-period-fixture";
 const OWNER = "harbor@example.com";
 const jar = (cookies: Record<string, string>) => ({ get: (name: string) => (name in cookies ? { value: cookies[name] } : undefined) });
 const count = (html: string, pattern: RegExp) => (html.match(pattern) ?? []).length;
-const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").replace(/\s+/g, " ").trim();
+/** The rendered text: tags are taken off until none is left, so no tag can survive by being split around another. */
+function text(html: string): string {
+  let out = html;
+  for (let before = ""; before !== out; ) {
+    before = out;
+    out = out.replace(/<[^<>]*>/g, "");
+  }
+  return out.replace(/[<>]/g, "").replace(/&#x27;/g, "'").replace(/\s+/g, " ").trim();
+}
 
 async function main(): Promise<void> {
   redis.clear();

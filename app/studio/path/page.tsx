@@ -31,7 +31,7 @@ import { allowanceFor } from "@/lib/store-allowance-rules";
 import { pathPlanLine } from "@/lib/path-plan";
 import { largerPlanFor } from "@/lib/larger-plan";
 import { chargeStudio, readPath, visitPath,returnMissionFor } from "@/lib/path";
-import { LEVEL_NAMES, LEVELS, PATH_SLOGAN, PATH_TITLE, goalWords, localDay, pathProgress, streakOf, type Place } from "@/lib/path-rules";
+import { KEPT_CHECKINS, LEVEL_NAMES, LEVELS, PATH_SLOGAN, PATH_TITLE, goalWords, localDay, pathProgress, streakOf, validPathDay, type Place } from "@/lib/path-rules";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PathOnboarding } from "@/components/path-onboarding";
@@ -81,7 +81,7 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
      <p className="mt-2 text-sm text-ink-soft">{goalWords(record.answers,store.currency)}</p>
      <p className="mt-2 text-sm text-ink-soft">Progress comes from your store&apos;s records. Readings refresh at most once every ten minutes when your studio allowance has room.</p>
      <p className="mt-2 text-sm text-ink-soft">{record.counts?"Visits and leads last read: "+new Date(record.counts.at).toISOString()+".":"Visits and leads have not been read yet."} {record.money?"Orders last read: "+new Date(record.money.at).toISOString()+".":"Orders have not been read yet."}</p>
-     {!failed&&!returning&&weeklySummary?.state==="unavailable"&&streak?<p className="mt-2">Current streak: {streak.days} check-in {streak.days===1?"day":"days"}. {streak.restLeft} rest {streak.restLeft===1?"day":"days"} left this week.</p>:null}
+     {!failed&&!returning&&weeklySummary?.state==="unavailable"&&streak&&record.checkins.length<=KEPT_CHECKINS&&Array.from(record.checkins).every(validPathDay)?<p className="mt-2">Current streak: {streak.days} check-in {streak.days===1?"day":"days"}. {streak.restLeft} rest {streak.restLeft===1?"day":"days"} left this week.</p>:null}
     </section>
     {!failed&&weeklySummary?<PathWeeklySummary summary={weeklySummary} streak={returning?null:streak}/>:null}
     <section className="mt-8" aria-labelledby="path-next"><h2 id="path-next" className="t-h3">{returning?RETURN_HEADING:progress.complete?"Your first real sale is recorded":"Your next mission"}</h2>

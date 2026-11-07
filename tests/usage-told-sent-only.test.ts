@@ -14,6 +14,11 @@
  * an ownerless store once support was told about it. Everything else is tried
  * again on the next run. A store told once is still not told twice.
  *
+ * An owner read that failed (Redis down, or a reply that is not a string) is
+ * not "no owner" (rule 24): nobody is written to about that store, support is
+ * not told it has no address, and it stays off the told list, so its owner is
+ * written to on the next run, once the read works.
+ *
  * Synthetic only: the Redis stub and the SES mail fixture, no real IO.
  */
 import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
@@ -37,6 +42,16 @@ const fixture = installSesMailFixture({
 });
 fixture.configure();
 const delivered = (): string[] => fixture.sent.flatMap((m) => m.to);
+
+/** Makes the owners' read (the GETs of nl:store:folder-owner:*) fail, or answer off-shape. */
+let ownerRead: "ok" | "throw" | "off-shape" = "ok";
+const realPipeline = redis.pipeline.bind(redis);
+(redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
+  const ownersOnly = list.length > 0 && list.every((c) => c[0] === "GET" && String(c[1]).startsWith("nl:store:folder-owner:"));
+  if (ownersOnly && ownerRead === "throw") return Promise.reject(new Error("synthetic: Redis request failed with status 503"));
+  if (ownersOnly && ownerRead === "off-shape") return Promise.resolve(list.map(() => 42));
+  return realPipeline(list);
+}) as typeof redis.pipeline;
 
 const request = { headers: new Headers(), nextUrl: new URL("https://marktmorgen.com/api/cron/usage") } as unknown as Parameters<typeof GET>[0];
 
@@ -129,6 +144,22 @@ async function main(): Promise<void> {
   is("now the ownerless store is in the told list", (await toldList()).includes(folder("f")), true);
   const o3 = await run();
   is("and support is not told again", o3.emails, []);
+
+  for (const failure of ["throw", "off-shape"] as const) {
+    part(`the owners' read ${failure === "throw" ? "fails" : "answers off-shape"}: nobody is told, nothing recorded, the owner is written to next run`);
+    redis.clear();
+    fixture.reset();
+    refused.clear();
+    await overAllowance(folder("g"), "owner@example.com");
+    ownerRead = failure;
+    const u1 = await run();
+    ownerRead = "ok";
+    is("first run: nobody is written to (not the owner, not support)", [u1.status, u1.told, u1.emails], [200, 0, []]);
+    is("the store is not in the told list", (await toldList()).includes(folder("g")), false);
+    const u2 = await run();
+    is("next run, owner read back: the owner gets the notice", [u2.told, u2.emails], [1, ["owner@example.com"]]);
+    is("now the store is in the told list", (await toldList()).includes(folder("g")), true);
+  }
 
   fixture.restore();
   done();

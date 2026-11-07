@@ -409,11 +409,22 @@ export async function takeTaskUpload(path: string): Promise<boolean> {
  * Each path is taken off the list by its own ZREM, and only one this run
  * removed itself (exactly 1) is deleted: a hand-in that took the door
  * (takeTaskUpload) after the list was read keeps its file (Claude 5 on
- * #2836). A deletion that fails puts its paths back, so the next run tries
- * again. The list, the pipeline and each ZREM are read in their exact shape
- * (CX-123 rule 24): anything else deletes nothing it cannot prove was this
- * run's own, and throws UnknownReplyError.
+ * #2836). Each won path is deleted on its own, and only a path whose deletion
+ * failed is put back, so one that keeps failing never holds the others
+ * (Claude 5 on #3045; as lib/community-files.ts does). The list, the pipeline
+ * and each ZREM are read in their exact shape (CX-123 rule 24): anything else
+ * deletes nothing it cannot prove was this run's own, is logged, and the paths
+ * deleted are still answered, so the cron counts them.
+ *
+ * The ZREMs go TAKE_BATCH to a pipeline: a reply lost after they ran (a
+ * timeout, a cut connection) leaves those doors off the list with nothing
+ * deleted, and putting them back blind is not safe (a hand-in may have won
+ * them), so a lost reply costs at most TAKE_BATCH files kept, not the run's
+ * whole list.
  */
+/** How many doors a pipeline of ZREMs takes off the list at most (see sweepTaskUploads). */
+const TAKE_BATCH = 25;
+
 export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void>, now = Date.now(), limit = 300): Promise<string[]> {
   if (!isRedisConfigured()) return [];
   const before = Math.floor(now / 1000) - DOOR_SECONDS;
@@ -421,22 +432,43 @@ export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void
   const listed = Array.isArray(found) ? repliesFor(found, found.length) : null;
   if (!listed || !listed.every((p): p is string => typeof p === "string")) throw new UnknownReplyError("the uploads never handed in");
   if (!listed.length) return [];
-  const takes = repliesFor(await redisPipeline(listed.map((p) => ["ZREM", DOORS_KEY, p])), listed.length);
-  if (!takes) throw new UnknownReplyError("which uploads never handed in were taken off their list");
-  const won = listed.filter((_, i) => takes[i] === 1);
-  const unknown = takes.some((reply) => reply !== 0 && reply !== 1);
-  let deleted = won;
-  if (won.length) {
+  const won: string[] = [];
+  let unknown = 0;
+  for (let at = 0; at < listed.length; at += TAKE_BATCH) {
+    const batch = listed.slice(at, at + TAKE_BATCH);
+    let takes: unknown[] | null;
     try {
-      await remove(won);
+      takes = repliesFor(await redisPipeline(batch.map((p) => ["ZREM", DOORS_KEY, p])), batch.length);
     } catch (error) {
-      console.error("could not delete unused assignment uploads; they are put back for the next run", error);
-      const back = repliesFor(await redisPipeline([["ZADD", DOORS_KEY, ...won.flatMap((p) => [before, p])]]), 1)?.[0];
-      if (countOf(back) === null) console.error(`putting back ${won.length} unused assignment uploads: unknown reply, they may be left`);
-      deleted = [];
+      console.error(`taking ${batch.length} unused assignment uploads off their list: no reply, their files are kept`, error);
+      unknown += batch.length;
+      continue;
+    }
+    if (!takes) {
+      unknown += batch.length;
+      continue;
+    }
+    batch.forEach((p, i) => {
+      if (takes[i] === 1) won.push(p);
+      else if (takes[i] !== 0) unknown += 1;
+    });
+  }
+  const deleted: string[] = [];
+  const failed: string[] = [];
+  for (const p of won) {
+    try {
+      await remove([p]);
+      deleted.push(p);
+    } catch (error) {
+      console.error("could not delete an unused assignment upload; it is put back for the next run", error);
+      failed.push(p);
     }
   }
-  if (unknown) throw new UnknownReplyError("whether an upload never handed in was taken off its list");
+  if (failed.length) {
+    const back = repliesFor(await redisPipeline([["ZADD", DOORS_KEY, ...failed.flatMap((p) => [before, p])]]), 1)?.[0];
+    if (countOf(back) === null) console.error(`putting back ${failed.length} unused assignment uploads: unknown reply, they may be left`);
+  }
+  if (unknown) console.error(`${unknown} unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept`);
   return deleted;
 }
 

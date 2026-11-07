@@ -100,8 +100,11 @@ function Codes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
  * The person's two-step login (lib/two-step.ts), in the studio's Account part,
  * beside their passkeys: turn it on with an authenticator app, see how many
  * recovery codes are left, make new ones, or turn it off.
+ *
+ * `unread`: the page could not read it, so it is neither on nor off here, and
+ * nothing is offered that would change it (CX-123 rule 24, lib/redis-reply.ts).
  */
-export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: initialReset, backup: backupShown, fresh, locked = false }: { on: boolean; codesLeft: number; reset: number; backup: string; fresh: boolean; locked?: boolean }) {
+export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: initialReset, backup: backupShown, fresh, locked = false, unread = false }: { on: boolean; codesLeft: number; reset: number; backup: string; fresh: boolean; locked?: boolean; unread?: boolean }) {
   const [reset, setReset] = useState(initialReset);
   const [recoveryShown, setRecoveryShown] = useState(backupShown);
   const [on, setOn] = useState(initialOn);
@@ -141,12 +144,26 @@ export function TwoStepManager({ on: initialOn, codesLeft: initialLeft, reset: i
     </label>
   );
 
+  const title = (
+    <h3 id="two-step-title" className="flex items-center gap-2 font-semibold text-ink">
+      <Icon name="lock" size={18} className="text-violet-deep" />
+      Two-step login
+    </h3>
+  );
+
+  if (unread)
+    return (
+      <section id="two-step" aria-labelledby="two-step-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
+        {title}
+        <p className="notice notice-warn mt-4 text-sm" role="status">
+          Two-step login could not be read just now, so this page cannot show whether it is on, or change it. Open this page again in a moment.
+        </p>
+      </section>
+    );
+
   return (
     <section id="two-step" aria-labelledby="two-step-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
-      <h3 id="two-step-title" className="flex items-center gap-2 font-semibold text-ink">
-        <Icon name="lock" size={18} className="text-violet-deep" />
-        Two-step login
-      </h3>
+      {title}
       <p className="mt-2 text-sm text-ink-soft">
         {on
           ? `On. Logging in with the emailed link also asks for the code in your authenticator app; a passkey needs no code. ${left} recovery ${left === 1 ? "code" : "codes"} left.${recoveryShown ? ` Lose your phone and your codes, and a link to your recovery address, ${recoveryShown}, lets you back in.` : " There is no recovery address: add one above, so losing your phone never keeps you out."}`

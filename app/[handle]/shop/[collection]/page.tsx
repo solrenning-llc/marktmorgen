@@ -9,7 +9,7 @@ import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { offersCart } from "@/lib/cart-checkout";
 import { MAX_CART, cartable } from "@/lib/cart-rules";
 import { bumpTargets } from "@/lib/product-extras";
-import { offeredItems } from "@/lib/bundles";
+import { bundleItemsToRead, offeredItems } from "@/lib/bundles";
 import { preorderDay, soonState } from "@/lib/preorders";
 import { stockLeft } from "@/lib/stock";
 import { outOfKeys } from "@/lib/licence-keys";
@@ -18,7 +18,8 @@ import { canManage } from "@/lib/membership-manage";
 import { canUseDomain } from "@/lib/domains";
 import { summaries } from "@/lib/reviews";
 import { forVisitor } from "@/lib/visitor";
-import { isResting } from "@/lib/traffic";
+import { isResting, takePublicRequest } from "@/lib/traffic";
+import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
 import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
@@ -109,11 +110,17 @@ export default async function CollectionPage({ params }: Params) {
 
   const ids = shownProducts(collection, listedItems(store));
   if (ids.length === 0) redirect(`/@${store.handle}`);
+  // Its products, paid for before they are read (lib/page-read-rules.ts, 4 November 2026):
+  // past the window, the resting page, and nothing of them read.
+  if (!(await takePublicRequest(store, "public", undefined, collectionUnits(ids.length)))) return <StoreResting store={store} />;
   // At most one page of products (MAX_COLLECTION_PRODUCTS), and the ones their checkout boxes offer.
   const listed = (await readListings(store, ids)).filter((p) => !p.hidden);
   const products = ids.flatMap((id) => listed.find((p) => p.id === id) ?? []);
   const targets = [...new Set(products.flatMap((p) => bumpTargets(p)))].filter((id) => !ids.includes(id));
   const related: Listing[] = [...products, ...(targets.length ? await readListings(store, targets).catch(() => []) : [])];
+  // The items their bundles hold, up to MAX_BUNDLE_ITEMS each, paid for once known and before they are read (Codex G2 on #2583).
+  const items = bundleItemsToRead(related);
+  if (items.length > 0 && !(await takePublicRequest(store, "public", undefined, bundleItemUnits(items.length)))) return <StoreResting store={store} />;
 
   const selling = canSell(store);
   const cartOn = selling && offersCart(store);
@@ -174,7 +181,7 @@ export default async function CollectionPage({ params }: Params) {
           {products.map((product, i) => (
             <ProductCard
               key={product.id}
-              eager={i < 3}
+              eager={i < 1}
               first={i === 0}
               store={store}
               product={product}

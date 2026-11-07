@@ -28,7 +28,7 @@ export default function PrivacyPage() {
   // Named only while the files creators sell are kept there (lib/vault.ts).
   const cloudflare = isVaultConfigured();
   return (
-    <LegalPage title="Privacy Policy" lastUpdated="November 2, 2026">
+    <LegalPage title="Privacy Policy" lastUpdated="November 4, 2026">
       <p>
         Marktmorgen (“Marktmorgen,” “we,” “us,” or “our”) is operated by
         Solrenning, an independent software studio. This Privacy Policy
@@ -160,7 +160,10 @@ export default function PrivacyPage() {
           another of the store&apos;s plans, the change is made on the
           creator&apos;s Stripe account, which keeps the record of it, and we
           email the member a receipt and the creator a note with the
-          member&apos;s email address and the two plans. We keep nothing more
+          member&apos;s email address and the two plans. The same goes for a
+          switch to yearly payments. Each asks the box about starting before
+          the 14 days end again, and keeps its answer on the membership (see{" "}
+          <a href="#instant-access" className="underline">Starting before the 14 days end</a>). We keep nothing more
           about it.
         </p>
         <p>
@@ -485,7 +488,8 @@ export default function PrivacyPage() {
           box about starting before a 14-day right to cancel ends. When you
           check it, we write &ldquo;yes&rdquo;, the version and kind of that
           sentence and the time on the order, and the confirmation email quotes
-          it back to you. For a card payment it is kept on the order itself, in
+          it back to you. Switching a membership to another plan or to yearly
+          payments asks the same box again, and the receipt quotes it. For a card payment it is kept on the order itself (on a switch, on the membership), in
           the creator&apos;s own Stripe account, for as long as the creator
           keeps their Stripe records. For a PayPal payment it is kept with our
           own record of that PayPal order, which we keep for 400 days for
@@ -798,6 +802,20 @@ export default function PrivacyPage() {
           of the address and network address that asked for a link for one
           hour.
         </p>
+        <p id="members-letters">
+          <strong className="text-black">An email kept for members.</strong>{" "}
+          When a creator publishes an email on their store for the buyers of
+          some products only, we decide who may read it by looking up the
+          email address a person types on the creator&apos;s own Stripe
+          account, on that creator&apos;s list for something free, or among
+          the buyers the creator brought over from another platform, and we
+          email that address a link that works for one hour. The link and the
+          address it was sent to are kept for that hour. Using it sets the
+          same cookie for that store a course and a community use, for 90
+          days. The answer about whether an address may read it is kept for
+          up to five minutes, and, to limit abuse, one-way hashes of the
+          address and network address that asked for a link for one hour.
+        </p>
         <p id="live-events">
           <strong className="text-black">Live events in a community.</strong>{" "}
           When a member says they are coming to a creator&apos;s live event
@@ -820,7 +838,8 @@ export default function PrivacyPage() {
           in as their name in the room, where the others in it see it. A
           replay is a YouTube, Vimeo or Loom video that loads from that
           service only when a member presses play, and so does a video on a
-          creator&apos;s sales page, when a visitor presses play.
+          creator&apos;s sales page, when a visitor presses play or the button
+          that opens it in a window, where it then starts playing.
         </p>
         <p id="imports">
           <strong className="text-black">
@@ -890,7 +909,10 @@ export default function PrivacyPage() {
           email from the store&apos;s name, through our email provider, saying
           what they were given, within the same 20,000 in 30 days as the
           emails above. We keep how many of these a store made each day, for a
-          day, to hold them to their limits.
+          day, to hold them to their limits. Any key of a store, one that only
+          reads included, can also list the store&apos;s sales with each
+          buyer&apos;s email address and name, read from the creator&apos;s own
+          Stripe account when the tool asks; we do not keep that list.
         </p>
         <p id="code-links">
           <strong className="text-black">
@@ -1110,7 +1132,10 @@ export default function PrivacyPage() {
           creator also gets a private address of their own that lists their
           upcoming calls and sessions with the name and email address of each
           buyer, for the calendar app they subscribe with; replacing that
-          address turns the old one off.
+          address turns the old one off. We keep the last copy of that list
+          made for their calendar app for up to 40 days; once the store is
+          deleted or closed, that copy is never shown again, and it is erased
+          within those 40 days.
         </p>
         <p id="webhooks">
           <strong className="text-black">Webhooks a creator adds.</strong> A
@@ -1362,6 +1387,17 @@ export default function PrivacyPage() {
           asked works for 400 days, and pressing it keeps a
           one-way hash of the address for that store for good, so that store
           never asks again.
+          When the creator asks for an AI summary of a product&apos;s reviews,
+          the words of up to 60 of its newest reviews shown on its page are
+          sent to Anthropic, with any email address, phone number or web
+          address taken out and without the name or address of whoever wrote
+          them. A summary is kept at most once a week for each product, but a
+          try that fails or finds no theme can be made again at once, and each
+          try sends those words again. The summary it returns keeps only the
+          themes and how many reviews say each, never a review&apos;s words,
+          who wrote it or which reviews were read; it is kept for 8 days, with
+          the time it was made, and is deleted at once when a review it
+          counted is deleted, hidden, refunded or rewritten.
         </p>
         <p id="video-rooms">
           <strong className="text-black">Video rooms.</strong> When a creator
@@ -1785,7 +1821,15 @@ export default function PrivacyPage() {
             reviews and the words searched for on the store that found
             nothing, from the last 90 days, never with a name, and with any
             email address, phone number or web address in them taken out
-            first;
+            first. When a creator asks for the summary of one product&apos;s
+            reviews, it receives the words of up to 60 of that product&apos;s
+            newest reviews shown on its page, with any email address, phone
+            number or web address taken out and without the name or address
+            of whoever wrote them; a summary is kept at most once a week for
+            each product, but a try that fails or finds no theme can be made
+            again at once and sends those words again; the summary keeps only
+            its themes and their counts, for 8 days, and is deleted at once
+            when a review it counted is deleted, hidden, refunded or rewritten;
           </li>
           <li>
             <strong className="text-black">Unsplash</strong>, which serves the
@@ -2097,7 +2141,7 @@ export default function PrivacyPage() {
           <p>
             What is deleted: your place on the store&apos;s list and every link
             in its emails to you; what its team noted about you (its fields,
-            notes and deals); your form answers with their quiz results and
+            notes, deals and tasks); your form answers with their quiz results and
             scores, inbox conversations, reviews
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;

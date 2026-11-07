@@ -60,7 +60,14 @@ async function main(): Promise<void> {
 
   part("Saving again during the notice");
   is("another field saved with the same new terms keeps the day", [(await save({ percent: 20, days: 30, rates: { [product]: 0 }, notice: 14, payday: 5 })).body.ok, (await setting()).pending?.from], [true, day]);
-  is("a deeper cut with no notice now still waits for that day", [(await save({ percent: 10, days: 30, rates: { [product]: 0 }, notice: 0 })).body.ok, (await setting()).percent, (await setting()).pending?.percent, (await setting()).pending?.from], [true, 30, 10, day]);
+  // A deeper cut waits the program's fourteen days from this save, as its affiliates were told, and never
+  // ends before the day already announced; read from the clock of this save, so a second between the two saves never matters.
+  const deeperAt = Date.now();
+  const deeper = [(await save({ percent: 10, days: 30, rates: { [product]: 0 }, notice: 0 })).body.ok, (await setting()).percent, (await setting()).pending?.percent] as const;
+  const deeperFrom = (await setting()).pending?.from ?? 0;
+  is("a deeper cut with no notice now still waits: the old share today, the new one pending", deeper, [true, 30, 10]);
+  is("never before the day already announced", deeperFrom >= day, true);
+  is("the program's fourteen days, counted from this save", Math.abs(deeperFrom - (Math.floor(deeperAt / 1000) + 14 * DAY)) <= 2, true);
   is("putting the old terms back clears it", [(await save({ percent: 30, days: 60, rates: { [product]: 40 }, notice: 0 })).body.ok, (await setting()).pending ?? null], [true, null]);
 
   part("Refused, or never taken from the request");

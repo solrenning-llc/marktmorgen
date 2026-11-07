@@ -14,8 +14,8 @@
  */
 import { crmPhone, crmUrl } from "@/lib/crm-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { type DataStore, DataRoomError, TAKE_DATA, dataKey, dataTakenOf, monthOf } from "@/lib/store-data";
+import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 
 export const MAX_CARD_NAME = 80;
 export const MAX_CARD_TITLE = 80;
@@ -31,7 +31,7 @@ export type CreatorCard = {
   title: string;
   /** An address they want people to write to, or nothing. */
   email: string;
-  /** A phone number as the creator typed it, grouped their way, with + (or 00) and the country code; dialled from its digits (crmPhone). Or nothing. */
+  /** A phone number in the international form (+ and the country code), or nothing. */
   phone: string;
   /** Their own website, https, or nothing. */
   website: string;
@@ -72,15 +72,15 @@ export function readCard(raw: Record<string, unknown>): { ok: true; card: Creato
   if (title === null) return { ok: false, error: "title" };
   const typedEmail = line(raw.email, MAX_CARD_EMAIL);
   if (typedEmail === null || (typedEmail && !EMAIL.test(typedEmail))) return { ok: false, error: "email" };
-  // Kept as typed, so it shows grouped as the creator wrote it; only a number crmPhone dials is taken.
   const typedPhone = line(raw.phone, 40);
-  if (typedPhone === null || (typedPhone && crmPhone(typedPhone) === null)) return { ok: false, error: "phone" };
+  const phone = typedPhone ? crmPhone(typedPhone) : "";
+  if (typedPhone === null || phone === null) return { ok: false, error: "phone" };
   const typedSite = line(raw.website, 200);
   const website = typedSite ? crmUrl(typedSite) : "";
   if (typedSite === null || website === null || (website && !website.startsWith("https://"))) return { ok: false, error: "website" };
   const note = line(raw.note, MAX_CARD_NOTE);
   if (note === null) return { ok: false, error: "note" };
-  return { ok: true, card: { on, name, title, email: typedEmail, phone: typedPhone, website, note } };
+  return { ok: true, card: { on, name, title, email: typedEmail, phone, website, note } };
 }
 
 /** A card as read back: checked again, and off whenever any of it fails. */
@@ -118,21 +118,14 @@ export function foldLine(text: string): string {
 /**
  * The "Save contact" file for a card that is on, with the store's own page
  * as a second link; null for a card that is off. Only what the card holds.
- *
- * N, which vCard 3.0 requires and some contact apps still read, holds the
- * whole name as the given name: which word is a family name, or whether it
- * is a person's name at all (the field invites a business's), is never
- * guessed, so every app shows the name as typed. No KIND, for the same
- * reason: the card does not say whether it is a person or a business.
  */
 export function cardVcard(card: CreatorCard, storeName: string, storeUrl: string): string | null {
   if (!card.on || !card.name) return null;
-  const lines = ["BEGIN:VCARD", "VERSION:4.0", `FN:${vcardText(card.name)}`, `N:;${vcardText(card.name)};;;`];
+  const lines = ["BEGIN:VCARD", "VERSION:4.0", `FN:${vcardText(card.name)}`, "KIND:individual"];
   if (card.title) lines.push(`TITLE:${vcardText(card.title)}`);
   if (storeName && storeName !== card.name) lines.push(`ORG:${vcardText(storeName)}`);
   if (card.email) lines.push(`EMAIL:${vcardText(card.email)}`);
-  const tel = card.phone ? crmPhone(card.phone) : null;
-  if (tel) lines.push(`TEL;VALUE=uri:tel:${tel}`);
+  if (card.phone) lines.push(`TEL;VALUE=uri:tel:${card.phone}`);
   if (card.website) lines.push(`URL:${card.website}`);
   if (storeUrl && storeUrl !== card.website) lines.push(`URL:${storeUrl}`);
   if (card.note) lines.push(`NOTE:${vcardText(card.note)}`);
@@ -152,27 +145,8 @@ export function vcardFileName(card: CreatorCard): string {
   return `${plain || "contact"}.vcf`;
 }
 
-/**
- * The same name as written, for Content-Disposition's filename* (RFC 6266,
- * RFC 8187), for a name with letters outside plain ASCII: letters in any
- * script kept, what a file name cannot hold made "-", percent-encoded as
- * UTF-8. Null for a plain ASCII name, whose plain file name says it already;
- * browsers that do not read filename* use the plain one.
- */
-export function vcardFileNameStar(card: CreatorCard): string | null {
-  if (!/[^\u0000-\u007f]/.test(card.name)) return null;
-  const cleaned = card.name
-    .normalize("NFC")
-    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, "-")
-    .replace(/\s+/g, " ")
-    .replace(/^[\s.-]+|[\s.-]+$/g, "");
-  // Cut by characters, never inside one.
-  const written = Array.from(cleaned).slice(0, 60).join("");
-  const name = `${written || "contact"}.vcf`;
-  return `UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
-}
-
 const cardKey = (statsId: string) => `nl:vcard:${statsId}`;
+/** The card's slot in the store's data room, as SAVE_CARD and DROP_CARD set it. */
 const CARD_SLOT = "card";
 /** The longest record a card can make, with room for JSON's quoting. */
 export const MAX_STORED_CARD_BYTES = (MAX_CARD_NAME + MAX_CARD_TITLE + MAX_CARD_EMAIL + 40 + 200 + MAX_CARD_NOTE) * 6 + 256;
@@ -189,20 +163,116 @@ export async function readCreatorCard(statsId: string | null): Promise<CreatorCa
   }
 }
 
+/** The card the studio edits could not be read for certain: the editor is not shown, and nothing is written. */
+export class CardUnreadable extends Error {
+  constructor() {
+    super("We could not read your business card just now. Reload the page in a moment; nothing was changed.");
+    this.name = "CardUnreadable";
+  }
+}
+
+/**
+ * The card as the studio edits it (app/studio/card, app/api/store/creator-card):
+ * the empty one only when no card is kept, exactly ([null]). Any other answer,
+ * a record that is too long, does not parse or is not a card throws
+ * CardUnreadable, so an unknown read never becomes an empty card that a save
+ * would write over the real one with (Codex G2 on #1963). The public pages keep
+ * readCreatorCard, where a card that cannot be read is simply off.
+ */
+export async function readCreatorCardForEditing(statsId: string | null): Promise<CreatorCard> {
+  return (await readCreatorCardHeld(statsId)).card;
+}
+
+/**
+ * The card as readCreatorCardForEditing reads it, and whether a record is still kept at all: a removal is done only
+ * when none is (`held` false), never because what is kept looks empty (Codex G on #1963).
+ */
+export async function readCreatorCardHeld(statsId: string | null): Promise<{ card: CreatorCard; held: boolean }> {
+  if (!statsId || !isRedisConfigured()) return { card: NO_CARD, held: false };
+  const reply: unknown = await redisPipeline([["GET", cardKey(statsId)]]);
+  if (!Array.isArray(reply) || reply.length !== 1) throw new CardUnreadable();
+  const [raw] = reply;
+  if (raw === null) return { card: NO_CARD, held: false };
+  if (typeof raw !== "string" || !raw || raw.length > MAX_STORED_CARD_BYTES) throw new CardUnreadable();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new CardUnreadable();
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CardUnreadable();
+  // A kept card is written whole (saveCreatorCard): its seven fields, `on` a boolean and the rest text. A record
+  // missing one, or with one of another type, is not a card as saved, so it is never read as one the creator would
+  // then save over with empty fields (Codex G and Revisor 2 on #1963).
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.on !== "boolean" || CARD_TEXT_FIELDS.some((field) => !Object.hasOwn(record, field) || typeof record[field] !== "string")) throw new CardUnreadable();
+  const read = readCard(record);
+  if (!read.ok) throw new CardUnreadable();
+  return { card: read.card, held: true };
+}
+
+/** The text fields a kept card always has (CreatorCard, besides `on`). */
+const CARD_TEXT_FIELDS = ["name", "title", "email", "phone", "website", "note"] as const;
+
+/** A card save whose answer could not be confirmed: it may or may not have been written. */
+export class CardSaveUnconfirmed extends Error {
+  constructor() {
+    super("We could not confirm your business card was saved. Reload the page to see what it is now, then save again if it is not what you saved.");
+    this.name = "CardSaveUnconfirmed";
+  }
+}
+
 /** Keeps a card as sent, after its room is taken; refused with the rule's reason, and then nothing is written. */
 export async function saveCreatorCard(statsId: string, raw: Record<string, unknown>, room: DataStore): Promise<{ ok: true; card: CreatorCard } | { ok: false; error: CardRefusal }> {
   const read = readCard(raw);
   if (!read.ok) return read;
   const json = JSON.stringify(read.card);
-  // Room first: a save that does not fit throws DataRoomError and nothing is written.
-  await needData(room, [{ slot: CARD_SLOT, bytes: dataBytes([json], 1), set: true }]);
-  await redisPipeline([["SET", cardKey(statsId), json]]);
-  return read;
+  // The card and its slot in one script (SAVE_CARD): the slot is set to the card written, so a save that does not fit
+  // writes nothing (DataRoomError), and two saves at once never leave a card larger than its slot (Codex L, #1961).
+  const key = dataKey(room);
+  if (!key || !isRedisConfigured()) throw new Error("the store's data room could not be counted");
+  const now = Date.now();
+  const replies: unknown = await redisPipeline([["EVAL", SAVE_CARD, 2, key, cardKey(statsId), contentRoomFor(room, now / 1000), monthOf(now), dataBytes([json], 1), json]]);
+  // The one script's answer, exactly: anything else does not show the card and its room were written, nor that they
+  // were not; it is said as not confirmed, and what was counted stays (Codex G2, #1961).
+  const taken = Array.isArray(replies) && replies.length === 1 ? dataTakenOf(room, replies[0], now / 1000) : null;
+  if (taken?.ok) return read;
+  if (taken?.reason === "full") throw new DataRoomError(taken);
+  throw new CardSaveUnconfirmed();
 }
 
-/** Forgets the card and gives back its room. */
+/**
+ * Forgets the card and gives back its room, in one script (DROP_CARD): only
+ * the card read here is deleted and its slot set to nothing, and a card saved
+ * since (another version) is left with its own slot (Codex L, #1961).
+ */
 export async function dropCreatorCard(statsId: string | null, room: DataStore): Promise<void> {
-  if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", cardKey(statsId)]]);
-  await giveData(room, [{ slot: CARD_SLOT, bytes: 0, set: true }]);
+  const key = dataKey(room);
+  if (!statsId || !key || !isRedisConfigured()) return;
+  const [held] = await redisPipeline([["GET", cardKey(statsId)]]);
+  const now = Date.now();
+  await redisPipeline([["EVAL", DROP_CARD, 2, key, cardKey(statsId), contentRoomFor(room, now / 1000), monthOf(now), typeof held === "string" ? held : ""]]);
 }
+
+/** The data room's own steps (TAKE_DATA) for the card's slot, set to `size`, inside a script whose KEYS[1] is the room. */
+const CARD_ROOM = `local function cardRoom(limit, always, month, size)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, always, month, 's', '${CARD_SLOT}', size}
+${TAKE_DATA}
+end`;
+
+/** Writes the card (KEYS[2]) and sets its slot to its size in the same step; nothing when it does not fit. Modelled by lib/redis-memory.ts. */
+export const SAVE_CARD = `-- marktmorgen:card-save:v1
+${CARD_ROOM}
+local taken = cardRoom(ARGV[1], '0', ARGV[2], ARGV[3])
+if taken[1] ~= 1 then return taken end
+redis.call('SET', KEYS[2], ARGV[4])
+return taken`;
+
+/** Deletes the card (KEYS[2]) only while it is the one read (ARGV[3], "" for none) and sets its slot to nothing; a card saved since keeps its slot. Modelled by lib/redis-memory.ts. */
+export const DROP_CARD = `-- marktmorgen:card-drop:v1
+${CARD_ROOM}
+local held = redis.call('GET', KEYS[2])
+if (held or '') ~= ARGV[3] then return {2, 0} end
+if held then redis.call('DEL', KEYS[2]) end
+return cardRoom(ARGV[1], '1', ARGV[2], '0')`;

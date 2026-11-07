@@ -39,7 +39,7 @@ export const pt: BuyerWords = {
 
   fairHead: (country, percent) => `Preço justo para o seu país (${country}): ${percent}${S}% de desconto`,
   fairNote: (store, plan) =>
-    `${store} baixa os preços onde o dinheiro vale menos. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço reduzido é para pagamento integral" : ""}.`,
+    `${store} baixa os preços onde o dinheiro vale menos. Este preço foi definido automaticamente para si, a partir do país da sua ligação à internet. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço reduzido é para pagamento integral" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% de desconto · ${ends}`,
   saleNote: (until, plan) =>
     `Até ${until}. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço promocional é para pagamento integral" : ""}.`,
@@ -51,9 +51,11 @@ export const pt: BuyerWords = {
   callLive: (dates) => `Sessão em direto, online, ${dates} ${plural(dates, "data marcada", "datas marcadas")}`,
   callGroup: (minutes, seats) => `Chamada de grupo, ${minutes} minutos, até ${seats} pessoas, online`,
   callOne: (minutes) => `Chamada de ${minutes} minutos, online`,
+  callLengths: (list) => `Chamada de ${list} minutos, online`,
   inPersonLive: (dates) => `Sessão presencial, ${dates} ${plural(dates, "data marcada", "datas marcadas")}`,
   inPersonGroup: (minutes, seats) => `${minutes} minutos, até ${seats} pessoas, presencial`,
   inPersonOne: (minutes) => `${minutes} minutos, presencial`,
+  inPersonLengths: (list) => `${list} minutos, presencial`,
   inPersonLiveNone: "Sessão presencial, sem datas marcadas",
   bundleOf: (count, worth) => `Pacote de ${count} produtos${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `${worth} em produtos por ${price}`,
@@ -83,7 +85,7 @@ export const pt: BuyerWords = {
   buyAsGift: "Comprar como presente",
   buyAsGiftFor: (price) => `Comprar como presente — ${price}`,
   giftNote: (store) =>
-    `Paga na página da Stripe. Logo a seguir, a pessoa recebe um único email de ${store} com o seu nome, a sua mensagem e uma ligação para o abrir com o próprio endereço. Fica com o recibo, não com uma cópia.`,
+    `Paga na página da Stripe. Depois do pagamento, o presente fica associado ao endereço da pessoa. Se o único email de ${store} lhe chegar, contém o seu nome, a sua mensagem e uma ligação para o abrir. Fica com o recibo, não com uma cópia.`,
   giftProblems: {
     email: "Isso não parece um endereço de email. Verifique o endereço do destinatário e tente novamente.",
     option: "Escolha o que quer oferecer e tente novamente. Nada foi cobrado.",
@@ -133,7 +135,8 @@ export const pt: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog de ${store}`,
-  blogEmpty: "Ainda não há nada aqui.",
+  blogPastEnd: "Não há publicações nesta página",
+  blogPastEndBody: "Esta página fica depois da última publicação.",
   blogMinutes: (n) => `${n} min de leitura`,
   blogNewer: "Publicações mais recentes",
   blogOlder: "Publicações anteriores",
@@ -146,6 +149,7 @@ export const pt: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `poupa ${percent}%`,
   chooseOptionFor: (title) => `Escolha uma opção para ${title}`,
+  chooseOne: "Escolha uma",
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Como pagar ${title}`,
@@ -297,10 +301,16 @@ export const pt: BuyerWords = {
   newer: "Mais recentes",
   older: "Mais antigas",
   askUnknown: (store) => `Esta página não o indica. Pergunte a ${store} antes de comprar.`,
+  askTermsCut: () => "Não tenho aqui as condições completas. Pergunte ao criador antes de comprar.",
 
   noLongerOnSale: "Este produto já não está à venda.",
   seeStore: (store) => `Ver ${store}`,
   cardTestMode: "Modo de teste: nenhum cartão real é cobrado.",
   cardCheckout: "Pagamento seguro pela Stripe, num novo separador.",
   cardOpens: (store) => `Abre na loja de ${store}, num novo separador.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} ou mais`,
+  plusTax: "+ impostos, quando aplicáveis",
+  salePriceUntil: (price, when) => `Preço promocional: ${price}, até ${when}`,
 };

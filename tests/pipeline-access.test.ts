@@ -9,6 +9,7 @@
  */
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/crm/route";
+import { dealVersion } from "@/lib/crm";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { DEFAULT_STAGES, FIRST_PIPELINE_ID, type Pipeline } from "@/lib/crm-rules";
 import { PIPELINE_ACCESS_REFUSAL, accessOf, parseAccessMap, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
@@ -16,6 +17,7 @@ import { readPipelineAccess, writePipelineAccess } from "@/lib/pipeline-access";
 import { redisPipeline } from "@/lib/redis";
 import { dataKey } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { crmAnswer } from "@/lib/crm-response";
 import { POST as FORM } from "@/app/api/store/form-opportunity/route";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { moveMemberships, putMember, removeMember } from "@/lib/team";
@@ -57,7 +59,9 @@ async function main(): Promise<void> {
   };
   const addedPipeline = await post("owner", { action: "pipeline", pipeline: workshops, moves: {} });
   is("the owner adds a second pipeline", [addedPipeline.status, addedPipeline.body.error], [200, undefined]);
-  const deal = async (who: keyof typeof cookies, stage: string, id?: string) => post(who, { action: "deal", deal: { ...(id ? { id } : {}), title: "Ten seats", email: "", cents: 50_000, stage, note: "" } });
+  // A change to a deal sends the version of its record as stored now (635 [GL3]).
+  const versionOf = async (id: string) => dealVersion(String((await redisPipeline([["HGET", "nl:crm:deals:" + statsId, id]]))[0]));
+  const deal = async (who: keyof typeof cookies, stage: string, id?: string) => post(who, { action: "deal", ...(id ? { version: await versionOf(id) } : {}), deal: { ...(id ? { id } : {}), title: "Ten seats", email: "", cents: 50_000, stage, note: "" } });
 
   const free = await deal("sam", "wnew01");
   is("unrestricted, a teammate adds a deal anywhere, as before", free.status, 200);
@@ -89,7 +93,7 @@ async function main(): Promise<void> {
   const ownerDeal = (await deal("owner", "wnew01")).body.deal!.id;
   const stringMoves = await post("sam", { action: "pipeline", pipeline: { ...workshops, stages: workshops.stages.filter((st) => st.id !== "wnew01") }, moves: "lead00" });
   is("a removed stage's deals sent by one stage for all (a string) into a pipeline they cannot change: refused", stringMoves.status, 403);
-  is("and the deal did not move", (await post("owner", { action: "deal", deal: { id: ownerDeal, title: "Ten seats", email: "", cents: 50_000, stage: "wnew01", note: "" } })).status, 200);
+  is("and the deal did not move", (await post("owner", { action: "deal", version: await versionOf(ownerDeal), deal: { id: ownerDeal, title: "Ten seats", email: "", cents: 50_000, stage: "wnew01", note: "" } })).status, 200);
   is("a deal that is not there, or cannot be read, is never removed by someone limited", (await post("sam", { action: "undeal", id: "zzzzzzzzzz" })).status, 403);
   const roomOf = async () => Number((await redisPipeline([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
   const roomBefore = await roomOf();
@@ -144,6 +148,16 @@ async function main(): Promise<void> {
   is("a deal made from a form: someone who can be restricted cannot make one at all (export is the owner's and Admins'), so a pipeline they may not change is never reached", [fromForm.status, ((await fromForm.json()) as { error?: string }).error], [403, "role"]);
   const formCode = readFileSync("app/api/store/form-opportunity/route.ts", "utf8");
   is("and the route still checks the pipeline, should that ever change", formCode.includes('accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) !== "edit"'), true);
+
+  part("Found in review of units 2 and 3");
+  // sam is a Support teammate again, with no access to Sales.
+  const madeByThem = await post("sam", { action: "pipeline", pipeline: { id: "mine01", name: "Mine", stages: [{ id: "mnew01", name: "New", kind: "open" }, { id: "mwon01", name: "Won", kind: "won" }, { id: "mlst01", name: "Lost", kind: "lost" }] }, moves: {} });
+  const back = (madeByThem.body as { pipelines?: { id: string }[] }).pipelines?.map((p) => p.id) ?? [];
+  is("a pipeline they add comes back without the names and stages of the ones they may not see", [madeByThem.status, back.includes("mine01"), back.includes(FIRST_PIPELINE_ID)], [200, true, false]);
+  const emptied = await post("sam", { action: "unpipeline", id: "mine01", moveTo: "" });
+  is("an empty pipeline they may change can be removed, with no destination to check", emptied.status, 200);
+  const refusedNow = await deal("sam", "lead00");
+  is("a change refused by access is a refusal the board shows as such, never an unconfirmed write", [refusedNow.status, crmAnswer(false, refusedNow.body)], [403, { ok: false, error: "pipeline_access" }]);
 
   done();
 }

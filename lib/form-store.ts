@@ -16,8 +16,9 @@
  * its room back. The forms themselves are few and bounded (MAX_FORMS).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { type FormDef, type FormResponse, FORM_RESPONSE_ID, FORM_ID, KEPT_RESPONSES, MAX_FORMS, parseForm } from "@/lib/forms";
 
 const formsKey = (statsId: string) => `nl:forms:${statsId}`;
@@ -88,16 +89,33 @@ export async function dropForm(statsId: string, id: string, room: DataStore): Pr
 
 const ANSWERS_SLOT = (formId: string) => `fr:${formId}`;
 
-/** Keeps one response, the newest first, and lets the oldest go past KEPT_RESPONSES. */
+/** One response kept, the newest first, and the ones past ARGV[2] let go, answered: what was really let go. */
+export const KEEP_FORM_RESPONSE = `-- marktmorgen:form-keep:v1
+redis.call("LPUSH", KEYS[1], ARGV[1])
+local out = {}
+while redis.call("LLEN", KEYS[1]) > tonumber(ARGV[2]) do
+  table.insert(out, redis.call("RPOP", KEYS[1]))
+end
+return out`;
+
+/**
+ * Keeps one response, the newest first, and lets the oldest go past
+ * KEPT_RESPONSES. The room is taken first from what is read (the new one
+ * less the oldest that should go), then set right from what the keep really
+ * let go, in one script, so a deletion of the person's responses at the same
+ * time, or another response, never leaves the room counting less than is kept.
+ */
 export async function addResponse(statsId: string, formId: string, response: FormResponse, room: DataStore): Promise<void> {
   const json = JSON.stringify(response);
   const [kept, oldest] = await redisPipeline([["LLEN", responsesKey(statsId, formId)], ["LINDEX", responsesKey(statsId, formId), -1]]);
-  const dropped = Number(kept) >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
-  await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: dataBytes([json], 1) - dropped }]);
-  await redisPipeline([
-    ["LPUSH", responsesKey(statsId, formId), json],
-    ["LTRIM", responsesKey(statsId, formId), 0, KEPT_RESPONSES - 1],
-  ]);
+  const guessed = Number(kept) >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
+  const charged = dataBytes([json], 1) - guessed;
+  await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
+  const [gone] = await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]);
+  const dropped = (Array.isArray(gone) ? gone : []).reduce<number>((sum, raw) => sum + (typeof raw === "string" ? dataBytes([raw], 1) : 0), 0);
+  const off = dataBytes([json], 1) - dropped - charged;
+  if (off > 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: off }]);
+  else if (off < 0) await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: -off }]);
 }
 
 function parseResponse(raw: unknown): FormResponse | null {
@@ -125,13 +143,18 @@ function parseResponse(raw: unknown): FormResponse | null {
 /** A form's responses, newest first, and how many are kept in all. */
 export async function readResponses(statsId: string | null, formId: string, limit = KEPT_RESPONSES): Promise<{ responses: FormResponse[]; total: number }> {
   if (!statsId || !FORM_ID.test(formId) || !isRedisConfigured()) return { responses: [], total: 0 };
-  const [list, total] = await redisPipeline([
+  const what = "the form responses";
+  const [raw, total] = exactReplies(await redisPipeline([
     ["LRANGE", responsesKey(statsId, formId), 0, Math.max(0, Math.min(limit, KEPT_RESPONSES) - 1)],
     ["LLEN", responsesKey(statsId, formId)],
-  ]);
+  ]), 2, what);
+  const list = plainList(raw);
+  if (!list || typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new UnknownReply(what);
+  const responses = list.map(parseResponse);
+  if (responses.some(response => response === null)) throw new UnknownReply(what);
   return {
-    responses: (Array.isArray(list) ? list : []).map(parseResponse).filter((r): r is FormResponse => r !== null),
-    total: Number(total) || 0,
+    responses: responses as FormResponse[],
+    total,
   };
 }
 
@@ -147,8 +170,8 @@ export async function responseCounts(statsId: string | null, ids: string[]): Pro
  * answers is this address (ARGV[1], lower case), on the Redis side so no
  * response travels. Answers how many went.
  */
-export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v1
-local removed = 0
+export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v2
+local out = {}
 for k = 1, #KEYS do
   local items = redis.call("LRANGE", KEYS[k], 0, -1)
   for _, raw in ipairs(items) do
@@ -159,16 +182,59 @@ for k = 1, #KEYS do
         if type(answer) == "string" and string.lower(string.match(answer, "^%s*(.-)%s*$")) == ARGV[1] then hit = true end
       end
     end
-    if hit then removed = removed + redis.call("LREM", KEYS[k], 0, raw) end
+    if hit then
+      local n = redis.call("LREM", KEYS[k], 0, raw)
+      if n > 0 then
+        table.insert(out, k)
+        table.insert(out, raw)
+        table.insert(out, n)
+      end
+    end
   end
 end
-return removed`;
+return out`;
 
-/** Deletes every response one person gave to any of the store's forms (lib/person-erasure.ts). */
-export async function forgetFormsPerson(statsId: string | null, email: string): Promise<number> {
+/**
+ * Deletes every response one person gave to any of the store's forms
+ * (lib/person-erasure.ts), and gives back to `room` exactly what each one
+ * took when it was kept (addResponse): the script answers each response it
+ * removed, by form, with how many times it was there. A reply that is not
+ * exactly that throws UnknownReply (lib/redis-exact.ts).
+ */
+export async function forgetFormsPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const forms = await readForms(statsId);
+  const what = "the deletion of a person's form responses";
+  // Which forms there are, read exactly (Codex G on #2584): the list as asked, every value a form that reads. Only an
+  // exact empty list means no forms; a reply in another shape, or a form record that does not read, is not "no
+  // responses to delete", so it throws UnknownReply and the erasure is said as incomplete.
+  const [listed] = exactReplies(await redisPipeline([["HVALS", formsKey(statsId)]]), 1, `${what} (its forms)`);
+  const values = plainList(listed);
+  if (!values) throw new UnknownReply(`${what} (its forms)`);
+  const forms = values.map((value) => {
+    if (typeof value !== "string") throw new UnknownReply(`${what} (its forms)`);
+    try {
+      const form = parseForm(JSON.parse(value));
+      if (form) return form;
+    } catch {
+      // Falls through to the refusal below.
+    }
+    throw new UnknownReply(`${what} (its forms)`);
+  });
   if (!forms.length) return 0;
-  const [removed] = await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]);
-  return Number(removed) || 0;
+  const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]), 1, what);
+  // Exactly {form's place, response, times removed} for each: any other shape
+  // leaves the deletion unknown (UnknownReply), and nothing is given back.
+  const list = plainList(reply);
+  if (!list || list.length % 3 !== 0) throw new UnknownReply(what);
+  let removed = 0;
+  const freed = new Map<string, number>();
+  for (let i = 0; i < list.length; i += 3) {
+    const [at, raw, n] = [list[i], list[i + 1], list[i + 2]];
+    const form = typeof at === "number" && Number.isInteger(at) ? forms[at - 1] : undefined;
+    if (!form || typeof raw !== "string" || typeof n !== "number" || !Number.isSafeInteger(n) || n < 1) throw new UnknownReply(what);
+    removed += n;
+    freed.set(form.id, (freed.get(form.id) ?? 0) + dataBytes([raw], 1) * n);
+  }
+  if (room && freed.size) await giveData(room, [...freed].map(([id, bytes]) => ({ slot: ANSWERS_SLOT(id), bytes })));
+  return removed;
 }

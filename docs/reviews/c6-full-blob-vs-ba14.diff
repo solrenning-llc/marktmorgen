@@ -1,0 +1,62 @@
+--- BA14/person-erasure.ts
++++ C6-f444/person-erasure.ts
+@@ -107,7 +107,13 @@
+  * (the FTC's rule on consumer reviews forbids suppressing them, lib/reviews.ts),
+  * nor take away what an import gave a buyer for a purchase made elsewhere.
+  */
+-type Eraser = { module: string; only?: ErasureBy; run: (scope: ErasureScope, files: string[], notes: Set<ErasureNote>) => Promise<number> };
++type Eraser = {
++  module: string;
++  only?: ErasureBy;
++  /** Modules that read what this one deletes: when one of them could not finish, this one waits for the retry. */
++  after?: string[];
++  run: (scope: ErasureScope, files: string[], notes: Set<ErasureNote>) => Promise<number>;
++};
+ 
+ /** Something the creator should know, said with the result. */
+ export type ErasureNote = "discord-roles" | "email-platform";
+@@ -127,7 +133,7 @@
+   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
+   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
+   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
+-  { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email) },
++  { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
+   {
+     module: "lib/learn.ts",
+     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),
+@@ -146,12 +152,12 @@
+       return records;
+     },
+   },
+-  { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email) },
++  { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email, s.store) },
+   {
+     module: "lib/lesson-comments.ts",
+     run: async (s) => {
+       let records = 0;
+-      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner);
++      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store);
+       return records;
+     },
+   },
+@@ -201,7 +207,8 @@
+   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
+   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
+   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
+-  { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },
++  // Kept while lib/mail-clicks.ts could not finish: its token is the only way to the key their links carried.
++  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email) },
+ ];
+ 
+ export type ErasureResult =
+@@ -298,6 +305,10 @@
+   const notes = new Set<ErasureNote>();
+   for (const eraser of ERASERS) {
+     if (eraser.only && eraser.only !== by.kind) continue;
++    if (eraser.after?.some((module) => failed.includes(module))) {
++      failed.push(eraser.module);
++      continue;
++    }
+     try {
+       parts.push({ module: eraser.module, records: await eraser.run(scope, files, notes) });
+     } catch (error) {

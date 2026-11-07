@@ -1,0 +1,52 @@
+✔ control: a kept contact's link key and used set are deleted, and the count is Redis's (7.114842ms)
+✔ control: a confirmed absent row (null) has no link key, and the erasure goes on (0.319477ms)
+✔ the contact's HGET answers an error string: unknown, nothing taken for gone (3.148774ms)
+✔ the contact's HGET answers an empty string: unknown, nothing taken for gone (0.627532ms)
+✔ the contact's HGET answers a string that is not a contact: unknown, nothing taken for gone (1.917224ms)
+✔ the contact's HGET answers an object: unknown, nothing taken for gone (0.31889ms)
+✔ the contact's HGET answers a number: unknown, nothing taken for gone (0.591451ms)
+✔ the contact's HGET answers false: unknown, nothing taken for gone (0.340541ms)
+✔ the contact's HGET answers undefined: unknown, nothing taken for gone (0.39345ms)
+✔ the contact's HGET answers a list: unknown, nothing taken for gone (0.790646ms)
+✔ the contact's HGET pipeline answers no reply: unknown (1.365569ms)
+✔ the contact's HGET pipeline answers two replies: unknown (1.299244ms)
+✔ the contact's HGET pipeline answers a hole: unknown (0.188505ms)
+✔ the contact's HGET pipeline answers not a list: unknown (0.142534ms)
+✔ the DEL answers a string: unknown, never a count of zero (0.296374ms)
+✔ the DEL answers null: unknown, never a count of zero (1.607505ms)
+✔ the DEL answers a negative: unknown, never a count of zero (0.781061ms)
+✔ the DEL answers a fraction: unknown, never a count of zero (0.993086ms)
+✔ the DEL answers a list: unknown, never a count of zero (0.199921ms)
+✖ the whole erasure stays incomplete on an unknown contact read, keeps the row, and a retry deletes the link key (42.321982ms)
+✔ control: the copy reads the emails whose links they used, sorted, and a confirmed empty set as none (0.539929ms)
+✔ the copy's SMEMBERS answers an error string: unknown, never "used no link" (0.266278ms)
+✔ the copy's SMEMBERS answers null: unknown, never "used no link" (0.113481ms)
+✔ the copy's SMEMBERS answers an object: unknown, never "used no link" (0.070768ms)
+✔ the copy's SMEMBERS answers a number in the list: unknown, never "used no link" (0.204956ms)
+✔ the copy's SMEMBERS answers a hole: unknown, never "used no link" (0.085514ms)
+✔ the person's copy is refused as a whole when their link use cannot be read (5.430344ms)
+N_SYNTHETIC_COMMANDS 193
+ℹ tests 27
+ℹ suites 0
+ℹ pass 26
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 84.288347
+
+✖ failing tests:
+
+test at n-ba14-local/n-handoff.cjs:93494:34
+✖ the whole erasure stays incomplete on an unknown contact read, keeps the row, and a retry deletes the link key (42.321982ms)
+  AssertionError [ERR_ASSERTION]: the list's row waits for the module that reads it
+      at TestContext.<anonymous> (/workspace/scratch/d28fe5e80a85/n-ba14-local/n-handoff.cjs:93522:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

@@ -1,7 +1,0 @@
-# Funded billing submission clock
-
-AB(a), 2026-10-24. Internal funded checkout and plan-switch submissions must reject a clock earlier than the grant's issuing second, derived from submitUntilSeconds minus the existing CONTRACT_FUNDING_RULES.submissionSeconds. Existing expiration, plan/store/source binding, principal and checkout activation-window checks remain. This closes a rollback between reserve acknowledgement and billing submission without adding a grant field.
-
-The synthetic regression creates valid checkout and switch grants, moves Date backwards one second and asserts both fail before any provider read/write. Existing successful metadata and activation tests remain. Full remote CI on the new head is required. Legacy calls without a route-issued funding grant retain their existing behavior; this is not new permission to sell or a restart/renewal implementation.
-
-No new Redis/provider request, ledger key or field is introduced. The additional comparison has unmeasured local CPU cost and is not certified zero. Full monthly/annual costs, highest-paid assumptions, spend floor, caps/reserves, the most onerous taxes and all LLC fixed costs including preserved Hazelsong residuals remain binding. Current-policy rotation, all retained obligations and global attempt budgets still require separate proof. Commercial policies remain null, coverage false and PLANS_ON_SALE false. No real provider or payment operation is part of verification.

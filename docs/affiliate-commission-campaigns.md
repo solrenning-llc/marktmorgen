@@ -1,7 +1,0 @@
-# Affiliate commission campaign labels
-
-The creator's affiliate page passes the recorded source/campaign/content tags into its commission-history view. Older untagged records stay untagged, and partially tagged records keep missing fields explicit. No new tracking, cookies, metadata storage or provider requests are introduced. The existing full export already includes these tags and remains unchanged.
-
-The page still loads at most 100 newest commission entries for display. It passes the loaded book count; the view distinguishes the display limit, zero loaded entries and unknown count. This is only the number returned by the current book reader, not certification of complete storage or provider coverage. The existing permissive book reader can normalize missing data to empty, so zero loaded entries must never be called proof of an empty historical ledger. Existing invoice/refund coverage warnings remain. Positive commission-record summaries separate currencies and credit types. Bonus and second-tier records are not additional purchases. Unsafe sums stay unavailable. No payout calculation, transfer, settlement, tax rule or financial admission changes.
-
-Tests use synthetic records and rendered components, not the live Affiliates page. Its GET invokes settlePayPal, so do not use a live authenticated request as a payment test. In-flight payout availability and other management-read fallbacks remain separate audit items; this UI work does not certify them or the commercial margin.

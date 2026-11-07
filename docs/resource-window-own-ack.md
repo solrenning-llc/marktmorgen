@@ -1,7 +1,0 @@
-# Paid resource-window acknowledgement
-
-The actual reservePaidResourceWindow entry now bounds the response before inspecting members: exactly one outer own data entry, exactly two inner own data entries, numeric flag1 and the exact admitted window end. Getters, inherited entries, sparse/non-array or oversized responses cannot authorize resource work. Existing policy/deadline/review-month/backwards-clock checks remain in place.
-
-The existing source-funded integration fixture now has a test-only acknowledgement transform after its validated cohort commit. Monthly and annual cases exercise17 malformed/exception shapes, both on a first allocation and an existing cohort. They verify one call, retained original cash/grant/slot/source fields, only one possible first cohort field, no getter or oversized member visits and normal recovery without a second allocation. The descriptor probe first observes a valid outer/inner response. Existing limits, expiry,64-observation and real Redis script tests remain unchanged.
-
-This is an actual entry exercised against the existing synthetic ledger, not proof that a mock certifies Redis Lua or full lifetime funding. It does not enable funded notice/renewal/settlement coverage or populate a real review. Lua, request byte ceiling, reservation format, one-or-twelve cohorts, rights, prices and visible limits are unchanged. Fixed descriptor inspection introduces no new productive IO/provider/retry; review/CI costs remain100%MarktmorgenFX275, unknown never zero. Whole new-head CI is required before merge.

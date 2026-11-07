@@ -1,0 +1,32 @@
+PROOF_BLOB 9378e6db2d1b1248adb70b839bd7d995ccec4993 BUNDLED_INPUTS 179
+✖ a retry can still delete the click marker after an unknown first read (6.976339ms)
+N_SYNTHETIC_COMMANDS 9
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.96748
+
+✖ failing tests:
+
+test at ../../../tmp/n-2700-replay-qKUSVq/replay.cjs:11139:31
+✖ a retry can still delete the click marker after an unknown first read (6.976339ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+  - null
+  
+      at TestContext.<anonymous> (/tmp/n-2700-replay-qKUSVq/replay.cjs:11150:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

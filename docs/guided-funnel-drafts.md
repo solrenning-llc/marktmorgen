@@ -1,9 +1,0 @@
-# Guided funnel drafts
-
-The setup assistant provides a review step with the ordered customer journey, optional author-written headlines/introductions and editable short, long or email questions. Marketing subscription offers default off in the assistant and can be enabled only when an email question exists. Existing visitor consent and confirmation rules remain in effect. Advanced quiz outcomes and branching remain in Forms.
-
-New pages are hidden and new funnels are disabled. Existing products retain their visibility. The creator must review pages, forms, delivery and checkout before enabling the journey. The setup itself makes no AI request, campaign or post-purchase offer. An optional AI draft (docs/ai-funnel-drafts.md) can fill the same fields, plus strictly validated `blockCopy`, before the creator presses create; it is a separate, counted writing request.
-
-Input is validated before setup writes. Required form capacity is checked before setup; manual saves and guided setup share an atomic form cap. Missing or malformed confirmations do not trigger an ordinary-write fallback. Existing server-generated response identities are preserved.
-
-Setup spans multiple records and is not a transaction. A lost reply or later failure can leave pages/forms or a disabled funnel saved. The UI asks the creator to review saved resources before another setup attempt. Existing page-list update concurrency and provider-dollar budgets are separate concerns. This change does not establish the required 60% after-tax margin.

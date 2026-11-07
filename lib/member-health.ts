@@ -154,11 +154,11 @@ async function scoredMembers(store: Store, rows: Raw[], now = Date.now()): Promi
     }
   }
   const ids = [...new Set(members.map((m) => m.product))];
-  const listings = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p]));
+  const listings = new Map((ids.length ? await readListings(store, ids) : []).map((p) => [p.id, p]));
 
   // The community, and which memberships open it.
   const community = store.community?.on ? store.community.id : "";
-  const config = community ? await readConfig(community).catch(() => null) : null;
+  const config = community ? await readConfig(community) : null;
   const opens = new Set(config?.access ?? []);
   const inCommunity = members.filter((m) => opens.has(m.product)).map((m) => m.email);
   // An unavailable activity reading is not evidence that every member never visited.

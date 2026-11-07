@@ -79,7 +79,7 @@ async function main() {
   const partial = await memberHealth(store, true, 1_800_000_000_000);
   is("good evidence stays usable beside one incomplete row", partial && [partial.members.length, partial.members[0]?.email, partial.unscored], [1, "member@example.com", 1]);
   const pageSource = readFileSync("app/studio/memberships/page.tsx", "utf8");
-  is("the creator is told that omitted rows make the figures partial", /could not be scored[\s\S]+figures[\s\S]+partial/i.test(pageSource), true);
+  is("the creator is told in plain language that omitted memberships make the numbers partial", /not counted here because Stripe did not send all their details\. The numbers above leave them out and are partial\./.test(pageSource), true);
   reset([page([scoredMember()])]);
   const scored = await memberHealth(store, true, 1_800_000_000_000);
   is("fully evidenced owned row stays complete", [scored?.complete, scored?.unscored, scored?.members.length, scored?.members[0]?.monthly, scored?.atRisk], [true, 0, 1, 2000, 2000]);

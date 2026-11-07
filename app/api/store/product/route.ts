@@ -35,6 +35,7 @@ import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
+import { dropCourseRatings } from "@/lib/lesson-rating";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
@@ -305,9 +306,12 @@ export async function POST(request: NextRequest) {
             if (!preparedCourse || JSON.stringify(found) !== JSON.stringify(preparedCourse)) return false;
             course = found;
             await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
+            // Its lessons' ratings go too (296 [SQ7]), a removed lesson's included: once the product is gone, nothing could reach them.
+            await dropCourseRatings(found.id, store);
           } else {
             if (preparedCourse) return false;
             await dropCommentsAfterCourseGone(going.course.id, store);
+            await dropCourseRatings(going.course.id, store);
           }
           return true;
         } catch {

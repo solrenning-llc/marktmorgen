@@ -38,7 +38,7 @@ export type LessonRatingWords = {
 
 const en: LessonRatingWords = {
   title: "Rate this lesson",
-  note: "Optional. Only the creator sees your rating and comment, without your name or email address. You can change or remove it here while this lesson is open to you. If you ask the store to delete your data, it is removed too.",
+  note: "Optional. Only the creator sees your rating and comment, without your name or email address. You can change or remove it here while this lesson is open to you. It is deleted if you ask the store to delete your data, or if the creator removes this lesson or course.",
   legend: "How useful was this lesson?",
   scores: ["1 – Not useful", "2 – A little useful", "3 – Useful", "4 – Very useful", "5 – Extremely useful"],
   noteLabel: "Comment (optional)",
@@ -71,7 +71,7 @@ const en: LessonRatingWords = {
 
 const es: LessonRatingWords = {
   title: "Valora esta lección",
-  note: "Es opcional. Solo el creador ve tu valoración y tu comentario, sin tu nombre ni tu email. Puedes cambiarla o quitarla aquí mientras esta lección esté abierta para ti. Si pides a la tienda que borre tus datos, también se quita.",
+  note: "Es opcional. Solo el creador ve tu valoración y tu comentario, sin tu nombre ni tu email. Puedes cambiarla o quitarla aquí mientras esta lección esté abierta para ti. Se borra si pides a la tienda que borre tus datos o si el creador quita esta lección o el curso.",
   legend: "¿Qué tan útil fue esta lección?",
   scores: ["1 – Nada útil", "2 – Poco útil", "3 – Útil", "4 – Muy útil", "5 – Extremadamente útil"],
   noteLabel: "Comentario (opcional)",
@@ -104,7 +104,7 @@ const es: LessonRatingWords = {
 
 const fr: LessonRatingWords = {
   title: "Notez cette leçon",
-  note: "Facultatif. Seul le créateur voit votre note et votre commentaire, sans votre nom ni votre adresse e-mail. Vous pouvez les modifier ou les retirer ici tant que cette leçon vous est ouverte. Si vous demandez à la boutique de supprimer vos données, ils sont retirés aussi.",
+  note: "Facultatif. Seul le créateur voit votre note et votre commentaire, sans votre nom ni votre adresse e-mail. Vous pouvez les modifier ou les retirer ici tant que cette leçon vous est ouverte. Ils sont supprimés si vous demandez à la boutique de supprimer vos données, ou si le créateur retire cette leçon ou le cours.",
   legend: "Cette leçon vous a-t-elle été utile ?",
   scores: ["1 – Pas utile", "2 – Un peu utile", "3 – Utile", "4 – Très utile", "5 – Extrêmement utile"],
   noteLabel: "Commentaire (facultatif)",
@@ -137,7 +137,7 @@ const fr: LessonRatingWords = {
 
 const de: LessonRatingWords = {
   title: "Diese Lektion bewerten",
-  note: "Freiwillig. Nur die Person, die den Kurs anbietet, sieht Ihre Bewertung und Ihren Kommentar, ohne Ihren Namen und Ihre E-Mail-Adresse. Sie können sie hier ändern oder entfernen, solange diese Lektion für Sie offen ist. Wenn Sie den Shop bitten, Ihre Daten zu löschen, wird sie ebenfalls entfernt.",
+  note: "Freiwillig. Nur die Person, die den Kurs anbietet, sieht Ihre Bewertung und Ihren Kommentar, ohne Ihren Namen und Ihre E-Mail-Adresse. Sie können sie hier ändern oder entfernen, solange diese Lektion für Sie offen ist. Sie werden gelöscht, wenn Sie den Shop bitten, Ihre Daten zu löschen, oder wenn diese Lektion oder der Kurs entfernt wird.",
   legend: "Wie hilfreich war diese Lektion?",
   scores: ["1 – Nicht hilfreich", "2 – Etwas hilfreich", "3 – Hilfreich", "4 – Sehr hilfreich", "5 – Äußerst hilfreich"],
   noteLabel: "Kommentar (freiwillig)",
@@ -170,7 +170,7 @@ const de: LessonRatingWords = {
 
 const it: LessonRatingWords = {
   title: "Valuta questa lezione",
-  note: "Facoltativo. Solo il creatore vede la tua valutazione e il tuo commento, senza il tuo nome né il tuo indirizzo email. Puoi cambiarla o rimuoverla qui finché questa lezione è aperta per te. Se chiedi al negozio di cancellare i tuoi dati, viene rimossa anch’essa.",
+  note: "Facoltativo. Solo il creatore vede la tua valutazione e il tuo commento, senza il tuo nome né il tuo indirizzo email. Puoi cambiarla o rimuoverla qui finché questa lezione è aperta per te. Viene cancellata se chiedi al negozio di cancellare i tuoi dati, o se il creatore rimuove questa lezione o il corso.",
   legend: "Quanto ti è stata utile questa lezione?",
   scores: ["1 – Per niente utile", "2 – Poco utile", "3 – Utile", "4 – Molto utile", "5 – Estremamente utile"],
   noteLabel: "Commento (facoltativo)",
@@ -203,7 +203,7 @@ const it: LessonRatingWords = {
 
 const nl: LessonRatingWords = {
   title: "Beoordeel deze les",
-  note: "Vrijblijvend. Alleen de maker ziet je beoordeling en opmerking, zonder je naam of e-mailadres. Je kunt hem hier wijzigen of verwijderen zolang deze les voor je open is. Als je de winkel vraagt je gegevens te verwijderen, verdwijnt hij ook.",
+  note: "Vrijblijvend. Alleen de maker ziet je beoordeling en opmerking, zonder je naam of e-mailadres. Je kunt hem hier wijzigen of verwijderen zolang deze les voor je open is. Hij wordt verwijderd als je de winkel vraagt je gegevens te verwijderen, of als de maker deze les of de cursus verwijdert.",
   legend: "Hoe nuttig was deze les?",
   scores: ["1 – Niet nuttig", "2 – Een beetje nuttig", "3 – Nuttig", "4 – Erg nuttig", "5 – Heel erg nuttig"],
   noteLabel: "Opmerking (vrijblijvend)",
@@ -236,7 +236,7 @@ const nl: LessonRatingWords = {
 
 const pt: LessonRatingWords = {
   title: "Avalie esta aula",
-  note: "Opcional. Só o criador vê a sua avaliação e o seu comentário, sem o seu nome nem o seu e-mail. Pode alterá-la ou retirá-la aqui enquanto esta aula estiver aberta para si. Se pedir à loja que apague os seus dados, ela também é retirada.",
+  note: "Opcional. Só o criador vê a sua avaliação e o seu comentário, sem o seu nome nem o seu e-mail. Pode alterá-la ou retirá-la aqui enquanto esta aula estiver aberta para si. Ela é apagada se pedir à loja que apague os seus dados, ou se o criador retirar esta aula ou o curso.",
   legend: "Quão útil foi esta aula?",
   scores: ["1 – Nada útil", "2 – Pouco útil", "3 – Útil", "4 – Muito útil", "5 – Extremamente útil"],
   noteLabel: "Comentário (opcional)",

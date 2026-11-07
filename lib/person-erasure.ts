@@ -258,6 +258,9 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
     // Lesson ratings are walked by their courses' index, a removed lesson too (296 [SQ7]): each such lesson is priced as one.
+    // A lesson both in the course and in the index is counted twice, on purpose: the exact union would need each
+    // course's index members (SMEMBERS, or SMISMEMBER over every lesson) read here, before the rest of the erasure is
+    // paid for, and that read is not; one SCARD per course is. Counting twice only ever prices more, never less.
     ratedLessonCount(scope.courses.map((c) => c.courseId)),
   ]);
   return {

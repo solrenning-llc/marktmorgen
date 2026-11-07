@@ -20,6 +20,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
+import { ITEM_ID_PATTERN } from "@/lib/course";
 import {
   type LessonRating,
   MAX_LESSON_RATINGS,
@@ -293,4 +294,32 @@ export async function ratedLessonCount(courseIds: readonly string[]): Promise<nu
     sum += reply;
   }
   return sum;
+}
+
+/**
+ * Takes away every rating of a course the creator removes or turns off, a
+ * lesson no longer in it too, found by the course's index, and gives back
+ * the room of each one confirmed gone. Answers how many went.
+ *
+ * Each lesson leaves the index in the same step its ratings go
+ * (DROP_LESSON_RATINGS), so the index is gone once it is empty: there is no
+ * separate DEL, which could drop the place of a rating written in between
+ * and leave it out of reach. A pass that finds the index still holding
+ * lessons reads it again, a few times at the most; one it cannot empty, or
+ * an entry that is not a lesson id, throws UnknownReply with nothing of
+ * that entry taken, so the caller can refuse the removal and it can be
+ * asked again.
+ */
+export async function dropCourseRatings(courseId: string, room: DataStore): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const what = "a removed course's rated lessons";
+  let gone = 0;
+  for (let pass = 0; pass < 3; pass += 1) {
+    const lessons = await ratedLessons(courseId);
+    if (!lessons.length) return gone;
+    if (!lessons.every((lesson) => ITEM_ID_PATTERN.test(lesson))) throw new UnknownReply(what);
+    gone += await dropLessonRatings(courseId, lessons, room);
+  }
+  if ((await ratedLessons(courseId)).length) throw new UnknownReply(what);
+  return gone;
 }

@@ -228,15 +228,16 @@ async function main(): Promise<void> {
 
   part("A course the creator removes or turns off takes every rating with it, a removed lesson's too");
   redis.clear();
+  const other = "o".repeat(32);
+  await rateLesson({ room: ROOM, courseId: other, lessonId: L1, who: ana, score: 5, note: "" });
+  const withoutCourse = await used();
   await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "Good." });
   await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ben, score: 2, note: "" });
   await rateLesson({ room: ROOM, courseId: COURSE, lessonId: "lessongone03", who: ana, score: 1, note: "" });
-  const other = "o".repeat(32);
-  await rateLesson({ room: ROOM, courseId: other, lessonId: L1, who: ana, score: 5, note: "" });
-  const withAll = await used();
   is("every rating of the course goes, a lesson no longer in it too", await dropCourseRatings(COURSE, ROOM), 3);
-  is("nothing of the course is left", redis.run(["KEYS", `nl:lr:${COURSE}:*`]), []);
-  is("their room comes back", withAll - (await used()), RATING_ROOM_BYTES * 3);
+  // The index is checked by its count: MemoryRedis keeps an emptied set, where Redis deletes it.
+  is("nothing of the course is left", [L1, L2, "lessongone03"].map((l) => redis.run(["EXISTS", `nl:lr:${COURSE}:l:${l}`])).concat(redis.run(["SCARD", `nl:lr:${COURSE}:ls`])), [0, 0, 0, 0]);
+  is("the room is what it was before the course was rated, its slot included", await used(), withoutCourse);
   is("another course's rating stays", (await readMyRating(other, L1, ana))?.score, 5);
   is("a course with no ratings: nothing", await dropCourseRatings(COURSE, ROOM), 0);
   redis.run(["SADD", `nl:lr:${COURSE}:ls`, "../../nl:x"]);
@@ -251,7 +252,7 @@ async function main(): Promise<void> {
   const productRoute = source("app/api/store/product/route.ts");
   const courseRoute = source("app/api/store/course/route.ts");
   is("removing a product with a course drops its ratings before the product goes, with its comments", (productRoute.match(/await dropCourseRatings\((?:found\.id|going\.course\.id), store\);/g) ?? []).length, 2);
-  is("turning a course off drops its ratings, or says it could not", /try \{\s*await dropComments\(course\.id, \[\], store\);\s*await dropCourseRatings\(course\.id, store\);\s*\} catch/.test(courseRoute), true);
+  is("turning a course off drops its ratings, or says it could not", /try \{\s*await dropComments\(course\.id, \[\], store\);\s*(?:\/\/[^\n]*\n\s*)?await dropCourseRatings\(course\.id, store\);\s*\} catch/.test(courseRoute), true);
   is("removing a lesson or a module drops their ratings beside their comments", /dropLessonComments\(course\.id, gone, store\)[^\n]*\n\s*await dropLessonRatings\(course\.id, gone, store\)/.test(courseRoute), true);
 
   part("Deleting a person is priced at every lesson its ratings are kept under, a removed one too");
@@ -303,7 +304,9 @@ async function main(): Promise<void> {
   is("removing is not charged a buyer action", /if \(action === "remove"\) \{(?:(?!takeBuyerAction)[\s\S]){0,900}removeMyRating/.test(route) && route.indexOf("await removeMyRating(") < take, true);
   const removing = route.indexOf('if (action === "remove")');
   is("a student removes their own rating without the lesson being open to them: only who they are is asked", removing > 0 && removing < route.indexOf('access.state !== "open"') && removing < route.indexOf("findLesson(") && removing < route.indexOf("heldBack("), true);
-  is("the store's owner never removes a student's rating", /if \(action === "remove"\) \{[\s\S]{0,400}learner\.owner\) return back\(""\)/.test(route), true);
+  // Changed window (rule 23, second pre-review): the pass's scope is checked first in the branch, so 400 characters no
+  // longer reach the owner's check; the check itself is unchanged.
+  is("the store's owner never removes a student's rating", /if \(action === "remove"\) \{[\s\S]{0,900}learner\.owner\) return back\(""\)/.test(route), true);
   is("removing keeps to the courses the sign-in opens: a pass for one course never removes a rating in another", /if \(action === "remove"\) \{[\s\S]{0,600}learner\.scope !== "all" && !learner\.scope\.includes\(course\)\)/.test(route), true);
   const scored = route.indexOf("parseScore(form.get(\"score\"))");
   is("a score that is not one is refused before a buyer action is taken", scored > 0 && scored < take, true);

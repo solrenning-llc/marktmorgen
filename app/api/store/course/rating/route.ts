@@ -17,8 +17,8 @@ import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
  * itself: a plain form, no script needed. `action` is "rate" (with `score`
  * 1 to 5 and an optional `note`) or "remove". Rating takes a student of the
  * course, on a lesson open to them; removing takes only who they are signed
- * in as, so a student whose access ended, was refunded or is held back can
- * still take back what they gave. The store's owner sees the ratings and
+ * in as, on a pass that reaches this course, so a student whose access
+ * ended, was refunded or is held back can still take back what they gave. The store's owner sees the ratings and
  * never gives or removes one. Every answer goes back to the lesson, with
  * `?r=` saying what happened.
  *
@@ -65,12 +65,15 @@ export async function POST(request: NextRequest) {
     return !minute || !day;
   };
 
-  // Taking back one's own rating asks only who is signed in: not that the
-  // lesson is still in the course, open to them or not held back. Only their
-  // own entry under this course is touched; one they never gave is nothing.
+  // Taking back one's own rating asks only who is signed in, for this course:
+  // not that the lesson is still in it, open to them or not held back. Only
+  // their own entry under this course is touched; one never given is nothing.
   if (action === "remove") {
     const learner = access.learner;
     if (!learner || !ITEM_ID_PATTERN.test(lessonId)) return new Response(null, { status: 303, headers: { Location: base } });
+    // A pass opened for some courses only (a sign-in link, or an address typed at checkout) reaches only those: never
+    // the rating its address gave in another course of the store. Access that ended is still the person's own course.
+    if (learner.scope !== "all" && !learner.scope.includes(course)) return new Response(null, { status: 303, headers: { Location: base } });
     // The creator reads ratings; only students give or take them back.
     if (learner.owner) return back("");
     const who = emailKey(learner.email);

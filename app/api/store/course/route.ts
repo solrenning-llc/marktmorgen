@@ -1,6 +1,7 @@
 import { originFrom } from "@/lib/request-origin";
 import { addComment, deleteComment, dropComments, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
 import { COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
+import { dropCourseRatings, dropLessonRatings } from "@/lib/lesson-rating";
 import { tellStudent } from "@/lib/lesson-comment-notify";
 import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
@@ -236,6 +237,8 @@ export async function POST(request: NextRequest) {
         if (lessonCount(course) > 0) return Response.json({ ok: false, error: "not_empty" }, { status: 400 });
         try {
           await dropComments(course.id, [], store);
+          // And every rating left under it (296 [SQ7]): a course with no lessons can still hold a removed lesson's.
+          await dropCourseRatings(course.id, store);
         } catch {
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }
@@ -496,6 +499,7 @@ export async function POST(request: NextRequest) {
         const goneLessons = lessonsInOrder(course).filter(({ lesson }) => !kept.has(lesson.id));
         const gone = goneLessons.map(({ lesson }) => lesson.id);
         await dropLessonComments(course.id, gone, store).catch((error) => console.error("could not delete a lesson's comments", error));
+        await dropLessonRatings(course.id, gone, store).catch((error) => console.error("could not delete a lesson's ratings", error));
         // An assignment goes with its lesson, and the work handed in for it, as read before the save.
         for (const drop of taskDrops) {
           const files = await applyTaskDrop(drop, storeKey(store), store);

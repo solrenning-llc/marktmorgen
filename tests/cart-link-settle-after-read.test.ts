@@ -7,7 +7,8 @@
  * opening is then refused as usual.
  */
 import { cartLinkProducts, cartLinkUnits, CART_LINK_UNIT_BYTES } from "@/lib/cart-link-products";
-import { KIND, productIds } from "@/lib/catalog";
+import { KIND, MAX_PRODUCT_BYTES, listingSizes, productIds } from "@/lib/catalog";
+import { dataKey } from "@/lib/store-data";
 import { addDraftProducts, claimHandle, ensureStatsId, setProductFile, setProductHidden, setSubscription, storeForEmail } from "@/lib/store";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
@@ -36,10 +37,16 @@ async function main(): Promise<void> {
   shop = (await storeForEmail(owner))!;
   const paidIds = shop.catalog.items.filter((p) => (p.kind & KIND.paid) !== 0).map((p) => p.id);
 
-  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more.
+  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more. That
+  // charge is worked out from what each listing weighs now (its data room slot, raised to its record's length), as
+  // the builder weighs it, so a record that grows beside every product (lib/page-depth-rules.ts) moves it with them.
+  const [weights] = (await redis.pipeline([["HMGET", dataKey(shop)!, ...paidIds.map((id) => `p:${id}`)]])) as unknown[][];
+  const sizes = await listingSizes(shop, paidIds);
+  if (!Array.isArray(weights) || weights.length !== paidIds.length || !sizes) throw new Error("fixture weights unknown");
+  const before = cartLinkUnits(2 * paidIds.length, paidIds.reduce((sum, _id, i) => sum + Math.min(MAX_PRODUCT_BYTES, Math.max(Number(weights[i]), sizes[i])), 0));
   const figure = allowanceFor(shop, "studio");
   const used = await allowanceUsed(shop, "studio");
-  const spare = figure - used - 10;
+  const spare = figure - used - before;
   if (spare > 0) await takeAllowance(shop, "studio", spare);
   const base = redis.pipeline.bind(redis);
   const debits: number[] = [];
@@ -78,6 +85,7 @@ async function main(): Promise<void> {
   }
   const total = debits.reduce((a, b) => a + b, 0);
   console.log("CART_LINK_SETTLE", JSON.stringify({ debits, paidBeforeRead, bytes, listed: listed.length }));
+  is("what was taken before the read is the charge left for it, and nothing more", paidBeforeRead, before);
   is("the records grew between their measure and their read, beyond what was taken before it", [grown, bytes > paidBeforeRead * CART_LINK_UNIT_BYTES], [true, true]);
   is("the builder still lists the 24 products", listed.length, 24);
   is("what was really read is taken in all, the difference after the read", total >= cartLinkUnits(2 * 24, bytes), true);

@@ -34,6 +34,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, UnknownReplyError } from "@/lib/redis-reply";
 import { type DataStore, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -74,10 +75,26 @@ const IMPORT_JOB = /^[0-9a-f]{24}$/;
 /** The addresses an import brought over, with when each was first brought (seconds). */
 export async function importedBuyers(statsId: string | null): Promise<Map<string, number>> {
   if (!statsId || !isRedisConfigured()) return new Map();
-  const [raw] = await redisPipeline([["HGETALL", importedWhoKey(statsId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const replies = repliesFor(await redisPipeline([["HGETALL", importedWhoKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("imported buyers");
+  const read = pairs(replies[0]);
   const out = new Map<string, number>();
-  for (let i = 0; i + 1 < flat.length; i += 2) out.set(flat[i], Number(flat[i + 1]) || 0);
+  let unknown = !read.complete;
+  for (const [email, raw] of read.rows) {
+    if (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw)) {
+      unknown = true;
+      continue;
+    }
+    const at = Number(raw);
+    if (!Number.isSafeInteger(at)) {
+      unknown = true;
+      continue;
+    }
+    out.set(email, at);
+  }
+  // This list drives the one-time closing notice. A legible row proves only
+  // that buyer, never that the list is complete enough to advance the notice.
+  if (unknown) throw new UnknownReplyError("imported buyers");
   return out;
 }
 
@@ -87,18 +104,23 @@ export function importedReference(statsId: string, email: string, productId: str
 }
 
 function parse(productId: string, raw: unknown): ImportedPurchase | null {
-  if (typeof raw !== "string") return null;
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(productId) || typeof raw !== "string") return null;
   try {
-    const value = JSON.parse(raw) as Record<string, unknown>;
-    const items = Array.isArray(value.items)
-      ? value.items.filter((id): id is string => typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id)).slice(0, 20)
-      : [];
+    const decoded = JSON.parse(raw) as unknown;
+    if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) return null;
+    const value = decoded as Record<string, unknown>;
+    if (typeof value.at !== "number" || !Number.isSafeInteger(value.at) || value.at < 0) return null;
+    if (typeof value.job !== "string" || !value.job || value.job.length > 512) return null;
+    if (value.items !== undefined && value.items !== null && !Array.isArray(value.items)) return null;
+    const items = value.items ?? [];
+    if (items.length > 20 || items.some((id) => typeof id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(id))) return null;
+    if (value.option !== undefined && value.option !== null && (typeof value.option !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(value.option))) return null;
     return {
       productId,
-      at: typeof value.at === "number" ? value.at : 0,
-      job: typeof value.job === "string" ? value.job : "",
+      at: value.at,
+      job: value.job,
       items: items.length ? items : null,
-      option: typeof value.option === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(value.option) ? value.option : null,
+      option: typeof value.option === "string" ? value.option : null,
     };
   } catch {
     return null;
@@ -106,14 +128,21 @@ function parse(productId: string, raw: unknown): ImportedPurchase | null {
 }
 
 /** Reads a hash as Redis returns it, a flat list or an object. */
-function pairs(raw: unknown): [string, unknown][] {
+function pairs(raw: unknown): { rows: [string, unknown][]; complete: boolean } {
   if (Array.isArray(raw)) {
     const out: [string, unknown][] = [];
-    for (let i = 0; i + 1 < raw.length; i += 2) out.push([String(raw[i]), raw[i + 1]]);
-    return out;
+    let complete = raw.length % 2 === 0;
+    for (let i = 0; i + 1 < raw.length; i += 2) {
+      if (typeof raw[i] !== "string") {
+        complete = false;
+        continue;
+      }
+      out.push([raw[i], raw[i + 1]]);
+    }
+    return { rows: out, complete };
   }
-  if (raw && typeof raw === "object") return Object.entries(raw as Record<string, unknown>);
-  return [];
+  if (raw && typeof raw === "object") return { rows: Object.entries(raw as Record<string, unknown>), complete: true };
+  return { rows: [], complete: false };
 }
 
 /** The command that reads one address's imported purchases, for a caller's own pipeline. */
@@ -124,17 +153,28 @@ export function importedRead(store: Store, email: string): (string | number)[] |
 
 /** What such a read answered, as purchases. */
 export function importedFrom(raw: unknown): ImportedPurchase[] {
-  return pairs(raw)
-    .map(([id, value]) => parse(id, value))
-    .filter((p): p is ImportedPurchase => p !== null);
+  const read = pairs(raw);
+  const found: ImportedPurchase[] = [];
+  let unknown = !read.complete;
+  for (const [id, value] of read.rows) {
+    const purchase = parse(id, value);
+    if (purchase) found.push(purchase);
+    else unknown = true;
+  }
+  // A legible row is enough to establish access. Only a complete, legible
+  // empty read may establish that there is none.
+  if (found.length) return found;
+  if (unknown) throw new UnknownReplyError("imported purchases");
+  return [];
 }
 
 /** Everything this address was given here by an import; [] for a store that never imported buyers. */
 export async function importedFor(store: Store, email: string): Promise<ImportedPurchase[]> {
   const read = importedRead(store, email);
   if (!read || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([read]);
-  const found = importedFrom(raw);
+  const replies = repliesFor(await redisPipeline([read]), 1);
+  if (!replies) throw new UnknownReplyError("imported purchases");
+  const found = importedFrom(replies[0]);
   // Brought over before the list of who was brought existed: noted the first time they are read.
   const brought = found.filter((p) => IMPORT_JOB.test(p.job));
   if (brought.length && store.statsId) {
@@ -169,7 +209,12 @@ export async function grantImported(
   // a PayPal purchase (no room given); not an import or the API's gift, which take from the store's room.
   if (sid && !room) await rememberBuyers(sid, grants.map((g) => g.email));
   if (IMPORT_JOB.test(job)) {
-    await redisPipeline([...new Set(grants.map((g) => normaliseEmail(g.email)))].map((email) => ["HSETNX", importedWhoKey(statsId), email, String(atSeconds)]));
+    const commands = [...new Set(grants.map((g) => normaliseEmail(g.email)))].map((email) => ["HSETNX", importedWhoKey(statsId), email, String(atSeconds)]);
+    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    if (!replies || replies.some((reply) => {
+      const count = countOf(reply);
+      return count !== 0 && count !== 1;
+    })) throw new UnknownReplyError("the imported-buyer marks");
   }
   const writes: (string | number)[][] = grants.map((g) => [
     "HSETNX",
@@ -179,7 +224,13 @@ export async function grantImported(
   ]);
   // An order's grant (no room given) is counted at what it really adds (lib/order-data.ts).
   const answers = room ? await redisPipeline(writes) : await orderWrite({ sid, statsId }, writes);
-  return answers.map((a) => Number(a) === 1);
+  const replies = repliesFor(answers, writes.length);
+  if (!replies) throw new UnknownReplyError("the imported grants");
+  return replies.map((reply) => {
+    const count = countOf(reply);
+    if (count !== 0 && count !== 1) throw new UnknownReplyError("an imported grant");
+    return count === 1;
+  });
 }
 
 /**
@@ -190,11 +241,18 @@ export async function grantImported(
 export async function takeGiven(statsId: string, email: string, productId: string, prefix: string): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   const key = importedKey(statsId, email);
-  const [raw] = await redisPipeline([["HGET", key, productId]]);
+  const read = repliesFor(await redisPipeline([["HGET", key, productId]]), 1);
+  if (!read) throw new UnknownReplyError("the imported grant");
+  const raw = read[0];
+  if (raw === null) return false;
   const given = parse(productId, raw);
-  if (!given || !given.job.startsWith(prefix)) return false;
-  const [gone] = await redisPipeline([["HDEL", key, productId]]);
-  return Number(gone) === 1;
+  if (!given) throw new UnknownReplyError("the imported grant");
+  if (!given.job.startsWith(prefix)) return false;
+  const removed = repliesFor(await redisPipeline([["HDEL", key, productId]]), 1);
+  if (!removed) throw new UnknownReplyError("the imported grant deletion");
+  const gone = countOf(removed[0]);
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("the imported grant deletion");
+  return gone === 1;
 }
 
 /**
@@ -205,6 +263,11 @@ export async function takeGiven(statsId: string, email: string, productId: strin
  */
 export async function forgetImportedPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const replies = await redisPipeline([["DEL", importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), normaliseEmail(email)]]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const replies = repliesFor(await redisPipeline([["DEL", importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), normaliseEmail(email)]]), 2);
+  if (!replies) throw new UnknownReplyError("the imported-person erasure");
+  return replies.reduce<number>((sum, reply) => {
+    const count = countOf(reply);
+    if (count !== 0 && count !== 1) throw new UnknownReplyError("the imported-person erasure");
+    return sum + count;
+  }, 0);
 }

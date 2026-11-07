@@ -1470,6 +1470,7 @@ async function lookUp(
     const productId = (Array.isArray(keys) ? keys.map(String) : []).find((id) => importedReference(statsId, email, id) === reference);
     if (!productId) return null;
     const [raw] = await redisPipeline([["HGET", key, productId]]);
+    if (raw === null) return null;
     const [given] = importedFrom([productId, raw]);
     if (!given || !inList(given.items ?? [], want.pid)) return null;
     // What was brought over holds one bundle at the most: its own.

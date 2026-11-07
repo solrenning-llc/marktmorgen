@@ -1325,3 +1325,332 @@ PREVALECE. CoordenaçãoSOMENTEClaude4/C1OFF. Anterior4e684280a37c009f2f1b088db1
 - Cincoownsemalteração: **2451bf6840e04371e0c8bcaa27674989532ff5b0ec96**,L8/9retry127163240735ESGOTADO; **2544447e97287e9bec0062e7878186495cb92cbdc277**,HOLDA3cancel_paid25→27; **26080fad82a0e8fec7c1558124bb41d33afcdac1b656**,tree7425d7e7/R2integral11blobs+9NOVOS/retry127378763596consumido; **26745bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3**,bloqueio2576d8d8c3d5/nãoapi-write-waitlistantesmerge/helper2784+scanner2773main/REDsoriginaispreservados/2421674inválido; **2700ba14e9a2eb63bd3f73a02105f4da84ec49051c87**,NOVOMÉDIOPabertoacima. BH1/buyer-library/SG227/30fila.
 
 ProdutoNUNCAreservas/Vconsolida. CanalFULLantesCAS/<20KBrecusa/409≥2min+FULLnovo. Nenhumpreço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contatoexterno/refalheio. Sósyntético/UNKNOWNnunca0/tetoantesgasto. MergeownexpectedSHA+reviewsemG/M+9agregadoresfinaisexatos(2dinheirosai). Provas/documentos/pareceresremotospreservados≤30min; pontocanônico/canalatualizadoantesencerrar. Próximaaçãocausal=retornoC4/C6sobre3hunks/união2700ouescoporesidualexclusivo, nãoesperaCIemrodadas.
+
+
+## Seção final canônica preparada LOCAL — 06/11/2026 20h42 Fortaleza — REDs #2700 reproduzidos / congelamento C4-3050/3070
+
+PREVALECE após a seção anterior quando esta atualização puder ser publicada no MESMO ramo canônico. Claude4 única/C1OFF. Remoto canônico permanece codex/n-checkpoint-2026-11-05@32181489f3e6cd5b471b31b1769097c56d390e92/blob7fcf0dcb4d0d5c481b93cb32b845d4d3b13f3ab9. NÃO houve push em PR, prova, produto ou checkpoint durante esta execução; este FULL está preparado/commitado somente localmente sob C4-3050. Canal e comentário qualificam os resultados, sem mover referência de produto. Depois de MAIN VERDE, publicar append ao MESMO canônico com FULL fresco/CAS, preservando todo histórico, sem recriar heads.
+
+### #2700 BA14: duas provas originais agora EXECUTADAS por N, MÉDIO P permanece aberto
+
+- Head próprio INTACTO ba14e9a2eb63bd3f73a02105f4da84ec49051c87. REDs15c02184 e4ee1e1eb preservados; últimos28/28 e ligados são históricos do módulo, não GREEN da orquestração.
+- HandoffC6 original claude6/handoff-tests@3407853e/tests/handoff/mail-clicks-exact.test.ts, blobad0d51cf35553a94426c07b4dc953b5224e4dced, copiado BYTE-ID à raiz tests para resolver ./redis-stub e billing-period-fixture canônicos, sem alterar assertivas. **MESMOS27:26PASS/1FAIL causal**,193comandos sintéticos. erasePerson REAL fica incomplete e mail-clicks falha, mas falha a asserção de que contacts também constafailed. Asserções posteriores desse caso NÃO executaram; NÃO alegar rowkept/retrysaúdavel/markergone provados nesse fluxo ainda.
+- ProvaP original codex/p-review-n2700-erasure-token@c4e7cf2f9e57cd01724ec436de34ff8a7336b3fb/tests/p-2700-erasure-token-dependency.test.ts, blob9378e6db2d1b1248adb70b839bd7d995ccec4993, BYTE-ID: **0PASS/1FAIL causal**,9comandos. Após forgetContactPerson incondicional e forgetClicksPerson saudável, marker ainda contém token sintético, esperado null. Esta prova direta preserva demonstração original; um fix sóorquestrador não a torna GREEN, não afrouxar.
+- Runner portátil novo validado com MESMAprovaP1: mesma1falha/9comandos/179inputs; não outroachado. Total3processos/28testesdistintos/211comandos; NÃO somarPduplicado como2achados. TentativaESM inicial parouANTES testes por__dirname deNext; corrigido runnerCJS sóharness, excluídaREDproduto.
+- Recursos admitidos antes:30cenários/run,10000comandos/caso/100000total,120s/log256KiB. Wrapper verifica antespipeline; fetch externo bloqueado. Terceiroprocesso validou novo runner, não união. ZEROproveedor/rede/instalação; MemoryRedis, NÃORedisnativo.
+- Host recuperado por leitura/cópia de snapshot local existente SÓ quando Gitblob coincide com árvoreBA14, maisfetch_blobfaltantes: **2166arquivosrastreadosmaterializados/2166byte-ID/0divergências**. Dependências existentes somenteleitura:Node24.22.1/esbuild0.28.2/TS5.9.3/Next16.4.2/React19.2.8. Nenhumworktree/ref/dependênciaalheiaeditado. SnapshotPARCIAL,nãoGitcheckoutcompleto/fullsuite. FonteBA14person-erasure13b3838a78e6c0496cc9e1c30cbfaec77cbf8841; mailclicks2621968b; config007ad672.
+- **Composição: f444C6 NÃO contém só3hunks contraBA14.** Diffexato tem6hunks: typeafter/contactsafter/guardaloop MAIS3callers que passam s.store a forgetFormsPerson,forgetCertificatesPerson,forgetLessonCommentsPerson. Por isso NÃOtransplantei/overlay/compilei arquivoC6 inteiro como união. Fonte ocupada C6 permanece intacta, grant3hunks/ordem empilhada continua pendente. NenhumGREENunião/P-R2closure/9CI alegado.
+- Evidência LOCALcommit **1f957839eea312785e5c01b54095d85d9e802bf3**, ramo local codex/n-2700-orchestrator-replay-local em /workspace/scratch/d28fe5e80a85/n-2700-local-evidence.9paths:2provasoriginais,runner portátil proofs/n/2700-orchestrator-replay.mjs,report docs/reviews/n-2700-orchestrator-replay.md,manifest2166,diffC6vsBA14,3logs. Sintaxe runner/diff-check0; não novo TS/lint/scannerproduto ou ligados GREEN sem correção. NÃO remotamentefetchableatéliberação, originaisP/C6 jáduráveisGitHub.
+- ComentárioPR **6698756190** registra provas executadas, diferença6hunks e HOLD. Reserva/anúncioantesnovosevidências no canal **d1d690cae3b2512feee4d3f4d632d788c1d116a6**, aplicouC4-3050/3070 antesedições. Nota anterior611067c2 confirmou recuperação local. Horáriosnominais20h39daRESERVA foram escritos algunsminutosadiantados; ordemcausalrecibocanal→arquivos→execuçõespreservada. Nãohouveediçãoproduto.
+
+### Ordem atual / próximo passo
+
+- **C4-3070 substituiu C4-2970:** recuperação main=#2940 DEPOIS #2894;2931redundanteapós2940. **Congelamento até anúncio literal MAIN VERDE**, sem inferirverde porfila/cancelamento. NenhumaCI consultada/repetida/cancelada porN.
+- ÚltimoFULLcanal2399445chars/blobf173894266ea2e8ae35693ea36eb3d0e1af4958f. Sódelta após19h45N analisado; semgrantnominalC4/C6paraN. Próximo: novidadescausais/escopoexato3hunks; NÃOretomarvarredura71duplicada, nãorepetirheadsunchanged. Depoisgrant+mainlegítimo, REDpermanenteorquestradorANTESfonte,mesmoprovas/28/ligados/TS/lint/scanner/P-R2retorno+9NOVOS eexpectedSHA. NãofecharPpor26/27.
+- Remoto checkpoint não foi movido por congelamento; FULL localesta seção permiteappendcanônico depoisliberação. Não trocarautomação porpromptmaisantigo/perder REDs. Rootcc23e732NUNCApush; nemnovoHEADownrecriado.
+- CincoownINTACTOS:2451/bf6840e04371e0c8bcaa27674989532ff5b0ec96 L8/9/retry127163240735ESGOTADO;2544/447e97287e9bec0062e7878186495cb92cbdc277 HOLDA3cancel_paid25→27;2608/0fad82a0e8fec7c1558124bb41d33afcdac1b656/tree7425d7e7 R2integral11blobs+9NOVOS/retry127378763596consumido;2674/5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3 bloqueio2576d8d8/nãoapi-write-waitlistantesmerge/helper2784+scanner2773main/REDspreservados/2421674inválido;2700/ba14acimaMaberto. Semsexta. BH1/buyer-library/SG227/30fila; g-l sóreconciliaçãob800, nãoauditado71novo.2770N5807530402/KB9N5807312305+5807338784concluídos,nãorepetiriguais/hashoficial.
+
+ProdutoNUNCAreservas/Vconsolida. Canal semprefetch_fileSHA+fetch_blobFULL/<20KBnãoescreve/409>=2min+FULLnovoCAS; nenhumerro409ou403nestaexecução. Sósyntético/UNKNOWNnunca0/tetoantesgasto; nenhumpreço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato/refalheio. Nenhummerge/aprovaçãoP1falsa/certificaçãocustoouRedisnativo. Revisão/provaslocaiscontinuampermitidas; publicaçãoPRsóapósMAINVERDE.
+
+
+
+## Seção final preparada LOCAL — 06/11/2026 21h30 Fortaleza — C4-3080/3090 e prova recebida #2608
+
+PREVALECE SOBRE prompt antigo321 e seções anteriores no que mudou: sem pushPR/prova/checkpoint/ref, integração/merge/CI até anúncio NOVO MAIN VERDE pela Claude4. Esforço MÉDIO/SERIAL, nenhumsubagente/unidadegrande/pesquisalonga. Remoto321/blob7fcf intacto; FULLlocalad385 anterior integralpreservado. N jáexecutouP1 e27C6 naexecuçãoanterior; NÃO voltar a dizer sóleu/nãoexecutou e NÃO rerodarheadigual.
+
+Mainregras/reservas/caixa conferidos poridentidades: TODOS iguais8e8545/472c4251/336274/d9893042 e2a440d/ed84f0/1dab1d/ec5f30/8f64c8. CanalFULL2503441chars/blob15079c8a405f8be3c7f057ac8ad8d22c21de7d99; sódelta apósN20h44 analisado. C4-3090 informa #2940 MERGED dd1756ab; #2894 ainda falta/head410e73b6c; congelamentoCONTINUA, nãoinferirliberação de9verdesrelatadosmain. NenhumaCI própria sondada/rerodada/cancelada.
+
+C5/21h11 enviouachado ler/apagar paraN; C6/21h13+21h26 ASSUMIU mail-clicks ecommunity-handle, novo claude6/mail-clicks-exact2eeab1fce relatado4/4+3/3+17/17. N NÃOexecutouessesnovosresultados nemleufonteintegralnova; nãoqualificacomoownGREEN. RespondiC6noCANAL0a199f2d749b3867a56322df35a5d257bd986b41: #2700BA14 NÃOtematomicidade, C6mantémseucorretivo; nãoeditoarquivoocupado/nemconcedoramoN. Composição3hunks/ordempedida3dc continuaSEMgrantC4. Antigo f444 tinha6hunkscontraBA14,3extrascallers; não transplantar arquivo inteiro. #2700MÉDIOPcontinuaABERTO/P-R2/9NOVOSfaltam.
+
+PROVA LOCAL pequena no MESMO #2608, achado recebidoC5, reservaANTESarquivos/execuções canal0a199f2d. RamoLOCAL codex/n-2608-podcast-erasure-race-local@9af76ee73d50b50a6651b71168089a0ff657865e em /workspace/scratch/d28fe5e80a85/n-2608-local.7paths:2snapshotsBYTE-ID,teste,world,runner,report,log. Original export forgetPodcastPerson em0fad/source85599110f3f843be7817b401f86af75c5d71e81c eFEED_TOKENreal fbdf2567bd88fbce87caf7bb0581e23ae083c570. FonteprodutivaNÃOalterada. Quatrocasos:1PASScontrole remoção3/idempotência0;3FAIL: concorrentecontrolado substitui índice+grant apósGET, DEL apagaíndiceatualmasguardanovotoken, retryrealcontinua índiceNULL/grantTRUE semrecusa; GET[undefined]nãorejeita/exclui; DELaplicado+ACKundefinednãorejeita/Number||0. RACEÉCONDICIONAL:writeréfixtureMap,nãoprova feedToken/rotapública/autorizaçãoreal, acessoindevido ouerasePersoncompleto. AACKunknownAPLICADO nãoéalegaçãodepersistêncianocaso3. CandidatoMÉDIOprivacidade/completudeaguardaR2EXEC/C4classificar, semnovoapprovalglobal. Testeanterior38/38/readFeedToken nãofechaapagamento.
+
+12comandospipeline+14escritasdiretasfixture=26operaçõessintéticas, teto128ANTES/4casos/120s/log128KiB; 0rede/provedor/install/nativo. StubMapGET/SET/DEL e normaliseEmailtrimlower; outrosimportsLANÇAMsechamados. Nãoadmissãofinanceira/tipos/linked/fullscanner/lintprodutocertificados. Runnernode--check e gitdiff-check0. NenhumGREENcorretivoainda, nenhumpush. Semcopiar3retries daC5/C6semcontarbytes/comandos/custoantes; R2/C4decisãoantesedição. AchadosregistradosnopróprioPRporcomentário permitido; nãoalteradohead/ref/CI.
+
+Cincoownremotos INTACTOS2451bf6840e0(retry127163240735ESGOTADO)/2544447e9728(HOLDA3cancel_paid25→27)/26080fad82a0(R2integral11blobs+9NOVOS+agoraprovaapagamento;retry127378763596consumido)/26745bcd2e65(HOLD2576;helper2784/scanner2773main;REDspreservados)/2700ba14(MPaberto/uniãoC6pendente). Semsexta; BH1/buyer-library/SG227/30fila.2770/KB9reviewsanterioresnão duplicadas, hashoficialnão repetido. g-lreconciliação nãoauditoria71novo. ProvasnovaecheckpointSOMENTELOCAIS, originaisP/C6járemotos; publicarquandoautorizado, não dizerfetchableagora. Próximo: classificação/provaR2ougrantnominalC4ouMAINVERDE, sembuscacíclicaCI. Depoisliberação:mainlegítimoUMAvez/umpushporPR/reviewsqualificadas+9NOVOS+expectedSHA. Claude4única/C1OFF; produtoNUNCAreservas/Vconsolida; sintético/UNKNOWNnunca0/tetoantesgasto; nada preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato/refalheio; rootcc23e732NUNCApush.
+
+
+## Seção final preparada LOCAL — 06/11/2026 22h31 Fortaleza — parecer C4/2608 recuperado e F2 confirmado
+
+PREVALECE. FULLremoto321/blob7fcf e FULLlocaledffeeb anteriores preservados. C4-3080/3090/dono:MÉDIO/SERIAL/semagentes/unidadesgrandes/pesquisas; nenhum pushPR-prova-checkpoint-ref/integração/merge/CI/operaçãoretrycancel até NOVO MAIN VERDE daClaude4. Nãoanúncionovo noFULL2544886chars/blob501ec09665709d6d28a5cac744f4b1edb653cfb4; sódeltaN21h31lido. Regrasmain/reservas/caixa MESMASidentidades8e8545/472c4251/336274/d9893042 e2a440d/ed84f0/1dab1d/ec5f30/8f64c8. NenhumCIpoll.
+
+#2608TIMELINE recuperada: comentárioindependenteClaude4 **6694994605**, publicado20h39UTC06/11, qualificaEXATO0fad82a0 e registra2LEVES F1unknowncount→limited eF2unknowngrant→404. Checkpointsanterioresque sódiziamR2integralfaltando eramINCOMPLETOS; esseparecerC4existe e deve serpreservado, NÃOfechaapagamento9afnemaprovaçãoqualificadafinal. C4diztertestadocandidatomergedmain2bfa; N NÃOexecutouessaintegração. CorpoPRantigo8ac énotaC4deprocessoaindaaplicável, nãoreescrito durantefreeze. R2integrale9NOVOScontinuamfaltando conformeescopoefechamento.
+
+ProvasC4dfd140d47 LIDASinteiras/nãoexecutadasoriginalmente: tests/c4-rev3-2608-unknown-says-limited.test.ts/blobfaa62c6f4cc502adb4563004cd717d98bf48f18b; tests/c4-rev3-2608-feed-unknown-404.test.ts/blobed8ca79be50a578dbdc6ae8e07d232c6bf1cb02a. CréditoC4eclassificaçãoLEVEpreservados. N NÃOalegaNextRequest/HTTP404/rota/autorização/sendContactreais neste recorte.
+
+AcréscimoSOMENTELOCAL naMESMAevidência#2608 **739e61432ccd1c81a5c6d0f188f89af02323e8f2**, pai9af76ee73d50b50a6651b71168089a0ff657865e IMUTÁVEL.1novo testeF2biblioteca: controlemesmograntcanônicolêválido, envelopeGETextraentãoretornaNULL. MESMOsource85599110intacto+regrasfbdf2567. Resultado1caso/1FAILcausal/2comandospipeline+1setupMap/0rede;4casosanterioresNÃOexecutados,padrãoNodeallowlistedselecionasóF2. NãoésegundoachadoC4. TetosANTES10comandos/120s/128KiB/1caso;0install/provedor/nativo. node--check/diff0; nãoTS/lint/fullscanner/ligados/GREENcorretivo ou9CIalegado. RESERVAantesacréscimo/execução canal**1d9e3dfc4639f67989fb34400955eb084c4d2eb5**, comentárioPR**6700377333**. Nãofonteprodutiva/sharedconfig/registro/refalterado.
+
+C6nova21h43: claude6/mail-clicks-exact**768b2894d** consentimento STOP_CLICKS_IF_SAME/readUnsubToken+FORGET_TRIES;6/6+64ligados RELATADOSporC6,nãoexecutadosN. Nãomexerfontesocupadas neminferirgrant; #2700BA14continuaMPaberto/3hunksordemC4pendente; f444antigo6hunksnãoquadroatualdofonteC6. ComposiçãoagoraexigirádeltaexatosemduplicarC6. N27C6/P1anterioresexecutadosepreservados,nãorepetidos. C6assumehandles econtatosQ/C3sãodonosexternos,nãoexpandirfaixaN.
+
+Cincoowncongelados2451bf6840e0(retry127163240735esgotado)/2544447e9728(HOLDA3cancel_paid25→27)/26080fad82a0(C4/2LEVES+R2integral+apagamento9af+9NOVOS)/26745bcd2e65(HOLD2576d8d8/REDspreservados/helper2784/scanner2773main)/2700ba14(MPcomposiçãoC6pendente). Não6ªunidade. #2940dd1756abentrou,#2894/410e73b6aindafaltanaultimaordemC4-3090;mainverdeANTESintegraçãoUMAvez/umpushporPR e9NOVOSreviews/expectedSHA. Todasprovas/checkpointsnovosSOMENTELOCAIS, nãofetchableGitHubatéliberação; remotosoriginaisP/C6/C4duráveis. Atualizarúnicacontinuidade comestefato;nãorecriarheads/automação oudesativarporfreeze/erropassageiro. ProdutoNUNCAreservas/Vconsolida,C4única/C1OFF; nenhumaatividadeexterna/preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato/refalheio;sintéticoUNKNOWNnunca0/tetoantesgasto;rootcc23e732NUNCApush.
+
+
+## Seção final canônica — 06/11/2026 23h40 Fortaleza — C4-3100 MAIN VERDE / provas publicadas / #2451 integração única
+
+PREVALECE SOBRE TODO FREEZE HISTÓRICO. Claude4 anunciou literalmente MAIN VERDE em22h33/C4-3100: #2894 MERGED5aae97e8, #2940jáincorporado. CongelamentoENCERRADO; enviospermitidos com mainlegítimoUMAvez eUMpushporPR/todasalteraçõesjuntas. SeC4anunciarNOVOMAINVERMELHO, suspenderenvios. RitmoAV10normalorçamentado/SERIAL, nenhumsubagentecriado. NãoaguardarC4repetiranúncio. NenhumCIretry/cancel/reopen/merge/deployfeito.
+
+Regrasmain/reservas/caixaMESMASidentidades8e8545/472c4251/336274/d9893042 e2a440d/ed84f0/1dab1d/ec5f30/8f64c8. FULLcanal2594689chars/blob509a90b16994694bc0b5f27089668b3aeb4bdbc7, apenasdeltaN22h32lido; FULLfresco2609583nobordodoenvio2451semnovaordemC4vermelho. MainPINADOda7824113475b5caec4171471b879c7559cedd43(merge2949C6;descendente5aae); rootd76da89b0368d45f24010c50864c29d71eae67b5. Leituraperson-erasuremainc2a0c0b6semdependênciaC6, mailclickmain85c7semcorretivoBA14, podcastmain28adee54aindacomforgetPodcastPersonGET→DELNumber||0. NãoinferirfechamentoprivacidadeporreleaseCI.
+
+### Provas retidas agora REMOTAS, sem reexecução ou novo parecer
+
+- #2608 mesmo ramo codex/n-2608-podcast-erasure-race-local: originalLOCAL9af76ee7→REMOTO **8bf0a9f8b3271572fc9761681250b4cbf8caf949**, treecb05117bdbbed2a36eb4909991a238697b2c3531; finalLOCAL739e6143→REMOTO **34e34fe06b7c9aecbd84bf09d604a375d01a8fb9**, tree2f203ca07c13666bdd78ddf7f08e510125303c2e. ComentárioPR **6701129858**.4casos1PASS3FAIL+F2dirigido1FAIL resultadosanteriorespreservados/limitesoriginais; NÃOrerodados. C4/6694994605doisLEVEScontinua, candidatosapagamentoR2classificarantesfix. R2integral11blobs+9NOVOSfaltam.
+- #2700 mesmo ramo codex/n-2700-orchestrator-replay-local: LOCAL1f957839→REMOTO **808ed8f60eacb2c9accca480d8f39ffa9c57a2d8**, tree5e690276818c564ca0181611e1d1a34c745de65f. ComentárioPR **6701130007**. MESMO27C6/26PASS1FAIL+Poriginal0PASS1FAIL preservados, semreexecução/GREEN/closure. C6novo768ocupadoecommaisalterações, grantordemC4continua pendente; Nnãoeditoufonte/refalheio.
+- As3árvoresAPI foramconferidasBYTE-IDcomGitlocal antescriarasrefs. SHAcommitsdiferemportransportemetadados/parentremoto321, queébasecanônicaN; NOVASrefsantesausentes404, nuncaoverwrite/refalheia. SãoARQUIVOSDEPROVAAPENAS, nãomergearárvoresrootdearquivo como produto. LocaloriginaisTODOSpreservados. NenhumPRaberto/CIdeprodutodisparadapelasprovas. PrimeiroanúncioC43100recebido **14bd49ec0d326413e8c1c5b351c28eab27e7f60b** antespublicação.
+
+### #2451 — NOVO HEAD pós-main enviado UMA vez, aguarda NOVE NOVOS
+
+- Remoteheadexato **d09fe010c02a21d27e318180e6672d5a5df1b6f5**, tree **3c1c1116e68e7a0ca353cc450732c8414cd97be0**, ramo MESMOcodex/n-email-target-evidence. Parentownbf6840e04371e0c8bcaa27674989532ff5b0ec96+parentmainPINADOda7824113475b5caec4171471b879c7559cedd43. Normalupdateexpectedbf/FALSEforce, únicoenvioefetivo; refRESTfrescaconfirmou d09. Nãomexer emmain/PRalheio/nãoforce/reopen/retry.
+- Tree calculadade3formas IDÊNTICAS: hashGitrecursivoindependente validoubase d76 e candidato3c1; gitmktree --missing nativomontou3c1 porblobs/treeslegítimos; APIcreate_tree base_tree d76+4pathsretornou3c1. APIcreate_commit doisparents normais, source/localtestcadaarquivo conferidoantesenvio.
+- Produto **lib/email-platforms.tsf9e9030a6d07bb06360421cbfea5195edfe1c3bb**, regressão **604dd49f4ff770414eda86c590974a4ac5a25a18**, world **e186894b8ff755cb50a5060f2d3fc456220eb761** BYTE-IDrevisadosL/5779366287. Não pedirreviewnovadessesblobsunchanged/CX122(8). ConfigFINAL **456b8b1abddafa8849b31e0ada33d9ca563e4c0f** = main29f6a3d1bba19ee87ee5691411f1ffd40cf501c4 INTEIRO+exataúnicalinhaemail-platform-targetprópria. Não4blobsBYTE-ID:configmudousóporbasemain;3blobsproduto/testeidênticos. Main→produtoéSÓlistTargets antigo→corretivojárevisado; nãocopyhunkalheio. Nenhumreservadocalteradorelativomain.
+- REDoriginal109/81falhas em2764d60839223309d2bf7462c71f410f2662199a continuaimutável; nãorepetidoagora pois éintegraçãopuradamesmacorreção. MAIN→f9diff comparadointeiro, sóloopvalidadorrevisado.
+- Pós-main SAME regressão **109/109** + withdrawal**1/1** + FAQ**16/16** +featuremechanisms**2/2**+storeallowance**13/13** = **141**totais/cincogrupos. Não somar109antigos. Memorydispatches46+94+0+0+999=1139; transportefoiSTANDINsintético,testesassertamGET/byte/time/redirectboundsexistentes;0fornecedorrede/DNS/conta. TetoANTES200000Memory/200transportstandins/120s256KiBprocesso foiadmitidoanúncio **82545dce195cd2b562277d150c0d646afc56a728** antesmaterializar/códigoexecutar. Nenhumavalaçãofinanceira/custocertificado.
+- **TiposstrictES2017:3raízes/718sources/0diagnósticos**, pathsprodutivosnormais. Tentativainicialincluíaruntimefixturealiases indevidamente:typesSafeFetchOptions/ResendTransportRuntimepareciamfaltarnoscampos; runnercorrigiu sótypepathspara@/*realcomonoprojeto, nãoasserçãonemfonte. Primeiros2307faltavamfontesdossnapshots, recuperadasporhashAPI; nãoachadosproduto. SEMglobaltypegen/build/browser/nativeRediscertificados.
+- **Lint4caminhos0errors0warnings**, log0bytes. **Scanneroficialscripts/check_public_data.py** doMAINPINADOexecutadoem2084arquivosRASTREADOSmaterializados/0correções. SnapshotPARCIAL,nãoalegar415x/mainfullscanlocal; fullscanrepositóriocontinuaobrigaçãoCI. **Diff--checkDOS4pathspróprios0**. Rootcommitdiffdas2084cópiasapontouwhitespaceHERDADOmainemhome-parts/closing-plan-guard/OFL/funnelbundle/help/pagecoach/reviewsummary/storequotes/historicalmargin/uploadworld; nãoreformatar/afrouxarasserção, essesarquivosnãoalteradosrelativomain. Nãodizerroot2084diff0.
+- Antesexecutarcadaarquivo, fontesmaterializadascoincidiam comblobsda782ou3blobsL/configmain+linhaprópria, conferidasporGitblob. Checkoutpróprio /workspace/scratch/d28fe5e80a85/n-2451-candidate. ReconstruçãocopiousóbytesverificadosdeUread-only/oldN+fetch_blobexatos, nenhumref/source/dependênciaalheiamodificado. Script/mainmanifest/plano em n-2451-*. Depspreexistentesesbuild0.28.2/TS5.9.3/ESLintsemnpm/providerinstall. **NãoécheckoutGithistorycompleto**:indexéparcialparascanner, treenativofullvemmanifestAPIcomhashbasereconferido.
+- Setupbuildsinitialmissingmodules NÃOexecutavamasserts. FAQprimeiraexecuçãoparouantes1ªasserção pormissingapp/studio/CWD; fonteMAINexata e cwdrootrecuperados, rodouSÓFAQnovamente16PASS, nãorepetiuoutros4jáverdes. Nenhumteste/expected/prazoalterado. Logsverdesoriginaisabaixoduráveis.
+- ComentárioPR **6701129656** ebodyreescritoparaheadfinal/problemscope/validação/limites; nomenãomudou. FotoÚNICAcheck-runs16iniciais/0nomesdeagregadorAllchecksvisíveis, NÃO9verdes. Nãopollar emrodadas. Próximo: notíciaAV12deconclusão9NOVOS+pareceraplicável+rawhead/mergeabilidadefrescos→mergenormalexpected d09. Verify127163240735 retryESGOTADOpreservado, nãoexecutar. Nãoaguardar9antigos/multiplicarpush.
+
+### Outros4 e continuação
+#2544447e97287e9bec0062e7878186495cb92cbdc277 HOLDA3cancel_paid25→27,nãoeditar/retry; #26080fad82a0e8fec7c1558124bb41d33afcdac1b656 C4/2LEVES+R2integral+apagamento+F2+9NOVOS,semcorretivoGREEN; #26745bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3 HOLD2576d8d8, helper2784/scanner2773main/REDspreservados/nãoapi-write-waitlistantesmerge; #2700ba14e9a2eb63bd3f73a02105f4da84ec49051c87 MP/ordemC6pendente. CINCOprodutos,não6ª. Provas/reviewnãocontamproduto. BH1/buyer-library/SG227/30fila, g-lb800nãoauditoria71nova.2770N5807530402 transferiu aS85df383d porblobsBYTE-ID,Scontrola9/merge;Nnãofazreviewduplicada. KB9reviewsNanterioresconcluídos/nãohashoficialrepetido.
+Checkpointagoradeveserpublicadonoprimeiroretomadosemmoveroutrosheads: MESMOcodex/n-checkpoint-2026-11-05, conteúdoFULLlocalpreservatodoprefixo321; appendapós C43100autorizado. Commitremotealterametadadosdiferentelocal,nãorecriarbranchcanônica. CanalFULLantesCAS/<20KBrecusa/409>=2minFULLfresco;nenhumerro409nestaexecução. AtualizarúnicaautomaçãoexistenteparaMAINVERDE+head2451d09/provasREMOTAS, semnova/cadênciaalterada/desativação. Rootcc23e732NUNCApush. ProdutoNUNCAreservas/Vconsolida, C4única/C1OFF. Sósyntético/UNKNOWNnunca0/tetoantesgasto; nenhuma alteração preço/limite/comissão/flag/trava/conta/pagamento/termo/chave/contato/refalheio.
+
+### Logs de validação pós-main #2451 — execuções já feitas, não comando novo
+
+#### regression
+
+````text
+BUILD_OK email-platform-target-evidence.test.ts
+
+Every provider needs a confirmed envelope and every destination
+  ok    mailchimp: malformed envelope 
+  ok    mailchimp: malformed envelope {
+  ok    mailchimp: malformed envelope null
+  ok    mailchimp: malformed envelope []
+  ok    mailchimp: malformed envelope {}
+  ok    mailchimp: malformed envelope {"lists":null}
+  ok    mailchimp: malformed envelope {"lists":{}}
+  ok    mailchimp: malformed envelope {"lists":"empty"}
+  ok    mailchimp: no partial page after invalid row null
+  ok    mailchimp: no partial page after invalid row []
+  ok    mailchimp: no partial page after invalid row "target"
+  ok    mailchimp: no partial page after invalid row 7
+  ok    mailchimp: no partial page after invalid row {}
+  ok    mailchimp: no partial page after invalid row {"id":""}
+  ok    mailchimp: no partial page after invalid row {"id":{}}
+  ok    mailchimp: no partial page after invalid row {"id":"wrong/path"}
+  ok    mailchimp: no partial page after invalid row {"id":1.5}
+  ok    mailchimp: no partial page after invalid row {"id":9007199254740992}
+  ok    mailchimp: explicit empty list remains valid
+  ok    mailchimp: existing names, numeric ids and fallback names
+  ok    mailchimp: exactly one bounded GET, no new request
+  ok    mailchimp: existing cap and order retained
+  ok    mailchimp: invalid evidence past picker cap still refuses page
+  ok    mailchimp: refused key retains existing classification
+  ok    mailchimp: server failure retains existing classification
+  ok    kit: malformed envelope 
+  ok    kit: malformed envelope {
+  ok    kit: malformed envelope null
+  ok    kit: malformed envelope []
+  ok    kit: malformed envelope {}
+  ok    kit: malformed envelope {"forms":null}
+  ok    kit: malformed envelope {"forms":{}}
+  ok    kit: malformed envelope {"forms":"empty"}
+  ok    kit: no partial page after invalid row null
+  ok    kit: no partial page after invalid row []
+  ok    kit: no partial page after invalid row "target"
+  ok    kit: no partial page after invalid row 7
+  ok    kit: no partial page after invalid row {}
+  ok    kit: no partial page after invalid row {"id":""}
+  ok    kit: no partial page after invalid row {"id":{}}
+  ok    kit: no partial page after invalid row {"id":"wrong/path"}
+  ok    kit: no partial page after invalid row {"id":1.5}
+  ok    kit: no partial page after invalid row {"id":9007199254740992}
+  ok    kit: explicit empty list remains valid
+  ok    kit: existing names, numeric ids and fallback names
+  ok    kit: exactly one bounded GET, no new request
+  ok    kit: existing cap and order retained
+  ok    kit: invalid evidence past picker cap still refuses page
+  ok    kit: refused key retains existing classification
+  ok    kit: server failure retains existing classification
+  ok    beehiiv: malformed envelope 
+  ok    beehiiv: malformed envelope {
+  ok    beehiiv: malformed envelope null
+  ok    beehiiv: malformed envelope []
+  ok    beehiiv: malformed envelope {}
+  ok    beehiiv: malformed envelope {"data":null}
+  ok    beehiiv: malformed envelope {"data":{}}
+  ok    beehiiv: malformed envelope {"data":"empty"}
+  ok    beehiiv: no partial page after invalid row null
+  ok    beehiiv: no partial page after invalid row []
+  ok    beehiiv: no partial page after invalid row "target"
+  ok    beehiiv: no partial page after invalid row 7
+  ok    beehiiv: no partial page after invalid row {}
+  ok    beehiiv: no partial page after invalid row {"id":""}
+  ok    beehiiv: no partial page after invalid row {"id":{}}
+  ok    beehiiv: no partial page after invalid row {"id":"wrong/path"}
+  ok    beehiiv: no partial page after invalid row {"id":1.5}
+  ok    beehiiv: no partial page after invalid row {"id":9007199254740992}
+  ok    beehiiv: explicit empty list remains valid
+  ok    beehiiv: existing names, numeric ids and fallback names
+  ok    beehiiv: exactly one bounded GET, no new request
+  ok    beehiiv: existing cap and order retained
+  ok    beehiiv: invalid evidence past picker cap still refuses page
+  ok    beehiiv: refused key retains existing classification
+  ok    beehiiv: server failure retains existing classification
+  ok    mailerlite: malformed envelope 
+  ok    mailerlite: malformed envelope {
+  ok    mailerlite: malformed envelope null
+  ok    mailerlite: malformed envelope []
+  ok    mailerlite: malformed envelope {}
+  ok    mailerlite: malformed envelope {"data":null}
+  ok    mailerlite: malformed envelope {"data":{}}
+  ok    mailerlite: malformed envelope {"data":"empty"}
+  ok    mailerlite: no partial page after invalid row null
+  ok    mailerlite: no partial page after invalid row []
+  ok    mailerlite: no partial page after invalid row "target"
+  ok    mailerlite: no partial page after invalid row 7
+  ok    mailerlite: no partial page after invalid row {}
+  ok    mailerlite: no partial page after invalid row {"id":""}
+  ok    mailerlite: no partial page after invalid row {"id":{}}
+  ok    mailerlite: no partial page after invalid row {"id":"wrong/path"}
+  ok    mailerlite: no partial page after invalid row {"id":1.5}
+  ok    mailerlite: no partial page after invalid row {"id":9007199254740992}
+  ok    mailerlite: explicit empty list remains valid
+  ok    mailerlite: existing names, numeric ids and fallback names
+  ok    mailerlite: exactly one bounded GET, no new request
+  ok    mailerlite: existing cap and order retained
+  ok    mailerlite: invalid evidence past picker cap still refuses page
+  ok    mailerlite: refused key retains existing classification
+  ok    mailerlite: server failure retains existing classification
+
+Real reconnect must preserve confirmed settings after a malformed list
+  ok    malformed reconnect reports failure
+  ok    malformed reconnect preserves sealed settings and cached state byte for byte
+  ok    malformed reconnect preserves real store buyer-consent reference
+  ok    only existing ping and target GETs, no POST or retry
+  ok    malformed reconnect reports failure
+  ok    malformed reconnect preserves sealed settings and cached state byte for byte
+  ok    malformed reconnect preserves real store buyer-consent reference
+  ok    only existing ping and target GETs, no POST or retry
+  ok    confirmed reconnect still succeeds and retains selection
+
+109 checks, all passing.
+N2451_COMMANDS 46
+
+````
+
+#### disconnect
+
+````text
+BUILD_OK email-disconnect-idempotent.test.ts
+✔ actual email withdrawal preserves missing legacy identifiers and retained cleanup (135.482299ms)
+N2451_COMMANDS 94
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 149.174689
+
+````
+
+#### faq
+
+````text
+BUILD_OK email-platform-faq.test.ts
+
+The studio's own words and rules
+  ok    the tool, for whoever may change settings, with no plan read by its route
+  ok    once connected: the place, who is sent, save and test; before: the platform and connect, as the editor says them
+  ok    each platform's key told where to find, under the key's box
+  ok    the warning where keys cannot be kept
+  ok    the test checks the key and the place, or says it could not
+  ok    until a plan is paid, the platform calls are limited, and the studio shows the server's words for it
+  ok    a free sign-up, a list sign-up and a sale each need the plan or its trial
+
+The answers, in both states
+  ok    three questions
+  ok    connecting: the owner or an Admin, the studio's words in order, the warning
+  ok    works: the test button once connected, the log's own title
+  ok    try before paying: the shared answer, and nobody sent before the plan
+  ok    one space between sentences, never two
+  ok    no figure but the trial's days, no percent, no result promised
+
+On the email platforms page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+  ok    no sentence of the answers said elsewhere on the page, or twice among them
+
+16 checks, all passing.
+N2451_COMMANDS 0
+
+````
+
+#### feature
+
+````text
+BUILD_OK feature-mechanisms.test.ts
+✔ every feature and creator page has one factual mechanism, with no orphan or missing entry (3.671347ms)
+✔ mechanisms describe existing choices, consent and records without numeric outcome claims (1.104676ms)
+N2451_COMMANDS 0
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15.29605
+
+````
+
+#### allowance
+
+````text
+BUILD_OK store-allowance.test.ts
+✔ a figure is taken whole or refused, and a refused use takes nothing (27.883046ms)
+✔ after a partial first period, the grace window and the real next period share one allowance (3.554068ms)
+✔ a paying store whose billing month is not known is let in to nothing (0.76528ms)
+✔ stores that pay nothing share the month's places, which grow with the stores that pay (5.842526ms)
+✔ an email counted against a store's figure is not sent past it, and the provider is never asked (291.375858ms)
+✔ the studio counts a page as several requests, and never shuts the owner out of paying, leaving or taking their data (50.714102ms)
+✔ a store's public side rests at its requests as at its visits, and what buyers have goes on to the whole figure (15.725121ms)
+✔ a plan's figures are published from the same numbers (0.950391ms)
+✔ the billing month is written down with the plan, forgotten when it stops, and the stores that pay are kept in line (9.398383ms)
+✔ the daily job writes a store down again when only its billing month moved (12.319348ms)
+✔ funded store-metered emails require paid proof before counters or provider dispatch (11.722167ms)
+✔ funded owner platform calls refuse without approval while consent reduction and disconnect remain available (55.618107ms)
+✔ marked paid webhook attempts need their cohort without blocking general maintenance allowances (10.068492ms)
+N2451_COMMANDS 999
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 531.167684
+an email was not sent: the store's transactional figure (used)
+
+````
+
+#### types
+
+````text
+{"roots":3,"sources":718,"diagnostics":0,"missing":[],"other":[]}
+
+````
+
+#### lint
+
+````text
+
+````
+
+#### scanner
+
+````text
+Public data check: 2084 tracked files; 0 file(s) require correction.
+
+````

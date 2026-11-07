@@ -160,7 +160,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const ratingView: OwnerRatingView | null = ownerAsks
     ? await ownerRatings(store, course.id, lesson.id)
     : ownerSees
-      ? { kind: "ask", href: `${base}/${lesson.id}?ratings=1#ratings` }
+      ? { kind: "ask", action: `${base}/${lesson.id}#ratings` }
       : null;
   // A student sees only the questions their try draws from a bank (lib/quiz.ts).
   const asked = quiz && attempt && quizMode === "student" ? studentQuiz(quiz, course.id, lesson.id, who, attempt) : null;

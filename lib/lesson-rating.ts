@@ -7,7 +7,9 @@
  *
  * The set lets a person's deletion and their copy find every rating they
  * gave, a lesson the creator removed since included. A lesson leaves it in the
- * same step that takes its last rating out.
+ * same step that takes its last rating out, or with all its ratings when the
+ * creator removes it (dropLessonRatings). A person's deletion is priced at
+ * every lesson in it (ratedLessonCount, lib/person-erasure.ts erasureSize).
  *
  * Every rating takes RATING_ROOM_BYTES of the store's data room before it is
  * written, once per student and lesson; a change takes nothing more, and the
@@ -65,6 +67,17 @@ export const DROP_LESSON_RATING = `-- marktmorgen:lesson-rating-drop:v1
 local gone = redis.call("HDEL", KEYS[1], ARGV[1])
 if redis.call("HLEN", KEYS[1]) == 0 then redis.call("SREM", KEYS[2], ARGV[2]) end
 return gone`;
+
+/**
+ * Takes every rating of a lesson the creator removed, and the lesson out of
+ * the course's rated lessons. KEYS: the lesson's ratings, the course's rated
+ * lessons; ARGV: the lesson. Answers how many ratings went.
+ */
+export const DROP_LESSON_RATINGS = `-- marktmorgen:lesson-ratings-drop-lesson:v1
+local count = redis.call("HLEN", KEYS[1])
+redis.call("DEL", KEYS[1])
+redis.call("SREM", KEYS[2], ARGV[1])
+return count`;
 
 /**
  * Reads every rating of a lesson, only while there are no more than were paid
@@ -240,4 +253,44 @@ export async function forgetLessonRatingsPerson(courseId: string, who: string, r
   if (room && gone) await giveData(room, [{ slot: RATINGS_SLOT(courseId), bytes: RATING_ROOM_BYTES * gone }]);
   if (!replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReply(what);
   return gone;
+}
+
+/**
+ * Takes away every rating of lessons gone from a course (the creator removed
+ * the lesson or its module), with each lesson's place in the course's rated
+ * lessons, and gives back the room of each rating confirmed gone. Answers
+ * how many went; a reply that is not a count throws UnknownReply, after
+ * what was confirmed came back.
+ */
+export async function dropLessonRatings(courseId: string, lessonIds: readonly string[], room: DataStore): Promise<number> {
+  if (!isRedisConfigured() || !lessonIds.length) return 0;
+  const what = "the deletion of a removed lesson's ratings";
+  const replies = exactReplies(
+    await redisPipeline(lessonIds.map((lesson) => ["EVAL", DROP_LESSON_RATINGS, 2, lessonKey(courseId, lesson), indexKey(courseId), lesson])),
+    lessonIds.length,
+    what,
+  );
+  const counted = replies.filter((reply): reply is number => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0);
+  const gone = counted.reduce((sum, n) => sum + n, 0);
+  if (gone) await giveData(room, [{ slot: RATINGS_SLOT(courseId), bytes: RATING_ROOM_BYTES * gone }]);
+  if (counted.length !== replies.length) throw new UnknownReply(what);
+  return gone;
+}
+
+/**
+ * How many lessons of these courses hold a rating, a lesson no longer in its
+ * course too: what a person's deletion walks (forgetLessonRatingsPerson), so
+ * its price counts them (lib/person-erasure.ts erasureSize). A reply that is
+ * not a count throws UnknownReply: never taken for none.
+ */
+export async function ratedLessonCount(courseIds: readonly string[]): Promise<number> {
+  if (!isRedisConfigured() || !courseIds.length) return 0;
+  const what = "the count of a course's rated lessons";
+  const replies = exactReplies(await redisPipeline(courseIds.map((course) => ["SCARD", indexKey(course)])), courseIds.length, what);
+  let sum = 0;
+  for (const reply of replies) {
+    if (typeof reply !== "number" || !Number.isSafeInteger(reply) || reply < 0) throw new UnknownReply(what);
+    sum += reply;
+  }
+  return sum;
 }

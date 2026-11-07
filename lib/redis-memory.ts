@@ -267,6 +267,13 @@ export class MemoryRedis {
           if (this.run(["HLEN", ratings]) === 0) this.run(["SREM", index, lesson]);
           return gone;
         }
+        if (key.startsWith("-- marktmorgen:lesson-ratings-drop-lesson:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, ratings, index, lesson] = args;
+          const count = Number(this.run(["HLEN", ratings]));
+          this.run(["DEL", ratings]);
+          this.run(["SREM", index, lesson]);
+          return count;
+        }
         if (key.startsWith("-- marktmorgen:lesson-rating-read:v1\n") && args[0] === "1" && args.length === 3) {
           const [, ratings, most] = args;
           const count = Number(this.run(["HLEN", ratings]));

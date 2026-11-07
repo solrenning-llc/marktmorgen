@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { type LessonRating, MAX_RATING_NOTE, RATING_SCORES, type RatingSummary, SHOWN_RATING_NOTES } from "@/lib/lesson-rating-rules";
 import { type RatingNotice, lessonRatingWords } from "@/lib/buyer-words/lesson-rating";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
@@ -97,7 +96,8 @@ export function LessonRatingBox({
 }
 
 export type OwnerRatingView =
-  | { kind: "ask"; href: string }
+  /** `action`: the lesson's own address, to ask with `ratings=1` (a form, so no browser or link reader fetches it ahead and spends the studio's requests). */
+  | { kind: "ask"; action: string }
   | { kind: "used" | "changed" | "failed" }
   | { kind: "shown"; summary: RatingSummary };
 
@@ -105,7 +105,7 @@ export type OwnerRatingView =
  * What the store's owner sees of a lesson's ratings, on the lesson itself:
  * nothing is read until they ask (each reading is paid from the studio's
  * requests), then the average, how many gave each score and the comments,
- * without names.
+ * without names, each with its month only, never its day.
  */
 export function LessonRatingSummary({ view, language }: { view: OwnerRatingView; language?: unknown }) {
   const w = lessonRatingWords(language);
@@ -119,7 +119,10 @@ export function LessonRatingSummary({ view, language }: { view: OwnerRatingView;
       </h2>
       <p className="st-muted mt-1 text-sm">{w.ownerNote}</p>
       {view.kind === "ask" ? (
-        <Link href={view.href} className="st-footer-link mt-3 inline-flex min-h-11 items-center text-sm font-semibold">{w.ownerShow}</Link>
+        <form method="get" action={view.action} className="mt-3">
+          <input type="hidden" name="ratings" value="1" />
+          <button type="submit" className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">{w.ownerShow}</button>
+        </form>
       ) : view.kind !== "shown" ? (
         <p className="cm-flash cm-flash-warn mt-4" role="alert">
           {view.kind === "used" ? w.ownerUsed : view.kind === "changed" ? w.ownerChanged : w.ownerFailed}
@@ -146,7 +149,7 @@ export function LessonRatingSummary({ view, language }: { view: OwnerRatingView;
                     <p className="font-semibold" style={{ color: "var(--st-text)" }}>
                       {w.noteScore(note.score)}
                       <span aria-hidden="true" className="st-muted font-normal"> · </span>
-                      <span className="st-muted font-normal">{new Date(note.at * 1000).toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" })}</span>
+                      <span className="st-muted font-normal">{new Date(note.at * 1000).toLocaleDateString(locale, { year: "numeric", month: "long", timeZone: "UTC" })}</span>
                     </p>
                     <p className="mt-1 whitespace-pre-line" style={{ color: "var(--st-text)" }}>{note.note}</p>
                   </li>

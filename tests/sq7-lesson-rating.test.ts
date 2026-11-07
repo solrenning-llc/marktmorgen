@@ -193,7 +193,6 @@ async function main(): Promise<void> {
 
   part("A lesson the creator removes takes its ratings with it, and their room comes back");
   redis.clear();
-  const bare = await used();
   await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "Good." });
   await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ben, score: 2, note: "" });
   await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ana, score: 5, note: "" });
@@ -210,6 +209,8 @@ async function main(): Promise<void> {
     if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:lesson-ratings-drop-lesson:v1"))) return [1, "?"];
     return realDrop(commands);
   }) as typeof redis.pipeline;
+  // Another rating stays in the course's slot, so what comes back is only the ratings' own bytes.
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: "lessonthree3", who: ben, score: 3, note: "" });
   const beforeOdd = await used();
   let oddThrew = false;
   try {
@@ -221,9 +222,8 @@ async function main(): Promise<void> {
   is("a reply that is not a count is unknown, said so", oddThrew, true);
   is("and only what was confirmed comes back", beforeOdd - (await used()), RATING_ROOM_BYTES);
   await forgetLessonRatingsPerson(COURSE, ana, ROOM);
-  redis.run(["DEL", `nl:lr:${COURSE}:l:${L2}`, `nl:lr:${COURSE}:ls`]);
+  await forgetLessonRatingsPerson(COURSE, ben, ROOM);
   is("the room counts ratings, and a store's closing erases them", [countedInRoom(`nl:lr:${COURSE}:l:${L1}`), countedInRoom(`nl:lr:${COURSE}:ls`), closingOf(`nl:lr:${COURSE}:ls`)], [true, true, { how: "erase" }]);
-  void bare;
 
   part("Deleting a person is priced at every lesson its ratings are kept under, a removed one too");
   redis.clear();
@@ -233,13 +233,18 @@ async function main(): Promise<void> {
   is("no course, nothing counted", await ratedLessonCount([]), 0);
   const scope = { store: ROOM, sid: "s", statsId: "f".repeat(32), listId: null, email: "ana@example.com", person: "p", learner: ana, courses: [{ productId: "p1", courseId: COURSE, lessonIds: [L1], moduleIds: ["m1"] }], productIds: ["p1"], communityId: null } as unknown as ErasureScope;
   is("the erasure is sized at the course's lessons and every lesson holding a rating", (await erasureSize(scope)).lessons, 1 + 2);
-  redis.run(["SET", `nl:lr:${COURSE}:ls`, "not a set"]);
+  const realCount = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "SCARD" && String(c[1]) === `nl:lr:${COURSE}:ls`)) return ["?"];
+    return realCount(commands);
+  }) as typeof redis.pipeline;
   let sizeThrew = false;
   try {
     await erasureSize(scope);
   } catch {
     sizeThrew = true;
   }
+  redis.pipeline = realCount;
   is("a count that cannot be read stops the erasure's sizing, never taken for none", sizeThrew, true);
   redis.clear();
 
@@ -261,7 +266,7 @@ async function main(): Promise<void> {
   const limit = route.indexOf("withinLimit(\"lesson-rating\"");
   is("a buyer action is taken before rating", take > 0 && take < rate, true);
   is("the per-person limit comes before any rating read or write", limit > 0 && limit < rate && limit < route.indexOf("await removeMyRating("), true);
-  is("removing is not charged a buyer action", /action === "remove"[\s\S]{0,40}removeMyRating/.test(route) && route.indexOf("await removeMyRating(") < take, true);
+  is("removing is not charged a buyer action", /if \(action === "remove"\) \{(?:(?!takeBuyerAction)[\s\S]){0,900}removeMyRating/.test(route) && route.indexOf("await removeMyRating(") < take, true);
   const removing = route.indexOf('if (action === "remove")');
   is("a student removes their own rating without the lesson being open to them: only who they are is asked", removing > 0 && removing < route.indexOf('access.state !== "open"') && removing < route.indexOf("findLesson(") && removing < route.indexOf("heldBack("), true);
   is("the store's owner never removes a student's rating", /if \(action === "remove"\) \{[\s\S]{0,400}learner\.owner\) return back\(""\)/.test(route), true);

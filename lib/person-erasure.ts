@@ -72,7 +72,7 @@ import { forgetQuizPerson } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
-import { forgetLessonRatingsPerson } from "@/lib/lesson-rating";
+import { forgetLessonRatingsPerson, ratedLessonCount } from "@/lib/lesson-rating";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
@@ -250,18 +250,20 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
 /** How big this erasure is: the store's catalogue and courses, and the few things counted to know it. */
 export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   const id = scope.communityId;
-  const [deals, conversations, dmConversations, roomMessages, events, certificates] = await Promise.all([
+  const [deals, conversations, dmConversations, roomMessages, events, certificates, ratedLessons] = await Promise.all([
     dealCount(scope.statsId),
     conversationCount(scope.statsId),
     id ? dmCount(id, scope.learner) : 0,
     id ? roomSize(id) : 0,
     id ? eventCount(id) : 0,
     certificateCount(scope.courses.map((c) => c.courseId)),
+    // Lesson ratings are walked by their courses' index, a removed lesson too (296 [SQ7]): each such lesson is priced as one.
+    ratedLessonCount(scope.courses.map((c) => c.courseId)),
   ]);
   return {
     products: scope.productIds.length,
     courses: scope.courses.length,
-    lessons: scope.courses.reduce((sum, c) => sum + c.lessonIds.length, 0),
+    lessons: scope.courses.reduce((sum, c) => sum + c.lessonIds.length, 0) + ratedLessons,
     deals,
     conversations,
     dmConversations,

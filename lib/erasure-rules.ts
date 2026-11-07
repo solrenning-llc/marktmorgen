@@ -54,6 +54,7 @@ export type ErasureBy = "team" | "person";
 export type ErasureSize = {
   products: number;
   courses: number;
+  /** The courses' lessons, and every lesson its ratings are kept under, one the creator removed too (lib/lesson-rating.ts ratedLessonCount). */
   lessons: number;
   /** Counted once the courses and the counts below are read. */
   deals: number;

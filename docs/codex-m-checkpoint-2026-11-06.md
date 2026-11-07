@@ -819,3 +819,159 @@ Public data check: 3965 tracked files; 0 file(s) require correction.
 ```
 {"verified": 3965, "unmatched": [], "scanner_exit": 0}
 ```
+
+
+## Retomada 07/11/2026 15h47 Fortaleza — revisão privacidade #3081
+
+#3077 formal M5814354925 COMMENT+FULLbodyreadbackEXATO entregue, correçãooriginal120PASS mas P5814311731ACKtransportHERDADO aguardaclassificação/disposiçãoR2/C1, C6-1536ciente. Canal combined **CXM-20261107-1543-C1-1** commit a386ec146450a90a5f52e3eefb0dcea564c25fb2/blob18d0781121a2ba3da145f5f972c65c8edb5f46b9 FULL3985201charsEXATO; ID1543/timestampnominaladiantou2min, clocktoolmostrou publicação18:41:40UTC/15:41:40Fortaleza. Esteappendfixa o horário real semreescreverhistórico. Canalpreservadointegralmente.
+
+### #3081 exatoafdbd48cb78099fdbc19ab52b769e3d5ba1fd0dc
+PedidoC6-1539, claimnoMESMOrecibo1543lidoFULL/metadata/timelinevaziaANTESdiff/fonte/testes. Atualização final18:46:48UTC OPEN/samehead/timelineaindavazia. Nenhumclaimconcorrente3081observado. Trêsarquivosautorais SOMENTELEITURA: snapshoteb0bf50973f17f0916b316a0f82cb840666ec405; public1217f134a1b94904b65616c2a32ee79b8556eee9377; securityreal3e1fa13b5865fdb8b5bcc08dde700a288755cb4b5. Basef609697b69e862cd5e1fe86eedee4c19fb75f561/snapshot93f9ab347a66b5aac5d71ed9fb44a02226370cb9. Cópia m-review-3081/view sóGitblobsheadexatos;3974filesmatching,semfontefalsa nemmudançaemautor. Preparaçãofaltouarquivos: bloqueiosesbuildANTESexecução, recuperadosblobsnecessários; erroownpathrunnercorrigido,nãoREDproduto. Em run.log pipelineencerraporbuildleadsfaltando3importsDEPOISpublictest121completos; leads.logposteriorcom68PASSqualificado, nãoalegarorquestrador0original.
+
+SAMEtestfinalpublic121+emuladorfinalnoMESMOgrafo, SÓsnapshotmóduloantigoalias:121/3FAIL (versãorepetida/stalewriteaceito/maskedaddressreaparece)→head121PASS. Ligadoaffiliate-leads68PASS =>189atuaisPASS. PrecountsANTES pipeline5187/run5368/mock103(old),head5174/5355/103,leads196/242/1;guardas20kcommands+20krun/500mockHTTP/120s512MiB256KiBporfilho,nenhumexcedido. FonteLuaBOOK_FORGETlida:tokenfenceantesDEL/SETverNXEX(now)/INCR/EXPIRE; pipeline5slotsmapeadosGETpointer/EXISTSbookcorretos,semrecálculoteto. Redisserver/cli nãoinstaladosPATHnemworkspace, não baixei/instalei/nãoexecuteijornada3realnemafirmeiLuaemuladacomoprovaRedisreal. Autorrelatareal3 e24; evidênciaMlimitadaa189memóriacontroles+sourceLua+typesnovoSecurity.
+
+Tipos4raízesinclpublic121+leadsatingiram512MiBOOM/exit134em~23s, INCOMPLETO,nãoverde,nãodefeitoproduto. NÃOsubiteto: reduzi escopoa snapshotprod+securitynovotest,2raízes830fontesES2017strictBundler0diagnósticos. Publictesttypesamplos NÃOcertificadosporM. LintTODOS3changedfilesexit0; scanneroficial3974tracked0;diffcheckwhitespacemódulosaídasemdiagnóstico(código1dodifféconteúdodiferente,nenhumwhitespaceachado). Escopoprivacidadedeversãonãorepeteapósexpiração8dias, contagemnova SETNX,no flags/price/limit/ceiling/provideraccounts. Semachadopróprionestaslinhas; revisão source+memóriacausal não fullCI/novechecks/produção/MRglobal. Próximo formalCOMMENT comlimitações +canal; fontes/refautor/CI/fila/main intocados. Serial/Médio0subagentes, C1coordena/C4executor,próximoreviewpedido ainda livre exigepreflight+reservaANTEScódigo.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>500)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/affiliate-book-snapshot']=join(root,'before-snapshot.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-snapshot.ts')){if(hash!=='93f9ab347a66b5aac5d71ed9fb44a02226370cb9')throw Error('Old rule mismatch');}else if(input!=='tests/m-3051-payout-values.proof.ts'&&hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/affiliate-book-snapshot.ts','tests/public-reads-ceiling.test.ts','tests/security/affiliate-book-version.redis-run.ts','tests/affiliate-leads.test.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### verify-focused.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/affiliate-book-snapshot.ts','tests/security/affiliate-book-version.redis-run.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### run.log
+```
+{"mode":"before","test":"public-reads-ceiling.test.ts","checked":468}
+{"mode":"before","test":"public-reads-ceiling.test.ts","exit":1,"signal":null,"tail":"e-public-reads-ceiling.test.ts.cjs:121308:3) {\n  status: 500,\n  code: 'unknown',\n  stripeMessage: 'down'\n}\ncounting an affiliate book's refresh failed Error: ERR unknown command 'EVAL'\n    at store.pipeline (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:121443:54)\n    at redisPipeline (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:2128:41)\n    at script2 (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:49497:23)\n    at beginAttempt (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:49528:25)\n    at main (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:121447:32)\nkeeping an affiliate book failed Error: ERR unknown command 'EVAL'\n    at store.pipeline (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:121443:54)\n    at redisPipeline (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:2128:41)\n    at script2 (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:49497:23)\n    at markOnly (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:49565:26)\n    at write (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:49592:12)\n    at async writeSnapshot (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:49542:12)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3081/logs/before-public-reads-ceiling.test.ts.cjs:121448:26)\n"}
+{"mode":"head","test":"public-reads-ceiling.test.ts","checked":468}
+{"mode":"head","test":"public-reads-ceiling.test.ts","exit":0,"signal":null,"tail":"7/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:121314:3) {\n  status: 500,\n  code: 'unknown',\n  stripeMessage: 'down'\n}\ncounting an affiliate book's refresh failed Error: ERR unknown command 'EVAL'\n    at store.pipeline (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:121449:54)\n    at redisPipeline (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:2128:41)\n    at script2 (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:49497:23)\n    at beginAttempt (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:49532:25)\n    at main (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:121453:32)\nkeeping an affiliate book failed Error: ERR unknown command 'EVAL'\n    at store.pipeline (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:121449:54)\n    at redisPipeline (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:2128:41)\n    at script2 (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:49497:23)\n    at markOnly (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:49569:26)\n    at write (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:49596:12)\n    at async writeSnapshot (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:49546:12)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3081/logs/head-public-reads-ceiling.test.ts.cjs:121454:26)\n"}
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/assignment" (originally "@/lib/assignment")
+
+    lib/person-erasure.ts:54:31:
+      54 │ import { noteTaskUpload } from "@/lib/assignment";
+         ╵                                ~~~~~~~~~~~~~~~~~~
+
+  The path "@/lib/assignment" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/assignment" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/welcome-offer-send" (originally "@/lib/welcome-offer-send")
+
+    lib/person-erasure.ts:81:36:
+      81 │ import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
+         ╵                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/lib/welcome-offer-send" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/welcome-offer-send" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/member-health" (originally "@/lib/member-health")
+
+    lib/person-erasure.ts:92:33:
+      92 │ import { forgetHealthCopy } from "@/lib/member-health";
+         ╵                                  ~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/lib/member-health" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/member-health" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 3 errors:
+lib/person-erasure.ts:54:31: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/assignment" (originally "@/lib/assignment")
+lib/person-erasure.ts:81:36: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/welcome-offer-send" (originally "@/lib/welcome-offer-send")
+lib/person-erasure.ts:92:33: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3081/view/lib/member-health" (originally "@/lib/member-health")
+    at failureErrorWithLog (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+```
+
+### leads.log
+```
+{"mode":"head","test":"affiliate-leads.test.ts","checked":467}
+{"mode":"head","test":"affiliate-leads.test.ts","exit":0,"signal":null,"tail":"t is payable\n  ok    a reversal needs a reason\n  ok    reversed: nothing owed, and the affiliate sees why\n  ok    undone, it waits for approval again\n  ok    in the spreadsheet as a lead\n  ok    Ana's own page has her lead\n  ok    held with everything else when flagged\n\nA free product, and a booking\n  ok    credited for a free product claimed\n  ok    the free download credits only the first time that address got the product\n  ok    a booking's checkout carries the lead whatever the share, never from a package\n  ok    the booking route carries it only where the store pays per booking\n\nDeleting a person\n  ok    their address comes off the lead\n  ok    the lead stays, as the affiliate's record\n  ok    and the same person joining again is not a new lead\n  ok    the erasure runs it, and says so\n\nWhat affiliates are told, in every language\n  ok    en: the terms name the amount, the hold, the cap and the budget, and the disclosure is there\n  ok    es: the terms name the amount, the hold, the cap and the budget, and the disclosure is there\n  ok    fr: the terms name the amount, the hold, the cap and the budget, and the disclosure is there\n  ok    de: the terms name the amount, the hold, the cap and the budget, and the disclosure is there\n  ok    it: the terms name the amount, the hold, the cap and the budget, and the disclosure is there\n  ok    nl: the terms name the amount, the hold, the cap and the budget, and the disclosure is there\n  ok    pt: the terms name the amount, the hold, the cap and the budget, and the disclosure is there\n  ok    no word the owner forbids\n\n68 checks, all passing.\nM_BUDGET {\"pipelineCommands\":196,\"memoryRun\":242,\"httpMockDispatch\":1,\"exceeded\":false}\n"}
+
+```
+
+### types-incomplete.log
+```
+
+<--- Last few GCs --->
+
+[7:0x705c000]    22845 ms: Mark-Compact 508.6 (515.1) -> 504.1 (514.4) MB, pooled: 0 MB, 235.37 / 0.00 ms  (average mu = 0.258, current mu = 0.085) allocation failure; scavenge might not succeed
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x91d810  [node]
+ 2: 0x75bb1b node::OOMErrorHandler(char const*, v8::OOMDetails const&) [node]
+ 3: 0xc755c0  [node]
+ 4: 0xc756bf  [node]
+ 5: 0xf24835  [node]
+ 6: 0xf24862  [node]
+ 7: 0xf24be4  [node]
+ 8: 0xf3694a  [node]
+ 9: 0xf3ae00  [node]
+10: 0x1a3ed81  [node]
+
+```
+
+### verify-focused.log
+```
+types 0
+lint 0 null undefined
+
+```
+
+### types.log
+```
+{"roots":2,"sources":830,"diagnostics":0}
+```
+
+### lint-all-changed.log
+```
+
+```
+
+### scanner.log
+```
+Public data check: 3974 tracked files; 0 file(s) require correction.
+
+```
+
+### verified.json
+```
+{"verified": 3974, "unmatched": [], "scanner_exit": 0}
+```

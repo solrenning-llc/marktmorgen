@@ -114,6 +114,20 @@ async function main(): Promise<void> {
   rules = [{ when: first("HSETNX"), reply: ["?"], run: true }, { when: first("HGET"), reply: [7], run: false }];
   is("HSETNX reply lost and the read-back out of shape: unknown, the run stops", await tell(), "rejected");
 
+  // Text the list never holds (neither a mark nor a told time) is unknown too, never "another run's mark" (P-3009).
+  for (const bad of ["x:zz", "x:0123456789ABCDEF", "x:", "xx", "told", "-5", ""]) {
+    await fresh();
+    rules = [{ when: first("HSETNX"), reply: ["?"], run: false }, { when: first("HGET"), reply: [bad], run: false }];
+    is(`HSETNX reply lost and the read-back ${JSON.stringify(bad)}: unknown, the run stops`, await tell(), "rejected");
+  }
+  // What the list does hold, when it is not ours: not counted by us, and the run goes on.
+  for (const known of ["x", "x:fedcba9876543210", String(E)]) {
+    await fresh();
+    rules = [{ when: first("HSETNX"), reply: ["?"], run: false }, { when: first("HGET"), reply: [known], run: false }];
+    const got = await tell();
+    is(`HSETNX reply lost and the read-back ${known} (not ours): not counted, the run goes on`, got !== "rejected" && got.untold, 0);
+  }
+
   await fresh();
   rules = [{ when: first("HSETNX"), reply: [0], run: true }];
   {

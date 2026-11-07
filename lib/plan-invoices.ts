@@ -56,7 +56,12 @@ export type PlanInvoice = {
   /** When Stripe made it, in seconds. */
   created: number;
   status: (typeof SHOWN_STATUSES)[number];
+  /** The invoice's total: below zero when a proration credit is larger than the charge (it goes to the balance). */
   totalCents: number;
+  /** What was paid (Stripe's amount_paid): after any balance credit, so it can be less than the total. */
+  paidCents: number;
+  /** What is still owed (Stripe's amount_remaining). */
+  remainingCents: number;
   currency: string;
   /** Stripe's hosted page for it, or null when Stripe gave none at its own https host. */
   page: string | null;
@@ -101,6 +106,8 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
       const created = ownField(row, "created");
       const total = ownField(row, "total");
       const currency = ownField(row, "currency");
+      const paid = ownField(row, "amount_paid");
+      const remaining = ownField(row, "amount_remaining");
       return (
         ownField(row, "customer") === owner.customer &&
         subscriptionOf(row) === owner.subscription &&
@@ -108,6 +115,9 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
         hasOwnField(row, "number") && (number === null || (typeof number === "string" && number.length > 0 && number.length <= 100)) &&
         typeof created === "number" && Number.isSafeInteger(created) && created > 0 &&
         typeof total === "number" && Number.isSafeInteger(total) &&
+        // What was paid and what is owed are what the page says, so a row without them is not shown with a made-up one.
+        typeof paid === "number" && Number.isSafeInteger(paid) && paid >= 0 &&
+        typeof remaining === "number" && Number.isSafeInteger(remaining) && remaining >= 0 &&
         typeof currency === "string" && /^[a-z]{3}$/.test(currency)
       );
     },
@@ -121,6 +131,8 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
       created: ownField(row, "created") as number,
       status: ownField(row, "status") as PlanInvoice["status"],
       totalCents: ownField(row, "total") as number,
+      paidCents: ownField(row, "amount_paid") as number,
+      remainingCents: ownField(row, "amount_remaining") as number,
       currency: ownField(row, "currency") as string,
       page: link(ownField(row, "hosted_invoice_url"), INVOICE_PAGE),
       pdf: link(ownField(row, "invoice_pdf"), INVOICE_PDF),

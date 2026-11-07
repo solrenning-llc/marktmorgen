@@ -11,15 +11,25 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
 - **Twelve months**: the current month (marked "so far", with the time it was read) and the
   eleven before it, newest first, as calendar months in the store's time zone. The store has
   no time zone today (lib/store.ts has none; sales goals count UTC months), so until one exists
-  the page counts UTC months and says so in one line. The rule takes any IANA zone.
+  the page counts UTC months and says so in one line. The rule takes any IANA zone; a zone in
+  which a month shown would begin before its floor (an offset zone such as `+23:00`, which Intl
+  accepts, more than 14 hours ahead of UTC) gives nothing, never a month called read too soon.
 - **By source**, each with its provenance in words, never mixed:
-  - **Stripe**: checkouts and one-click extras paid, plus renewals, minus refunds, minus
-    disputed money the bank holds or the buyer won (`DISPUTE_TAKES` of lib/retained-revenue.ts),
-    read from the creator's own Stripe account.
+  - **Stripe**: checkouts and one-click extras paid, plus every later paid invoice of a
+    membership or payment plan, plus money given back, minus refunds, minus disputes, read
+    from the creator's own Stripe account and from nothing else. A dispute is counted in the
+    month the bank took the money, whatever happens to it later; when the creator wins it, the
+    money that comes back is "given back" in the month it came back (a refund that failed, the
+    same). So a month already shown is never rewritten: `DISPUTE_TAKES` of
+    lib/retained-revenue.ts, which drops a dispute once won, is for the 7/30/90-day columns,
+    not for this page.
   - **PayPal**, only for a store that sells through it: sales and full refunds written down as
-    they were paid (lib/paypal-sales.ts, exact amounts in the smallest unit). PayPal disputes
-    are not read anywhere in the product, so a PayPal month says "before PayPal disputes,
-    which are not read" (the same honesty as lib/retained-revenue.ts).
+    they were paid (lib/paypal-sales.ts, exact amounts in the smallest unit). PayPal's
+    partial refunds are not recorded anywhere in the product (a capture is written down as refunded
+    only when PayPal says `REFUNDED`, in full), so every PayPal month says "refunds in full
+    only" (`PARTLY_READ` in the rule). PayPal disputes are not read anywhere in the product, so
+    a PayPal month says "before PayPal disputes, which are not read" (the same honesty as
+    lib/retained-revenue.ts).
   - **Entered by you**: optional amounts the creator types (an ad payout, a brand deal paid
     outside the store), each with its date, currency and a short label. Always shown as
     "entered by you", never as verified.
@@ -28,13 +38,31 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
     again: ES1 records carry the Stripe payment id, and the rule refuses a duplicate id.
 - **Per currency**: amounts are never added across currencies and nothing is converted. A
   month with dollars and euros shows two lines.
-- **What a number is**: money in (sales, renewals, entered), money out (refunds, disputes),
-  and the difference, called "after refunds and disputes". It is before Stripe's and PayPal's
-  fees and before taxes, and the page says that it is not profit.
+- **What a number is**: money in (sales, renewals, money given back, entered), money out
+  (refunds, disputes), and the difference, called "after refunds and disputes". A sale is what
+  the buyer paid, including any tax collected from buyers on top of the price (which the creator
+  owes to the tax office, lib/tax.ts), and the page says so. The difference is before Stripe's
+  and PayPal's fees and before the creator's own taxes, and the page says that it is not profit.
+  A month's total adds "entered by you" in its own column (`enteredCents`), so the page shows
+  how much of a total was typed rather than read.
 - **Unknown is said, never zero**: a month a source could not be read in full shows "could
   not be read" for that source, with no amount at all (not a lower number), and the month's
   total is shown only when every source of that month was read. A month read in full with
   nothing in it says "Nothing recorded", which is a confirmed zero.
+- **Exact, once, so far** (Codex J's review of #2941): every difference is worked out exactly,
+  never rounded, and a sum past exact integers is unknown; each provider is given once, and a
+  provider given twice is unknown rather than added twice; the reading's time is taken once
+  every list was read, and a record after it (or an entry dated after its day in the store's
+  zone) makes its source unknown; a time outside a date's range, or in a year not of four
+  digits, gives nothing or an unknown source, never an error.
+- **Every kind read or said, every record once, in its own source** (Claude 2's review of
+  #2941): each provider has a fixed set of kinds of money (`EXPECTED_KINDS`: Stripe sales,
+  renewals, refunds, disputes and money given back; PayPal sales, refunds and disputes). A
+  reading must give each one as a list, as unread, or as not read (said left out), never two
+  of these; a kind just missing makes the source unknown, never a confirmed zero. Each record
+  of a provider carries that provider's own id (`stripe:…`, `paypal:…`): a record without one,
+  or with another provider's (a PayPal sale given as Stripe), makes the source unknown, so a
+  sale is never added twice.
 - **561 [NE1] (no earnings claims), respected**: no "best month", no growth percentage, no
   projection, no goal celebration, no comparison with other creators, no badge, level or status
   by revenue. The rule's output has no such field (held by a test). The page carries the NE1
@@ -47,10 +75,10 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
 
 | Need | Existing reading | Covers 12 months? |
 | --- | --- | --- |
-| Checkouts, extras | `readPaidSales` (lib/stats.ts), 20 pages of 100 each | Only to 180 days in `readSales`; the function takes any `since` |
-| Renewals | `readRenewals`, 10 pages | 90 days in `readSales` |
+| Checkouts, extras | The Stripe lists inside `readPaidSales` (lib/stats.ts): checkout sessions and one-click payment intents on the creator's account, 20 pages of 100 each. Never `readPaidSales` itself, which adds the store's PayPal sales to the same list: those are PayPal's, and would be counted twice, once as Stripe | Only to 180 days in `readSales`; the lists take any `since` |
+| Paid invoices of memberships | `readRenewals`, 10 pages, keeps only `subscription_cycle`. The year reading takes every paid invoice of the store's memberships and payment plans, dated by payment: period renewals (`subscription_cycle`), a plan change charged at once (`subscription_update`, lib/tier-switch.ts and lib/yearly-switch.ts), and any other reason, except `subscription_create`, whose payment the checkout already counted (a creator's memberships are opened only by the store's checkout today; one opened another way would have its first invoice counted) | 90 days in `readSales` |
 | Refunds | `readRefunds` / `readStoreRefunds`, 5 pages | 90 days |
-| Disputes | `readDisputes`, 3 pages | 90 days |
+| Disputes, money given back | `readDisputes`, 3 pages, keeps `DISPUTE_TAKES`. The rule takes every dispute that took money, in the month of its debit, and the money a won dispute gave back (or a refund that failed), in the month of its credit, each from its own balance transaction. No code of this repository reads a dispute's balance transactions, so their shape is not confirmed here: until it is, the year reading (unit 2) does not read the disputes list and says Stripe disputes and money given back not read (`notRead`) on every Stripe month, never `DISPUTE_TAKES` and never zero | 90 days |
 | PayPal sales, refunds | `readPayPalSales`, `readPayPalRefundsWithCoverage` | Any `since`, record-capped |
 | Kept copy | `keptReading` (lib/store-readings.ts), kind `sales`, 10 min fresh, a day kept | 90 days |
 
@@ -60,10 +88,17 @@ No existing reading reaches twelve months, so the screen needs one reading of it
 365 days: the same functions with the same page caps, a different `since`
 (`readingSince` in the rule: the first instant any time zone could start the oldest month).
 
-Exactness (rules of this repository, reused as they are): every Stripe page goes through
-`financialPage` (explicit `has_more`, distinct ids, invalid page = failed reading) and every
-Redis reply through lib/redis-reply.ts. An unknown read never becomes zero: a list that fails
-is `unread` and every month of that source says "could not be read".
+Exactness: every Stripe page goes through the page check of this repository (explicit
+`has_more`, distinct ids, invalid page = failed reading) and every Redis reply through
+lib/redis-reply.ts. An unknown read never becomes zero: a list that fails is `unread` and
+every month of that source says "could not be read". The existing PayPal readers are not
+exact enough to take as they are (Claude 2's review of #2941), so the year reading reads the
+same keys with these rules: each list is read newest first, so a cut loses only the oldest
+records and `reachedBack` proves the months after it (`readPayPalRefundsWithCoverage` reads
+oldest first and would lose the newest refunds); a record that cannot be read, or a reply out
+of shape, makes the list unread, never a lower complete number (`readPayPalSales` drops it);
+and a record or a Stripe row whose amount, currency or time is missing makes its list unread,
+never 0, `usd` or now (as `readPaidSales` would give).
 
 **Per month completeness.** A capped list (more records than its pages) still proves every
 record newer than the oldest one it read. The reading records, for each list, the oldest
@@ -76,10 +111,13 @@ before them; never a lower number for them.
 
 **Renewal dates (for the reading unit).** `readRenewals` lists invoices by `created`; a renewal
 paid later after card retries would land in the wrong month or be missed in the oldest one.
-The reading unit dates renewals by payment time (`status_transitions.paid_at`, or the invoice
-payment's `created` on newer API versions) and gives the renewal list a `since` earlier by the
-longest retry window it can prove from Stripe's dated documentation; until proved, the oldest
-month is "could not be read" for renewals (fail closed).
+The reading unit dates renewals by payment time (`status_transitions.paid_at`). No bound on
+how late an invoice is paid is proved (Stripe's retries are the creator's own settings, and
+lib/card-update.ts pays an open invoice whenever the member updates their card: Claude 3 on
+#3022, MEDIUM 2), so none is assumed: the invoices are listed paid only (`status=paid`), from
+the account's first, with no `created[gte]`. Read to the end, every month is known; stopped at
+the cap or at an invoice it cannot date or place, no month is known for Stripe (fail closed).
+History: until 7 Nov 2026 the unit assumed a 27-day bound (`RENEWAL_PAID_WITHIN_DAYS`).
 
 ## Read count per page view, and the cost
 
@@ -135,17 +173,28 @@ source and currency only).
    refunds and disputes subtracted, per-month completeness, invalid or duplicate records fail
    closed, confirmed zero apart from unknown, no status fields.
 2. **The year reading** (built): `readEarningsYear(store, timeZone, now)` in lib/earnings-read.ts
-   (lib/stats.ts is another agent's file). It reads the same five Stripe lists with the same paths
-   and page caps (`EARNINGS_STRIPE_PAGES`: 20 + 20 + 10 + 5 + 3 = 58) and the PayPal sales (2,000)
-   and refunds (`PAYPAL_REFUNDS_READ`), but in their exact shape, list by list: lib/stats.ts's
+   (lib/stats.ts is another agent's file). It reads four of the same Stripe lists with the same
+   paths and page caps but the invoices (`EARNINGS_STRIPE_PAGES`: 20 + 20 + 13 + 5 = 58, the 58 of
+   `SALES_READ_SHAPE`; the disputes list is not read, see the table above, and its 3 pages go to
+   the invoices, read from the account's first) and the PayPal sales
+   (2,000) and refunds (`PAYPAL_REFUNDS_READ`), but in their exact shape, list by list: lib/stats.ts's
    readers answer one `partial` for two lists together, read PayPal refunds oldest first and take
    an unreadable answer as an empty list, so they cannot say how far back each list was read.
    Each list returns `reachedBack`; a row or record that cannot be read stops its list there (the
    newer months stay known); a page in another shape, an id twice, rows out of order or a failure
-   make the list unread. Renewals are dated by `status_transitions.paid_at`; until Stripe's retry
-   window is proved from dated documentation they are known only from `RENEWAL_PAID_WITHIN_DAYS`
-   (27) after the reading's start, which gives up the oldest month, and a renewal read that was
-   paid later than that after its invoice makes the renewals unread. Kept as the fourth reading
+   make the list unread. Under the rule's contract of #2941: every record carries its provider's
+   id (`stripe:…`, `paypal:…`); Stripe says disputes and money given back not read
+   (`EARNINGS_STRIPE_NOT_READ`), PayPal its disputes; the invoices taken are every paid invoice
+   of the store's memberships but `subscription_create` (Claude 3's money review of #3022,
+   MEDIUM 1), an invoice of no subscription in either shape is skipped, and one that names a
+   subscription without metadata that can be read stops its list there. Renewals are dated by `status_transitions.paid_at`, with no bound assumed on how
+   late an invoice is paid (Claude 3's review of #3022, MEDIUM 2): the invoices are listed
+   `status=paid` from the account's first, so a renewal paid in any month of the year is read
+   whenever its invoice was made; a list stopped at its 13 pages, or at an invoice it cannot
+   date or place, makes every Stripe month unknown. The months' own time is
+   when every list was read (`now` plus the time the reading took, on a monotonic clock), not
+   the `now` the reading began at: money recorded while the lists were read is counted, and a
+   record dated after they were read still makes its source unknown. Kept as the fourth reading
    kind (`READING_KINDS` 3 to 4, `HEAVY_KINDS` in lib/store-readings.ts), taken as one of the
    day's two heavy readings before anything is read. Cost, measured: the store-readings line
    +US$ 0.0000011 a month (one more copy kept a day) and the store-data registry, which prices

@@ -10,12 +10,15 @@
  *   - a put that fails after its slot was granted keeps the slot used (the cost side fails closed), the words stay
  *     saved and the buyer is told the photo was not added;
  *   - taking a photo off needs no put and no slot;
- *   - a counter that cannot be read is taken as the ceiling, never as zero.
+ *   - a counter that cannot be read is taken as the ceiling, never as zero;
+ *   - deleting the review and writing it again does not reset the count (review M1 on #2863): the count is also kept
+ *     on its own hash beside the product's reviews, which a buyer's delete and a person's erasure leave in place; it
+ *     goes only with the product's reviews (dropReviews) or the store.
  */
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/review/route";
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { parseReview, readReview, reviewId } from "@/lib/reviews";
+import { dropReviews, forgetReviewsPerson, parseReview, readReview, reviewId } from "@/lib/reviews";
 import * as summaryRules from "@/lib/review-summary";
 import { REVIEW_NOTICES } from "@/components/review-form";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
@@ -134,6 +137,18 @@ async function main() {
   is("over the review's whole life: a photo after it was taken off is not put either", statusOf(await send(ONE, { photo: jpeg(800, 600) })), "photoLimit");
   is("still three puts", blobControl.puts.length, 3);
 
+  part("Deleting the review and writing it again does not reset the count (review M1 on #2863)");
+  for (let round = 1; round <= 3; round += 1) {
+    is(`round ${round}: the buyer deletes their review`, statusOf(await send(ONE, { action: "delete" })), "deleted");
+    is(`round ${round}: the review is gone`, await kept(idOne), null);
+    is(`round ${round}: written again with a photo, the words are saved and the photo is refused`, statusOf(await send(ONE, { photo: jpeg(800, 600), text: `Again ${round}.` })), "photoLimit");
+    is(`round ${round}: no new put`, blobControl.puts.length, 3);
+    is(`round ${round}: the new record carries the kept count`, (await kept(idOne) as unknown as { photoPuts?: number })?.photoPuts, 3);
+  }
+  is("a person's erasure of their reviews leaves the count too", (await forgetReviewsPerson(statsId, [productId], SESSIONS[ONE].email, store)).records, 1);
+  is("after the erasure, a review with a photo is saved without it", statusOf(await send(ONE, { photo: jpeg(800, 600), text: "After erasure." })), "photoLimit");
+  is("still no new put", blobControl.puts.length, 3);
+
   part("A put that fails after its slot was granted");
   blobControl.fail = true;
   is("the buyer is told the photo was not added", statusOf(await send(TWO, { photo: jpeg(1200, 900), text: "Words from two." })), "photoFailed");
@@ -142,6 +157,26 @@ async function main() {
   is("with no photo", (await kept(idTwo))?.photo ?? null, null);
   is("the slot stays used: the cost side fails closed", (await kept(idTwo) as unknown as { photoPuts?: number })?.photoPuts, 1);
   is("one put was tried", blobControl.puts.length, 4);
+
+  part("The kept count read in an unknown shape is the ceiling, never zero");
+  const SESSION_THREE = "cs_test_reviewphotolimit00003";
+  SESSIONS[SESSION_THREE] = { email: "buyer-three@example.com", pi: "pi_ReviewPhotoLimit03" };
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await original(commands);
+    // The kept count's read, answered in an unknown shape; every other command as Redis answers it.
+    return reply.map((r, i) => (commands[i][0] === "HGET" && String(commands[i][1]).endsWith(":photos") ? ["garbled"] : r));
+  }) as typeof redis.pipeline;
+  const unknownStatus = statusOf(await send(SESSION_THREE, { photo: jpeg(1200, 900), text: "Words from three." }));
+  redis.pipeline = original;
+  is("a new review whose kept count reads garbled: the words are saved, the photo refused", unknownStatus, "photoLimit");
+  is("no put for it", blobControl.puts.length, 4);
+
+  part("The kept count goes with the product's reviews");
+  const countKey = `nl:rev:${statsId}:${productId}:photos`;
+  is("control: the count is kept on its own hash", redis.keys().includes(countKey), true);
+  await dropReviews(statsId, productId);
+  is("dropReviews deletes it with the reviews", redis.keys().includes(countKey), false);
 
   part("The counter as kept");
   const raw = (extra: Record<string, unknown>) =>

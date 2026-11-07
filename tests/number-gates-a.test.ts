@@ -26,7 +26,10 @@ import { cardLink, openCardUpdate } from "@/lib/card-update";
 import { askPlace, placeNotice, placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
 import { addressHash, grantImported, importedFor, importedKey } from "@/lib/imported-purchases";
 import { recordEnrollment } from "@/lib/learn";
+import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { requestCopy, spendClaim } from "@/lib/free";
+import { POST as freeDownload } from "@/app/api/store/free/download/route";
+import { NextRequest } from "next/server";
 import { paidPeriod } from "./billing-period-fixture";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -551,6 +554,40 @@ async function main(): Promise<void> {
     redis.run(["DEL", opening]);
   }
 
+  part("An open that outlives its hold: the order's room given back once, never twice (Claude 5's review of #2654)");
+  {
+    const id = await paidGroup("pi_ReviewD");
+    const d = "d-double@numbergates.example";
+    const td = await linkFor(id, d);
+    const settles = (from: number) => seen.slice(from).filter((c) => c[0] === "EVAL" && key(c).startsWith("-- marktmorgen:order-admission-settle:")).length;
+    // Another checkout of the store holds its own order's room in the same hour.
+    const other = await admitOrders(store, 1);
+    is("another checkout holds its order's room", other.ok, true);
+    const before = holding();
+    const from = seen.length;
+    let second: unknown = null;
+    const starts: string[] = [];
+    // Open A is still in what follows the gift when its 30 seconds end; open B of the same link comes in then.
+    const first = await outcome(() =>
+      takePlace({
+        store,
+        token: td,
+        recordStart: async (email) => {
+          starts.push(email);
+          if (second !== null) return;
+          second = "running";
+          advance(31_000);
+          second = await outcome(() => takePlace({ store, token: td, recordStart: async (e) => void starts.push(e) }));
+        },
+      }),
+    );
+    is("A takes the place and B finds it already hers", [o(first), o(second)], ["taken", "already"]);
+    is("the place's room is given back once", settles(from), 1);
+    is("the other checkout's room is still held: every room held before is held after", [before >= 1, holding()], [true, before]);
+    is("the product given once and one place counted", [await given(d), await placesTaken(id)], [1, 1]);
+    if (other.ok && other.hour !== null) await settleAdmitted(store, other.hour);
+  }
+
   part("The page's notice after the link was opened (lib/group-buy.ts placeNotice)");
   {
     const t = "a".repeat(64);
@@ -646,6 +683,15 @@ async function main(): Promise<void> {
       const got = await outcome(() => spendClaim(claimToken));
       const want = reply === "throw" ? "threw Error" : "threw UnknownReplyError";
       is(`${label}: no claim handed out`, [got, counterCalls - calls], [want, 1]);
+    }
+    // The route the link's button posts to: an unknown count is said as a moment's trouble, never a bare 500 (Claude 5's review of #2654).
+    for (const [label, reply] of [["a count cut short", [1]], ["a count that never answers", "throw"]] as [string, unknown][]) {
+      counter = { match: isUses, reply };
+      const form = new FormData();
+      form.set("token", claimToken);
+      const response = await outcome(() => freeDownload(new NextRequest("https://marktmorgen.com/api/store/free/download", { method: "POST", body: form })));
+      const answer = response instanceof Response ? [response.status, (await response.text()).length > 0, response.headers.get("location")] : response;
+      is(`the download route, ${label}: unavailable, with words, and no file`, answer, [503, true, null]);
     }
     counter = { match: isUses, reply: [11, 1] };
     is("a confirmed count past the uses allowed: spent, as before", await spendClaim(claimToken), { ok: false, reason: "spent" });

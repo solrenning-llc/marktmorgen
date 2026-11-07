@@ -23,6 +23,7 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { leadsKey, parseContact, upsertContact } from "@/lib/contacts";
 import { remindAbandoned } from "@/lib/checkout-recovery";
 import { advanceUpdate, readUpdateJob, startUpdate } from "@/lib/product-updates";
+import { type ReadingGuard, keptReading } from "@/lib/store-readings";
 import { readListing } from "@/lib/catalog";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -223,4 +224,47 @@ test("product updates: an unknown erasure check sends nothing and leaves the job
   const job = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 20_000);
   assert.equal(job?.status, "sent");
   assert.deepEqual(sent.slice(before).map((m) => m.to), ["ana@example.com"]);
+});
+
+// Rule 30 sibling of keepUnlessErased (Claude 6's review of #2865, LOW): lib/store-readings.ts keptReading reads the
+// same step's reply (READING_COPY = KEEP_UNLESS_ERASED). A list of places with a hole, or a slot that is a getter,
+// is not a whole answer: Array#every skips a hole, so the erased buyer was shown and the old copy naming them kept.
+type Top = { top: string[] };
+const readingGuard = (listId: string): ReadingGuard<Top> => ({ listId, names: (v) => v.top, without: (v, gone) => ({ top: v.top.filter((e) => !gone.has(e)) }) });
+const isReadingCopy = (commands: Commands) => commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:reading-copy:"));
+const withGetter = () => {
+  const list: unknown[] = [];
+  Object.defineProperty(list, 0, { get: () => 1, enumerable: true, configurable: true });
+  return list;
+};
+
+test("control: a kept reading leaves out a buyer deleted before it is kept, and keeps one naming only the others", async () => {
+  await redis.pipeline([suppressCommand("suppx-list-r0", "erased@example.com")]);
+  const read = async (): Promise<Top> => ({ top: ["erased@example.com", "kept@example.com"] });
+  const kept = await keptReading({ statsId: "suppx-stats-r0" }, "sales", read, Date.now(), true, readingGuard("suppx-list-r0"));
+  assert.deepEqual(kept?.value, { top: ["kept@example.com"] });
+  const clean = await keptReading({ statsId: "suppx-stats-r0b" }, "sales", async () => ({ top: ["kept@example.com"] }), Date.now(), true, readingGuard("suppx-list-r0"));
+  assert.deepEqual(clean?.value, { top: ["kept@example.com"] });
+  assert.ok(String((await redis.pipeline([["GET", "nl:reading:sales:suppx-stats-r0b"]]))[0]).includes("kept@example.com"));
+});
+
+test("a kept reading whose check answers a holey, getter or cut-short list of places names nobody and keeps no copy", async () => {
+  await redis.pipeline([suppressCommand("suppx-list-r1", "erased@example.com")]);
+  const shapes: [string, () => unknown[]][] = [
+    ["a list of places with a hole", () => [new Array(1)]],
+    ["a place behind a getter", () => [withGetter()]],
+    ["a pipeline with a hole", () => new Array(1)],
+  ];
+  const wrong: string[] = [];
+  for (const [label, answer] of shapes) {
+    const statsId = `suppx-stats-r1-${shapes.findIndex(([l]) => l === label)}`;
+    const copy = `nl:reading:sales:${statsId}`;
+    // An older copy naming them: the step's answer is unknown, so it goes.
+    await redis.pipeline([["SET", copy, JSON.stringify({ at: Date.now() - 86_400_000, value: { top: ["erased@example.com"] } }), "EX", 3600]]);
+    const read = async (): Promise<Top> => ({ top: ["erased@example.com", "kept@example.com"] });
+    const kept = await intercept(isReadingCopy, async () => answer(), () => keptReading({ statsId }, "sales", read, Date.now(), true, readingGuard("suppx-list-r1")));
+    if (JSON.stringify(kept?.value).includes("erased@example.com")) wrong.push(`${label}: the erased buyer was shown`);
+    if ((await redis.pipeline([["GET", copy]]))[0] !== null) wrong.push(`${label}: a copy naming the erased buyer was kept`);
+  }
+  assert.deepEqual(wrong, []);
 });

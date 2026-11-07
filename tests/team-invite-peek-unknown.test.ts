@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import JoinPage from "@/app/signin/join/page";
 import { peekInvite } from "@/lib/team";
+import { claimHandle, ensureStoreId, storeForEmail } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -79,6 +80,36 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   is("Redis down: the page says it could not be read, never expired", await landing(TOKEN), "page");
   restore();
+
+  // Claude 6 on #2969 (MEDIUM, rule 30): the store behind the invitation is read exactly too. A store-id GET or an
+  // owner-record GET with no reply, or in another shape, was "store gone" and sent a valid invitation to expired.
+  part("The store behind the invitation read in an unknown shape is unknown, never 'no longer works'");
+  redis.clear();
+  await claimHandle("owner@example.com", "join-harbor", "Join Harbor", "");
+  await ensureStoreId("owner@example.com");
+  const sid = (await storeForEmail("owner@example.com"))!.sid;
+  const STORE_TOKEN = "e".repeat(64);
+  await real([["SET", inviteKey(STORE_TOKEN), JSON.stringify({ sid, id: "2".repeat(16), email: "ada@example.com", role: "editor" })]]);
+  const storeShapes: [string, (batch: Command[]) => boolean, unknown][] = [
+    ["the store id: no reply", (b) => b.length === 1 && b[0][0] === "GET" && b[0][1] === `nl:store:id:${sid}`, []],
+    ["the store id: a number", (b) => b.length === 1 && b[0][0] === "GET" && b[0][1] === `nl:store:id:${sid}`, [7]],
+    ["the owner's record: no reply", (b) => b.length === 1 && b[0][0] === "GET" && String(b[0][1]).startsWith("nl:store:owner:"), []],
+    ["the owner's record: not a store", (b) => b.length === 1 && b[0][0] === "GET" && String(b[0][1]).startsWith("nl:store:owner:"), ["{cut"]],
+  ];
+  for (const [name, match, reply] of storeShapes) {
+    redis.pipeline = (async (batch: Command[]) => (match(batch) ? reply : real(batch))) as typeof redis.pipeline;
+    is(`${name}: peekInvite is unknown`, await outcome(STORE_TOKEN), "unknown");
+    is(`${name}: the page says the invitation could not be read, never that it expired`, await landing(STORE_TOKEN), "page");
+    restore();
+  }
+  is("control: a store id that is truly not there is none", await (async () => {
+    redis.pipeline = (async (batch: Command[]) => (batch.length === 1 && batch[0][0] === "GET" && batch[0][1] === `nl:store:id:${sid}` ? [null] : real(batch))) as typeof redis.pipeline;
+    try {
+      return await outcome(STORE_TOKEN);
+    } finally {
+      restore();
+    }
+  })(), "none");
   done();
 }
 

@@ -52,6 +52,7 @@ import { type Intro, parseIntro } from "@/lib/intro-price";
 import { type Yearly, parseYearly } from "@/lib/yearly-price";
 import { type CallSetup, parseSetup } from "@/lib/call-setup";
 import { COURSE_ID_PATTERN } from "@/lib/course";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Bump, type Plan, bumpTargets, canBeBumped, isOneOff, parseBump, parseBumps, parsePlan, parseStock } from "@/lib/product-extras";
 import { type Funnel, funnelFromUpsell, parseFunnel } from "@/lib/funnel";
 import { type PayWhatYouWant, parsePwyw } from "@/lib/pay-what-you-want";
@@ -778,6 +779,62 @@ export function listingFinder(store: Store): (id: string | undefined) => Promise
     }
     return found;
   };
+}
+
+/** The most product records one MGET of listingsById names. */
+export const LISTING_MGET_KEYS = 500;
+
+/**
+ * The listings these ids name, by id, read before a walk through sales that
+ * each name some (the sales file, lib/stats.ts salesCsv): whatever the store
+ * record holds is not read again, and the rest is read in MGETs of at most
+ * LISTING_MGET_KEYS records sent side by side, so 2,000 products are four
+ * commands and one wait, never a GET after another for each product. Ids the
+ * store does not have, and records Redis answers are not there (nil), are left
+ * out, as readListings leaves them. A reply that is not one string or nil for
+ * each record asked, or a record that does not read as that product's listing,
+ * throws UnknownReplyError (CX-123 rule 24), never "no such product".
+ */
+export async function listingsById(store: Store, ids: Iterable<string>): Promise<Map<string, Listing>> {
+  const asked = wanted(store, ids);
+  const found = new Map<string, Listing>();
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    for (const id of asked) {
+      const product = byId.get(id);
+      if (product) found.set(id, listingOf(product));
+    }
+    return found;
+  }
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing: string[] = [];
+  for (const id of asked) {
+    const listing = head.get(id);
+    if (listing) found.set(id, listing);
+    else missing.push(id);
+  }
+  if (!missing.length || !catalog.id || !isRedisConfigured()) return found;
+  const chunks: string[][] = [];
+  for (let i = 0; i < missing.length; i += LISTING_MGET_KEYS) chunks.push(missing.slice(i, i + LISTING_MGET_KEYS));
+  const answers = await Promise.all(
+    chunks.map(async (chunk) => {
+      const [reply] = repliesFor(await redisPipeline([["MGET", ...chunk.map((id) => listingKey(catalog.id!, id))]]), 1) ?? [undefined];
+      const raws = repliesFor(reply, chunk.length);
+      if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a store's product records");
+      return raws as (string | null)[];
+    }),
+  );
+  chunks.forEach((chunk, c) => {
+    chunk.forEach((id, i) => {
+      const raw = answers[c][i];
+      if (raw === null) return;
+      const listing = parseListing(parseJson(raw));
+      if (!listing || listing.id !== id) throw new UnknownReplyError("a product's listing");
+      found.set(id, listing);
+    });
+  });
+  return found;
 }
 
 /** Listings of every product of one kind, in the creator's order. */

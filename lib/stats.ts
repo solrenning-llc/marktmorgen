@@ -37,11 +37,12 @@ import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
-import { listingFinder, productIds, recordListings } from "@/lib/catalog";
+import { MAX_TITLE_LENGTH, listingsById, productIds, recordListings } from "@/lib/catalog";
 import { plainAmount } from "@/lib/money";
 import { revenueBySource } from "@/lib/came-from";
 import { type AttributionTable, attributionTable } from "@/lib/attribution-rules";
-import { bumpsFromMeta } from "@/lib/bundle-rules";
+import { BUMP_KEYS, bumpsFromMeta } from "@/lib/bundle-rules";
+import { MAX_OPTION_LABEL_LENGTH } from "@/lib/product-option";
 import { reachRows } from "@/lib/page-read";
 import { PAGE_PARTS } from "@/lib/store-order";
 import { type CappedCount, cappedCount, cappedCountCommand } from "@/lib/capped-count";
@@ -2323,17 +2324,84 @@ export function csvRow(values: (string | number)[]): string {
 /** The most pages of a hundred read for a sales file. */
 export const EXPORT_PAGES = 50;
 
+/** The most UTF-8 bytes a title or an option label can take: each UTF-16 unit is at most 3 bytes, a doubled quote 2. */
+const TITLE_BYTES = MAX_TITLE_LENGTH * 3;
+const LABEL_BYTES = MAX_OPTION_LABEL_LENGTH * 3;
+
+/**
+ * The sales file's columns, in order, each with the most UTF-8 bytes its cell
+ * holds once its quotes are doubled, a cut's "…" included (the two quotes
+ * around a cell and a defusing apostrophe are beside these), so a row is at
+ * most 2,435 bytes however long what a buyer or a stale record typed. The
+ * catalog's own cells are never cut: a title is MAX_TITLE_LENGTH units and an
+ * option label MAX_OPTION_LABEL_LENGTH, and a sale names at most
+ * BUMP_KEYS.length extras. Past that, only text no checkout writes is cut: a
+ * buyer's name over 600 bytes (at least 200 characters in any alphabet), an
+ * email over 254 bytes (RFC 5321's most) or an id over 255.
+ */
+export const SALES_FILE_COLUMNS = [
+  ["paid_at_utc", 20],
+  ["stripe_id", 255],
+  ["product_id", 64],
+  ["product", TITLE_BYTES],
+  ["price_option", LABEL_BYTES],
+  ["order_bump", BUMP_KEYS.length * TITLE_BYTES + (BUMP_KEYS.length - 1) * " + ".length],
+  ["kind", 12],
+  ["amount", 24],
+  ["discount", 24],
+  ["tax", 24],
+  ["currency", 3],
+  ["buyer_email", 254],
+  ["buyer_name", 600],
+  ["buyer_country", 2],
+  ["paid_with", 6],
+] as const;
+
+/** What marks a cell that was cut: one visible character, 3 bytes. */
+const CUT_MARK = "\u2026";
+const CUT_MARK_BYTES = 3;
+
+/** The bytes one character takes in the file: a quote is doubled, a lone surrogate is written as U+FFFD. */
+function cellBytes(char: string): number {
+  if (char === '"') return 2;
+  const point = char.codePointAt(0) as number;
+  return point < 0x80 ? 1 : point < 0x800 ? 2 : point < 0x10000 ? 3 : 4;
+}
+
+/**
+ * Text cut so that, with its quotes doubled, it takes at most `max` UTF-8
+ * bytes, always between two characters and with "…" at the end when cut, the
+ * mark inside the bound; a cell too small for the mark is left empty rather
+ * than wrong. Text that fits is returned as it is. Pure.
+ */
+export function cutToBytes(text: string, max: number): string {
+  let used = 0;
+  let fit = 0;
+  for (const char of text) {
+    used += cellBytes(char);
+    if (used > max) return max < CUT_MARK_BYTES ? "" : `${text.slice(0, fit)}${CUT_MARK}`;
+    if (used <= max - CUT_MARK_BYTES) fit += char.length;
+  }
+  return text;
+}
+
 /**
  * The store's sales as CSV, newest first: every paid checkout and one-click
  * extra since `sinceSeconds` (0 for all), up to EXPORT_PAGES pages of each.
+ * Every product the sales name is read once, before the rows, in batches
+ * (listingsById); each cell is bounded by SALES_FILE_COLUMNS.
  */
 export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ csv: string; rows: number; partial: boolean }> {
   const { sales, partial } = await readPaidSales(store, sinceSeconds, EXPORT_PAGES);
-  const find = listingFinder(store);
-  const title = async (id: string, fallback: unknown) => (await find(id))?.title ?? (typeof fallback === "string" ? fallback : "");
-  const lines = [
-    csvRow(["paid_at_utc", "stripe_id", "product_id", "product", "price_option", "order_bump", "kind", "amount", "discount", "tax", "currency", "buyer_email", "buyer_name", "buyer_country", "paid_with"]),
-  ];
+  const named = new Set<string>();
+  for (const sale of sales) {
+    if (sale.product) named.add(sale.product);
+    for (const added of bumpsFromMeta((sale.row.metadata ?? {}) as Record<string, string>)) named.add(added.id);
+  }
+  const listings = await listingsById(store, named);
+  const find = (id: string) => (id ? listings.get(id) ?? null : null);
+  const title = (id: string, fallback: unknown) => find(id)?.title ?? (typeof fallback === "string" ? fallback : "");
+  const lines = [csvRow(SALES_FILE_COLUMNS.map(([name]) => name))];
   for (const sale of sales) {
     const row = sale.row;
     const meta = (row.metadata ?? {}) as Record<string, string>;
@@ -2341,7 +2409,7 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
     const totals = (row.total_details ?? {}) as { amount_discount?: unknown; amount_tax?: unknown };
     const text = (v: unknown) => (typeof v === "string" ? v : "");
     const cents = (v: unknown) => (typeof v === "number" ? v : 0);
-    const product = await find(sale.product);
+    const product = find(sale.product);
     const option = product?.options.find((o) => o.id === meta.option)?.label ?? meta.option ?? "";
     const kind = sale.upsell
       ? "upsell"
@@ -2354,25 +2422,24 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
           : row.mode === "subscription"
             ? "membership"
             : "one_time";
-    lines.push(
-      csvRow([
-        new Date(sale.created).toISOString().replace(/\.\d{3}Z$/, "Z"),
-        text(row.id),
-        sale.product,
-        await title(sale.product, meta.title),
-        option,
-        (await Promise.all(bumpsFromMeta(meta).map((added) => title(added.id, "")))).filter(Boolean).join(" + "),
-        kind,
-        plainAmount(sale.cents, sale.currency),
-        plainAmount(cents(totals.amount_discount), sale.currency),
-        plainAmount(cents(totals.amount_tax), sale.currency),
-        sale.currency.toUpperCase(),
-        text(details.email) || text(row.customer_email) || text(row.receipt_email),
-        text(details.name),
-        text(details.address?.country),
-        meta.paid_with === "paypal" ? "paypal" : "stripe",
-      ]),
-    );
+    const cells: string[] = [
+      new Date(sale.created).toISOString().replace(/\.\d{3}Z$/, "Z"),
+      text(row.id),
+      sale.product,
+      title(sale.product, meta.title),
+      option,
+      bumpsFromMeta(meta).map((added) => title(added.id, "")).filter(Boolean).join(" + "),
+      kind,
+      plainAmount(sale.cents, sale.currency),
+      plainAmount(cents(totals.amount_discount), sale.currency),
+      plainAmount(cents(totals.amount_tax), sale.currency),
+      sale.currency.toUpperCase(),
+      text(details.email) || text(row.customer_email) || text(row.receipt_email),
+      text(details.name),
+      text(details.address?.country),
+      meta.paid_with === "paypal" ? "paypal" : "stripe",
+    ];
+    lines.push(csvRow(cells.map((cell, i) => cutToBytes(cell, SALES_FILE_COLUMNS[i][1]))));
   }
   return { csv: `${lines.join("\r\n")}\r\n`, rows: sales.length, partial };
 }

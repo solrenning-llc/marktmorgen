@@ -80,10 +80,11 @@ const newKey = (s: string) => `nl:rev:new:${s}`;
 const payKey = (s: string) => `nl:rev:pay:${s}`;
 const lockKey = (s: string, p: string) => `nl:rev:lock:${s}:${p}`;
 /**
- * How many new photos each review of a product has been granted (MAX_REVIEW_PHOTOS), by review id: a number with
- * no address, kept beside the product's reviews so that a buyer's delete or a person's erasure, which HDEL the review,
- * do not reset it (review M1 on #2863). It goes with the product's reviews (dropReviews) or the store; its room is
- * counted with the reviews' (REVIEWS_SLOT).
+ * How many new photos each review of a product has been granted (MAX_REVIEW_PHOTOS), by review id: kept beside the
+ * product's reviews so that a buyer's delete, which HDELs the review, does not reset it (review M1 on #2863). The id is
+ * computed from the buyer's address, so it goes with that person's erasure (forgetReviewsPerson; second review of
+ * #2863), with the product's reviews (dropReviews) or with the store; its room is counted with the reviews'
+ * (REVIEWS_SLOT).
  */
 const photoCountKey = (s: string, p: string) => `nl:rev:${s}:${p}:photos`;
 
@@ -742,13 +743,25 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
  * Deletes every review one buyer wrote in this store (lib/person-erasure.ts),
  * as their own delete does: its stars leave the average with it. Returns the
  * photos to delete from the picture folder. The count of photos each review
- * was granted (photoCountKey) stays: a number under a one-way id, with no
- * address or words, kept so the photo ceiling cannot be reset.
+ * was granted (photoCountKey) goes too, for every product asked about, even
+ * one whose review the buyer had already deleted: its id is computed from
+ * their address. One erased person who writes again may get at most
+ * MAX_REVIEW_PHOTOS more, bounded by the erasures themselves.
  */
 export async function forgetReviewsPerson(statsId: string | null, productIds: string[], email: string, room: DataStore): Promise<{ records: number; photos: string[] }> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return { records: 0, photos: [] };
   const wanted = productIds.filter((p) => PRODUCT_ID_PATTERN.test(p));
   const ids = wanted.map((p) => reviewId(statsId, p, email));
+  if (wanted.length) {
+    // One request for every product's count; each answer read exactly, its room given back only when it removed one.
+    // Before the reviews: a failure here throws while every review, and so every photo to delete, is still there for
+    // the erasure's next try.
+    const gone = repliesFor(await redisPipeline(wanted.map((p, i) => ["HDEL", photoCountKey(statsId, p), ids[i]])), wanted.length);
+    const removed = gone?.map(countOf) ?? null;
+    if (!removed || removed.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of a review's photo count");
+    const back = wanted.flatMap((p, i) => (removed[i] === 1 ? [{ slot: REVIEWS_SLOT(p), bytes: dataBytes([ids[i], String(MAX_REVIEW_PHOTOS)]) }] : []));
+    if (back.length) await giveData(room, back);
+  }
   const raws = wanted.length ? await redisPipeline(wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]])) : [];
   let records = 0;
   const photos: string[] = [];

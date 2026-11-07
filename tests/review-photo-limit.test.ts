@@ -158,6 +158,16 @@ async function main() {
   is("the count under their id is gone", redis.run(["HGET", countKey, idOne]), null);
   is("written again after the erasure, a photo is a new review's first", statusOf(await send(ONE, { photo: jpeg(800, 600), text: "After erasure." })), "saved");
   is("one new put, inside a new slot", blobControl.puts.length, 4);
+  const healthy = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await healthy(commands);
+    // The count's deletion answered in an unknown shape; every other command as Redis answers it.
+    return reply.map((r, i) => (commands[i][0] === "HDEL" && String(commands[i][1]).endsWith(":photos") ? "garbled" : r));
+  }) as typeof redis.pipeline;
+  const refused = await forgetReviewsPerson(statsId, [productId], SESSIONS[ONE].email, store).then(() => "done", (error: unknown) => (error as Error).name);
+  redis.pipeline = healthy;
+  is("the count's deletion answered in an unknown shape: the erasure is not said as done", refused, "UnknownReplyError");
+  is("and the review, with its photo to delete, is still there for the erasure's next try", Boolean((await kept(idOne))?.photo), true);
   is("erased with the review there", (await forgetReviewsPerson(statsId, [productId], SESSIONS[ONE].email, store)).records, 1);
   is("its count goes with it", redis.run(["HGET", countKey, idOne]), null);
 

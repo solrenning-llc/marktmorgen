@@ -47,13 +47,6 @@ export async function putReviewPhoto(ref: string, checked: CheckedPhoto): Promis
   return { path, width: checked.width, height: checked.height };
 }
 
-/** What the form sent, made into a kept photo; "photo" when it is not one we keep. */
-export async function keepReviewPhoto(ref: string, raw: string): Promise<ReviewPhoto | PhotoProblem> {
-  const checked = checkReviewPhoto(raw);
-  if (checked === "photo") return checked;
-  return putReviewPhoto(ref, checked);
-}
-
 /** Deletes a photo no review points at any more. Best effort. */
 export async function dropReviewPhoto(photo: ReviewPhoto | null | undefined): Promise<void> {
   if (photo) await del(photo.path).catch((error: unknown) => console.error("could not delete a review's photo", error));

@@ -31,7 +31,7 @@ import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addOption, addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, setProductImage, setSitePages, storeFolder, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { fileFolder } from "@/lib/product-file";
-import { keepReviewPhoto } from "@/lib/review-photo";
+import { checkReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
 import { readPodcast, savePodcast } from "@/lib/podcast";
 import { picturePaths } from "@/lib/sales-page";
 import { readPage } from "@/lib/sales-page-store";
@@ -178,8 +178,9 @@ async function main(): Promise<void> {
   is("its own audio is deleted", files.has(other), false);
 
   part("A buyer's review photo, in the same picture folder");
-  const photo = await keepReviewPhoto(OWNER, REVIEW_JPEG);
-  if (photo === "photo") throw new Error("review photo");
+  const checkedPhoto = checkReviewPhoto(REVIEW_JPEG);
+  if (checkedPhoto === "photo") throw new Error("review photo");
+  const photo = await putReviewPhoto(OWNER, checkedPhoto);
   is("stored in the store's picture folder", photo.path.startsWith(`images/${folder}/`), true);
   is("on product C: refused", await attach(c, photo.path), [400, "in_use"]);
   is("on a link: refused", await linkAttach(linkTwo, photo.path), [400, "in_use"]);

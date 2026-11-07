@@ -8,8 +8,9 @@
  * keyRecords, which every pass of lib/api-key-pause.ts reads (a teammate leaving, a role change, the two-step
  * rule), read a list in another shape as no keys and an unknown hold as none: a teammate taken off the team
  * while the list read so kept a key that worked again once they were invited back. Now each of these throws
- * UnknownReplyError: the delivery stays queued, the event is not marked sent, and the removal is refused (the
- * person stays on the team) until the list reads.
+ * UnknownReplyError: the delivery stays queued, the endpoint's event is queued and held until the key reads, and
+ * the removal is refused (the person stays on the team) until the list reads. A hold this code does not know is
+ * read as a refusing hold, "unknown", never no hold and never a failed list (tests/r24-api-key-hold-team.test.ts).
  *
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts); no email or webhook leaves.
  */
@@ -87,11 +88,11 @@ async function main(): Promise<void> {
   is("a pipeline missing a reply", await outcome(keyStates(sid, [live.made.id])), "unknown");
   short = null;
 
-  part("A hold read in another shape, or one this code does not know, is unknown, never no hold");
+  part("A hold read in another shape is unknown; one this code does not know refuses the key; never no hold");
   bend = (c, reply) => (c[0] === "HMGET" && c[1] === holds ? "off-shape" : reply);
   is("a paused key's hold list in another shape is not live", await outcome(keyStates(sid, [held.made.id])), "unknown");
   bend = (c, reply) => (c[0] === "HMGET" && c[1] === holds ? ["suspended"] : reply);
-  is("a hold this code does not know is not live", await outcome(keyStates(sid, [held.made.id])), "unknown");
+  is("a hold this code does not know is not live: paused", await outcome(keyStates(sid, [held.made.id])), { [held.made.id]: "paused" });
   bend = null;
 
   part("A webhook event for an endpoint an API key added is not dropped on an unknown key state");
@@ -100,8 +101,10 @@ async function main(): Promise<void> {
   bend = (c, reply) => (c[0] === "HMGET" && c[1] === list ? "off-shape" : reply);
   const emitted = await outcome(emitEvent(store, "sale.completed", "cs_test_keystates01", { amount_cents: 6900 }));
   bend = null;
-  is("the event is said as not done (the caller retries), never sent to nobody", emitted, "unknown");
-  is("and it was not marked sent, so it is sent once the list reads", await outcome(emitEvent(store, "sale.completed", "cs_test_keystates01", { amount_cents: 6900 })), 1);
+  // The event is written for that endpoint and held by its try until the key reads (lib/webhooks.ts liveEndpoints
+  // keepUnread): the callers that only log (PayPal, calls, free downloads) no longer lose it (Claude 2 on #3096).
+  is("the event is queued for the endpoint, never sent to nobody", emitted, 1);
+  is("and it is marked written, so it is not written twice", await outcome(emitEvent(store, "sale.completed", "cs_test_keystates01", { amount_cents: 6900 })), 0);
 
   part("keyRecords, as every pass of lib/api-key-pause.ts reads it, never reads unknown as no keys or no hold");
   bend = (c, reply) => (c[0] === "HGETALL" && c[1] === list ? "off-shape" : reply);
@@ -109,7 +112,8 @@ async function main(): Promise<void> {
   bend = (c, reply) => (c[0] === "HGETALL" && c[1] === holds ? "off-shape" : reply);
   is("a hold list in another shape", await outcome(keyRecords(sid)), "unknown");
   bend = (c, reply) => (c[0] === "HGETALL" && c[1] === holds ? [held.made.id, "suspended"] : reply);
-  is("a hold this code does not know", await outcome(keyRecords(sid)), "unknown");
+  const odd = await outcome(keyRecords(sid));
+  is("a hold this code does not know is read as unknown (refusing), the list still reads", Array.isArray(odd) ? (odd as { id: string; hold: unknown }[]).find((k) => k.id === held.made.id)?.hold : odd, "unknown");
   bend = (c, reply) => (c[0] === "HGETALL" && c[1] === list ? "off-shape" : reply);
   is("rewriteMakers on a list in another shape is not done, never nothing to rewrite", await outcome(rewriteMakers(sid, () => null)), "unknown");
   bend = null;

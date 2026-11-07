@@ -72,8 +72,8 @@ async function main(): Promise<void> {
   const records = await outcome(keyRecords(sid));
   is("keyRecords lists both keys, the odd one with an unknown hold", Array.isArray(records) ? (records as { id: string; hold: unknown }[]).map((k) => [k.id, k.hold]) : records, [[live.made.id, null], [odd.made.id, "unknown"]]);
   const shown = await outcome(shownKeys(store, OWNER, "owner"));
-  const oddShown = Array.isArray(shown) ? (shown as { id: string; paused: boolean; why: unknown; mayTurnOn: boolean; mayRevoke: boolean }[]).find((k) => k.id === odd.made.id) : shown;
-  is("the studio shows it to the owner, paused, not offered to turn on, offered to revoke", oddShown && typeof oddShown === "object" ? [oddShown.paused, oddShown.why, oddShown.mayTurnOn, oddShown.mayRevoke] : oddShown, [true, "unknown", false, true]);
+  const oddShown = Array.isArray(shown) ? (shown as { id: string; paused: boolean; why: unknown; mayTurnOn: boolean; mayRevoke: boolean }[]).find((k) => k.id === odd.made.id) : undefined;
+  is("the studio shows it to the owner, paused, not offered to turn on, offered to revoke", oddShown ? [oddShown.paused, oddShown.why, oddShown.mayTurnOn, oddShown.mayRevoke] : shown, [true, "unknown", false, true]);
   is("the owner revokes it", await outcome(revokeChecked(store, "owner", odd.made.id)), "ok");
   is("and it opens nothing any more", await outcome(resolveKey(odd.key)), null);
 
@@ -149,9 +149,10 @@ async function main(): Promise<void> {
     return { delivery, queued: due !== null };
   };
   const studio = await deliveryOf("/studio");
-  is("the studio endpoint's delivery was written and tried", [studio.delivery !== null, (studio.delivery?.attempts ?? 0) >= 1], [true, true]);
+  is("the studio endpoint's delivery was written and is on the queue", [studio.delivery !== null, studio.queued], [true, true]);
+  // Its try reads the key again first (attempt, heldNow) and sends nothing until it reads as in use.
   const held = await deliveryOf("/unread");
-  is("the unread key's endpoint is held back: written, never sent, still on the queue to be tried again", [held.delivery?.state, held.delivery?.attempts, held.queued], ["queued", 0, true]);
+  is("the unread key's endpoint is held back, not dropped: written, never sent, still on the queue", [held.delivery?.state, held.delivery?.attempts, held.queued], ["queued", 0, true]);
   is("the paused key's endpoint gets nothing, as before", (await deliveryOf("/paused")).delivery, null);
 
   done();

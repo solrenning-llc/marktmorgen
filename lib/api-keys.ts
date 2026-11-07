@@ -95,11 +95,17 @@ export type KeyMaker = { owner: boolean; by: string; step: boolean; left?: true 
  */
 export type Hold = "paused" | "told" | "left" | "role" | "unmatched" | "vouched";
 const HOLDS: readonly string[] = ["paused", "told", "left", "role", "unmatched", "vouched"];
+/**
+ * A hold as read: one of HOLDS, or "unknown" for a stored value this code does not know (a later version's,
+ * after a rollback). Unknown refuses the key (pauseWhy "unknown"), is never written, and is never matched by a
+ * change (swapHolds), so it stays until the key is revoked (Claude 2 on #3096: read as no hold, the key worked).
+ */
+export type KeyHold = Hold | "unknown";
 /** Whether a hold refuses the key. */
-export const isPaused = (hold: Hold | null): boolean => hold !== null && hold !== "vouched";
+export const isPaused = (hold: KeyHold | null): boolean => hold !== null && hold !== "vouched";
 
 /** A key's record with who made it and its hold, never the key or its fingerprint. */
-export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: Hold | null };
+export type KeyRecord = ApiKey & { maker: KeyMaker | null; hold: KeyHold | null };
 
 /**
  * A one-way fingerprint of a teammate's sign-in address on one store: an HMAC
@@ -271,11 +277,13 @@ export async function keyRecords(sid: string, _strict?: true): Promise<KeyRecord
  * teammate leaving, the owner pausing) is never overwritten by a change
  * decided on what was there before.
  */
-export async function swapHolds(sid: string, ids: string[], to: Hold | null, from: (Hold | null)[]): Promise<string[]> {
+export async function swapHolds(sid: string, ids: string[], to: Hold | null, from: readonly (KeyHold | null)[]): Promise<string[]> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return [];
   const wanted = [...new Set(ids.filter((id) => ID_PATTERN.test(id)))];
-  if (!wanted.length || !from.length) return [];
-  const [changed] = await redisPipeline([["EVAL", HOLD_SWAP, 2, holdKey(sid), listKey(sid), to ?? "", wanted.length, ...wanted, ...from.map((f) => f ?? "")]]);
+  // An unknown hold is never a value to change from: it stays, refusing the key, until the key is revoked.
+  const known = from.filter((f) => f !== "unknown");
+  if (!wanted.length || !known.length) return [];
+  const [changed] = await redisPipeline([["EVAL", HOLD_SWAP, 2, holdKey(sid), listKey(sid), to ?? "", wanted.length, ...wanted, ...known.map((f) => f ?? "")]]);
   return Array.isArray(changed) ? changed.map(String).filter((id) => wanted.includes(id)) : [];
 }
 
@@ -301,11 +309,39 @@ for i = 1, n do
 end
 return changed`;
 
-/** A hold as stored: none (no field), or one this file knows; anything else is unknown and throws (rule 24), never no hold. */
-function holdOf(raw: string | null | undefined): Hold | null {
+/**
+ * A hold as stored: none (no field), one this file knows, or "unknown" for any other value, which refuses the
+ * key (rule 24: never no hold). It does not throw, so the owner still sees the key and can revoke it, and its
+ * maker can still be taken off the team (Claude 2 on #3096). A reply in another shape is checked by the caller.
+ */
+function holdOf(raw: string | null | undefined): KeyHold | null {
   if (raw === null || raw === undefined) return null;
-  if (!HOLDS.includes(raw)) throw new UnknownReplyError("an API key's hold");
-  return raw as Hold;
+  return HOLDS.includes(raw) ? (raw as Hold) : "unknown";
+}
+
+/**
+ * The store's team record as lib/api-keys.ts reads it: only null is no team (a store nobody was invited to).
+ * Anything else that is not the record's JSON object with both lists of objects and a rule that is true or
+ * false throws UnknownReplyError (rule 24), never read as no team, which turned the two-step rule off and let a
+ * key it pauses work (Claude 2 on #3096). The same reading as lib/team.ts parseTeam on #2036.
+ */
+function teamOf(raw: unknown): ReturnType<typeof parseTeam> {
+  if (raw === null) return parseTeam(null);
+  const unknown = () => new UnknownReplyError("a store's team record");
+  if (typeof raw !== "string") throw unknown();
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw unknown();
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw unknown();
+  const fields = value as { members?: unknown; invites?: unknown; requireTwoStep?: unknown };
+  for (const entries of [fields.members, fields.invites]) {
+    if (!Array.isArray(entries) || entries.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) throw unknown();
+  }
+  if (fields.requireTwoStep !== undefined && typeof fields.requireTwoStep !== "boolean") throw unknown();
+  return parseTeam(raw);
 }
 
 /** An HMGET's reply: exactly one field for each asked, each its text or nothing (null); anything else throws (rule 24). */
@@ -316,10 +352,10 @@ function fieldsOf(reply: unknown, count: number): (string | null)[] {
 }
 
 /**
- * Whether each of these keys of a store is in use, paused (held, or its maker gone from the team) or gone
- * (revoked: no record). A reply in another shape, a record that does not read or a hold this file does not know
- * throws UnknownReplyError (CX-123 rule 24): never "gone", which would fail a webhook delivery for good or pass
- * over an endpoint, and never "live", which would send to the endpoint of a key that is paused.
+ * Whether each of these keys of a store is in use, paused (held, its maker gone from the team, or a hold this
+ * file does not know) or gone (revoked: no record). A reply in another shape, a record or a team record that
+ * does not read throws UnknownReplyError (CX-123 rule 24): never "gone", which would fail a webhook delivery for
+ * good or pass over an endpoint, and never "live", which would send to the endpoint of a key that is paused.
  */
 export async function keyStates(sid: string, ids: string[]): Promise<Map<string, "live" | "paused" | "gone">> {
   const out = new Map<string, "live" | "paused" | "gone">();
@@ -333,7 +369,7 @@ export async function keyStates(sid: string, ids: string[]): Promise<Map<string,
   if (!replies) throw new UnknownReplyError("a store's API keys");
   const records = fieldsOf(replies[0], wanted.length);
   const holds = fieldsOf(replies[1], wanted.length);
-  const { members, requireTwoStep } = parseTeam(replies[2]);
+  const { members, requireTwoStep } = teamOf(replies[2]);
   wanted.forEach((id, at) => {
     const raw = records[at];
     if (raw === null) {
@@ -416,9 +452,10 @@ return changed`;
  * maker could not be matched to anybody on the team, turned back on by the
  * owner; "role", its maker's role does not allow it, turned back on by the
  * owner; "unrecorded", nobody is recorded as its maker, turned back on by the
- * owner.
+ * owner; "unknown", its hold (or, for a request, the team) could not be read:
+ * refused, turned back on by nobody, revoked by the owner.
  */
-export type PauseWhy = "rule" | "left" | "unmatched" | "role" | "unrecorded";
+export type PauseWhy = "rule" | "left" | "unmatched" | "role" | "unrecorded" | "unknown";
 
 /**
  * Why a key is refused, or null when it is not: its hold, or its maker read
@@ -432,8 +469,9 @@ export type PauseWhy = "rule" | "left" | "unmatched" | "role" | "unrecorded";
  * second step and was not turned back on is refused too, with no hold
  * needed: the switch's pauses and emails only record and tell (owner C3-121).
  */
-export function pauseWhy(sid: string, maker: KeyMaker | null, hold: Hold | null, members: Pick<Member, "email" | "role">[], write: boolean, rule = false): PauseWhy | null {
+export function pauseWhy(sid: string, maker: KeyMaker | null, hold: KeyHold | null, members: Pick<Member, "email" | "role">[], write: boolean, rule = false): PauseWhy | null {
   if (hold === "left" || maker?.left) return "left";
+  if (hold === "unknown") return "unknown";
   if (maker && !maker.owner) {
     const member = members.find((m) => makerPrints(sid, m.email).includes(maker.by));
     if (!member) return "unmatched";
@@ -504,8 +542,15 @@ export async function resolveKey(presented: string, now = Date.now()): Promise<{
   if (!stored || stored.hash !== hash) return null;
   // Paused by the team's two-step rule, its maker's role, or its maker leaving (lib/api-key-pause.ts):
   // known, refused, and not counted as used. A maker who left refuses it even with no hold written.
-  const holdNow = typeof hold === "string" && HOLDS.includes(hold) ? (hold as Hold) : null;
-  const read = parseTeam(team);
+  // A hold this file does not know, or one read in another shape, refuses the key (holdOf), never no hold.
+  const holdNow = hold === null ? null : typeof hold === "string" ? holdOf(hold) : "unknown";
+  // A team record that does not read refuses the key (teamOf), never no team, which would turn the two-step rule off.
+  let read: ReturnType<typeof parseTeam>;
+  try {
+    read = teamOf(team);
+  } catch {
+    return { sid, id, write: stored.write, agent: stored.agent, paused: true, why: "unknown" };
+  }
   const why = pauseWhy(sid, stored.maker ?? null, holdNow, read.members, stored.write, read.requireTwoStep === true);
   if (why) return { sid, id, write: stored.write, agent: stored.agent, paused: true, why };
 

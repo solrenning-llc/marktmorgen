@@ -197,12 +197,36 @@ type Endpoint = {
 /** Why an endpoint added by an API key is sent nothing: its key is paused, or was revoked. */
 export type EndpointHeld = "paused" | "revoked";
 
-/** The endpoints sent to now: one added in the studio always, one added by an API key while that key is in use (lib/api-keys.ts keyStates). */
-async function liveEndpoints(store: Pick<Store, "sid">, endpoints: Endpoint[]): Promise<Endpoint[]> {
+/**
+ * The endpoints sent to now: one added in the studio always, one added by an API key while that key is in use
+ * (lib/api-keys.ts keyStates). `keepUnread` (emitEvent): when the keys' states cannot all be read, each key is
+ * read on its own, and an endpoint whose key alone cannot be read is kept, so its delivery is written and
+ * queued; the try reads the key again before anything is sent (attempt, heldNow) and sends nothing until it
+ * reads as in use. So one unreadable key holds back only its own endpoint, never the event for every endpoint
+ * of the store, which callers that only log (PayPal, calls, free downloads) would lose (Claude 2 on #3096).
+ */
+async function liveEndpoints(store: Pick<Store, "sid">, endpoints: Endpoint[], keepUnread = false): Promise<Endpoint[]> {
   const keyed = endpoints.filter((e) => e.key);
   if (!keyed.length) return endpoints;
-  const states = await keyStates(store.sid ?? "", keyed.map((e) => e.key as string));
-  return endpoints.filter((e) => !e.key || states.get(e.key) === "live");
+  const ids = keyed.map((e) => e.key as string);
+  let states: Map<string, string>;
+  const unread = new Set<string>();
+  try {
+    states = await keyStates(store.sid ?? "", ids);
+  } catch (error) {
+    if (!keepUnread || !(error instanceof UnknownReplyError)) throw error;
+    states = new Map();
+    for (const id of new Set(ids)) {
+      try {
+        for (const [key, state] of await keyStates(store.sid ?? "", [id])) states.set(key, state);
+      } catch (one) {
+        if (!(one instanceof UnknownReplyError)) throw one;
+        unread.add(id);
+      }
+    }
+    console.error("WEBHOOK KEY STATE UNREAD: the endpoints of these API keys are queued and held until their state reads", store.sid, [...unread]);
+  }
+  return endpoints.filter((e) => !e.key || states.get(e.key) === "live" || unread.has(e.key));
 }
 
 /** Why one endpoint is sent nothing now, or null when it is sent to. */
@@ -574,8 +598,9 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   if (!store.statsId || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const config = await readConfig(statsId);
-  // An endpoint whose API key is paused or revoked hears nothing (owner C3-100), read as the key is now.
-  const listening = await liveEndpoints(store, config?.endpoints.filter((e) => e.events.includes(type)) ?? []);
+  // An endpoint whose API key is paused or revoked hears nothing (owner C3-100), read as the key is now; one whose
+  // key cannot be read is queued and held by its try until it reads (liveEndpoints keepUnread).
+  const listening = await liveEndpoints(store, config?.endpoints.filter((e) => e.events.includes(type)) ?? [], true);
   if (!listening.length) return 0;
   const eventId = eventIdFor(statsId, type, seed);
   const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);

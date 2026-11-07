@@ -13,6 +13,9 @@ import { storeBase } from "@/lib/purchase-email";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 
+/** The longest a run taking a place lasts (PLACE_RUN_SECONDS, lib/group-buy.ts; a test holds the two equal). */
+export const maxDuration = 60;
+
 type Params = {
   params: Promise<{ handle: string; group: string }>;
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;

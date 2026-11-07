@@ -10,7 +10,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
+import { PLACE_STALE_SECONDS, placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
 import { importedFor } from "@/lib/imported-purchases";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { paidPeriod } from "./billing-period-fixture";
@@ -166,18 +166,23 @@ async function main(): Promise<void> {
   // address a record that later reads as a place it was never given (Claude 6 on #2872).
   // Rule 23 (#2872, L1): narrowed to the give-back script by its name, since the script counting a place names the
   // same hash; the cases and expectations are unchanged.
-  const isDropOf = (id: string) => (c: Command) => c[0] === "EVAL" && String(c[1]).includes("hdel-own") && c[3] === `nl:grp:${id}:m`;
-  /** The give-back script fails, the rest of its pipeline lands; `always` fails it alone too (the retry). */
+  // Rule 23 (pre-review of #2872): the give-back is now one script giving back the record and the count together
+  // (grp-give-back, lib/group-buy.ts GIVE_BACK_OWN), with no DECR beside it to land alone; matched by its name as well,
+  // and the first scenario fails only the first try (before: the pipeline of two), so its retry alone succeeds.
+  const isDropOf = (id: string) => (c: Command) => c[0] === "EVAL" && (String(c[1]).includes("hdel-own") || String(c[1]).includes("grp-give-back")) && c[3] === `nl:grp:${id}:m`;
+  /** The give-back script fails, the rest of its pipeline lands; `always` fails it on the retry too. */
   const failDrop = (id: string, always: boolean) => {
+    let tries = 0;
     redis.pipeline = (async (commands: Command[]) => {
       const drop = commands.some(isDropOf(id));
-      if (!drop || (!always && commands.length === 1)) return real(commands);
+      if (!drop || (!always && tries > 0)) return real(commands);
+      tries += 1;
       await real(commands.filter((c) => !isDropOf(id)(c)));
       throw new Error("Redis error: ERR script failed");
     }) as typeof redis.pipeline;
   };
 
-  part("Full, and the give-back script fails while its DECR lands: the run retries the script alone");
+  part("Full, and the give-back script fails once: the run retries the script alone");
   const failed = await paidGroup(2);
   is("two places, taken", [await take(await failed.link("hal@example.com")), await take(await failed.link("ivy@example.com"))], ["taken", "taken"]);
   const thirdLink = await failed.link("jo@example.com");
@@ -197,7 +202,17 @@ async function main(): Promise<void> {
   restore();
   is("the third address is told full, nothing handed over", [stuckFirst, await owns("max@example.com")], ["full", []]);
   is("opened again it is 'pending', never 'already', and nothing is handed over", [await take(stuckLink), await owns("max@example.com")], ["pending", []]);
-  is("no place counted past the two paid for", await placesTaken(stuck.id), 2);
+  // Rule 23 (pre-review of #2872): was "no place counted past the two paid for" = 2, with the DECR landing beside the
+  // failed script. Now the record and its count move together, so while the record is left over its count stands (3,
+  // never a place freed while a record still holds it); once no run can be writing it, opening the link again gives
+  // both back: full, two counted, nothing handed over.
+  is("while the record is left over, its count stands with it", await placesTaken(stuck.id), 3);
+  const realNow = Date.now.bind(Date);
+  const later = realNow() + (PLACE_STALE_SECONDS + 1) * 1000;
+  Date.now = () => later;
+  const stuckLater = await take(stuckLink);
+  Date.now = realNow;
+  is("past the longest run, opened again it is full, nothing handed over, two counted", [stuckLater, await owns("max@example.com"), await placesTaken(stuck.id)], ["full", [], 2]);
   is(
     "the page says 'not confirmed' in every buyer language, never 'expired' nor 'the place is yours'",
     Object.values(GIVING_WORDS).every((w) => Boolean(w.groupNotices.unconfirmed?.title && w.groupNotices.unconfirmed?.body) && w.groupNotices.unconfirmed.title !== w.groupNotices.expired.title),

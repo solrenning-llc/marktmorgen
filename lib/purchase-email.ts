@@ -440,9 +440,11 @@ export async function confirmPurchase(
   // by the checkout, and not at all when its sale paid a share.
   if (outcome === "sent") {
     const paid = typeof read.session?.amount_total === "number" ? read.session.amount_total : 0;
-    await countOrder(store, `checkout:${sessionId}`, paid, Date.now());
-    // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts).
-    await settleAdmitted(store, read.session?.metadata?.[ADMITTED_FIELD], 1, read.items ?? 1);
+    const first = await countOrder(store, `checkout:${sessionId}`, paid, Date.now());
+    // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts): only by the run
+    // that counted it first, so a checkout told twice (a giving or settling mark that ran out under a run that outlived
+    // it, lib/gifts.ts and lib/group-buy.ts) gives it back once (pre-review of #2872, LEVE).
+    if (first) await settleAdmitted(store, read.session?.metadata?.[ADMITTED_FIELD], 1, read.items ?? 1);
   }
   return outcome;
 }

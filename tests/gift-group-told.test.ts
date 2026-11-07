@@ -25,7 +25,8 @@
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { startGift } from "@/lib/gifts";
-import { askPlace, placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
+import { PLACE_RUN_SECONDS, PLACE_STALE_SECONDS, askPlace, placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
+import { readFileSync } from "node:fs";
 import { importedFor } from "@/lib/imported-purchases";
 import { confirmPurchase } from "@/lib/purchase-email";
 import { storeOrdersThisMonth } from "@/lib/orders";
@@ -177,7 +178,9 @@ async function main(): Promise<void> {
   const d = await paidGroup(2);
   is("two places, taken", [await take(await d.link("al@example.com")), await take(await d.link("bea@example.com"))], ["taken", "taken"]);
   const bobLink = await d.link("bob@example.com");
-  const isDropOf = (cmd: Command) => cmd[0] === "EVAL" && cmd[3] === `nl:grp:${d.id}:m` && String(cmd[1]).includes("hdel-own");
+  // Rule 23 (pre-review of #2872): the give-back is now one script (grp-give-back, the record and the count together),
+  // so the failing script matched is that one as well as hdel-own; the check below is unchanged.
+  const isDropOf = (cmd: Command) => cmd[0] === "EVAL" && cmd[3] === `nl:grp:${d.id}:m` && (String(cmd[1]).includes("hdel-own") || String(cmd[1]).includes("grp-give-back"));
   redis.pipeline = (async (commands: Command[]) => {
     if (!commands.some(isDropOf)) return real(commands);
     await real(commands.filter((cmd) => !isDropOf(cmd)));
@@ -215,6 +218,10 @@ async function main(): Promise<void> {
   const clockBack = () => {
     Date.now = realNow;
   };
+
+  part("F-H. The longest a run lasts, as the code declares it");
+  is("the place page's maxDuration is PLACE_RUN_SECONDS", readFileSync("app/[handle]/group/[group]/page.tsx", "utf8").includes(`export const maxDuration = ${PLACE_RUN_SECONDS};`), true);
+  is("a left-over record is resolved after the run and its last request, inside the clock jump these checks make", [PLACE_STALE_SECONDS > PLACE_RUN_SECONDS, PLACE_STALE_SECONDS < 120], [true, true]);
 
   part("F. ALTO: the grant's request times out (nothing came back) and lands after the run looked");
   const f = await paidGroup(2);
@@ -277,6 +284,34 @@ async function main(): Promise<void> {
   is("jan refuses, reads pending while a run may still own it, then takes it; kai takes the second; lou is full", [jan1, jan2, jan3, kai, lou], ["threw", "pending", "taken", "taken", "full"]);
   is("two places paid for: jan and kai hold the product", [await owns("jan@example.com"), await owns("kai@example.com"), await owns("lou@example.com")], [[product.id], [product.id], []]);
   is("two places counted", await placesTaken(gg.id), 2);
+
+  part("G. MEDIO: two tries find the same left-over counted record at once; one hands it over");
+  const gj = await paidGroup(2);
+  const pia = await gj.link("pia@example.com");
+  step = 0;
+  redis.pipeline = (async (commands: Command[]) => {
+    const isCountOf = commands.some((cmd) => cmd[0] === "EVAL" && cmd.includes(`nl:grp:${gj.id}:n`) && String(cmd[1]).includes("grp-count-own"));
+    const isBack = commands.some((cmd) => cmd[0] === "HGET" && cmd[1] === `nl:grp:${gj.id}:m`);
+    if (step === 0 && isCountOf) {
+      step = 1;
+      await real(commands);
+      return [UNKNOWN];
+    }
+    if (step === 1 && isBack) {
+      step = 2;
+      return [UNKNOWN];
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const pia1 = await take(pia);
+  restore();
+  pastARun();
+  const both = await Promise.all([take(pia), take(pia)]);
+  const quy = await take(await gj.link("quy@example.com"));
+  const ray = await take(await gj.link("ray@example.com"));
+  clockBack();
+  is("pia's first try refuses; of two at once one takes it, the other reads pending", [pia1, [...both].sort()], ["threw", ["pending", "taken"]]);
+  is("quy takes the second place, ray is full; two counted", [quy, ray, await placesTaken(gj.id)], ["taken", "full", 2]);
 
   part("H. MEDIO, rule 30: a hold never counted that could not be let go");
   const hh = await paidGroup(2);

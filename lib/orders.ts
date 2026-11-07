@@ -326,7 +326,10 @@ export function coveredByShare(store: Parameters<typeof shareBps>[0], paidCents:
 /**
  * One order handed over. `reference` names it (a checkout, a payment, a
  * place, a free copy) and `paidCents` is what was paid for it, zero for
- * nothing. Answers whether it was counted.
+ * nothing. Answers whether this run was the first for `reference`: counted
+ * now, or covered by the share its sale paid. False for a reference seen
+ * before, or when that could not be written: what a caller gives back the
+ * room its checkout held on, so it is given back once (pre-review of #2872).
  *
  * Never throws: a count that cannot be written must not cost a buyer their
  * email.
@@ -336,11 +339,13 @@ export async function countOrder(store: Store, reference: string, paidCents: num
   try {
     const [fresh] = await redisPipeline([["SET", seenKey(reference), "1", "NX", "EX", SEEN_SECONDS]]);
     if (fresh === null) return false;
+    // Counted on a reply in another shape, as before; said first only on exactly "OK", so nothing is given back twice.
+    const first = fresh === "OK";
     // What the order leaves in the database is counted in the store's data
     // room by the writes that leave it, at what each really adds
     // (lib/order-data.ts), never refused: its room was held when its checkout
     // was admitted (lib/order-admission.ts), at the most an order can take.
-    if (coveredByShare(store, paidCents, now / 1000)) return false;
+    if (coveredByShare(store, paidCents, now / 1000)) return first;
     const owner = storeRef(store);
     const folder = await storeFolder(owner);
     // Counted in the store's window (lib/allowance-window.ts). An order paid
@@ -364,7 +369,7 @@ export async function countOrder(store: Store, reference: string, paidCents: num
       // Whose folder this is, for the daily job that bills and writes (lib/usage-billing.ts, storeOf).
       await rememberFolderOwner(folder, owner);
     }
-    return true;
+    return first;
   } catch (error) {
     console.error("could not count an order", error);
     return false;

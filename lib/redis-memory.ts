@@ -257,7 +257,25 @@ export class MemoryRedis {
             this.run(["HSET", hash, field, `${countedAs}${n}}`]);
             return n;
           }
-          return typeof held === "string" && held.startsWith(countedAs) ? Number(held.slice(countedAs.length, -1)) : 0;
+          if (typeof held !== "string" || !held.startsWith(countedAs)) return 0;
+          // As the script: only digits and the closing brace after the prefix answer a count; anything else is nil.
+          const digits = /^(\d+)\}$/.exec(held.slice(countedAs.length));
+          return digits ? Number(digits[1]) : null;
+        }
+        // lib/group-buy.ts takePlace: a counted place given back, its record and the count in one step.
+        if (key.startsWith("-- marktmorgen:grp-give-back:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, hash, taken, field, value] = args;
+          if (this.run(["HGET", hash, field]) !== value) return 0;
+          this.run(["HDEL", hash, field]);
+          this.run(["DECR", taken]);
+          return 1;
+        }
+        // lib/group-buy.ts takePlace: a left-over record made a try's own, only while it holds what was read.
+        if (key.startsWith("-- marktmorgen:grp-reown:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, hash, field, was, value] = args;
+          if (this.run(["HGET", hash, field]) !== was) return 0;
+          this.run(["HSET", hash, field, value]);
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
           const [, lock, token, seconds] = args;

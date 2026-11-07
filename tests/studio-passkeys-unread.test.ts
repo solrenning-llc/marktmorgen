@@ -35,7 +35,7 @@ process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const hex = (value: string) => createHash("sha256").update(value).digest("hex");
 const parts = passkeyModule as unknown as Record<string, unknown>;
 const PasskeyManager = parts.PasskeyManager;
-const UNKNOWN = "Could not be checked just now, so it is not ticked. Open this page again in a moment.";
+const UNKNOWN = "Could not be checked just now, so it is not marked done. Open this page again in a moment.";
 const PasskeysUnread = typeof parts.PasskeysUnread === "function" ? (parts.PasskeysUnread as () => null) : null;
 
 async function propsOf(node: unknown, type: unknown, found: Record<string, unknown>[] = [], seen = new Set<unknown>()): Promise<Record<string, unknown>[]> {
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
   const start = renderToStaticMarkup(createElement(StudioStart, { steps }));
   is("the list is still shown", start.includes("Getting your store ready"), true);
   is("the step says it could not be checked just now, also to a screen reader", [start.includes(UNKNOWN), start.includes("(could not be checked just now)")], [true, true]);
-  is("it is not offered as the next step on a guess, nor ticked", [start.includes("Next: Keep a way back in"), /line-through[^>]*>Keep a way back in</.test(start)], [false, false]);
+  is("it is not offered as the next step on a guess, nor marked done", [start.includes("Next: Keep a way back in"), /line-through[^>]*>Keep a way back in</.test(start)], [false, false]);
   const finished = renderToStaticMarkup(createElement(StudioStart, { steps: steps.map((s) => (s.key === "recovery" ? { ...s, done: true, unknown: false } : s)) }));
   is("control: with every step known and done, the list hides itself", finished, "");
   done();

@@ -701,7 +701,13 @@ async function sendAffiliateLink(store: Store, email: string, note: string, orig
   const grant: LinkGrant = { s: store.statsId as string, e: email, n: note, ...(recruiter ? { r: recruiter.id } : {}) };
   let sent = false;
   try {
-    await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]);
+    // A paid email only with a link Redis said it stored (rule 24): any other answer sends nothing, and the link,
+    // in case it did land, is removed below like any unsent one. The answer was already "sent" for every address.
+    const saved = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]), 1);
+    if (saved?.[0] !== "OK") {
+      console.error("an affiliate link was not stored, so no email was sent");
+      return;
+    }
 
     const name = store.name;
     const a = affiliatesWords(store.language);

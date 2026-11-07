@@ -457,7 +457,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             bundleItems={bundleItems.get(product.id) ?? null}
                             soon={soon.has(product.id)}
                             preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
-                            cart={cartOn && !soon.has(product.id) && cartable(product)}
+                            cart={cartOn && !soon.has(product.id) && cartable(product) && left.get(product.id) !== 0}
                             sold={soldLine(soldCounts?.byProduct[product.id])}
                             grid
                           />
@@ -519,7 +519,10 @@ export default async function StorePage({ params, searchParams }: Params) {
                       <strong>{w.testModeTitle}</strong> {w.testModeBody} {w.testModeLater(store.name)}
                     </p>
                   ) : selling || byPayPal ? (
-                    <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+                    <>
+                      <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+                      <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
+                    </>
                   ) : (
                     <p className="st-note mt-6 text-sm">
                       <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody(store.name)}

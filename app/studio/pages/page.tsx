@@ -238,7 +238,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
               summary={summary && summary.visible + summary.hidden > 0 ? summary : null}
               reviews={reviews}
               lang={store.language}
-              facts={await readPageFacts(store, selected)}
+              {...(await readPageFacts(store, selected))}
               outline={
                 selected.course
                   ? ((await readCourse(selected.course.id).catch(() => null))?.modules ?? []).map((m) => ({ title: m.title, lessons: m.lessons.map((l) => l.title) }))

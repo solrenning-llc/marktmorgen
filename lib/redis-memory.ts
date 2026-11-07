@@ -549,6 +549,14 @@ export class MemoryRedis {
           this.run(["ZADD", queue, score, next]);
           return 1;
         }
+        // lib/mail-clicks.ts, FORGET_CLICKS_IF_SAME: a person's link use deleted only while their row is what was read.
+        if (key.startsWith("-- marktmorgen:mail-clicks-forget:v1\n") && Number(args[0]) >= 2 && args.length === Number(args[0]) + 4) {
+          const [leads, ...gone] = args.slice(1, Number(args[0]) + 1);
+          const [field, present, expected] = args.slice(Number(args[0]) + 1);
+          const raw = this.run(["HGET", leads, field]);
+          if (present === "0" ? raw !== null : raw !== expected) return -1;
+          return this.run(["DEL", ...gone]);
+        }
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
           const target = args[1];
           this.live(target);

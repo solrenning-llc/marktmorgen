@@ -79,3 +79,38 @@ test("forgetClicksPerson: with nothing written in between, the person's key goes
   assert.equal(await exists(keyIndex(linkKeyOf(OLD))), false);
   assert.equal(await exists(keyIndex(linkKeyOf(THEIRS))), true);
 });
+
+test("forgetClicksPerson: a row that keeps changing is never said erased, and nothing is taken for gone", async () => {
+  await seed();
+  const original = redis.pipeline.bind(redis);
+  let turn = 0;
+  redis.pipeline = (async (batch: Batch) => {
+    const replies = await original(batch);
+    if (batch.some((c) => c[0] === "HGET" && c[1] === leadsKey(LIST) && c[2] === EMAIL)) {
+      turn += 1;
+      await original([["HSET", leadsKey(LIST), EMAIL, row(String(turn % 10).repeat(40))]]);
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  try {
+    await assert.rejects(forgetClicksPerson(LIST, EMAIL));
+  } finally {
+    redis.pipeline = original as typeof redis.pipeline;
+  }
+  assert.equal(turn, 3, "read three times, then it gives up");
+  assert.equal(await exists(keyIndex(linkKeyOf(OLD))), true, "nothing was deleted while the row was not what was read");
+});
+
+test("forgetClicksPerson: a deletion reply in an unknown shape is said as not done, never as a count", async () => {
+  const shapes: unknown[] = [[], [null], [undefined], ["1"], [-2], [1.5], [Number.NaN], [3], [{}], [[1]]];
+  for (const reply of shapes) {
+    await seed();
+    const original = redis.pipeline.bind(redis);
+    redis.pipeline = (async (batch: Batch) => (batch[0][0] === "EVAL" ? reply : original(batch))) as typeof redis.pipeline;
+    try {
+      await assert.rejects(forgetClicksPerson(LIST, EMAIL), `deletion reply ${JSON.stringify(reply)}`);
+    } finally {
+      redis.pipeline = original as typeof redis.pipeline;
+    }
+  }
+});

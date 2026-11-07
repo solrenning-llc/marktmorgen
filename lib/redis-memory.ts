@@ -1015,6 +1015,41 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:studio-demo-session-refuse:v1\n")) return this.studioDemo("sessionRefuse", args);
         if (key.startsWith("-- marktmorgen:studio-demo-seed:v1\n")) return this.studioDemo("seed", args);
         if (key.startsWith("-- marktmorgen:studio-demo-take:v1\n")) return this.studioDemo("take", args);
+        // lib/community-schedule.ts SCHEDULE_ADD: a scheduled post's record and both its places, under the cap.
+        if (key.startsWith("-- marktmorgen:cm-schedule-add:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, list, record, due, id, at, member, json, cap] = args;
+          if (Number(this.run(["ZCARD", list])) >= Number(cap)) return 0;
+          if (this.run(["EXISTS", record]) === 1) return -1;
+          this.run(["SET", record, json]);
+          this.run(["ZADD", list, at, id]);
+          this.run(["ZADD", due, at, member]);
+          return 1;
+        }
+        // lib/community-schedule.ts SCHEDULE_CLAIM: the job's hold and its "publishing" mark in one step.
+        if (key.startsWith("-- marktmorgen:cm-schedule-claim:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, due, record, member, now, expected, marked] = args;
+          const score = this.run(["ZSCORE", due, member]);
+          if (score === null) return 0;
+          if (Number(score) > Number(now)) return 2;
+          const current = this.run(["GET", record]);
+          if (current === null || current === undefined) {
+            this.run(["ZREM", due, member]);
+            return -1;
+          }
+          if (current !== expected) return 3;
+          this.run(["ZREM", due, member]);
+          this.run(["SET", record, marked]);
+          return 1;
+        }
+        // lib/community-schedule.ts SCHEDULE_SWAP: a scheduled post changed only while it reads as it was read.
+        if (key.startsWith("-- marktmorgen:cm-schedule-swap:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, record, due, list, expected, next, member, id, dueAt, listAt] = args;
+          if (this.run(["GET", record]) !== expected) return 0;
+          this.run(next === "" ? ["DEL", record] : ["SET", record, next]);
+          this.run(dueAt === "" ? ["ZREM", due, member] : ["ZADD", due, dueAt, member]);
+          this.run(listAt === "" ? ["ZREM", list, id] : ["ZADD", list, listAt, id]);
+          return 1;
+        }
         if (!key.startsWith("-- marktmorgen:form-opportunity:v1\n") || args[0] !== "1" || args.length !== 5) throw new Error("MemoryRedis: unsupported EVAL");
         const target = args[1];
         this.live(target);

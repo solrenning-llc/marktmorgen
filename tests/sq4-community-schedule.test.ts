@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { claimHandle, ensureListId, ensureStatsId, setCommunity, setSubscription, storeForEmail } from "@/lib/store";
-import { feed, freshConfig, readConfig, saveConfig } from "@/lib/community";
+import { feed, freshConfig, postCount, readConfig, saveConfig } from "@/lib/community";
 import { dataKey } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -180,14 +180,14 @@ async function main(): Promise<void> {
   const heldPost = held.ok ? held.post : null!;
   const lateNow = (heldPost.due + STUCK_SECONDS + 1) * 1000;
   let during: unknown = null;
-  const feedBefore = (await feed(id, {})).posts.length;
+  const feedBefore = await postCount(id);
   seen.length = 0;
   hook = { when: claimed, then: async () => { during = await sched.cancelScheduled(shop, heldPost.id, lateNow); } };
   watch();
   const ranHeld = await sched.runScheduledPosts(Date.now() + 10_000, lateNow);
   redis.pipeline = realPipeline;
   is("a cancel right after the job took it is refused, however late it is: it is being posted", during, { ok: false, reason: "busy" });
-  is("posted once, and its record says so", [ranHeld.posted, (await feed(id, {})).posts.length - feedBefore, sched.parseRecord(redis.run(["GET", keys.record(heldPost.id)]))?.state], [1, 1, "posted"]);
+  is("posted once, and its record says so", [ranHeld.posted, (await postCount(id)) - feedBefore, sched.parseRecord(redis.run(["GET", keys.record(heldPost.id)]))?.state], [1, 1, "posted"]);
   is("the job never takes a member off the due list by itself before posting: its hold is the claim script", seen.some((c) => c.startsWith(`ZREM ${sched.DUE_KEY}`)), false);
   is("nor marks the record by itself", seen.some((c) => c === `SET ${keys.record(heldPost.id)}`), false);
 
@@ -267,11 +267,11 @@ async function main(): Promise<void> {
   const inExtra = await sched.schedulePost(shop, { ...inputAt(3600), sp: "dddddddddddd" }, t0);
   const extraId = inExtra.ok ? inExtra.post : null!;
   await saveConfig(id, cfgNow);
-  const before = (await feed(id, {})).posts.length;
+  const before = await postCount(id);
   await sched.runScheduledPosts(Date.now() + 10_000, (goneId.due + 1) * 1000);
   const extraAfter = sched.parseRecord(redis.run(["GET", keys.record(extraId.id)]));
   is("a space removed since: not posted, said why", [extraAfter?.state, extraAfter?.why], ["failed", "space"]);
-  is("only the other one went up", (await feed(id, {})).posts.length, before + 1);
+  is("only the other one went up", await postCount(id), before + 1);
 
   part("A store that is not there any more");
   for (const p of await sched.listScheduled(shop, (goneId.due + 1) * 1000)) await sched.cancelScheduled(shop, p.id, (goneId.due + 1) * 1000);
@@ -280,7 +280,7 @@ async function main(): Promise<void> {
   redis.run(["ZREM", sched.DUE_KEY, sched.dueMember(shop.sid, id, orphanPost.id)]);
   redis.run(["ZADD", sched.DUE_KEY, String(orphanPost.due), sched.dueMember("f".repeat(32), id, orphanPost.id)]);
   const ranGone = await sched.runScheduledPosts(Date.now() + 10_000, (orphanPost.due + 1) * 1000);
-  is("not posted", [ranGone.posted, (await feed(id, {})).posts.length], [0, before + 1]);
+  is("not posted", [ranGone.posted, await postCount(id)], [0, before + 1]);
   is("its record says failed: gone", sched.parseRecord(redis.run(["GET", keys.record(orphanPost.id)]))?.why, "gone");
 
   part("A try the job cannot confirm is never made again");

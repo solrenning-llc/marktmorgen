@@ -9,7 +9,7 @@
  * posted (lib/community-files.ts) and a poll's days start when it is written,
  * so both stay with posting now.
  */
-import { isTimeZone, zonedToUtc } from "@/lib/call-setup";
+import { isTimeZone, zoneName, zonedToUtc } from "@/lib/call-setup";
 import { ITEM_ID, MAX_LINKS_IN_POST, MAX_POST_TEXT, MAX_POST_TITLE, cleanLine, cleanText, linkCount } from "@/lib/community-text";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -33,9 +33,16 @@ export const RETRY_SECONDS = 300;
  * store and writes the post as posting it now does (tests/plan-cost-registry.ts).
  */
 export const SCHEDULE_UNITS = 1 + PUBLISH_TRIES;
-/** Past its time by this much and still not taken by the job: held up, and the creator may clear it. */
+/**
+ * How long the job's mark "publishing" may stand before it is read as not
+ * confirmed. The job runs at most sixty seconds and every request in it is
+ * given up by then (lib/fetch-timeout.ts), so a mark this old has no run
+ * behind it.
+ */
 export const STUCK_SECONDS = 900;
-/** How long a posted one stays in the studio's list. */
+/** The least time left in the job's slice for it to take one more: what a post and its email take, about. */
+export const PUBLISH_MIN_MS = 3_000;
+/** How long a done one (posted, failed, not confirmed) stays in the studio's list, and counts in its places. */
 export const POSTED_KEEP_SECONDS = 7 * 86_400;
 /** How many the job takes in one run, across all stores. */
 export const RUN_BATCH = 25;
@@ -77,7 +84,7 @@ export type ScheduledPost = ScheduleInput & {
   at: number;
 };
 
-export type ScheduleProblem = "space" | "empty" | "links" | "when" | "no_such_time" | "soon" | "far";
+export type ScheduleProblem = "space" | "empty" | "links" | "when" | "no_such_time" | "soon" | "far" | "too_close";
 
 export const SCHEDULE_PROBLEMS: Readonly<Record<ScheduleProblem, string>> = {
   space: "That space is not in your community anymore. Pick another one.",
@@ -87,6 +94,7 @@ export const SCHEDULE_PROBLEMS: Readonly<Record<ScheduleProblem, string>> = {
   no_such_time: "That time does not happen on that day, because the clocks move forward. Pick another time.",
   soon: `Pick a time at least ${MIN_LEAD_SECONDS / 60} minutes from now. To post sooner, post it now from the community page.`,
   far: `Pick a time within ${MAX_AHEAD_DAYS} days.`,
+  too_close: `It goes up in less than ${MIN_LEAD_SECONDS / 60} minutes, so it can no longer be changed: the job may be posting it. You can still cancel it.`,
 };
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -192,11 +200,33 @@ export function recordBytes(post: ScheduledPost): number {
   return dataBytes([JSON.stringify(largest), 32 + 12, 32 + 32 + 12 + 2], 3);
 }
 
-/** Whether the job will not touch it again: done, or held up well past its time. */
+/**
+ * Whether the job is done with it: posted, failed, not confirmed, or marked
+ * "publishing" by a run long over (STUCK_SECONDS). A waiting one is never
+ * settled, however late: the job may take it at any moment, and only the
+ * claim script decides who has it (lib/community-schedule.ts).
+ */
 export function settled(post: ScheduledPost, nowSeconds: number): boolean {
   if (post.state === "posted" || post.state === "failed" || post.state === "unknown") return true;
-  if (post.state === "waiting") return post.due + STUCK_SECONDS < nowSeconds;
+  if (post.state === "waiting") return false;
   return post.at + STUCK_SECONDS < nowSeconds;
+}
+
+/** Whether a settled one has had its week in the list. */
+export function expired(post: ScheduledPost, nowSeconds: number): boolean {
+  return settled(post, nowSeconds) && post.at + POSTED_KEEP_SECONDS < nowSeconds;
+}
+
+/** "Goes up Tuesday, January 15, 2030 at 9:30 AM EST" while it is to come; "Set for …" once it is late or done. */
+export function whenWords(post: Pick<ScheduledPost, "state" | "due" | "tz">, nowSeconds: number): string {
+  const at = new Date(post.due * 1000);
+  let clock: string;
+  try {
+    clock = `${new Intl.DateTimeFormat("en-US", { timeZone: post.tz, dateStyle: "full", timeStyle: "short" }).format(at)} ${zoneName(at.getTime(), post.tz)}`;
+  } catch {
+    clock = at.toUTCString();
+  }
+  return `${post.state === "waiting" && post.due > nowSeconds ? "Goes up" : "Set for"} ${clock}`;
 }
 
 const FAILED: Readonly<Record<FailReason, string>> = {
@@ -225,6 +255,7 @@ export function stateWords(post: ScheduledPost, nowSeconds: number): string {
     return "We could not confirm it was posted. Look at your community feed, and post it again if it is not there.";
   }
   if (post.state === "publishing") return "Being posted now.";
-  if (settled(post, nowSeconds)) return "It is late and has not been posted yet. You can clear it and post it from the community page.";
-  return post.tries > 0 ? "Waiting. The first try did not reach your store, so it is tried again in a few minutes." : "Waiting.";
+  if (post.tries > 0) return "Waiting. The first try did not reach your store, so it is tried again in a few minutes.";
+  if (post.due < nowSeconds) return "Late: it has not gone up yet, and goes up within the next few minutes. You can still cancel it.";
+  return "Waiting.";
 }

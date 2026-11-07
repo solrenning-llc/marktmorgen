@@ -9,13 +9,24 @@
  * Each one takes room in the store's data room before it is written, in its
  * own slot, and gives it back when it is cleared (lib/store-data.ts).
  *
- * Who may change one is decided by one command: taking its member off the
- * due list (ZREM). Whoever gets 1 back holds it, the five-minute job to post
- * it or the studio to edit or cancel it, and the other is refused, so a post
- * is never put up with words the creator had already changed, and never
- * changed once the job has it. The record is read and written only by the
- * holder; the job marks it "publishing" before it writes the post, so a try
- * whose outcome is not known is said as such and never made again.
+ * Who has one is decided inside Redis, in one script at a time, never by a
+ * read followed by a write:
+ *
+ *   CLAIM  the job takes it off the due list and marks it "publishing" in the
+ *          same step, only while the record still reads as the job read it
+ *          and its time has come. Nothing else can come between the two.
+ *   SWAP   the studio's edit and cancel, the job's outcome, a clear from the
+ *          list and putting a lost one back: the record is replaced or
+ *          deleted, and its two places set, only while it still reads as the
+ *          caller read it (compare and set). A record the job has marked no
+ *          longer reads "waiting", so an edit or a cancel read before the
+ *          job's claim is refused, never half done.
+ *   ADD    scheduling writes the record and both places together, under the
+ *          community's cap.
+ *
+ * A failed claim (no answer from Redis) leaves the record waiting and due,
+ * as it was. A try whose post write may have landed is said as not confirmed
+ * and never made again.
  *
  * Posting goes through createPost, with the rules as they are at that moment:
  * the space still there, the community's post cap and the store's data room.
@@ -24,7 +35,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
-import { countOf } from "@/lib/redis-reply";
+import { withCutoff } from "@/lib/fetch-timeout";
 import { storeForId, type Store } from "@/lib/store";
 import { CREATOR, createPost, readConfig } from "@/lib/community";
 import { COMMUNITY_ID, ITEM_ID } from "@/lib/community-text";
@@ -38,10 +49,12 @@ import {
   type ScheduleInput,
   type ScheduledPost,
   MAX_SCHEDULED_POSTS,
-  POSTED_KEEP_SECONDS,
+  MIN_LEAD_SECONDS,
+  PUBLISH_MIN_MS,
   PUBLISH_TRIES,
   RETRY_SECONDS,
   RUN_BATCH,
+  expired,
   parseRecord,
   recordBytes,
   settled,
@@ -65,6 +78,53 @@ export function dueMember(store: string, community: string, id: string): string 
   return `${store}:${community}:${id}`;
 }
 
+/**
+ * KEYS[1] the community's list, KEYS[2] the record, KEYS[3] the due list.
+ * ARGV[1] id, ARGV[2] its time, ARGV[3] its due member, ARGV[4] the record,
+ * ARGV[5] the cap. 1 written; 0 the list is full; -1 the record is there already.
+ */
+export const SCHEDULE_ADD = `-- marktmorgen:cm-schedule-add:v1
+if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[5]) then return 0 end
+if redis.call('EXISTS', KEYS[2]) == 1 then return -1 end
+redis.call('SET', KEYS[2], ARGV[4])
+redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+redis.call('ZADD', KEYS[3], ARGV[2], ARGV[3])
+return 1`;
+
+/**
+ * KEYS[1] the due list, KEYS[2] the record. ARGV[1] the due member, ARGV[2]
+ * now (seconds), ARGV[3] the record as the job read it, ARGV[4] the record
+ * marked "publishing". 1 held and marked; 0 not on the due list; 2 not due
+ * yet; 3 changed since it was read; -1 its record is gone (its member taken off).
+ */
+export const SCHEDULE_CLAIM = `-- marktmorgen:cm-schedule-claim:v1
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if not score then return 0 end
+if tonumber(score) > tonumber(ARGV[2]) then return 2 end
+local current = redis.call('GET', KEYS[2])
+if not current then
+  redis.call('ZREM', KEYS[1], ARGV[1])
+  return -1
+end
+if current ~= ARGV[3] then return 3 end
+redis.call('ZREM', KEYS[1], ARGV[1])
+redis.call('SET', KEYS[2], ARGV[4])
+return 1`;
+
+/**
+ * KEYS[1] the record, KEYS[2] the due list, KEYS[3] the community's list.
+ * ARGV[1] the record as the caller read it, ARGV[2] the new record ("" deletes
+ * it), ARGV[3] the due member, ARGV[4] the id, ARGV[5] its time on the due
+ * list ("" takes it off), ARGV[6] its time on the community's list ("" takes
+ * it off). 1 done; 0 the record no longer reads as it was read, nothing done.
+ */
+export const SCHEDULE_SWAP = `-- marktmorgen:cm-schedule-swap:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if ARGV[2] == '' then redis.call('DEL', KEYS[1]) else redis.call('SET', KEYS[1], ARGV[2]) end
+if ARGV[5] == '' then redis.call('ZREM', KEYS[2], ARGV[3]) else redis.call('ZADD', KEYS[2], ARGV[5], ARGV[3]) end
+if ARGV[6] == '' then redis.call('ZREM', KEYS[3], ARGV[4]) else redis.call('ZADD', KEYS[3], ARGV[6], ARGV[4]) end
+return 1`;
+
 const STORE_ID = /^[0-9a-f]{32}$/;
 const toSeconds = (ms: number) => Math.floor(ms / 1000);
 
@@ -76,10 +136,34 @@ function readMember(member: string): { store: string; community: string; id: str
 
 const room = (id: string, bytes: number) => [{ slot: scheduleSlot(id), bytes, set: true }];
 
+/** One compare-and-set (SCHEDULE_SWAP): true when the record still read as `expected` and the change was made. */
+async function swap(
+  community: string,
+  member: string,
+  id: string,
+  expected: string,
+  next: string,
+  due: number | null,
+  listed: number | null,
+): Promise<boolean> {
+  const keys = scheduleKeys(community);
+  const [done] = await redisPipeline([
+    ["EVAL", SCHEDULE_SWAP, 3, keys.record(id), DUE_KEY, keys.list, expected, next, member, id, due === null ? "" : due, listed === null ? "" : listed],
+  ]);
+  return done === 1;
+}
+
+/** One record as it is now: its raw text, for the compare-and-set, and what it says. */
+async function readRaw(community: string, id: string): Promise<{ raw: string | null; post: ScheduledPost | null }> {
+  const [raw] = await redisPipeline([["GET", scheduleKeys(community).record(id)]]);
+  return typeof raw === "string" ? { raw, post: parseRecord(raw) } : { raw: null, post: null };
+}
+
 /**
- * Keeps one to go up at its time. Its room is taken first: refused there,
- * nothing is written (DataRoomError). Past the community's cap, its place is
- * taken back with its room, and the answer is "full".
+ * Keeps one to go up at its time. Done ones past their week are cleared
+ * first, so they never keep a new one out. Its room is taken next: refused
+ * there, nothing is written (DataRoomError). Past the community's cap, its
+ * room is given back and the answer is "full".
  */
 export async function schedulePost(
   store: Store,
@@ -88,69 +172,52 @@ export async function schedulePost(
 ): Promise<{ ok: true; post: ScheduledPost } | { ok: false; reason: "full" | "off" }> {
   const community = store.community?.id;
   if (!community || !store.sid) return { ok: false, reason: "off" };
+  await listScheduled(store, now);
   const at = toSeconds(now);
   const post: ScheduledPost = { ...input, id: randomBytes(6).toString("hex"), made: at, state: "waiting", tries: 0, post: "", mail: "", why: "", at };
   const keys = scheduleKeys(community);
   await needData(store, room(post.id, recordBytes(post)), now);
-  let count: number | null = null;
-  try {
-    const [, size] = await redisPipeline([["ZADD", keys.list, "NX", post.due, post.id], ["ZCARD", keys.list]]);
-    count = countOf(size);
-  } catch (error) {
-    await giveData(store, room(post.id, 0), now);
-    throw error;
-  }
-  if (count === null || count > MAX_SCHEDULED_POSTS) {
-    await redisPipeline([["ZREM", keys.list, post.id]]).catch(() => undefined);
-    await giveData(store, room(post.id, 0), now);
-    if (count === null) throw new Error("the community's scheduled posts could not be counted");
-    return { ok: false, reason: "full" };
-  }
-  await redisPipeline([
-    ["SET", keys.record(post.id), JSON.stringify(post)],
-    ["ZADD", DUE_KEY, post.due, dueMember(store.sid, community, post.id)],
+  // A failure here leaves it unknown whether it was written: its room stays counted, the safe side.
+  const [added] = await redisPipeline([
+    ["EVAL", SCHEDULE_ADD, 3, keys.list, keys.record(post.id), DUE_KEY, post.id, post.due, dueMember(store.sid, community, post.id), JSON.stringify(post), MAX_SCHEDULED_POSTS],
   ]);
-  return { ok: true, post };
+  if (added === 1) return { ok: true, post };
+  await giveData(store, room(post.id, 0), now);
+  if (added === 0) return { ok: false, reason: "full" };
+  throw new Error("a scheduled post could not be written");
 }
 
 /**
  * Changes one that is still waiting: its words, its space, its kind and its
- * time. Refused ("busy") once the job holds it.
+ * time. Refused once the job has it ("busy"), once it is done ("done"), and
+ * within the lead before its time ("too_close"), when the job may take it any
+ * minute: a cancel still works then.
  */
 export async function editScheduled(
   store: Store,
   id: string,
   input: ScheduleInput,
   now = Date.now(),
-): Promise<{ ok: true } | { ok: false; reason: "gone" | "busy" }> {
+): Promise<{ ok: true } | { ok: false; reason: "gone" | "busy" | "done" | "too_close" }> {
   const community = store.community?.id;
   if (!community || !store.sid || !ITEM_ID.test(id)) return { ok: false, reason: "gone" };
-  const keys = scheduleKeys(community);
-  const member = dueMember(store.sid, community, id);
-  const [removed, raw] = await redisPipeline([["ZREM", DUE_KEY, member], ["GET", keys.record(id)]]);
-  const current = parseRecord(raw);
-  if (removed !== 1) return { ok: false, reason: current ? "busy" : "gone" };
-  // Held from here: only this request reads and writes the record until it is back on the due list.
-  if (!current || current.state !== "waiting") return { ok: false, reason: "gone" };
+  const { raw, post: current } = await readRaw(community, id);
+  if (!raw || !current) return { ok: false, reason: "gone" };
+  if (current.state === "publishing") return { ok: false, reason: "busy" };
+  if (current.state !== "waiting") return { ok: false, reason: "done" };
+  if (current.due < toSeconds(now) + MIN_LEAD_SECONDS) return { ok: false, reason: "too_close" };
   const next: ScheduledPost = { ...current, ...input, at: toSeconds(now) };
-  try {
-    await needData(store, room(id, recordBytes(next)), now);
-  } catch (error) {
-    await redisPipeline([["ZADD", DUE_KEY, current.due, member]]);
-    throw error;
-  }
-  await redisPipeline([
-    ["SET", keys.record(id), JSON.stringify(next)],
-    ["ZADD", keys.list, next.due, id],
-    ["ZADD", DUE_KEY, next.due, member],
-  ]);
-  return { ok: true };
+  await needData(store, room(id, recordBytes(next)), now);
+  if (await swap(community, dueMember(store.sid, community, id), id, raw, JSON.stringify(next), next.due, next.due)) return { ok: true };
+  // Changed since it was read (the job took it, or another edit): its room as it was.
+  await giveData(store, room(id, recordBytes(current)), now);
+  return { ok: false, reason: "busy" };
 }
 
 /**
- * Takes one off: a waiting one before the job holds it, or one the job is
- * done with (posted, failed, not confirmed), or one held up well past its
- * time. Its record, its places and its room all go.
+ * Takes one off: a waiting one, while the job has not taken it, or one the
+ * job is done with (posted, failed, not confirmed, or marked by a run long
+ * over), cleared from the list. Its record, its places and its room all go.
  */
 export async function cancelScheduled(
   store: Store,
@@ -159,46 +226,51 @@ export async function cancelScheduled(
 ): Promise<{ ok: true } | { ok: false; reason: "gone" | "busy" }> {
   const community = store.community?.id;
   if (!community || !store.sid || !ITEM_ID.test(id)) return { ok: false, reason: "gone" };
-  const keys = scheduleKeys(community);
-  const [removed, raw] = await redisPipeline([["ZREM", DUE_KEY, dueMember(store.sid, community, id)], ["GET", keys.record(id)]]);
-  const current = parseRecord(raw);
-  if (!current) {
-    // Nothing to clear but a place left behind, if any.
-    const [listed] = await redisPipeline([["ZREM", keys.list, id]]);
-    if (listed === 1) await giveData(store, room(id, 0), now);
-    return { ok: false, reason: "gone" };
-  }
-  if (removed !== 1 && !settled(current, toSeconds(now))) return { ok: false, reason: "busy" };
-  await redisPipeline([["DEL", keys.record(id)], ["ZREM", keys.list, id]]);
+  const { raw, post: current } = await readRaw(community, id);
+  if (!raw || !current) return { ok: false, reason: "gone" };
+  if (current.state === "publishing" && !settled(current, toSeconds(now))) return { ok: false, reason: "busy" };
+  if (!(await swap(community, dueMember(store.sid, community, id), id, raw, "", null, null))) return { ok: false, reason: "busy" };
   await giveData(store, room(id, 0), now);
   return { ok: true };
 }
 
 /**
- * The community's scheduled posts, soonest first, for the studio. Posted
- * ones past their week, and places whose record is gone, are cleared on the
- * way, with their room.
+ * The community's scheduled posts, soonest first, for the studio. On the
+ * way: done ones past their week are cleared with their room; a place whose
+ * record is gone is taken off; a waiting one that is not on the due list
+ * (which the scripts never leave behind, but a hand or a restore could) is put
+ * back on it, and says it is late.
  */
 export async function listScheduled(store: Store, now = Date.now()): Promise<ScheduledPost[]> {
   const community = store.community?.id;
-  if (!community) return [];
+  if (!community || !store.sid) return [];
   const keys = scheduleKeys(community);
   const [ids] = await redisPipeline([["ZRANGEBYSCORE", keys.list, "-inf", "+inf", "LIMIT", 0, MAX_SCHEDULED_POSTS + 5]]);
   const list = Array.isArray(ids) ? ids.filter((one): one is string => typeof one === "string" && ITEM_ID.test(one)) : [];
   if (!list.length) return [];
-  const [raws] = await redisPipeline([["MGET", ...list.map((one) => keys.record(one))]]);
-  const records = Array.isArray(raws) ? raws : [];
+  const replies = await redisPipeline([
+    ["MGET", ...list.map((one) => keys.record(one))],
+    ...list.map((one) => ["ZSCORE", DUE_KEY, dueMember(store.sid, community, one)]),
+  ]);
+  const raws = Array.isArray(replies[0]) ? (replies[0] as unknown[]) : [];
   const at = toSeconds(now);
   const shown: ScheduledPost[] = [];
   for (const [i, one] of list.entries()) {
-    const post = parseRecord(records[i]);
-    if (post && post.id === one && !(post.state === "posted" && post.at + POSTED_KEEP_SECONDS < at)) {
-      shown.push(post);
+    const raw = raws[i];
+    const post = parseRecord(raw);
+    const member = dueMember(store.sid, community, one);
+    if (typeof raw !== "string") {
+      const [taken] = await redisPipeline([["ZREM", keys.list, one]]);
+      if (taken === 1) await giveData(store, room(one, 0), now);
       continue;
     }
-    if (post && post.id !== one) continue;
-    await redisPipeline([["DEL", keys.record(one)], ["ZREM", keys.list, one]]);
-    await giveData(store, room(one, 0), now);
+    if (!post || post.id !== one) continue;
+    if (expired(post, at)) {
+      if (await swap(community, member, one, raw, "", null, null)) await giveData(store, room(one, 0), now);
+      continue;
+    }
+    if (post.state === "waiting" && replies[i + 1] === null) await swap(community, member, one, raw, raw, post.due, post.due);
+    shown.push(post);
   }
   return shown;
 }
@@ -206,56 +278,58 @@ export async function listScheduled(store: Store, now = Date.now()): Promise<Sch
 export type RunCounts = { posted: number; failed: number; unknown: number; later: number };
 
 /**
- * The five-minute job's part: puts up what is due, at most RUN_BATCH a run,
- * starting nothing after `deadline` (milliseconds). `now` is the job's clock.
+ * The five-minute job's part: puts up what is due, at most RUN_BATCH a run.
+ * It takes one only with PUBLISH_MIN_MS left before `deadline`
+ * (milliseconds), and each post's own work is cut off at `deadline`. `now`
+ * is the job's clock.
  */
 export async function runScheduledPosts(deadline: number, now = Date.now()): Promise<RunCounts> {
   const counts: RunCounts = { posted: 0, failed: 0, unknown: 0, later: 0 };
   const at = toSeconds(now);
+  if (Date.now() + PUBLISH_MIN_MS > deadline) return counts;
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", at, "LIMIT", 0, RUN_BATCH]]);
   const members = Array.isArray(due) ? due.filter((one): one is string => typeof one === "string") : [];
   for (const member of members) {
-    if (Date.now() >= deadline) break;
+    if (Date.now() + PUBLISH_MIN_MS > deadline) break;
     const where = readMember(member);
     if (!where) {
       await redisPipeline([["ZREM", DUE_KEY, member]]);
       continue;
     }
     const keys = scheduleKeys(where.community);
-    const [removed, raw] = await redisPipeline([["ZREM", DUE_KEY, member], ["GET", keys.record(where.id)]]);
-    // Taken already, by another run or by the studio.
-    if (removed !== 1) continue;
-    const post = parseRecord(raw);
-    // Canceled meanwhile: nothing to post.
-    if (!post || post.state !== "waiting") continue;
-    // Moved to later by the studio between the read of the due list and this hold.
-    if (post.due > at) {
-      await redisPipeline([["ZADD", DUE_KEY, post.due, member]]);
+    const { raw, post } = await readRaw(where.community, where.id);
+    if (raw !== null && !post) {
+      // A record that does not read as one is never posted, and never becomes one.
+      await redisPipeline([["ZREM", DUE_KEY, member]]);
       continue;
     }
-    const [marked] = await redisPipeline([["SET", keys.record(post.id), JSON.stringify({ ...post, state: "publishing", tries: post.tries + 1, at }), "XX"]]);
-    // Cleared by the studio between the hold and the mark: not posted.
-    if (marked !== "OK") continue;
-    const tried: ScheduledPost = { ...post, tries: post.tries + 1 };
-    const outcome = await publish(where.store, where.community, tried);
+    if (post && post.state !== "waiting") {
+      // Done with: its place on the due list only, while it reads the same.
+      await swap(where.community, member, where.id, raw!, raw!, null, post.due);
+      continue;
+    }
+    const marked: ScheduledPost | null = post ? { ...post, state: "publishing", tries: post.tries + 1, at } : null;
+    const [held] = await redisPipeline([["EVAL", SCHEDULE_CLAIM, 2, DUE_KEY, keys.record(where.id), member, at, raw ?? "", marked ? JSON.stringify(marked) : ""]]);
+    if (held !== 1 || !marked) continue;
+    const outcome = await withCutoff(deadline, () => publish(where.store, where.community, marked)).catch((error: unknown): Outcome => {
+      console.error("posting a scheduled community post failed", error);
+      return { kind: "unknown" };
+    });
     let next: ScheduledPost;
     if (outcome.kind === "posted") {
-      next = { ...tried, state: "posted", post: outcome.post, mail: outcome.mail, at };
+      next = { ...marked, state: "posted", post: outcome.post, mail: outcome.mail, at };
       counts.posted += 1;
     } else if (outcome.kind === "unknown") {
-      next = { ...tried, state: "unknown", at };
+      next = { ...marked, state: "unknown", at };
       counts.unknown += 1;
-    } else if (outcome.kind === "later" && tried.tries < PUBLISH_TRIES) {
-      next = { ...tried, state: "waiting", at };
+    } else if (outcome.kind === "later" && marked.tries < PUBLISH_TRIES) {
+      next = { ...marked, state: "waiting", at };
       counts.later += 1;
     } else {
-      next = { ...tried, state: "failed", why: outcome.kind === "later" ? "error" : outcome.why, at };
+      next = { ...marked, state: "failed", why: outcome.kind === "later" ? "error" : outcome.why, at };
       counts.failed += 1;
     }
-    await redisPipeline([
-      ["SET", keys.record(post.id), JSON.stringify(next), "XX"],
-      ...(next.state === "waiting" ? [["ZADD", DUE_KEY, at + RETRY_SECONDS, member]] : []),
-    ]);
+    await swap(where.community, member, where.id, JSON.stringify(marked), JSON.stringify(next), next.state === "waiting" ? at + RETRY_SECONDS : null, marked.due);
   }
   return counts;
 }

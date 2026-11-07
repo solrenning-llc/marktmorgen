@@ -67,7 +67,8 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, id: made.post.id });
     }
     const changed = await editScheduled(store, id, read.input);
-    return changed.ok ? Response.json({ ok: true }) : fail(changed.reason, changed.reason === "busy" ? 409 : 404);
+    if (changed.ok) return Response.json({ ok: true });
+    return fail(changed.reason, changed.reason === "gone" ? 404 : 409, changed.reason === "too_close" ? SCHEDULE_PROBLEMS.too_close : undefined);
   } catch (error) {
     if (error instanceof DataRoomError) return fail("store_full", 409, error.message);
     console.error("scheduling a community post failed", error);

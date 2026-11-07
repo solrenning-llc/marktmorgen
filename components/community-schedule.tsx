@@ -19,10 +19,12 @@ export type StudioScheduled = {
   date: string;
   time: string;
   tz: string;
-  /** "Tuesday, January 15, 2030 at 9:30 AM EST". */
+  /** "Goes up Tuesday, January 15, 2030 at 9:30 AM EST", or "Set for …" once late or done. */
   when: string;
-  /** Waiting, so it can still be changed. */
+  /** Waiting: it can still be canceled. */
   waiting: boolean;
+  /** Waiting and not yet within the lead before its time: it can still be changed. */
+  changeable: boolean;
   /** Done with or held up, so it can be cleared from the list. */
   clearable: boolean;
   /** Where it stands, in one sentence. */
@@ -40,6 +42,7 @@ const MESSAGES: Record<string, string> = {
   ...SCHEDULE_PROBLEMS,
   too_many: `Your community can keep ${MAX_SCHEDULED_POSTS} scheduled posts at once. Clear the ones already posted, or cancel one.`,
   busy: "It is being posted right now, so it can no longer be changed. Look for it in your community.",
+  done: "It has already been posted or stopped, so it can no longer be changed. Reload the page.",
   gone: "That scheduled post is not there anymore. Reload the page.",
   unknown: "That scheduled post is not there anymore. Reload the page.",
   owner_only: "Only the store's owner can post as the creator.",
@@ -152,13 +155,14 @@ export function CommunitySchedule({
                 {`${p.kind === "announcement" ? (p.email ? "Announcement, emailed to members who asked" : "Announcement") : "Post"} in ${p.spaceName}. ${p.when}.`}
               </p>
               <p className="mt-1 text-sm text-ink">{p.state}</p>
+              {p.waiting && !p.changeable ? <p className="mt-1 text-sm text-ink-soft">{MESSAGES.too_close}</p> : null}
               {p.href ? (
                 <p className="mt-1 text-sm">
                   <a href={p.href} className="font-semibold underline underline-offset-4">{`Open the post${p.title ? `: ${p.title}` : ""}`}</a>
                 </p>
               ) : null}
               <div className="mt-2 flex flex-wrap gap-x-5">
-                {p.waiting ? (
+                {p.changeable ? (
                   <button type="button" className={small} disabled={busy !== null} onClick={() => { setEditing(editing === p.id ? null : p.id); setAsking(null); }} aria-expanded={editing === p.id}>
                     {editing === p.id ? "Close the editor" : `Change ${p.title ? `"${p.title}"` : "this post"}`}
                   </button>

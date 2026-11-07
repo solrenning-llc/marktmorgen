@@ -24,14 +24,13 @@ import { CommunityStudio, type QueueRow, type StudioMember } from "@/components/
 import { CommunityEventsStudio, type StudioEvent } from "@/components/community-events-studio";
 import { CommunitySchedule, type StudioScheduled } from "@/components/community-schedule";
 import { listScheduled } from "@/lib/community-schedule";
-import { settled, stateWords } from "@/lib/community-schedule-rules";
+import { MIN_LEAD_SECONDS, settled, stateWords, whenWords } from "@/lib/community-schedule-rules";
 import { VIDEO_ROOM_NOTE } from "@/lib/call-rooms";
 import { configuredProviders } from "@/lib/meet-providers";
 import { meetView } from "@/lib/meet-connect";
 import { eventMeetings } from "@/lib/event-meetings";
 import type { MeetAccount } from "@/components/call-editor";
 import { videoAddress } from "@/lib/sales-page";
-import { zoneName } from "@/lib/call-setup";
 import {
   type CommunityEvent,
   eventClock,
@@ -154,8 +153,9 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
             date: p.date,
             time: p.time,
             tz: p.tz,
-            when: `${p.state === "posted" ? "Set for" : "Goes up"} ${new Intl.DateTimeFormat("en-US", { timeZone: p.tz, dateStyle: "full", timeStyle: "short" }).format(new Date(p.due * 1000))} ${zoneName(p.due * 1000, p.tz)}`,
-            waiting: p.state === "waiting" && !settled(p, Math.floor(at / 1000)),
+            when: whenWords(p, Math.floor(at / 1000)),
+            waiting: p.state === "waiting",
+            changeable: p.state === "waiting" && p.due >= Math.floor(at / 1000) + MIN_LEAD_SECONDS,
             clearable: settled(p, Math.floor(at / 1000)),
             state: stateWords(p, Math.floor(at / 1000)),
             href: p.state === "posted" && p.post ? `/@${store.handle}/community/post/${p.post}` : "",

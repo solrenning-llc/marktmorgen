@@ -74,7 +74,37 @@ export type ProductImage = {
    * lib/picture-r2-copy.ts). Absent for every picture copied nowhere; nothing serves from there yet.
    */
   r2?: true;
+  /**
+   * The picture's average color, exactly #rrggbb (TONE_PATTERN), painted under it while it loads (Encanto 5b): made
+   * in the creator's browser from the picture as it is shrunk, only for a picture with no transparency. Absent for
+   * every picture from before, and for one that has transparency.
+   */
+  tone?: string;
 };
+
+/** A picture's color as it is kept: # and six lowercase hex digits, nothing else. */
+export const TONE_PATTERN = /^#[0-9a-f]{6}$/;
+
+/**
+ * The average color of a picture's pixels (RGBA, four bytes each, as canvas getImageData gives them), as #rrggbb;
+ * null where any pixel is not fully opaque (the color would show through once the picture loads), where there is
+ * nothing to read, or where the bytes are not whole pixels.
+ */
+export function toneOf(data: ArrayLike<number>): string | null {
+  if (data.length === 0 || data.length % 4 !== 0) return null;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] !== 255) return null;
+    r += data[i];
+    g += data[i + 1];
+    b += data[i + 2];
+  }
+  const pixels = data.length / 4;
+  const hex = (sum: number) => Math.round(sum / pixels).toString(16).padStart(2, "0");
+  return `#${hex(r)}${hex(g)}${hex(b)}`;
+}
 
 export type SmallCopy = { path: string; width: number; bytes: number };
 
@@ -146,6 +176,11 @@ export function imageSrcSet(image: Pick<ProductImage, "path" | "width" | "small"
  */
 export const IMAGE_SIZES = {
   cover: "(max-width: 36rem) calc(100vw - 2rem), 34rem",
+  /**
+   * A card in the store page's grid: from 1024 px the cards go two to a row beside the store's profile (Encanto 3),
+   * each at most about 25rem wide. Only that grid; a one-column list keeps `cover` (Codex K2 on #2786).
+   */
+  grid: "(min-width: 64rem) 25rem, (max-width: 36rem) calc(100vw - 2rem), 34rem",
   hero: "(max-width: 42rem) calc(100vw - 4rem), 37rem",
   /** Beside the title, or in a list: a few dozen points across. */
   thumb: "6rem",
@@ -173,6 +208,7 @@ export function parseProductImage(raw: unknown): ProductImage | null {
     bytes: typeof value.bytes === "number" && value.bytes > 0 ? value.bytes : 0,
     small: parseSmall(value.small, value.path, width),
     ...(value.r2 === true ? { r2: true as const } : {}),
+    ...(typeof value.tone === "string" && TONE_PATTERN.test(value.tone) ? { tone: value.tone } : {}),
   };
 }
 

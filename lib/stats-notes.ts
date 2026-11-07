@@ -31,7 +31,7 @@ const KEEP_SECONDS = 400 * 86_400;
 
 /** A note's words as they are kept: one line, trimmed, at most MAX_NOTE_LENGTH characters. */
 export function noteText(raw: unknown): string {
-  return typeof raw === "string" ? raw.replace(/\s+/g, " ").trim().slice(0, MAX_NOTE_LENGTH) : "";
+  return typeof raw === "string" ? raw.replace(/\s+/g, " ").trim().slice(0, MAX_NOTE_LENGTH).trimEnd() : "";
 }
 
 /** A day a note can be put on: a real date, not in the future, not before the days kept. */
@@ -70,7 +70,11 @@ function allNotes(raw: unknown): StatsNote[] {
     if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 2 || !Object.hasOwn(value, "day") || !Object.hasOwn(value, "text")) throw new Error("Chart notes could not be read");
     const { day, text } = value as Record<string, unknown>;
     const date = typeof day === "string" && DAY.test(day) ? Date.parse(`${day}T00:00:00Z`) : NaN;
-    if (!Number.isFinite(date) || new Date(date).toISOString().slice(0, 10) !== day || typeof text !== "string" || !text || noteText(text) !== text) throw new Error("Chart notes could not be read");
+    const words = noteText(text);
+    // The previous writer could cut its final word immediately after one
+    // normalized space. Keep that exact 80-character stored form readable.
+    const legacyBoundary = typeof text === "string" && text.length === MAX_NOTE_LENGTH && text === words + " ";
+    if (!Number.isFinite(date) || new Date(date).toISOString().slice(0, 10) !== day || typeof text !== "string" || !words || (words !== text && !legacyBoundary)) throw new Error("Chart notes could not be read");
     // The sole writer uses this canonical representation. Parsing alone would
     // silently choose the last of conflicting duplicate day/text members.
     if (stored !== JSON.stringify({ day, text })) throw new Error("Chart notes could not be read");

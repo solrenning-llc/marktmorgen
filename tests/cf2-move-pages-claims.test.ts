@@ -26,6 +26,7 @@ import { addRows, finishUpload, runImport, startImport } from "@/lib/imports";
 import { paidCourses } from "@/lib/learn";
 import { emptyCourse, newItemId, saveCourse } from "@/lib/course";
 import { MIGRATION_GUIDES, migrationGuidePage, migrationGuides } from "@/lib/migration-guides";
+import { PAGES } from "@/lib/site-pages";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -63,6 +64,26 @@ async function main(): Promise<void> {
       is(`${p}, ${when}: no line's title reads the file's figure as what moves ("up to N a file")`, (block?.items ?? []).filter((m) => /up to [\d,]+ a file/.test(m.title)).map((m) => m.title), []);
     }
   }
+
+  // Rule 30: the same two sentences on the other public pages (the general moving page, the email and course pages,
+  // their questions and the comparisons). A file's import figure is never said without the month's rows, in the
+  // same sentence or in its section's introduction; "several prices cannot be given" never without its exception.
+  part("The same figures and the same exception on every other public page");
+  const perFile = /\b(50,000|20,000|500)\b[^.;]*\ba file\b|\bfile of up to (50,000|20,000|500)\b/;
+  const strings = (value: unknown): string[] => (typeof value === "string" ? [value] : Array.isArray(value) ? value.flatMap(strings) : value && typeof value === "object" ? Object.values(value).flatMap(strings) : []);
+  const unqualified: string[] = [];
+  const noException: string[] = [];
+  for (const page of PAGES) {
+    for (const block of (page.blocks ?? []) as unknown as Record<string, unknown>[]) {
+      const sectionSays = typeof block.intro === "string" && block.intro.includes("rows a month");
+      for (const text of strings(block)) {
+        if (perFile.test(text) && !sectionSays && !text.includes("rows a month")) unqualified.push(`${page.slug}: ${text.slice(0, 90)}`);
+        if (/several prices cannot be given/.test(text) && !(/course/.test(text) && /podcast/.test(text))) noException.push(`${page.slug}: ${text.slice(0, 90)}`);
+      }
+    }
+  }
+  is("no import figure a file without the month's rows", unqualified, []);
+  is("no 'several prices cannot be given' without the course or podcast exception", noException, []);
 
   part("The month's figure the page says is what the real route admits (no plan)");
   const owner = "move-claims@example.com";

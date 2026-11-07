@@ -15,7 +15,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_stripe_account_written_only";
-const ACCOUNT = "acct_1WrittenAAAAAAAAA";
+const ACCOUNT = "acct_1Written";
 let status = "active";
 let stripeCalls = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {

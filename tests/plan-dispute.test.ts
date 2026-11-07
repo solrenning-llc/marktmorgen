@@ -52,7 +52,7 @@ const ADDON = "sub_PlanDisputeAddon";
 const OTHER = "sub_PlanDisputeOther";
 const BROKEN = "sub_PlanDisputeBroken";
 /** Subscriptions whose reply is set by the test, to prove that a reply for another subscription decides nothing. */
-const misread: Record<string, Record<string, unknown>> = {};
+const misread: Record<string, unknown> = {};
 
 let byId: Record<string, Record<string, unknown>> = {};
 let pages: { data: Record<string, unknown>[]; has_more: boolean }[] = [];
@@ -76,7 +76,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (url.pathname === `/v1/subscriptions/${ADDON}`) return Response.json({ id: ADDON, metadata: { store: handle, addon: "assistant" }, customer: "cus_PlanDispute01" });
     if (url.pathname === `/v1/subscriptions/${OTHER}`) return Response.json({ id: OTHER, metadata: { store: handle }, customer: "cus_SomeoneElse" });
     const subAsked = url.pathname.startsWith("/v1/subscriptions/") ? decodeURIComponent(url.pathname.slice("/v1/subscriptions/".length)) : "";
-    if (subAsked && misread[subAsked]) return Response.json(misread[subAsked]);
+    if (subAsked && Object.hasOwn(misread, subAsked)) return Response.json(misread[subAsked]);
     if (url.pathname === `/v1/subscriptions/${BROKEN}`) return new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500 });
   }
   return new Response("{}", { status: 404 });
@@ -229,6 +229,24 @@ async function main() {
     pages = [{ data: [dispute("du_Later1", "needs_response", LATER)], has_more: false }];
     const later = await syncPlanDisputes(Date.now() + 10_000, NOW + 8 * DAY);
     is("the right reply, read after the week an unmatched one is asked about, is still written", [later.recorded, (await storeForEmail(owner))!.planDisputes?.map((kept) => kept.id)], [1, ["du_Later1"]]);
+    for (const key of Object.keys(misread)) delete misread[key];
+  }
+
+  // Claude 6 on #3098: a 200 whose JSON body is null, a string or a number is not the subscription asked for either.
+  part("A reply that is not an object (null, a string, a number) decides nothing");
+  {
+    await setup();
+    const asked = ["sub_PlanDisputeNull", "sub_PlanDisputeText", "sub_PlanDisputeNumber"];
+    misread[asked[0]] = null;
+    misread[asked[1]] = SUB;
+    misread[asked[2]] = 7;
+    pages = [{ data: [dispute("du_NullBody1", "needs_response", asked[0]), dispute("du_TextBody1", "needs_response", asked[1]), dispute("du_NumberBody1", "needs_response", asked[2])], has_more: false }];
+    const read = await syncPlanDisputes(Date.now() + 10_000, NOW);
+    is("each is counted as failed, none recorded or unmatched", [read.recorded, read.unmatched, read.failed, read.complete], [0, 0, 3, true]);
+    is("no dispute is written on the store", (await storeForEmail(owner))!.planDisputes ?? [], []);
+    const seenNow = await redis.run(["HGETALL", "nl:plan-disputes:seen"]);
+    const seenIds = Array.isArray(seenNow) ? (seenNow as unknown[]).filter((_, i) => i % 2 === 0).map(String) : Object.keys((seenNow ?? {}) as object);
+    is("nothing is remembered for them, so the next run reads them again", ["du_NullBody1", "du_TextBody1", "du_NumberBody1"].filter((id) => seenIds.includes(id)), []);
     for (const key of Object.keys(misread)) delete misread[key];
   }
 

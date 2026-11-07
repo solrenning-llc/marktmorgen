@@ -28,7 +28,7 @@ const CUSTOMER = "cus_ClosingMember1";
 const HANDLE = "closing-own-reply";
 
 /** What Stripe answers for GET /subscriptions/<MEMBER>. */
-let reply: Record<string, unknown> = {};
+let reply: unknown = {};
 const writes: string[] = [];
 const reads: string[] = [];
 /** What Stripe lists for GET /invoices, by status, whatever subscription was asked for. */
@@ -113,6 +113,16 @@ async function main() {
     is("no invoice of another subscription is read", reads.filter((path) => path === "/invoices").length, 0);
     is("the other subscription is never written down as a member", (await fields(folder)).filter((field) => field.endsWith(OTHER)), []);
     is("the member is still to be tried again", [(await fields(folder)).includes(`f:${MEMBER}`), counts.failed], [true, 1]);
+  }
+
+  // Claude 6 on #3098: a 200 whose JSON body is null, a string or a number is not the member's reply either.
+  for (const [label, body] of [["null", null], ["a string", MEMBER], ["a number", 7]] as const) {
+    part(`A reply that is ${label}, not an object, never drops the member`);
+    const { store, folder } = await setup();
+    reply = body;
+    const counts = await retryHolds(store, ENDED_AT, Date.now() + 10_000);
+    is("the member is still to be tried again", [(await fields(folder)).includes(`f:${MEMBER}`), counts.failed], [true, 1]);
+    is("nothing is written to Stripe and no invoice is read", [writes, reads.filter((path) => path === "/invoices").length], [[], 0]);
   }
 
   part("The member's own reply still decides");

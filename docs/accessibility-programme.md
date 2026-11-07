@@ -138,7 +138,7 @@ Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are smal
   - The soft accent (behind chosen, selected and highlighted things) also gives muted words 7:1. On "night" it was 4.05–4.3:1.
   - `tests/page-style.test.ts` checks 7:1 on the page, on cards, on items, on bands and on the soft accent, in every theme and across every accent tested.
 - **Not changed:**
-  - Links on a band stay at 4.5:1. Asking 7:1 there has no solution for some accents the creator may pick, so it stays a recorded gap and needs a design choice.
+  - Links on a band: decided on 2026-11-06 (C1-20261106-0100-TODOS-1) and built in 274 [AX1]: a link on a band is black or white, whichever reads more on it, always underlined (`lib/store-look.ts` `bandLink`, `app/globals.css`). `tests/band-link-contrast.test.ts` checks 7:1 for every theme across 216 accents (864 pairs). Before, links on a band were held to 4.5:1 in the creator's colour, which had no 7:1 solution for some accents; the creator's colour stays on buttons and elsewhere, not on band links.
   - Large text and non-text contrast were not changed.
   - Some backgrounds are barely set apart from the card. The soft accent on "night" moved from 1.60:1 to 1.30:1 against the card. Bands were already as close as 1.06:1 for some accents, before and after this change. Text stays readable on them, which is what 1.4.6 asks. A background difference is never the only sign that something is chosen (1.4.1), so a minimum band-to-card difference is a design choice left open.
 
@@ -152,3 +152,65 @@ Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are smal
 - **Why it cannot be fixed on our side:** a page cannot listen to keys inside a frame of another origin. Running our script in the frame is not possible either, because it is the provider's page.
 - **The equivalent we offer:** this is not a keyboard trap (2.1.2). One Shift+Tab from the player's first control reaches Close, which is labeled "Close", is at least 44 × 44 px and is always visible at the top of the window. Close is also the first thing focused when the window opens.
 - **Not checked:** a real screen reader with each provider's real player.
+
+## Resource-page interface captures (6 November 2026)
+
+Encanto 9 adds dated captures to `/platform/store-page` and
+`/platform/sales-pages`. These show the actual application with isolated,
+fictional Harbor Kitchen content. They are not testimonials, customer outcomes,
+or a replacement for the page's live heading, description, capability details,
+and closed-plan notice. Captions identify the fictional content, capture date,
+and substitute font. No text is placed over the captured pixels.
+
+### SC 1.4.9 assessment and alternatives
+
+The purpose is to show the interface arrangement: a creator profile above
+product cards, and a product list beside an editor with Build/Preview tabs and
+a page-coach panel. The surrounding card structure, spacing, selection and
+control placement convey visual information in addition to the text. Rendering
+a marketing paragraph as pixels is not this purpose. The capture's particular
+presentation is the evidence of how the application looked at the recorded
+revision; it does not establish the current state of a customer's store.
+
+The [W3C explanation of SC 1.4.9](https://www.w3.org/WAI/WCAG22/Understanding/images-of-text-no-exception.html),
+reviewed on November 6, 2026 (page updated September 16, 2025), distinguishes
+screenshots conveying significant other visual information from an image that
+simply styles text. Classification depends on what an individual image conveys,
+not on its file extension or the word "screenshot". This is the scoped basis
+for using these two informative interface captures; independent review must
+confirm it before merge. It is not a blanket exemption for text in future images.
+
+Each image has a specific text alternative describing its visible arrangement.
+The store alternative identifies the profile, three product cards, titles and
+price badges; the editor alternative identifies the product list, editor tabs
+and page-coach score. The latter does not claim a phone preview outside the
+captured area. Dates and provenance are live text in a visible `figcaption`.
+Page explanations and availability remain live, adjustable HTML text; these
+images introduce no separate product promise, price or testimonial.
+
+### Evidence and remaining limits
+
+Captures are 1280 by 820 pixels, with explicit intrinsic dimensions, lazy loading
+and asynchronous decoding. Local static WebP assets are 37,746 and 54,842
+bytes; the 100,000-byte per-capture publication ceiling was checked before
+creating them. There is no optimizer, external image host or runtime capture.
+The exact original SHA-256 digests are retained. Each matching resource page
+requests one separately cacheable `/feature-captures/` asset; pixels are no
+longer copied into the route module or HTML. The actual route dependency
+graph measured with esbuild (packages external and the same substitute font)
+fell from 1,769,389 to 1,645,958 bytes, and from 534,311 to 441,191 bytes gzip.
+The capture module contributes 1,179 rather than 124,610 bytes. This is a
+bundler report, not a Next production, RSC hydration, LCP or CLS measurement.
+Static-hosting request/transfer costs remain existing company costs, unknown
+rather than zero; these payload measurements do not certify global margin.
+The source revision, timestamps and SHA-256 digests are recorded with the images.
+
+The capture run used real Next server-rendered UI, local synthetic services and
+a substitute font. JavaScript was disabled to avoid automatic visit analytics;
+no hydration, editing interaction, production font fidelity or screen-reader
+journey is claimed. Isolated component checks at 390 and 1440 pixels confirm
+image decoding, readable live captions, no overflow and no violations in the
+selected automated accessibility rules. Full page integration is checked in the
+associated PR. Neither these checks nor this record certify whole-product AAA,
+all access needs, real devices, LCP/CLS or production behavior. Review of the
+image purpose and text alternatives remains part of independent PR review.

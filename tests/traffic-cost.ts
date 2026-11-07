@@ -74,7 +74,7 @@ const CALL = 0.6 / 1_000_000;
 const CPU_PER_SECOND = 0.128 / 3600;
 const MEMORY_PER_SECOND = (0.0106 * 2) / 3600;
 /** What a function sends the CDN, by the byte. */
-const ORIGIN_PER_BYTE = 0.06 / 1_000_000_000;
+export const ORIGIN_PER_BYTE = 0.06 / 1_000_000_000;
 /** A page of a store as it leaves the function: 44 KB measured, costed at 48. */
 export const PAGE_BYTES = 48_000;
 

@@ -57,12 +57,14 @@ LITERAL = re.compile(
 # Imports whose target is computed while running: the graph cannot follow them.
 # A dynamic import or require counts as literal only when its argument is the whole quoted
 # string: anything after the closing quote but ")" or "," (a join, a method) is computed.
+# One rule for every form that loads or resolves a module by name (Codex G on #3037, four
+# returns): the call is literal only when its whole first argument is one quoted string
+# followed by ")" or ","; anything else (a variable, a join, a method, a template) is computed.
+_CALL = r"""(?:\bimport\.meta\.resolve|\brequire\.resolve|\brequire|\bimport)\s*\("""
 COMPUTED = re.compile(
-    r"""\bimport\s*\(\s*[^"'\s)]|\brequire\s*\(\s*[^"'\s)]|\brequire\.context\b|\bimport\.meta\.glob\b"""
-    r"""|\b(?:import|require(?:\.resolve)?)\s*\(\s*(["'])[^"'\n]*\1\s*(?![\s),])"""
-    # Resolving a computed name is a computed import too (Codex G's third return on #3037).
-    r"""|\brequire\.resolve\s*\(\s*[^"'\s)]|\bimport\.meta\.resolve\s*\(\s*[^"'\s)]"""
-    r"""|\bnew\s+URL\s*\(\s*[^"'\s)][^;]*?\bimport\.meta\.url""")
+    _CALL + r"""(?!\s*(?P<q1>["'])[^"'\n]*(?P=q1)\s*[),])"""
+    + r"""|\bnew\s+URL\s*\((?!\s*(?P<q2>["'])[^"'\n]*(?P=q2)\s*,)[^;]*?\bimport\.meta\.url"""
+    + r"""|\brequire\.context\b|\bimport\.meta\.glob\b""")
 LISTING = re.compile(r"""\b(?:readdirSync|readdir|opendirSync|opendir|globSync|glob)\s*\(""")
 CSS_URL = re.compile(r"""url\(\s*(["']?)(\.{1,2}/[^"')\s]+)\1\s*\)""")
 # A string that names a repository file: "lib/x.ts", "../../lib/x.ts", "seed.ts".

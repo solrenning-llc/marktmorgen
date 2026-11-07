@@ -92,7 +92,7 @@ import { readAllListingsExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { readFlowsExact } from "@/lib/flows";
 import { FINAL_INDEX, workKey } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, imageFolder, saleHandles, storeFolder, storeForClosing, storeRef } from "@/lib/store";
+import { type Store, accountStores, closeStoreRecord, closedRecordKey, imageFolder, saleHandles, storeFolder, storeForClosing, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
@@ -319,6 +319,39 @@ async function del(keys: string[]): Promise<void> {
     const [gone] = repliesFor(await redisPipeline([["DEL", ...keys.slice(i, i + DEL_BATCH)]]), 1) ?? refuse("a delete");
     countOf(gone, "a delete");
   }
+}
+
+/**
+ * Deletes keys named by closing stores' keys alone, in one step with the check that each store's key still holds
+ * no record (Codex G on #2560, MEDIUM 2): the walk's once-a-run read that a key is free (refGuard) can be stale by
+ * the time it deletes, and a store its owner opened again under the same key in between keeps everything its key
+ * names. One command a DEL_BATCH of keys, as a DEL: inside it one EXISTS for each store they belong to and one
+ * DEL. Answers how many were kept for a store opened again; an unknown receipt throws.
+ */
+const DEL_WHILE_FREE = `-- marktmorgen:closed-del-if-free:v1
+local n = tonumber(ARGV[1])
+local free = {}
+for i = 1, n do free[i] = redis.call('EXISTS', KEYS[i]) == 0 end
+local doomed = {}
+local kept = 0
+for j = n + 1, #KEYS do
+  if free[tonumber(ARGV[j - n + 1])] then doomed[#doomed + 1] = KEYS[j] else kept = kept + 1 end
+end
+local gone = 0
+if #doomed > 0 then gone = redis.call('DEL', unpack(doomed)) end
+return {gone, kept}`;
+
+async function delWhileFree(keys: string[], ownerOf: Map<string, string>): Promise<number> {
+  if (!keys.length) return 0;
+  const owners = [...new Set(keys.map((key) => ownerOf.get(key)!))];
+  const records = await Promise.all(owners.map(closedRecordKey));
+  const at = new Map(owners.map((owner, i) => [owner, i + 1]));
+  const [reply] = repliesFor(await redisPipeline([["EVAL", DEL_WHILE_FREE, records.length + keys.length, ...records, ...keys, records.length, ...keys.map((key) => at.get(ownerOf.get(key)!)!)]]), 1) ?? refuse("a guarded delete");
+  const pair = repliesFor(reply, 2);
+  if (!pair) return refuse("a guarded delete");
+  countOf(pair[0], "a guarded delete");
+  const kept = countOf(pair[1], "a guarded delete");
+  return kept <= keys.length ? kept : refuse("a guarded delete");
 }
 
 /**
@@ -766,6 +799,8 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
   const refFree = ways.refFree ?? refGuard();
   /** Each key to delete, with the closing store it belongs to. */
   const doomed = new Map<string, string>();
+  /** The keys named by a closing store's key alone: deleted only while no store holds that key again (Codex G on #2560). */
+  const guarded = new Map<string, string>();
   // The keys each follower is handed, by store and family: read together, once the page is sorted.
   const followed = new Map<string, { family: string; owner: string; keys: string[] }>();
   let pruned = 0;
@@ -805,19 +840,32 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
       followed.set(`${hit.owner}|${family}`, group);
     }
     doomed.set(key, hit.owner);
+    if (hit.byRef) guarded.set(key, hit.owner);
   }
   for (const { family, owner, keys: found } of followed.values()) {
+    // What a key named by the store's key alone leads to is guarded as that key is.
+    const byRef = found.some((key) => guarded.has(key));
     try {
-      for (const key of await FOLLOWERS[family].find(found, batch.get(owner)!)) if (followable(key, family)) doomed.set(key, owner);
+      for (const key of await FOLLOWERS[family].find(found, batch.get(owner)!)) {
+        if (!followable(key, family)) continue;
+        doomed.set(key, owner);
+        if (byRef) guarded.set(key, owner);
+      }
     } catch (error) {
       if (!ways.skip) throw error;
       // Its keys are kept for the next walk, which follows them again: deleted now, what they lead to would be lost.
-      for (const key of found) doomed.delete(key);
+      for (const key of found) {
+        doomed.delete(key);
+        guarded.delete(key);
+      }
       ways.skip([owner], error);
     }
   }
+  let kept = 0;
   try {
-    await del([...doomed.keys()]);
+    await del([...doomed.keys()].filter((key) => !guarded.has(key)));
+    const named = [...guarded.keys()];
+    for (let i = 0; i < named.length; i += DEL_BATCH) kept += await delWhileFree(named.slice(i, i + DEL_BATCH), guarded);
   } catch (error) {
     // A delete whose receipt is unknown (Codex G on #2560): its stores are never finished on it. Before PAGE_TRIES
     // the page is read again; after them its stores are passed over, not finished, and walked again with the next walk.
@@ -825,7 +873,7 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
     ways.skip([...new Set(doomed.values())], error);
     return { deleted: 0, pruned };
   }
-  return { deleted: doomed.size, pruned };
+  return { deleted: doomed.size - kept, pruned };
 }
 
 /** What the walk needs of one store, as it was written: any other value is refused, never passed over (its store would never be walked). */

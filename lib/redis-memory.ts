@@ -125,6 +125,22 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/closed-store-data.ts DEL_WHILE_FREE: a closed store's key-named keys deleted only while no store holds its key again.
+        if (key.startsWith("-- marktmorgen:closed-del-if-free:v1\n")) {
+          const total = Number(args[0]);
+          const keys = args.slice(1, 1 + total);
+          const argv = args.slice(1 + total);
+          const n = Number(argv[0]);
+          const free = keys.slice(0, n).map((record) => this.run(["EXISTS", record]) === 0);
+          const doomed: string[] = [];
+          let kept = 0;
+          keys.slice(n).forEach((name, j) => {
+            if (free[Number(argv[j + 1]) - 1]) doomed.push(name);
+            else kept += 1;
+          });
+          this.scriptCalls += n + (doomed.length ? 1 : 0);
+          return [doomed.length ? this.run(["DEL", ...doomed]) : 0, kept];
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;

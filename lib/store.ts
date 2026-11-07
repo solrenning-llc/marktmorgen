@@ -858,6 +858,12 @@ async function sha256Hex(value: string): Promise<string> {
 const ownerKey = async (email: string) =>
   `nl:store:owner:${(await sha256Hex(`nimbus-store:${email.toLowerCase()}`)).slice(0, 40)}`;
 
+/**
+ * The key a store's record is kept under, for the closed stores' walk (lib/closed-store-data.ts): its deletes of
+ * what a closed store's key alone names check, in the same step, that no store was opened again under it.
+ */
+export const closedRecordKey = (ref: string): Promise<string> => ownerKey(ref);
+
 const handleKey = (handle: string) => `nl:store:handle:${handle}`;
 /**
  * Whether a handle's key, as read, still leads to a store: not free, not held

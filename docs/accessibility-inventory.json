@@ -1110,6 +1110,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/notifications/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/notifications",
+      "parameters": []
+    },
+    {
       "source": "app/studio/outreach/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/outreach",
@@ -1427,6 +1433,7 @@
     "components/next-offer-box.tsx",
     "components/next-offer-card.tsx",
     "components/no-count-toggle.tsx",
+    "components/notify-prefs-panel.tsx",
     "components/nudge-editor.tsx",
     "components/numbers-ask.tsx",
     "components/numbers-links-editor.tsx",
@@ -1835,6 +1842,7 @@
     "app/api/store/next-offer/route.ts",
     "app/api/store/no-count/route.ts",
     "app/api/store/notes/route.ts",
+    "app/api/store/notify-prefs/route.ts",
     "app/api/store/nudge/route.ts",
     "app/api/store/numbers-links/route.ts",
     "app/api/store/numbers/ask/route.ts",

@@ -1,0 +1,55 @@
+/**
+ * Review proof P1 (#3103): a lesson removed in another tab, or a session that
+ * ended, makes the studio's lesson-text read answer 404 "unknown" or 401; the
+ * new loader says only "could not be read just now. Try again in a moment.",
+ * which a retry never fixes. Synthetic store, Redis stub, no network.
+ */
+import { readFileSync } from "node:fs";
+import { NextRequest } from "next/server";
+import { GET as courseGet, POST as courseRoute } from "@/app/api/store/course/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { lessonsInOrder, readCourse } from "@/lib/course";
+import { readListing } from "@/lib/catalog";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
+import { done, is, part } from "./check";
+import { store as redis } from "./redis-stub";
+
+const OWNER = "rev3103-p1@example.com";
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
+  await claimHandle(OWNER, "rev3103pone", "Rev P1", "");
+  await ensureStatsId(OWNER);
+  await ensureStoreId(OWNER);
+  await setStripeAccount(OWNER, "acct_Rev3103P1", true);
+  await setSubscription(OWNER, { customerId: "cus_rev3103p1", subscriptionId: "sub_rev3103p1", active: true, tier: "creator", period: paidPeriod() });
+  const session = await openSession(OWNER);
+  const store = (await storeForEmail(OWNER))!;
+  const headers = { "content-type": "application/json", "x-nimbus-store": store.sid!, cookie: `${SESSION_COOKIE}=${session}` };
+  const call = async (body: Record<string, unknown>) => (await (await courseRoute(new NextRequest("https://marktmorgen.com/api/store/course", { method: "POST", headers, body: JSON.stringify(body) }))).json()) as { ok?: boolean };
+  const made = await addProduct(OWNER, "Course", "", "40");
+  if (!made.ok) throw new Error("product");
+  const id = made.product.id;
+  if (!(await call({ action: "enable", id })).ok) throw new Error("enable");
+  const courseId = (await readListing((await storeForEmail(OWNER))!, id))!.course!.id;
+  const outline = (await readCourse(courseId))!;
+  if (!(await call({ action: "edit", id, op: "lesson-add", moduleId: outline.modules[0].id, title: "Gone" })).ok) throw new Error("add");
+  const [gone] = lessonsInOrder((await readCourse(courseId))!).map(({ lesson }) => lesson.id);
+  if (!(await call({ action: "edit", id, op: "lesson-remove", lessonId: gone })).ok) throw new Error("remove");
+
+  part("What the server answers");
+  const removed = await courseGet(new NextRequest(`https://marktmorgen.com/api/store/course?id=${id}&lessonId=${gone}`, { headers }));
+  is("a removed lesson answers 404 unknown, not 503", [removed.status, ((await removed.json()) as { error?: string }).error], [404, "unknown"]);
+  const signedOut = await courseGet(new NextRequest(`https://marktmorgen.com/api/store/course?id=${id}&lessonId=${gone}`, { headers: { "x-nimbus-store": store.sid! } }));
+  is("a request without a session is refused as such", signedOut.status === 401 || signedOut.status === 403, true);
+
+  part("What the editor says");
+  const editor = readFileSync("components/course-editor.tsx", "utf8");
+  const load = editor.slice(editor.indexOf("async function loadText()"), editor.indexOf("async function upload("));
+  is("the loader tells a gone lesson or an ended session apart from a passing failure", /response\.status === 40[134]|data\.error === "unknown"|MESSAGES\[/.test(load), true);
+  done();
+}
+
+void main();

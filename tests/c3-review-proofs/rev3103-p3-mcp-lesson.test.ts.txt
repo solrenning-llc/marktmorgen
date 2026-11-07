@@ -1,0 +1,71 @@
+/**
+ * Review proof P3 (#3103, rule 30, same class outside the editor): the MCP
+ * get_lesson tool reads the lesson text with the lenient readBody, so an
+ * off-shape reply reaches the agent as text "" (a lesson with no text), while
+ * the studio GET now answers 503. Synthetic store, Redis stub, no network.
+ */
+import { POST } from "@/app/api/mcp/route";
+import { makeKey } from "@/lib/api-keys";
+import { editCourse, emptyCourse, saveBody, saveCourse } from "@/lib/course";
+import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
+import { store as redis } from "./redis-stub";
+import { ROOM } from "./data-room";
+import { done, is, part } from "./check";
+
+const OWNER = "rev3103-p3@example.com";
+type Pipeline = typeof redis.pipeline;
+
+async function main(): Promise<void> {
+  redis.clear();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (async () => { throw new Error("No outside requests in this test"); }) as typeof fetch;
+  try {
+    await claimHandle(OWNER, "rev3103-pthree", "Rev P3", "");
+    await ensureStatsId(OWNER);
+    await setSubscription(OWNER, { customerId: "cus_rev3103p3", subscriptionId: "sub_rev3103p3", active: true, tier: "pro", cycle: "month", period: paidPeriod() });
+    const made = await addProduct(OWNER, "Course", "", "49", null);
+    if (!made.ok) throw new Error("product");
+    let course = emptyCourse();
+    const added = editCourse(course, { op: "lesson-add", moduleId: course.modules[0].id, title: "With text" });
+    if (!added.ok) throw new Error("lesson");
+    course = added.course;
+    await saveCourse(course, ROOM);
+    if (!(await setProductCourse(OWNER, made.product.id, { id: course.id, lessons: 1 })).ok) throw new Error("course");
+    const lessonId = course.modules[0].lessons[0].id;
+    await saveBody(course.id, lessonId, "The creator's real lesson text.", ROOM);
+    const store = (await storeForEmail(OWNER))!;
+    const key = await makeKey(store.sid, "Synthetic reader");
+    if (!key.ok) throw new Error("key");
+    let n = 0;
+    const getLesson = async () => {
+      const response = await POST(new Request("https://marktmorgen.com/api/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key.key}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: ++n, method: "tools/call", params: { name: "get_lesson", arguments: { product: made.product.id, lesson: lessonId } } }),
+      }));
+      const body = (await response.json()) as { result: { isError: boolean; content: { text: string }[] } };
+      return { isError: body.result.isError, value: JSON.parse(body.result.content[0].text) as Record<string, unknown> };
+    };
+
+    part("Known reply");
+    const known = await getLesson();
+    is("the lesson's text is read as kept", [known.isError, known.value.text], [false, "The creator's real lesson text."]);
+
+    part("Off-shape reply to the text read only");
+    const real: Pipeline = redis.pipeline.bind(redis);
+    (redis as unknown as { pipeline: Pipeline }).pipeline = (async (commands: (string | number)[][]) => {
+      const out = await real(commands);
+      return commands.map((c, i) => (c[0] === "GET" && String(c[1]).includes(":body:") ? 1 : out[i]));
+    }) as Pipeline;
+    const odd = await getLesson().finally(() => {
+      (redis as unknown as { pipeline: Pipeline }).pipeline = real;
+    });
+    is("an off-shape text reply is never handed to the agent as a lesson with no text", odd.isError === false && odd.value.text === "", false);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+  done();
+}
+
+void main();

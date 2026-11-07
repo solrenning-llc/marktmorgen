@@ -1,0 +1,60 @@
+/**
+ * Review proof P1 (#3103): a lesson removed in another tab, or a session that
+ * ended, makes the studio's lesson-text read answer 404 "unknown" or 401; the
+ * new loader says only "could not be read just now. Try again in a moment.",
+ * which a retry never fixes. Synthetic store, Redis stub, no network.
+ */
+import { readFileSync } from "node:fs";
+import { NextRequest } from "next/server";
+import { GET as courseGet, POST as courseRoute } from "@/app/api/store/course/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { lessonsInOrder, readCourse } from "@/lib/course";
+import { readListing } from "@/lib/catalog";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
+import { done, is, part } from "./check";
+import { store as redis } from "./redis-stub";
+
+const OWNER = "rev3103-p4@example.com";
+
+async function main(): Promise<void> {
+  redis.clear();
+  process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
+  await claimHandle(OWNER, "rev3103pfour", "Rev P1", "");
+  await ensureStatsId(OWNER);
+  await ensureStoreId(OWNER);
+  await setStripeAccount(OWNER, "acct_Rev3103P4", true);
+  await setSubscription(OWNER, { customerId: "cus_rev3103p4", subscriptionId: "sub_rev3103p4", active: true, tier: "creator", period: paidPeriod() });
+  const session = await openSession(OWNER);
+  const store = (await storeForEmail(OWNER))!;
+  const headers = { "content-type": "application/json", "x-nimbus-store": store.sid!, cookie: `${SESSION_COOKIE}=${session}` };
+  const call = async (body: Record<string, unknown>) => (await (await courseRoute(new NextRequest("https://marktmorgen.com/api/store/course", { method: "POST", headers, body: JSON.stringify(body) }))).json()) as { ok?: boolean };
+  const made = await addProduct(OWNER, "Course", "", "40");
+  if (!made.ok) throw new Error("product");
+  const id = made.product.id;
+  if (!(await call({ action: "enable", id })).ok) throw new Error("enable");
+  const courseId = (await readListing((await storeForEmail(OWNER))!, id))!.course!.id;
+  const outline = (await readCourse(courseId))!;
+  if (!(await call({ action: "edit", id, op: "lesson-add", moduleId: outline.modules[0].id, title: "Gone" })).ok) throw new Error("add");
+  const [gone] = lessonsInOrder((await readCourse(courseId))!).map(({ lesson }) => lesson.id);
+  await call({ action: "body", id, lessonId: gone, text: "Real text." });
+
+  type Pipeline = typeof redis.pipeline;
+  const real: Pipeline = redis.pipeline.bind(redis);
+  const get = async () => { const r = await courseGet(new NextRequest(`https://marktmorgen.com/api/store/course?id=${id}&lessonId=${gone}`, { headers })); return [r.status, (await r.json()) as unknown]; };
+  part("Probes (expected to pass)");
+  for (const [label, swap] of [
+    ["Redis throws on the text read", async (commands: (string | number)[][]) => { if (commands.some((c) => c[0] === "GET" && String(c[1]).includes(":body:"))) throw new Error("boom"); return real(commands); }],
+    ["the reply list comes back empty", async (commands: (string | number)[][]) => (commands.some((c) => c[0] === "GET" && String(c[1]).includes(":body:")) ? [] : real(commands))],
+    ["the reply list comes back with an extra entry", async (commands: (string | number)[][]) => (commands.some((c) => c[0] === "GET" && String(c[1]).includes(":body:")) ? ["Real text.", "x"] : real(commands))],
+    ["a boolean in place of the text", async (commands: (string | number)[][]) => (commands.some((c) => c[0] === "GET" && String(c[1]).includes(":body:")) ? [false] : real(commands))],
+  ] as const) {
+    (redis as unknown as { pipeline: unknown }).pipeline = swap;
+    const got = await get().finally(() => { (redis as unknown as { pipeline: Pipeline }).pipeline = real; });
+    is(`${label}: 503 unavailable`, got, [503, { ok: false, error: "unavailable" }]);
+  }
+  is("the real text is still kept and read after the probes", await get(), [200, { ok: true, text: "Real text." }]);
+  done();
+}
+
+void main();

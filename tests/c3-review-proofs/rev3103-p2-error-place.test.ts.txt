@@ -1,0 +1,25 @@
+/**
+ * Review proof P2 (#3103): the lesson-text failure goes through onError to the
+ * course editor's single page-level alert, drawn above every module, not next
+ * to the "Edit the text" button the creator pressed; the quiz and assignment
+ * editors, named by the PR as the model, draw theirs inside themselves.
+ */
+import { readFileSync } from "node:fs";
+import { done, is, part } from "./check";
+
+const editor = readFileSync("components/course-editor.tsx", "utf8");
+const quiz = readFileSync("components/quiz-editor.tsx", "utf8");
+const task = readFileSync("components/task-editor.tsx", "utf8");
+const lessonStart = editor.indexOf("function LessonEditor(");
+const lessonEnd = editor.indexOf("\nfunction ", lessonStart + 10);
+const lessonBody = editor.slice(lessonStart, lessonEnd);
+
+part("Where each failure is drawn");
+is("the quiz editor keeps its own alert", /const \[error, setError\] = useState<string \| null>\(null\);/.test(quiz) && quiz.includes('role="alert"'), true);
+is("the assignment editor keeps its own alert", /const \[error, setError\] = useState<string \| null>\(null\);/.test(task) && task.includes('role="alert"'), true);
+is("the lesson-text loader reports through the page-level onError", lessonBody.includes('onError("The lesson text could not be read just now.'), true);
+const pageAlert = editor.indexOf('<p className="notice notice-error" role="alert">{error}</p>');
+const modules = editor.indexOf("course.modules.map((unit, index) => (");
+is("the page-level alert is drawn before (above) every module card", pageAlert > 0 && pageAlert < modules, true);
+is("the lesson editor draws the text failure next to its button, as the quiz and assignment editors do", /role="alert"/.test(lessonBody.slice(lessonBody.indexOf('htmlFor={`${prefix}-text`}'), lessonBody.indexOf('<p className="field-label">Downloads</p>'))), true);
+done();

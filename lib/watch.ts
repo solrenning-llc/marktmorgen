@@ -128,18 +128,19 @@ export async function watchedFolders(month = calendarWindow().id): Promise<strin
 }
 
 /**
- * The window a folder's store counts its video in: its billing month when it
- * pays and the period is known, the calendar month when the folder is known
- * to belong to no store (watching that happened is counted somewhere, never
- * nowhere). Null when whose it is could not be read (CX-123 rule 24): the
- * calendar month then would put the seconds where the store's own window,
- * which the video admission reads, never sees them.
+ * The window a folder's store counts its video in: the store's own window
+ * (its billing month when it pays, the calendar month when it does not), the
+ * calendar month when the folder is known to belong to no store (watching
+ * that happened is counted somewhere, never nowhere). Null when whose it is
+ * could not be read, or when the store pays and its window is unknown (CX-123
+ * rule 24): the calendar month then would put the seconds where the store's
+ * own window, which the video admission reads, never sees them.
  */
 async function windowOfFolder(folder: string, now: number): Promise<string | null> {
   try {
     const [key] = await storeKeysOf([folder]);
     const store = key ? await storeForEmail(key) : null;
-    if (store && (await storeFolder(storeRef(store))) === folder) return (allowanceWindow(store, now) ?? calendarWindow(now)).id;
+    if (store && (await storeFolder(storeRef(store))) === folder) return allowanceWindow(store, now)?.id ?? null;
   } catch (error) {
     console.error("could not read whose video was watched; measured again soon", error);
     return null;

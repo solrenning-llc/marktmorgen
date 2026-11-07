@@ -5,10 +5,13 @@
  *
  * It says, in plain words, how many are left, when the count starts again,
  * and at 100% what stops (one-off emails, refused by lib/broadcasts.ts) and
- * what waits (sequence emails, held by lib/flows.ts until the month turns).
- * The only ways on it names are the ones that work today: the existing
- * "Need more?" move up to Scale, when the page offers it, and writing to a
- * smaller group. Scale is the largest plan and is never given an invented
+ * what waits (sequence emails to the list, held by lib/flows.ts until the
+ * month turns); a step that emails the creator is not held but skipped
+ * (lib/flows.ts), and is said so. The only ways on it names are the ones that
+ * work today: the existing "Need more?" move up to Scale, when the page offers
+ * it outside the free trial (in the trial the allowance stays the trial's
+ * until it ends, lib/mail.ts monthlyAllowance, so moving up opens no email
+ * now), and writing to a smaller group. Scale is the largest plan and is never given an invented
  * one; email packs (344 [RN2]) are not on sale, so they are not named.
  *
  * Read from the numbers the page already has (the month's count and the
@@ -67,7 +70,8 @@ export function mailMonthNotice(facts: MailMonthFacts): MailMonthNotice | null {
       : facts.billing
         ? `The count starts again with your next billing month, on ${facts.reset}.`
         : `The count starts again on ${facts.reset}.`;
-  const moveUp = facts.moveUp && count(facts.moveUp.emails) && facts.moveUp.emails > allowance
+  // Never in the trial: the trial's allowance holds until it ends, whatever the plan, so a move up adds no email now.
+  const moveUp = !facts.trial && facts.moveUp && count(facts.moveUp.emails) && facts.moveUp.emails > allowance
     ? `Scale holds up to ${n(facts.moveUp.emails)} emails a month. "Need more?" below shows its price and moves you up.`
     : null;
   const largest = facts.biggest && !facts.trial;
@@ -78,8 +82,10 @@ export function mailMonthNotice(facts: MailMonthFacts): MailMonthNotice | null {
       title: facts.trial ? "The free trial's emails are used up" : "This month's emails are used up",
       lines: [
         facts.trial
-          ? "One-off emails can't go out now. Sequence emails wait until there are emails again."
-          : "One-off emails can't go out until the count starts again. Sequence emails wait and go out once it does.",
+          ? "One-off emails can't go out now. Sequence emails to your list wait until there are emails again."
+          : "One-off emails can't go out until the count starts again. Sequence emails to your list wait and go out once it does.",
+        // lib/flows.ts fails the step that emails the creator when the month is used up: it is never held.
+        "A step that emails you is skipped for anyone who reaches it before then.",
         when,
         ...(moveUp ? [moveUp] : largest ? ["Scale is the largest plan, so no plan holds more emails."] : []),
       ],

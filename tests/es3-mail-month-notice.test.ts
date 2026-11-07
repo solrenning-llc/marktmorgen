@@ -124,7 +124,7 @@ async function main(): Promise<void> {
   const box = renderToStaticMarkup(createElement(MailMonthNoticeBox, { notice: out!, hideKey: "mm:mail-month:s1:2026-11-04:out", headingId: "mail-month-heading" }));
   is("a status note", /role="status"/.test(box), true);
   is("warn colors at 100%", /class="notice notice-warn/.test(box), true);
-  is("title and lines shown", box.includes("This month&#x27;s emails are used up") && box.includes("Sequence emails wait"), true);
+  is("title and lines shown", box.includes("This month&#x27;s emails are used up") && box.includes("Sequence emails to your list wait"), true);
   is("a real button to hide it", /<button type="button"[^>]*>Hide this note<\/button>/.test(box), true);
   is("no dialog, no link away", /dialog|<a\b|autofocus/i.test(box), false);
   const nearBox = renderToStaticMarkup(createElement(MailMonthNoticeBox, { notice: near!, hideKey: null, headingId: "mail-month-heading" }));

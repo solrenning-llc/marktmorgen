@@ -488,12 +488,12 @@ export function EmailStudio(props: {
       <div className="min-w-0">
         <div className="card mt-8 p-6 sm:p-8 lg:mt-0">
           {/* Focus comes here when the month's note is hidden (components/mail-month-notice.tsx). */}
-          <p id="mail-month-heading" tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">This month</p>
+          <h2 id="mail-month-heading" tabIndex={-1} className="rounded-[6px] text-lg font-semibold tracking-[-0.02em] text-ink focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[3px] focus-visible:outline-[var(--focus)]">This month</h2>
           {props.used === null ? (
             // A count that could not be read is said to be unknown, never "0 of" (357 [ES3]).
             <>
               <p className="mt-2 text-3xl font-semibold">Not known right now</p>
-              <p className="mt-1 text-sm text-ink-soft" data-month-unknown>This month&apos;s count could not be read just now. Reload the page to try again.</p>
+              <p className="mt-1 text-sm text-ink-soft" data-month-unknown>This month&apos;s count can&apos;t be shown right now.</p>
             </>
           ) : (
             <>

@@ -14,6 +14,12 @@ import type { MailMonthNotice } from "@/lib/mail-month-notice";
  * refused, so every read and write is inside try and the note simply shows.
  * Hiding hands focus to the card's heading, so a keyboard or screen reader
  * user is not left on nothing.
+ *
+ * Known gap (ES3 review): a note hidden before is drawn by the server and
+ * removed on hydration, so it shows for a moment. Deciding on the server
+ * needs a new studio cookie, which the privacy policy names one by one (with
+ * its "last updated" date and notice), or an inline script, which the CSP
+ * allows only with its nonce; neither is a small change, so it is left as is.
  */
 const onStorage = (changed: () => void) => {
   window.addEventListener("storage", changed);

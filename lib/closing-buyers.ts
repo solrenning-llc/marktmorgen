@@ -34,7 +34,7 @@ import { NIMBUS_FROM, sendBatch, type BatchMessage } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeRef } from "@/lib/store";
 import { readPayPalSales } from "@/lib/paypal-sales";
 import { importedBuyers } from "@/lib/imported-purchases";
@@ -244,8 +244,10 @@ export async function tellStaysOpen(store: Store, until: number): Promise<boolea
   const base = storeBase(store);
   for (let round = 0; round < 1_000; round += 1) {
     if (Date.now() > until) return false;
-    const [reply] = await redisPipeline([["HSCAN", toldKey(folder), "0", "COUNT", 100]]);
-    const flat = Array.isArray(reply) && Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
+    // Only a page in its exact shape, [cursor, field, value, ...]; anything else holds and is tried again (rule 24).
+    const page = repliesFor(repliesFor(await redisPipeline([["HSCAN", toldKey(folder), "0", "COUNT", 100]]), 1)?.[0], 2);
+    const flat = page && typeof page[0] === "string" ? stringList(page[1]) : null;
+    if (!flat || flat.length % 2 !== 0) return false;
     const told: { email: string; ending: string }[] = [];
     const untold: string[] = [];
     for (let i = 0; i + 1 < flat.length; i += 2) {

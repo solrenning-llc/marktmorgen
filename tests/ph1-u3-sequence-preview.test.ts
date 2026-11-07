@@ -32,6 +32,7 @@ import { MAIL_TEMPLATES, hasPlaceholder } from "@/lib/mail-body";
 import { enroll, readFlows, saveFlow, sendDueSteps, type Flow } from "@/lib/flows";
 import { parseFlowList, readFlowListStrict } from "@/lib/flow-list";
 import { readSequenceCsv } from "@/lib/sequence-import";
+import { refusedStepPreview, sendablePreview } from "@/lib/step-preview";
 import { SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
 import { copyOf, planKeep } from "@/lib/mail-reuse";
 import { confirmedMailCopy } from "@/lib/mail-response";
@@ -190,7 +191,13 @@ async function main(): Promise<void> {
   is("the composer starts from a template's preview", /useState\([^;]*props\.draft\?\.preview \?\? props\.initialTemplate\?\.preview \?\? ""\)/.test(studio), true);
   is("Write it again opens with the copy's preview", /onOpen\(\{[^}]*copy\.preview/.test(studio), true);
   is("every email of a sequence has the field, its count and its problem", [/<PreviewTextField\b[^>]*id=\{`step-preview-\$\{s\.editorKey\}`\}/.test(studio), /function PreviewTextField\b/.test(studio)], [true, true]);
-  is("the field has a visible label, a count tied to it, announced, and its problem in words", [/<span className="[^"]*">Preview text<\/span>/.test(studio), /aria-describedby=\{`\$\{id\}-count \$\{id\}-hint \$\{id\}-problem`\}/.test(studio), /id=\{`\$\{id\}-count`\}[^>]*aria-live="polite"/.test(studio), /PREVIEW_PROBLEMS\[problem\]/.test(studio)], [true, true, true, true]);
+  is("a sequence's emails follow the composer's rules: the subject behind an invisible character, invisible characters only, a letter under a pile of marks", [
+    refusedStepPreview([{ subject: "Three new recipes", body: "Hi.", preview: "Three\u200c new\u00ad recipes" }], 150),
+    refusedStepPreview([{ subject: "Hi", body: "Hi.", preview: "\u200c\u3164\u2800" }], 150),
+    refusedStepPreview([{ subject: "Hi", body: "Hi.", preview: "a" + "\u0301".repeat(3000) }], 150),
+  ], ["preview_subject", "preview_blank", "preview_heavy"]);
+  is("and a stored one those rules now refuse is never sent", [sendablePreview({ subject: "Hi", preview: "\u200c\u3164" }), sendablePreview({ subject: "Three new recipes", preview: "Three\u200c new recipes" })], [null, null]);
+  is("the field has a short visible label, its hint outside it, a count tied to it but not read at every key, and its problem in words, announced", [/<label className="block" htmlFor=\{id\}>\s*<span className="[^"]*">Preview text<\/span>\s*<\/label>\s*<p className="field-hint mt-1" id=\{`\$\{id\}-hint`\}>/.test(studio), /aria-describedby=\{`\$\{id\}-hint \$\{id\}-count \$\{id\}-problem`\}/.test(studio), /id=\{`\$\{id\}-count`\}[^>]*aria-live/.test(studio), /id=\{`\$\{id\}-problem`\}[^>]*aria-live="polite"/.test(studio), /PREVIEW_PROBLEMS\[problem\]/.test(studio)], [true, true, false, true, true]);
   is("it goes with the saved sequence, only on an email", /delayHours: flowWaitHours\(s\.wait, s\.unit\)!,[\s\S]{0,200}\.\.\.\(!action && s\.preview\.trim\(\) \? \{ preview: s\.preview \} : \{\}\)/.test(studio), true);
   is("an opened sequence and one brought in from a file show theirs", [/preview: s\.preview \?\? ""/.test(studio), /preview: s\.preview \?\? "",\s*\}\)\),/.test(studio)], [true, true]);
   is("saving waits while an email's preview has a problem", /stepPreviewProblem/.test(studio) && /disabled=\{[^}]*previewBlocked/.test(studio), true);

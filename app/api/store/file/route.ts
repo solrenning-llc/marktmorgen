@@ -150,11 +150,11 @@ export async function POST(request: NextRequest) {
     return Response.json(answer);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "server_error";
-    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "storage_full", "storage_trial", "storage_setup", "files_unavailable", "upload_budget_unavailable", "renewal_unpaid", "plan_disputed"].includes(reason);
+    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "used", "two_step", "locked", "storage_full", "storage_trial", "storage_setup", "files_unavailable", "upload_budget_unavailable", "renewal_unpaid", "plan_disputed"].includes(reason);
     if (!known) console.error("signing an upload failed", error);
     return Response.json(
       { ok: false, error: known ? reason : "server_error" },
-      { status: reason === "signed_out" ? 401 : reason === "forbidden" || reason === "gone" ? 403 : reason === "files_unavailable" || reason === "upload_budget_unavailable" ? 503 : reason === "renewal_unpaid" || reason === "plan_disputed" ? 409 : known ? 400 : 500 },
+      { status: reason === "signed_out" ? 401 : reason === "used" ? 429 : reason === "forbidden" || reason === "gone" || reason === "two_step" || reason === "locked" ? 403 : reason === "files_unavailable" || reason === "upload_budget_unavailable" ? 503 : reason === "renewal_unpaid" || reason === "plan_disputed" ? 409 : known ? 400 : 500 },
     );
   }
 }

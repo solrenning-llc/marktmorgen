@@ -18,7 +18,10 @@
  *     oldest month's renewals said as known before Stripe's retry window is
  *     proved from dated documentation;
  *   - the fourth kept copy missing from READING_KINDS, or its cost not in the
- *     store-readings line.
+ *     store-readings line;
+ *   - money recorded while the reading was being made making its source
+ *     unknown: the reading's time is when its lists were read, not the `now`
+ *     it began at; a record after that time still makes it unknown (#2941).
  * Synthetic only: a stand-in Stripe (fetch) and the in-memory Redis.
  */
 process.env.STRIPE_SECRET_KEY = "sk_test_earnings_stand_in";
@@ -46,8 +49,13 @@ let broken: Partial<Record<ListPath, "garbled" | "error" | "shuffled">> = {};
 const log: string[] = [];
 const pagesOf: Record<string, number> = {};
 let versions = new Set<string>();
+// A stand-in clock for the reading's own time: each Stripe request and Redis call moves it by `tick` ms.
+let clockMs = 0;
+let tick = 0;
+const clock = () => clockMs;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  clockMs += tick;
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "") as ListPath;
   log.push(`stripe ${path}`);
@@ -72,6 +80,7 @@ let commands = 0;
 let replyBytes = 0;
 let garbleZrange = false;
 (redis as unknown as { pipeline: typeof pipeline }).pipeline = async (cmds: (string | number)[][]) => {
+  clockMs += tick;
   for (const c of cmds) log.push(`redis ${c[0]} ${c[1]}`);
   commands += cmds.length;
   const replies = await pipeline(cmds);
@@ -89,6 +98,8 @@ function reset(): void {
   commands = 0;
   replyBytes = 0;
   garbleZrange = false;
+  clockMs = 0;
+  tick = 0;
 }
 
 let storeCount = 0;
@@ -320,6 +331,36 @@ async function main(): Promise<void> {
     const shop = makeStore(false);
     const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
     is("a store that never sold through PayPal and has no PayPal sale kept: no PayPal source", states(e, "paypal"), Array(12).fill("absent"));
+  }
+
+  part("The reading's own time is when it ended: money recorded while it was reading is money so far");
+  reset();
+  {
+    // Every Stripe request and Redis call takes 20 seconds: the reading ends minutes after the `now` it began at.
+    tick = 20_000;
+    const shop = makeStore();
+    stripe["/checkout/sessions"] = [checkout("during1", NOW + 30_000, 5000), checkout("a0006", Date.UTC(2031, 5, 3), 5000)];
+    await paypalSale(shop, "PAYPALORDER0009", NOW + 40_000, 4000);
+    const e = (await readEarningsYear(shop, "UTC", NOW, false, clock))?.value ?? null;
+    const ended = NOW + clockMs;
+    is("the reading took time: it ended after the sales recorded while it read", ended > NOW + 40_000, true);
+    is("a Stripe sale recorded during the reading: Stripe is read, not unknown", states(e, "stripe").slice(0, 11), Array(11).fill("read"));
+    is("and the sale is counted in June", (of(e, "2031-06", "stripe") as { lines?: { salesCents: number }[] })?.lines?.[0]?.salesCents, 10_000);
+    is("a PayPal sale recorded during the reading: PayPal is read, not unknown", states(e, "paypal"), Array(12).fill("read"));
+    is("the reading's time is when its lists were read: after what it read, not after the call ended", [(e?.at ?? 0) >= NOW + 40_000, (e?.at ?? Infinity) <= ended], [true, true]);
+  }
+
+  reset();
+  {
+    tick = 20_000;
+    const shop = makeStore();
+    // Dated a day after the reading began, so after it ended: not money so far, whatever the reading took.
+    stripe["/checkout/sessions"] = [checkout("later01", NOW + DAY, 5000), checkout("a0007", Date.UTC(2031, 5, 3), 5000)];
+    await paypalSale(shop, "PAYPALORDER0010", NOW + DAY, 4000);
+    const e = (await readEarningsYear(shop, "UTC", NOW, false, clock))?.value ?? null;
+    is("the reading ended before the day after it began", NOW + clockMs < NOW + DAY, true);
+    is("a Stripe record after the reading ended: Stripe still unknown (#2941)", states(e, "stripe"), Array(12).fill("invalid"));
+    is("a PayPal record after the reading ended: PayPal still unknown (#2941)", states(e, "paypal"), Array(12).fill("invalid"));
   }
 
   part("The months in the store's time zone");

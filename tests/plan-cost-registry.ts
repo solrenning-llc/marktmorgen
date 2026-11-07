@@ -1107,6 +1107,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A member price's proof reads what the visitor holds from the creator's Stripe account (two calls at most) and the purchases
+      // brought over, counted before, at the next product's own count and inside its bounds (620 [SZ4], 6 November 2026;
+      // MAX_MEMBER_QUALIFYING listings and MEMBER_PRICE_STRIPE_CALLS held under NEXT_OFFER_READ's in tests/member-price.test.ts).
+      { file: "lib/member-price.ts", names: ["takeBuyerRead(store, MEMBER_PRICE_REQUEST_UNITS)", "MEMBER_PRICE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "MEMBER_PRICE_STRIPE_CALLS = 2"] },
       // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // An opening of a buyer's orders page takes ORDERS_OPEN_UNITS before anything is read, and its meter more before each read

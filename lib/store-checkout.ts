@@ -15,9 +15,10 @@ import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
 import { currentMeta } from "@/lib/tier-rules";
-import { saleOff } from "@/lib/store-sale";
+import { saleOff, saleable } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
-import { fairCoupon } from "@/lib/fair-coupon";
+import { fairCoupon, memberCoupon } from "@/lib/fair-coupon";
+import { isMemberPercent } from "@/lib/member-price-rules";
 import { introCoupon } from "@/lib/intro-coupon";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
@@ -221,6 +222,13 @@ export async function createCheckout(
      * the route from the request; "" when it is not known.
      */
     country?: string;
+    /**
+     * A member price (lib/member-price.ts, 620 [SZ4]): the percentage the page
+     * showed and the address it was proved for, proved again by the route
+     * (memberClaim) before they are passed here. Taken off like a fair price,
+     * when it takes off the most, with that address fixed on Stripe's page.
+     */
+    member?: { percent: number; email: string };
     /** No free trial: somebody coming back has had theirs. */
     noTrial?: boolean;
     /**
@@ -480,6 +488,14 @@ export async function createCheckout(
   // the page used to show the price, and taken off the same way as a sale,
   // when it takes off more than the sale does. Never both.
   const fairOffNow = !extras.coupon && !plan && !membership ? fairOff(store.fair, product, extras.country ?? "") : 0;
+  // A member price (lib/member-price.ts), already proved by the route: on
+  // what a sale covers, the same way, when it takes off more than a sale or
+  // a fair price does. Never two. Only on the member's own purchase of that
+  // product alone: a coupon comes off every line, so not with a box ticked
+  // (a product no rule may cover), nor a gift, places for others or a
+  // pre-order, which hand nothing to the member (lib/bundle-rules.ts).
+  const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;
+  const memberOffNow = !extras.coupon && !plan && !membership && memberAlone && saleable(product) && extras.member && isMemberPercent(extras.member.percent) ? extras.member.percent : 0;
   // A membership's introductory price (lib/intro-price.ts), unless a
   // come-back offer replaces it: one discount at a time, as everywhere here.
   const intro = membership && !extras.coupon ? activeIntro(product, store.tiers) : null;
@@ -504,6 +520,12 @@ export async function createCheckout(
     body.set("metadata[intro_cents]", String(intro.cents));
     body.set("metadata[regular_cents]", String(product.priceCents));
     body.set("subscription_data[metadata][intro]", String(intro.count));
+  } else if (memberOffNow > saleOffNow && memberOffNow > fairOffNow) {
+    body.set("discounts[0][coupon]", await memberCoupon(store.stripeAccountId, memberOffNow));
+    body.set("metadata[member]", String(memberOffNow));
+    // The member's own purchase: Stripe's page opens with the proved address, which the buyer cannot change.
+    if (extras.member?.email) body.set("customer_email", extras.member.email);
+    mayComeOff.push({ kind: "percent", percent: memberOffNow });
   } else if (fairOffNow > saleOffNow) {
     body.set("discounts[0][coupon]", await fairCoupon(store.stripeAccountId, fairOffNow));
     body.set("metadata[fair]", `${extras.country}:${fairOffNow}`);
@@ -710,7 +732,8 @@ export async function createCheckout(
     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&
     !extras.buyerKey && !extras.upsellKey && !extras.news && !extras.held && !extras.remind && !recovering && !named &&
     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&
-    !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
+    // A member price (620 [SZ4]) does not take a product out of this closed category: its coupon and fixed address are not counted.
+    !body.has("discounts[0][promotion_code]") && !(body.has("discounts[0][coupon]") && !body.has("metadata[member]")));
   if (singleDigital) throw new Error("The payment page could not be opened");
 
   // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):

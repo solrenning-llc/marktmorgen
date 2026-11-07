@@ -576,6 +576,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:exposure:v1:YYYY-MM@lib/exposure-budget-policy.ts": company("The exposure ledger's name", "The company's ledger."),
   "nl:exposure:v1:@lib/exposure-budget.ts": company("The company's exposure ledger, a month", "The company's ledger, carried by its fixed costs."),
   "nl:fair:c:@lib/fair-coupon.ts": { what: "A fair-price coupon made on the creator's Stripe", parts: [capped(96 * KEY, "One per percent offered.")] },
+  "nl:member:c:@lib/fair-coupon.ts": { what: "A member-price coupon made on the creator's Stripe (620 [SZ4])", parts: [capped(96 * KEY, "One per percent offered: at most the 18 of MEMBER_PERCENT_CHOICES.")] },
   "nl:mail:flows:@lib/flow-list.ts": { what: "The store's workflows", room: ["lib/flows.ts"] },
   "nl:wf:day:@lib/flow-runs.ts": short("Runs started and refused a day", "day", 3, 128),
   "nl:wf:held:@lib/flow-runs.ts": { what: "Held runs", room: ["lib/flows.ts"] },

@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   const replies: ("own" | string | null)[] = [];
   let cancelSet = false;
   /** Rule 30 on the add-on's price made at Stripe (POST /prices): answered as written, or with one value not the one written. */
-  let priceAs: "written" | "amount" | "currency" | "interval" = "written";
+  let priceAs: "written" | "amount" | "currency" | "interval" | "null" = "written";
   let pricesMade = 0;
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -69,6 +69,8 @@ async function main(): Promise<void> {
     if (method === "GET" && url.pathname === "/v1/products/nimbus_labs_store_assistant") return Response.json({ id: "nimbus_labs_store_assistant", object: "product" });
     if (method === "POST" && url.pathname === "/v1/prices") {
       pricesMade += 1;
+      // Claude 6 on #3098: an HTTP 200 whose JSON body is `null` itself.
+      if (priceAs === "null") return Response.json(null);
       const body = new URLSearchParams(String(init?.body ?? ""));
       const price: Record<string, unknown> = { id: "price_SyncAssist0" + pricesMade, object: "price", unit_amount: Number(body.get("unit_amount")), currency: body.get("currency"), recurring: { interval: body.get("recurring[interval]") }, lookup_key: body.get("lookup_key"), product: body.get("product") };
       if (priceAs === "amount") price.unit_amount = 4900;
@@ -155,7 +157,7 @@ async function main(): Promise<void> {
     is("its own reply is read as before", [own?.subscriptionId, own?.active], [plan.subscriptionId, true]);
 
     part("Rule 30 on the add-on's price made at Stripe: used only when the reply carries the price just written");
-    for (const [label, as] of [["another amount", "amount"], ["another currency", "currency"], ["a yearly interval", "interval"]] as const) {
+    for (const [label, as] of [["another amount", "amount"], ["another currency", "currency"], ["a yearly interval", "interval"], ["a null body", "null"]] as const) {
       priceAs = as;
       const got = await ensureAssistantPrice().then((id) => id, () => "refused");
       is("a price answered with " + label + " is never used for a checkout, nor kept for the next", got, "refused");
@@ -165,7 +167,7 @@ async function main(): Promise<void> {
     is(
       "control: the price answered as written (" + ASSISTANT_PRICE_CENTS + " cents a month) is used, and kept for the next checkout",
       [made, await ensureAssistantPrice(), pricesMade],
-      ["price_SyncAssist04", "price_SyncAssist04", 4],
+      ["price_SyncAssist05", "price_SyncAssist05", 5],
     );
   } finally {
     globalThis.fetch = original;

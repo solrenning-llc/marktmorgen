@@ -21,9 +21,9 @@ const failing = new Set<string>();
 /** What each GET /subscriptions/:id answers with: its own id, another subscription's, or none. */
 let readAs: "own" | "other" | "none" = "own";
 /** What each POST /subscriptions/:id (the switch) answers with: itself, another's id, none, or itself without the price just written. */
-let switchAs: "own" | "other" | "none" | "unwritten" = "own";
+let switchAs: "own" | "other" | "none" | "unwritten" | "null" = "own";
 /** What the void of a declined switch's invoice answers with. */
-let voidAs: "own" | "other" | "none" = "own";
+let voidAs: "own" | "other" | "none" | "null" = "own";
 /** The invoices a void was asked for. */
 const voids: string[] = [];
 const answerAs = (row: Record<string, unknown>, as: string, other: string) => {
@@ -67,6 +67,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const sub = path.match(/^\/subscriptions\/(sub_\w+)$/);
   if (sub && method === "POST") {
     const row = subs.get(sub[1])!;
+    if (switchAs === "null") {
+      // Applied (or declined) at Stripe, answered with a JSON body `null`.
+      if (!failing.has(row.customer)) row.items.data[0].price = prices.get(body.get("items[0][price]") ?? "")!;
+      return json(null);
+    }
     if (failing.has(row.customer)) return json(answerAs({ ...row, pending_update: { expires_at: 1 }, latest_invoice: { id: "in_VerifyDeclined1", status: "open", total: 2000, amount_paid: 0 } }, switchAs, "sub_SomebodyElse02"));
     const before = row.items.data[0].price;
     row.items.data[0].price = prices.get(body.get("items[0][price]") ?? "")!;
@@ -83,6 +88,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const voided = path.match(/^\/invoices\/(in_\w+)\/void$/);
   if (method === "POST" && voided) {
     voids.push(voided[1]);
+    if (voidAs === "null") return json(null);
     return json(answerAs({ id: voided[1], status: "void" }, voidAs, "in_SomebodyElse01"));
   }
   return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
@@ -133,6 +139,31 @@ async function main(): Promise<void> {
     part(`The void answered with ${label}`);
     is(`the declined card never passes on it`, await run("own", mode), [[true, true, true], false, ["in_VerifyDeclined1"]]);
   }
+
+  // Claude 6 on #3098, the same shape on the POST replies: an HTTP 200 whose JSON body is `null` itself. Whether the run
+  // fails whole (the cron reports "the run itself" as failing) or check by check, nothing passes on it.
+  const passingOn = (checks: { check: string; ok: boolean }[]) => [...amounts(checks), declined(checks)].filter(Boolean).length;
+  /** The checks of one run, or null when the whole run failed (the cron then reports "the run itself" as failing). */
+  const attempt = async (switching: typeof switchAs, voiding: typeof voidAs) => {
+    subs.clear();
+    failing.clear();
+    voids.length = 0;
+    readAs = "own";
+    switchAs = switching;
+    voidAs = voiding;
+    return verifyTiers().then(
+      (checks) => checks,
+      () => null,
+    );
+  };
+  part("The switch answered with a null body");
+  const onSwitch = await attempt("null", "own");
+  is("no amount and no declined card pass on it", onSwitch === null ? 0 : passingOn(onSwitch), 0);
+  part("The void answered with a null body");
+  const onVoid = await attempt("own", "null");
+  is("the declined card never passes on it", onVoid === null ? false : declined(onVoid) === true, false);
+  switchAs = "own";
+  voidAs = "own";
 }
 
 main().then(done).catch((error) => {

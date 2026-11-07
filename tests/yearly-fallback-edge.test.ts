@@ -53,7 +53,11 @@ let invoiceReadCount = 0;
 let monthVoidFails = false;
 let yearVoidFails = false;
 let yearPaidOnVoid = false; // the year gets paid by the member right as we void
-/** Rule 30: undefined answers with the object's own id; a string answers with another object's id; null with no id. */
+/**
+ * Rule 30: undefined answers with the object's own id; a string answers with another object's id; null with no id;
+ * NULL_BODY with an HTTP 200 whose JSON body is `null` itself.
+ */
+const NULL_BODY = "null body";
 let subReplyId: string | null | undefined;
 let yearReplyAt = -1; // 1-based count of GET /invoices/YEAR answered with yearReplyId
 let yearReplyId: string | null | undefined;
@@ -64,6 +68,7 @@ let moveReplyId: string | null | undefined;
 let moveReplyUnwritten = false;
 const replyAs = (row: Record<string, unknown>, id: string | null | undefined, status?: string) => {
   if (id === undefined) return row;
+  if (id === NULL_BODY) return null;
   const copy: Record<string, unknown> = status === undefined ? { ...row } : { ...row, status };
   if (id === null) delete copy.id;
   else copy.id = id;
@@ -73,7 +78,7 @@ const replyAs = (row: Record<string, unknown>, id: string | null | undefined, st
 /** The move's reply, as moveReplyId and moveReplyUnwritten say; Stripe's state is changed as the mode says either way. */
 const moveReply = (row: Record<string, unknown>) => {
   const copy = replyAs(row, moveReplyId);
-  if (!moveReplyUnwritten) return copy;
+  if (!moveReplyUnwritten || copy === null) return copy;
   const drop = (meta: unknown) => Object.fromEntries(Object.entries((meta ?? {}) as Record<string, string>).filter(([k]) => k !== "monthly_replaced"));
   const pending = copy.pending_update as { metadata?: unknown } | null;
   return { ...copy, metadata: drop(copy.metadata), pending_update: pending ? { ...pending, metadata: drop(pending.metadata) } : null };
@@ -495,6 +500,7 @@ async function main(): Promise<void> {
     ["another membership's id", "sub_Somebody0001", false],
     ["no id", null, false],
     ["its own id but not the yearly invoice it replaces", undefined, true],
+    ["a null body", NULL_BODY, false],
   ] as const) {
     part(`M. the move answered with ${label}`);
     await reset();

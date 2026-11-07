@@ -7,9 +7,17 @@
  *
  * Before the fix each round handed its bundles to productsBuyableNow, which
  * read their items again (offeredItems) and the pre-orders again (soonState):
- * 80 item reads and 4 pre-order reads for the 6 requests paid, more than
- * they cover. Every command the call sends is counted here, each key of a
- * GET or MGET as one, with the bytes of every answer.
+ * 80 item reads and 4 pre-order reads for the 6 requests paid. At the
+ * registry's figures for a listing read (collectionRead, bundleItemRead)
+ * that cost $0.000431 against the $0.000380 paid; the commands and bytes
+ * alone stayed under it, so that check is only a bound, and the proof is
+ * the read counts and the registry's figures. Every command the call sends
+ * is counted here, each key of a GET or MGET as one, with the bytes of
+ * every answer.
+ *
+ * A read that fails while the way in is worked out (the pre-orders, or a
+ * bundle's item) answers empty, which the page draws as "unknown", never
+ * "none" (access not available) for a product that could be on sale.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setCommunity, setProductBundle, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { type CommunityConfig, freshConfig, newItemId } from "@/lib/community";
@@ -125,9 +133,28 @@ async function main(): Promise<void> {
   part("What the rounds really read is inside what they paid");
   const paid = units * laterPageCost();
   is("every value read is within a listing's bytes, the registry's figure for one", largest <= READ_LISTING_BYTES, true);
-  is("the commands and bytes really sent cost less than the requests paid", commands * COMMAND + bytes * DB_BYTE <= paid, true);
+  // Only a bound: the code before the fix passed it too. The proof is the read counts above and the registry's figures below.
+  is("bound only, not the proof of the fix: the commands and bytes really sent cost less than the requests paid", commands * COMMAND + bytes * DB_BYTE <= paid, true);
   // Every one of the 15 products is judged (its stock and keys), whether its listing came from Redis or the catalog's head.
   is("the reads, at the registry's figures, cost less than the requests paid", collectionRead(productSet.size) + bundleItemRead(itemReads) <= paid, true);
+
+  part("A read that fails answers unknown, never none");
+  const failing = async (fails: (command: (string | number)[]) => boolean) => {
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      if (sent.some(fails)) throw new Error("synthetic lost reply");
+      return original(sent);
+    }) as typeof redis.pipeline;
+    try {
+      return await unlocksOf(store, config, async () => true);
+    } finally {
+      redis.pipeline = original;
+    }
+  };
+  is("the pre-orders' SMEMBERS fails: empty (unknown), not none", await failing((command) => command[0] === "SMEMBERS"), {});
+  const itemKey = (key: string | number) => String(key).startsWith("nl:catalog:") && children.some((id) => String(key).endsWith(id));
+  is("a bundle item's GET fails: empty (unknown), not none", await failing((command) => (command[0] === "GET" || command[0] === "MGET") && command.slice(1).some(itemKey)), {});
+  const control = await failing(() => false);
+  is("control: with nothing failing, each space names its bundle again", spaces.map((space) => (control?.[space] as { title?: string } | undefined)?.title), ["Bundle 0", "Bundle 1", "Bundle 2", "Bundle 3"]);
   done();
 }
 

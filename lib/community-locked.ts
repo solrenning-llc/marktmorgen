@@ -98,9 +98,11 @@ function unlockOf(needs: readonly string[], read: ReadonlySet<string>, byId: Rea
  * read twice: the pre-orders are read once, in the first round, and every
  * listing read (a space's product or a bundle's item) is kept and handed to
  * productsBuyableNow, so a bundle reached again in a later round, or an item
- * held by several bundles, is never read again. A round pays only for the
- * products and items it reads for the first time, so the rounds together pay
- * what reading them at once would. A failed read of the listings, the items
+ * held by several bundles, is never read again. A round pays, before it
+ * reads, for its products and for the items it reads for the first time, so
+ * the rounds together pay at least what reading them at once would (an id
+ * read as an item and later judged as a product is paid at both rates).
+ * A failed read of the listings, the items
  * or the pre-orders makes the answer empty ("unknown"), never "none" (a
  * product whose stock or keys cannot be read is left out by
  * productsBuyableNow, as on its page). A space still unread when the cap is

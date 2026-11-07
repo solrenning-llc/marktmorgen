@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { TakedownButton } from "@/components/takedown-actions";
-import { openReport, reportedProduct } from "@/lib/takedown";
+import { openReport, reportedProduct, unsentNotices } from "@/lib/takedown";
 import { NewTab } from "@/components/new-tab";
 
 export const metadata: Metadata = { title: "A notice — Marktmorgen", robots: { index: false, follow: false } };
@@ -22,6 +22,9 @@ export default async function TakedownPage({ params }: Params) {
   // The product the address points at, however far down the list, and the first page of the rest.
   const pointed = store ? await reportedProduct(report, store) : null;
   const products = store ? [...(pointed && !pointed.hidden ? [pointed] : []), ...store.catalog.head.filter((p) => !p.hidden && p.id !== pointed?.id)] : [];
+  // Taken down, but the email to the creator did not go out (Claude 6 on #3087): listed whenever the page is opened,
+  // so the notice the law asks for can still be sent after the page that failed was closed.
+  const owed = store ? await unsentNotices(report) : [];
   return (
     <LegalPage title={report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"} eyebrow={`Notice ${report.id}`} effective={null} legalNav={false} lastUpdated={new Date(report.at).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }) + " UTC"}>
       <LegalSection title="What it says">
@@ -39,6 +42,19 @@ export default async function TakedownPage({ params }: Params) {
               ? `${store.strikes.length} piece${store.strikes.length === 1 ? "" : "s"} of content taken down before, the latest ${new Date(store.strikes[0].at).toLocaleDateString("en-US", { dateStyle: "long" })}: ${store.strikes.slice(0, 3).map((s) => s.what).join("; ")}.`
               : "Nothing taken down from it before."}
           </p>
+          {owed.length ? (
+            <>
+              <p className="font-semibold text-black">Taken down, but the creator was not told yet</p>
+              <ul className="space-y-3">
+                {owed.map((o) => (
+                  <li key={JSON.stringify(o.action)} className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="[overflow-wrap:anywhere]">{o.what}</span>
+                    <TakedownButton token={token} action={o.action} label="Send the email to the creator" />
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
           {store.links.filter((l) => !l.header).length ? (
             <>
               <p className="font-semibold text-black">Its links</p>

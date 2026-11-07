@@ -117,6 +117,38 @@ export async function openReport(token: string): Promise<{ report: Report; store
   }
 }
 
+/**
+ * The takedowns of this notice whose content is down but whose notice to the creator has not gone out (the press
+ * that took it down could not send it), with what was taken down and the action that sends it: pressed again,
+ * takeDown finds the content down and the steps unfinished, and sends only the notice. A read that fails throws: an
+ * unknown is never "nothing owed".
+ */
+export async function unsentNotices(report: Pick<Report, "id">): Promise<{ action: TakedownAction; what: string }[]> {
+  const [members] = await redisPipeline([["SMEMBERS", owedKey(report.id)]]);
+  if (members === null || members === undefined) return [];
+  if (!Array.isArray(members) || members.some((m) => typeof m !== "string")) throw new Error("a notice's owed takedowns could not be read");
+  const owed: { action: TakedownAction; what: string }[] = [];
+  for (const part of (members as string[]).slice().sort().slice(0, MAX_OWED)) {
+    const action = actionOfPart(part);
+    if (!action) continue;
+    const steps = await readSteps(noticeKey(report.id, part));
+    if (steps && !steps.sent) owed.push({ action, what: steps.what });
+  }
+  return owed;
+}
+
+/** The action a takedown's part names ("<type>-<id>"), as takeDown wrote it. */
+function actionOfPart(part: string): TakedownAction | null {
+  const cut = part.indexOf("-");
+  if (cut < 0) return null;
+  const type = part.slice(0, cut);
+  const id = part.slice(cut + 1);
+  if ((type === "link" || type === "product") && id) return { type, id };
+  if (type === "kit" && !id) return { type: "kit" };
+  if (type === "store" && !id) return { type: "store", on: true };
+  return null;
+}
+
 export type TakedownAction =
   | { type: "link"; id: string }
   | { type: "product"; id: string }
@@ -146,6 +178,13 @@ export class TakedownNoticeUnsent extends Error {
  * key, whose notice the provider never answers with the first one's receipt.
  */
 const noticeKey = (report: string, part: string) => reportKey(`${report}:n:${part}`);
+/**
+ *   nl:report:<id>:n  set  the takedowns of that notice whose steps were written, until their notice to the creator
+ *                          went out, 400 days: what a page opened again lists as still owed (unsentNotices).
+ */
+const owedKey = (report: string) => reportKey(`${report}:n`);
+/** The most takedowns of one notice a page lists as owed: one notice names one address, so a handful at most. */
+const MAX_OWED = 50;
 type Steps = { what: string; howLong: string; at: string; noted: boolean; counted: boolean; sent: boolean };
 
 async function readSteps(key: string): Promise<Steps | null> {
@@ -275,8 +314,10 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
   if (up) {
     steps = { ...up, at: String(Date.now()), noted: false, counted: false, sent: false };
     await writeSteps(key, steps);
+    // Owed from here until its notice goes out, so a page opened again can still send it (unsentNotices).
+    await redisPipeline([["SADD", owedKey(report.id), part], ["EXPIRE", owedKey(report.id), REPORT_SECONDS]]);
     if (!(await apply(ref, store, action))) {
-      await redisPipeline([["DEL", key]]).catch(() => {});
+      await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
       return null;
     }
   } else {
@@ -331,5 +372,7 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
   }).catch(() => false);
   if (!sent) throw new TakedownNoticeUnsent();
   await writeSteps(key, { ...steps, sent: true });
+  // No longer owed. If this fails the steps say it was sent, and unsentNotices reads the steps, not the set alone.
+  await redisPipeline([["SREM", owedKey(report.id), part]]).catch(() => {});
   return what;
 }

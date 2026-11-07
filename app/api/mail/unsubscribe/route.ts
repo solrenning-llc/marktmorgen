@@ -58,7 +58,8 @@ export async function POST(request: NextRequest) {
     : COMMUNITY_UNSUB.test(community)
     ? await stopAnnouncements(community)
     : STOP_TOKEN.test(reminder)
-      ? await stopReminders(reminder)
+      // A stop whose write cannot be confirmed is not done (CX-123 rule 24): null, answered below.
+      ? await stopReminders(reminder).catch(() => null)
       : await unsubscribe(token);
   const which = UPDATE_STOP.test(update) ? `u=${update}` : REVIEW_STOP.test(review) ? `v=${review}` : COMMUNITY_UNSUB.test(community) ? `c=${community}` : STOP_TOKEN.test(reminder) ? `r=${reminder}` : `t=${token}`;
   if (fromPage) {

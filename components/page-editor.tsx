@@ -255,6 +255,7 @@ export function PageEditor({
   folder,
   lang = "en",
   facts = {},
+  factsUnread = [],
   traffic = null,
   outline = [],
   asked = [],
@@ -288,6 +289,8 @@ export function PageEditor({
   lang?: LanguageCode;
   /** The numbers the store has counted for this product (lib/page-facts.ts). */
   facts?: PageFacts;
+  /** The numbers whose read did not come back (lib/page-facts-read.ts): said as not read, never as not shown. */
+  factsUnread?: readonly FactKey[];
   /** Its page's last 30 days: times it was opened, checkouts started. */
   traffic?: { views: number; checkouts: number } | null;
   /** A course's modules and lessons, by title, to fill "What's inside" from (lib/course-outline-items.ts). */
@@ -1863,7 +1866,7 @@ export function PageEditor({
                       <span>
                         <span className="block font-semibold text-ink">
                           {fact.label}
-                          <span className="ml-2 font-normal text-ink-soft">{now ? `now: ${now.value} ${now.label}` : "not shown yet"}</span>
+                          <span className="ml-2 font-normal text-ink-soft">{now ? `now: ${now.value} ${now.label}` : factsUnread.includes(fact.key) ? "could not be read just now" : "not shown yet"}</span>
                         </span>
                         <span className="block text-xs text-ink-soft">{fact.hint}</span>
                       </span>
@@ -1990,7 +1993,8 @@ export function PageEditor({
       }
       case "facts": {
         const live = block.show.filter((key) => facts[key]).length;
-        return `${block.heading ? `${block.heading} · ` : ""}${live} ${live === 1 ? "number" : "numbers"} shown now`;
+        const unread = block.show.filter((key) => !facts[key] && factsUnread.includes(key)).length;
+        return `${block.heading ? `${block.heading} · ` : ""}${live} ${live === 1 ? "number" : "numbers"} shown now${unread ? `, ${unread} could not be read just now` : ""}`;
       }
     }
   };
@@ -2186,6 +2190,7 @@ export function PageEditor({
               picture={Boolean(product.picture)}
               pictureAlt={product.picture?.alt ?? ""}
               facts={facts}
+              factsUnread={factsUnread}
               // The version being edited: what the coach adds goes into it. The other version, never this one twice,
               // is the second one, whose pictures are counted too (independent review, 31/10/2026).
               page={{ ...pageToSend(), blocks: drafts.map((d) => d.block), variant: other ? { id: "", blocks: other.map((d) => d.block) } : null }}

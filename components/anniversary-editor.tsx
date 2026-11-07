@@ -53,8 +53,12 @@ export function AnniversaryEditor({
   const [refusedChoice, setRefusedChoice] = useState(0);
   const productsRef = useRef<HTMLFieldSetElement>(null);
   const productsErrorRef = useRef<HTMLParagraphElement>(null);
-  // Whether the email really goes out as saved: on, with an address and a known, non-empty choice.
-  const sending = anniversaryOn({ anniversary: setting });
+  // Whether the email really goes out as saved: on, with an address and a known, non-empty choice
+  // (anniversaryOn), a connected Stripe account (lib/anniversary-send.ts reads the sales there and stops
+  // without one) and email in the plan (the store's email figure is zero without it).
+  const sending = anniversaryOn({ anniversary: setting }) && connected && emailInPlan;
+  // Switched on but stopped by one of those: said as such, with the reason in the notices below, never "On".
+  const status = sending ? "On" : setting.on ? "On, but not sending" : "Off";
   // Left on with none chosen, as when the last chosen product was deleted: nothing goes out, and the creator decides what to do.
   const noneChosen = setting.on && Array.isArray(setting.products) && setting.products.length === 0;
   // A refused choice is said at the products, when they are shown; anything else below the form.
@@ -129,7 +133,7 @@ export function AnniversaryEditor({
         <h2 id="anniversary-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
           Email buyers a year after they buy
         </h2>
-        <span className={`tag ${sending ? "tag-live" : ""}`}>{sending ? "On" : "Off"}</span>
+        <span className={`tag ${sending ? "tag-live" : ""}`}>{status}</span>
       </div>
       <ul className="mt-4 space-y-2 text-sm text-ink-soft">
         {bullets.map((line) => (

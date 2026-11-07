@@ -22,8 +22,10 @@
  *   - the protections of unit 1 stay: the box at checkout, the list, once
  *     per person per date, the store's email figure before sending;
  *   - the studio's editor says what is true: "On" and the month's count only
- *     while the email really goes out (anniversaryOn), and a warning when it
- *     is switched on with no product chosen, without changing the setting;
+ *     while the email really goes out (anniversaryOn, a connected Stripe
+ *     account and email in the plan), "On, but not sending" with the reason
+ *     when switched on but stopped, and a warning when it is switched on with
+ *     no product chosen, without changing the setting;
  *     a choice refused is said at the products, and the most that can be
  *     chosen is said beside the boxes it disables.
  */
@@ -226,7 +228,9 @@ async function main(): Promise<void> {
   const left = (await chosen()) as rules.Anniversary;
   is("the setting is left on, as the creator set it, with none chosen", [left.on, left.products], [true, []]);
   const emptyOn = draw(left);
-  is("the editor does not say On while no email goes out", [rules.anniversaryOn({ anniversary: left }), />On<\/span>/.test(emptyOn), />Off<\/span>/.test(emptyOn)], [false, false, true]);
+  // Assertion changed (rule 23): the third value was `/>Off<\/span>/` expected true; switched on with none
+  // chosen it now says "On, but not sending" (the box is checked, and nothing goes out), never "On" nor "Off".
+  is("the editor does not say On while no email goes out", [rules.anniversaryOn({ anniversary: left }), />On<\/span>/.test(emptyOn), emptyOn.includes(">On, but not sending</span>")], [false, false, true]);
   is("nor counts the month as if it were sending", emptyOn.includes("Sent this month"), false);
   is("it says why nothing goes out, and what to do", emptyOn.includes("No product is chosen, so no email goes out. Choose at least one."), true);
   const choiceList = Array.from({ length: 201 }, (_, i) => ({ id: `prod${String(i).padStart(4, "0")}`, title: `Product ${i}` }));

@@ -1,3 +1,13 @@
+# Recibo final — 07/11/2026 01h09 Fortaleza
+
+PONTO DE PARADA PUBLICADO no canal: 72788a47f018d2ab1f368de5d3fe08d81c83a43c, blob 4f1ceefff0b13349921077c1f3b7e9aee64c041f, identificador CXZ-20261107-0108-C4-1. A publicação sucedeu após três409 sem gravação, todos seguidos de>=120s e leituraFULL com preservação do prefixo; a parada antes por leitura de novidades não foi tentativa de escrita. Isto encerra a pendência de publicação descrita no adendo abaixo. O canal referencia o checkpoint completo bfe773a3668ed9c57e813bba8caa9a0ddad60b1c; este novo prefixo só guarda o recibo, preservando todo aquele conteúdo.
+
+Liberação dos dois testes de assistant publicada também em comentário6702046321 no próprio #2740: somente ownership para C5/counter-ttl-wip, sem editar refs Z nem aprovar atomicidade/desenho/funding. Não há edição Z concorrente dos dois arquivos. Sem novo produto, CI, rerun ou merge depois do estado detalhado abaixo. #3039 mantém última foto8/9, focal C5 limpo; #2741 e#2819 mantêm MÉDIOS bloqueantes; #2947 falta focal C4. Próximos seguem R2/C5/publicação de provas2741/2819, nono gate3039 por notícia causal e focal2947. Não inventar atividade futura da vigia temporária. Continuidade não concluída: bloqueios de coordenação/CI são transitórios.
+
+Novidades lidas até39894065: relato C6 de01h06 de uma execução de FAQ aprovada não executou retentativa própria; G publicou novo MÉDIO residual3037/5809960512, unidade G/C4/R2; C5 reviews alheias mantêm seus donos. Nenhuma nova instrução nominal Z nem anúncio C4 MAIN VERMELHO no intervalo. Identificadores únicos C4-20261107-0059-TODOS-1 aplicados. Todos históricos/REDs/WIPs/retentativas consumidas abaixo permanecem válidos.
+
+---
+
 
 
 ### Codex Z — adendo de retomada — 07/11/2026 01h04 Fortaleza

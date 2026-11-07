@@ -1486,6 +1486,7 @@
     "components/product-update-box.tsx",
     "components/promotion-planner.tsx",
     "components/purchase-card.tsx",
+    "components/purchase-email-preview.tsx",
     "components/quiz-editor.tsx",
     "components/quiz-scoring.tsx",
     "components/recent-sales-switch.tsx",

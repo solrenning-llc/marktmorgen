@@ -29,6 +29,8 @@ import { missedQuestions } from "@/lib/answers";
 import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
 import { storeBase } from "@/lib/purchase-email";
+import { purchaseEmailPreview } from "@/lib/purchase-email-preview";
+import { PurchaseEmailPreview } from "@/components/purchase-email-preview";
 import { productSegment } from "@/lib/product-slug";
 import { featuredCards } from "@/lib/featured-cards";
 
@@ -114,6 +116,8 @@ export default async function StudioPagesPage({ searchParams }: Params) {
   const picked = page?.blocks.find((block) => block.kind === "reviews")?.first ?? [];
   const reviews = selected && summary && summary.visible > 0 ? await visibleReviews(store.statsId, selected.id, 0, PICKABLE_REVIEWS, picked).catch(() => []) : [];
   const action = selected ? pageAction(store, selected, null, canSell(store), related) : null;
+  // The email a buyer gets after paying for it, as an example: written by the real sender's own function from what is read above (lib/purchase-email-preview.ts).
+  const example = selected ? purchaseEmailPreview(store, selected) : null;
   const leadsTo = !selected || !action
     ? ""
     : action.action.kind === "checkout"
@@ -254,6 +258,8 @@ export default async function StudioPagesPage({ searchParams }: Params) {
                 .catch(() => null)}
             />
             </AiOn>
+            {/* The email a buyer gets after paying, as an example (lib/purchase-email-preview.ts): no read, nothing sent. */}
+            {example ? <PurchaseEmailPreview preview={example} productTitle={selected.title} /> : null}
             {/* What a buyer reads after paying (lib/thanks-note.ts). Something free has its own page after a sign-up. */}
             {!isFree(selected) ? (
               <ThanksNoteEditor

@@ -36,9 +36,9 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | NEW-CHARGE | 20 |
 | TOTALS | 34 |
 | PAST-SALE | 10 |
-| SETTING | 42 |
-| OTHER | 2 |
-| All | 118 |
+| SETTING | 44 |
+| OTHER | 3 |
+| All | 121 |
 
 ## The files
 
@@ -157,6 +157,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/funnel-offer-review.ts` | SETTING | 38: plan pause wording | no |
 | `lib/imports.ts` | SETTING | 693–698: imported price parsing and range | no |
 | `lib/next-offer.ts` | SETTING | 168: candidate price facts | no |
+| `lib/purchase-email-preview.ts` | SETTING | 84/121: the studio's example purchase email at the product's listed price, in the store's currency (380 [TB6], unit 1); the real email keeps the session's own currency | no |
 | `lib/store-assistant.ts` | SETTING | 172: product price facts | no |
 | `lib/store-export.ts` | SETTING | 99: the store's currency setting in the export | n/a |
 | `lib/store-guide.ts` | SETTING | 49–50: price and delivery facts | no |

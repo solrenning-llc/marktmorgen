@@ -130,20 +130,19 @@ export function feedXml(input: {
   /** The store's language, as RSS writes one ("es-es"); "en-us" unless given. */
   language?: string;
   /**
-   * Where an episode's transcript is fetched, and the line that names it in the episode's notes, in the store's
-   * language. Given, an episode with a transcript carries it twice: the podcast:transcript tag, for apps that show
-   * transcripts, and that line, because every app shows an episode's notes.
+   * Where an episode's transcript is fetched. Given, an episode with a transcript carries it in the podcast:transcript
+   * tag, for apps that show transcripts. Never in the episode's notes: the address holds the buyer's own feed token,
+   * and apps show and share notes as text (owner's privacy decision, 07/11/2026).
    */
-  transcript?: { url: (episode: Episode) => string; line: (url: string) => string };
+  transcript?: { url: (episode: Episode) => string };
 }): string {
   const items = [...input.episodes]
     .sort((a, b) => b.at - a.at)
     .map((e) => {
       const words = e.transcript && input.transcript ? input.transcript.url(e) : null;
-      const notes = words ? [e.notes, input.transcript!.line(words)].filter(Boolean).join("\n\n") : e.notes;
       return `    <item>
       <title>${xml(e.title)}</title>
-      <description>${xml(notes)}</description>
+      <description>${xml(e.notes)}</description>
       <guid isPermaLink="false">${e.id}</guid>
       <pubDate>${new Date(e.at * 1000).toUTCString()}</pubDate>
       <enclosure url="${xml(input.audio(e))}" length="${e.bytes}" type="${xml(e.contentType)}"/>

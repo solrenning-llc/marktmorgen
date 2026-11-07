@@ -66,8 +66,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     image: product.image ? `${SITE_URL}${imageUrl(product.image)}` : store.photoId ? `${SITE_URL}${photoUrl(store.photoId)}` : null,
     episodes: podcast?.episodes ?? [],
     audio: (e) => `${base}/${e.id}.${e.contentType === "audio/mp4" ? "m4a" : "mp3"}`,
-    // An episode's transcript, behind the same checks as its audio (274 [AX1] Part B.3).
-    transcript: { url: (e) => `${base}/${e.id}.txt`, line: coursesWords(store.language).feedTranscript },
+    // An episode's transcript, behind the same checks as its audio (274 [AX1] Part B.3); in its tag only, never in
+    // the notes, since the address holds the buyer's token.
+    transcript: { url: (e) => `${base}/${e.id}.txt` },
   });
   return new Response(body, { status: 200, headers: HEADERS });
 }

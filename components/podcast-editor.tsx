@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -41,6 +41,9 @@ const TRANSCRIPT_MESSAGES: Record<string, string> = {
   too_big: `A transcript can be up to ${MAX_TRANSCRIPT_LABEL}.`,
   in_use: "That file is already an episode's audio or transcript. Choose the file from your device again.",
 };
+
+/** How long "Press again to remove the transcript" waits for the second press before it goes back. */
+const CONFIRM_FOR_MS = 5000;
 
 /** The words of a file that is not a transcript, checked in the browser before anything is uploaded; null when it is one. */
 function transcriptProblem(file: File): string | null {
@@ -123,15 +126,18 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
     setPercent(0);
     setError(null);
     try {
-      const before = new Set(podcast.episodes.map((episode) => episode.id));
       const pathname = await uploadSoldFile(file, { folder, ownerId: productId }, setPercent);
       const out = await run({ action: "add", pathname, title, notes }, "Episode out. It reaches every listener's app the next time it checks.");
       if (out) {
         setTitle("");
         setNotes("");
         setFile(null);
-        const added = out.episodes.find((episode) => !before.has(episode.id));
-        if (words && added) {
+        // Found by the audio just uploaded, which no other episode can name (app/api/store/podcast refuses one that
+        // does), never by what is new in the list: another tab may have put an episode out a moment before.
+        const added = out.episodes.find((episode) => episode.pathname === pathname);
+        if (words && !added) {
+          setError("The episode is out, but its transcript was not added: the new episode is not in the list yet. Reload the page, then add it from the episode in the list below.");
+        } else if (words && added) {
           const failed = await sendTranscript(added.id, words);
           if (failed) setError(`The episode is out, but its transcript was not added. ${failed} You can add it from the episode in the list below.`);
           else toast("Transcript added.");
@@ -187,7 +193,7 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
           <div className="notice notice-info mt-3">
             <p className="font-semibold text-ink">{missing === 1 ? "1 episode has no transcript" : `${missing} episodes have no transcript`}</p>
             <p className="mt-1 text-sm">
-              {`A transcript is everything said in the episode, as text. It lets listeners who are deaf or hard of hearing, or who cannot play sound, follow along. Add it to an episode below as a plain text file (.txt). It is linked in the episode's notes in each listener's podcast app.`}
+              {`A transcript is everything said in the episode, as text. It lets listeners who are deaf or hard of hearing, or who cannot play sound, follow along. Add it to an episode below as a plain text file (.txt). Podcast apps that show transcripts show it with the episode.`}
             </p>
           </div>
         ) : null}
@@ -245,7 +251,9 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
 /**
  * One episode's transcript: whether it has one, and a file field to add or
  * replace it, with a button that sends it only when pressed (WCAG 3.2.2), and
- * a removal that asks twice, as deleting an episode does.
+ * a removal that asks twice, as deleting an episode does. Each control's name
+ * ends with the episode's title, after the words on screen (WCAG 2.4.6, 2.5.3),
+ * so a list of controls read out of the page still says which episode each is.
  */
 function EpisodeTranscript({ episode, onSend, onRemove }: { episode: Episode; onSend: (file: File) => Promise<string | null>; onRemove: () => Promise<boolean> }) {
   const [chosen, setChosen] = useState<File | null>(null);
@@ -253,14 +261,35 @@ function EpisodeTranscript({ episode, onSend, onRemove }: { episode: Episode; on
   const [problem, setProblem] = useState<string | null>(null);
   const [sure, setSure] = useState(false);
   const [round, setRound] = useState(0);
+  // Set while a removal is asked for, so focus moves to the field that adds one once it is drawn (WCAG 2.4.3).
+  const toField = useRef(false);
+  const field = useRef<HTMLInputElement>(null);
   const id = useId();
   const has = episode.transcript !== null;
+  const named = (to: string) => <span className="sr-only">{` ${to} “${episode.title}”`}</span>;
+
+  // The second press is asked for only a few seconds; then the button goes back (as it does when focus leaves it).
+  useEffect(() => {
+    if (!sure) return;
+    const back = window.setTimeout(() => setSure(false), CONFIRM_FOR_MS);
+    return () => window.clearTimeout(back);
+  }, [sure]);
+
+  useEffect(() => {
+    if (has || !toField.current) return;
+    toField.current = false;
+    field.current?.focus();
+  }, [has]);
+
   return (
     <div className="mt-3 space-y-2">
       <p className="text-sm text-ink-soft">{episode.transcript ? `Transcript added (${readableSize(episode.transcript.bytes)})` : "No transcript yet."}</p>
       <div>
-        <label htmlFor={`${id}-file`} className="field-label">{has ? "Replace the transcript (.txt)" : "Add a transcript (.txt)"}</label>
-        <input key={round} id={`${id}-file`} className="field mt-1" type="file" accept={TRANSCRIPT_ACCEPT} onChange={(e) => { setProblem(null); setChosen(e.target.files?.[0] ?? null); }} />
+        <label htmlFor={`${id}-file`} className="field-label">
+          {has ? "Replace the transcript (.txt)" : "Add a transcript (.txt)"}
+          {named(has ? "of" : "to")}
+        </label>
+        <input ref={field} key={round} id={`${id}-file`} className="field mt-1" type="file" accept={TRANSCRIPT_ACCEPT} onChange={(e) => { setProblem(null); setChosen(e.target.files?.[0] ?? null); }} />
       </div>
       {problem ? <p className="notice notice-error text-sm" role="alert">{problem}</p> : null}
       <div className="flex flex-wrap gap-3">
@@ -282,21 +311,25 @@ function EpisodeTranscript({ episode, onSend, onRemove }: { episode: Episode; on
           }}
         >
           {busy ? "Uploading…" : has ? "Upload the new transcript" : "Upload the transcript"}
+          {named("for")}
         </button>
         {has ? (
           <button
             type="button"
             className="btn btn-ghost btn-sm"
             disabled={busy}
+            onBlur={() => setSure(false)}
             onClick={async () => {
               if (!sure) return setSure(true);
               setSure(false);
               setBusy(true);
-              await onRemove();
+              toField.current = true;
+              if (!(await onRemove())) toField.current = false;
               setBusy(false);
             }}
           >
             {sure ? "Press again to remove the transcript" : "Remove the transcript"}
+            {named("of")}
           </button>
         ) : null}
       </div>

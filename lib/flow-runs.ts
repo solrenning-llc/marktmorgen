@@ -62,6 +62,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { MAX_RUN_EVENTS, MAX_STEPS, RUN_KEEP_SECONDS } from "@/lib/flow-limits";
 
@@ -379,7 +380,8 @@ export async function readRun(flowId: string, person: string): Promise<{ run: Ru
   if (!PERSON_KEY.test(person)) return null;
   if (!isRedisConfigured()) throw new FlowRunUnavailable();
   const reply = await redisPipeline([["HGETALL", runKey(flowId, person)], ["LRANGE", logKey(flowId, person), 0, MAX_RUN_EVENTS * 2]]).catch(() => null);
-  if (!replied(reply, 2) || !Array.isArray(reply[1])) throw new FlowRunUnavailable();
+  // An HGETALL slot that is not exactly a list of strings is unknown, never "no such run" (CX-123 rule 24).
+  if (!replied(reply, 2) || !Array.isArray(reply[1]) || !stringList(reply[0])) throw new FlowRunUnavailable();
   const run = parseRun(person, reply[0]);
   if (!run) return null;
   return { run, events: (reply[1] as unknown[]).map(parseEvent).filter((e): e is RunEvent => e !== null) };
@@ -445,7 +447,8 @@ export async function runPeople(flowId: string, page = 500): Promise<{ person: s
   for (let i = 0; i < people.length; i += page) {
     const chunk = people.slice(i, i + page);
     const emails = await redisPipeline(chunk.map((person) => ["HGET", runKey(flowId, person), "email"])).catch(() => null);
-    if (!replied(emails, chunk.length)) throw new FlowRunUnavailable();
+    // Exactly nil is "this run holds no address"; any other shape is unknown, so its queued steps are never left behind.
+    if (!replied(emails, chunk.length) || emails.some((email) => email !== null && typeof email !== "string")) throw new FlowRunUnavailable();
     chunk.forEach((person, j) => out.push({ person, email: typeof emails[j] === "string" ? (emails[j] as string) : "" }));
   }
   return out;

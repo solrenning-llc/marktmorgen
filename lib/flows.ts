@@ -41,6 +41,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
@@ -220,6 +221,10 @@ export async function flowsBytes(listId: string | null): Promise<number | null> 
 export async function readFlows(listId: string | null): Promise<Flow[]> {
   if (!listId || !isRedisConfigured()) return [];
   const [raw] = await redisPipeline([["GET", flowsKey(listId)]]);
+  return parseFlows(raw);
+}
+
+function parseFlows(raw: unknown): Flow[] {
   if (typeof raw !== "string") return [];
   try {
     const list = JSON.parse(raw) as Flow[];
@@ -227,6 +232,17 @@ export async function readFlows(listId: string | null): Promise<Flow[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * The store's workflows for the sender (sendDueSteps): none only when Redis says exactly nil; a reply that is missing
+ * or of another shape throws, so the due batch goes back in the queue for a later run instead of being dropped
+ * (CX-123 rule 24).
+ */
+async function readFlowsExact(listId: string): Promise<Flow[]> {
+  const reply = repliesFor(await redisPipeline([["GET", flowsKey(listId)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("the store's workflows");
+  return parseFlows(reply[0]);
 }
 
 export class FlowWriteUnconfirmed extends Error {
@@ -538,16 +554,26 @@ export async function enroll(store: Store, email: string, event: { joined: boole
  * Starts these sequences for these people, each person once per sequence:
  * the start is claimed before anything is lined up, so a sequence that
  * starts another, or a label given twice, never starts anybody a second time.
- * Says how many starts were new.
+ * Says how many starts were new; throws UnknownReplyError, after the
+ * definite starts, when a claim's reply was unknown.
  */
 async function startFlows(store: Store, flows: Flow[], addresses: string[]): Promise<number> {
   if (!store.listId || !addresses.length) return 0;
   const now = Math.floor(Date.now() / 1000);
   let started = 0;
+  let unknown = false;
   for (const flow of flows) {
     if (!flow.steps.length) continue;
-    const claims = await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), "1", "NX", "EX", 400 * 86_400]));
-    const claimed = addresses.filter((_, i) => claims[i] !== null);
+    // Claimed only on exactly "OK", not on exactly nil (they are in it already); any other reply is unknown: that
+    // person is neither restarted nor sent anything, and the whole call says so once the definite starts are done
+    // (CX-123 rule 24).
+    const claims = repliesFor(await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), "1", "NX", "EX", 400 * 86_400])), addresses.length);
+    if (!claims) {
+      unknown = true;
+      continue;
+    }
+    const claimed = addresses.filter((_, i) => claims[i] === "OK");
+    if (claims.some((claim) => claim !== "OK" && claim !== null)) unknown = true;
     if (!claimed.length) continue;
     // The store's runs a day (lib/flow-limits.ts): past it, nobody more is
     // started today, and their start is given back so a later moment can.
@@ -573,6 +599,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     ]);
     started += fresh.length;
   }
+  if (unknown) throw new UnknownReplyError("a sequence's once-only start");
   return started;
 }
 
@@ -1133,7 +1160,7 @@ export async function sendDueSteps(
       counts.dropped += emails.length;
       return;
     }
-    if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlows(listId));
+    if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlowsExact(listId));
     const flow = flowsFor.get(listId)!.find((f) => f.id === flowId);
     const step = flow?.steps[index];
     if (!flow || !flow.active || !step || monthlyAllowance(store) === 0) {

@@ -16,6 +16,16 @@
  *    priced with the registry's own unit prices; no superseded margin figure is
  *    cited as current.
  * 4. One sequence for the units, with no "can run now" beside "nothing starts".
+ *
+ * Claude 4's focal return on #3032 (7 November 2026) added:
+ *
+ * 5. Coverage is tied to the video it measured: a lesson's bitmap carries its
+ *    video version beside it, a beat for a video the lesson no longer has is
+ *    refused, a replaced video starts from an empty bitmap, and every read
+ *    counts a bitmap of another version as 0%. Existing coverage, cost and
+ *    privacy of the change are stated.
+ * 6. No per-lesson cap that can never refuse anything.
+ * 7. What happens when the heartbeat token expires in the middle of a lesson.
  */
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
@@ -77,7 +87,7 @@ part("Finding 2: one Redis representation, erased whole");
 is("no hash per student and course holding the bitmap", /one hash per student and course/.test(flat), false);
 const commandsOf: Record<string, string[]> = {
   string: ["GET", "SET", "INCR", "EXPIRE", "PEXPIRE", "SETBIT", "GETBIT", "BITCOUNT", "DEL"],
-  hash: ["HGET", "HMGET", "HSET", "HINCRBY", "PEXPIRE", "EXPIRE", "DEL"],
+  hash: ["HGET", "HMGET", "HSET", "HINCRBY", "HKEYS", "PEXPIRE", "EXPIRE", "DEL"],
   set: ["SADD", "SISMEMBER", "SMEMBERS", "DEL"],
 };
 const storage = section("### 4.2");
@@ -104,7 +114,7 @@ const admission = [...cost.matchAll(/^\| ([A-E]) \| ([^|]+) \| (\d+) \|$/gm)];
 is("an admission table, step by step", admission.length >= 4, true);
 is("its commands fit the envelope", admission.reduce((sum, m) => sum + Number(m[3]), 0) <= commands && commands > 0, true);
 const admitted = admission.map((m) => m[2]).join(" ");
-is("it admits access, course, gate, student share, per-lesson cap, data room, pace, pool, duplicate and fallback", ["access", "course", "heldBack", "student share", "per-lesson cap", "data room", "pace", "pool", "duplicate", "fallback"].filter((w) => !admitted.includes(w)), []);
+is("it admits access, course, gate, student share, video version, data room, pace, pool, duplicate and fallback", ["access", "course", "heldBack", "student share", "video version", "data room", "pace", "pool", "duplicate", "fallback"].filter((w) => !admitted.includes(w)), []);
 is("a duplicate takes a pool unit: the pool bounds every request that reaches Redis", [flat.includes("a duplicate beat takes one pool unit"), /costs no pool after the first/.test(flat)], [true, false]);
 for (const tier of TIERS) {
   const pool = (2 * paidVideoSeconds(tier)) / 15;
@@ -117,5 +127,25 @@ const units = section("## 6.");
 const unit2 = units.split("\n").find((l) => l.startsWith("| 2 |")) ?? "";
 is("unit 2 waits for unit 1, its reservations and a current MR model line", [unit2.includes("after unit 1 merges"), unit2.includes("reserve"), unit2.includes("MR")], [true, true, true]);
 is("unit 1 is the only unit that can start now", units.includes("Only unit 1 can start now"), true);
+
+part("Focal return finding 1 (MÉDIO): coverage is tied to the video it measured");
+const index = families.find((f) => f.key === "nl:course:<course>:watchidx:<emailKey>");
+is("the lesson index is a hash from lesson id to the video version its bitmap measured", [index?.type, storage.includes("lesson id to video version")], ["hash", true]);
+is("the video version is the stream id with the signed interval and buckets", flat.includes("video version = `streamId`, `interval` and `buckets`"), true);
+is("step C refuses a beat for a video the lesson no longer has (current stream record read)", [flat.includes("a beat for a video the lesson no longer has is refused"), admission.some((m) => m[1] === "C" && m[2].includes("stream record"))], [true, true]);
+is("the writing script deletes the old bitmap before setting a bit for a new version", flat.includes("deletes the old bitmap before setting the new bit"), true);
+is("every read counts a bitmap of another version as 0%, never the old coverage", flat.includes("a bitmap whose video version is not the lesson's current video counts as 0%"), true);
+is("the count needs no range: every bit was set under the version stored beside it", flat.includes("every bit in a bitmap was set by a beat of the version stored beside it"), true);
+is("existing coverage, the cost and the privacy of the change are stated", [flat.includes("No coverage exists today"), flat.includes("The cost of tying coverage to the video"), flat.includes("The video version holds no timestamp")], [true, true, true]);
+is("unit 2 tests a replaced video", section("## 7.").includes("replaced video"), true);
+
+part("Focal return finding 2 (LEVE): no cap that can never refuse");
+is("no per-lesson cap family, field or reply", [families.some((f) => f.key.includes("watchcap")), /per-lesson cap/.test(flat), /`\["cap"\]`/.test(flat), /2 \* buckets` accepted writes/.test(flat)], [false, false, false, false]);
+is("the document says why no cap is needed", flat.includes("No per-lesson cap is kept"), true);
+
+part("Focal return finding 3 (LEVE): the token expires in the middle of a lesson");
+is("the client stops at `exp` and asks for a reload; the route says reload", [section("### 2.2").includes("stops sending beats at `exp`"), flat.includes("`{ reload: true }`")], [true, true]);
+is("the student is told in words", section("### 3.4").includes("reload this page"), true);
+is("unit 4 tests it", section("## 7.").includes("after the token expires"), true);
 
 done();

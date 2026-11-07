@@ -1875,7 +1875,8 @@ function stepPreviewProblem(s: Pick<StepDraft, "preview" | "subject">): PreviewP
 /**
  * The preview text of a sequence's email (537 [PH1], unit 3): the same rules
  * as the composer's field, its count as a reader counts (an emoji is one) and
- * its problem in words beside it, read out once when it appears.
+ * its problem in words beside it, read out once when it appears. The label
+ * is the name only; the hint and the count are read with the field.
  */
 function PreviewTextField({ id, value, subject, onChange }: { id: string; value: string; subject: string; onChange: (next: string) => void }) {
   const problem = stepPreviewProblem({ preview: value, subject });
@@ -1883,20 +1884,21 @@ function PreviewTextField({ id, value, subject, onChange }: { id: string; value:
     <div>
       <label className="block" htmlFor={id}>
         <span className="text-sm text-ink-soft">Preview text</span>
-        <span className="field-hint mt-1 block" id={`${id}-hint`}>
-          Optional. The short line readers see after the subject, before they open the email. Say what is inside.
-        </span>
       </label>
+      <p className="field-hint mt-1" id={`${id}-hint`}>
+        Optional. The short line readers see after the subject, before they open the email. Say what is inside.
+      </p>
       <input
         id={id}
         className="field mt-1"
         value={value}
         autoComplete="off"
         aria-invalid={problem ? true : undefined}
-        aria-describedby={`${id}-count ${id}-hint ${id}-problem`}
+        aria-describedby={`${id}-hint ${id}-count ${id}-problem`}
         onChange={(e) => onChange(e.target.value)}
       />
-      <span id={`${id}-count`} className="field-hint mt-1 block tabular-nums" aria-live="polite">
+      {/* Not a live region: read with the field, not at every key; going past the limit is said by the problem line. */}
+      <span id={`${id}-count`} className="field-hint mt-1 block tabular-nums">
         {`${n(previewLength(value.replace(/\s+/g, " ").trim()))} of ${MAX_PREVIEW} characters`}
       </span>
       <span id={`${id}-problem`} className="mt-1 block text-sm font-semibold text-danger-text" aria-live="polite">

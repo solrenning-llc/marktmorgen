@@ -34,6 +34,7 @@ import {
   answerOfPerson,
   answerSurvey,
   dropCourseSurvey,
+  hasAnswer,
   forgetSurveyPerson,
   readCourseAnswers,
   readMyAnswer,
@@ -44,6 +45,8 @@ import {
   MAX_COURSE_ANSWERS,
   MAX_SURVEY_NOTE,
   SURVEY_ENTRY_MAX_BYTES,
+  SURVEY_PAGE_BYTES,
+  SURVEY_PAGE_COMMANDS,
   SURVEY_QUESTION,
   SURVEY_READ_BYTES_PER_UNIT,
   SURVEY_ROOM_BYTES,
@@ -292,8 +295,37 @@ async function main(): Promise<void> {
   is("and gives no room back", await used(), beforeOdd);
   const productRoute = source("app/api/store/product/route.ts");
   const courseRoute = source("app/api/store/course/route.ts");
-  is("removing a product drops its course's survey, on its own line after the course", /await dropCourse\(removedCourse, removed\.store\)[^\n]*\n\s*await dropCourseSurvey\(removedCourse\.id, removed\.store\)/.test(productRoute), true);
-  is("turning a course off drops its survey, on its own line after the course", /await dropCourse\(course, store\);\n\s*await dropCourseSurvey\(course\.id, store\)/.test(courseRoute), true);
+  // Inside the removal's own check, before the product goes: a failure keeps the product for another try, as its comments do.
+  const check = productRoute.slice(productRoute.indexOf("await removeProduct(ref, id, async"), productRoute.indexOf("result = removed.ok"));
+  is("removing a product drops its course's survey in the removal's check, beside its comments", /await dropCourseSurvey\(found\.id, store\);\n\s*await dropComments\(found\.id/.test(check), true);
+  is("and a course already gone too", /await dropCourseSurvey\(going\.course\.id, store\);\n\s*await dropCommentsAfterCourseGone\(going\.course\.id, store\)/.test(check), true);
+  is("a failure there is never only logged", !/dropCourseSurvey\([^)]*\)\.catch/.test(productRoute) && (productRoute.match(/dropCourseSurvey\(/g) ?? []).length === 2, true);
+  is("turning a course off drops its survey in the same try as its comments, 503 on failure", /try \{\n\s*await dropCourseSurvey\(course\.id, store\);\n\s*await dropComments\(course\.id, \[\], store\);\n\s*\} catch \{\n\s*return Response\.json\(\{ ok: false, error: "unavailable" \}, \{ status: 503 \}\);/.test(courseRoute), true);
+  is("and only there", (courseRoute.match(/dropCourseSurvey\(/g) ?? []).length === 1, true);
+
+  part("What a course page adds to each of its views, and where that is paid");
+  redis.clear();
+  is("no answer kept: no", await hasAnswer(COURSE, ana), false);
+  await answerSurvey({ room: ROOM, courseId: COURSE, who: ana, score: 5, note: "x".repeat(MAX_SURVEY_NOTE) });
+  is("one kept: yes", await hasAnswer(COURSE, ana), true);
+  const sent: (string | number)[][][] = [];
+  const realSee = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    sent.push(commands);
+    return realSee(commands);
+  }) as typeof redis.pipeline;
+  await hasAnswer(COURSE, ana);
+  const looked = sent.flat();
+  sent.length = 0;
+  await readMyAnswer(COURSE, ana);
+  const read = sent.flat();
+  redis.pipeline = realSee;
+  is("whether one is kept is one command that returns no comment", looked.map((c) => c[0]), ["HEXISTS"]);
+  is("reading one's own is one command", read.map((c) => c[0]), ["HGET"]);
+  is("a page view adds at most the commands the cost line prices", Math.max(looked.length, read.length) <= SURVEY_PAGE_COMMANDS, true);
+  is("and at most the bytes it prices: one answer at its largest", SURVEY_PAGE_BYTES >= SURVEY_ENTRY_MAX_BYTES, true);
+  const costLine = source("tests/plan-cost-registry.ts");
+  is("the public requests line prices it for every request of the window", /limit \* surveyPageCost\(\)/.test(costLine) && costLine.includes(`{ file: "lib/course-survey-rules.ts", names: ["SURVEY_PAGE_COMMANDS", "SURVEY_PAGE_BYTES"] }`), true);
 
   part("The registries: deletion, the copy and the cost line say what the code does");
   const surveyData = PERSON_DATA.filter((entry) => entry.file === "lib/course-survey.ts");
@@ -328,7 +360,8 @@ async function main(): Promise<void> {
   is("the count is paid for before it is read", page.indexOf("countStudio(store, null, 1)") > 0 && page.indexOf("countStudio(store, null, 1)") < page.indexOf("await surveyAnswerCount("), true);
   is("the answers are paid for before they are read", paid > 0 && paid < page.indexOf("await readCourseAnswers("), true);
   is("only the owner, and only when asked", /const surveyAsks = open && access\.learner\.owner && query\.survey === "1";/.test(page), true);
-  is("a student's own answer is read for that student, with this course in their pass", /surveyWho \? readMyAnswer\(course\.id, surveyWho\)/.test(page), true);
+  is("a student's whole answer is read only once they finished, for the form", /surveyWho && finished \? readMyAnswer\(course\.id, surveyWho\)/.test(page), true);
+  is("otherwise only whether one is kept, one command and no comment", /surveyWho \? hasAnswer\(course\.id, surveyWho\)/.test(page), true);
   is("the form only once finished; otherwise only the way to remove a kept answer", /mode=\{finished \? "answer" : "remove"\}/.test(page), true);
   const box = source("components/course-survey.tsx");
   is("the notice takes the focus when the page comes back", box.includes("<ArrivalNotice"), true);

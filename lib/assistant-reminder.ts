@@ -74,7 +74,7 @@ const whoKey = (statsId: string, email: string) =>
  * still holds exactly the checkouts read (ARGV): a yes noted since then is not left without its note. Answers how
  * many keys went, or -1 when the note changed. Billed as the EVAL, its SMEMBERS and its DEL.
  */
-const FORGET_IF_SAME = [
+export const FORGET_IF_SAME = [
   "-- marktmorgen:assist-remind-forget:v1",
   "local members = redis.call('SMEMBERS', KEYS[1])",
   "if #members ~= #ARGV then return -1 end",

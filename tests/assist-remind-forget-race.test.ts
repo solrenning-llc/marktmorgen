@@ -16,10 +16,22 @@
  *   anything else rejects (UnknownReplyError), so the part is said as not
  *   finished.
  *
- * Synthetic data only: the in-memory Redis stand-in.
+ *   Size (7 November 2026): the deletion was one DEL of unpack(KEYS), which
+ *   real Redis refuses past about 8,000 keys ("too many results to unpack"),
+ *   so a person with that many checkouts noted could never be erased. It now
+ *   deletes in blocks. Checked on a real redis-server when
+ *   ASSIST_REMIND_REDIS_SERVER names one (a disposable loopback process only).
+ *
+ *   Rounds: a note that changes in every one of the rounds is never deleted
+ *   blind: the part throws (not finished) and every yes stays noted.
+ *
+ * Synthetic data only: the in-memory Redis stand-in, or a disposable local
+ * redis-server.
  */
 import { createHash } from "node:crypto";
-import { forgetAssistReminderPerson } from "@/lib/assistant-reminder";
+import { spawn } from "node:child_process";
+import { createConnection, createServer } from "node:net";
+import { FORGET_IF_SAME, forgetAssistReminderPerson } from "@/lib/assistant-reminder";
 import { store as redis, redisPipeline } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -43,6 +55,8 @@ function keepCommands(s: string): (string | number)[][] {
 }
 
 let between: string | null = null;
+/** A new yes written after every read of the note, for the rounds test. */
+let always = 0;
 let bad: { commands: string[]; reply: () => unknown } | null = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -53,6 +67,10 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
     const s = between;
     between = null;
     await pipeline(keepCommands(s));
+  }
+  if (always > 0 && commands.some((command) => command[0] === "SMEMBERS" && command[1] === who)) {
+    always += 1;
+    await pipeline(keepCommands(session(String.fromCharCode(100 + always))));
   }
   return replies;
 }) as typeof redis.pipeline;
@@ -83,6 +101,76 @@ async function scard(): Promise<number> {
 async function noted(s: string): Promise<number> {
   const [n] = await redisPipeline([["SISMEMBER", who, s]]);
   return Number(n);
+}
+
+
+/** A RESP command to a disposable local redis-server: integers, simple strings and errors are all these checks read. */
+function command(port: number, parts: (string | number)[]): Promise<string | number> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let reply = Buffer.alloc(0);
+    socket.setTimeout(10_000, () => socket.destroy(new Error("Disposable Redis timeout")));
+    socket.once("error", reject);
+    socket.once("connect", () => socket.write(`*${parts.length}\r\n${parts.map((value) => `$${Buffer.byteLength(String(value))}\r\n${value}\r\n`).join("")}`));
+    socket.on("data", (chunk) => {
+      reply = Buffer.concat([reply, chunk]);
+      const end = reply.indexOf("\r\n");
+      if (end < 0) return;
+      socket.destroy();
+      const kind = reply.toString("ascii", 0, 1), value = reply.toString("utf8", 1, end);
+      if (kind === "-") reject(new Error(value));
+      else if (kind === ":") resolve(Number(value));
+      else if (kind === "+") resolve(value);
+      else reject(new Error(`Unexpected disposable Redis reply ${kind}`));
+    });
+  });
+}
+
+/** The deletion script on a real redis-server, opt-in: ASSIST_REMIND_REDIS_SERVER=/path/to/redis-server. */
+async function nativeForget(): Promise<void> {
+  const binary = process.env.ASSIST_REMIND_REDIS_SERVER;
+  if (!binary) {
+    console.log("Native Redis check not run: set ASSIST_REMIND_REDIS_SERVER to a local redis-server binary.");
+    return;
+  }
+  const probe = createServer();
+  await new Promise<void>((resolve, reject) => {
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", resolve);
+  });
+  const address = probe.address();
+  if (!address || typeof address === "string") throw new Error("No disposable Redis port");
+  const port = address.port;
+  await new Promise<void>((resolve, reject) => probe.close((error) => (error ? reject(error) : resolve())));
+  const server = spawn(binary, ["--bind", "127.0.0.1", "--port", String(port), "--protected-mode", "yes", "--save", "", "--appendonly", "no"], { stdio: "ignore" });
+  try {
+    let ready = false;
+    for (let attempt = 0; attempt < 100 && !ready; attempt++) {
+      ready = await command(port, ["PING"]).then((value) => value === "PONG", () => false);
+      if (!ready) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    if (!ready) throw new Error("Disposable Redis did not start");
+    const forget = async (count: number) => {
+      await command(port, ["FLUSHALL"]);
+      const members = Array.from({ length: count }, (_, n) => `cs_test_${String(n).padStart(24, "0")}`);
+      await command(port, ["SADD", who, ...members]);
+      await command(port, ["MSET", ...members.flatMap((s) => [yes(s), consent(s)])]);
+      const keys = [who, ...members.map(yes)];
+      const gone = await command(port, ["EVAL", FORGET_IF_SAME, keys.length, ...keys, ...members]).catch((error: Error) => `refused: ${error.message}`);
+      return [gone, await command(port, ["DBSIZE"])];
+    };
+    is("real Redis: two yeses and their note go", await forget(2), [3, 0]);
+    is("real Redis: 9,000 yeses and their note go, never refused for their number", await forget(9_000), [9_001, 0]);
+    await command(port, ["FLUSHALL"]);
+    await command(port, ["SADD", who, session("a"), session("b")]);
+    is("real Redis: a note that changed is left whole", [await command(port, ["EVAL", FORGET_IF_SAME, 2, who, yes(session("a")), session("a")]), await command(port, ["SCARD", who])], [-1, 2]);
+  } finally {
+    if (server.exitCode === null && server.signalCode === null) {
+      const stopped = new Promise<void>((resolve) => server.once("exit", () => resolve()));
+      server.kill("SIGTERM");
+      await stopped;
+    }
+  }
 }
 
 void (async () => {
@@ -135,6 +223,22 @@ void (async () => {
     bad = null;
     is(`and after a note answered ${what}, the yes is still found by the next erasure`, [await exists(yes(session("a"))), await noted(session("a"))], [1, 1]);
   }
+
+  part("Rounds: a note that changes in every round is never deleted blind");
+  await seed(session("a"));
+  always = 1;
+  const busy = await outcome(() => forgetAssistReminderPerson(STATS, EMAIL));
+  const written = always - 1;
+  always = 0;
+  is("the note changed in each of the three rounds: the part is not finished", [busy, written], ["rejected: Error", 3]);
+  const [members] = await redisPipeline([["SMEMBERS", who]]);
+  const sessions = (members as string[]).slice().sort();
+  is("every yes, the first and the three written meanwhile, is still noted under the address", sessions.length, 4);
+  is("and each is still there, for the next erasure to find", (await Promise.all(sessions.map((s) => exists(yes(s))))).every((n) => n === 1), true);
+  is("the next erasure, with nothing in between, removes them all", [await forgetAssistReminderPerson(STATS, EMAIL), await scard()], [5, 0]);
+
+  part("Size: the deletion on a real Redis");
+  await nativeForget();
 
   done();
 })();

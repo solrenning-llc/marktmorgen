@@ -12,6 +12,15 @@
  *    place: on a full purchase that address is told "full", never sent "Your place".
  * E. N1 (takePlace): the grant of a place answers in another shape and did not land. The place is given back, so the
  *    same link takes it on a later try and two places paid for are two people holding the product.
+ * F. Pre-review of #2872 (ALTO): the grant's request times out (nothing came back) and its write lands after the run
+ *    looked. A place is given back only when the reply arrived; a request that may still be in flight gives nothing
+ *    back, so two places paid for are never three people holding the product.
+ * G. Pre-review (MEDIO): the count's script lands with its reply unknown and the read-back is unknown too. Inside the
+ *    longest a run can last the link says "pending"; past it, the counted place is handed over, never held forever.
+ * H. Pre-review (MEDIO, rule 30): a hold that was never counted and could not be let go is let go once no run can
+ *    still own it, and the same link takes the place.
+ * I. Pre-review (LEVE): a checkout told twice (a giving mark that ran out under a run that outlived it) gives back the
+ *    room its checkout held once, never twice.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -20,6 +29,8 @@ import { askPlace, placesTaken, settleGroup, startGroup, takePlace } from "@/lib
 import { importedFor } from "@/lib/imported-purchases";
 import { confirmPurchase } from "@/lib/purchase-email";
 import { storeOrdersThisMonth } from "@/lib/orders";
+import { admitOrders } from "@/lib/order-admission";
+import { storeFolder, storeRef } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -194,6 +205,115 @@ async function main(): Promise<void> {
   is("cy's first try refuses, the next takes the place; dee takes the second; eli is told full", [cy1, cy2, dee, eli], ["threw", "taken", "taken", "full"]);
   is("two places paid for: cy and dee both hold the product", [await owns("cy@example.com"), await owns("dee@example.com")], [[product.id], [product.id]]);
   is("two places counted", await placesTaken(e.id), 2);
+
+  /** Moves the clock past the longest a run of takePlace can last (PLACE_STALE_SECONDS, lib/group-buy.ts). */
+  const realNow = Date.now.bind(Date);
+  const pastARun = () => {
+    const at = realNow() + 120_000;
+    Date.now = () => at;
+  };
+  const clockBack = () => {
+    Date.now = realNow;
+  };
+
+  part("F. ALTO: the grant's request times out (nothing came back) and lands after the run looked");
+  const f = await paidGroup(2);
+  const fy = await f.link("fy@example.com");
+  let delayed: Command[] | null = null;
+  let armed = true;
+  redis.pipeline = (async (commands: Command[]) => {
+    if (armed && commands.some((cmd) => cmd[0] === "EVAL" && JSON.stringify(cmd).includes(`group:${f.id}`))) {
+      armed = false;
+      delayed = commands;
+      throw new Error("Redis request timed out");
+    }
+    const r = await real(commands);
+    // The late write lands right after the run's first look at the address (where the read-back would be).
+    if (delayed && commands.some((cmd) => cmd[0] === "HEXISTS" && String(cmd[1]).startsWith("nl:imp:buy:"))) {
+      await real(delayed);
+      delayed = null;
+    }
+    return r;
+  }) as typeof redis.pipeline;
+  const fy1 = await take(fy);
+  restore();
+  if (delayed) await real(delayed); // the late write lands anyway
+  const fy2 = await take(fy);
+  const gus = await take(await f.link("gus@example.com"));
+  const hal = await take(await f.link("hal@example.com"));
+  const ida = await take(await f.link("ida@example.com"));
+  is("fy's first try refuses, then reads already; gus takes the second; hal and ida are told full", [fy1, fy2, gus, hal, ida], ["threw", "already", "taken", "full", "full"]);
+  const fHolders: string[] = [];
+  for (const a of ["fy@example.com", "gus@example.com", "hal@example.com", "ida@example.com"]) if ((await owns(a)).length) fHolders.push(a);
+  is("two places paid for: fy and gus hold the product, nobody else", fHolders, ["fy@example.com", "gus@example.com"]);
+  is("two places counted", await placesTaken(f.id), 2);
+
+  part("G. MEDIO: the count's script lands with its reply unknown, and its read-back is unknown too");
+  const gg = await paidGroup(2);
+  const jan = await gg.link("jan@example.com");
+  let step = 0;
+  redis.pipeline = (async (commands: Command[]) => {
+    const isCountOf = commands.some((cmd) => cmd[0] === "EVAL" && cmd.includes(`nl:grp:${gg.id}:n`) && String(cmd[1]).includes("grp-count-own"));
+    const isBack = commands.some((cmd) => cmd[0] === "HGET" && cmd[1] === `nl:grp:${gg.id}:m`);
+    if (step === 0 && isCountOf) {
+      step = 1;
+      await real(commands);
+      return [UNKNOWN];
+    }
+    if (step === 1 && isBack) {
+      step = 2;
+      return [UNKNOWN];
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const jan1 = await take(jan);
+  restore();
+  const jan2 = await take(jan);
+  pastARun();
+  const jan3 = await take(jan);
+  const kai = await take(await gg.link("kai@example.com"));
+  const lou = await take(await gg.link("lou@example.com"));
+  clockBack();
+  is("jan refuses, reads pending while a run may still own it, then takes it; kai takes the second; lou is full", [jan1, jan2, jan3, kai, lou], ["threw", "pending", "taken", "taken", "full"]);
+  is("two places paid for: jan and kai hold the product", [await owns("jan@example.com"), await owns("kai@example.com"), await owns("lou@example.com")], [[product.id], [product.id], []]);
+  is("two places counted", await placesTaken(gg.id), 2);
+
+  part("H. MEDIO, rule 30: a hold never counted that could not be let go");
+  const hh = await paidGroup(2);
+  const max = await hh.link("max@example.com");
+  redis.pipeline = (async (commands: Command[]) => {
+    const counting = commands.some((cmd) => cmd[0] === "EVAL" && cmd.includes(`nl:grp:${hh.id}:n`) && String(cmd[1]).includes("grp-count-own"));
+    const lettingGo = commands.some((cmd) => cmd[0] === "EVAL" && cmd.includes(`nl:grp:${hh.id}:m`) && String(cmd[1]).includes("hdel-own"));
+    if (counting) throw new Error("Redis request timed out"); // the count never ran
+    if (lettingGo) throw new Error("Redis error: ERR script failed"); // and the hold could not be let go
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const max1 = await take(max);
+  restore();
+  const max2 = await take(max);
+  pastARun();
+  const max3 = await take(max);
+  const ned = await take(await hh.link("ned@example.com"));
+  const oli = await take(await hh.link("oli@example.com"));
+  clockBack();
+  is("max refuses, reads pending, then takes the place; ned takes the second; oli is full", [max1, max2, max3, ned, oli], ["threw", "pending", "taken", "taken", "full"]);
+  is("two places counted", await placesTaken(hh.id), 2);
+
+  part("I. LEVE: a checkout told twice gives back the room it held once");
+  const folder = await storeFolder(storeRef(store));
+  const admitted = await admitOrders(store, 2);
+  if (!admitted.ok || admitted.hour === null) throw new Error("no admission");
+  const heldNow = async () => Number((await real([["HGET", `nl:orders:open:${folder}`, String(admitted.hour)]]))[0] ?? 0);
+  const iGift = await startGift(store, product, { to: "friend3@example.com", from: "Ana", message: "" });
+  if (!iGift.ok) throw new Error("no gift");
+  const iGs = paidSession({ gift: iGift.gift.id, mm_admit: String(admitted.hour) }, "payer3@example.com");
+  const heldBefore = await heldNow();
+  const i1 = await outcome(confirmPurchase(store, iGs.id, iGs as never));
+  // The giving mark ran out under a run that outlived it, before its "sent" mark was written: a second run tells too.
+  await real([["DEL", `nl:gift:${iGift.gift.id}:giving`], ["DEL", `nl:confirm:${iGs.id}`]]);
+  const i2 = await outcome(confirmPurchase(store, iGs.id, iGs as never));
+  is("both runs say sent (the case the 300-second mark cannot rule out)", [i1, i2], ["sent", "sent"]);
+  is("the room held for the checkout is given back once", heldBefore - (await heldNow()), 1);
   done();
 }
 

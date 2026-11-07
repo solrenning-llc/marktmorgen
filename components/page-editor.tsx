@@ -186,7 +186,10 @@ export function refusalWords(error: string | undefined, clearing: boolean): stri
   return MESSAGES[error ?? ""] ?? MESSAGES.server_error;
 }
 
-/** A refusal, said at once; a session that ended links to the log-in page in a new tab, so this tab keeps the page. */
+/**
+ * A refusal, said at once; a session that ended links to the log-in page in a new tab, so this tab keeps the page.
+ * Its words already say so to everyone, so it carries no <NewTab />, which would say it a second time.
+ */
 export function ErrorNotice({ error }: { error: string }) {
   return (
     <p className="notice notice-error mt-4" role="alert">
@@ -196,7 +199,6 @@ export function ErrorNotice({ error }: { error: string }) {
           {" "}
           <a href="/signin" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold underline underline-offset-4">
             Log in again in a new tab
-            <NewTab />
           </a>
         </>
       ) : null}

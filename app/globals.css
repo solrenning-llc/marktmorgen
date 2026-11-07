@@ -799,9 +799,11 @@ html {
    * No color of a button is animated in forced colors. WebKit animates them:
    * a button that turned usable was still drawn, for a moment, in GrayText on
    * the page's own sand (2.78:1, Studio AAA, inbox C4-35). It shows the
-   * system's colors at once instead.
+   * system's colors at once instead. The round icon buttons (.icon-btn) too,
+   * which take GrayText when off and keep Tailwind's transition-colors.
    */
-  .btn {
+  .btn,
+  .icon-btn {
     transition: none;
   }
 }

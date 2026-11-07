@@ -27,3 +27,13 @@ Frozen queue H2 and X6 excerpts preserve document-only work, unknown total fundi
 Serial bounded documentary review. The paired reviews inspect12 cited local source paths plus author documents and Git identities/diffs, without runtime, browser/device, Redis, supplier, SDK, external contact, account or dependency action. No broad search or global absence certification. Historical live-quiz/PR inventories and every unselected cited file were not replayed; the absence/ownership conclusions remain pinned/limited. The separate H1 policy spot checks do not certify an H2 provider or legal compliance.
 
 Targeted report personal-data scan and whitespace checks only. No runtime RED/GREEN, types/lint/build, hosted CI, margin, accessibility conformity or deployment claim. Customer steps/decisions0to0. No author source/ref/CI or foreign merge changed. Author owns the later correction and final merge gates.
+
+## Focused documentary return: LOW closed
+
+Exact author head: `253322dedb86da009815185a900593d9294bcd88`.
+Document blob: `269221c244dde9022f3391b05a94f2aad7bd62b6`.
+Request6701596916; T claim6702117231 and channel reservationd8c12ee1710b7360fac2422b93e7969f0c9b47b7 preceded new diff/source inspection. The first channel CAS409 wrote nothing; the retry used fresh full preserved history after at least120seconds.
+
+**LOW5809739563 is CLOSED; no new high, medium or low finding demonstrated in this focused documentary delta.** The entire one-file change is exactly one clause on line67, with no main merge or product change. Native string replacement verifies every other byte unchanged. The revised clause keeps the requested device off, preserves the other device's prior explicit choice, and says both remain off when neither was enabled. The previously described example (microphone explicitly on, camera permission declined) now agrees with the unchanged state table at line101. This closes the wording contradiction only, not a tested media/privacy implementation.
+
+Read scope: complete one-line delta, surrounding proposed-contract paragraphs and unchanged device-state table, previous T report and native blob/diff identities. No new provider research, source implementation execution, tests, browser, devices, types, lint, build, hosted CI, legal/financial/privacy certification or foreign merge is claimed. Source/cost/eligibility qualifications and the original report remain preserved. Targeted report data scan and whitespace checks cover the appended report only. Author M retains final-check/merge responsibility.

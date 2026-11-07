@@ -53,6 +53,7 @@ import { isSettled } from "@/lib/instant-pay";
 import { CONFIRM_WITHIN_SECONDS, type SessionRecord, canConfirm, confirmPurchase, confirmationKey } from "@/lib/purchase-email";
 import { REMIND_WITHIN_SECONDS, remindAbandoned } from "@/lib/checkout-recovery";
 import { enroll, readFlows } from "@/lib/flows";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
@@ -671,9 +672,23 @@ async function startAbandonedWorkflows(store: Store, rows: SessionRecord[]): Pro
     if (!handles.has(meta.store ?? "") || !meta.product || !flows.some((f) => f.productId === meta.product)) continue;
     const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
     if (!email || typeof row.id !== "string") continue;
-    // Handed on only on an exact OK (CX-123 rule 24, L6): taken by an earlier run, or unknown, starts nothing.
-    const fresh = repliesFor(await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]), 1);
-    if (!fresh || fresh[0] !== "OK") continue;
-    await enroll(store, email, { joined: false, abandoned: meta.product });
+    // Handed on once (CX-123 rule 24, L6), by a claim read back when its answer is lost (lib/claim-mark.ts): a
+    // landed write whose answer went missing is still ours, so the checkout is not skipped for the mark's two days
+    // against the six-hour window. Taken by an earlier run (an old "1" mark too) starts nothing; unknown starts
+    // nothing and lets go of this run's own value, so the next run tries again.
+    const key = `nl:wf:abandoned:${row.id}`;
+    const mine = claimValue();
+    const claimed = await claimMark(key, 2 * 86_400, mine);
+    if (claimed !== "ours") {
+      if (claimed === "unknown") await releaseMark(key, mine);
+      continue;
+    }
+    try {
+      await enroll(store, email, { joined: false, abandoned: meta.product });
+    } catch (error) {
+      // enroll() never throws today; should it, the checkout is not spent on a start that did not happen.
+      await releaseMark(key, mine);
+      console.error("an abandoned-checkout workflow did not start; the next run tries again", row.id, error);
+    }
   }
 }

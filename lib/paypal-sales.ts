@@ -66,6 +66,26 @@ const TIMEOUT_MS = 20_000;
 const ORDER_ID = /^[A-Z0-9]{10,36}$/;
 /** The refunded mark's score as this file writes it (ZADD with String(now)): whole seconds, nothing else. */
 const REDIS_SCORE = /^[1-9]\d{0,11}$/;
+/**
+ * A refunded payment's purchase taken back only while nothing else stands for it, in one step (Codex G's M1 on #2791):
+ * KEYS[1] the address's imported purchases, KEYS[2] its payments for the product; ARGV[1] the product, ARGV[2] the
+ * refunded payment's job, ARGV[3..] the other payments already read as not keeping it. A payment that came in since
+ * (one not in ARGV), or a record that is now another's, answers 0 and nothing is taken; 1 is taken, 2 was already gone.
+ * Billed as the EVAL plus each redis.call (Upstash): at most 4 commands a take-back (EVAL, SMEMBERS, HGET, HDEL),
+ * against the 1 HDEL it replaced, for at most the 25 due orders a store's watch reads a run (Revisor 1 on #2809).
+ */
+const PAYPAL_REVOKE = `-- marktmorgen:paypal-revoke:v1
+local known = {}
+for i = 3, #ARGV do known[ARGV[i]] = true end
+for _, member in ipairs(redis.call('SMEMBERS', KEYS[2])) do
+  if not known[member] then return 0 end
+end
+local raw = redis.call('HGET', KEYS[1], ARGV[1])
+if not raw then return 2 end
+local ok, record = pcall(cjson.decode, raw)
+if not ok or type(record) ~= 'table' or record.job ~= ARGV[2] then return 0 end
+redis.call('HDEL', KEYS[1], ARGV[1])
+return 1`;
 /** A product id as the catalog makes them, and a PayPal capture id: what the refund watch reads a paid order by. */
 const PAID_PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const CAPTURE_ID = /^[A-Za-z0-9-]{1,64}$/;
@@ -699,7 +719,13 @@ export function nextLook(paidAt: number, now: number): number | null {
 export async function watchPayPal(
   store: Store,
   deadline: number,
-  on: { handOver: (paid: Paid) => Promise<void>; dropStart: (email: string, productId: string) => Promise<void>; refunded?: (paid: Paid) => Promise<void> },
+  on: {
+    handOver: (paid: Paid) => Promise<void>;
+    dropStart: (email: string, productId: string) => Promise<void>;
+    refunded?: (paid: Paid) => Promise<void>;
+    /** Puts a course back for a payment that keeps the purchase (an HSETNX: nothing for one still there, no email). */
+    restoreStart?: (email: string, productId: string, startSeconds: number) => Promise<void>;
+  },
 ): Promise<{ cleared: number; revoked: number }> {
   const result = { cleared: 0, revoked: 0 };
   if (!paypalSalesConfigured() || !store.statsId || !store.paypalSeller || !isRedisConfigured()) return result;
@@ -815,6 +841,22 @@ export async function watchPayPal(
     // leaves this buyer's own payments too, read exactly, and is never later taken for one that keeps the purchase
     // (Codex G on #2791).
     if ((v as { job: string }).job !== `paypal:${order}`) {
+      // The payment that stands now gets its course back, in case this one's course removal ran after it was handed
+      // over (Codex G's M1 on #2791); an HSETNX, nothing for a course still there.
+      const standing = /^paypal:(.+)$/.exec((v as { job: string }).job)?.[1];
+      if (standing && on.restoreStart) {
+        const other = ORDER_ID.test(standing) ? await readPaidExact(standing) : "unknown";
+        const listedItems = (v as { items?: unknown }).items;
+        const otherItems = Array.isArray(listedItems) ? listedItems.filter((item): item is string => typeof item === "string") : [];
+        try {
+          if (other === "unknown") throw new Error("the standing payment could not be read");
+          if (other && other.product === paid.product) for (const id of [other.product, ...otherItems]) await on.restoreStart(other.email, id, other.at);
+        } catch (error) {
+          console.error("giving a standing PayPal payment its course back failed; looked at again in an hour", error);
+          await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+          continue;
+        }
+      }
       const left = repliesFor(await redisPipeline([["SREM", ownKey(statsId, paid.email, paid.product), order]]), 1);
       if (!left || (left[0] !== 0 && left[0] !== 1)) {
         await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
@@ -879,6 +921,16 @@ export async function watchPayPal(
       return true;
     };
     if (kept) {
+      // Its course back too (an HSETNX), in case an earlier pass took it away before this payment was seen.
+      if (on.restoreStart) {
+        try {
+          for (const id of [kept.product, ...items]) await on.restoreStart(kept.email, id, kept.at);
+        } catch (error) {
+          console.error("giving a kept PayPal purchase its course back failed; looked at again in an hour", error);
+          await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+          continue;
+        }
+      }
       await leaveWatch(["HSET", importedKey(statsId, paid.email), paid.product, JSON.stringify({ at: kept.at, job: `paypal:${kept.order}`, items: items.length ? items : null })]);
       continue;
     }
@@ -891,7 +943,19 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
       continue;
     }
-    if (await leaveWatch(["HDEL", importedKey(statsId, paid.email), paid.product])) revoked += 1;
+    // Taken back only if no payment came in since the reading above (Codex G's M1 on #2791): one that did keeps the
+    // purchase, and the order is looked at again in a minute, when that payment is read and its course put back.
+    const taken = repliesFor(
+      await redisPipeline([["EVAL", PAYPAL_REVOKE, 2, importedKey(statsId, paid.email), own, paid.product, `paypal:${order}`, ...(others as string[])]]),
+      1,
+    );
+    const answer = taken?.[0];
+    if (answer === 1 || answer === 2) {
+      await redisPipeline([["ZREM", watchKey(statsId), order]]);
+      if (answer === 1) revoked += 1;
+    } else {
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + (answer === 0 ? 60 : 3600)), order]]).catch(() => undefined);
+    }
   }
   result.revoked = revoked;
   return result;

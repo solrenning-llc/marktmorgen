@@ -75,6 +75,7 @@ export function testAliases(file,root,here){
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
  if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-physical.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='cart-stock.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-open.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-page-bounds.test.ts'){aliases['next/server']=join(here,'next-server-after-world.ts');aliases['next/link']=join(here,'next-link-world.tsx');}
@@ -87,6 +88,12 @@ export function testAliases(file,root,here){
  if(['commercial-review-input.test.ts','commercial-terms-snapshot.test.ts','net-margin.test.ts','customer-base.test.ts','plan-revenue-ceilings.test.ts','commercial-ai-coverage.test.ts'].includes(file))aliases['@/lib/ai-spend-policy']=join(here,'commercial-ai-approved-policy.ts');
  if(file==='ai-spend-provider.test.ts')aliases['@/lib/ai-spend-policy']=join(here,'ai-spend-approved-policy.ts');
  if(['video-admission.test.ts','video-tier.test.ts'].includes(file)){aliases['@/lib/redis']=join(here,'video-admission-redis.ts');aliases['@/lib/stream']=join(here,'video-admission-stream.ts');}
+ if(['ai-counted-ack.test.ts','ai-left-envelope.test.ts'].includes(file))for(const name of ['redis','ai-spend'])aliases['@/lib/'+name]=join(here,'z-counted-ack-world.ts');
+ if(file==='ai-inbox-balance-page.test.ts'){
+  for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'z-ai-inbox-page-world.ts');
+  for(const name of ['studio-route','ai','email','house-store','inbox','team'])aliases['@/lib/'+name]=join(here,'z-ai-inbox-page-world.ts');
+  for(const name of ['studio-header','studio-store-pin','inbox-studio'])aliases['@/components/'+name]=join(here,'z-ai-inbox-page-world.ts');
+ }
  if(file==='storage-measurement.test.ts')for(const name of ['blob','vault','stream'])aliases['@/lib/'+name]=join(here,'storage-provider-stub.ts');
  if(file==='blob-download-attachment.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
  if(file==='sg2-l1-serve-file.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');

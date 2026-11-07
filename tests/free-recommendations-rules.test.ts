@@ -120,6 +120,71 @@ for (const fine of [
 ]) {
   is(`common words and punctuation are not a link: ${JSON.stringify(fine)}`, ok([{ handle: "sam.writes", why: fine }])?.length, 1);
 }
+
+part("Pre-review: invisible marks, a domain after _ or -, and words that only look like one");
+const why = (line: string) => problem([{ handle: "sam.writes", why: line }]);
+for (const bad of [
+  // Default-ignorable marks that are not \p{Cf}: combining grapheme joiner, variation selectors, Mongolian free variation selector, Hangul fillers.
+  "Great shop: evil\u034f.com",
+  "Great shop: evil\ufe0f.com",
+  "Great shop: evil\ufe00.com",
+  "Great shop: evil\u{e0100}.com",
+  "Great shop: evil\u180b.com",
+  "Great\u115fshop",
+  "Great\u1160shop",
+  "Great\u3164shop",
+  "Great\uffa0shop",
+]) {
+  is(`an invisible mark is refused: ${JSON.stringify(bad)}`, why(bad), ["why-unsafe", 0]);
+}
+for (const bad of [
+  "Visit my_store.com today",
+  "Visit -evil.com today",
+  "Visit _evil.com today",
+  // A combining mark inside the label still leaves a domain a reader can type.
+  "Visit evi\u0331l.com today",
+  // An ending in capitals that is a real one.
+  "Visit EVIL.COM today",
+  "Visit Evil.Com today",
+  "Shop at evil.Shop",
+  // Decided on the safe side: these names are also real addresses (asp.net, socket.io, web3.py).
+  "Best ASP.NET course",
+  "Learn Socket.IO fast",
+  "Learn Web3.py basics",
+  // An emoji label is a real address on some endings.
+  "Visit i\u2764.ws",
+  // An IPv4 address.
+  "Server at 8.8.8.8",
+  "Server at 8.8.8.8.",
+  "Server at 10.0.0.1 now",
+  // The ideographic full stop between Latin letters is still a dot.
+  "Go to evil\u3002com",
+  "Go to evil\uff61com",
+]) {
+  is(`a domain or an address is refused: ${JSON.stringify(bad)}`, why(bad), ["why-contact", 0]);
+}
+for (const fine of [
+  // A missing space after a sentence, an ending in capitals that is no real ending.
+  "Great course.Highly recommended",
+  "Short notes.Weekly",
+  "Mr.Beast style videos",
+  // Spanish initials with dots.
+  "Hecho en EE.UU. con cari\u00f1o",
+  // The ideographic full stop between CJK words is the end of a sentence.
+  "\u5f88\u597d\u3002\u63a8\u8350\u7ed9\u5927\u5bb6",
+  // Decided: the browser makes none of these a link, and a reader would have to rewrite them by hand.
+  "Visit evil dot com",
+  "Visit evil[.]com",
+  // A version number, not an IPv4 address.
+  "Version 1.2.3 is out",
+  "Now on v1.2.3.4",
+  // An emoji with its presentation selector is a picture, not a hidden mark.
+  "Love this store \u2764\ufe0f",
+  "Clear guides to Node.js and React 19.",
+]) {
+  is(`words that only look like a domain are accepted: ${JSON.stringify(fine)}`, why(fine), null);
+}
+
 is("the first problem is the one named", problem([{ handle: "sam.writes", why: "ok" }, { handle: OWN, why: "x" }, { handle: "x", why: "" }]), ["own", 1]);
 is("the creator's own store address must be a real one", problem([], ""), ["own", null]);
 is("an own address of the wrong shape is refused", problem([{ handle: "sam.writes", why: "x" }], "Not A Handle"), ["own", null]);

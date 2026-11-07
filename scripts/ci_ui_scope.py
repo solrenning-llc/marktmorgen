@@ -28,6 +28,13 @@ What this does not cover, on purpose: `next build` also type-checks every .ts fi
 tsconfig.json, so a type error in an unreachable file would fail these suites' build.
 Product checks (verify) runs the same build on every pull request, so that error still
 blocks the change; skipping here does not hide it.
+
+Also not covered (Claude 5 on #3037): app/globals.css imports Tailwind without source(),
+so `next build` scans every versioned file for class names, outside the import graph. A
+class name written only in a file this module finds unreachable (tests/, lib/, docs/)
+can change the generated CSS. Only a class name built at run time or read from data is
+exposed this way, because a literal in a reachable file already emits its rule; none was
+found. The documentation-only skip from before has the same exposure for .md files.
 """
 import json
 import re
@@ -71,8 +78,26 @@ COMPUTED = re.compile(
 NEW_URL_COMPUTED = re.compile(r"""\bnew\s+URL\s*\((?!\s*(?P<q>["'])[^"'\n]*(?P=q)\s*,)""")
 
 
+# A loader under another name (Claude 5 on #3037): createRequire's result bound to anything
+# but `require`, createRequire or require renamed on import, or require passed on as a
+# value. The call through that name cannot be read, so the file is computed.
+CREATE_REQUIRE = re.compile(r"""\bcreateRequire\s*\(""")
+# `const require = createRequire(…)`, also as a later declarator (`const a = 1, require = …`).
+BOUND_TO_REQUIRE = re.compile(r"""(?:\b(?:const|let|var)\s+|,\s*)require\s*=\s*(?:[A-Za-z_$][\w$]*\.)?$""")
+# `createRequire(…)("typescript")`: called at once with one whole literal.
+CALLED_WITH_LITERAL = re.compile(r"""createRequire\s*\([^()]*(?:\([^()]*\)[^()]*)*\)\s*\(\s*(["'])[^"'\n]*\1\s*\)""")
+RENAMED_LOADER = re.compile(
+    r"""\b(?:createRequire|require)\s+as\b|\bcreateRequire\s*:"""
+    r"""|[=:,(\[?{]\s*require\b(?!\s*(?:[(.\w$]|=(?!=)))""")
+
+
 def computed(code):
-    return bool(COMPUTED.search(code)) or ("import.meta.url" in code and bool(NEW_URL_COMPUTED.search(code)))
+    if COMPUTED.search(code) or RENAMED_LOADER.search(code):
+        return True
+    if any(not BOUND_TO_REQUIRE.search(code[:m.start()]) and not CALLED_WITH_LITERAL.match(code, m.start())
+           for m in CREATE_REQUIRE.finditer(code)):
+        return True
+    return "import.meta.url" in code and bool(NEW_URL_COMPUTED.search(code))
 
 
 LISTING = re.compile(r"""\b(?:readdirSync|readdir|opendirSync|opendir|globSync|glob)\s*\(""")
@@ -92,6 +117,10 @@ REVIEWED_COMPUTED = frozenset({
     # Its new URL calls parse page addresses at run time; import.meta.url only names its folder.
     "tests/e2e/run.mjs",
     "tests/e2e/services.mjs",
+    # Passes require into a vm context that runs an esbuild bundle of JSX snippets which
+    # import only packages (react-dom/server and the JSX runtime); app/ and components/
+    # are read through its reviewed listing (LISTERS), not imported.
+    "tests/e2e/skip-content-focus.mjs",
     "tests/e2e/store-copy.mjs",
 })
 
@@ -130,10 +159,89 @@ def install_hooks(read):
         raise Uncertain("package.json runs scripts on install")
 
 
+def without_comments(text):
+    """The text with every comment blanked and every string kept, newlines in place.
+
+    Reads quotes and template literals (with their ${...} code) so a "//" or "/*" inside a
+    string is not a comment. A regular-expression literal is not recognized; code_lines()
+    therefore also keeps the older line filter's lines, so a misread only adds text."""
+    out, i, n = [], 0, len(text)
+    stack = []  # open template literals: the brace depth of each ${...} being read
+    state = "code"
+    while i < n:
+        c = text[i]
+        pair = text[i:i + 2]
+        if state == "code":
+            if pair == "//":
+                state = "line"
+                out.append("  ")
+                i += 2
+                continue
+            if pair == "/*":
+                state = "block"
+                out.append("  ")
+                i += 2
+                continue
+            if c in "'\"":
+                state = c
+            elif c == "`":
+                state = "`"
+            elif c == "{" and stack:
+                stack[-1] += 1
+            elif c == "}" and stack:
+                if stack[-1] == 0:
+                    stack.pop()
+                    state = "`"
+                else:
+                    stack[-1] -= 1
+            out.append(c)
+        elif state == "line":
+            if c == "\n":
+                state = "code"
+                out.append(c)
+            else:
+                out.append(" ")
+        elif state == "block":
+            if pair == "*/":
+                state = "code"
+                out.append("  ")
+                i += 2
+                continue
+            out.append(c if c == "\n" else " ")
+        elif state == "`":
+            if c == "\\":
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if pair == "${":
+                stack.append(0)
+                state = "code"
+                out.append(pair)
+                i += 2
+                continue
+            if c == "`":
+                state = "code"
+            out.append(c)
+        else:  # inside '...' or "..."; a newline ends a broken one
+            if c == "\\":
+                out.append(text[i:i + 2])
+                i += 2
+                continue
+            if c == state or c == "\n":
+                state = "code"
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def code_lines(text):
-    """Lines that are not comment lines: prose such as "an import (lib/x.ts)" is not code."""
-    return [line for line in text.splitlines()
-            if not line.lstrip().startswith(("*", "//", "/*"))]
+    """The code without its comments: prose such as "an import (lib/x.ts)" is not code, but
+    code after a comment on the same line, or a line starting with "*" outside a comment (a
+    generator method), is (Claude 5 on #3037). The older filter's lines, which drop whole
+    lines starting with "*", "//" or "/*", are added too, so a misread string only adds."""
+    stripped = [line for line in without_comments(text).splitlines() if line.strip()]
+    older = [line for line in text.splitlines() if not line.lstrip().startswith(("*", "//", "/*"))]
+    return stripped + older
 
 
 def roots(files):

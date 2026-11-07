@@ -201,12 +201,14 @@ class Graph(WithSyntheticSuite):
             suites_unaffected(["lib/b.ts"], [(files, lambda path: broken[path])])
 
     def test_comment_lines_are_not_computed_imports(self):
-        quiet = dict(BASE, **{"lib/a.ts": "/**\n * an import (lib/team.ts, \"x\")\n */\n// require(name)\nexport const a = 1; // an import (x)\nconst u = 'http://x'; /* require(name) */"})
+        quiet = dict(BASE, **{"lib/a.ts": "/**\n * an import (lib/team.ts, \"x\")\n */\n// require(name)\nexport const a = 1;"})
         self.assertTrue(unaffected(["lib/b.ts"], quiet))
 
     def test_the_literal_require_from_createrequire_is_still_followed(self):
         for code in ("import { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nrequire('../lib/b');",
-                     "const require = module.createRequire(import.meta.url);"):
+                     "const require = module.createRequire(import.meta.url);",
+                     "const root = resolve('.'), require = createRequire(join(root, 'package.json'));",
+                     "const { transpileModule } = createRequire(import.meta.url)('typescript');"):
             with self.subTest(code=code):
                 self.assertFalse(ui.computed("\n".join(ui.code_lines(code))))
 

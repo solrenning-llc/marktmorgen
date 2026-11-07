@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
 const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
-  sent: { tone: "ok", text: "If that address is an affiliate of any store here, a link to your page is on its way to it. Open it on this device or any other; it works for 24 hours." },
+  sent: { tone: "ok", text: "If that address is an affiliate of any store here, we tried to email it a link to your page. Open it on this device or any other; it works for 24 hours. If nothing arrives in a few minutes, check your spam folder, then ask again." },
   email: { tone: "error", text: "That does not look like an email address. Type the one you joined with." },
   limited: { tone: "error", text: "Too many tries for now. Wait an hour and ask again." },
   error: { tone: "error", text: "The email could not be sent just now. Try again in a moment." },

@@ -43,6 +43,7 @@ import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { personKeys, personWrite } from "@/lib/joined-stores";
 import { repliesFor as exactReplies } from "@/lib/redis-reply";
+import { afterAnswer } from "@/lib/after-answer";
 
 export const HUB_LINK_SECONDS = 24 * 60 * 60;
 export const HUB_TOKEN = /^[0-9a-f]{64}$/;
@@ -76,7 +77,11 @@ export type HubRequest = "sent" | "email" | "limited" | "error";
 
 /**
  * Emails a link that opens the page. "sent" whether or not the address is
- * anybody's affiliate; nothing is sent to one that is not.
+ * anybody's affiliate, and at once, right after the limits: which stores it
+ * promotes is read, and its link made and emailed, only after the answer is
+ * sent (lib/after-answer.ts), so neither the answer's words nor its time tell
+ * them apart, and an email that could not go out is said only in the server's
+ * log. Nothing is sent to an address that is nobody's affiliate.
  */
 export async function requestHubLink(input: { email: string; ip: string; origin: string }): Promise<HubRequest> {
   const raw = input.email.trim();
@@ -85,31 +90,55 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
   const email = normaliseEmail(raw);
   if (!(await withinLimit("affhub-ip", input.ip, 10, 3_600))) return "limited";
   if (!(await withinLimit("affhub-address", sha(email), 5, 3_600))) return "limited";
+  // From here the answer is "sent" whatever happens, and at once: the stores, the link and its email are all after it.
+  afterAnswer("sending an affiliate's page link", () => sendHubLink(email, input.origin));
+  return "sent";
+}
+
+/** The link itself, for an address that is an affiliate of a store here; nothing for one that is not. */
+async function sendHubLink(email: string, origin: string): Promise<void> {
   const stores = await storesPromoted(email);
-  if (!stores.length) return "sent";
-  const token = randomBytes(32).toString("hex");
-  // A paid email only with a link Redis said it stored (rule 24): otherwise nothing is sent, and the page says to try again.
-  const saved = exactReplies(await redisPipeline([["SET", linkKey(token), email, "EX", HUB_LINK_SECONDS]]), 1);
-  if (saved?.[0] !== "OK") return "error";
-  const link = `${input.origin}/affiliate?token=${token}`;
+  if (!stores.length) return;
   // One of the access emails of the first store in the list (lib/store-allowance-rules.ts).
   const charged = await storeForId(stores[0]).catch(() => null);
-  if (!charged) return "error";
-  const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
-    from: NIMBUS_FROM,
-    to: email,
-    subject: "Your affiliate programs on Marktmorgen",
-    text: [
-      `Here are the affiliate programs you are in on Marktmorgen, ${stores.length} ${stores.length === 1 ? "store" : "stores"} in one place:`,
-      "",
-      link,
-      "",
-      "The link works for 24 hours. After that, ask for a new one at marktmorgen.com/affiliate.",
-      "",
-      "If you did not ask for this, you can ignore it: nobody can open the page without this email.",
-    ].join("\n"),
-  });
-  return sent ? "sent" : "error";
+  if (!charged) {
+    console.error("an affiliate's page link was not sent: its first store could not be read");
+    return;
+  }
+  const token = randomBytes(32).toString("hex");
+  let sent = false;
+  try {
+    // A paid email only with a link Redis said it stored (rule 24): any other answer sends nothing, and the link,
+    // in case it did land, is removed below like any unsent one. The answer was already "sent" for every address.
+    const saved = exactReplies(await redisPipeline([["SET", linkKey(token), email, "EX", HUB_LINK_SECONDS]]), 1);
+    if (saved?.[0] !== "OK") {
+      console.error("an affiliate's page link was not stored, so no email was sent");
+      return;
+    }
+    const link = `${origin}/affiliate?token=${token}`;
+    sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
+      from: NIMBUS_FROM,
+      to: email,
+      subject: "Your affiliate programs on Marktmorgen",
+      text: [
+        `Here are the affiliate programs you are in on Marktmorgen, ${stores.length} ${stores.length === 1 ? "store" : "stores"} in one place:`,
+        "",
+        link,
+        "",
+        "The link works for 24 hours. After that, ask for a new one at marktmorgen.com/affiliate.",
+        "",
+        "If you did not ask for this, you can ignore it: nobody can open the page without this email.",
+      ].join("\n"),
+    });
+  } finally {
+    // A link whose email did not go out opens nothing: it is removed at once, not left for the day. When the send's
+    // outcome was unknown, an email that did arrive then holds a link that no longer opens, and asking again sends a
+    // new one. Removal is best effort: the day's expiry still ends it.
+    if (!sent) {
+      await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("removing an unsent affiliate page link failed", error));
+    }
+  }
+  if (!sent) console.error("an affiliate's page link was not sent");
 }
 
 /** The address a live link was sent to, or null. */

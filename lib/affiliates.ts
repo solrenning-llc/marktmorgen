@@ -790,7 +790,12 @@ export async function invitePartner(input: {
   const grant: LinkGrant = { s: statsId, e: email, n: "Invited as a partner", k: 1, p: share };
   // A paid email only with a link Redis said it stored (rule 24).
   const saved = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]), 1);
-  if (saved?.[0] !== "OK") return "error";
+  if (saved?.[0] !== "OK") {
+    // A SET that landed with its answer lost is removed, since no email carries it; in place of the send's own
+    // commands, so within the invitation's cost. Best effort: the hour's expiry still ends it.
+    await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("removing an unconfirmed partner link failed", error));
+    return "error";
+  }
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
     to: email,

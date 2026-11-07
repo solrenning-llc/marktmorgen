@@ -931,6 +931,12 @@
       "parameters": []
     },
     {
+      "source": "app/status/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/status",
+      "parameters": []
+    },
+    {
       "source": "app/studio/add/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/add",
@@ -964,6 +970,12 @@
       "source": "app/studio/calendar/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/calendar",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/card/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/card",
       "parameters": []
     },
     {
@@ -1272,6 +1284,7 @@
     "components/call-editor.tsx",
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
+    "components/cart-link-builder.tsx",
     "components/certificate-actions.tsx",
     "components/certificate-validity.tsx",
     "components/chat-summary-editor.tsx",
@@ -1305,6 +1318,7 @@
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",
     "components/cover-maker.tsx",
+    "components/creator-card-editor.tsx",
     "components/creator-card-view.tsx",
     "components/creator-research-form.tsx",
     "components/creator-showcase.tsx",
@@ -1438,6 +1452,7 @@
     "components/path-share-card.tsx",
     "components/path-social-scripts.tsx",
     "components/path-studio-reminder.tsx",
+    "components/path-weekly-summary.tsx",
     "components/pause-editor.tsx",
     "components/payment-comparison.tsx",
     "components/payment-mix.tsx",
@@ -2009,6 +2024,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 136
+    "pageTemplates": 138
   }
 }

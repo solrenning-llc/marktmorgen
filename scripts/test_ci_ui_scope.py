@@ -137,6 +137,12 @@ class Graph(WithSyntheticSuite):
                                      "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "concatenated require.resolve": {"app/page.tsx": "export default require.resolve('../lib/' + leaf);"},
             "template with a hole": {"app/page.tsx": "export default await import(`../lib/${leaf}`);"},
+            # Codex G's fifth return on #3037: a ";" inside a string must not end the search
+            # for import.meta.url; a file that uses import.meta.url and builds a URL from
+            # anything but one whole literal is computed, wherever the ";" falls.
+            "semicolon inside a string before import.meta.url": {"app/page.tsx": "export default new URL(\n  'discard;'.slice(0, 0) + '../lib/' + leaf + '.json',\n  import.meta.url\n);"},
+            "same in a re-exported component": {"components/c.tsx": "export const c = new URL(\n  'x;'.slice(0, 0) + '../lib/' + leaf,\n  import.meta.url);",
+                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "method on the specifier": {"app/page.tsx": "export default await import('../lib/b'.concat(x));"},
             "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},

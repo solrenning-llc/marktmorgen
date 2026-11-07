@@ -12,6 +12,7 @@
  * doors read (lib/membership-access.ts, memberState).
  */
 import { onAccount, StripeError } from "@/lib/stripe-account";
+import { withLock } from "@/lib/redis-lock";
 import { grantOf, subsOf, type SubRow } from "@/lib/membership-manage";
 import { forgetStatus } from "@/lib/membership-access";
 import { productOfSub } from "@/lib/tier-rules";
@@ -24,6 +25,28 @@ import type { Store } from "@/lib/store";
 import { type PauseSub, addMonths, cannotPause, pauseOf, periodEndOf } from "@/lib/membership-pause-rules";
 
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
+
+/**
+ * One change to a membership at a time: the lock a switch between plans or to yearly takes (lib/tier-switch.ts,
+ * lib/yearly-fallback.ts), held from reading the membership to Stripe's answer. Resuming inside a pause starts a new
+ * period with a payment (`billing_cycle_anchor=now`), and Stripe charges for every such request it carries out, so
+ * two presses that both read the membership as paused must never both send it: the second waits, then reads it as it
+ * is. A lock that cannot be taken, or Redis that cannot be asked, changes nothing and answers "error".
+ */
+const membershipLockKey = (subscription: string) => `nl:tier:${subscription}:lock`;
+/** Longer than the reads and the change at their ceiling (STRIPE_TIMEOUT_MS, 20 s, lib/fetch-timeout.ts), with room. */
+const MEMBERSHIP_LOCK_SECONDS = 120;
+const MEMBERSHIP_LOCK_WAIT_MS = 5_000;
+
+/** Runs one change to a membership under its lock; a lock not taken (or not askable) is "error", never a change. */
+async function underLock<T>(subscription: string, what: string, work: () => Promise<T | { ok: false; reason: "error" }>): Promise<T | { ok: false; reason: "error" }> {
+  try {
+    return await withLock(membershipLockKey(subscription), MEMBERSHIP_LOCK_SECONDS, MEMBERSHIP_LOCK_WAIT_MS, work);
+  } catch (error) {
+    console.error(`${what} could not take the membership's lock`, error);
+    return { ok: false, reason: "error" };
+  }
+}
 
 export type PauseResult = { ok: true; from: number; until: number } | { ok: false; reason: "expired" | "cannot" | "error" };
 export type ResumeResult = { ok: true } | { ok: false; reason: "expired" | "cannot" | "declined" | "error" };
@@ -44,35 +67,40 @@ function day(store: Store, seconds: number): string {
 /** Pauses one membership for `months`, from the end of the period already paid for. */
 export async function pauseMembership(store: Store, token: string, subscription: string, months: number, now = Math.floor(Date.now() / 1000)): Promise<PauseResult> {
   if (!Number.isInteger(months) || months < 1 || months > store.pause) return { ok: false, reason: "cannot" };
-  let found: Awaited<ReturnType<typeof memberSub>>;
-  try {
-    found = await memberSub(store, token, subscription);
-  } catch (error) {
-    console.error("reading a membership to pause failed", error);
-    return { ok: false, reason: "error" };
-  }
-  if (found === "expired") return { ok: false, reason: "expired" };
-  if (!found || cannotPause(found.sub, store.pause, now) !== null) return { ok: false, reason: "cannot" };
-  const from = periodEndOf(found.sub);
-  const until = addMonths(from, months);
-  try {
-    await onAccount(
-      "POST",
-      found.account,
-      `/subscriptions/${encodeURIComponent(subscription)}`,
-      new URLSearchParams({
-        "pause_collection[behavior]": "void",
-        "pause_collection[resumes_at]": String(until),
-        "metadata[pause_from]": String(from),
-        "metadata[paused_at]": String(now),
-      }),
-      undefined,
-      `nimbus-pause:${subscription}:${from}`,
-    );
-  } catch (error) {
-    console.error("pausing a membership failed", error);
-    return { ok: false, reason: "error" };
-  }
+  const done = await underLock(subscription, "pausing a membership", async () => {
+    let found: Awaited<ReturnType<typeof memberSub>>;
+    try {
+      found = await memberSub(store, token, subscription);
+    } catch (error) {
+      console.error("reading a membership to pause failed", error);
+      return { ok: false as const, reason: "error" as const };
+    }
+    if (found === "expired") return { ok: false as const, reason: "expired" as const };
+    if (!found || cannotPause(found.sub, store.pause, now) !== null) return { ok: false as const, reason: "cannot" as const };
+    const from = periodEndOf(found.sub);
+    const until = addMonths(from, months);
+    try {
+      await onAccount(
+        "POST",
+        found.account,
+        `/subscriptions/${encodeURIComponent(subscription)}`,
+        new URLSearchParams({
+          "pause_collection[behavior]": "void",
+          "pause_collection[resumes_at]": String(until),
+          "metadata[pause_from]": String(from),
+          "metadata[paused_at]": String(now),
+        }),
+        undefined,
+        `nimbus-pause:${subscription}:${from}`,
+      );
+    } catch (error) {
+      console.error("pausing a membership failed", error);
+      return { ok: false as const, reason: "error" as const };
+    }
+    return { ok: true as const, found, from, until };
+  });
+  if (!done.ok) return done;
+  const { found, from, until } = done;
   await forgetStatus(found.account, subscription).catch(() => null);
   await tellPaused(store, found.account, found.customer, found.sub, from, until).catch((error) => console.error("telling a member of their pause failed", error));
   return { ok: true, from, until };
@@ -85,30 +113,35 @@ export async function pauseMembership(store: Store, token: string, subscription:
  * change if that payment fails, so nobody is let back in on a declined card.
  */
 export async function resumeMembership(store: Store, token: string, subscription: string, now = Math.floor(Date.now() / 1000)): Promise<ResumeResult> {
-  let found: Awaited<ReturnType<typeof memberSub>>;
-  try {
-    found = await memberSub(store, token, subscription);
-  } catch (error) {
-    console.error("reading a membership to resume failed", error);
-    return { ok: false, reason: "error" };
-  }
-  if (found === "expired") return { ok: false, reason: "expired" };
-  const pause = found ? pauseOf(found.sub) : null;
-  if (!found || !pause) return { ok: false, reason: "cannot" };
-  const body = new URLSearchParams({ pause_collection: "", "metadata[pause_from]": "" });
-  if (now >= pause.from) {
-    body.set("billing_cycle_anchor", "now");
-    body.set("proration_behavior", "none");
-    body.set("payment_behavior", "error_if_incomplete");
-  }
-  try {
-    await onAccount("POST", found.account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
-  } catch (error) {
-    if (error instanceof StripeError && error.status === 402) return { ok: false, reason: "declined" };
-    console.error("resuming a membership failed", error);
-    return { ok: false, reason: "error" };
-  }
-  await forgetStatus(found.account, subscription).catch(() => null);
+  // Read and changed under the membership's lock: a second press reads it after the first's change, no longer paused.
+  const done = await underLock(subscription, "resuming a membership", async (): Promise<ResumeResult | { ok: true; account: string }> => {
+    let found: Awaited<ReturnType<typeof memberSub>>;
+    try {
+      found = await memberSub(store, token, subscription);
+    } catch (error) {
+      console.error("reading a membership to resume failed", error);
+      return { ok: false, reason: "error" };
+    }
+    if (found === "expired") return { ok: false, reason: "expired" };
+    const pause = found ? pauseOf(found.sub) : null;
+    if (!found || !pause) return { ok: false, reason: "cannot" };
+    const body = new URLSearchParams({ pause_collection: "", "metadata[pause_from]": "" });
+    if (now >= pause.from) {
+      body.set("billing_cycle_anchor", "now");
+      body.set("proration_behavior", "none");
+      body.set("payment_behavior", "error_if_incomplete");
+    }
+    try {
+      await onAccount("POST", found.account, `/subscriptions/${encodeURIComponent(subscription)}`, body);
+    } catch (error) {
+      if (error instanceof StripeError && error.status === 402) return { ok: false, reason: "declined" };
+      console.error("resuming a membership failed", error);
+      return { ok: false, reason: "error" };
+    }
+    return { ok: true, account: found.account };
+  });
+  if (!done.ok) return done;
+  await forgetStatus(done.account, subscription).catch(() => null);
   return { ok: true };
 }
 

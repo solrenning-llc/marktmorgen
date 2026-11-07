@@ -78,8 +78,33 @@ export type Invoice = {
   lines?: { data?: Line[] } | null;
 };
 
-const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() && Number.isFinite(Number(v)) ? Number(v) : 0);
-const str = (v: unknown) => (typeof v === "string" ? v : v && typeof v === "object" && typeof (v as { id?: unknown }).id === "string" ? (v as { id: string }).id : "");
+/**
+ * An invoice or one of its lines in a shape these rules cannot read (CX-123
+ * rule 24). The movements are then not shown (lib/membership-numbers.ts
+ * catches it, as it does an invoice reading that failed), rather than shown
+ * with a member worth nothing for a month they paid.
+ */
+export class UnreadInvoiceError extends Error {
+  constructor(what: string) {
+    super(`Stripe gave ${what} in a shape that cannot be read`);
+    this.name = "UnreadInvoiceError";
+  }
+}
+
+/** A number Stripe gave, or a numeric string (a decimal price); null when it gave none (absent or null). Anything else throws. */
+const num = (v: unknown, what: string): number | null => {
+  if (v === undefined || v === null) return null;
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : Number.NaN;
+  if (!Number.isFinite(n)) throw new UnreadInvoiceError(what);
+  return n;
+};
+/** A subscription Stripe referred to: its id, or the expanded object with that id; "" when it gave none (absent or null). Anything else throws. */
+const ref = (v: unknown, what: string): string => {
+  if (v === undefined || v === null) return "";
+  const id = typeof v === "object" && !Array.isArray(v) ? (v as { id?: unknown }).id : v;
+  if (typeof id !== "string" || !id) throw new UnreadInvoiceError(what);
+  return id;
+};
 
 /**
  * What each membership was charged at, and from when, from its invoices.
@@ -89,22 +114,29 @@ const str = (v: unknown) => (typeof v === "string" ? v : v && typeof v === "obje
 export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<string, Entry[]> {
   const out = new Map<string, Entry[]>();
   for (const invoice of invoices) {
-    const fromInvoice = str(invoice.subscription) || str(invoice.parent?.subscription_details?.subscription);
-    for (const line of invoice.lines?.data ?? []) {
-      const id = str(line.subscription) || str(line.parent?.subscription_item_details?.subscription) || fromInvoice;
+    if (!invoice || typeof invoice !== "object") throw new UnreadInvoiceError("an invoice");
+    const fromInvoice = ref(invoice.subscription, "an invoice's subscription") || ref(invoice.parent?.subscription_details?.subscription, "an invoice's subscription");
+    const lines = invoice.lines === undefined || invoice.lines === null ? [] : invoice.lines.data;
+    if (!Array.isArray(lines)) throw new UnreadInvoiceError("an invoice's lines");
+    for (const line of lines as unknown[] as Line[]) {
+      if (!line || typeof line !== "object") throw new UnreadInvoiceError("an invoice line");
+      const id = ref(line.subscription, "an invoice line's subscription") || ref(line.parent?.subscription_item_details?.subscription, "an invoice line's subscription") || fromInvoice;
       const sub = subs.get(id);
-      if (!sub || num(line.amount) < 0) continue;
-      const unit = num(line.price?.unit_amount) || num(line.pricing?.unit_amount_decimal);
+      if (!sub) continue;
+      const amount = num(line.amount, "an invoice line's amount");
+      if (amount === null) throw new UnreadInvoiceError("an invoice line with no amount");
+      if (amount < 0) continue;
+      const unit = num(line.price?.unit_amount, "an invoice line's price") || num(line.pricing?.unit_amount_decimal, "an invoice line's decimal price") || 0;
       const proration = line.proration === true || line.parent?.subscription_item_details?.proration === true;
       // A line without its price says only what a part of a period cost; that is not a month's worth.
       if (!unit && proration) continue;
-      const quantity = num(line.quantity) || 1;
+      const quantity = num(line.quantity, "an invoice line's quantity") || 1;
       const recurring = line.price?.recurring;
       const interval = typeof recurring?.interval === "string" ? recurring.interval : sub.interval;
-      const count = num(recurring?.interval_count) || (typeof recurring?.interval === "string" ? 1 : sub.count);
-      const value = unit ? perMonth(unit * quantity, interval, count) : perMonth(num(line.amount), sub.interval, sub.count);
-      const at = num(line.period?.start) || num(invoice.created);
-      if (!at) continue;
+      const count = num(recurring?.interval_count, "an invoice line's interval count") || (typeof recurring?.interval === "string" ? 1 : sub.count);
+      const value = unit ? perMonth(unit * quantity, interval, count) : perMonth(amount, sub.interval, sub.count);
+      const at = num(line.period?.start, "an invoice line's period") || num(invoice.created, "an invoice's date");
+      if (!at) throw new UnreadInvoiceError("an invoice line with no time");
       out.set(id, [...(out.get(id) ?? []), { at, value }]);
     }
   }

@@ -73,14 +73,25 @@ export async function GET(request: NextRequest) {
   const granted = await exchange(code, trip.redirect);
   if (!granted?.serverId) return back("discord=error");
   // Another server than the one connected: the old one is let go, with whoever it gave roles to.
-  // A failed forget (a thrown read, or an exact read that throws UnknownReplyError) switches nothing: the new server
-  // is not saved and the bot stays in the old one, and the creator is told so instead of a bare 500.
+  // A failed forget switches nothing only when it changed nothing: the kept server is read again, exactly. Still the
+  // old one (a thrown read, or an exact read that throws UnknownReplyError, before the DEL): the new server is not
+  // saved, the bot stays in the old one, and the creator is told nothing was changed. Exactly none (the DEL ran and
+  // only its reply was lost): the forget happened, so the switch finishes. Anything else, or a failed read: the
+  // outcome is unknown and the creator is told so, never "Nothing was changed" (Claude 4's focal return on #2976).
   if (before && before.id !== granted.serverId) {
     try {
       await forgetServer(room, store.sid);
     } catch (error) {
       console.error("forgetting the old Discord server before a switch failed", error);
-      return back("discord=unchecked");
+      let now: Awaited<ReturnType<typeof readServerOrThrow>>;
+      try {
+        now = await readServerOrThrow(room);
+      } catch (again) {
+        console.error("reading the connected Discord server after a failed forget failed", again);
+        return back("discord=unconfirmed");
+      }
+      if (now?.id === before.id) return back("discord=unchecked");
+      if (now !== null) return back("discord=unconfirmed");
     }
     await leaveServer(before.id).catch(() => false);
   }

@@ -122,8 +122,12 @@ export async function spendsForReport(statsId: string | null): Promise<AdSpend[]
  * which no other line has, and false is answered only once that HDEL's reply is a count, so nothing of this add is
  * kept and trying again records the expense once. When that reply is unknown too, whether the line is kept is
  * unknown, and it throws (UnknownReplyError: reload to see where it stands), never "saved" nor "nothing saved".
+ * When the write's own round trip failed, the write may still be on its way (Codex Z on #2924): an HDEL that finds
+ * nothing (0) proves only that it has not landed yet, so that outcome is unknown too; only an HDEL that removed the
+ * line (1), or a write that answered in some shape (it ran), lets the add be refused as nothing saved.
  */
 async function written(statsId: string, id: string, value: string): Promise<boolean> {
+  let unresolved = false;
   const receipt = await redisPipeline([
     ["HSET", key(statsId), id, value],
     ["EXPIRE", key(statsId), KEEP_SECONDS],
@@ -131,6 +135,7 @@ async function written(statsId: string, id: string, value: string): Promise<bool
     (replies) => repliesFor(replies, 2),
     (error: unknown) => {
       console.error("writing an ad spend line answered no receipt", error);
+      unresolved = true;
       return null;
     },
   );
@@ -140,7 +145,7 @@ async function written(statsId: string, id: string, value: string): Promise<bool
     () => null,
   );
   const count = undone?.[0];
-  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > 1) {
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > 1 || (unresolved && count === 0)) {
     throw new UnknownReplyError("writing an ad spend line");
   }
   return false;

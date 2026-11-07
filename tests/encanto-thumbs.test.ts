@@ -68,6 +68,13 @@ for (const tier of ["creator", "pro", "scale"] as const) {
 }
 is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);
 is("the signing request is named among its sources", line?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);
+// One typed CDN price only: the line reads the visit model's CDN_PER_REQUEST (tests/traffic-cost.ts), so a later move
+// of that price to the dearest region moves this line with it (Claude 4 on #2801, 6711058322, finding 2).
+const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+const thumbStart = registry.indexOf('id: "picture-thumbnails"');
+const thumbLine = registry.slice(thumbStart, registry.indexOf("\n  },", thumbStart));
+is("the registry types no second CDN request price", /export const CDN_REQUEST\b/.test(registry), false);
+is("the thumbnail line costs its CDN request at traffic-cost's CDN_PER_REQUEST", thumbStart > 0 && /import \{[^}]*\bCDN_PER_REQUEST\b[^}]*\} from "\.\/traffic-cost"/.test(registry) && /\bCDN_PER_REQUEST\b/.test(thumbLine), true);
 
 part("Its size is checked before its bytes are read, so the read is at most MAX_THUMB_BYTES (Claude 1 on #2801, finding 2)");
 // The upload token for any picture name allows MAX_IMAGE_BYTES, so a file sent under the thumbnail's name may be far

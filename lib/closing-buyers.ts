@@ -75,16 +75,19 @@ const isUntold = (raw: unknown): boolean => typeof raw === "string" && UNTOLD_MA
 /**
  * Marks `field` as not told and says whether this call wrote it, so it is counted once (CX-123 rule 24). HSETNX
  * answers 1 (written) or 0 (there already). Any other reply is not "not written": the field is read back once (HGET),
- * and only our own mark counts. Nil there is not written (tried again next run); another value is not ours. A
- * read-back out of shape gives back the `certain` credit taken before it this round, whose emails will not go now,
- * and throws UnknownReplyError, so the closing job holds and tries again.
+ * and only our own mark counts. Nil there is not written (tried again next run); another mark or a told time is not
+ * ours. A read-back out of shape, text the list never holds included (markOf), gives back the `certain` credit taken
+ * before it this round, whose emails will not go now, and throws UnknownReplyError, so the closing job holds and
+ * tries again.
  */
 async function markUntold(folder: string, field: string, certain: number): Promise<boolean> {
   const mark = untoldMark();
   const written = repliesFor(await redisPipeline([["HSETNX", toldKey(folder), field, mark]]), 1)?.[0];
   if (written === 1 || written === 0) return written === 1;
   const back = repliesFor(await redisPipeline([["HGET", toldKey(folder), field]]), 1)?.[0];
-  if (back === null || typeof back === "string") return back === mark;
+  if (back === mark) return true;
+  // Nil, or what the list holds (a mark, or a told time) that is not ours: not written by this call.
+  if (back === null || (typeof back === "string" && markOf(back) !== null)) return false;
   await returnCredit(folder, certain).catch((failed) => console.error("giving back a closing's email credit failed; not tried again", failed));
   throw new UnknownReplyError("whether a closing's buyer was marked as not told");
 }

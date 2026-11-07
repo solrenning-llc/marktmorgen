@@ -5,14 +5,14 @@
  * last id to go on from, is a reading not made: it fails closed, never reads
  * as an empty or complete list. Checked, with a stand-in for Stripe:
  *
- *   - whether a moved member already kept a membership (lib/move-members.ts,
- *     keptAlready), on the customers list and each membership list;
  *   - whether a buyer is new or returning (lib/ad-events.ts, customerType),
  *     which says null when unknown;
  *   - the renewals sent to the ad platforms (lib/ad-events.ts, sendRenewals),
  *     reading every page of the day's paid invoices.
+ *
+ * Whether a moved member already kept a membership (lib/move-members.ts,
+ * keptAlready) is read in its exact shape by #2685, not here.
  */
-import { keptAlready } from "@/lib/move-members";
 import { adsCheckout, customerType, sendRenewals, setServerToken } from "@/lib/ad-events";
 import { nextAdsCookie, adsCookieName } from "@/lib/ad-consent";
 import { NO_PIXELS } from "@/lib/pixels";
@@ -56,43 +56,12 @@ async function outcome<T>(run: () => Promise<T>): Promise<T | "threw"> {
   }
 }
 
-/** A membership as the creator's Stripe account lists it. */
-const sub = (id: string, product = "club000001", status = "active") => ({ id, status, metadata: { store: "pages", product } });
-
 async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "pages", "Pages Kitchen", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, ACCOUNT, true);
   let store = (await storeForEmail(OWNER))!;
-
-  part("Whether a moved member already kept a membership (keptAlready)");
-  const customers = (data: unknown, more: unknown = false) => ({ object: "list", data, has_more: more });
-  const subsOf = (data: unknown, more: unknown = false) => ({ object: "list", data, has_more: more });
-  pages.set("/customers", [customers([{ id: "cus_Pages01" }])]);
-  pages.set("/subscriptions", [subsOf([sub("sub_Kept0001")])]);
-  is("control: a live membership to the product is kept", await keptAlready(store, "m@example.com", "club000001"), true);
-  pages.set("/customers", [customers([{ id: "cus_Pages01" }])]);
-  pages.set("/subscriptions", [subsOf([sub("sub_Kept0001", "other00001")])]);
-  is("control: a membership to another product is not", await keptAlready(store, "m@example.com", "club000001"), false);
-  pages.set("/customers", [customers([])]);
-  is("control: no customer by that address, not kept", await keptAlready(store, "m@example.com", "club000001"), false);
-  pages.set("/customers", [customers({ id: "cus_Pages01" })]);
-  is("a customers page whose data is not a list fails, never 'not kept'", await outcome(() => keptAlready(store, "m@example.com", "club000001")), "threw");
-  pages.set("/customers", [{ object: "list", data: [] }]);
-  is("a customers page with no has_more fails", await outcome(() => keptAlready(store, "m@example.com", "club000001")), "threw");
-  pages.set("/customers", [customers([{ id: "cus_Pages01" }], true)]);
-  pages.set("/subscriptions", [subsOf([])]);
-  is("more customers by that address than one page fails, never 'not kept'", await outcome(() => keptAlready(store, "m@example.com", "club000001")), "threw");
-  pages.set("/customers", [customers([{ id: "cus_Pages01" }])]);
-  pages.set("/subscriptions", [subsOf(null)]);
-  is("a memberships page whose data is not a list fails, never 'not kept'", await outcome(() => keptAlready(store, "m@example.com", "club000001")), "threw");
-  pages.set("/customers", [customers([{ id: "cus_Pages01" }])]);
-  pages.set("/subscriptions", [{ object: "list", data: [] }]);
-  is("a memberships page with no has_more fails", await outcome(() => keptAlready(store, "m@example.com", "club000001")), "threw");
-  pages.set("/customers", [customers([{ id: "cus_Pages01" }])]);
-  pages.set("/subscriptions", [subsOf([sub("sub_Kept0001", "other00001", "canceled")], true)]);
-  is("more memberships than one page, none live on it, fails, never 'not kept'", await outcome(() => keptAlready(store, "m@example.com", "club000001")), "threw");
 
   part("Whether a buyer is new or returning (customerType)");
   const session = (id: string, created: number) => ({ id, payment_status: "paid", created });

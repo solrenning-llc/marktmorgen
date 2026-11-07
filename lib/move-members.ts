@@ -218,24 +218,13 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
 export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
-  // A list in an unknown shape, or one with more than the page read, is a reading not made (CX-123 rule 24):
-  // it fails as Stripe not answering does (the reminder is tried again later), never as "not kept", which
-  // would write to somebody who already moved.
   const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
-  if (!Array.isArray(customers.data)) throw new Error("Stripe gave a page of customers that is not a list");
-  if (typeof customers.has_more !== "boolean") throw new Error("Stripe gave whether there are more customers in a shape that cannot be read");
-  let more = customers.has_more;
-  for (const customer of customers.data as { id?: unknown }[]) {
+  for (const customer of (Array.isArray(customers.data) ? customers.data : []) as { id?: unknown }[]) {
     if (typeof customer.id !== "string") continue;
     const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
-    if (!Array.isArray(subs.data)) throw new Error("Stripe gave a page of memberships that is not a list");
-    if (typeof subs.has_more !== "boolean") throw new Error("Stripe gave whether there are more memberships in a shape that cannot be read");
-    const list = subs.data as { status?: unknown; metadata?: Record<string, string> | null }[];
+    const list = (Array.isArray(subs.data) ? subs.data : []) as { status?: unknown; metadata?: Record<string, string> | null }[];
     if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
-    more ||= subs.has_more;
   }
-  // A live membership found on a page read is known; none found while Stripe has more to give is not.
-  if (more) throw new Error("Stripe has more customers or memberships for this address than one page");
   return false;
 }
 

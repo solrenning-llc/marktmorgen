@@ -222,12 +222,12 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PasskeyManager } from "@/components/passkey-manager";
 import { PasskeySignIn } from "@/components/passkey-signin";
-import { TwoStepManager } from "@/components/two-step-manager";
+import { TwoStepManager, TwoStepUnread } from "@/components/two-step-manager";
 import { AppCodeInvite } from "@/components/app-code-invite";
 import { showAppCodeInvite } from "@/lib/app-code-invite-words";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
-import { RecoveryAddressManager } from "@/components/recovery-address-manager";
+import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
 import { LeaveTeam } from "@/components/team-manager";
@@ -1165,8 +1165,8 @@ export default async function StudioPage({
     // The person's recovery address, partly hidden (lib/recovery-address.ts).
     email ? recoveryAddress(email).then((a) => (a ? hideAddress(a) : "")).catch(() => null) : Promise.resolve(""),
   ]);
-  // Not read just now (null) is not off or none: the Account section says so instead of its two managers.
-  const securityUnread = twoStepRead === null || recoveryRead === null;
+  // Not read just now (null) is not off or none: each of the two Account sections says so in place of its own manager,
+  // judged on its own read, so a two-step login that was read is always drawn (with the Cancel its reset notice names).
   const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
   const recoveryShown = recoveryRead ?? "";
   const connectReady = isConnectConfigured();
@@ -3311,14 +3311,8 @@ export default async function StudioPage({
                 removals={passkeyRemovals}
                 removalDays={REMOVAL_DAYS}
               />
-              {securityUnread ? (
-                <p className="text-sm text-ink-soft">Your two-step login and recovery address could not be read just now. Nothing was changed; reload the page in a moment.</p>
-              ) : (
-                <>
-                  <RecoveryAddressManager shown={recoveryShown} />
-                  <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
-                </>
-              )}
+              {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
+              {twoStepRead === null ? <TwoStepUnread /> : <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} />}
 
               {role !== "owner" ? (
                 <section aria-labelledby="leave-title" className="mt-8 border-t border-line pt-6">
@@ -3407,14 +3401,8 @@ export default async function StudioPage({
                   removals={passkeyRemovals}
                   removalDays={REMOVAL_DAYS}
                 />
-                {securityUnread ? (
-                  <p className="text-sm text-ink-soft">Your two-step login and recovery address could not be read just now. Nothing was changed; reload the page in a moment.</p>
-                ) : (
-                  <>
-                    <RecoveryAddressManager shown={recoveryShown} />
-                    <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} />
-                  </>
-                )}
+                {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
+                {twoStepRead === null ? <TwoStepUnread /> : <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} />}
                 <p className="text-sm text-ink-soft">
                   <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
                     Once it is set up, log in again with it

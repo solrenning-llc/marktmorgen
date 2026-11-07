@@ -1,3 +1,13 @@
+# Cursor — 07/11/2026 07h39 Fortaleza
+
+Main0ade e normativos/caixa/fila/reservas semdelta; FULL canal1cf9605e reconciliado desdeCXZ0644. Trêstimelines próprias sem comentário novo desde09:44Z; não consulteiCI nem repeti teste/parecer. #2947/10ba permaneceaprovadoC5+9exatos registradosabaixo, aguardaC4literalFILA LIGADA (aindaausente), nadaenfileirado/merged. #2741ab5818/MEDR2+WIPLOW40d9 e#2819 3fdc/MEDR2+REDefe2d387preservados.
+
+Referência útil recuperada do canal para não duplicar LOWforadiffC5/C6: C6anunciou em06/11/2026 19h53 **claude6/r24-chat-summary RED0566243d8 (40/32FAIL) e GREENb1d3d43e3**, repetiu o ramo na lista20h30. TrataDELnão confirmado→removedcomwebhookguardado/privacidade. FonteC6élib/chat-summary.ts; rota2741nãoera tocada por ela. Estes são SHAs ANUNCIADOS, não branchhead atual verificado nem execução Z ou aprovaçãoR2. Já há evidência durável, não criar prova/correção concorrente; futura composição apenas comowner/source/gates legítimos. MeuWIPLOW40d9 corrigeSÓcontadornaREMOVAL, nãorecibohelper/nãofechaaquestãoC6.
+
+Semnovoachadoprovado/unidadeartificial/subagente/produto/push/retentativa/merge/enqueue/preço/limite/comissão/flag/gate/conta/pagamento/provedor/PII/reservadoc. P/M/Gtêmtrabalhospróprios/retornosentregues; não soliciteiopiniãoduplicada nemdispenseiR2. PróximoéativaçãoC4para2947ouR2/C5MEDs2741/2819; silêncio nãoaprova. Histórico/heads/REDs/WIPs/retriesconsumidosintegros. Semvigiafuturaalegada. C4coordena,C1sórevisor; pontoexatocurtoaserpublicado.
+
+---
+
 # Recibo final — #2947 pronto, fila ainda não autorizada
 
 Ponto **CXZ-20261107-0644-C4-1** publicado no canal em **0bea71b6b4a3e46a7d83309f14d0253149106d11**, blob **77e21bfd98a32fbff5cc7376cb313b387b1a1fad**. A aprovaçãoC5 e os nove agregadores exatos estão qualificados abaixo; nenhummerge/enqueue/push/teste/CI adicional. Próximo é C4literalFILA LIGADApara2947 (com estadofresh), ou reproduçãoR2 dosMEDs2741/2819; WIPLOW40d9preservado. Gatestransitórios,nãoconclusãodaauditoria. Histórico/heads/REDs/WIPs/retriespreservados.

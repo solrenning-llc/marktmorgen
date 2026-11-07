@@ -352,26 +352,42 @@ export async function takeUpsell(input: {
     const existing = await readUpsell(session, slot);
     return existing?.state === "failed" ? { kind: "failed" } : existing?.state === "declined" ? { kind: "declined" } : { kind: "done" };
   }
-  // An offer taken is one of the month's orders: a paid store's stop at its plan's figure
-  // (lib/order-admission.ts) before anything is charged. Not admitted, the answer is taken
-  // back and the buyer goes on to what they already bought.
-  const admitted = await admitOrders(store, 1);
-  if (!admitted.ok) {
-    await redisPipeline([["DEL", recordKey(session, slot)]]);
-    return { kind: "unavailable" };
-  }
-  if (slot) await redisPipeline([["SADD", slotsKey(session), slot], ["EXPIRE", slotsKey(session), RECORD_SECONDS]]);
+  // From the claim won to Stripe being asked, nothing has been charged. A step that fails in between lets the claim
+  // go (Claude 5 on #2897): only while the key still holds this press's claim, or the record this press wrote over
+  // it, so the "nothing was charged, try again" the buyer is told is true and the retry claims the offer again,
+  // instead of finding it pending, with no customer and off the job's list, and saying done without charging.
+  let written: string | null = null;
+  let admitted: Awaited<ReturnType<typeof admitOrders>>;
+  let customer: string | null;
+  let method: string | null;
+  try {
+    // An offer taken is one of the month's orders: a paid store's stop at its plan's figure
+    // (lib/order-admission.ts) before anything is charged. Not admitted, the answer is taken
+    // back and the buyer goes on to what they already bought.
+    admitted = await admitOrders(store, 1);
+    if (!admitted.ok) {
+      await redisPipeline([["DEL", recordKey(session, slot)]]);
+      return { kind: "unavailable" };
+    }
+    if (slot) await redisPipeline([["SADD", slotsKey(session), slot], ["EXPIRE", slotsKey(session), RECORD_SECONDS]]);
 
-  const method = methodId(view);
-  const customer = typeof view.customer === "string" ? view.customer : null;
-  if (!method || !customer) {
-    await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, at: Date.now() });
-    return { kind: "failed" };
-  }
+    method = methodId(view);
+    customer = typeof view.customer === "string" ? view.customer : null;
+    if (!method || !customer) {
+      await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, at: Date.now() });
+      return { kind: "failed" };
+    }
 
-  // Written down before Stripe is asked, so a lost answer can be looked for,
-  // by the thanks page and by the five-minute job.
-  await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
+    // Written down before Stripe is asked, so a lost answer can be looked for,
+    // by the thanks page and by the five-minute job.
+    const pending: UpsellRecord = { state: "pending", product: target.id, ...extra, customer, at: Date.now() };
+    written = JSON.stringify(pending);
+    await writeUpsell(session, slot, pending);
+  } catch (error) {
+    await releaseMark(recordKey(session, slot), value);
+    if (written) await releaseMark(recordKey(session, slot), written);
+    throw error;
+  }
   await watchPending(store, session, slot);
 
   const email = typeof view.customer_details?.email === "string" ? view.customer_details.email : "";

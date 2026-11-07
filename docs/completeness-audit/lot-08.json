@@ -120,7 +120,7 @@
    "estado": "em andamento",
    "prova_do_estado": "queue.md:21915 (item) e queue.md:21903: \"Estado inicial: na fila.\"; nenhuma outra linha de estado na fila (busca por COPY_DOOR na queue.md: 0). Decisões do dono pela caixa: docs/agent-inbox.md:344 (C3-5, pedido de cópia sempre atendido, custo numa exposição financiada, uma cópia por pessoa a cada 30 dias por loja), :350 (C3-7) e :367 (C3-12, porta fechada pela trava COPY_DOOR_OPEN até COPY_COMPLETE e política de exposição aprovada; \"Registre ... na fila que a abertura da porta depende da aprovação da política de exposição pelo dono, para entrar no Bloco de abertura\"). No GitHub: PR #1854 (unidades 2-5, incluindo a 1) incorporado 03/11/2026 10:04:58 UTC; PR #1843 (unidade 1) incorporado 03/11/2026 16:49:33 UTC; PR #2083 (tarefas da equipe na cópia) 05/11/2026 02:58:16 UTC; PR #2609 (Codex, evidência de checkout incompleta recusada) 05/11/2026 17:28:59 UTC; PRs abertos #2627 e #2629 (Codex, endurecimento da cópia de pontos e do chat).",
    "linha_estado": "Estado inicial: na fila.",
-   "correcao_estado": "PR #1854, commit b7d17247839e24f837e40c4a0ce9d3f821d46c05, 03/11/2026 07h04 Fortaleza (unidades 1 a 5: a cópia lê todos os módulos, COPY_COMPLETE verdadeiro); também PR #1843, commit f147db0a10eeff05fb19f1b23ebe9c982b6c81fc, 03/11/2026 13h49; PR #2083, commit fc4dd1d2aa8c9ec7b3bcb62deddbcc5fb1e39cf1, 04/11/2026 23h58; PR #2609, commit 579f4b11c889ccaced3d02ad1ab71277dda7f0a5, 05/11/2026 14h28. Fica \"em andamento\": falta a porta (página, link de uso único por e-mail, JSON e CSV, limites, aviso ao criador, botão no estúdio, seção 8 de /privacy), construída atrás de COPY_DOOR_OPEN, cuja abertura depende da aprovação da política de exposição pelo dono e entra no Bloco de abertura (C3-12); PRs abertos #2627 e #2629 endurecem leitores.",
+   "correcao_estado": "PR #1854, commit b7d17247839e24f837e40c4a0ce9d3f821d46c05, 03/11/2026 07h04 Fortaleza (unidades 1 a 5: a cópia lê todos os módulos, COPY_COMPLETE verdadeiro); também PR #1843, commit f147db0a10eeff05fb19f1b23ebe9c982b6c81fc, 03/11/2026 13h49; PR #2083, commit fc4dd1d2aa8c9ec7b3bcb62deddbcc5fb1e39cf1, 04/11/2026 23h58; PR #2609, commit 579f4b11c889ccaced3d02ad1ab71277dda7f0a5, 05/11/2026 14h28. Fica \"em andamento\": falta a porta (página, link de uso único por e-mail, JSON e CSV, limites, aviso ao criador, botão no estúdio, seção 8 de /privacy), que deve ser construída atrás de COPY_DOOR_OPEN, com teste (a trava ainda não existe no código), cuja abertura depende da aprovação da política de exposição pelo dono e entra no Bloco de abertura (C3-12); os PRs #2629 (commit e48d114daaa25fe547e6a09c40ca1b259cd6bcb8, 06/11/2026 02h10 Fortaleza) e #2627 (commit 138eec869865a2f77159639cfc3dc4c53bd9848e, 06/11/2026 16h51), incorporados depois da auditoria, endurecem leitores.",
    "pedidos": [
     {
      "o_que": "A cópia lê tudo o que a loja guarda sobre a pessoa segundo o registro de person-data (lista, campos, notas, formulários, cursos, comunidade, importados, consentimentos/acordos com versão)",
@@ -201,7 +201,8 @@
      "onde_deveria_estar": ""
     }
    ],
-   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta registrar em docs/codex-queue.md, no item 619 [SZ3] e no Bloco de abertura, o que a mensagem C3-12 (docs/agent-inbox.md:367) mandou gravar na fila: a porta da cópia (página, link de uso único, JSON e CSV, limites, aviso ao criador e botão no estúdio) é construída atrás da trava testada COPY_DOOR_OPEN, e a abertura dela depende de COPY_COMPLETE e da aprovação, pelo dono, da política de exposição (CURRENT_EXPOSURE_BUDGET_POLICY diferente de null); hoje nenhuma linha da fila cita COPY_DOOR_OPEN nem o estado do item. Falta documental pequena; a porta em si continua prevista como próxima unidade."
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta registrar em docs/codex-queue.md, no item 619 [SZ3] e no Bloco de abertura, o que a mensagem C3-12 (docs/agent-inbox.md:367) mandou gravar na fila: a porta da cópia (página, link de uso único, JSON e CSV, limites, aviso ao criador e botão no estúdio) deve ser construída atrás da trava COPY_DOOR_OPEN, com teste (a trava ainda não existe no código; hoje só a mensagem C3-12 a descreve), e a abertura dela depende de COPY_COMPLETE e da aprovação, pelo dono, da política de exposição (CURRENT_EXPOSURE_BUDGET_POLICY diferente de null); hoje nenhuma linha da fila cita COPY_DOOR_OPEN nem o estado do item. Falta documental pequena; a porta em si continua prevista como próxima unidade.",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foram incorporados o PR #2629 (commit e48d114daaa25fe547e6a09c40ca1b259cd6bcb8, 06/11/2026 02h10 Fortaleza) e o PR #2627 (commit 138eec869865a2f77159639cfc3dc4c53bd9848e, 06/11/2026 16h51 Fortaleza), que a auditoria registrou como abertos; eles endurecem leitores da cópia; a porta e a trava COPY_DOOR_OPEN continuam por fazer."
   },
   {
    "n": 620,
@@ -221,7 +222,8 @@
    "linha_estado": "",
    "correcao_estado": "",
    "pedidos": [],
-   "complemento": ""
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #2696 (commit 9d8abcc8b5987595d45785ddba9488cda67186c0, 05/11/2026 23h20 Fortaleza), que a auditoria registrou como aberto; ele é a auditoria de completude do lote 1, um documento; o estado do item não muda."
   },
   {
    "n": 622,
@@ -249,7 +251,7 @@
    "estado": "em andamento",
    "prova_do_estado": "queue.md:21930 (item) e queue.md:21903: \"Estado inicial: na fila.\"; queue.md:22064 só cita o subitem (31) a partir de outro item; nenhuma linha de estado do 624. No GitHub, subitens incorporados: (9) PR #1778, (5) PR #1777, (42) PR #1877, (29) PR #1891, (47) PR #1875, (35) PR #1925; aberto: (23) PR #1928. PR #1657 só acrescentou os subitens 50 a 54 (documento).",
    "linha_estado": "Estado inicial: na fila.",
-   "correcao_estado": "PR #1778, commit 1aa5e55d0b0b76337689a44276c75eceb0f3062b, 02/11/2026 18h45 Fortaleza (subitem 9); PR #1777, commit c7d8fd3cf1eb5f27996e85b96571fb7ff1af24d6, 02/11/2026 22h13 (subitem 5); PR #1877, commit f7764f68512d3862a6d6a3ecc8cb08481bc30e0a, 03/11/2026 06h17 (subitem 42); PR #1891, commit b1724a1090f4cbd7a1bcf0ba85b06f82aa3529cd, 03/11/2026 07h39 (subitem 29); PR #1875, commit 84622248bfda970665993fb0a8e5964af9b6552a, 03/11/2026 13h50 (subitem 47); PR #1925, commit 56f4b4557a6fb73ff8182f4b018d5b85d17ec159, 04/11/2026 04h04 (subitem 35). Fica \"em andamento\": subitem 23 no PR aberto #1928 e os demais subitens na fila do próprio item.",
+   "correcao_estado": "PR #1778, commit 1aa5e55d0b0b76337689a44276c75eceb0f3062b, 02/11/2026 18h45 Fortaleza (subitem 9); PR #1777, commit c7d8fd3cf1eb5f27996e85b96571fb7ff1af24d6, 02/11/2026 22h13 (subitem 5); PR #1877, commit f7764f68512d3862a6d6a3ecc8cb08481bc30e0a, 03/11/2026 06h17 (subitem 42); PR #1891, commit b1724a1090f4cbd7a1bcf0ba85b06f82aa3529cd, 03/11/2026 07h39 (subitem 29); PR #1875, commit 84622248bfda970665993fb0a8e5964af9b6552a, 03/11/2026 13h50 (subitem 47); PR #1925, commit 56f4b4557a6fb73ff8182f4b018d5b85d17ec159, 04/11/2026 04h04 (subitem 35). Fica \"em andamento\": o subitem 23 foi incorporado depois da auditoria, no PR #1928 (commit c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92, 06/11/2026 19h35 Fortaleza), e os demais subitens seguem na fila do próprio item.",
    "pedidos": [
     {
      "o_que": "(1) Visualizador de modelo 3D no produto físico",
@@ -588,7 +590,8 @@
      "onde_deveria_estar": ""
     }
    ],
-   "complemento": ""
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #1928 (commit c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92, 06/11/2026 19h35 Fortaleza), que a auditoria registrou como aberto; ele traz o subitem (23); o item continua em andamento pelos demais subitens."
   },
   {
    "n": 625,
@@ -608,7 +611,8 @@
    "linha_estado": "",
    "correcao_estado": "",
    "pedidos": [],
-   "complemento": ""
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #2686 (commit 07c7a963132e56d21b6d2038edc522c314746d49, 06/11/2026 01h00 Fortaleza), que a auditoria registrou como aberto; ele é um documento de fila; o estado do item não muda."
   },
   {
    "n": 627,
@@ -646,7 +650,7 @@
    "estado": "em andamento",
    "prova_do_estado": "queue.md:22103 'Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 571 [VS1].'; queue.md:160 status Claude 3 'Em PR: unidade 1 (#1743...), unidade 2 (#1745...), unidade 3 (#1746...)'; queue.md:355 faixa do Claude 3. GitHub: incorporados #1743, #1745, #1746, #1749, #1751, #1753, #1754, #1759, #1760 (02/11/2026); abertos #1821, #1856, #1929, #1933.",
    "linha_estado": "Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 571 [VS1].",
-   "correcao_estado": "PR #1743, commit 8fcc9bf771b00691b119550855bef15b12c56da8, 02/11/2026 15h11 Fortaleza (unidade 1, inventário de cobertura); fica 'em andamento': também incorporados #1745 (fdd097ca042ca3341b6579bf1205feb3a94d582f, 15h01, regras de proposta/confirmação/desfazer), #1746 (8ff380b37be07a32d9df78931a449f0852e11e09, 15h02, chaves de agente por escopo), #1749 (75c8f63182b10696b51f948530d0866ff8bf3a5f, 16h56, conferência do código gerado), #1751 (1d45828025f545f6b3d93eabdd6870df159409bd, 16h41, /llms.txt), #1753 (79f0756a7e7a6b4a216baccd3ab35e44e5263d72, 17h32, linha de comando), #1754 (b0a95bd099529dec25f66ccd367e41b810ba6eb6, 16h26, regras de isolamento dos apps gerados), #1759 (310badaa8e4acda3f4c827ea25dc390f0d2c6c07, 15h57, plano OAuth) e #1760 (474f097a75e9f6bea06e534c79ec1771c7b87dca, 17h01, regras OAuth); em PR aberto: #1821, #1856, #1929, #1933; o resto segue as unidades de docs/ai-agent-store.md.",
+   "correcao_estado": "PR #1743, commit 8fcc9bf771b00691b119550855bef15b12c56da8, 02/11/2026 15h11 Fortaleza (unidade 1, inventário de cobertura); fica 'em andamento': também incorporados #1745 (fdd097ca042ca3341b6579bf1205feb3a94d582f, 15h01, regras de proposta/confirmação/desfazer), #1746 (8ff380b37be07a32d9df78931a449f0852e11e09, 15h02, chaves de agente por escopo), #1749 (75c8f63182b10696b51f948530d0866ff8bf3a5f, 16h56, conferência do código gerado), #1751 (1d45828025f545f6b3d93eabdd6870df159409bd, 16h41, /llms.txt), #1753 (79f0756a7e7a6b4a216baccd3ab35e44e5263d72, 17h32, linha de comando), #1754 (b0a95bd099529dec25f66ccd367e41b810ba6eb6, 16h26, regras de isolamento dos apps gerados), #1759 (310badaa8e4acda3f4c827ea25dc390f0d2c6c07, 15h57, plano OAuth) e #1760 (474f097a75e9f6bea06e534c79ec1771c7b87dca, 17h01, regras OAuth); depois da auditoria, também incorporados #1821 (commit 835b70a531c45271c2e8fc7517b53dc0df302f3d, 06/11/2026 10h32 Fortaleza) e #1856 (commit 7903ae96aa2b4218086d3250b2e44c0a43990426, 07/11/2026 01h58); em PR aberto: #1929, #1933; o resto segue as unidades de docs/ai-agent-store.md.",
    "pedidos": [
     {
      "o_que": "(a) inventário de todas as ações do estúdio com ferramenta ou motivo, e teste que falha quando falta",
@@ -757,7 +761,8 @@
      "onde_deveria_estar": "docs/ai-agent-store.md, seção Units"
     }
    ],
-   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar em docs/ai-agent-store.md (seção Units, linhas 21-23 e seguintes) as palavras de estado das unidades já incorporadas: unidade 1 (#1743), regras de proposta/confirmação/desfazer (#1745) e chaves de agente por escopo (#1746) como 'merged' em vez de 'Tested in a PR'/'On the queue', e registrar como incorporadas a conferência do código gerado (#1749), /llms.txt (#1751), a linha de comando (#1753), as regras de isolamento dos apps gerados (#1754) e o plano e as regras de OAuth do MCP (#1759, #1760); nenhum código muda."
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar em docs/ai-agent-store.md (seção Units, linhas 21-23 e seguintes) as palavras de estado das unidades já incorporadas: unidade 1 (#1743), regras de proposta/confirmação/desfazer (#1745) e chaves de agente por escopo (#1746) como 'merged' em vez de 'Tested in a PR'/'On the queue', e registrar como incorporadas a conferência do código gerado (#1749), /llms.txt (#1751), a linha de comando (#1753), as regras de isolamento dos apps gerados (#1754) e o plano e as regras de OAuth do MCP (#1759, #1760); nenhum código muda.",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foram incorporados o PR #1821 (commit 835b70a531c45271c2e8fc7517b53dc0df302f3d, 06/11/2026 10h32 Fortaleza) e o PR #1856 (commit 7903ae96aa2b4218086d3250b2e44c0a43990426, 07/11/2026 01h58 Fortaleza), que a auditoria registrou como abertos; eles trazem as ferramentas de leitura das unidades 9 a 14 e a descrição do produto preparada pelo agente; continuam em PR aberto #1929 e #1933, e as palavras de estado de docs/ai-agent-store.md (complemento) seguem desatualizadas no main."
   },
   {
    "n": 632,
@@ -765,7 +770,7 @@
    "estado": "em andamento",
    "prova_do_estado": "queue.md:22133 'Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 631 [AA1].'; queue.md:355 faixa do Claude 3. GitHub: incorporados #1758, #1766, #1769, #1770, #1869, #1893, #1894, #1941; abertos #1947, #1950, #2581, #1990.",
    "linha_estado": "Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 631 [AA1].",
-   "correcao_estado": "PR #1758, commit 3c5edc1131423105e304b4c69d548f60ca39206e, 02/11/2026 17h39 Fortaleza (estudo (a)); fica 'em andamento': também incorporados #1766 (ba1aa38d86b1703b2d34afcb9349ba9012ec97eb, 02/11 15h29, conferência oficial), #1770 (cc4e3c9229b27b0de588d05c8db6350c0f37f0ad, 02/11 18h47, textos de anúncio), #1769 (50f884d85f5e1ed590097e27adadaef05c1bce4e, 02/11 23h14, plano de campanha pausado), #1869 (2386afab09194bdff4f8ca527be37351d2dcc457, 03/11 02h11, proteções de gasto), #1894 (5078ae24e140e630e0afae6c095a23dea4a21555, 03/11 07h31, teste de criativos), #1893 (98cb90051dc20b232c80a70849780f59ee20d0db, 03/11 07h34, piloto automático) e #1941 (93c613e08dc7d3d93637bf0eb95ddcbd39f0803b, 05/11 08h36, regras da página de destino); em PR aberto: #1947, #1950 (m), #2581 (l), #1990 (lacunas do estudo).",
+   "correcao_estado": "PR #1758, commit 3c5edc1131423105e304b4c69d548f60ca39206e, 02/11/2026 17h39 Fortaleza (estudo (a)); fica 'em andamento': também incorporados #1766 (ba1aa38d86b1703b2d34afcb9349ba9012ec97eb, 02/11 15h29, conferência oficial), #1770 (cc4e3c9229b27b0de588d05c8db6350c0f37f0ad, 02/11 18h47, textos de anúncio), #1769 (50f884d85f5e1ed590097e27adadaef05c1bce4e, 02/11 23h14, plano de campanha pausado), #1869 (2386afab09194bdff4f8ca527be37351d2dcc457, 03/11 02h11, proteções de gasto), #1894 (5078ae24e140e630e0afae6c095a23dea4a21555, 03/11 07h31, teste de criativos), #1893 (98cb90051dc20b232c80a70849780f59ee20d0db, 03/11 07h34, piloto automático) e #1941 (93c613e08dc7d3d93637bf0eb95ddcbd39f0803b, 05/11 08h36, regras da página de destino); depois da auditoria, também incorporados #2581 (l) (commit 7760b146fa645849bfefa357dc4c17f7c76d8ea3, 06/11/2026 08h35 Fortaleza) e #1990 (lacunas do estudo) (commit 9bca8b16b12721c07b6a21aea1b187ad9c384ccd, 06/11/2026 02h38); em PR aberto: #1947, #1950 (m).",
    "pedidos": [
     {
      "o_que": "(a) estudo com fontes oficiais datadas de Meta, Google e TikTok, com o passo de cada revisão de aplicativo para o dono",
@@ -894,7 +899,8 @@
      "onde_deveria_estar": ""
     }
    ],
-   "complemento": ""
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foram incorporados o PR #1990 (commit 9bca8b16b12721c07b6a21aea1b187ad9c384ccd, 06/11/2026 02h38 Fortaleza) e o PR #2581 (commit 7760b146fa645849bfefa357dc4c17f7c76d8ea3, 06/11/2026 08h35 Fortaleza), que a auditoria registrou como abertos; eles trazem as lacunas do estudo e (l); continuam em PR aberto #1947 e #1950."
   },
   {
    "n": 633,
@@ -1034,7 +1040,7 @@
      "onde_deveria_estar": ""
     }
    ],
-   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta desenhar para os compradores o resumo por IA das avaliações de 636 [GL4](d), já feito e guardado (lib/review-ai-summary.ts, lib/review-ai-summary-rules.ts) mas mostrado só no estúdio: na página do produto app/[handle]/p/[product]/page.tsx (e na página de avaliações app/[handle]/p/[product]/reviews/page.tsx), com o rótulo de IA desenhado pela página, só os temas e contagens guardados, sem nova chamada de IA ao abrir a página e com teste de que um resumo apagado ou fora das avaliações não aparece; o próprio lib/review-ai-summary.ts:10-11 diz que isso ficou para depois porque a página do produto estava reservada pelo PR #1730 (513 [PF1]) da Claude 2, ainda aberto."
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta desenhar para os compradores o resumo por IA das avaliações de 636 [GL4](d), já feito e guardado (lib/review-ai-summary.ts, lib/review-ai-summary-rules.ts) mas mostrado só no estúdio: na página do produto app/[handle]/p/[product]/page.tsx (e na página de avaliações app/[handle]/p/[product]/reviews/page.tsx), com o rótulo de IA desenhado pela página, só os temas e contagens guardados, sem nova chamada de IA ao abrir a página e com teste de que um resumo apagado ou fora das avaliações não aparece; o próprio lib/review-ai-summary.ts:10-11 diz que isso ficou para depois porque a página do produto estava reservada pelo PR #1730 (513 [PF1]) da Claude 2, que estava em andamento na auditoria e foi incorporado depois dela (commit 8f73f9d31b1cc912bb127ce9259601d739732981, 06/11/2026 18h51 Fortaleza); o resumo continua só no estúdio."
   },
   {
    "n": 638,
@@ -1052,7 +1058,7 @@
    "estado": "em andamento",
    "prova_do_estado": "queue.md:22178 'Estado inicial: na fila.' (seção GL), sem linha de andamento no item (queue.md:22219-22262); docs/agent-inbox.md:342 mantém o 639 com o Claude 3; GitHub: 22 PRs do 639 incorporados entre 03/11 e 05/11/2026 e 9 abertos (#1927, #1962, #1963, #1965, #1969, #2036, #2048, #2571, #2574).",
    "linha_estado": "Estado inicial: na fila.",
-   "correcao_estado": "PR #1796, commit c686aa325549447179bfbd39f4b1b7af71553615, 03/11/2026 07h12 Fortaleza (primeiro recurso, (8)); fica 'em andamento': incorporados também (2) #1903, (3) #1968, (6) #1954/#1959/#1960, (7) #1972/#2007, (9) #1952, (20) #2063, (22) #1961, (26) #1910/#1911/#1912, (30) #1804, (31) #1937, (32) #1838, (34) #1966, (38) #1840, (40) #1939/#1949/#1951; em PR aberto: #1927, #1962, #1963, #1965, #1969, #2036, #2048, #2571, #2574; os demais recursos não iniciados.",
+   "correcao_estado": "PR #1796, commit c686aa325549447179bfbd39f4b1b7af71553615, 03/11/2026 07h12 Fortaleza (primeiro recurso, (8)); fica 'em andamento': incorporados também (2) #1903, (3) #1968, (6) #1954/#1959/#1960, (7) #1972/#2007, (9) #1952, (20) #2063, (22) #1961, (26) #1910/#1911/#1912, (30) #1804, (31) #1937, (32) #1838, (34) #1966, (38) #1840, (40) #1939/#1949/#1951; depois da auditoria, também incorporados (22) #1962 (commit 6c8f5c40918311bd81a7e29344f080ddafb323c5, 06/11/2026 16h36 Fortaleza) e #1963 (commit 749dac81607b76156be9eea039e34eb1f733c081, 06/11/2026 17h26) e (34) #1969 (commit 0ade0faf3478ca554226b3f80e1866de82276ca9, 07/11/2026 02h22); em PR aberto: #1927, #1965, #2036, #2048, #2571, #2574; os demais recursos não iniciados.",
    "pedidos": [
     {
      "o_que": "1. Oferta de retorno a criadores que cancelaram, um e-mail com consentimento",
@@ -1349,7 +1355,8 @@
      "onde_deveria_estar": ""
     }
    ],
-   "complemento": ""
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foram incorporados o PR #1962 (commit 6c8f5c40918311bd81a7e29344f080ddafb323c5, 06/11/2026 16h36 Fortaleza), o PR #1963 (commit 749dac81607b76156be9eea039e34eb1f733c081, 06/11/2026 17h26 Fortaleza) e o PR #1969 (commit 0ade0faf3478ca554226b3f80e1866de82276ca9, 07/11/2026 02h22 Fortaleza), que a auditoria registrou como abertos; eles trazem as unidades 2 e 3 de (22) e a unidade 2 de (34); continuam em PR aberto #1927, #1965, #2036, #2048, #2571 e #2574."
   },
   {
    "n": 640,
@@ -1359,7 +1366,8 @@
    "linha_estado": "",
    "correcao_estado": "",
    "pedidos": [],
-   "complemento": ""
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #2704 (commit e3be1cd01bd3234727f13fa4a7cb3aef9559279c, 06/11/2026 08h54 Fortaleza), que a auditoria registrou como aberto; ele é uma auditoria de completude, um documento; o estado do item não muda."
   },
   {
    "n": 641,
@@ -1424,7 +1432,8 @@
      "onde_deveria_estar": ""
     }
    ],
-   "complemento": ""
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #2565 (commit ba310cc2c9021032f745d801c1e2fee989f19c16, 06/11/2026 00h09 Fortaleza), que a auditoria registrou como aberto; ele traz o estudo: docs/external-page-attribution-study.md e tests/external-page-attribution-study.test.ts estão agora no main; a conferência do estudo, pedido por pedido, não foi refeita nesta atualização, e o estado acima continua o da auditoria."
   },
   {
    "n": 645,

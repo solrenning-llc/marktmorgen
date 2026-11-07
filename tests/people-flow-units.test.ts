@@ -80,19 +80,25 @@ async function seedPerson(store: Store, flowIds: string[]) {
 
 type Tally = { commands: number; dbBytes: number; flowsRead: number };
 
-/** Runs `work` with every command and byte of the store's workflows and of the starts counted. */
-async function tallied<T>(listId: string, work: () => Promise<T>, fail?: (command: string, key: string) => boolean): Promise<{ result: T | "threw"; tally: Tally }> {
+/** A command that reads the list itself: a GET of it, or a script given its key (lib/flow-list.ts, readFlowListWithin). */
+const readsList = (c: (string | number)[], flowsKey: string) => (c[0] === "GET" || c[0] === "EVAL") && c.includes(flowsKey);
+
+/**
+ * Runs `work` with every command and byte of the store's workflows and of the starts counted. `fail` names a command
+ * the database does not answer: "list" (the list read), or a command's own name.
+ */
+async function tallied<T>(listId: string, work: () => Promise<T>, fail?: string): Promise<{ result: T | "threw"; tally: Tally }> {
   const flowsKey = `nl:mail:flows:${listId}`;
   const base = redis.pipeline.bind(redis);
   const tally: Tally = { commands: 0, dbBytes: 0, flowsRead: 0 };
   redis.pipeline = async (batch) => {
-    if (fail && batch.some((c) => fail(String(c[0]), String(c[1])))) throw new Error("the database did not answer");
-    const ours = batch.some((c) => c[1] === flowsKey || String(c[1]).startsWith("nl:mail:enr:"));
+    if (fail && batch.some((c) => (fail === "list" ? readsList(c, flowsKey) : c[0] === fail))) throw new Error("the database did not answer");
+    const ours = batch.some((c) => c.includes(flowsKey) || c.some((a) => String(a).startsWith("nl:mail:enr:")));
     const reply = await base(batch);
     if (ours) {
       tally.commands += batch.length;
       tally.dbBytes += utf8(JSON.stringify(batch)) + utf8(JSON.stringify(reply));
-      for (const c of batch) if (c[0] === "GET" && c[1] === flowsKey) tally.flowsRead += 1;
+      for (const c of batch) if (readsList(c, flowsKey)) tally.flowsRead += 1;
     }
     return reply;
   };
@@ -147,19 +153,21 @@ async function main(): Promise<void> {
   is("the page says it in words", /sequencesNotLoaded/.test(page) && /sequences === null/.test(page), true);
 
   // ---------------------------------------------------------------- part 3
+  // Regra 23 (changed after the RED commit): the list read is known by its key in any argument, as a GET or as the
+  // bounded script claude5/flow-save-units reads it with (readFlowListWithin), so this holds on either; same values.
   part("3. A list or a start that cannot be read is 'not loaded', never 'none'");
   await setUp();
   const one = await seedFlows(2, 2, 200);
   const sStore = await current();
   await seedPerson(sStore, [one[0]]);
-  const down = await tallied(sStore.listId as string, () => open(sStore, BUYER, (u) => countUnits(sStore, u)), (c, key) => c === "GET" && key.startsWith("nl:mail:flows:"));
+  const down = await tallied(sStore.listId as string, () => open(sStore, BUYER, (u) => countUnits(sStore, u)), "list");
   const d = down.result !== "threw" ? down.result : null;
   is("the list did not come back: not loaded", [d ? d.sequences : "threw", (d?.sequencesNotLoaded ?? "").length > 20], [null, true]);
   is("the rest is still there", d?.contact?.agreed, true);
-  const noStart = await tallied(sStore.listId as string, () => open(sStore, BUYER, (u) => countUnits(sStore, u)), (c) => c === "EXISTS");
+  const noStart = await tallied(sStore.listId as string, () => open(sStore, BUYER, (u) => countUnits(sStore, u)), "EXISTS");
   const n = noStart.result !== "threw" ? noStart.result : null;
   is("the starts did not come back: not loaded", [n ? n.sequences : "threw", (n?.sequencesNotLoaded ?? "").length > 20], [null, true]);
-  const strlen = await tallied(sStore.listId as string, () => open(sStore, BUYER, async () => ({ ok: true })), (c) => c === "STRLEN");
+  const strlen = await tallied(sStore.listId as string, () => open(sStore, BUYER, async () => ({ ok: true })), "STRLEN");
   const s = strlen.result !== "threw" ? strlen.result : null;
   is("its size did not come back: not loaded, nothing read", [s ? s.sequences : "threw", strlen.tally.flowsRead], [null, 0]);
 

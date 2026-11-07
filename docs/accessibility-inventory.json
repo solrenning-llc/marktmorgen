@@ -1204,6 +1204,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/tax/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/tax",
+      "parameters": []
+    },
+    {
       "source": "app/studio/team/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/team",
@@ -1619,6 +1625,7 @@
     "components/weekly-team-picker.tsx",
     "components/welcome-countdown.tsx",
     "components/welcome-offer-editor.tsx",
+    "components/who-answers.tsx",
     "components/winback-editor.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
@@ -2044,6 +2051,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 140
+    "pageTemplates": 141
   }
 }

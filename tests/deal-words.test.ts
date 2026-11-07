@@ -146,8 +146,9 @@ is("each is refused, though the facts have the word in Latin letters", [
 ].filter((reply) => heldToFacts(reply, deals)), []);
 is("honest Lisu, Coptic and Tifinagh text passes", [heldToFacts("\uA4E1\uA4F2-\uA4E2\uA4F4 \uA4DF\uA4EC \uA4D2\uA4F5.", "Lisu."), heldToFacts("\u2CA0\u2C93\u2C9B\u2C9F\u2CA9\u03EF.", "Coptic."), heldToFacts("\u2D5C\u2D30\u2D4E\u2D30\u2D63\u2D49\u2D56\u2D5C.", "Tifinagh.")], [true, true, true]);
 const copy = readFileSync("tooling/unicode/confusables-18.0.0.txt", "utf8");
-is("the table is made from the committed copy of confusables.txt, version 18.0.0", [versionOf(copy).version, readFileSync("lib/confusables-latin.ts", "utf8") === renderTable(copy)], ["18.0.0", true]);
-const table = new Map(latinLookalikes(copy));
+const names = readFileSync("tooling/unicode/UnicodeData-18.0.0.txt", "utf8");
+is("the table is made from the committed copy of confusables.txt, version 18.0.0", [versionOf(copy).version, readFileSync("lib/confusables-latin.ts", "utf8") === renderTable(copy, names)], ["18.0.0", true]);
+const table = new Map(latinLookalikes(copy, names));
 is("it keeps letters of other scripts and leaves accented letters, digits, Arabic, Hebrew and Han out", [
   table.get(0xa4d3), table.get(0x2ca5), table.get(0x10302), table.get(0x2d54), table.get(0x0441), table.get(0x0406),
   table.has(0x00e9), table.has(0x0660), table.has(0x0627), table.has(0x05d5), table.has(0x4e00), table.has(0x2282),

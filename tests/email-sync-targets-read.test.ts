@@ -219,6 +219,30 @@ async function main() {
   await settle();
   is("a late opening read that succeeds after a failed Refresh: the failure the creator was told stays", told(lateGood), true);
 
+  // A connect refused while the opening read is under way is not a read of the lists: the opening read's answer
+  // still lands, never leaving "Reading your account…" with no read left to end it (Claude 5, focal return 2).
+  const refusedConnect = screen();
+  let answerFirst: (response: Response) => void = () => {};
+  const waitingFirst = (() => new Promise<Response>((resolve) => { answerFirst = resolve; })) as typeof fetch;
+  opening({ fetch: waitingFirst, connectedProvider: "kit", ...refusedConnect, LISTS_UNREAD })();
+  await connecting({
+    post: async () => null,
+    provider: "kit",
+    key: "wrong-key",
+    setKey: () => {},
+    setReplacing: () => {},
+    setTarget: () => {},
+    toast: () => {},
+    byKey: () => ({ name: "Kit" }),
+    ...refusedConnect,
+    LISTS_UNREAD,
+  })({ preventDefault: () => {} });
+  answerFirst(new Response(JSON.stringify({ ok: true, targets: lists }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  await settle();
+  await settle();
+  is("a refused connect during the opening read: the opening read's lists are shown", refusedConnect.now.targets, lists);
+  is("and the box no longer says it is reading", box(refusedConnect).first !== READING, true);
+
   part("The note under the box");
   is("the component has a status line for lists not read", noteLine !== null, true);
   is("drawn as a status message", /role="status"[^>]*>\s*\{listsNote\}/.test(SOURCE), true);

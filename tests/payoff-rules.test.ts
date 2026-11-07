@@ -5,8 +5,10 @@
  * no fee, and only when every fact agrees: a payment owed, a payment about
  * to be taken, a plan not yet given its end, money given back, a discount,
  * an amount that does not match or a count that does not match the dates,
- * a paused collection, a schedule or an update waiting on Stripe, and a
- * customer balance all refuse, and a fact that is missing refuses too.
+ * a paused collection, a schedule or an update waiting on Stripe, a
+ * customer balance or one kept in another currency, invoice items waiting
+ * for the next invoice, and a total that with the tax on top could pass
+ * Stripe's largest charge all refuse, and a fact that is missing refuses too.
  */
 import { PAYOFF_QUIET_SECONDS, STRIPE_MAX_CHARGE, payoffQuote, payoffWords, type PayoffFacts } from "@/lib/payoff-rules";
 import { addPeriods } from "@/lib/plans";
@@ -40,6 +42,8 @@ const facts = (extra: Partial<PayoffFacts> = {}): PayoffFacts => ({
   scheduled: false,
   pendingUpdate: false,
   customerBalanceCents: 0,
+  customerCurrency: "usd",
+  pendingItems: 0,
   nowSeconds: at(1) + 10 * DAY,
   ...extra,
 });
@@ -65,7 +69,9 @@ part("The amount: the payments still to come, nothing more");
   is("with one payment left, that one is the total", last.ok ? [last.remaining, last.totalCents] : last.reason, [1, 11_000]);
   const weekly = payoffQuote(facts({ interval: "week", payments: 6, cancelAt: addPeriods(ANCHOR, "week", 6), currentPeriodStart: addPeriods(ANCHOR, "week", 1), latestInvoice: { status: "paid", subtotalCents: 11_000, taxCents: 0, periodStart: addPeriods(ANCHOR, "week", 1) }, nowSeconds: addPeriods(ANCHOR, "week", 1) + 2 * DAY + 60 }));
   is("a weekly plan counts weeks", weekly.ok ? [weekly.paid, weekly.remaining, weekly.totalCents] : weekly.reason, [2, 4, 44_000]);
-  const yen = payoffQuote(facts({ currency: "jpy", unitAmountCents: 5_000, latestInvoice: { status: "paid", subtotalCents: 5_000, taxCents: 0, periodStart: at(1) } }));
+  // Changed (TB7 pre-review): the customer's currency is now a fact and must
+  // be the plan's, so a yen plan's customer is a yen customer.
+  const yen = payoffQuote(facts({ currency: "jpy", customerCurrency: "jpy", unitAmountCents: 5_000, latestInvoice: { status: "paid", subtotalCents: 5_000, taxCents: 0, periodStart: at(1) } }));
   is("a zero-decimal currency is summed as it is", yen.ok ? [yen.currency, yen.totalCents] : yen.reason, ["jpy", 10_000]);
 }
 
@@ -119,8 +125,24 @@ part("Refused when the amount cannot be sure");
   is("a payment above the currency's dearest price refuses", reason(facts({ unitAmountCents: 500_001, latestInvoice: { status: "paid", subtotalCents: 500_001, taxCents: 0, periodStart: at(1) } })), "unknown");
   is("a payment below the currency's smallest charge refuses", reason(facts({ unitAmountCents: 40, latestInvoice: { status: "paid", subtotalCents: 40, taxCents: 0, periodStart: at(1) } })), "unknown");
   const big = 10_000_000;
-  is("a total above Stripe's largest single charge refuses", reason(facts({ currency: "mxn", payments: 12, cancelAt: at(12), unitAmountCents: big, latestInvoice: { status: "paid", subtotalCents: big, taxCents: 0, periodStart: at(1) } })), "too_large");
+  // Changed (TB7 pre-review): customerCurrency "mxn" added, since a customer
+  // kept in another currency now refuses first.
+  is("a total above Stripe's largest single charge refuses", reason(facts({ currency: "mxn", customerCurrency: "mxn", payments: 12, cancelAt: at(12), unitAmountCents: big, latestInvoice: { status: "paid", subtotalCents: big, taxCents: 0, periodStart: at(1) } })), "too_large");
   is("Stripe's largest single charge", STRIPE_MAX_CHARGE, 99_999_999);
+  // Nine payments of MX$100,000 left: MX$90,000,000 before tax; 16% IVA on
+  // top makes MX$104,400,000, above Stripe's largest single charge.
+  const nineLeft = { currency: "mxn", customerCurrency: "mxn", payments: 12, cancelAt: at(12), currentPeriodStart: at(2), paidInvoices: 3, unitAmountCents: big, nowSeconds: at(2) + 10 * DAY };
+  is("with tax on top, room is kept for the tax before Stripe's cap", reason(facts({ ...nineLeft, latestInvoice: { status: "paid", subtotalCents: big, taxCents: 1_600_000, periodStart: at(2) } })), "too_large");
+  is("with tax on top, room is kept for the dearest tax even when the latest invoice carried none", reason(facts({ ...nineLeft, latestInvoice: { status: "paid", subtotalCents: big, taxCents: 0, periodStart: at(2) } })), "too_large");
+  is("with tax included, the same total is all the buyer pays and is quoted", reason(facts({ ...nineLeft, taxBehavior: "inclusive", latestInvoice: { status: "paid", subtotalCents: big, taxCents: 1_379_311, periodStart: at(2) } })), "ok");
+  // 9 × MX$78,000 = MX$70,200,000; 27% on top = MX$18,954,000; 89,154,000 fits.
+  const fits = 7_800_000;
+  is("with tax on top, a total that fits with the dearest tax is quoted", reason(facts({ ...nineLeft, unitAmountCents: fits, latestInvoice: { status: "paid", subtotalCents: fits, taxCents: 0, periodStart: at(2) } })), "ok");
+  // A tax on the latest invoice above the dearest rate (here about 42%) is
+  // reserved as it is, for each payment left: 9 × (7,800,000 + 3,311,111) is
+  // exactly 99,999,999 and fits; one cent more of tax per payment does not.
+  is("a tax on the invoices above the dearest rate is reserved as it is (fits at the cap)", reason(facts({ ...nineLeft, unitAmountCents: fits, latestInvoice: { status: "paid", subtotalCents: fits, taxCents: 3_311_111, periodStart: at(2) } })), "ok");
+  is("a tax on the invoices above the dearest rate is reserved as it is (one cent over)", reason(facts({ ...nineLeft, unitAmountCents: fits, latestInvoice: { status: "paid", subtotalCents: fits, taxCents: 3_311_112, periodStart: at(2) } })), "too_large");
 }
 
 part("Refused while Stripe could charge something else, or charge it differently");
@@ -130,6 +152,9 @@ part("Refused while Stripe could charge something else, or charge it differently
   is("an update waiting on a payment refuses", reason(facts({ pendingUpdate: true })), "update_pending");
   is("a credit the customer holds refuses", reason(facts({ customerBalanceCents: -500 })), "customer_balance");
   is("an amount the customer owes on the next invoice refuses", reason(facts({ customerBalanceCents: 500 })), "customer_balance");
+  is("a customer whose balance is kept in another currency refuses: the balance in the plan's currency is not known", reason(facts({ customerCurrency: "eur" })), "customer_balance");
+  is("an invoice item waiting for the next invoice refuses", reason(facts({ pendingItems: 1 })), "pending_items");
+  is("several invoice items waiting refuse", reason(facts({ pendingItems: 3 })), "pending_items");
   is("a payment owed still comes first", reason(facts({ paused: true, openInvoices: 1 })), "owing");
 }
 
@@ -167,6 +192,11 @@ part("A missing or malformed fact refuses");
     ["a pending update not known", { pendingUpdate: null }],
     ["a customer balance not known", { customerBalanceCents: Number.NaN }],
     ["a customer balance not whole", { customerBalanceCents: 1.5 }],
+    ["a customer currency not known", { customerCurrency: null }],
+    ["a customer currency in upper case", { customerCurrency: "USD" }],
+    ["pending invoice items not known", { pendingItems: Number.NaN }],
+    ["pending invoice items below zero", { pendingItems: -1 }],
+    ["pending invoice items not whole", { pendingItems: 0.5 }],
   ];
   for (const [what, extra] of bad) is(`${what}: refused`, reason(facts(extra)), "unknown");
   is("a status Stripe may add later is not taken as good", reason(facts({ status: "paused" })), "unknown");

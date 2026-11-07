@@ -49,7 +49,7 @@ export const en = {
   // ---- Sales and fair prices ----------------------------------------------
   fairHead: (country: string, percent: number) => `A fair price for ${country}: ${percent}% off`,
   fairNote: (store: string, plan: boolean) =>
-    `${store} lowers prices where money buys less. Taken off on the payment page, no code needed${plan ? "; the lower price is for paying in full" : ""}.`,
+    `${store} lowers prices where money buys less. This price was set automatically for you, from the country of your internet connection. Taken off on the payment page, no code needed${plan ? "; the lower price is for paying in full" : ""}.`,
   saleHead: (name: string, percent: number, ends: string) => `${name ? `${name}: ` : ""}${percent}% off · ${ends}`,
   saleNote: (until: string, plan: boolean) =>
     `Until ${until}. Taken off on the payment page, no code needed${plan ? "; the sale price is for paying in full" : ""}.`,

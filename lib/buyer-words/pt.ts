@@ -39,7 +39,7 @@ export const pt: BuyerWords = {
 
   fairHead: (country, percent) => `Preço justo para o seu país (${country}): ${percent}${S}% de desconto`,
   fairNote: (store, plan) =>
-    `${store} baixa os preços onde o dinheiro vale menos. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço reduzido é para pagamento integral" : ""}.`,
+    `${store} baixa os preços onde o dinheiro vale menos. Este preço foi definido automaticamente para si, a partir do país da sua ligação à internet. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço reduzido é para pagamento integral" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% de desconto · ${ends}`,
   saleNote: (until, plan) =>
     `Até ${until}. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço promocional é para pagamento integral" : ""}.`,

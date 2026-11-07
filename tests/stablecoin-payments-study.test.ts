@@ -37,7 +37,10 @@ test("the fee is labeled by product, region and date, with Link stablecoins list
 
 test("a creator-paid processing fee does not make Marktmorgen's other costs zero (finding 3)", () => {
   const text = readStudy();
-  assert.ok(text.includes("https://docs.stripe.com/connect/direct-charges-fee-payer-behavior"));
+  // The fee-payer page is cited as a whole source-table cell, compared for equality (not a
+  // substring), so a longer or look-alike address does not count as the cited page.
+  const sourceCells = text.split("\n").flatMap((line) => line.split("|").map((cell) => cell.trim()));
+  assert.ok(sourceCells.some((cell) => cell === "https://docs.stripe.com/connect/direct-charges-fee-payer-behavior"), "fee payer source cited");
   assert.match(text, /fee payer[\s\S]{0,400}does not prove/i);
   assert.match(text, /unimplemented hypothes[ie]s/i);
   assert.ok(text.includes("not an MR admission"), "not an MR admission");

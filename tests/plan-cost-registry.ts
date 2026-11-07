@@ -110,7 +110,7 @@ import {
   PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -364,8 +364,6 @@ export const BLOB_PUT_TRIES = 11;
  * plain fetch, sent once (Codex S on #2801; tests/picture-upload-costs.test.ts reads the installed SDK).
  */
 export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
-/** One CDN request, at the US$ 2.00 a million the SES notice's hosting attempt above already counts. */
-export const CDN_REQUEST = 2 / 1e6;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -872,7 +870,7 @@ export const COST_LINES: CostLine[] = [
   {
     id: "picture-thumbnails",
     feature: "The thumbnail copy of a product picture: its Blob put and the checks of its name and bytes (Encanto 5b-2, 6 November 2026)",
-    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (2 * BLOB_PUT_TRIES * BLOB_ADVANCED_OP + (2 * BLOB_HEAD_TRIES + 1) * BLOB_SIMPLE_OP + MAX_THUMB_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_REQUEST),
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (2 * BLOB_PUT_TRIES * BLOB_ADVANCED_OP + (2 * BLOB_HEAD_TRIES + 1) * BLOB_SIMPLE_OP + MAX_THUMB_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_PER_REQUEST),
     sources: [
       { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor", "issueSignedToken"] },
       { file: "lib/studio-route.ts", names: ["countStudio"] },

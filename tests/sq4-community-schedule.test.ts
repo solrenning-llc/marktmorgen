@@ -153,17 +153,111 @@ async function main(): Promise<void> {
   const atNew = await sched.runScheduledPosts(Date.now() + 10_000, (later.due + 1) * 1000);
   is("at its new time it goes up with the new words", [atNew.posted >= 1, (await feed(id, {})).posts.some((p) => p.title === "Week two" && p.text === "Edited words.")], [true, true]);
 
-  part("Once the job holds it, the studio cannot change or cancel it");
+  part("Who holds it is decided in one step: the job's hold and its mark are one script, the studio writes only if nothing changed");
   for (const p of await sched.listScheduled(shop, (later.due + 1) * 1000)) await sched.cancelScheduled(shop, p.id, (later.due + 1) * 1000);
+  const realPipeline = redis.pipeline.bind(redis);
+  type Hook = { when: (commands: (string | number)[][], out: unknown[]) => boolean; then: () => Promise<void> };
+  let hook: Hook | null = null;
+  const seen: string[] = [];
+  const watch = () => {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const out = (await realPipeline(commands)) as unknown[];
+      for (const c of commands) seen.push(c[0] === "EVAL" ? String(c[1]).split("\n")[0] : `${c[0]} ${String(c[1])}`);
+      if (hook && hook.when(commands, out)) {
+        const h = hook;
+        hook = null;
+        await h.then();
+      }
+      return out;
+    }) as typeof redis.pipeline;
+  };
+  const claimed = (commands: (string | number)[][], out: unknown[]) =>
+    commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:cm-schedule-claim:v1") && out[0] === 1;
+  const readOf = (one: string) => (commands: (string | number)[][]) => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === keys.record(one);
+
+  // 1. The job takes it, late and long overdue; the studio asks to cancel at that same moment.
   const held = await sched.schedulePost(shop, inputAt(3600), t0);
   const heldPost = held.ok ? held.post : null!;
-  // The job's own claim: the member taken off the due list.
-  redis.run(["ZREM", sched.DUE_KEY, sched.dueMember(shop.sid, id, heldPost.id)]);
-  is("edit refused while held", await sched.editScheduled(shop, heldPost.id, inputAt(7200), t0), { ok: false, reason: "busy" });
-  is("cancel refused while held, before it counts as held up", await sched.cancelScheduled(shop, heldPost.id, (heldPost.due + 60) * 1000), { ok: false, reason: "busy" });
-  is("the record is untouched", sched.parseRecord(redis.run(["GET", keys.record(heldPost.id)]))?.state, "waiting");
-  is("held up long past its time, it may be cleared", await sched.cancelScheduled(shop, heldPost.id, (heldPost.due + STUCK_SECONDS + 1) * 1000), { ok: true });
-  is("and its room is given back", slot(heldPost.id), 0);
+  const lateNow = (heldPost.due + STUCK_SECONDS + 1) * 1000;
+  let during: unknown = null;
+  const feedBefore = (await feed(id, {})).posts.length;
+  seen.length = 0;
+  hook = { when: claimed, then: async () => { during = await sched.cancelScheduled(shop, heldPost.id, lateNow); } };
+  watch();
+  const ranHeld = await sched.runScheduledPosts(Date.now() + 10_000, lateNow);
+  redis.pipeline = realPipeline;
+  is("a cancel right after the job took it is refused, however late it is: it is being posted", during, { ok: false, reason: "busy" });
+  is("posted once, and its record says so", [ranHeld.posted, (await feed(id, {})).posts.length - feedBefore, sched.parseRecord(redis.run(["GET", keys.record(heldPost.id)]))?.state], [1, 1, "posted"]);
+  is("the job never takes a member off the due list by itself before posting: its hold is the claim script", seen.some((c) => c.startsWith(`ZREM ${sched.DUE_KEY}`)), false);
+  is("nor marks the record by itself", seen.some((c) => c === `SET ${keys.record(heldPost.id)}`), false);
+
+  // 2. The studio reads it, then the job takes it and posts it, then the studio's cancel lands.
+  const raced = await sched.schedulePost(shop, inputAt(3600), t0);
+  const racedPost = raced.ok ? raced.post : null!;
+  hook = { when: readOf(racedPost.id), then: async () => { await sched.runScheduledPosts(Date.now() + 10_000, (racedPost.due + 1) * 1000); } };
+  watch();
+  const lateCancel = await sched.cancelScheduled(shop, racedPost.id, (racedPost.due + 1) * 1000);
+  redis.pipeline = realPipeline;
+  is("a cancel read before the job's hold is refused, not half done", lateCancel, { ok: false, reason: "busy" });
+  is("the post stands and so does its record", sched.parseRecord(redis.run(["GET", keys.record(racedPost.id)]))?.state, "posted");
+  is("its room is still counted", slot(racedPost.id), rules.recordBytes(racedPost));
+
+  // 3. The same with an edit: the words the job posted are the ones it held.
+  const raced2 = await sched.schedulePost(shop, inputAt(3600, { title: "Old words" }), t0);
+  const raced2Post = raced2.ok ? raced2.post : null!;
+  hook = { when: readOf(raced2Post.id), then: async () => { await sched.runScheduledPosts(Date.now() + 10_000, (raced2Post.due + 1) * 1000); } };
+  watch();
+  const lateEdit = await sched.editScheduled(shop, raced2Post.id, inputAt(7200, { title: "New words" }), t0);
+  redis.pipeline = realPipeline;
+  is("an edit read before the job's hold is refused", lateEdit, { ok: false, reason: "busy" });
+  is("the words posted are the old ones, never a mix", (await feed(id, {})).posts.filter((p) => p.title === "Old words" || p.title === "New words").map((p) => p.title), ["Old words"]);
+
+  // 4. The claim fails on its way: nothing was held, so nothing is stuck.
+  const broken = await sched.schedulePost(shop, inputAt(3600), t0);
+  const brokenPost = broken.ok ? broken.post : null!;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:cm-schedule-claim:v1"))) throw new Error("synthetic: Redis did not answer");
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  await sched.runScheduledPosts(Date.now() + 10_000, (brokenPost.due + 1) * 1000).catch(() => null);
+  redis.pipeline = realPipeline;
+  is("still waiting, still due", [sched.parseRecord(redis.run(["GET", keys.record(brokenPost.id)]))?.state, redis.run(["ZSCORE", sched.DUE_KEY, sched.dueMember(shop.sid, id, brokenPost.id)])], ["waiting", String(brokenPost.due)]);
+  is("still editable: never busy forever", await sched.editScheduled(shop, brokenPost.id, inputAt(3600, { title: "Fixed" }), t0), { ok: true });
+  const ranBroken = await sched.runScheduledPosts(Date.now() + 10_000, (brokenPost.due + 1) * 1000);
+  is("the next run posts it", [ranBroken.posted, (await feed(id, {})).posts.some((p) => p.title === "Fixed")], [1, true]);
+
+  // 5. A waiting one that lost its place on the due list, however, is put back, and the studio says it is late.
+  const lost = await sched.schedulePost(shop, inputAt(3600), t0);
+  const lostPost = lost.ok ? lost.post : null!;
+  redis.run(["ZREM", sched.DUE_KEY, sched.dueMember(shop.sid, id, lostPost.id)]);
+  const lostList = await sched.listScheduled(shop, (lostPost.due + 120) * 1000);
+  is("put back on the due list", redis.run(["ZSCORE", sched.DUE_KEY, sched.dueMember(shop.sid, id, lostPost.id)]), String(lostPost.due));
+  is("and said late to the creator", rules.stateWords(lostList.find((p) => p.id === lostPost.id)!, lostPost.due + 120).startsWith("Late"), true);
+  is("the next run posts it", (await sched.runScheduledPosts(Date.now() + 10_000, (lostPost.due + 120) * 1000)).posted, 1);
+
+  part("Scheduling writes its record and both places in one script");
+  seen.length = 0;
+  watch();
+  const oneStep = await sched.schedulePost(shop, inputAt(3600), t0);
+  redis.pipeline = realPipeline;
+  is("one script, and no separate place written", [seen.filter((c) => c === "-- marktmorgen:cm-schedule-add:v1").length, seen.some((c) => c.startsWith("ZADD ") || c.startsWith(`SET ${keys.record(oneStep.ok ? oneStep.post.id : "")}`))], [1, false]);
+
+  part("The job starts no post it has no time left to finish");
+  const noTime = await sched.runScheduledPosts(Date.now() + rules.PUBLISH_MIN_MS - 500, ((oneStep.ok ? oneStep.post.due : 0) + 1) * 1000);
+  is("nothing taken", [noTime.posted, sched.parseRecord(redis.run(["GET", keys.record(oneStep.ok ? oneStep.post.id : "")]))?.state], [0, "waiting"]);
+
+  part("Too close to its time to change, said why");
+  const close = oneStep.ok ? oneStep.post : null!;
+  const tooClose = await sched.editScheduled(shop, close.id, inputAt(7200), (close.due - MIN_LEAD_SECONDS + 60) * 1000);
+  is("refused within the lead", tooClose, { ok: false, reason: "too_close" });
+  is("with a sentence that says why and what still works", rules.SCHEDULE_PROBLEMS.too_close.includes("can still cancel"), true);
+  is("cancel still works then", await sched.cancelScheduled(shop, close.id, (close.due - 60) * 1000), { ok: true });
+
+  part("When it is set for, in words that are never a past time to come");
+  const sample = { ...close, tz: "UTC", due: Date.UTC(2030, 0, 15, 14, 30) / 1000 };
+  is("waiting and to come: goes up", rules.whenWords(sample, sample.due - 3600).startsWith("Goes up Tuesday, January 15, 2030"), true);
+  is("waiting and late: was set for", rules.whenWords(sample, sample.due + 60).startsWith("Set for"), true);
+  is("failed: was set for", rules.whenWords({ ...sample, state: "failed" }, sample.due - 3600).startsWith("Set for"), true);
 
   part("Under the rules as they are at its time");
   const gone = await sched.schedulePost(shop, inputAt(3600), t0);
@@ -193,7 +287,6 @@ async function main(): Promise<void> {
   await sched.cancelScheduled(shop, orphanPost.id, (orphanPost.due + 1) * 1000);
   const unsure = await sched.schedulePost(shop, inputAt(3600), t0);
   const unsurePost = unsure.ok ? unsure.post : null!;
-  const realPipeline = redis.pipeline.bind(redis);
   // The post's own write fails: whether it landed is not known.
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith(`nl:cm:${id}:p:`))) throw new Error("synthetic: the connection dropped");
@@ -239,6 +332,26 @@ async function main(): Promise<void> {
   is("the creator is told it was not emailed, and why", rules.stateWords(annAfter!, annPost.due + 60), "Posted. It was not emailed: your plan does not send community emails right now.");
   is("nobody asking is said too", rules.stateWords({ ...annAfter!, mail: "empty" }, annPost.due + 60).includes("nobody has asked"), true);
   is("an email started is said as going out, never as delivered", rules.stateWords({ ...annAfter!, mail: "queued" }, annPost.due + 60).includes("is going out"), true);
+
+  part("Done ones go after a week by themselves, and never keep a new one out");
+  for (const p of await sched.listScheduled(shop, (annPost.due + 60) * 1000)) if (p.id !== annPost.id) await sched.cancelScheduled(shop, p.id, (annPost.due + 60) * 1000);
+  const old: string[] = [];
+  for (let i = 0; i < MAX_SCHEDULED_POSTS - 1; i += 1) {
+    const made = await sched.schedulePost(shop, inputAt(3600 + i * 60), t0);
+    if (made.ok) old.push(made.post.id);
+  }
+  // Each failed (or not confirmed) more than a week before now.
+  const weekAgo = Math.floor(t0 / 1000) - POSTED_KEEP_SECONDS - 60;
+  for (const [i, one] of old.entries()) {
+    const r = sched.parseRecord(redis.run(["GET", keys.record(one)]))!;
+    redis.run(["SET", keys.record(one), JSON.stringify({ ...r, state: i % 2 ? "failed" : "unknown", why: i % 2 ? "space" : "", at: weekAgo })]);
+    redis.run(["ZREM", sched.DUE_KEY, sched.dueMember(shop.sid, id, one)]);
+  }
+  is("the list is full", redis.run(["ZCARD", keys.list]), MAX_SCHEDULED_POSTS);
+  const fresh = await sched.schedulePost(shop, inputAt(3600), t0);
+  is("a new one still fits: the week-old failed ones were cleared first", fresh.ok, true);
+  is("with their records and rooms", [old.every((one) => redis.run(["GET", keys.record(one)]) === null), old.every((one) => slot(one) === 0)], [true, true]);
+  if (fresh.ok) await sched.cancelScheduled(shop, fresh.post.id, t0);
 
   part("The list: soonest first; posted ones go after a week, with their room");
   shop = (await storeForEmail(OWNER))!;

@@ -361,6 +361,55 @@ async function main(): Promise<void> {
   const route = readFileSync("app/l/[code]/route.ts", "utf8");
   is("the route reads the time once and keeps the CDN inside the date", [/targetNow\(/.test(route), /linkCache\(/.test(route), /never keeps it past the date/.test(route)], [true, true, false]);
 
+  part("Fourth pre-review: an old panel's view, the panel's clock, a date said, a link gone");
+  // P1: a panel drawn before `to` was sent says "no date" as { at: null, passed: false }: read as no date, like a request with no view.
+  is(
+    "a view of no date without `to` reads as no date (a panel opened before `to` was sent)",
+    [readSeen({ at: null, passed: false }), readSeen({ at: null, passed: true }), readSeen({ at: null, passed: false, to: { kind: "store" } })],
+    [{ at: null, passed: false, to: null }, { at: null, passed: true, to: null }, null],
+  );
+  const undated = (await readLinks(mine.statsId)).find((l) => l.code === fresh.link.code);
+  if (!undated) throw new Error("no second link");
+  await setThen(mine.statsId, fresh.link.code, null, guide, Date.now(), seenAt(undated, Date.now()));
+  const oldPanel = await post({ action: "target", code: fresh.link.code, target: { kind: "product", id: "guide" }, seen: { at: null, passed: false } });
+  is("a change from such a panel, on a link with no date, is saved", [oldPanel.status, oldPanel.body.ok], [200, true]);
+
+  // P2: the panel's clock is read after the page's reads, so it does not start behind by their time.
+  const block = studio.slice(studio.lastIndexOf("(async () => {", studio.indexOf("<ShortLinks")), studio.indexOf("})()", studio.indexOf("<ShortLinks")));
+  is(
+    "the panel's clock is the server's, read after the links and the titles",
+    [/now=\{todayNow\(\)\}/.test(block), block.indexOf("await readLinks") >= 0 && block.indexOf("await readLinks") < block.indexOf("todayNow()"), block.indexOf("await titles") >= 0 && block.indexOf("await titles") < block.indexOf("todayNow()")],
+    [true, true, true],
+  );
+
+  // P3: a date passed while a change was being sent is said, from what the panel showed, if the answer still has it come.
+  const came = (shown: unknown, freshList: unknown, from: number, to: number) => (r.datesCame ? (r.datesCame(shown, freshList, from, to) as { code: string }[]).map((l) => l.code) : "missing");
+  const b = { ...plainLink, code: "bbbbbb", then: { at: NOW + 500, target: { kind: "product", id: "guide" } } };
+  is(
+    "a date passed during a request is said when the answer comes, unless the answer took it back or the link is gone",
+    [
+      came([b], [b], NOW, NOW + 1_000),
+      came([b], [{ ...b, then: undefined, target: { kind: "product", id: "guide" } }], NOW, NOW + 1_000),
+      came([b], [{ ...b, then: undefined }], NOW, NOW + 1_000),
+      came([b], [], NOW, NOW + 1_000),
+      came([b], [b], NOW + 1_000, NOW + 2_000),
+    ],
+    // Came; came, the date settled into the page; taken back meanwhile; gone; said already.
+    [["bbbbbb"], ["bbbbbb"], [], [], []],
+  );
+  is(
+    "an answer moves the panel's clock by the tick's own path, and the same words are said again",
+    [/setNow\(clock\(\)\)/.test(panel), (panel.match(/advance\(answer\.links\)/g) ?? []).length, /const tick = \(\) => advance\(/.test(panel), /datesCame\(/.test(panel), /setSaid\(""\)/.test(panel)],
+    [false, 2, true, true, true],
+  );
+
+  // P4: a link gone when a change is refused is said in the panel's own place, focused, without asking to reload what is already shown.
+  is(
+    "a link gone after a refusal is said in a lasting place in the panel, focused, not in a toast",
+    [/toast\(REASONS\.gone\)/.test(panel), /statusRef\.current\?\.focus\(\)/.test(panel), /\bended: "(?![^"]*Reload)[^"]*"/.test(panel), /refuseRow\(/.test(panel)],
+    [false, true, true, true],
+  );
+
   done();
 }
 

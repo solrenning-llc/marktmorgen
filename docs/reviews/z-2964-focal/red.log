@@ -1,0 +1,352 @@
+z-2964-paypal-refund-records.proof.ts
+  ok    healthy control: the exact record produces the exact refund
+  ok    missing-record control: a confirmed null record is partial
+  synthetic financial reading: {"rows":[{"order":"SYNTHORDER0001","capture":"SYNTHCAPTURE01","cents":1200,"currency":"USD","at":1760356800}],"partial":false}
+  FAIL  one MGET command cannot have an extra outer reply
+        expected true
+        got      false
+  synthetic financial reading: {"rows":[{"order":"SYNTHORDER0001","capture":"SYNTHCAPTURE01","cents":1200,"currency":"USD","at":1760356800}],"partial":false}
+  FAIL  one requested record cannot have an extra MGET member
+        expected true
+        got      false
+  synthetic financial reading: {"rows":[{"order":"DIFFERENT0001","capture":"SYNTHCAPTURE01","cents":1200,"currency":"USD","at":1760356800}],"partial":false}
+  FAIL  the indexed order and record order disagree makes the refund read unknown
+        expected true
+        got      false
+  synthetic financial reading: {"rows":[{"order":"SYNTHORDER0001","capture":"SYNTHCAPTURE01","cents":"1200","currency":"USD","at":1760356800}],"partial":false}
+  FAIL  cents is text rather than a whole numeric amount makes the refund read unknown
+        expected true
+        got      false
+  synthetic financial reading: {"rows":[{"order":"SYNTHORDER0001","capture":null,"cents":1200,"currency":"USD","at":1760356800}],"partial":false}
+  FAIL  the capture identity is null makes the refund read unknown
+        expected true
+        got      false
+  synthetic financial reading: {"rows":[{"order":"SYNTHORDER0001","capture":"SYNTHCAPTURE01","cents":1200,"currency":{},"at":1760356800}],"partial":false}
+  FAIL  the currency is an object makes the refund read unknown
+        expected true
+        got      false
+
+8 checks, 6 failing.
+COUNTED_MEMORY_COMMANDS 16
+paypal-refunds-score-exact.test.ts
+✔ a healthy refund is read with its own date (3.864744ms)
+✔ a store with no refunds is a known empty reading, and no store reads nothing (0.413723ms)
+✔ a refund score that is text throws, never a refund dated 0 (0.937597ms)
+✔ a refund score that is empty throws, never a refund dated 0 (0.515183ms)
+✔ a refund score that is spaces throws, never a refund dated 0 (0.376396ms)
+✔ a refund score that is hex throws, never a refund dated 0 (1.187237ms)
+✔ a refund score that is overflow throws, never a refund dated 0 (0.322733ms)
+✔ a refund score that is infinity throws, never a refund dated 0 (0.310496ms)
+✔ a refund score that is fraction throws, never a refund dated 0 (0.669007ms)
+✔ a refund score that is zero throws, never a refund dated 0 (0.49582ms)
+✔ a refund score that is negative throws, never a refund dated 0 (0.271927ms)
+✔ a refund score that is newline throws, never a refund dated 0 (0.240975ms)
+✔ a refund score that is number, not text throws, never a refund dated 0 (0.247714ms)
+✔ a refund score that is null throws, never a refund dated 0 (0.151814ms)
+✔ a refund score that is before the range asked throws, never a refund dated 0 (0.144108ms)
+✔ a refund list that is null throws, never "no refunds" (0.236123ms)
+✔ a refund list that is an object throws, never "no refunds" (0.239812ms)
+✔ a refund list that is a member without its score throws, never "no refunds" (0.271655ms)
+✔ a refund list that is a member that is not text throws, never "no refunds" (0.575786ms)
+✔ a refund list that is longer than asked throws, never "no refunds" (1.512606ms)
+✔ a confirmed empty list stays a complete reading, a well-formed list reads as before (0.535952ms)
+✖ the refunded sales' records: no reply throws, never a refund row read as complete (1.41275ms)
+✖ the refunded sales' records: an extra reply throws, never a refund row read as complete (0.461676ms)
+✖ the refunded sales' records: records not a list throws, never a refund row read as complete (0.817704ms)
+✖ the refunded sales' records: records null throws, never a refund row read as complete (0.325309ms)
+✖ the refunded sales' records: no record for the one asked throws, never a refund row read as complete (0.33485ms)
+✖ the refunded sales' records: two records for the one asked throws, never a refund row read as complete (0.418879ms)
+✖ the refunded sales' records: a record that is a number throws, never a refund row read as complete (0.474291ms)
+✖ the refunded sales' records: a record that is not JSON throws, never a refund row read as complete (0.633167ms)
+✖ the refunded sales' records: a record that is a JSON list throws, never a refund row read as complete (0.355157ms)
+✖ the refunded sales' records: another order's record throws, never a refund row read as complete (0.435432ms)
+✖ the refunded sales' records: cents as text throws, never a refund row read as complete (0.284846ms)
+✖ the refunded sales' records: cents negative throws, never a refund row read as complete (0.268367ms)
+✖ the refunded sales' records: cents a fraction throws, never a refund row read as complete (0.451685ms)
+✖ the refunded sales' records: a null capture throws, never a refund row read as complete (0.353364ms)
+✖ the refunded sales' records: a capture that is not one throws, never a refund row read as complete (0.280015ms)
+✖ the refunded sales' records: the currency an object throws, never a refund row read as complete (0.326011ms)
+✖ the refunded sales' records: the currency not three letters throws, never a refund row read as complete (0.242181ms)
+✔ the refunded sales' records: a record confirmed missing is a partial reading; an exact one reads as before (0.600233ms)
+✖ readPayPalRefunds: a partial reading throws, never 'these are all the refunds'; a complete one is its rows (0.642748ms)
+COUNTED_MEMORY_COMMANDS 26
+ℹ tests 40
+ℹ suites 0
+ℹ pass 22
+ℹ fail 18
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41.540019
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: no reply throws, never a refund row read as complete (1.41275ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: an extra reply throws, never a refund row read as complete (0.461676ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: records not a list throws, never a refund row read as complete (0.817704ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: records null throws, never a refund row read as complete (0.325309ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: no record for the one asked throws, never a refund row read as complete (0.33485ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: two records for the one asked throws, never a refund row read as complete (0.418879ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: a record that is a number throws, never a refund row read as complete (0.474291ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: a record that is not JSON throws, never a refund row read as complete (0.633167ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: a record that is a JSON list throws, never a refund row read as complete (0.355157ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: another order's record throws, never a refund row read as complete (0.435432ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: cents as text throws, never a refund row read as complete (0.284846ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: cents negative throws, never a refund row read as complete (0.268367ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: cents a fraction throws, never a refund row read as complete (0.451685ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: a null capture throws, never a refund row read as complete (0.353364ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: a capture that is not one throws, never a refund row read as complete (0.280015ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: the currency an object throws, never a refund row read as complete (0.326011ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11175:29
+✖ the refunded sales' records: the currency not three letters throws, never a refund row read as complete (0.242181ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11176:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [class UnknownReplyError extends Error],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11186:27
+✖ readPayPalRefunds: a partial reading throws, never 'these are all the refunds'; a complete one is its rows (0.642748ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withRecords (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11150:12)
+      at async TestContext.<anonymous> (/tmp/z-points-worQh6/paypal-refunds-score-exact.test.ts.cjs:11187:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }

@@ -1,0 +1,646 @@
+z-2964-paypal-refund-records.proof.ts
+  ok    healthy control: the exact record produces the exact refund
+  ok    missing-record control: a confirmed null record is partial
+  ok    one MGET command cannot have an extra outer reply
+  ok    one requested record cannot have an extra MGET member
+  ok    the indexed order and record order disagree makes the refund read unknown
+  ok    cents is text rather than a whole numeric amount makes the refund read unknown
+  ok    the capture identity is null makes the refund read unknown
+  ok    the currency is an object makes the refund read unknown
+
+8 checks, all passing.
+COUNTED_MEMORY_COMMANDS 16
+paypal-refunds-score-exact.test.ts
+✔ a healthy refund is read with its own date (3.633498ms)
+✔ a store with no refunds is a known empty reading, and no store reads nothing (0.289421ms)
+✔ a refund score that is text throws, never a refund dated 0 (0.854419ms)
+✔ a refund score that is empty throws, never a refund dated 0 (0.302257ms)
+✔ a refund score that is spaces throws, never a refund dated 0 (0.173765ms)
+✔ a refund score that is hex throws, never a refund dated 0 (0.549065ms)
+✔ a refund score that is overflow throws, never a refund dated 0 (0.187372ms)
+✔ a refund score that is infinity throws, never a refund dated 0 (0.148017ms)
+✔ a refund score that is fraction throws, never a refund dated 0 (0.205101ms)
+✔ a refund score that is zero throws, never a refund dated 0 (0.254848ms)
+✔ a refund score that is negative throws, never a refund dated 0 (0.138404ms)
+✔ a refund score that is newline throws, never a refund dated 0 (0.212997ms)
+✔ a refund score that is number, not text throws, never a refund dated 0 (0.15792ms)
+✔ a refund score that is null throws, never a refund dated 0 (0.170865ms)
+✔ a refund score that is before the range asked throws, never a refund dated 0 (0.153005ms)
+✔ a refund list that is null throws, never "no refunds" (0.227346ms)
+✔ a refund list that is an object throws, never "no refunds" (0.178379ms)
+✔ a refund list that is a member without its score throws, never "no refunds" (0.149123ms)
+✔ a refund list that is a member that is not text throws, never "no refunds" (0.146886ms)
+✔ a refund list that is longer than asked throws, never "no refunds" (0.681249ms)
+✔ a confirmed empty list stays a complete reading, a well-formed list reads as before (0.417163ms)
+✔ the refunded sales' records: no reply throws, never a refund row read as complete (0.364677ms)
+✔ the refunded sales' records: an extra reply throws, never a refund row read as complete (0.326929ms)
+✔ the refunded sales' records: records not a list throws, never a refund row read as complete (0.628204ms)
+✔ the refunded sales' records: records null throws, never a refund row read as complete (0.167011ms)
+✔ the refunded sales' records: no record for the one asked throws, never a refund row read as complete (0.116609ms)
+✔ the refunded sales' records: two records for the one asked throws, never a refund row read as complete (0.401885ms)
+✔ the refunded sales' records: a record that is a number throws, never a refund row read as complete (0.228501ms)
+✔ the refunded sales' records: a record that is not JSON throws, never a refund row read as complete (0.204899ms)
+✔ the refunded sales' records: a record that is a JSON list throws, never a refund row read as complete (0.191843ms)
+✔ the refunded sales' records: another order's record throws, never a refund row read as complete (0.152758ms)
+✔ the refunded sales' records: cents as text throws, never a refund row read as complete (0.110823ms)
+✔ the refunded sales' records: cents negative throws, never a refund row read as complete (0.145817ms)
+✔ the refunded sales' records: cents a fraction throws, never a refund row read as complete (0.17838ms)
+✔ the refunded sales' records: a null capture throws, never a refund row read as complete (0.111209ms)
+✔ the refunded sales' records: a capture that is not one throws, never a refund row read as complete (0.090611ms)
+✔ the refunded sales' records: the currency an object throws, never a refund row read as complete (0.093269ms)
+✔ the refunded sales' records: the currency not three letters throws, never a refund row read as complete (0.089773ms)
+✔ the refunded sales' records: a record confirmed missing is a partial reading; an exact one reads as before (0.302451ms)
+✔ readPayPalRefunds: a partial reading throws, never 'these are all the refunds'; a complete one is its rows (0.337742ms)
+COUNTED_MEMORY_COMMANDS 29
+ℹ tests 40
+ℹ suites 0
+ℹ pass 40
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32.867216
+paypal-sales.test.ts
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+  ok    a course removal that fails keeps the purchase for the next run
+  ok    both refunded: taken back
+  ok    from their purchases and their course
+  ok    the paid record stays, for the thanks page and PayPal's id
+
+A funded new seller onboarding requires its resource cohort
+  ok    no new referral without a funded resource window
+  ok    the provider is not asked and the existing seller stays
+
+A funded seller return rechecks admission before provider verification
+  ok    a marked owner stays at the studio without completing seller installation
+  ok    no PayPal request including auth and no seller replacement
+
+Disconnected
+  ok    no PayPal button, no order
+
+67 checks, all passing.
+COUNTED_MEMORY_COMMANDS 322
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:19096:13)
+    at async captureOrder (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:19363:13)
+    at async main (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:67955:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:19096:13)
+    at async captureOrder (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:19363:13)
+    at async main (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:67961:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+taking a refunded PayPal sale's course away failed; looked at again in an hour Error: the ledger did not answer
+    at dropStart (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:67993:11)
+    at watchPayPal (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:19616:56)
+    at async main (/tmp/z-points-lhTxGT/paypal-sales.test.ts.cjs:67992:3)
+paypal-sales-shape.test.ts
+
+Captured, the answer unreadable: kept for the sweep, handed over once PayPal is read
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+Captured, the answer without the buyer's address: kept for the sweep
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+A pending order read back garbled stays watched
+  ok    pending
+  ok    still watched after a garbled read
+  ok    handed over once PayPal completes it
+
+A paid order read back COMPLETED without its captures stays watched (review of Codex G on #2681)
+  ok    still watched
+  ok    handed over once PayPal shows the capture
+
+A capture read back garbled at the end of its refund window is not taken for 'not refunded'
+  ok    still watched, to be asked again
+
+12 checks, all passing.
+COUNTED_MEMORY_COMMANDS 168
+read-ceilings.test.ts
+
+The booking calendar answers from its last good copy, never from the studio's requests
+  ok    the first answer makes the file, reading Stripe
+  ok    the next answers it from the copy, reading nothing from Stripe
+  ok    and neither took a single studio request
+  ok    past 4 answers in an hour the app is asked to come back, and nothing is read
+
+A sliding hour: an app asking late in an hour is not refused for the next one (light c)
+  ok    within sixty minutes, the 5th is refused
+  ok    just past the hour, at 11:10 (not 12:00), answered again
+  ok    a refusal is taken back from the count
+
+Made again a few times a day at most, each booking that day with its own credit (M3), and the copy stands when it cannot be
+  ok    the day's own 2 makings spent, then a booking each: made for the first 5 (the fifth among them), then the copy
+  ok    the next day the copy has grown old: made again
+  ok    an hour on, nothing changed and the copy young: the copy, nothing made
+  ok    the copy grown old and Stripe down: the copy is answered, not an error
+  ok    no copy at all and Stripe down: the route answers 503
+
+A making that fails is given back once a day; the second failure that day stays counted (inbox C4-53)
+  ok    the first failure gives its making back (1 a day): the day still has one
+  ok    the second failure that day is counted: the day's makings are used
+  ok    so with Stripe back, nothing is made until the next day
+  ok    the given-back count never goes below zero
+  ok    with no making left, an answer takes no count: the pace and one MGET
+  ok    the day's tries, made or failed, never pass the 7 priced makings, own makings left or not
+
+A deleted store's copy is never answered again (M2), by the route itself
+  ok    before: the route answers the file
+  ok    the store deleted (its handle let go): the route answers 404, and the copy is gone
+
+Each count keeps its expiry, and the copy has a size (L3, L4)
+  ok    a count found without an expiry gets one back
+  ok    a file past its ceiling is neither kept nor sent
+
+A new address keeps the last copy (light a)
+  ok    the copy is still there for the new address
+
+Refusals have a ceiling: past CALENDAR_REFUSED_PER_HOUR in an hour the address stops, and the studio says so (C4-33, light a)
+  ok    the 7 refusals the line prices leave the address as it is
+  ok    the refusal that stops it: the pace, its count and the stop, within a refused shape and the stop priced as one more (its token's two reads aside)
+  ok    one more: the address is let go
+  ok    the studio shows no address and says it was stopped, with when
+  ok    the studio makes a new one in its place and keeps saying why
+  ok    a new address the creator asks for clears the note
+  ok    the editor says the rule and how to keep the address: every 15 minutes or less often
+
+The file keeps what is still to come first
+  ok    every event still to come is kept, then the latest past ones
+  ok    the file holds at most CALENDAR_MAX_EVENTS events, the soonest
+  ok    the build's Stripe pages are lib/calls.ts's own
+  ok    the biggest buyers' prints looked up are lib/stats.ts's TOP_BUYERS
+  ok    the members' words looked up are lib/membership-numbers.ts's own bounds
+
+A real making, measured, within its count (M1, light d)
+  ok    each booking adds what the count gives it (0.00 <= 7)
+  ok    forty bookings, measured (19), within the count for forty (320)
+  ok    the shape holds the measured fixed part (10), every listing and every booking at its worst
+
+A store from before lists gets one the first time a reading would name someone, tried once a day: measured, within its shape, priced every day (reviews of fe4cb5e56 and 2c1af02e0)
+  ok    made, measured (6), within LIST_MADE_SHAPE less the lock's other tries and the head's reads (13)
+  ok    once there is one, nothing is written: one read
+  ok    the figures the shape is built from are the code's own
+  ok    priced every day of the month, once a day a store, in the store-readings line
+  ok    and no longer as a one-time line beside it
+  a day's try at a list (store-readings line): $0.0005 a day at most (144 commands)
+
+Every figure costs at least the worst it stands for
+  ok    a store's one-time all-time filling has its own line, once for each store (M4)
+  ok    the feed is a cost line of its own, every try of a making (its own and its credits, a failure given back included) and answer of the month at its worst
+  ok    every light shape is lighter than the heavy ones it is counted apart from
+  ok    the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light)
+  ok    the first year given back stays under US$ 65 with the day's heavy readings
+  ok    and one more heavy reading a day would pass it: the figure is the most the margin allows
+  ok    which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden
+  ok    heavy readings stop at HEAVY_READINGS_PER_DAY, and a refused one is not counted
+  ok    a reading's count, measured: light 3, heavy 5, as READING_COUNT_COMMANDS less its GET and SET
+  ok    refused, with its DECRBY: light 4, heavy 7, inside what KEPT_READINGS_SHAPE prices for a page that reads nothing
+  ok    what is left of the day: two GET, and none left once used
+  ok    a store in its trial or past its plan keeps both, priced for it (M2)
+  calendar feed: a making $0.012347, an answer $0.000236, the month $3.5903
+  store readings: a reading at most $0.003787, the month $0.4084
+  its own once-a-store line (stats-life-fill): a store's first all-time filling $0.0820 once (40806 commands)
+
+The totals: a page of each store's studio, as the Terms say; its numbers from its own readings (M1)
+  ok    one store's visits and sales at the worst refunds (one command of 500 keys), measured (292), within their readings' count (799)
+  ok    the sales reading's bytes hold every PayPal record it reads at its heaviest
+  ok    looked at again within the fresh time: read from what was kept, a few commands
+  ok    the day's readings used and nothing kept: nothing read, said as used (never as no numbers), and no studio request taken for it
+  ok    the totals say a store so left out comes back at 00:00 UTC, on the reader's clock too (C4-33 (3))
+  ok    the page takes a page of each other store's studio and nothing more
+
+A handle taken by another store never brings the old copy back (M2-bis)
+  ok    the first store's copy is made
+  ok    deleted: gone, and the copy, which names buyers, deleted at once (light 1)
+  ok    that answer's commands, with the token's two, within CALENDAR_POLL_SHAPE (8 <= 9)
+  ok    the handle taken by another store: every answer is 404, the fifth too, and never the old copy
+  ok    and nothing of the old copy is kept, nor anyone's address in its place (light e)
+  ok    with the day's makings spent, the old copy is not answered either
+
+A renamed store keeps its feed (L-c)
+  ok    renamed
+  ok    its feed, still under the old handle in its settings, answers: no 404 by mistake
+  ok    the copy, young and unchanged
+  ok    a booking marked under the new handle is read by the calls id: made again at once
+
+A copy is kept only by the store that made it (light 3)
+  ok    it names what the handle led to and the store's own id
+  ok    a copy that names another store's id is not answered
+
+A deletion while the file is being made is not undone (light 2)
+  ok    the file made is neither answered nor kept: the feed is gone
+
+A store deleted from the studio forgets its feed at once (M2-bis, 1; light 6)
+  ok    the studio's delete answers by going back to the studio
+  ok    before: its settings and its copy were kept
+  ok    after: its settings, its copy and its address are gone
+
+77 checks, all passing.
+COUNTED_MEMORY_COMMANDS 2345
+making a booking calendar failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/tmp/z-points-lhTxGT/read-ceilings.test.ts.cjs:8944:11)
+    at async readCallSessions (/tmp/z-points-lhTxGT/read-ceilings.test.ts.cjs:54462:19)
+    at async paidCalls (/tmp/z-points-lhTxGT/read-ceilings.test.ts.cjs:54395:11)
+    at async /tmp/z-points-lhTxGT/read-ceilings.test.ts.cjs:122134:45
+    at async bookedCalendarFeed (/tmp/z-points-lhTxGT/read-ceilings.test.ts.cjs:17722:12)
+    at async GET (/tmp/z-points-lhTxGT/read-ceilings.test.ts.cjs:122129:20)
+    at async main (/tmp/z-points-lhTxGT/read-ceilings.test.ts.cjs:126221:23) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+a booking calendar file is larger than its ceiling, so it is neither kept nor sent a6187b1d7f184801b48fab2f388d62bf
+refund-activity.test.ts
+
+Same-period refund activity, not refund rates for those sales
+  ok    denominator includes renewals and excludes days outside window
+  ok    refunds with no payments keep an unknown ratio
+  ok    total payments include channels with no refunds
+  ok    incomplete payment or refund history returns unknown
+  ok    failed processor reading returns unknown
+  ok    no processor returns unknown
+  ok    missing refund ledger is not treated as zero
+  ok    missing payment ledger is not treated as zero
+  ok    amount ratio can exceed one
+  ok    blank direct channels merge amounts and records
+  ok    complete reading with no refunds is genuinely zero
+
+Alerts use receipts, disclose old purchases and wait for complete figures
+  ok    refund alert is visible before general records
+  ok    renewal receipts replace initial-sale denominator
+  ok    refund records are not described as refunded buyers or purchases
+  ok    partial reads produce no refund alert
+  ok    refund-only channels still produce a clear alert
+  ok    single refund record does not trigger this alert
+  ok    small amount ratio does not trigger this alert
+  ok    recorded ad losses keep priority
+
+Panel and CSV explain timing, counts and zero denominators
+  ok    renders table, exact amounts, unknown ratio and download
+  ok    definitions prevent false buyer or sales rates
+  ok    incomplete reading does not render false zeros
+  ok    no recorded refunds need no panel
+  ok    CSV retains amounts, records, dates, currency and percent
+  ok    refund-only ratio is blank in CSV
+  ok    CSV does not clamp ratios above 100%
+  ok    yen amounts follow currency rules
+  ok    untrusted channel text is formula-safe
+
+Assistant and tools share the panel arithmetic
+  ok    assistant gets 30%, not initial-sale ratio
+  ok    assistant keeps no-payment ratio unknown
+  ok    assistant navigates to panel
+  ok    tool reports amounts in minor units and same ratio
+  ok    no buyer identities in context or tool
+  ok    incomplete tool reading omits the analysis
+  ok    incomplete assistant reading omits the analysis
+
+35 checks, all passing.
+COUNTED_MEMORY_COMMANDS 0
+ledger-counted-callers.test.ts
+
+A narrowed email written down counts its reading of the buyers first
+  ok    with fewer studio requests left than reading Stripe again needs, nothing is read from Stripe or written
+  ok    and the refusal says how many this needs and how many are left
+  ok    the composer is told so, not that the write is unknown
+
+Telling a product's buyers of an update counts every paid sale it reads first
+  ok    with fewer left than it needs, it is refused with the sentence, and Stripe is not read
+  ok    a reading of the buyers' worth, with the PayPal sales kept by their weight
+  ok    the Stripe part only when Stripe is read; nothing when no sales are read
+  ok    with room, it counts them and then reads Stripe
+
+A narrowed email's send reads the buyers once, counted (review M1)
+  ok    a reading's worst case, as kept now: the copy by size, and Stripe's pages should the copy be gone
+  ok    sent now: due now, it holds EXTRA_READS readings in this month, should another run make its list
+  ok    it lists from the narrowing just read and counted: Stripe not read, nothing counted again, the hold given back
+
+ALTO: every way the scheduled job makes a narrowed email's list is paid before it reads: one set for the next minute, one due now that it takes first
+  ok    set for the next minute, it is the scheduled job's to start: scheduled, holding READS_HELD readings in this month
+  ok    a run before it is due does nothing with it
+  ok    due, its copy gone and this month's requests used up by the rest, the scheduled job reads drawing from its hold, and lists it
+  ok    what the reading drew stays taken; the rest of the hold is given back once its list is made
+  ok    due now and taken first by the scheduled job, it reads drawing from the EXTRA_READS it held: Stripe read, nothing taken over the month
+
+Decision (1): what a reading needs beyond the hold is taken from the month it is read in; with none left there, it waits for the next month, saying when, never read unpaid
+  ok    the excess taken from this month, the hold drawn to nothing, then read and listed
+  ok    an email written down with nothing to count it holds nothing
+  ok    with no studio request left this month it is not read: it waits, saying why and when they open again, until then
+  ok    a note that fits the room it was given
+  ok    before that day nothing is tried, even with room again
+  ok    that day, it is read, paid from that month, and goes on
+  ok    held for another month than the one it goes out in: that hold is let go, and the month it is read in pays for the reading
+
+Decision (2): a scheduled email holds in the month it goes out; scheduling past that month's figure, or past the plan's end, is refused at once
+  ok    two months ahead: held in that month's own figure, nothing in this one's but the count just read
+  ok    all held for a month never passes that month's figure: refused, with how many it needs and how many that month has left, nothing written or held
+  ok    the composer is told that sentence
+  ok    set to end in 20 days, an email for day 40 is refused, saying the plan's end
+  ok    three months ahead: held in that month only
+  ok    the plan ended before it was due: canceled, saying so; nothing read, sent or taken; its hold given back; out of the queue
+  ok    a narrowed email canceled with the plan does not say none of the studio requests were used; one to the whole list may
+  ok    the plan ended: an email to the whole list is canceled too, saying so, nothing sent, out of the queue (never waiting for Pro)
+  ok    one going out stops where it was, saying how many went
+  ok    the plan on again later does not bring it back
+
+The month a moment ahead falls in, as the plan stands now (windowAt)
+  ok    a monthly plan anchored on the 31st: the period running, then the periods Stripe makes from that anchor (cut to a short month, back to the 31st after)
+  ok    the same anchor read from a period that began cut short (28 February to 31 March)
+  ok    anchored on the 30th
+  ok    a yearly plan: its months on its own day, into the next year
+  ok    a plan set to end has no month after its end; an ended one counts the calendar month, where holdAllowanceAt holds nothing; an unknown moment has none
+
+MÉDIO 3: a reading that fails at Stripe never fails the email at once: what it drew stays spent, it waits, saying so, and stops after READ_MISSES_ALLOWED in a row
+  ok    waiting with the note; what the try drew from its hold stays spent; no reading counted; this month's figure untouched
+  ok    tried again after an hour, and not before
+  ok    failing 7 times in a row: waiting until then, then failed, saying so, out of the queue
+  ok    every try paid before it asked Stripe: the hold first, then this month
+  ok    Stripe answering again, it is read and listed, with no wait or miss left on it
+  ok    its notes fit the room they were given
+
+ALTO (round 2): a narrowed email whose store no longer reads its buyers is never sent without its narrowing
+  ok    written to the one buyer who spent enough, of three on the list
+  ok    Stripe disconnected, no PayPal and none brought over: canceled, saying why, sent to no one, its hold given back
+
+MÉDIO 2: a hold made under a larger plan never draws past the figure of the smaller plan of the month it is read in
+  ok    on Pro, its hold draws only the 4 Pro leaves, the rest given back; the reading needs more, so it waits for next month, unread
+
+Refusals and waits that say what happened
+  ok    this month too few left: how many it needs and how many are left
+  ok    in a trial, a day past its end is refused with the day the trial ends
+  ok    a count that could not be made: not read, waiting an hour, saying so
+  ok    giving back to a counter that is not there never leaves one below zero, nor one without an expiry
+  ok    a subject test decided by sales: without studio requests its sales are not read
+  ok    with them, paid first, then read
+
+MÉDIO 4 and the record's room: a full data room refuses the email and gives back what it held
+  ok    store_full, nothing written, and nothing held left taken
+  ok    the studio says so, as a refusal, not as a write it cannot confirm
+  ok    the room it takes covers its record at its widest: its readings, misses, wait and hold too
+
+LEVE 8: a draw that cannot be written down takes nothing from the hold
+  ok    not read, waiting, its hold whole on the record
+
+A list that cannot be made for another reason is read again at most EXTRA_READS times, each paid, then the email stops, failed, saying why
+  ok    an email holding its readings, its data room full for 3 rounds: read 2 times at the most, waiting with the data room's note until then, then failed
+  ok    what it held and did not draw given back when it stops
+  ok    then it stops, failed, with why it waited, out of the queue: never dropped without a word
+  ok    an email written down with nothing held, its data room full for 3 rounds: read 2 times at the most, waiting with the data room's note until then, then failed
+  ok    what it held and did not draw given back when it stops
+  ok    then it stops, failed, with why it waited, out of the queue: never dropped without a word
+  ok    waiting, its note says what happens and when: tried again in an hour, once more, then it stops
+  ok    and before that hour nothing is tried
+  ok    made room within its readings, its list is made at the next round and it goes on
+  ok    the note without a retry sentence of its own keeps its words; an empty one says the list could not be made
+
+A scheduled or waiting email with no list made, nothing sent, can be canceled; what it held and did not draw is given back
+  ok    canceled while scheduled: canceled, out of the queue, its hold given back and marked so
+  ok    not while a run holds it
+  ok    then it cancels, leaves the queue, and its half-written list, kept with no expiry, goes with it (LEVE 6)
+  ok    a run after that reads and sends nothing
+  ok    a waiting email whose list was made still cannot be canceled
+  ok    a waiting email with some sent still cannot be canceled
+  ok    a record with {"hold":{"window":"2026-10-28","units":-1}} is refused as malformed, never run
+  ok    a record with {"hold":{"window":"soon","units":1}} is refused as malformed, never run
+  ok    a record with {"reads":1.5} is refused as malformed, never run
+  ok    a record with {"retryAt":-1} is refused as malformed, never run
+
+The routes and the studio
+  ok    the studio offers the same button for a waiting email with no list made and nothing sent, at a 44-pixel target
+  ok    the composer's count counts its reading of the buyers, and says the refusal's sentence
+  ok    a narrowed email written down counts it too
+  ok    the mail route reads the buyers only counted: never without a count, and its send started now takes the narrowing just counted
+  ok    a hold refused says its own sentence
+  ok    the update's refusal carries its sentence, or the shared one
+  ok    asking the numbers checks the month's AI jobs, then counts their reading as their page does, then reads them
+  ok    with the shared sentence when the count gave none
+  ok    a narrowed email says, before it is confirmed, what it sets aside and from which month, and that what it does not use comes back; a refusal is shown as an alert
+  ok    the composer shows the sentence, on the count as on a send, and takes the count's away when the next count goes through
+  ok    so do the update box and the numbers question
+
+87 checks, all passing.
+COUNTED_MEMORY_COMMANDS 1254
+reading a scheduled email's buyers failed 69e0f33ee498cffda2a9a4d1 TypeError: fetch failed
+    at globalThis.fetch (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64833:62)
+    at /tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10704:29
+    at timed (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:2272:19)
+    at onAccount (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10703:43)
+    at readRenewalPayments (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:18757:25)
+    at buyerLedger (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63910:14)
+    at async keepFor (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63986:24)
+    at async readNarrowing (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64493:12)
+    at async advanceBroadcast (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64279:23)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65033:18)
+reading a scheduled email's buyers failed 69e0f33ee498cffda2a9a4d1 TypeError: fetch failed
+    at globalThis.fetch (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64833:62)
+    at /tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10704:29
+    at timed (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:2272:19)
+    at onAccount (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10703:43)
+    at readRenewalPayments (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:18757:25)
+    at buyerLedger (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63910:14)
+    at async keepFor (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63986:24)
+    at async readNarrowing (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64493:12)
+    at async advanceBroadcast (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64279:23)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65040:17)
+reading a scheduled email's buyers failed 69e0f33ee498cffda2a9a4d1 TypeError: fetch failed
+    at globalThis.fetch (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64833:62)
+    at /tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10704:29
+    at timed (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:2272:19)
+    at onAccount (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10703:43)
+    at readRenewalPayments (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:18757:25)
+    at buyerLedger (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63910:14)
+    at async keepFor (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63986:24)
+    at async readNarrowing (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64493:12)
+    at async advanceBroadcast (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64279:23)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65040:17)
+reading a scheduled email's buyers failed 69e0f33ee498cffda2a9a4d1 TypeError: fetch failed
+    at globalThis.fetch (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64833:62)
+    at /tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10704:29
+    at timed (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:2272:19)
+    at onAccount (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10703:43)
+    at readRenewalPayments (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:18757:25)
+    at buyerLedger (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63910:14)
+    at async keepFor (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63986:24)
+    at async readNarrowing (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64493:12)
+    at async advanceBroadcast (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64279:23)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65040:17)
+reading a scheduled email's buyers failed 69e0f33ee498cffda2a9a4d1 TypeError: fetch failed
+    at globalThis.fetch (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64833:62)
+    at /tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10704:29
+    at timed (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:2272:19)
+    at onAccount (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10703:43)
+    at readRenewalPayments (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:18757:25)
+    at buyerLedger (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63910:14)
+    at async keepFor (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63986:24)
+    at async readNarrowing (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64493:12)
+    at async advanceBroadcast (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64279:23)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65040:17)
+reading a scheduled email's buyers failed 69e0f33ee498cffda2a9a4d1 TypeError: fetch failed
+    at globalThis.fetch (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64833:62)
+    at /tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10704:29
+    at timed (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:2272:19)
+    at onAccount (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10703:43)
+    at readRenewalPayments (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:18757:25)
+    at buyerLedger (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63910:14)
+    at async keepFor (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63986:24)
+    at async readNarrowing (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64493:12)
+    at async advanceBroadcast (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64279:23)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65040:17)
+reading a scheduled email's buyers failed 69e0f33ee498cffda2a9a4d1 TypeError: fetch failed
+    at globalThis.fetch (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64833:62)
+    at /tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10704:29
+    at timed (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:2272:19)
+    at onAccount (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10703:43)
+    at readRenewalPayments (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:18757:25)
+    at buyerLedger (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63910:14)
+    at async keepFor (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63986:24)
+    at async readNarrowing (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64493:12)
+    at async advanceBroadcast (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64279:23)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65040:17)
+reading a scheduled email's buyers failed d5dbd33a55c18eac741c754f TypeError: fetch failed
+    at globalThis.fetch (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64833:62)
+    at /tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10704:29
+    at timed (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:2272:19)
+    at onAccount (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:10703:43)
+    at readRenewalPayments (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:18757:25)
+    at buyerLedger (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63910:14)
+    at async keepFor (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:63986:24)
+    at async readNarrowing (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64493:12)
+    at async advanceBroadcast (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64279:23)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65049:3)
+reading a subject test's sales failed Error: a subject test's sales were not read: its studio requests could not be counted
+    at countTest (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:64548:27)
+    at async main (/tmp/z-points-lhTxGT/ledger-counted-callers.test.ts.cjs:65113:18)
+plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (64.939754ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (101.862699ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (40.383998ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.456978ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.29643ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.139389ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.687856ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (91.183677ms)
+✔ every store figure taken in the code is a kind a line prices (78.899615ms)
+✔ every email sent names a meter, and each file only the meters it may use (119.503918ms)
+✔ the units a figure is taken in cost at least what they stand for (9.060151ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.021563ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.295177ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.30987ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.10749ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.085262ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.286989ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.054983ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.15554ms)
+✔ Path push fits its reserved studio requests (0.066114ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.059412ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.060869ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.099775ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (42.624359ms)
+COUNTED_MEMORY_COMMANDS 0
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 581.485787

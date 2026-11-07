@@ -472,3 +472,41 @@ A directed canonical public-data scan of the FULL checkpoint found one historica
 ## 07 November 2026 03:33 UTC — final channel receipt resolved
 
 The final channel append SUCCEEDED via normal GitData ref update (expected parent8394076c7a9b0dff8bc9ae77ce68c626224aa16b, force=false): commit e930ae2f052c7aa092b7e43c54ebea1e7879c759, messages blobcbe47246382343484d36e4855d99180a7a148bbb. Full readback confirmed the ENTIRE prior channel prefix and the complete final M status exactly;2,722,879 characters. All earlier409attempts wrote nothing and are superseded; do NOT repost the pending status. Six own merges independently confirmed by GET; only3041/253 remains OPEN with9newgreens and T focal6701596916 pending. Remote checkpoint hygiene scan0; local exact-copySHA256beforethisfooter d2734ed5ae3b1b1dcd827f54949004efca7647add46966f33df8b74bb2313bda. No active subagent/newautomation/cadencechange/foreignsourcewrite/continuouswatch. Continue only on a new applicable T opinion, nominal review or assigned free work within the current budget/MV rules.
+
+## 07 November 2026 04:38 UTC — H2 normally merged; new nominal2900 return partially executed
+
+Latest current-source reads supersede the earlier H2 hold. Seven own units are now complete: #2648/#2834/#2889/#2890/#2891/#3040 remain merged; **#3041 NORMAL merged1aa86b7b8412629554800e1042070911ff41af04**, expected253322dedb86da009815185a900593d9294bcd88. IndependentT5810029704 (04:18UTC) CLOSEDLOW5809739563, no new H/M/LOW within documentary delta; exact full wording only/no product-media/legal/cost claim. All NINE distinct exact-head All checks completedSUCCESS relived before ordinary merge; rawRESTtrue/clean. Subsequent GET CLOSED/mergedtrue confirmed, receipt6702329496. No source push/main merge/retry/cancel/bypass. ZERO known own OPEN PRs; do not recreate old units or reservations.
+
+At main17bbf5afe8bbc52047f878eccebabb57322a35b4, complete untruncated tree confirms all TEN CLAUDE/AGENTS/agent-inbox/queue/reservation file SHAs BYTE-ID to previously read values. No need to reread unchanged historical sections. Channel FULL6ae91b0e0ff824fccb962a5e0755d749dd5f08cd read; C4-3100 release/3110 MV/3120 focal priorities and C4-20261107-0059-TODOS-1 unique-message ID rule applied. No NEW C4 MAIN VERMELHO found. G owns3037; C5 owns3042 and multiple second reviews; no duplication. RoleC4ONLY/C1OFF, stricter user<=5own bound respected, zero subagents. Last run's FAQ preflight was a pure parser, no reader/actionable defect, no unit/code/test change; do not reopen it as a found bug.
+
+### New actual assignment: C6 nominal01:30 #2900 f1->a2
+Source **a2e00ec1db29270664399acaa46482e49676b670**, branchclaude6/today-jsx-parts. Mclaim **6702304840** BEFORE newdiff/source/test; fulltimeline had only author request6702261895/no competing acceptance. Channel success **dbe4acf88bf6924766da15048834777365f517aa**, content475a1867b07621fb3d85a3fac1bef19403c80f34, ID CXM-20261107-0138-C4-1 unique checked absent. Its header01:38 was approximate; actual tool clock at publication04:34:56UTC. No duplicate message/ref or author source/CI mutation.
+
+Complete f1b027ca64885a2103541f3c08bdd1f5acacea38->a2 compare ahead7/behind0/exact4changedfiles:
+- app/studio/page.tsx: current blob**1104f88ce119404eb01fc69d2e3a670881b5e42f**.
+- components/two-step-manager.tsx: blob**9ddccf4caf57a80ff9788b9e84a272b320f49989**.
+- tests/passkey-app-code-invite.test.ts: two source-wiring lines.
+- tests/studio-today-removal-order.test.ts: current blob**d17c3bfa3b87e39bc20e5f8062162e0d91b620d6**.
+Entire endpoint Page/TwoStep/passkey-invite diff read, complete canonical46 test read. Composition of already C5-reviewed2835 introduces explicit unread/no controls/anchor retained, AppCodeInvite unknown gate, paid readings wait for fatal prerequisites and shelf. New residual listing fix: catch null, counted requires known statListings, weeklysample gated bycounted; downstreamcontext arrays guarded. No new source finding demonstrated in STATIC inspection; not a completed clean return until final execution.
+
+The SAME canonical46test blob is BYTE-ID at author RED14218f32b and a2. RED Page**c3bf89a871feb56b1e0c4bb1b695780075813259** was substituted into the exact current graph; this is PAGE-ONLY causal isolation, NOT a whole historical checkout. It ran ONCE: **46checks45PASS1FAIL**, precisely late listingread still endingpage. All45controls passed, including healthybothproducts, shelf-failure/no-daily-reading, unreadTwoStep/noinvite and bothstorewriteordercases. No preexistingclosedMLOW re-opened; C5/C6 credit preserved.
+
+Canonical exact import graph materialized: **735paths/10,524,381B/missing[]**, every reused localblobSHA matched current complete untruncated remote manifest; only Page/TwoStep/test needed new source copies. Scope caps <=20sourceAPIreads/3MiBnew,1200paths/18MiBlocal. No install/business-stub inventions; actual existing React19.2.8/Next16.4.2/esbuild0.28.2/TS5.9.3 dependencyset unchanged, canonical testAliases/testEnvironment/MemoryRedis. Providertransport is entirely synthetic; global fetch guard blocks any other request.
+
+Local own recovery directory **m-review-2900-a2**:
+- manifest.json SHA256db18f6ebe618f5a7de6e9372809765358f52cf7c26cc0a0490a2997b42eda5b9.
+- source-state.json SHA2568e1f1a7b1dec41ba5cba4b035e67c6391eca686155f21a27d2a2c51cac0d820f.
+- validate.mjs SHA2566ffaf17f419fe45fedf5f9743ba4298b49372008c61f94997c23b2dea6bb04a9.
+- RED log validation/before-page-only.cjs.log SHA2563c3262d966cde7f1f091f88ef649a28b7edb6824481340c4b8d1b49fd147de66.
+- red-page.tsx c3bf; current view/Page1104; current testd17. All other pinned source cached/read-only matching manifest. Driver derives prior real bootstrap, only new pins/resultfolder and stricter fixed commandbudget20000 before dispatch; no assertion changes.
+RED receipt: exit1/no signal,2.261s/log3304B/initialfree847364096B,4815syntheticcommands1398trips/20000commandceiling, providerNetworkCalls0. childheap512/120s/128KiBlog; original finite cgroup admission>=768MiB free.
+
+**GREEN/CURRENT IS NOT STARTED.** Parent's next-stage memory admission rejected before launch; one current-only invocation was also rejected before compile/launch. No failed current assertion or completed replay exists. Last measured free467066880B against805306368B floor (cgroupmax8589934592/current8122867712). Did NOT lower admission, raise heap, weaken flags or invoke another source. Transient shared-memory block; do NOTdisable existing recurring task.
+
+**Partial progress published6702334507** on2900 states all the above and explicitly NOTAPPROVAL. Next continuation must run ONLY pendingcurrent, never repeatRED:
+    M_FOCAL_ONLY_CURRENT=1 node --max-old-space-size=256 validate.mjs
+from m-review-2900-a2. The driver reads/preserves validation/results.json RED receipt, pinsPage/test/RED hashes, admits finite memory, runs current stage once, saves append-only results/current.cjs.log, verifies originalsourceunchanged. If environmental reset loseslocalfiles, reconstruct by currenta2 Git tree plus originalREDPage, exactcanonicaltest/helper aliases; do not claim old342/f1 graphs equivalent without SHAvalidation. No new type/lint/browser/build/global suite/native/provider/CI claim.
+
+Once pendingcurrent runs46PASS, finish qualified nominal COMMENT anchoreda2, retainauthorC5credit/earlierclosedLOWs and normalforeignauthorownership. If actual newfinding, publishproof within own namespace after reservation, never edit authorPage. If memory remains insufficient, keep precisepartial/unexecutedstage status, no GREEN assertion, no zero-unknown-cost claim.
+
+No new own PR opened merely to wait; no scheduledtaskcreate/update/disable/cadencechange (priorMownershipuncertain). Need final channel status+checkpointreceipt for this continuation; preserve FULLprefix/CAS or normalGitDataexpectedref/forcefalse; on409/internal wait>=120s then rereadFULL and checkIDabsent.

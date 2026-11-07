@@ -34,7 +34,7 @@ import {
 } from "@/lib/discount-schedule-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type Store, setHasDiscounts, storeForIdExactly, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, type Store, setHasDiscounts, storeForId, storeRef } from "@/lib/store";
 
 export const DUE_KEY = "nl:dsched:due";
 const scheduleKey = (statsId: string) => `nl:dsched:${statsId}`;
@@ -49,6 +49,23 @@ const PROMO_ID = /^[A-Za-z0-9_]{1,80}$/;
 type Shop = Pick<Store, "sid" | "statsId" | "stripeAccountId">;
 
 const memberOf = (sid: string, statsId: string, id: string) => `${sid}|${statsId}|${id}`;
+
+/**
+ * The store with this id, read exactly, for work dropped for good when its
+ * store is gone: "none" only when the id's own key (nl:store:id:<sid>, which
+ * deleting a store removes first) is confirmed absent; "unknown" when that
+ * reply is not in its exact shape or the record behind it cannot be read, so
+ * a partial answer is never taken for a store that is gone.
+ */
+async function storeExactly(sid: string): Promise<Store | "none" | "unknown"> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return "unknown";
+  const replies = repliesFor(await redisPipeline([["GET", `nl:store:id:${sid}`]]), 1);
+  if (!replies) return "unknown";
+  const ref = replies[0];
+  if (ref === null) return "none";
+  if (typeof ref !== "string" || !ref) return "unknown";
+  return (await storeForId(sid)) ?? "unknown";
+}
 
 /** A kept schedule, read in its exact shape, or null. */
 function readRecord(id: string, raw: string): ScheduleEntry | null {
@@ -233,7 +250,7 @@ type Deps<S extends Shop> = {
 };
 
 const DEFAULT_DEPS: Deps<Store> = {
-  findStore: storeForIdExactly,
+  findStore: storeExactly,
   markDiscounts: (store) => setHasDiscounts(storeRef(store), true),
 };
 

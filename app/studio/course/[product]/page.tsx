@@ -23,6 +23,7 @@ import {
   CourseEditor,
   GiveTriesBack,
   StudentAccess,
+  StudentsBlockedUnknown,
   WithdrawCertificate,
 } from "@/components/course-editor";
 import { readListing } from "@/lib/catalog";
@@ -83,7 +84,7 @@ export default async function StudioCoursePage({
   const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
-  const { students, total } = await studentsOf(course, 500);
+  const { students, total, blockedKnown } = await studentsOf(course, 500);
   const lessons = lessonCount(course);
   const finished = students.filter((s) => lessons > 0 && s.done >= lessons).length;
   const started = students.filter((s) => s.done > 0).length;
@@ -321,6 +322,9 @@ export default async function StudioCoursePage({
           {students.length === 0 ? (
             <p className="mt-5 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">Nobody has opened it yet.</p>
           ) : (
+            <>
+            {/* Who was taken off, read in its exact shape (lib/learn.ts): an unknown list is said, never drawn as nobody. */}
+            {blockedKnown ? null : <StudentsBlockedUnknown />}
             <div className="mt-5 overflow-x-auto" tabIndex={0} role="region" aria-label="Students, one row each">
               <table className="w-full text-left text-sm">
                 <thead>
@@ -347,7 +351,7 @@ export default async function StudioCoursePage({
                       ) : null}
                       <td className="py-2">
                         <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                          <StudentAccess productId={product.id} email={student.email} blocked={student.blocked} />
+                          <StudentAccess productId={product.id} email={student.email} blocked={blockedKnown ? student.blocked : null} />
                           {quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
                         </span>
                       </td>
@@ -356,6 +360,7 @@ export default async function StudioCoursePage({
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </section>
       </main>

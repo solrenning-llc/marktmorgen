@@ -1379,7 +1379,27 @@ function AutoCaptions({
   );
 }
 
-export function StudentAccess({ productId, email, blocked }: { productId: string; email: string; blocked: boolean }) {
+/**
+ * Whether a student may open the course, with the button that changes it. Null when the list of students taken off
+ * could not be read (studentsOf's blockedKnown false): said in words, with no button, since a button would act on a
+ * guess (CX-123 rule 24).
+ */
+export function StudentAccess({ productId, email, blocked }: { productId: string; email: string; blocked: boolean | null }) {
+  if (blocked === null) return <span className="whitespace-nowrap text-sm font-semibold text-ink-soft">Access not known</span>;
+  return <StudentAccessButton productId={productId} email={email} blocked={blocked} />;
+}
+
+/** Above the Students table when the list of students taken off could not be read. */
+export function StudentsBlockedUnknown() {
+  return (
+    <p className="mt-5 max-w-2xl rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink" role="note">
+      We could not check right now which students you took off this course. So the buttons to take a student off or let
+      them back in are hidden, and each row says &ldquo;Access not known.&rdquo; Reload the page to try again.
+    </p>
+  );
+}
+
+function StudentAccessButton({ productId, email, blocked }: { productId: string; email: string; blocked: boolean }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   return (

@@ -7,9 +7,9 @@
  *      the download route says so as a temporary error; a free copy is never handed out on a count nobody read.
  *   2. listSize: any error, or a count in another shape, was a list of 0, and the full export was priced from it
  *      (lib/store-export.ts exportShape). An unknown read now throws.
- *   3. listAsCsv: an unreadable field list, unreadable answers, an HSCAN reply in another shape or a cursor that never
- *      came back to zero gave a CSV missing columns or rows, handed over as complete. Each now throws, so the list
- *      download says it could not read the list and the store export writes that part as unread.
+ *   3. listAsCsv: a field list or answers unreadable or in another shape (Claude 3 on #2862), an HSCAN reply in another
+ *      shape or a cursor that never came back to zero gave a CSV missing columns or rows, handed over as complete. Each
+ *      now throws, so the list download says it could not read the list and the store export writes that part as unread.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";

@@ -26,7 +26,7 @@
  * so moving the account to another address takes the list along untouched.
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
-import { allValues, readFields } from "@/lib/crm";
+import { allValues, readFieldsExact } from "@/lib/crm";
 import { personKey } from "@/lib/person-key";
 import { countOrder, storeOrdersThisMonth } from "@/lib/orders";
 import { freeCopiesLimitFor } from "@/lib/order-rules";
@@ -412,9 +412,10 @@ function cell(value: string): string {
  * the ones a creator in Europe may write to about anything new.
  */
 export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<string> {
-  // Unreadable fields or answers throw rather than give a file missing columns (sweep A2): the list download says
-  // it could not read the list, and the store export writes this part as unread.
-  const fields = await readFields(store.statsId);
+  // Unreadable fields or answers throw rather than give a file missing columns (sweep A2): a failed read, and a
+  // reply lost or in another shape (readFieldsExact, allValues: UnknownReplyError). The list download says it
+  // could not read the list, and the store export writes this part as unread.
+  const fields = await readFieldsExact(store.statsId);
   const answers = fields.length ? await allValues(store.statsId, fields) : {};
   const rows = [
     // And the store's own fields, each a column of its own (lib/crm-rules.ts).

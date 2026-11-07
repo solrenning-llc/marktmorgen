@@ -20,6 +20,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
@@ -162,6 +163,23 @@ export async function readFields(statsId: string | null): Promise<CrmField[]> {
 }
 
 /**
+ * The fields, read only in their exact shape: none stored is no fields, and any
+ * other reply (lost, a reply without a result, QUEUED, text that is not a JSON
+ * list) throws UnknownReplyError, never "no fields" (CX-123 rule 24). For the
+ * list's file (lib/free.ts listAsCsv), where a field read as absent would be a
+ * column missing from a file handed over as complete (Claude 3 on #2862).
+ */
+export async function readFieldsExact(statsId: string | null): Promise<CrmField[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline([["GET", fieldsKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's fields");
+  if (replies[0] === null) return [];
+  const raw = json(replies[0]);
+  if (!Array.isArray(raw)) throw new UnknownReplyError("a store's fields");
+  return parseFields(raw);
+}
+
+/**
  * Saves the fields; the answers kept for a field that is gone go with it.
  * With `keepAll`, nothing is written when a field kept now would be gone
  * (CrmFieldsKept). The fields are read just before the write, not in the
@@ -216,16 +234,22 @@ export async function setValue(statsId: string, person: string, field: CrmField,
   return true;
 }
 
-/** Every value of every field, by field id and then by person: for the list's file. */
+/**
+ * Every value of every field, by field id and then by person: for the list's file.
+ * Read only in their exact shape: one HGETALL reply per field, each a list of
+ * strings in pairs; any other reply throws UnknownReplyError, never a field read
+ * as having no answers (CX-123 rule 24; Claude 3 on #2862).
+ */
 export async function allValues(statsId: string | null, fields: CrmField[]): Promise<Record<string, Record<string, string>>> {
   if (!statsId || !fields.length || !isRedisConfigured()) return {};
-  const got = await redisPipeline(fields.map((f) => ["HGETALL", valuesKey(statsId, f.id)]));
+  const got = repliesFor(await redisPipeline(fields.map((f) => ["HGETALL", valuesKey(statsId, f.id)])), fields.length);
+  if (!got) throw new UnknownReplyError("a store's field answers");
   return Object.fromEntries(
     fields.map((f, i) => {
-      const raw = got[i];
+      const flat = stringList(got[i]);
+      if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's field answers");
       const map: Record<string, string> = {};
-      if (Array.isArray(raw)) for (let k = 0; k + 1 < raw.length; k += 2) map[String(raw[k])] = String(raw[k + 1]);
-      else if (raw && typeof raw === "object") Object.assign(map, raw as Record<string, string>);
+      for (let k = 0; k + 1 < flat.length; k += 2) map[flat[k]] = flat[k + 1];
       return [f.id, map];
     }),
   );

@@ -11,9 +11,13 @@
  * Review MEDIUM on #2868: a product the store still lists whose listing read comes back empty (a product outside the
  * catalog head, its GET answered in an unknown shape) is not "the product is gone": the refund stays unread and the
  * next run revokes the key.
+ *
+ * Review MEDIUM on #2868 (Codex G): a key's record read back as text that is not JSON, or as JSON of another shape,
+ * is not "this product never gave the key": the refund stays unread, the healthy record is not overwritten, and the
+ * next run revokes the key. The data copy says such a record is unknown rather than leave the key out.
  */
 import { type Store, claimHandle, ensureStatsId, addProduct, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { MAX_POOL_KEYS, addKeys, checkKey, keyForSale, keysOf, revokeRefunded } from "@/lib/licence-keys";
+import { MAX_POOL_KEYS, addKeys, checkKey, keyForSale, keysOf, revokeRefunded, setRevoked } from "@/lib/licence-keys";
 import { readListing } from "@/lib/catalog";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -235,6 +239,62 @@ async function main(): Promise<void> {
   }
   redis.pipeline = real;
   is("an unknown answer is said as unknown, never as no keys", copy, "UnknownReplyError");
+
+  part("6. MEDIUM (Codex G): a key's record read back unreadable keeps its refund unread and the record whole");
+  const infoOf = `nl:keys:${store.statsId}:${app.id}:info`;
+  for (const [label, bad, n] of [
+    ["text that is not JSON", "{cut", "21"],
+    ["JSON of another shape", "{}", "22"],
+  ] as const) {
+    const key = await sale(`cs_test_licref0000${n}`, `pi_LicenceRef00${n}`);
+    const id = `re_LicenceRef00${n}`;
+    refunds = [refund(id, `pi_LicenceRef00${n}`)];
+    const before = (await real([["HGET", infoOf, key]]))[0];
+    let faults = 0;
+    redis.pipeline = (async (commands: Command[]) => {
+      if (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === infoOf && commands[0][2] === key) {
+        faults += 1;
+        return [bad];
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const first = await run();
+    redis.pipeline = real;
+    is(`${label}: the record was read once, unreadable`, faults, 1);
+    is(`${label}: nothing counted revoked and the refund stays unread`, [first, await seenOf(id)], [0, 0]);
+    is(`${label}: the healthy record is not overwritten`, (await real([["HGET", infoOf, key]]))[0], before);
+    is(`${label}: the next healthy run revokes the key and marks the refund read`, [await run(), await checkKey(store, app, key), await seenOf(id)], [1, "revoked", 1]);
+  }
+
+  part("6b. Same pattern: the creator's revoke never answers \"not your key\" on an unreadable record");
+  const clicked = await sale("cs_test_licref000023", "pi_LicenceRef0023");
+  redis.pipeline = (async (commands: Command[]) => {
+    if (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === infoOf) return ["{cut"];
+    return real(commands);
+  }) as typeof redis.pipeline;
+  let answered: unknown;
+  try {
+    answered = await setRevoked(store, app, clicked, true);
+  } catch (error) {
+    answered = error instanceof Error ? error.name : "threw";
+  }
+  redis.pipeline = real;
+  is("an unreadable record is unknown, never false", answered, "UnknownReplyError");
+  is("control: a key this product never gave is false", await setRevoked(store, app, "KILN-NONE-NONE-NONE", true), false);
+
+  part("6c. Same pattern: the data copy never leaves a key out because its record is unreadable");
+  redis.pipeline = (async (commands: Command[]) => {
+    if (commands.some((c) => c[0] === "HGETALL")) return commands.map(() => [good, "{cut"]);
+    return real(commands);
+  }) as typeof redis.pipeline;
+  let unreadable: unknown;
+  try {
+    unreadable = await keysOf(store, [app.id], "buyer@example.com");
+  } catch (error) {
+    unreadable = error instanceof Error ? error.name : "threw";
+  }
+  redis.pipeline = real;
+  is("an unreadable record is said as unknown, never left out", unreadable, "UnknownReplyError");
   done();
 }
 

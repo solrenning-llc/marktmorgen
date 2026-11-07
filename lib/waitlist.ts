@@ -22,7 +22,8 @@ import { withinLimit } from "@/lib/request-guard";
 import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
-import type { Listing, Store } from "@/lib/store";
+import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
+import { listingSizes, productIds } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -260,6 +261,47 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
 }
 
 /**
+ * The store and product a launch sends for, "gone" only on an exact answer
+ * that one of them no longer exists, and "unknown" when a read did not come
+ * back in its shape (rule 24). `load` and `readProduct` answer null for both,
+ * so a null is checked again exactly: the handle's own key (Redis's nil, or a
+ * name let go, is a free handle) and the product among the store's own ids,
+ * then its listing record's size (STRLEN 0: no record).
+ */
+async function launchTarget(
+  handle: string,
+  sid: string,
+  pid: string,
+  load: (handle: string) => Promise<Store | null>,
+  readProduct: (store: Store, id: string) => Promise<Listing | null>,
+): Promise<{ store: Store; product: Listing } | "gone" | "unknown"> {
+  let store: Store | null;
+  try {
+    store = await load(handle);
+  } catch {
+    return "unknown";
+  }
+  if (!store) {
+    const reply = repliesFor(await redisPipeline([["GET", storeHandleKey(handle)]]), 1);
+    if (!reply) return "unknown";
+    const raw = reply[0];
+    return raw === null || (typeof raw === "string" && !handleLeadsToStore(raw)) ? "gone" : "unknown";
+  }
+  // The handle now leads to another store: this launch's store is not there.
+  if (store.statsId !== sid) return "gone";
+  let product: Listing | null;
+  try {
+    product = await readProduct(store, pid);
+  } catch {
+    return "unknown";
+  }
+  if (product) return { store, product };
+  if (!productIds(store).includes(pid)) return "gone";
+  const sizes = await listingSizes(store, [pid]).catch(() => null);
+  return sizes?.[0] === 0 ? "gone" : "unknown";
+}
+
+/**
  * Sends what launches still owe, a hundred at a time, until `deadline`.
  * Each batch carries a key made of where it starts, so a batch tried again
  * is never sent twice. Returns how many emails went.
@@ -271,14 +313,32 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
   for (const member of Array.isArray(members) ? (members as string[]) : []) {
     if (Date.now() > deadline) break;
     const [sid, pid] = member.split("|");
-    const [rawJob] = await redisPipeline([["GET", jobKey(sid, pid)]]);
-    const job = parseJob(rawJob);
-    const store = job ? await load(job.handle) : null;
-    const product = store && store.statsId === sid ? await readProduct(store, pid) : null;
-    if (!job || job.finished || !store || !product) {
+    // Only an exact answer that the launch is gone takes it off the queue
+    // (rule 24). A read that came back in another shape holds it where it is:
+    // nothing reserved, nothing sent, the cursor left, tried again next run.
+    // A hold is bounded: the job key lapses 120 days after its last write, and
+    // then its exact nil finishes the launch here.
+    const jobReply = repliesFor(await redisPipeline([["GET", jobKey(sid, pid)]]), 1);
+    const job = jobReply && typeof jobReply[0] === "string" ? parseJob(jobReply[0]) : null;
+    if (!job) {
+      if (jobReply && jobReply[0] === null) await redisPipeline([["SREM", JOBS, member]]);
+      else console.error("sending a waitlist launch: its job was read in an unknown shape, so it waits", new UnknownReplyError("a waitlist launch's job"));
+      continue;
+    }
+    if (job.finished) {
       await redisPipeline([["SREM", JOBS, member]]);
       continue;
     }
+    const target = await launchTarget(job.handle, sid, pid, load, readProduct);
+    if (target === "gone") {
+      await redisPipeline([["SREM", JOBS, member]]);
+      continue;
+    }
+    if (target === "unknown") {
+      console.error("sending a waitlist launch: its store or product was read in an unknown shape, so it waits", new UnknownReplyError("a waitlist launch's store or product"));
+      continue;
+    }
+    const { store, product } = target;
     const said = speech(store);
     const g = givingWords(store.language);
     const words = launchBody(

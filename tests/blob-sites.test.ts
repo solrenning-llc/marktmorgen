@@ -9,11 +9,17 @@
  *   - `open`: a cost no line prices yet, named by the audit item that will price it.
  * So no new Blob call can be added without a decision, and the open ones are written down, never taken as zero.
  * Closing an open one means pricing it in a line (or proving it free) and moving its entry here.
+ *
+ * Its reach: the files that import Blob directly (in either quote style, through `@/lib/blob` or a relative path to it, or the SDK).
+ * A dynamic import or a re-export of Blob shows as "*", so that file has to be listed by hand. Files that call a wrapper listed here
+ * (lib/file-store, lib/community-files, lib/picture-door, lib/uploaded-image, lib/review-photo, lib/serve-file and the others) are not
+ * scanned: their Blob operations are counted once, at the wrapper's own entry, whichever caller asks for them. So a new caller of, say,
+ * headFile is not seen here, and the wrapper's label may not name it (the course task route's headFile is under file-store's "audit 6").
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, posix, relative } from "node:path";
 import { COST_LINES } from "./plan-cost-registry";
 
 type Paid = { line: string } | { free: string } | { notInProduction: string } | { open: string };
@@ -85,7 +91,17 @@ export const BLOB_SITES: Record<string, Record<string, Paid>> = {
 };
 
 const root = process.cwd();
-const BLOB_IMPORT = /import\s+(?:\*\s+as\s+(\w+)|\{([^}]*)\})\s+from\s+"(@\/lib\/blob|@vercel\/blob(?:\/client)?)"/g;
+/** A static import or re-export at the start of a line, in either quote style: its clause and its module. */
+const STATIC_IMPORT = /^[ \t]*(import|export)\s+([^;]*?)\s*from\s*(["'])([^"']+)\3/gm;
+/** A dynamic import, whose names the guard cannot read. */
+const DYNAMIC_IMPORT = /\bimport\s*\(\s*(["'`])([^"'`]+)\1\s*\)/g;
+
+/** The Blob module a specifier names, as written in `file`: "lib/blob" (also through a relative path), the SDK, or undefined. */
+function blobModule(file: string, spec: string): string | undefined {
+  if (spec === "@vercel/blob" || spec === "@vercel/blob/client") return spec;
+  const path = spec.startsWith("@/") ? spec.slice(2) : spec.startsWith(".") ? posix.join(dirname(file).split("\\").join("/"), spec) : undefined;
+  return path?.replace(/\.(ts|tsx|mjs|js)$/, "") === "lib/blob" ? "lib/blob" : undefined;
+}
 const NOT_CALLS = new Set(["BlobNotFoundError", "HandleUploadPresignedBody", "type"]);
 
 function codeFiles(dir: string): string[] {
@@ -102,15 +118,23 @@ function codeFiles(dir: string): string[] {
 /** What one file calls from Blob: the names it imports, or for a namespace import the `ns.name(` it uses; undefined when it does not import Blob. */
 export function blobCallsIn(file: string, source: string): Set<string> | undefined {
   let ops: Set<string> | undefined;
-  for (const m of source.matchAll(BLOB_IMPORT)) {
+  for (const [, kind, rawClause, , spec] of source.matchAll(STATIC_IMPORT)) {
+    const blob = blobModule(file, spec);
+    const clause = rawClause.trim();
+    if (!blob || /^type\s/.test(clause)) continue;
     ops ??= new Set<string>();
-    if (m[1] && m[3] === "@/lib/blob") for (const use of source.matchAll(new RegExp(`\\b${m[1]}\\.(\\w+)\\(`, "g"))) ops.add(use[1]);
-    else if (m[1]) ops.add("*");
-    for (const part of (m[2] ?? "").split(",")) {
+    // A re-export, or a clause this reader does not know (a default import, say), names no call it can check: "*" makes the file listed by hand (rule 24).
+    const namespace = /^\*\s+as\s+(\w+)$/.exec(clause);
+    const names = /^\{([^}]*)\}$/.exec(clause);
+    if (kind === "export" || (!namespace && !names)) ops.add("*");
+    else if (namespace && blob === "lib/blob") for (const use of source.matchAll(new RegExp(`\\b${namespace[1]}\\.(\\w+)\\(`, "g"))) ops.add(use[1]);
+    else if (namespace) ops.add("*");
+    for (const part of (kind === "import" ? names?.[1] ?? "" : "").split(",")) {
       const name = part.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim();
       if (name && !NOT_CALLS.has(name) && !part.trim().startsWith("type ")) ops.add(name);
     }
   }
+  for (const [, , spec] of source.matchAll(DYNAMIC_IMPORT)) if (blobModule(file, spec)) (ops ??= new Set<string>()).add("*");
   return ops;
 }
 

@@ -38,6 +38,7 @@
  *                 immediate
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { type Store, storeForId } from "@/lib/store";
 import { recordListings, type Listing } from "@/lib/catalog";
 import { RECURRING_ALWAYS, commissionOn, commissionRate } from "@/lib/affiliate-setting";
@@ -61,6 +62,22 @@ const KEEP_SECONDS = 600;
 
 /** The most programs read for the page: far past what one page lists. */
 const MAX_ROWS = 2_000;
+
+/** Stores asked of the listed set in one SSCAN page. */
+const SCAN_COUNT = 200;
+
+/**
+ * The most SSCAN pages one read of the directory sends (R2/C4 on #2921). A
+ * healthy walk takes at most MAX_ROWS / SCAN_COUNT = 10; SSCAN may also
+ * return pages with no new store, and more of them the larger the set once
+ * was (Redis keeps a shrinking set's old table for a while), and 64 leaves
+ * room for a set whose peak was about a million. A cursor still not back at
+ * "0" after this many pages, with fewer than MAX_ROWS stores read, is an
+ * unknown reply: the read throws and nothing is kept, so no visit sends
+ * SSCAN after SSCAN until the function times out. Its cost is the company's
+ * (tests/plan-cost-registry.ts, NOT_A_COST).
+ */
+export const DIRECTORY_SCAN_PAGES = 64;
 
 export type DirectoryProduct = {
   id: string;
@@ -231,8 +248,12 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
+  let pages = 0;
   do {
-    const page = await listedStores(cursor, 200);
+    // Past the ceiling the walk is not known to end: unknown, never a shorter list (R2/C4 on #2921).
+    if (pages === DIRECTORY_SCAN_PAGES) throw new UnknownReplyError(`the directory's SSCAN (not finished after ${DIRECTORY_SCAN_PAGES} pages)`);
+    const page = await listedStores(cursor, SCAN_COUNT);
+    pages += 1;
     for (const sid of page.sids) sids.add(sid);
     cursor = page.next;
   } while (cursor !== "0" && sids.size < MAX_ROWS);

@@ -1,3 +1,9 @@
+# Recibo final — 07/11/2026 02h42 Fortaleza
+
+Ponto exato CXZ-20261107-0242-C4-1 publicado no canal em **d2651e8eee6648837a38995e7c083f6e533e759e**, blob **c38fd08d46a228eac3ee8c37d9d979d583dc74db**. Prova2819/efe2d387 e pedido EXEC/classificaçãoR2 publicados; produto/heads originais intocados. C4-0226 continua: aguardar anúncio literal FILA LIGADA, sem merge direto. Nenhuma retentativa/CI/novo gasto de teste após os recibos abaixo; próximos continuamR2/C5 para2741/2819 e focalC4 de2947. Histórico integral preservado.
+
+---
+
 # Estado vigente — 07/11/2026 02h41 Fortaleza: RED aditivo #2819 publicado
 
 RESERVA de prova ANTES de código no canal **3d1de3da506ae95362b7870d2525136d78b38810**, ID CXZ-20261107-0240-C4-1. Mesma unidade2819, sem novoPR/CI, três NOVOS artefatos próprios. Evidência durável **codex/z-meet-callback-context-red@efe2d387ca2afefd90817dd36b36d5bf966b0a2c**, tree**a1d46cf37cf984ffe036daa31c74bfeea5e84a5c**, parent3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac; native**c783500389db159f6e6742bbc6951ba9d5a549b5**. Publicação PR **6702928013**.

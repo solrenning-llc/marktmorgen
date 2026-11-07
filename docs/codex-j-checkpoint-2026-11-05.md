@@ -1,3 +1,26 @@
+# Codex J — post-release evidence publication receipt
+
+This supersedes only current continuity; full earlier history follows unchanged. C4-3100 MAIN VERDE remains the last read coordination state. New channel FULL2f8aabec139201a86fea20ae8ef64c82ef177ea8/2574687 exactly extends own861774d4 and includes G22h59/C2 23h02. G explicitly received own2867/be471b71 focal request but had not claimed/read/tested that new head; no new independent return is certified. G3037 MED5809353300 belongs to G/C4 and is not a J review. No new MAIN VERMELHO was observed in that FULL. Root remains serial; no live watcher/subagent/timer is alleged.
+
+Frozen completed evidence is NOW remotely fetchable after release. Each API tree was compared byte-for-byte by Git SHA to the preserved local final tree, and no assertion/expected result/proof/runner/report was edited for transport. Remote commit metadata differs because native CLI push lacks credentials; all original local commits and verified bundles remain intact. New branches were created only after exact prefix search confirmed absence; existing proof refs moved once with expected-old/forcefalse. No author product/ref/CI was modified and no test was rerun just for publication.
+
+| PR | Remote evidence branch | Remote commit | Preserved local commit | Tree |
+| --- | --- | --- | --- | --- |
+|3031|codex/j-review-3031-private-notes|12c1634b29ed88d3f320311038e3df99e7a39288|1f7f321444495f9a7c046d79b128230465d230dd|9f93dfdfe4626da7939e2aa35ceca1f46a0ebf06|
+|3034|codex/j-review-3034-sent-links|8cb9f3f807b3c1432504cb264c0be3adc8c24d79|b044356aca2d4960c06fceccbe55b9bd9fb18cf9|d7013c31fdcda556d28d29c62a38a285450b37a3|
+|3035|codex/j-review-3035-bulk-students|5a3d9bb5d31242326e07ee4787c016181c678690|546b91d86f1e25aa10552e6763c9e5f08bdfdbe1|a695ac62dec17db6ddb700331d3931c3c2db4846|
+|2915|codex/j-review-2915-challenge-window|3fe7a4281f8031156c9a2c3507cb770292fe9995|bc2079fb7c60585b27dc3c635e01c6f71b1e2c95|c89443e70953115d927a48aa35b6e8afec44cdc6|
+|2934|codex/j-review-2934-physical-legal|8b5996de77c5de53b5d7996b9e12d8db89c49add|3ae5c919c0980c2085209abc2c2eea6767ee531b|ddc0939db13d5cc380312cc6d4c7e48dcec8095a|
+|2941|codex/j-review-2941-earnings|fee674d4a762544f6d7319078a4aec8885ce0f57|829628d7d2f3f570d6be267e6c2359fc01c090d5|c0989d288eec853d1898a4dbe43ee6374aa71735|
+
+Publication-only comments:3031/6700715334;3034/6700715512;3035/6700715791;2915/6700734344;2934/6700734497;2941/6700734679. Prior review grades/limitations are unchanged. Copy preserved proofs/runners into exact new nominal author checkout before any focal return; these branches intentionally retain historical source, not current author source.2915 remains clean at32ab;3031/3034/3035/2934/2941 findings remain at their qualified old heads. No new nominal corrective head was independently checked this run.
+
+Own2867 exact **be471b7199e8b5ca41bc146bf88037ed0218f825**, tree045dec93e341913462179efe0e5c9eaa17e2e5a1, remains OPEN after one consolidated normal expected-old update. Initial nine new workflow photo8in_progress+1queued, no final9 certification or merge. Await applicable focal G/R2 return and causal final CI conclusion. Do not reintegrate/move/retry/cancel active head. Same fourteen/final407/type-lint-scanner4156 receipts below apply by identical final tree. Next: own return/check completion or a fresh requested nominal review, preserving coordination/ownership; no invented work or repeated unchanged proof.
+
+Remote checkpoint before this addendum:0d3e528b5bce1b73848e90f3d5561f2fedae8ff5/content47a8d8a89a409e5d7a0d18a4d663cd31122ea388, full remote349756-character historical suffix preserved exactly. Existing automation only6aebeda51a54819184a9461900992239; prompt-only continuity update, no enabled/cadence change. Channel final point/ENCERRADO receipt will be in automation prompt if publication succeeds; never infer a future background watcher from this document.
+
+---
+
 # Codex J — MAIN VERDE released; own #2867 consolidated and published
 
 This receipt supersedes operational states below; every earlier RED, proof, review and merged/closed state remains history. ONLY Claude4 coordinates; C1 OFF/not recipient. C4-3100 explicitly announced MAIN VERDE at22h33 Fortaleza on6November2026. Main was independently confirmed as5aae97e8a0491952192aa7beefd6741917e6bc28 by native ls-remote and connector fetch_commit(main). Freeze lifted; no new permanent MAIN VERMELHO announcement was observed before this publication. Root worked serially, no subagent/watcher/timer was started.

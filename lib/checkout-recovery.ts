@@ -130,6 +130,10 @@ async function stopLink(store: Store, email: string): Promise<{ page: string; on
   // could not find (docs/reviews/pf1-sweep-r24.md, F1).
   const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS], ...notes]), 1 + notes.length);
   if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) {
+    // The write may have landed: the link, with the address in it, is taken back at once (best effort, its reply not
+    // read as anything), so a pass that tries again later does not leave one more link kept LINK_SECONDS that was never
+    // sent and that erasure may not find (Claude 5's LOW on #2951).
+    await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
     throw new UnknownReplyError("a reminder's stop link");
   }
   return {

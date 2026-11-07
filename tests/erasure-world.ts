@@ -104,6 +104,8 @@ export async function makeWorld(handle = "erase-shop", owner = OWNER): Promise<W
   const flow = await saveFlow(store, { name: "Welcome", trigger: "joined", active: true, steps: [{ delayHours: 48, subject: "Hello", body: "Hi there." }] }, { activate: true });
   if (!flow.ok) throw new Error(`no flow: ${JSON.stringify(flow)}`);
   store = (await storeForEmail(owner))!;
+  // A benefit handed over by hand on a membership (lib/tier-benefits.ts): the store's, kept when a person goes.
+  await redisPipeline([["HSET", `nl:tben:${store.statsId}`, "b00000000000a", JSON.stringify({ product: plain.product.id, text: "A signed print", cadence: "once", since: second(), retired: 0 })]]);
 
   return {
     store,
@@ -236,6 +238,11 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
     ["SET", `nl:wl:t:${confirm}`, JSON.stringify({ s: statsId, h: store.handle, p: w.plain, e: email, k: "confirm" }), "EX", 86_400],
     ...noteForErasure(statsId, email, `nl:wl:t:${confirm}`),
     ["RPUSH", `nl:wl:${statsId}:${w.plain}:send`, email],
+  ]);
+  // The team's mark that the store's benefit was handed to them (lib/tier-benefits.ts).
+  await redisPipeline([
+    ["HSET", `nl:tben:given:${statsId}:${person}`, `b00000000000a:sub_${hex(8)}:once`, JSON.stringify({ at: now, by: OWNER })],
+    ["SADD", `nl:tben:who:${statsId}`, person],
   ]);
   // Its affiliate (lib/affiliate-bond.ts), what an import gave it (lib/imported-purchases.ts), its podcast feed (lib/podcast-access.ts).
   await redisPipeline([["HSET", `nl:aff:${statsId}:bond`, sha(`nimbus-aff-bond:${statsId}:${email}`).slice(0, 32), "aff001"]]);

@@ -78,7 +78,7 @@ async function main(): Promise<void> {
   };
   is("the person's marks answered in another shape", await failure(() => COPIERS[MODULE](scope)), "failed");
   redis.pipeline = pipeline;
-  is("read again once it can be", (await COPIERS[MODULE](scope)).length, 1);
+  is("read again once it can be", (await COPIERS[MODULE](scope)).length, 2);
 
   part("After the erasure, nothing is found");
   await ERASERS.find((e) => e.module === MODULE)!.run(scope, [], new Set());

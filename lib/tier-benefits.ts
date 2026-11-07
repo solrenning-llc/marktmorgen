@@ -458,6 +458,66 @@ export async function undoGiven(store: Store, benefit: unknown, sub: unknown, pe
   return { ok: true, undone: removed === 1 };
 }
 
+// ------------------------------------------------------------------ the person's copy
+
+export type BenefitMark = {
+  /** The benefit's words, as the creator wrote them. */
+  benefit: string;
+  /** The membership (product id) it is on. */
+  membership: string;
+  /** The person's own membership on the creator's Stripe account. */
+  subscription: string;
+  cadence: Benefit["cadence"];
+  /** For a monthly benefit, when the month it was for began (ISO 8601); null for a one-time one. */
+  forMonthFrom: string | null;
+  /** When it was marked given (ISO 8601). */
+  given: string;
+};
+
+const MARK_FIELD = /^(b[0-9a-f]{12}):(sub_[A-Za-z0-9]{6,64}):(once|m\d{9,11})$/;
+const isoOf = (seconds: number) => new Date(seconds * 1000).toISOString();
+
+/**
+ * One person's marks, for the copy of their data (lib/person-copy.ts), oldest
+ * first: which benefit, on which membership, for which month, and when.
+ * Never who on the team marked it, which is that teammate's. Only reads (two
+ * HGETALLs: the person's marks, and the store's benefits, bounded by
+ * MAX_BENEFITS_KEPT, only when there are marks). A reply, a field or a mark
+ * in another shape throws, so the copy fails instead of leaving it out.
+ */
+export async function benefitMarksOf(store: Store, person: string): Promise<BenefitMark[]> {
+  if (!store.statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
+  const [held] = repliesFor(await redisPipeline([["HGETALL", marksKey(store.statsId, person)]]), 1) ?? [];
+  const flat = stringList(held);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a person's benefit marks");
+  if (!flat.length) return [];
+  const benefits = await readBenefits(store);
+  if (benefits === null) throw new UnknownReplyError("the store's benefits");
+  const byId = new Map(benefits.map((b) => [b.id, b]));
+  const out: { at: number; mark: BenefitMark }[] = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    const parts = MARK_FIELD.exec(flat[i]);
+    const given = parseGiven(flat[i + 1]);
+    // A benefit is retired, never deleted, while its store lives: a mark of one not kept is not a shape this module writes.
+    const benefit = parts ? byId.get(parts[1]) : undefined;
+    if (!parts || !given || !benefit) throw new UnknownReplyError("a person's benefit mark");
+    const period = parts[3];
+    out.push({
+      at: given.at,
+      mark: {
+        benefit: benefit.text,
+        membership: benefit.product,
+        subscription: parts[2],
+        cadence: benefit.cadence,
+        forMonthFrom: period === "once" ? null : isoOf(Number(period.slice(1))),
+        given: isoOf(given.at),
+      },
+    });
+  }
+  out.sort((a, b) => a.at - b.at || a.mark.benefit.localeCompare(b.mark.benefit) || a.mark.subscription.localeCompare(b.mark.subscription));
+  return out.map((o) => o.mark);
+}
+
 // ------------------------------------------------------------------ erasure
 
 /** A deleted person's marks (lib/person-erasure.ts): how many keys went. Throws when the answer cannot be read. */

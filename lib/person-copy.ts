@@ -76,6 +76,7 @@ import { callScope, readRecords } from "@/lib/meet-records";
 import { heldPaymentsOf } from "@/lib/closing-holds";
 import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
+import { benefitMarksOf } from "@/lib/tier-benefits";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
@@ -118,6 +119,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/store-readings.ts": { how: "marks", what: "A day's copy of the store's sales numbers, which may name its biggest buyers, made from its Stripe account" },
   "lib/calendar-sync.ts": { how: "marks", what: "A copy of the store's private booking calendar, which may name you if you booked, made from its bookings" },
   "lib/member-health.ts": { how: "marks", what: "A ten-minute copy of the store's members' scores, made from its Stripe account" },
+  "lib/tier-benefits.ts": { how: "copied", what: "The membership benefits the store marked as handed to you: which one, for which month, and when" },
   "lib/reviews.ts": { how: "copied", what: "Your reviews, and the store's replies to them" },
   "lib/customer-voice.ts": { how: "marks", what: "The store's monthly summary of what its customers said, which may quote your review words without your name; your reviews themselves are in this copy" },
   "lib/buyer-library.ts": { how: "copied", what: "The note that you bought from or joined the store, for your library" },
@@ -317,6 +319,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
+  // Which teammate marked each is theirs, left out (lib/tier-benefits.ts, benefitMarksOf).
+  "lib/tier-benefits.ts": async (s) => benefitMarksOf(s.store, s.person),
   "lib/buyer-library.ts": async (s) => ((await storesKnownFor(s.email)).includes(s.sid) ? [{ inYourLibrary: true }] : []),
   "lib/mail-clicks.ts": async (s) => (await clicksOf(s.listId, s.email)).map((email) => ({ email })),
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),

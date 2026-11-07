@@ -35,7 +35,7 @@
  *     like any other, and counted in the same month of emails.
  */
 import { readFlowListStrict } from "@/lib/flow-list";
-import { type Flow, type FlowMeter, type FlowResult, saveFlow } from "@/lib/flows";
+import { type Flow, type FlowMeter, type FlowResult, saveFlow, writeFlowList } from "@/lib/flows";
 import { idsOfKind, productIds, readCards } from "@/lib/catalog";
 import { storeBase } from "@/lib/purchase-email";
 import { productLink } from "@/lib/checkout-recovery";
@@ -193,10 +193,14 @@ export async function setUpStarters(store: Store, meter?: FlowMeter): Promise<St
   if (!raws.length) return { ok: false, reason: "nothing" };
   let latest = flows;
   for (const raw of raws) {
-    // Saved by the one place that checks a sequence: the plan, the setup, ten at most.
-    const saved = await saveFlow(store, raw, { meter });
+    // Checked by the one place that checks a sequence: the plan, the setup, ten at most; built on the list read
+    // above, not read again.
+    const saved = await saveFlow(store, raw, { meter, onto: latest, write: false });
     if (!saved.ok) return saved;
     latest = saved.flows;
   }
+  // Every starter in one write, its room and studio requests taken first: refused, the list is left as it was,
+  // as NOT_COUNTED says (7 November 2026: written one by one, a refusal between them left the first written).
+  await writeFlowList(store, latest, meter);
   return { ok: true, flows: latest, made: raws.map((r) => r.starter) };
 }

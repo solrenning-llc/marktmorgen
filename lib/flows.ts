@@ -1,5 +1,5 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
-import { readFlowListStrict } from "@/lib/flow-list";
+import { readFlowListStrict, readFlowListWithin } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
@@ -238,6 +238,9 @@ export class FlowWriteUnconfirmed extends Error {
   }
 }
 
+/** Reads of a list that keeps growing between its measure and its read before the studio action is refused. */
+const FLOW_READ_TRIES = 3;
+
 /** Takes `units` of the studio's requests, or says why not (lib/person-agenda-read.ts, countUnits). */
 export type FlowCharge = (units: number) => Promise<{ ok: true } | { ok: false; message: string }>;
 
@@ -278,14 +281,19 @@ export class FlowMeter {
 
   /** The list, read strictly once it is counted; `sends` when the action sends it back. */
   async list(listId: string | null, sends = true): Promise<Flow[]> {
-    const measured = await flowsBytes(listId).catch(() => null);
+    let measured = await flowsBytes(listId).catch(() => null);
     if (measured === null) throw new FlowNotCounted("");
     await this.take(measured, sends ? measured : 0);
-    const flows = await readFlowListStrict(listId);
-    // Grown since it was measured (a save in another tab): the rest is taken before anything else moves.
-    const read = utf8Bytes(JSON.stringify(flows));
-    if (read > measured) await this.take(read - measured, sends ? read : 0);
-    return flows;
+    // Read only while no larger than what was taken for (READ_FLOWS_WITHIN): grown since it was measured (a save
+    // in another tab), nothing of it moves, and the rest is taken before it is read again, a few times at most.
+    for (let tries = 0; tries < FLOW_READ_TRIES; tries += 1) {
+      const read = await readFlowListWithin(listId, measured);
+      if ("flows" in read) return read.flows;
+      await this.take(read.larger - measured, sends ? read.larger : 0);
+      measured = read.larger;
+    }
+    // Still growing: what reading it would take is not known, so nothing of it is read.
+    throw new FlowNotCounted("");
   }
 
   /** Before `json`, the whole list, is written; it is also what is sent back. */
@@ -312,8 +320,9 @@ export class FlowMeter {
  */
 async function writeFlows(store: Store, listId: string, flows: Flow[], meter?: FlowMeter): Promise<void> {
   const json = JSON.stringify(flows);
-  await meter?.write(json);
   await needData(store, [{ slot: "wf:defs", bytes: dataBytes([json], 1 + flows.length), set: true }]);
+  // Taken once the room is: a save refused as full takes no studio request for a write it never makes.
+  await meter?.write(json);
   let replies: unknown;
   try {
     replies = await redisPipeline([["SET", flowsKey(listId), json]]);
@@ -336,7 +345,7 @@ export type FlowResult =
  * the creator chose in the editor. Either way, switching on counts against
  * the plan's number of active workflows (lib/flow-limits.ts).
  */
-export async function saveFlow(store: Store, raw: Record<string, unknown>, opts: { activate?: boolean; meter?: FlowMeter } = {}): Promise<FlowResult> {
+export async function saveFlow(store: Store, raw: Record<string, unknown>, opts: { activate?: boolean; meter?: FlowMeter; onto?: Flow[]; write?: false } = {}): Promise<FlowResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
   if (!store.listId || !store.mail) return { ok: false, reason: "setup" };
   const name = typeof raw.name === "string" ? raw.name.replace(/\s+/g, " ").trim().slice(0, MAX_FLOW_NAME) : "";
@@ -376,7 +385,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const ctx: ActionContext = { field: (fid) => crmFields.find((f) => f.id === fid), isStage: (sid) => stages.some((st) => st.id === sid), isAssignee: (email) => assignees.has(email) };
   if (rawSteps.length === 0 || rawSteps.length > MAX_STEPS) return { ok: false, reason: "steps" };
   const known = (id: string) => hasProduct(store, id);
-  const flows = opts.meter ? await opts.meter.list(store.listId) : await readFlowListStrict(store.listId);
+  // `onto`: the list a caller already read and builds on, never read again.
+  const flows = opts.onto ?? (opts.meter ? await opts.meter.list(store.listId) : await readFlowListStrict(store.listId));
   const id = typeof raw.id === "string" && FLOW_ID.test(raw.id) ? raw.id : null;
   // Another of the store's sequences, never this one: starting itself would do nothing.
   const isFlow = (flowId: string) => flowId !== id && flows.some((f) => f.id === flowId);
@@ -429,8 +439,15 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const next = [...flows];
   if (at >= 0) next[at] = flow;
   else next.push(flow);
-  await writeFlows(store, store.listId, next, opts.meter);
+  // `write: false`: checked and built only, for a caller that writes several in one write (writeFlowList).
+  if (opts.write !== false) await writeFlows(store, store.listId, next, opts.meter);
   return { ok: true, flows: next };
+}
+
+/** Writes a list built by saveFlow with `write: false`, as saveFlow writes one: room first, then the meter. */
+export async function writeFlowList(store: Store, flows: Flow[], meter?: FlowMeter): Promise<void> {
+  if (!store.listId) throw new FlowWriteUnconfirmed();
+  await writeFlows(store, store.listId, flows, meter);
 }
 
 export async function removeFlow(store: Store, id: string, meter?: FlowMeter): Promise<FlowResult> {
@@ -1071,9 +1088,10 @@ export const RESOLVE_CHOICES: readonly ResolveChoice[] = ["continue", "retry", "
  * "retry" (do that step again, knowing it may arrive twice) or "end". Only
  * one answer is ever taken for a hold.
  */
-export async function resolveHeldRun(store: Store, flowId: string, person: string, choice: ResolveChoice): Promise<"ok" | "unknown" | "not_held" | "paused" | "retry_limit"> {
+export async function resolveHeldRun(store: Store, flowId: string, person: string, choice: ResolveChoice, read?: Flow[]): Promise<"ok" | "unknown" | "not_held" | "paused" | "retry_limit"> {
   if (!store.listId) return "unknown";
-  const flows = await readFlowListStrict(store.listId);
+  // The list the studio's request already read through its meter, never read again unmetered.
+  const flows = read ?? (await readFlowListStrict(store.listId));
   const flow = flows.find((f) => f.id === flowId);
   if (!flow) return "unknown";
   const found = await readRun(flowId, person);

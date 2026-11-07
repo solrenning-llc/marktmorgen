@@ -91,7 +91,10 @@ test("no model writes them, so they cost nothing and cannot say something new", 
   assert.ok(!/@\/lib\/ai\b|fetch\(/.test(src));
   // Changed 7 November 2026 (review of #1927): the same one save, now also carrying the studio's meter, so what
   // reading and writing the workflows moves takes its studio requests first (lib/flows.ts, FlowMeter).
-  assert.match(src, /const saved = await saveFlow\(store, raw, \{ meter \}\);/, "and they are saved by the one place that checks a sequence");
+  // Changed again the same day (pre-review of that fix): each is still checked by saveFlow, built on the list
+  // already read, and all are written in one write, so a refusal of the meter leaves none written.
+  assert.match(src, /const saved = await saveFlow\(store, raw, \{ meter, onto: latest, write: false \}\);/, "and they are checked by the one place that checks a sequence");
+  assert.match(src, /await writeFlowList\(store, latest, meter\);/, "and written in one write");
 });
 
 test("where a written sequence came from survives an edit, and only whoever sends may ask for one", () => {

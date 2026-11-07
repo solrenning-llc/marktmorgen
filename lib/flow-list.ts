@@ -47,15 +47,49 @@ export function parseFlowList(raw: unknown): Flow[] | null {
   }
   return raw as Flow[];
 }
+/** The stored list's value as read: nothing is an empty list; anything else malformed throws. */
+function flowListOf(raw: unknown): Flow[] {
+  if (raw === null) return [];
+  if (typeof raw !== "string") throw new Error("Invalid sequence list response");
+  const flows = parseFlowList(JSON.parse(raw));
+  if (!flows) throw new Error("Invalid sequence list records");
+  return flows;
+}
+
 /** Studio-only read: confirmed absence is empty; failed or malformed reads throw. */
 export async function readFlowListStrict(listId: string | null): Promise<Flow[]> {
   if (!listId) return [];
   if (!isRedisConfigured()) throw new Error("Sequence storage is unavailable");
   const rows = await redisPipeline([["GET", "nl:mail:flows:" + listId]]);
   if (!Array.isArray(rows) || rows.length !== 1) throw new Error("Incomplete sequence list response");
-  if (rows[0] === null) return [];
-  if (typeof rows[0] !== "string") throw new Error("Invalid sequence list response");
-  const flows = parseFlowList(JSON.parse(rows[0]));
-  if (!flows) throw new Error("Invalid sequence list records");
-  return flows;
+  return flowListOf(rows[0]);
+}
+
+/**
+ * Reads the list KEYS[1] only while it is no larger than ARGV[1] bytes:
+ * {1, value} (nothing when it is not there), or {0, its size} with nothing
+ * of it sent back. So a read never moves more of the list than was taken
+ * for before it (lib/flows.ts, FlowMeter). Modelled by lib/redis-memory.ts.
+ */
+export const READ_FLOWS_WITHIN = `-- marktmorgen:flows-read-within:v1
+local n = redis.call('STRLEN', KEYS[1])
+if n > tonumber(ARGV[1]) then return {0, n} end
+return {1, redis.call('GET', KEYS[1])}`;
+
+/**
+ * The studio's strict read of the list, within `most` bytes (READ_FLOWS_WITHIN):
+ * the list, or the size it has grown to, nothing of it read. Failed or
+ * malformed answers throw, as readFlowListStrict's.
+ */
+export async function readFlowListWithin(listId: string | null, most: number): Promise<{ flows: Flow[] } | { larger: number }> {
+  if (!listId) return { flows: [] };
+  if (!isRedisConfigured()) throw new Error("Sequence storage is unavailable");
+  if (!Number.isSafeInteger(most) || most < 0) throw new Error("Invalid sequence list bound");
+  const rows = await redisPipeline([["EVAL", READ_FLOWS_WITHIN, 1, "nl:mail:flows:" + listId, most]]);
+  if (!Array.isArray(rows) || rows.length !== 1 || !Array.isArray(rows[0])) throw new Error("Incomplete sequence list response");
+  const reply = rows[0] as unknown[];
+  if (reply[0] === 1 && (reply.length === 2 || reply.length === 1)) return { flows: flowListOf(reply.length === 2 ? reply[1] : null) };
+  const larger = Number(reply[1]);
+  if (reply[0] === 0 && reply.length === 2 && Number.isSafeInteger(larger) && larger > most) return { larger };
+  throw new Error("Invalid sequence list response");
 }

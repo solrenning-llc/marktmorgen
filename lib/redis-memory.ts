@@ -204,6 +204,16 @@ export class MemoryRedis {
           this.run(["HINCRBY", ledger, "reserved", rawCharge]); return 1;
         }
         // CX-67: atomic held membership and aggregate observations.
+        // lib/flow-list.ts READ_FLOWS_WITHIN: the list read only while it is no larger than its bound, else {0, its size}.
+        if (key.startsWith("-- marktmorgen:flows-read-within:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, list, bound] = args;
+          this.scriptCalls += 1;
+          const n = Number(this.run(["STRLEN", list]) ?? 0);
+          if (n > Number(bound)) return [0, n];
+          this.scriptCalls += 1;
+          const value = this.run(["GET", list]);
+          return [1, typeof value === "string" ? value : null];
+        }
         // lib/webhooks.ts READ_DELIVERIES: each delivery read only while it is no larger than its bound, {0} at the first larger one.
         if (key.startsWith("-- marktmorgen:webhook-deliveries-read:v1\n")) {
           const count = Number(args[0]);

@@ -7,11 +7,37 @@
  * caller decides what failing closed means there (keep what it would have
  * deleted, refuse, or say it could not read).
  *
- * Node runtime only: `types.isProxy` comes from node:util. No importer is an
- * edge route, and no client bundle reaches this file (only server actions and
- * type imports do); Next 16's proxy.ts also runs on Node.
+ * Node's isProxy (node:util) is read at run time through
+ * process.getBuiltinModule (Node 20.16+/22.3+; CI and the server run Node 22/24)
+ * rather than imported, so a client bundle that reaches this file through a
+ * shared module (components/blog-body.tsx -> lib/store-blog.ts) still builds: in
+ * a browser there is no Redis reply to read, and no Proxy check is needed there.
  */
-import { types } from "node:util";
+type ProxyCheck = (value: unknown) => boolean;
+/**
+ * The Proxy check for where this runs: Node's own when it can be read; in a browser (no Redis reply ever reaches
+ * there) none is needed; on a server without it (a Node older than 20.16/22.3), every reply counts as a Proxy, so
+ * each read fails closed as unknown and says so once, never quietly accepting a reply whose traps would run
+ * (Revisor 1 on #2822).
+ */
+export function proxyCheckFor(host: { getBuiltinModule?: (id: string) => unknown } | undefined, browser: boolean): ProxyCheck {
+  const util = host?.getBuiltinModule?.("node:util") as { types?: { isProxy?: unknown } } | undefined;
+  const check = util?.types?.isProxy;
+  if (typeof check === "function") return check as ProxyCheck;
+  if (browser) return () => false;
+  let told = false;
+  return () => {
+    if (!told) {
+      told = true;
+      console.error("node:util isProxy is not available on this server; every Redis reply is read as unknown (Node 20.16+/22.3+ needed)");
+    }
+    return true;
+  };
+}
+const isProxy: ProxyCheck = proxyCheckFor(
+  typeof process === "undefined" ? undefined : (process as { getBuiltinModule?: (id: string) => unknown }),
+  typeof window !== "undefined",
+);
 
 /**
  * A list's own data slots, as a fresh plain list, with no code of the reply
@@ -23,7 +49,7 @@ import { types } from "node:util";
  * and the whole answer is null. With `expected`, the length must be exactly it.
  */
 function ownSlots(reply: unknown, expected?: number): unknown[] | null {
-  if (types.isProxy(reply) || !Array.isArray(reply)) return null;
+  if (isProxy(reply) || !Array.isArray(reply)) return null;
   const length = Object.getOwnPropertyDescriptor(reply, "length");
   if (!length || !Object.hasOwn(length, "value")) return null;
   const count: unknown = length.value;

@@ -1,0 +1,110 @@
+✔ the list's row is erased after the module that reads its token, and waits for it (2.220783ms)
+✔ the erasure stays incomplete when the link use could not be erased, keeps the row, and a retry deletes the link key (64.241743ms)
+✔ control: with nothing failing, the row and the link key go in one erasure (8.583229ms)
+✖ legacy Lead variant 0 is fully erased and stays erased on retries (9.882745ms)
+✖ legacy Lead variant 1 is fully erased and stays erased on retries (5.307877ms)
+✖ legacy Lead variant 2 is fully erased and stays erased on retries (6.317899ms)
+✖ legacy Lead variant 3 is fully erased and stays erased on retries (7.789554ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 3
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 113.065359
+
+✖ failing tests:
+
+test at ../../../../tmp/n2700grant-z0H8el/case.cjs:91549:36
+✖ legacy Lead variant 0 is fully erased and stays erased on retries (9.882745ms)
+  AssertionError [ERR_ASSERTION]: legacy row erasure attempt 1 completes
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n2700grant-z0H8el/case.cjs:91564:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n2700grant-z0H8el/case.cjs:91549:36
+✖ legacy Lead variant 1 is fully erased and stays erased on retries (5.307877ms)
+  AssertionError [ERR_ASSERTION]: legacy row erasure attempt 1 completes
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n2700grant-z0H8el/case.cjs:91564:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n2700grant-z0H8el/case.cjs:91549:36
+✖ legacy Lead variant 2 is fully erased and stays erased on retries (6.317899ms)
+  AssertionError [ERR_ASSERTION]: legacy row erasure attempt 1 completes
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n2700grant-z0H8el/case.cjs:91564:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n2700grant-z0H8el/case.cjs:91549:36
+✖ legacy Lead variant 3 is fully erased and stays erased on retries (7.789554ms)
+  AssertionError [ERR_ASSERTION]: legacy row erasure attempt 1 completes
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n2700grant-z0H8el/case.cjs:91564:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+N2700_MEMORY_RUN 685
+deleting a person: lib/mail-clicks.ts could not finish UnknownReplyError: Redis answered a link-use token in an unknown shape
+    at forgetClicksPerson (/tmp/n2700grant-z0H8el/case.cjs:12567:13)
+    at async erasePerson (/tmp/n2700grant-z0H8el/case.cjs:91256:52)
+    at async TestContext.<anonymous> (/tmp/n2700grant-z0H8el/case.cjs:91563:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+deleting a person: lib/mail-clicks.ts could not finish UnknownReplyError: Redis answered a link-use token in an unknown shape
+    at forgetClicksPerson (/tmp/n2700grant-z0H8el/case.cjs:12567:13)
+    at async erasePerson (/tmp/n2700grant-z0H8el/case.cjs:91256:52)
+    at async TestContext.<anonymous> (/tmp/n2700grant-z0H8el/case.cjs:91563:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+deleting a person: lib/mail-clicks.ts could not finish UnknownReplyError: Redis answered a link-use token in an unknown shape
+    at forgetClicksPerson (/tmp/n2700grant-z0H8el/case.cjs:12567:13)
+    at async erasePerson (/tmp/n2700grant-z0H8el/case.cjs:91256:52)
+    at async TestContext.<anonymous> (/tmp/n2700grant-z0H8el/case.cjs:91563:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+deleting a person: lib/mail-clicks.ts could not finish UnknownReplyError: Redis answered a link-use token in an unknown shape
+    at forgetClicksPerson (/tmp/n2700grant-z0H8el/case.cjs:12567:13)
+    at async erasePerson (/tmp/n2700grant-z0H8el/case.cjs:91256:52)
+    at async TestContext.<anonymous> (/tmp/n2700grant-z0H8el/case.cjs:91563:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

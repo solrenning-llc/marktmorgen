@@ -1,0 +1,12 @@
+
+Each reader finds what its module keeps
+  ok    all five are copied now
+  ok    one record each
+  ok    the waitlist link's secret and the feed's address are not in it
+  ok    the reminder says the sentence checked and when
+
+After the erasure, each finds nothing
+  ok    nothing left to copy
+
+5 checks, all passing.
+N2700_MEMORY_RUN 45

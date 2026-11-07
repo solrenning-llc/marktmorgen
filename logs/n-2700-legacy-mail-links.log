@@ -1,0 +1,22 @@
+✔ a link to the creator's own store is tagged with the email it came from (2.061366ms)
+✔ the store's own domain counts as the store (0.714695ms)
+✔ somebody else's address is left exactly as typed (0.642351ms)
+✔ a link the creator tagged themselves is theirs to measure (0.32386ms)
+✔ what cannot be read as an address comes back unchanged (0.383457ms)
+✔ the tag survives the cleaning the checkout gives it, whole (0.796213ms)
+✔ the reader sees the address as written; only where it goes is tagged (2.20825ms)
+✔ a full stop after an address ends the sentence, not the link (0.751408ms)
+✔ sales are added up by email, from email only, in the store's currency; another currency's are counted apart, never added (1.70413ms)
+✔ a sequence's figure is every one of its emails together, and nobody else's (0.909308ms)
+✔ both kinds of email are sent with their tag (2.363919ms)
+✔ an email made before links were tagged is never said to have sold nothing (3.919811ms)
+✔ the tag is one per email, with nothing of the reader in it (0.71454ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.666608
+N2700_MEMORY_RUN 0

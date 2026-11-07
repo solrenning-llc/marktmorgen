@@ -1,0 +1,16 @@
+✔ the list's row is erased after the module that reads its token, and waits for it (2.567501ms)
+✔ the erasure stays incomplete when the link use could not be erased, keeps the row, and a retry deletes the link key (607.220686ms)
+✔ control: with nothing failing, the row and the link key go in one erasure (21.345386ms)
+✔ legacy Lead variant 0 is fully erased and stays erased on retries (21.277447ms)
+✔ legacy Lead variant 1 is fully erased and stays erased on retries (24.237954ms)
+✔ legacy Lead variant 2 is fully erased and stays erased on retries (13.720574ms)
+✔ legacy Lead variant 3 is fully erased and stays erased on retries (183.010067ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 893.155285
+N2700_MEMORY_RUN 1345

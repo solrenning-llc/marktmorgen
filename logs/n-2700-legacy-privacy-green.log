@@ -1,0 +1,37 @@
+✔ C4 P8: unknown link use already rejects on the existing head (3.650182ms)
+✔ copy returns canonical ids and a confirmed empty set (5.256335ms)
+✔ copy rejects missing envelope rather than empty or fabricated ids (1.956455ms)
+✔ copy rejects extra envelope rather than empty or fabricated ids (0.376319ms)
+✔ copy rejects undefined rather than empty or fabricated ids (0.695108ms)
+✔ copy rejects null rather than empty or fabricated ids (0.610181ms)
+✔ copy rejects scalar rather than empty or fabricated ids (0.358862ms)
+✔ copy rejects non-string rather than empty or fabricated ids (0.556813ms)
+✔ copy rejects sparse rather than empty or fabricated ids (2.336735ms)
+✔ copy rejects invalid id rather than empty or fabricated ids (0.96551ms)
+✔ copy rejects duplicate rather than empty or fabricated ids (0.228637ms)
+✔ erasure preserves its work when contact read is missing (0.997292ms)
+✔ erasure preserves its work when contact read is extra (0.535949ms)
+✔ erasure preserves its work when contact read is undefined (0.251346ms)
+✔ erasure preserves its work when contact read is object (0.390299ms)
+✔ erasure preserves its work when contact read is broken JSON (0.28953ms)
+✔ erasure preserves its work when contact read is null JSON (0.265759ms)
+✔ erasure preserves its work when contact read is array JSON (0.713066ms)
+✔ legacy missing token has no possible marker and erases only its used links (1.490565ms)
+✔ legacy bad token type has no possible marker and erases only its used links (0.558592ms)
+✔ legacy bad token value has no possible marker and erases only its used links (0.415647ms)
+✔ healthy erasure deletes both token and used links once; repeat is exact zero (0.333297ms)
+✔ confirmed absent contact still deletes its known click set (0.716913ms)
+✔ erasure rejects missing deletion receipt (0.35686ms)
+✔ erasure rejects unknown deletion receipt (0.294676ms)
+✔ erasure rejects string deletion receipt (0.167679ms)
+✔ erasure rejects too large deletion receipt (0.254831ms)
+✔ erasure rejects extra deletion receipt (0.155722ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40.26963
+N2700_MEMORY_RUN 85

@@ -1,0 +1,63 @@
+✔ C4 P8: unknown link use already rejects on the existing head (7.239064ms)
+✔ copy returns canonical ids and a confirmed empty set (4.077208ms)
+✔ copy rejects missing envelope rather than empty or fabricated ids (0.485295ms)
+✔ copy rejects extra envelope rather than empty or fabricated ids (0.296311ms)
+✔ copy rejects undefined rather than empty or fabricated ids (0.897777ms)
+✔ copy rejects null rather than empty or fabricated ids (0.395337ms)
+✔ copy rejects scalar rather than empty or fabricated ids (0.318477ms)
+✔ copy rejects non-string rather than empty or fabricated ids (0.679451ms)
+✔ copy rejects sparse rather than empty or fabricated ids (0.353642ms)
+✔ copy rejects invalid id rather than empty or fabricated ids (0.325188ms)
+✔ copy rejects duplicate rather than empty or fabricated ids (0.162058ms)
+✔ erasure preserves its work when contact read is missing (0.38636ms)
+✔ erasure preserves its work when contact read is extra (0.319504ms)
+✔ erasure preserves its work when contact read is undefined (0.152344ms)
+✔ erasure preserves its work when contact read is object (0.385892ms)
+✔ erasure preserves its work when contact read is broken JSON (0.25173ms)
+✔ erasure preserves its work when contact read is null JSON (0.138851ms)
+✔ erasure preserves its work when contact read is array JSON (0.273378ms)
+✖ legacy missing token has no possible marker and erases only its used links (1.560367ms)
+✖ legacy bad token type has no possible marker and erases only its used links (0.259552ms)
+✖ legacy bad token value has no possible marker and erases only its used links (0.578656ms)
+✔ healthy erasure deletes both token and used links once; repeat is exact zero (0.366007ms)
+✔ confirmed absent contact still deletes its known click set (0.286384ms)
+✔ erasure rejects missing deletion receipt (0.531985ms)
+✔ erasure rejects unknown deletion receipt (0.195778ms)
+✔ erasure rejects string deletion receipt (0.131396ms)
+✔ erasure rejects too large deletion receipt (0.223267ms)
+✔ erasure rejects extra deletion receipt (0.160918ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 25
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 42.052837
+
+✖ failing tests:
+
+test at ../../../../tmp/n2700grant-0kUGBO/case.cjs:11160:34
+✖ legacy missing token has no possible marker and erases only its used links (1.560367ms)
+  UnknownReplyError: Redis answered a link-use token in an unknown shape
+      at forgetClicksPerson (/tmp/n2700grant-0kUGBO/case.cjs:11046:13)
+      at async TestContext.<anonymous> (/tmp/n2700grant-0kUGBO/case.cjs:11168:37)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at ../../../../tmp/n2700grant-0kUGBO/case.cjs:11160:34
+✖ legacy bad token type has no possible marker and erases only its used links (0.259552ms)
+  UnknownReplyError: Redis answered a link-use token in an unknown shape
+      at forgetClicksPerson (/tmp/n2700grant-0kUGBO/case.cjs:11046:13)
+      at async TestContext.<anonymous> (/tmp/n2700grant-0kUGBO/case.cjs:11168:37)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at ../../../../tmp/n2700grant-0kUGBO/case.cjs:11160:34
+✖ legacy bad token value has no possible marker and erases only its used links (0.578656ms)
+  UnknownReplyError: Redis answered a link-use token in an unknown shape
+      at forgetClicksPerson (/tmp/n2700grant-0kUGBO/case.cjs:11046:13)
+      at async TestContext.<anonymous> (/tmp/n2700grant-0kUGBO/case.cjs:11168:37)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+N2700_MEMORY_RUN 76

@@ -1,0 +1,12 @@
+
+Only exact link-use evidence selects an email branch
+  ok    canonical one and zero keep their positions
+  ok    canonical zeros prove neither reader clicked
+  ok    a partial reply is unknown
+  ok    an extra reply is unknown
+  ok    a numeric-looking string is unknown
+  ok    null is unknown rather than zero
+  ok    another number is unknown rather than zero
+
+7 checks, all passing.
+N2700_MEMORY_RUN 0

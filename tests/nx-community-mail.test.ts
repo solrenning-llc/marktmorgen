@@ -190,6 +190,27 @@ async function main(): Promise<void> {
   const seen = await runEventQueue(async () => store, Date.now() + 10_000, { mail: true });
   is("the next run makes it and sends it to both, once", [seen.reminders, sent.flat().length, db.run(["ZCARD", "nl:cm:evq"])], [1, 2, 0]);
 
+  // Codex P on #2954 (focal return): a send's record read back as text that is not this send is unknown, never
+  // "made": the reminder stays due, nothing is sent, and the aged mark is not taken over on that read.
+  part("event: a taken mark whose send reads back as something else keeps the reminder");
+  const sendKey = reminder.slice(0, -":made".length);
+  const otherSend = JSON.stringify({ ...job, id: "a".repeat(24), kind: "24" });
+  for (const [name, text] of [["cut text", "{cut"], ["an id this code never writes", '{"id":"invalid"}'], ["another send's record", otherSend], ["a JSON list", "[1]"]] as const) {
+    reset();
+    db.run(["ZADD", "nl:cm:evq", 1, due]);
+    const aged = `${Date.now() - 20 * 60_000}.000000001`;
+    db.run(["SET", reminder, aged, "EX", 2_592_000]);
+    db.pipeline = async (commands: Command[]) => {
+      if (commands.length === 2 && commands[1][0] === "GET" && commands[1][1] === sendKey) return [(await original([commands[0]]))[0], text];
+      return original(commands);
+    };
+    const odd = await runEventQueue(async () => store, Date.now() + 10_000, { mail: true });
+    restore();
+    is(`${name}: nothing made or sent, still due, the mark untouched`, [odd.reminders, sent.length, db.run(["ZCARD", "nl:cm:evq"]), db.run(["GET", reminder])], [0, 0, 1, aged]);
+    const healed = await runEventQueue(async () => store, Date.now() + 10_000, { mail: true });
+    is(`${name}: read again with no send there, the aged mark is taken over and the reminder sent once`, [healed.reminders, sent.length, db.run(["ZCARD", "nl:cm:evq"])], [1, 1, 0]);
+  }
+
   // Claude 5 on #2954, MEDIUM 2: the send's own record read in an unknown shape under the lock leaves it in line.
   for (const kind of ["announcement", "event"] as const) {
     part(`${kind}: the send's record unknown under the lock`);

@@ -82,7 +82,7 @@ import { indexMember } from "@/lib/community-index";
 import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
-import { claimHandle } from "@/lib/community-mentions";
+import { claimHandle, forgetHandle } from "@/lib/community-mentions";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
 export const CREATOR = "creator";
@@ -554,15 +554,29 @@ export async function setProfile(
   // named but unmentionable. Claiming gives back what they ended up with,
   // which may carry a number when somebody already held the plain one.
   const handle = await claimHandle(id, member.k, name, member.h);
-  return (
-    (await patchMember(id, member.k, (now) => ({
+  let replaced = "";
+  const saved = await patchMember(id, member.k, (now) => {
+    replaced = now.h;
+    return {
       n: name,
       h: handle,
       dir: change.dir && Boolean(name),
       mail: change.mail,
       ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
-    }))) ?? member
-  );
+    };
+  });
+  // The erasure deletes only the handle the record holds (lib/community-erasure.ts),
+  // so a handle the record does not carry is given back here, never left tied to
+  // the member: the one this change claimed when the record went in between (an
+  // erasure), and one a change made at the same time wrote and this one replaced
+  // (rule 30 on Codex G's review 5815472405 of #3123). forgetHandle deletes it
+  // only while it still points at this member.
+  if (!saved) {
+    if (handle) await forgetHandle(id, handle, member.k);
+    return member;
+  }
+  if (replaced && replaced !== handle && replaced !== member.h) await forgetHandle(id, replaced, member.k);
+  return saved;
 }
 
 /**

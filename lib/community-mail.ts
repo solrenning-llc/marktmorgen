@@ -145,21 +145,44 @@ export async function queueAnnouncement(store: Store, config: CommunityConfig, p
  * (lib/community-event-mail.ts): both are the community's emails they asked for.
  */
 export async function tokenFor(store: Store, communityId: string, member: Member): Promise<string> {
-  if (member.t) return member.t;
-  const token = randomBytes(20).toString("hex");
-  // Kept for good, once a member: counted in the store's room (lib/order-data.ts).
-  await orderWrite(store, [["SET", unsubKey(token), `${communityId}|${member.k}|${store.handle}`]]);
-  // The token the record holds: ours, or one another send kept first, which is
-  // the link already in an email and is never replaced (Codex G on #3123).
-  const kept = await setMemberToken(communityId, member, token);
-  if (kept !== token) {
-    // Ours was never handed to any email: its record goes, and only it (a
-    // random key this call wrote). A failed delete leaves a record no link
-    // carries, which readCommunityUnsub refuses as not the member's token.
-    await redisPipeline([["DEL", unsubKey(token)]]).catch(() => {});
-  }
-  if (kept === null) throw new Error("a community member with no record has no stop link");
+  // The token is made canonical on the member's record first: ours, or one
+  // another send kept first, which is the link already in an email and is
+  // never replaced (Codex G on #3123). Only that token ever gets a link
+  // record, so no record is written for a token that is not the member's, and
+  // the member's erasure, which deletes the record of member.t, finds every
+  // one (Codex G, review 5815472405).
+  const kept = member.t || (await setMemberToken(communityId, member, randomBytes(20).toString("hex")));
+  if (!kept) throw new Error("a community member with no record has no stop link");
+  await keepStopLink(store, communityId, member.k, kept);
   return kept;
+}
+
+/**
+ * Makes sure the member's canonical token has its link record, and only
+ * while the member still holds it. A record already there is read, not
+ * written again; a missing one (a send that stopped between keeping the
+ * token and writing its record) is written once, with SET NX. Then the
+ * member is read again: an erasure that ran in between (and so may have
+ * deleted the record before it was written) leaves no member holding the
+ * token, and the record just written is deleted with its reply confirmed,
+ * before anything is returned. Every reply is read in its exact shape
+ * (CX-123 rule 24): one not known throws, so the send stays pending and no
+ * email carries the link.
+ */
+async function keepStopLink(store: Store, communityId: string, key: string, token: string): Promise<void> {
+  const value = `${communityId}|${key}|${store.handle}`;
+  const read = repliesFor(await redisPipeline([["GET", unsubKey(token)]]), 1);
+  if (!read || (read[0] !== null && read[0] !== value)) throw new UnknownReplyError("a community stop link");
+  if (read[0] === value) return;
+  // Kept for good, once a member: counted in the store's room at what it adds (lib/order-data.ts).
+  const [set] = await orderWrite(store, [["SET", unsubKey(token), value, "NX"]]);
+  if (set !== "OK" && set !== null) throw new UnknownReplyError("a community stop link");
+  if ((await readMember(communityId, key))?.t === token) return;
+  // The member is gone (or holds another token): this token is no one's link,
+  // and its record goes before the call refuses.
+  const gone = repliesFor(await redisPipeline([["DEL", unsubKey(token)]]), 1)?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("a community stop link of a member who is gone");
+  throw new Error("a community member with no record has no stop link");
 }
 
 /** Runs `each` over `items`, a few at a time. */

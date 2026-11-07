@@ -281,6 +281,19 @@ async function main(): Promise<void> {
     is(`${label}: nothing is sent and the answer is "try again"`, [requests.length, unread], [0, { ok: false, reason: "error" }]);
   }
   await fresh();
+  await realPipeline([["SET", record, JSON.stringify({ ...JSON.parse(written), s: Date.now() + 60_000 })]]);
+  const aheadFirst = await resume();
+  const realNow = Date.now;
+  const later = realNow() + 120_000;
+  Date.now = () => later;
+  let aheadLater: unknown;
+  try {
+    aheadLater = await resume();
+  } finally {
+    Date.now = realNow;
+  }
+  is("a stored send time once seen in the future stays unknown after the clock passes it: nothing is ever sent", [aheadFirst, aheadLater, requests.length], [{ ok: false, reason: "error" }, { ok: false, reason: "error" }, 0]);
+  await fresh();
   await realPipeline([["SET", record, JSON.stringify({ ...JSON.parse(written), s: Date.now() })]]);
   const justSent = await resume();
   is("a record sent just now (not in the future, inside the window) repeats its own key once", [justSent, keys(), charged], [{ ok: true }, [JSON.parse(written).k], 1]);

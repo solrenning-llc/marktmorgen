@@ -107,11 +107,34 @@ async function main(): Promise<void> {
     ["a record without its customer", ["0", JSON.stringify({ from: 0, to: OWED, at: 1, amount: 10, line: "x", subscriptionId: "sub_Meter000001" })]],
     ["a record whose figures go backwards", ["0", JSON.stringify({ from: OWED, to: 0, at: 1, amount: 10, line: "x", customerId: "cus_Meter000001", subscriptionId: "sub_Meter000001" })]],
     ["a JSON list", ["0", "[]"]],
+    // Claude 5 on #2944 (MEDIUM 1): figures that are not whole cents were read as a line carried out or past what is
+    // owed, deleted, and the month begun again from what was billed.
+    ["a record from a fraction of a cent", ["0", JSON.stringify({ from: 0.5, to: OWED, at: 1, amount: 10, line: "x", customerId: "cus_Meter000001", subscriptionId: "sub_Meter000001" })]],
+    ["a record to a figure past any number", ["0", `{"from":0,"to":1e400,"at":1,"amount":10,"line":"x","customerId":"cus_Meter000001","subscriptionId":"sub_Meter000001"}`]],
+    ["a record begun at a fraction of a time", ["0", JSON.stringify({ from: 0, to: OWED, at: 1.5, amount: 10, line: "x", customerId: "cus_Meter000001", subscriptionId: "sub_Meter000001" })]],
   ] as [string, unknown[]][]) {
     inject = (c) => (reads(c) ? reply : null);
     is(`line answered ${label}: not settled, nothing charged`, await settle(), { state: "unknown", charged: 0, lineBegun: false });
     inject = null;
   }
+
+  // Claude 5 on #2944 (MEDIUM 2): the line written down before Stripe is asked is the only thing that stops a second
+  // charge; a write whose answer is not an exact "OK" is not known to be there, so nothing is charged on it.
+  part("The line written down before the charge: charged only on an exact OK");
+  const writesLine = (c: Command[]) => c.length === 1 && c[0][0] === "SET" && c[0][1] === adding;
+  for (const [label, reply] of [["no reply", []], ["null", [null]], ["another word", ["QUEUED"]], ["two replies", ["OK", "OK"]]] as [string, unknown[]][]) {
+    await pipeline([["DEL", billed], ["DEL", adding]]);
+    inject = (c) => (writesLine(c) ? reply : null);
+    is(`the line's write answered ${label} (not written): nothing charged`, await settle(), { state: "unknown", charged: 0, lineBegun: true });
+    inject = null;
+  }
+  await pipeline([["DEL", billed], ["DEL", adding]]);
+  // The write is applied, then its answer is lost (the wrapper above hands this promise's [] back as the reply).
+  inject = (c) => (writesLine(c) ? (pipeline(c).then(() => []) as unknown as unknown[]) : null);
+  is("the line's write landed with its answer lost: nothing charged this run", await settle(), { state: "unknown", charged: 0, lineBegun: true });
+  inject = null;
+  is("the next run finishes that line once, never begins another", await settle(), { state: "billed", charged: 1, lineBegun: false });
+  is("billed once in all", await settle(), { state: "nothing", charged: 0, lineBegun: false });
 
   part("Confirmed: a line written down and not finished is finished, not begun again");
   await pipeline([["DEL", billed]]);

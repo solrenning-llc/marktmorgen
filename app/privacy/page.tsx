@@ -680,7 +680,8 @@ export default function PrivacyPage() {
           them. A note holds at most 4,000 characters, and a student keeps at
           most 300 notes in one store. The student can download a course&apos;s
           notes as a text file whenever they are signed in with the address
-          they took it with, also after the course is no longer open to them
+          they took it with: from each lesson while the course is open to
+          them, and from the course&apos;s own page also after the course is no longer open to them
           (after a refund, for example, or when a membership ends). A note is
           deleted when the student empties it, when they ask to be deleted
           from the store, and when the store is closed.

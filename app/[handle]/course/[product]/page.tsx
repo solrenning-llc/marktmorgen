@@ -26,6 +26,9 @@ import { CourseOutline, WithDay } from "@/components/course-outline";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
+import { takeBuyerRead } from "@/lib/buyer-actions";
+import { notesDownloadAfterAccess } from "@/lib/lesson-notes";
+import { lessonNotesWords } from "@/lib/buyer-words/lesson-notes";
 import { productSegment } from "@/lib/product-slug";
 import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
@@ -105,6 +108,10 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const finished = studying && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
+  // A student the course is no longer open to (a refund, an ended membership) still downloads their own
+  // notes here, as the privacy policy says (#lesson-notes): no lesson's box is there to give the link.
+  const notesAfter = await notesDownloadAfterAccess(store.statsId ?? "", access, course.id, () => takeBuyerRead(store));
+  const nw = lessonNotesWords(store.language);
 
   const all = lessonsInOrder(course);
   const total = lessonCount(course);
@@ -282,6 +289,19 @@ export default async function CoursePage({ params, searchParams }: Params) {
                     {w.tryFree(preview.lesson.title)}
                   </Link>
                 </p>
+              ) : null}
+              {notesAfter ? (
+                <section aria-labelledby="course-notes-heading" className="rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>
+                  <h2 id="course-notes-heading" className="st-label">{nw.heading}</h2>
+                  <p className="st-muted mt-1 text-sm">{nw.privateLine}</p>
+                  <a
+                    href={`/api/store/course/note?h=${encodeURIComponent(store.handle)}&p=${encodeURIComponent(product.id)}`}
+                    download
+                    className="st-footer-link mt-2 inline-flex min-h-[44px] items-center text-sm font-semibold"
+                  >
+                    {nw.download}
+                  </a>
+                </section>
               ) : null}
               {access.state === "ended" ? null : (
               <form action="/api/store/course/link" method="post" className="rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>

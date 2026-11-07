@@ -276,9 +276,50 @@ export async function courseNotesOf(statsId: string, learner: string, courseId: 
   if (!STATS_PATTERN.test(statsId) || !LEARNER_PATTERN.test(learner) || !COURSE_ID_PATTERN.test(courseId)) return [];
   if (!isRedisConfigured()) throw new UnknownReply("a student's notes");
   const key = notesKey(statsId, learner);
-  const fields = fieldsOf(exactReplies(await redisPipeline([["HKEYS", key]]), 1, "a student's notes")[0]).filter((field) => FIELD_PATTERN.exec(field)?.[1] === courseId);
+  const fields = await courseFieldsOf(key, courseId);
   if (!(await admit(noteReadUnits(fields.length)))) return null;
   return notesAt(key, fields);
+}
+
+/** The fields of one course's notes in a student's hash (one HKEYS). Throws UnknownReply when the reply is not exactly a list of names. */
+async function courseFieldsOf(key: string, courseId: string): Promise<string[]> {
+  return fieldsOf(exactReplies(await redisPipeline([["HKEYS", key]]), 1, "a student's notes")[0]).filter((field) => FIELD_PATTERN.exec(field)?.[1] === courseId);
+}
+
+/**
+ * How many notes one student keeps on one course (no value read). Throws
+ * UnknownReply when a reply is not exactly what was asked.
+ */
+export async function courseNoteCount(statsId: string, learner: string, courseId: string): Promise<number> {
+  if (!STATS_PATTERN.test(statsId) || !LEARNER_PATTERN.test(learner) || !COURSE_ID_PATTERN.test(courseId)) return 0;
+  if (!isRedisConfigured()) throw new UnknownReply("a student's notes");
+  return (await courseFieldsOf(notesKey(statsId, learner), courseId)).length;
+}
+
+/**
+ * Whether a course's own page links to the student's notes download once
+ * the course is no longer open to them (a refund, an ended membership),
+ * where no lesson's box is there to give it: for the student noteReaderOf
+ * names, while they keep notes on the course. Counting them is one of the
+ * store's public requests, asked by `admit` before anything is read. When it
+ * is refused or the count cannot be read, the link is shown: not knowing is
+ * not "no notes", and the download says so itself if it cannot read them.
+ */
+export async function notesDownloadAfterAccess(
+  statsId: string,
+  access: { state: string; learner: { email: string; scope: "all" | string[]; owner: boolean } | null },
+  courseId: string,
+  admit: () => Promise<boolean>,
+): Promise<boolean> {
+  if (access.state === "open") return false;
+  const who = noteReaderOf(access, courseId);
+  if (!who) return false;
+  if (!(await admit())) return true;
+  try {
+    return (await courseNoteCount(statsId, who, courseId)) > 0;
+  } catch {
+    return true;
+  }
 }
 
 /**

@@ -34,7 +34,7 @@ export function testAliases(file,root,here){
  if(file==='sales-goal-ack.test.ts')aliases['@/lib/store-request']=join(here,'sales-goal-ack-world.ts');
  if(!['order-email-fallback.test.ts','resend-fallback-budget.test.ts','auth-mail-unavailable.test.ts','course-link-mail-unavailable.test.ts','email-meter-preflight.test.ts'].includes(file))aliases['@/lib/resend-fallback-transport']=join(here,'resend-fallback-fixture.ts');
  if(file==='customer-base-fixed-evidence.test.ts')for(const [name,fixture] of [['upload-budget-policy','upload-budget-approved-policy'],['ai-spend-policy','commercial-ai-approved-policy'],['llc-fixed-costs','llc-fixed-approved-policy']])aliases['@/lib/'+name]=join(here,fixture+'.ts');
- if(file==='meeting-withdrawal-page.test.ts'){
+ if(file==='meeting-withdrawal-page.test.ts'||file==='studio-meetings-test-unread.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'meeting-withdrawal-page-world.ts');
   for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'meeting-withdrawal-page-world.ts');
   aliases['next/server']=join(here,'next-server-after-world.ts');

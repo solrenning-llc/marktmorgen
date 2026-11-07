@@ -75,7 +75,7 @@
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPayPalRefunds, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
-import { saleHandles, storeForEmail, storeForId, storeRef } from "@/lib/store";
+import { MAX_STORE_BYTES, saleHandles, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -374,11 +374,13 @@ export function payAddress(affiliate: Pick<Affiliate, "email" | "paypal">): stri
  * Sets, or clears with null, the share one affiliate earns. Written over exactly the record read (changeAffiliate),
  * so a share or a decision written meanwhile is kept.
  *
- * A share that only goes down is written at once: it never raises what a sale promises. Any other change (up, from
- * the program's to their own, or back to the program's, which may be higher) is checked first, under the program's
- * partner lock, against the partners and the commission read exactly now (commissionProblem, #2995 follow-up): over
- * the 90% cap on a product with partners, ShareCapError and nothing written. Unknown reply: UnknownReplyError; the
- * lock not held: LockBusyError; nothing written either way.
+ * A share of their own that only goes down is written at once: it never raises what a sale promises. A move between
+ * their own share and the program's is judged under the program's partner lock, against the terms read exactly now:
+ * one that pays no more on any product (paysNoMore: the program's 30% for an own 20%, say) is a reduction too, written
+ * without reading the program's people and never refused for them. Any other change is checked against the partners
+ * and the commission read exactly now (commissionProblem, #2995 follow-up): over the 90% cap on a product with
+ * partners, ShareCapError and nothing written. Unknown reply: UnknownReplyError; the lock not held: LockBusyError;
+ * nothing written either way.
  */
 export async function setAffiliateRate(store: Store, id: string, rate: number | null): Promise<Affiliate | null> {
   if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
@@ -388,9 +390,17 @@ export async function setAffiliateRate(store: Store, id: string, rate: number | 
   if (plain.next) return plain.next;
   if (plain.before.rate === rate) return plain.before;
   return withPartnerLock(store, async (held) => {
-    const problem = await commissionProblem(await storeNow(store), { rate: { id, rate } });
+    const now = await storeNow(store);
+    const lost = () => new LockBusyError("the partner lock was lost before an affiliate's share was written");
+    // The terms cannot change while the lock is held (every save of them takes it), so "pays no more" stays true.
+    if (!(await holdLock(held))) throw lost();
+    const lowered = await changeAffiliate(store, id, (affiliate) => (paysNoMore(now.affiliates, affiliate.rate, rate) ? { ...affiliate, rate } : null));
+    if (!lowered) return null;
+    if (lowered.next) return lowered.next;
+    if (lowered.before.rate === rate) return lowered.before;
+    const problem = await commissionProblem(now, { rate: { id, rate } });
     if (problem) throw new ShareCapError(problem);
-    if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before an affiliate's share was written");
+    if (!(await holdLock(held))) throw lost();
     return (await changeAffiliate(store, id, (affiliate) => ({ ...affiliate, rate })))?.next ?? null;
   });
 }
@@ -439,7 +449,11 @@ export async function withPartnerLock<T>(store: Store, work: (held: Held) => Pro
 export async function partnerShareProblem(store: Store, share: PartnerShare, self: string | null): Promise<ShareProblem | null> {
   // The commission as it is now, not as the request read it before the lock: a raise saved meanwhile counts.
   const now = await storeNow(store);
-  const people = await listAffiliates(now);
+  return shareProblemAmong(now.affiliates, await listAffiliates(now), share, self);
+}
+
+/** partnerShareProblem against `people` and `terms` already read (a batch checks many against one read). */
+function shareProblemAmong(terms: CommissionTerms, people: readonly Affiliate[], share: PartnerShare, self: string | null): ShareProblem | null {
   const others: Record<string, number[]> = {};
   for (const other of people) {
     if (other.id === self || other.status !== "approved" || !other.share) continue;
@@ -447,7 +461,7 @@ export async function partnerShareProblem(store: Store, share: PartnerShare, sel
   }
   // The most an affiliate can earn on each product: the program's, the product's, or one affiliate's own (rule 30).
   const affiliatePercent: Record<string, number> = {};
-  for (const product of share.products) affiliatePercent[product] = topCommission(now.affiliates, people, product);
+  for (const product of share.products) affiliatePercent[product] = topCommission(terms, people, product);
   return shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
 }
 
@@ -468,7 +482,7 @@ type CommissionTerms = Pick<AffiliateSetting, "percent" | "rates">;
  * (lib/affiliate-setting.ts commissionRate), whatever their status, since a decision can make anybody approved again.
  * A product set to 0% stays out for everyone.
  */
-export function topCommission(terms: CommissionTerms, people: Pick<Affiliate, "rate">[], product: string): number {
+export function topCommission(terms: CommissionTerms, people: readonly Pick<Affiliate, "rate">[], product: string): number {
   let top = commissionRate(terms, product);
   for (const person of people) if (person.rate !== null) top = Math.max(top, commissionRate(terms, product, person.rate));
   return top;
@@ -481,6 +495,17 @@ export function commissionRaised(before: CommissionTerms, after: CommissionTerms
     if (commissionRate(after, id) > commissionRate(before, id)) return true;
   }
   return false;
+}
+
+/**
+ * Whether an affiliate earning `to` (their own share, or null for the program's) instead of `from` is paid no more on
+ * any product under `terms`: on each product with a share of its own, and on every other (the program's share).
+ * A product set to 0% stays at 0 either way (commissionRate).
+ */
+export function paysNoMore(terms: CommissionTerms, from: number | null, to: number | null): boolean {
+  if (from === to) return true;
+  // "" is no product's id (lib/catalog.ts ids are never empty): it reads as any product with no share of its own.
+  return [...Object.keys(terms.rates), ""].every((product) => commissionRate(terms, product, to) <= commissionRate(terms, product, from));
 }
 
 /**
@@ -663,11 +688,48 @@ function hashPairsExact(replies: unknown, what: string): [string, string][] {
  * reply they do not understand (docs/reviews/c5-sweep-app1.md finding 1).
  */
 export async function listAffiliates(store: Store): Promise<Affiliate[]> {
-  if (!store.statsId || !isRedisConfigured()) return [];
-  return hashPairsExact(await redisPipeline([["HGETALL", peopleKey(store.statsId)]]), "an affiliate program's people")
-    .map(([, raw]) => parseAffiliate(raw))
-    .filter((a): a is Affiliate => a !== null)
-    .sort((a, b) => b.appliedAt - a.appliedAt);
+  return [...(await peopleExact(store)).values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
+}
+
+/** One record as read, with the text it was read as, so it can be written over exactly that (changeAffiliate). */
+type Read = { raw: string; affiliate: Affiliate };
+
+/** Every record of the program by its field (its id), each with its text (one HGETALL). Throws UnknownReplyError like listAffiliates. */
+async function peopleExact(store: Store): Promise<Map<string, Read>> {
+  const out = new Map<string, Read>();
+  if (!store.statsId || !isRedisConfigured()) return out;
+  for (const [field, raw] of hashPairsExact(await redisPipeline([["HGETALL", peopleKey(store.statsId)]]), "an affiliate program's people")) {
+    const affiliate = parseAffiliate(raw);
+    if (affiliate) out.set(field, { raw, affiliate });
+  }
+  return out;
+}
+
+/**
+ * The records of these people, in one HMGET, each with its text; null for one not there (or not readable as a
+ * record). Throws UnknownReplyError when the reply is not exactly one string or nil for each: never "nobody".
+ */
+async function recordsExact(store: Store, ids: readonly string[]): Promise<Map<string, Read | null>> {
+  const out = new Map<string, Read | null>();
+  if (!ids.length) return out;
+  const reply = repliesFor(await redisPipeline([["HMGET", peopleKey(store.statsId as string), ...ids]]), 1);
+  const slots = reply ? repliesFor(reply[0], ids.length) : null;
+  if (!slots) throw new UnknownReplyError("an affiliate program's records");
+  ids.forEach((id, i) => {
+    const raw = slots[i];
+    if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("an affiliate's record");
+    const affiliate = raw === null ? null : parseAffiliate(raw);
+    out.set(id, raw !== null && affiliate?.id === id ? { raw, affiliate } : null);
+  });
+  return out;
+}
+
+/** How many records the program keeps (one HLEN), read exactly: UnknownReplyError otherwise. */
+async function peopleCount(store: Store): Promise<number> {
+  const reply = repliesFor(await redisPipeline([["HLEN", peopleKey(store.statsId as string)]]), 1);
+  const count = reply ? countOf(reply[0]) : null;
+  if (count === null) throw new UnknownReplyError("how many records an affiliate program keeps");
+  return count;
 }
 
 export async function readAffiliate(store: Store, id: string): Promise<Affiliate | null> {
@@ -713,9 +775,33 @@ async function changeAffiliate(
   store: Store,
   id: string,
   change: (now: Affiliate) => Affiliate | null,
+  /**
+   * `known`: the record's text as a batch already read it, written over without reading it again. With it, a single
+   * attempt: when the record changed meanwhile, one HEXISTS tells "gone" (null) from "changed" (LockBusyError), so a
+   * batch never reads a record twice and its cost stays what it took for it (bulkUnits).
+   */
+  known?: string,
 ): Promise<{ before: Affiliate; next: Affiliate | null } | null> {
   if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return null;
   const key = peopleKey(store.statsId);
+  if (known !== undefined) {
+    const before = parseAffiliate(known);
+    if (!before) return null;
+    const next = change(before);
+    if (!next) return { before, next: null };
+    const swapped = repliesFor(await redisPipeline([["EVAL", AFFILIATE_SWAP, 1, key, id, known, JSON.stringify(next)]]), 1);
+    const written = swapped ? countOf(swapped[0]) : null;
+    if (written === 1) {
+      await rememberAffiliate(store.sid, next.email);
+      return { before, next };
+    }
+    if (written !== 0) throw new UnknownReplyError("an affiliate's record swap");
+    const there = repliesFor(await redisPipeline([["HEXISTS", key, id]]), 1);
+    const exists = there ? countOf(there[0]) : null;
+    if (exists === 0) return null;
+    if (exists !== 1) throw new UnknownReplyError("whether an affiliate's record is there");
+    throw new LockBusyError("an affiliate's record changed while a batch wrote it");
+  }
   for (let attempt = 0; attempt < SWAP_ATTEMPTS; attempt += 1) {
     const read = repliesFor(await redisPipeline([["HGET", key, id]]), 1);
     if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("an affiliate's record");
@@ -1403,9 +1489,12 @@ export async function decide(store: Store, id: string, decision: Decision): Prom
   const counts = (a: Affiliate) => status === "approved" && a.status !== "approved" && a.share !== null;
   // Only the decision is changed, over exactly the record read (changeAffiliate): a share, a rate or an address
   // written meanwhile is kept. `checked` is the share the cap was checked with: when the record now holds another
-  // (it can only change under the partner lock this decision holds), nothing is written.
+  // (it can only change under the partner lock this decision holds), nothing is written. With no lock (`checked`
+  // undefined), a record that now holds a share this decision would make count is never written: the decision goes
+  // again under the lock (NeedsPartnerLock), so a share given meanwhile is checked against the cap (pre-review M1).
   const write = async (checked: PartnerShare | null | undefined) => {
     const changed = await changeAffiliate(store, id, (now) => {
+      if (checked === undefined && counts(now)) throw new NeedsPartnerLock();
       if (checked !== undefined && JSON.stringify(now.share) !== JSON.stringify(checked)) {
         throw new LockBusyError("a partner's share changed while the decision was written");
       }
@@ -1413,22 +1502,41 @@ export async function decide(store: Store, id: string, decision: Decision): Prom
     });
     return changed?.next ? { affiliate: changed.before, next: changed.next } : null;
   };
+  const locked = () =>
+    withPartnerLock(store, async (held) => {
+      // Read again under the lock: the share or the status may have changed since.
+      const now = await readAffiliate(store, id);
+      if (!now) return null;
+      if (counts(now) && now.share) {
+        const problem = await partnerShareProblem(store, now.share, now.id);
+        if (problem) throw new ShareCapError(problem);
+        if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before the decision was written");
+      }
+      return write(now.share);
+    });
   const written = counts(found)
-    ? await withPartnerLock(store, async (held) => {
-        // Read again under the lock: the share or the status may have changed since.
-        const now = await readAffiliate(store, id);
-        if (!now) return null;
-        if (counts(now) && now.share) {
-          const problem = await partnerShareProblem(store, now.share, now.id);
-          if (problem) throw new ShareCapError(problem);
-          if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before the decision was written");
-        }
-        return write(now.share);
-      })
-    : await write(undefined);
+    ? await locked()
+    : await write(undefined).catch((error: unknown) => {
+        if (error instanceof NeedsPartnerLock) return locked();
+        throw error;
+      });
   if (!written) return null;
   const { affiliate, next } = written;
-  if (decision === "approve" && affiliate.status === "pending" && isSenderConfigured()) {
+  if (decision === "approve" && affiliate.status === "pending") await tellApproved(store, affiliate);
+  return next;
+}
+
+/** Thrown inside a change written with no partner lock that turns out to need it: the caller goes again under it. */
+class NeedsPartnerLock extends Error {
+  constructor() {
+    super("the change needs the partner lock");
+    this.name = "NeedsPartnerLock";
+  }
+}
+
+/** Emails somebody just approved their link and the program's terms, when the store can send. Never throws. */
+async function tellApproved(store: Store, affiliate: Affiliate): Promise<void> {
+  if (isSenderConfigured()) {
     const a = affiliatesWords(store.language);
     await sendEmail({ meter: { by: "store", store: store, kind: "email" },
       from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
@@ -1461,7 +1569,6 @@ export async function decide(store: Store, id: string, decision: Decision): Prom
       ].join("\n"),
     }).catch((error) => console.error("telling an affiliate they were approved failed", error));
   }
-  return next;
 }
 
 // ---- Several decisions at once, with undo (630 [HN6](4), unit 1) ----------
@@ -1473,26 +1580,207 @@ export const BULK_UNDO_MS = 10 * 60_000;
 /** How one affiliate stood before a decision in bulk: what an undo puts back. */
 export type Before = { id: string; status: AffiliateStatus; decidedAt: number };
 
+// ---- What a change in bulk reads, and the studio requests it takes first (pre-review M2) ----
+
 /**
- * Approves or declines several pending applications, one by one through
- * decide (each approval emails its link, as one at a time). Only pending
- * ones are touched; anybody already decided is left as they are. Returns how
- * each stood before, for an undo.
+ * What one more studio request covers of a change in bulk (tests/plan-cost-registry.test.ts holds both under
+ * UNIT_COST.studio, at a light request's shape): STUDIO_UNIT_COMMANDS commands, or STUDIO_UNIT_BYTES bytes through the
+ * database, as lib/segments.ts counts a megabyte read. A change in bulk takes, before each part of it, the studio
+ * requests that part costs at its worst size (bulkUnits), on top of the one its press took;
+ * tests/affiliate-bulk-cost.test.ts measures every command and byte of a batch inside what it took.
  */
-export async function decideMany(store: Store, ids: string[], decision: "approve" | "decline"): Promise<{ before: Before[]; held: HeldOne[] }> {
-  const before: Before[] = [];
-  const held: HeldOne[] = [];
-  for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
-    const affiliate = await readAffiliate(store, id);
-    if (!affiliate || affiliate.status !== "pending") continue;
-    // A share that would pass the cap, a reply that could not be read or the partner lock held elsewhere: this one is
-    // left pending, nothing written for it, the rest go on (decide), and the studio names who and why
-    // (lib/affiliate-bulk-words.ts), never a silent gap in the count.
-    const why = await heldWhy(() => decide(store, id, decision));
-    if (why) held.push({ id, email: affiliate.email, why });
-    else before.push({ id, status: affiliate.status, decidedAt: affiliate.decidedAt });
+export const STUDIO_UNIT_COMMANDS = 20;
+export const STUDIO_UNIT_BYTES = 1_000_000;
+
+/**
+ * The most bytes one affiliate's record can take as JSON, by the caps it is written and read with (parseAffiliate):
+ * two addresses of MAX_EMAIL_LENGTH and a note of MAX_NOTE_LENGTH characters, each character at its widest (a control
+ * character, six bytes escaped), a share of 200 product ids of 40 characters, 50 ids let through and the rest.
+ * tests/affiliate-bulk-cost.test.ts holds the widest record under it.
+ */
+export const AFFILIATE_RECORD_MAX_BYTES = 16_000;
+
+/**
+ * Commands the partner lock takes at the most: a try every 20 ms, doubling up to 250 ms, for PARTNER_LOCK_WAIT_MS;
+ * keeping it before the first write and every BATCH_HOLD_EVERY writes after; letting it go.
+ */
+const LOCK_COMMANDS = 16 + Math.ceil(MAX_BULK_DECISIONS / 25) + 2;
+/** How many writes of a batch go between two checks that the partner lock is still held. */
+const BATCH_HOLD_EVERY = 25;
+/** Commands one write of a batch takes at the most: the swap, the HEXISTS that says gone or changed, the hub's two. */
+const WRITE_COMMANDS = 4;
+
+/**
+ * Studio requests that cover `commands` commands and `bytes` bytes through the database: each request covers a share
+ * of either, and the shares add up, so together they cover both (and a light request's own time, each).
+ */
+export function bulkUnits(commands: number, bytes: number): number {
+  return Math.ceil(commands / STUDIO_UNIT_COMMANDS + bytes / STUDIO_UNIT_BYTES);
+}
+
+/**
+ * Bytes a record read moves, at most: its text inside a JSON reply, each character escaped at most to two bytes
+ * (Upstash answers JSON), and the reply's framing.
+ */
+const readBytes = (records: number) => records * (2 * AFFILIATE_RECORD_MAX_BYTES + 64);
+/** Bytes one write moves, at most: the script, the record as read and as written, escaped, and the hub's commands. */
+const writeBytes = (raw: number, next: number) => 2 * (raw + next) + 1_200;
+const utf8 = (text: string) => Buffer.byteLength(text, "utf8");
+
+/** Takes this many of the store's studio requests before the work they pay for: false when they were not taken. */
+export type Charge = (units: number) => Promise<boolean>;
+/** For a caller that already paid for the work, or a test of the work alone. */
+const PAID: Charge = async () => true;
+/** Commands one take of studio requests uses itself (lib/studio-route.ts countStudio: the window's count and its key). */
+const TAKE_COMMANDS = 6;
+/** Takes, before the work, the studio requests `commands` commands and `bytes` bytes cost, with the take's own commands. */
+const take = async (charge: Charge, commands: number, bytes: number) =>
+  (commands <= 0 && bytes <= 0) || (await charge(bulkUnits(commands + TAKE_COMMANDS, bytes)).catch(() => false));
+
+type BatchWrite = { id: string; raw: string; change: (now: Affiliate) => Affiliate | null };
+type BatchResult = { before: Affiliate; next: Affiliate } | HeldWhy | null;
+
+/**
+ * Writes each change over exactly the record as the batch read it (changeAffiliate with `known`): no record is read
+ * again. Per id: the record before and after, null when `change` wrote nothing, or why not ("gone": no longer there;
+ * "unavailable": changed meanwhile, an unknown reply, or the partner lock lost). With `held`, the lock is confirmed
+ * before the first write and every BATCH_HOLD_EVERY after; once lost, nothing more is written.
+ */
+async function writeBatch(store: Store, writes: readonly BatchWrite[], held?: Held): Promise<Map<string, BatchResult>> {
+  const out = new Map<string, BatchResult>();
+  let lost = false;
+  for (const [i, one] of writes.entries()) {
+    if (held && !lost && i % BATCH_HOLD_EVERY === 0 && !(await holdLock(held))) lost = true;
+    if (lost) {
+      out.set(one.id, "unavailable");
+      continue;
+    }
+    try {
+      const changed = await changeAffiliate(store, one.id, one.change, one.raw);
+      out.set(one.id, changed === null ? "gone" : changed.next ? { before: changed.before, next: changed.next } : null);
+    } catch (error) {
+      if (error instanceof UnknownReplyError || error instanceof LockBusyError) out.set(one.id, "unavailable");
+      else throw error;
+    }
   }
-  return { before, held };
+  return out;
+}
+
+/** The people a batch asks about, at most MAX_BULK_DECISIONS, once each, in order. */
+const batchIds = (ids: readonly string[]) => [...new Set(ids)].slice(0, MAX_BULK_DECISIONS);
+
+/**
+ * Approves or declines several pending applications at once. Only pending ones are touched; anybody already decided
+ * is left as they are. Each approval emails its link, as one at a time does. Returns how each stood before, for an
+ * undo, and who was left out and why (lib/affiliate-bulk-words.ts), never a silent gap in the count.
+ *
+ * One read of the people asked for (HMGET). Approving somebody who holds a share makes it count, so those are
+ * checked, together, under ONE partner lock, against ONE read of the store and of the program's people: each one in
+ * turn against the partners as they would stand with the ones before it approved (pre-review M2). Each part is paid
+ * for in studio requests first (`charge`, bulkUnits); one that was not is left out as "used", nothing read or written
+ * for it.
+ */
+export async function decideMany(
+  store: Store,
+  ids: string[],
+  decision: "approve" | "decline",
+  charge: Charge = PAID,
+): Promise<{ before: Before[]; held: HeldOne[] }> {
+  const status: AffiliateStatus = decision === "approve" ? "approved" : "declined";
+  const asked = batchIds(ids);
+  const held: HeldOne[] = [];
+  const outcome = new Map<string, BatchResult>();
+  const email = new Map<string, string>();
+  const leave = (list: readonly string[], why: HeldWhy) => list.forEach((id) => outcome.set(id, why));
+  const finish = () => {
+    const before: Before[] = [];
+    for (const id of asked) {
+      const result = outcome.get(id);
+      if (result === undefined || result === null) continue;
+      if (typeof result === "string") held.push({ id, email: email.get(id) ?? "", why: result });
+      else before.push({ id, status: result.before.status, decidedAt: result.before.decidedAt });
+    }
+    return { before, held };
+  };
+  leave(asked.filter((id) => !AFFILIATE_ID_PATTERN.test(id)), "gone");
+  const valid = asked.filter((id) => AFFILIATE_ID_PATTERN.test(id));
+  if (!valid.length) return finish();
+  if (!store.statsId || !isRedisConfigured()) return (leave(valid, "unavailable"), finish());
+  if (!(await take(charge, 1, readBytes(valid.length)))) return (leave(valid, "used"), finish());
+  const records = await recordsExact(store, valid).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+  if (!records) return (leave(valid, "unavailable"), finish());
+
+  const plain: BatchWrite[] = [];
+  const shared: string[] = [];
+  const decided = (now: Affiliate) => ({ ...now, status, decidedAt: Date.now() });
+  for (const id of valid) {
+    const read = records.get(id);
+    if (!read) {
+      outcome.set(id, "gone");
+      continue;
+    }
+    email.set(id, read.affiliate.email);
+    if (read.affiliate.status !== "pending") continue;
+    // Over exactly the record read (its share was null then): one given a share meanwhile is not written.
+    if (status === "approved" && read.affiliate.share) shared.push(id);
+    else plain.push({ id, raw: read.raw, change: (now) => (now.status === "pending" ? decided(now) : null) });
+  }
+  const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0) + shared.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
+  if (!(await take(charge, WRITE_COMMANDS * (plain.length + shared.length), writing))) {
+    leave([...plain.map((one) => one.id), ...shared], "used");
+    return finish();
+  }
+  for (const [id, result] of await writeBatch(store, plain)) outcome.set(id, result);
+
+  if (shared.length) {
+    try {
+      if (!(await take(charge, LOCK_COMMANDS + 2, 2 * MAX_STORE_BYTES))) leave(shared, "used");
+      else
+        await withPartnerLock(store, async (lock) => {
+          const now = await storeNow(store);
+          if (!(await take(charge, 1, readBytes(await peopleCount(now))))) return leave(shared, "used");
+          const everyone = await peopleExact(now);
+          const people = [...everyone.values()].map((one) => one.affiliate);
+          const at = new Map(people.map((one, i) => [one.id, i]));
+          const writes: BatchWrite[] = [];
+          for (const id of shared) {
+            const read = everyone.get(id);
+            const i = at.get(id);
+            if (!read || i === undefined) {
+              outcome.set(id, "gone");
+              continue;
+            }
+            const share = read.affiliate.share;
+            if (read.affiliate.status !== "pending") continue;
+            if (share) {
+              // Against the partners as they stand with those approved before it in this batch.
+              const problem = shareProblemAmong(now.affiliates, people, share, id);
+              if (problem) {
+                outcome.set(id, problem === "crowded" ? "crowded" : "cap");
+                continue;
+              }
+            }
+            people[i] = { ...read.affiliate, status };
+            writes.push({ id, raw: read.raw, change: (x) => (x.status === "pending" ? decided(x) : null) });
+          }
+          for (const [id, result] of await writeBatch(store, writes, lock)) outcome.set(id, result);
+        });
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError || error instanceof LockBusyError)) throw error;
+    }
+    // Not reached for an unknown reply, or the lock held elsewhere: nothing was written for them.
+    leave(shared.filter((id) => !outcome.has(id)), "unavailable");
+  }
+  if (status === "approved") {
+    for (const id of asked) {
+      const result = outcome.get(id);
+      if (result && typeof result === "object" && result.before.status === "pending") await tellApproved(store, result.before);
+    }
+  }
+  return finish();
 }
 
 /**
@@ -1500,73 +1788,183 @@ export async function decideMany(store: Store, ids: string[], decision: "approve
  * still exactly as that decision left them and within BULK_UNDO_MS of it: a
  * later decision by hand is never overwritten. An approval email already
  * sent is not taken back; the studio says so. Returns how many were put back.
+ * One read of them all (HMGET), paid for first, like the decision (decideMany).
  */
-export async function undoMany(store: Store, before: Before[], decision: "approve" | "decline", now = Date.now()): Promise<number> {
+export async function undoMany(store: Store, before: Before[], decision: "approve" | "decline", now = Date.now(), charge: Charge = PAID): Promise<number> {
   const left: AffiliateStatus = decision === "approve" ? "approved" : "declined";
-  let undone = 0;
-  for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
-    if (entry.status !== "pending") continue;
+  const entries = new Map<string, Before>();
+  for (const entry of before.slice(0, MAX_BULK_DECISIONS)) if (entry.status === "pending" && AFFILIATE_ID_PATTERN.test(entry.id)) entries.set(entry.id, entry);
+  if (!entries.size || !store.statsId || !isRedisConfigured()) return 0;
+  const ids = [...entries.keys()];
+  if (!(await take(charge, 1 + WRITE_COMMANDS * ids.length, readBytes(ids.length) + ids.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES)))) return 0;
+  const records = await recordsExact(store, ids).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+  if (!records) return 0;
+  const writes: BatchWrite[] = [];
+  for (const [id, entry] of entries) {
+    const read = records.get(id);
+    if (!read) continue;
     // Over exactly the record read, and only while it is still as the bulk decision left it.
-    const changed = await changeAffiliate(store, entry.id, (affiliate) =>
-      affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt
-        ? null
-        : { ...affiliate, status: entry.status, decidedAt: entry.decidedAt },
-    );
-    if (changed?.next) undone += 1;
+    writes.push({
+      id,
+      raw: read.raw,
+      change: (affiliate) =>
+        affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt
+          ? null
+          : { ...affiliate, status: entry.status, decidedAt: entry.decidedAt },
+    });
   }
+  let undone = 0;
+  for (const result of (await writeBatch(store, writes)).values()) if (result && typeof result === "object") undone += 1;
   return undone;
 }
 
 /** How one affiliate's own share stood before a change in bulk: what an undo puts back. */
 export type RateBefore = { id: string; rate: number | null };
 
-/**
- * Sets, or clears with null, the share of several approved affiliates at
- * once (630 [HN6](4), unit 2), each through setAffiliateRate: it applies to
- * sales from now on, and a sale keeps the share it was made at. Returns how
- * each stood before, leaving out those already at it.
- */
-export async function setRatesMany(store: Store, ids: string[], rate: number | null): Promise<{ before: RateBefore[]; refused: HeldOne[] } | null> {
-  if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
-  const before: RateBefore[] = [];
-  const refused: HeldOne[] = [];
-  for (const id of [...new Set(ids)].slice(0, MAX_BULK_DECISIONS)) {
-    const affiliate = await readAffiliate(store, id);
-    if (!affiliate || affiliate.status !== "approved" || affiliate.rate === rate) continue;
-    // Over the cap on a product with partners, or not checked just now: this one keeps their share, the rest go on,
-    // and the studio names who and why (lib/affiliate-bulk-words.ts).
-    const why = await heldWhy(() => setAffiliateRate(store, id, rate));
-    if (why) refused.push({ id, email: affiliate.email, why });
-    else before.push({ id, rate: affiliate.rate });
-  }
-  return { before, refused };
-}
+/** One affiliate's share a batch changes: to `rate`, only while `when` holds for their record. */
+type RateAsk = { id: string; rate: number | null; when: (now: Affiliate) => boolean };
 
 /**
- * Runs one change of a bulk action: null when it was written, or why it was not, for those the cap or an unknown
- * reply stops ("cap", "unavailable"). A change that wrote nothing for another reason (the record gone) is said as
- * "unavailable" too: nothing was done for that person. Any other error is thrown.
+ * Changes several affiliates' own shares at once (setRatesMany, undoRates). One read of them all (HMGET); a share of
+ * their own that only goes down is written at once. Every other change is judged together, under ONE partner lock,
+ * against ONE read of the store: one that pays no more on any product (paysNoMore) is written without reading the
+ * people; the rest are checked against the cap with ONE read of the program's people, each in turn against the
+ * program as it stands with the ones before it changed (pre-review M2). Each part is paid for in studio requests
+ * first (`charge`); one that was not is left out as "used". Returns those written, with their share before, and who
+ * was left out and why.
  */
-async function heldWhy(work: () => Promise<unknown>): Promise<HeldWhy | null> {
-  try {
-    return (await work()) ? null : "unavailable";
-  } catch (error) {
-    if (error instanceof ShareCapError) return "cap";
-    if (error instanceof UnknownReplyError || error instanceof LockBusyError) return "unavailable";
+async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charge): Promise<{ done: RateBefore[]; held: HeldOne[] }> {
+  const outcome = new Map<string, BatchResult>();
+  const email = new Map<string, string>();
+  const leave = (list: readonly string[], why: HeldWhy) => list.forEach((id) => outcome.set(id, why));
+  const finish = () => {
+    const done: RateBefore[] = [];
+    const held: HeldOne[] = [];
+    for (const { id } of asks) {
+      const result = outcome.get(id);
+      if (result === undefined || result === null) continue;
+      if (typeof result === "string") held.push({ id, email: email.get(id) ?? "", why: result });
+      else done.push({ id, rate: result.before.rate });
+    }
+    return { done, held };
+  };
+  leave(asks.filter((ask) => !AFFILIATE_ID_PATTERN.test(ask.id)).map((ask) => ask.id), "gone");
+  const valid = asks.filter((ask) => AFFILIATE_ID_PATTERN.test(ask.id));
+  const ids = valid.map((ask) => ask.id);
+  if (!valid.length) return finish();
+  if (!store.statsId || !isRedisConfigured()) return (leave(ids, "unavailable"), finish());
+  if (!(await take(charge, 1, readBytes(valid.length)))) return (leave(ids, "used"), finish());
+  const records = await recordsExact(store, ids).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
     throw error;
+  });
+  if (!records) return (leave(ids, "unavailable"), finish());
+
+  const plain: BatchWrite[] = [];
+  const judged: RateAsk[] = [];
+  for (const ask of valid) {
+    const read = records.get(ask.id);
+    if (!read) {
+      outcome.set(ask.id, "gone");
+      continue;
+    }
+    email.set(ask.id, read.affiliate.email);
+    const was = read.affiliate.rate;
+    if (!ask.when(read.affiliate) || was === ask.rate) continue;
+    // Down from a share of their own to a lower one: lower on every product whatever the terms (commissionRate).
+    if (was !== null && ask.rate !== null && ask.rate <= was) plain.push({ id: ask.id, raw: read.raw, change: (now) => (ask.when(now) ? { ...now, rate: ask.rate } : null) });
+    else judged.push(ask);
   }
+  const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 8), 0) + judged.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
+  if (!(await take(charge, WRITE_COMMANDS * (plain.length + judged.length), writing))) {
+    leave([...plain.map((one) => one.id), ...judged.map((ask) => ask.id)], "used");
+    return finish();
+  }
+  for (const [id, result] of await writeBatch(store, plain)) outcome.set(id, result);
+
+  if (judged.length) {
+    try {
+      if (!(await take(charge, LOCK_COMMANDS + 2, 2 * MAX_STORE_BYTES))) leave(judged.map((ask) => ask.id), "used");
+      else
+        await withPartnerLock(store, async (lock) => {
+          const now = await storeNow(store);
+          const terms = now.affiliates;
+          const writes: BatchWrite[] = [];
+          const write = (ask: RateAsk, raw: string) => writes.push({ id: ask.id, raw, change: (x) => (ask.when(x) ? { ...x, rate: ask.rate } : null) });
+          // Paying no more anywhere, under the terms as they are now (they cannot change while the lock is held).
+          const lower = judged.filter((ask) => paysNoMore(terms, records.get(ask.id)?.affiliate.rate ?? null, ask.rate));
+          const raise = judged.filter((ask) => !lower.includes(ask));
+          for (const ask of lower) write(ask, records.get(ask.id)?.raw as string);
+          if (raise.length) {
+            if (!(await take(charge, 1, readBytes(await peopleCount(now))))) leave(raise.map((ask) => ask.id), "used");
+            else {
+              const everyone = await peopleExact(now);
+              const people = [...everyone.values()].map((one) => one.affiliate);
+              const at = new Map(people.map((one, i) => [one.id, i]));
+              for (const ask of lower) {
+                const i = at.get(ask.id);
+                if (i !== undefined) people[i] = { ...people[i], rate: ask.rate };
+              }
+              for (const ask of raise) {
+                const read = everyone.get(ask.id);
+                const i = at.get(ask.id);
+                if (!read || i === undefined) {
+                  outcome.set(ask.id, "gone");
+                  continue;
+                }
+                if (!ask.when(read.affiliate) || read.affiliate.rate === ask.rate) continue;
+                // Against the program as it stands with those changed before it in this batch.
+                const next = people.slice();
+                next[i] = { ...people[i], rate: ask.rate };
+                if (commissionCapProblem({ terms, people, nextTerms: terms, nextPeople: next })) {
+                  outcome.set(ask.id, "cap");
+                  continue;
+                }
+                people[i] = next[i];
+                write(ask, read.raw);
+              }
+            }
+          }
+          for (const [id, result] of await writeBatch(store, writes, lock)) outcome.set(id, result);
+        });
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError || error instanceof LockBusyError)) throw error;
+    }
+    // Not reached for an unknown reply, or the lock held elsewhere: nothing was written for them.
+    leave(judged.map((ask) => ask.id).filter((id) => !outcome.has(id)), "unavailable");
+  }
+  return finish();
 }
 
-/** Puts back each share still exactly as the change left it; one changed by hand since is never overwritten. */
-export async function undoRates(store: Store, before: RateBefore[], rate: number | null): Promise<number> {
-  let undone = 0;
+/**
+ * Sets, or clears with null, the share of several approved affiliates at once (630 [HN6](4), unit 2): it applies to
+ * sales from now on, and a sale keeps the share it was made at. Checked against the cap like one at a time
+ * (setAffiliateRate), all together (changeRates). Returns how each stood before, leaving out those already at it, and
+ * who was left out and why.
+ */
+export async function setRatesMany(store: Store, ids: string[], rate: number | null, charge: Charge = PAID): Promise<{ before: RateBefore[]; refused: HeldOne[] } | null> {
+  if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
+  const asks = batchIds(ids).map((id) => ({ id, rate, when: (a: Affiliate) => a.status === "approved" && a.rate !== rate }));
+  const { done, held } = await changeRates(store, asks, charge);
+  return { before: done, refused: held };
+}
+
+/**
+ * Puts back each share still exactly as the change left it; one changed by hand since is never overwritten. Putting
+ * back a higher share is checked against the cap like any raise; over it, or unchecked, it stays.
+ */
+export async function undoRates(store: Store, before: RateBefore[], rate: number | null, charge: Charge = PAID): Promise<number> {
+  const asks: RateAsk[] = [];
+  const seen = new Set<string>();
   for (const entry of before.slice(0, MAX_BULK_DECISIONS)) {
-    const affiliate = await readAffiliate(store, entry.id);
-    if (!affiliate || affiliate.rate !== rate) continue;
-    // Putting back a higher share is checked against the cap like any raise; over it, or unchecked, it stays.
-    if ((await heldWhy(() => setAffiliateRate(store, entry.id, entry.rate))) === null) undone += 1;
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    asks.push({ id: entry.id, rate: entry.rate, when: (a) => a.rate === rate });
   }
-  return undone;
+  return (await changeRates(store, asks, charge)).done.length;
 }
 
 export async function addPayout(

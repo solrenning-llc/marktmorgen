@@ -9,16 +9,18 @@
  *
  * Now: one read of the people asked for (HMGET), one partner lock, one read of the store and at most one HGETALL for
  * the whole batch, checked against the cap at once; and the batch takes, before each part, the studio requests that
- * part costs at its worst size (lib/affiliates.ts studioUnits), so every command and byte measured here is inside
- * what was taken: at most STUDIO_UNIT_COMMANDS commands and STUDIO_UNIT_BYTES bytes a request.
+ * part costs at its worst size (lib/affiliates.ts bulkUnits), so what every command and byte measured here costs, at
+ * a studio request's shape and the prices of tests/plan-cost-registry.ts, is inside the studio requests taken.
  */
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { readAffiliate } from "@/lib/affiliates";
+import { AFFILIATE_RECORD_MAX_BYTES, MAX_NOTE_LENGTH, readAffiliate } from "@/lib/affiliates";
+import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
+import { UNIT_COST, request } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -26,9 +28,6 @@ import { paidPeriod } from "./billing-period-fixture";
 process.env.RESEND_API_KEY = "re_test_partner_approve_only";
 globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
 
-/** What one studio request is priced to cover (tests/plan-cost-registry.ts UNIT_COST.studio): 27 commands, 50 KB. */
-const UNIT_COMMANDS = 20 + 4 + 3;
-const UNIT_BYTES = 50_000;
 
 const real = redis.pipeline.bind(redis);
 const seen = { commands: 0, bytes: 0, hgetall: 0, lockTakes: 0 };
@@ -77,6 +76,31 @@ async function main(): Promise<void> {
   await real(writes);
   is("(1,000 records)", Number((await real([["HLEN", people]]))[0]), 1000);
 
+  part("0. The widest record a program can keep fits the size a batch pays for each");
+  const wide = "\u0001".repeat(MAX_EMAIL_LENGTH - 12);
+  const widest = {
+    id: "fffffffffff0",
+    email: `${wide}@example.com`,
+    code: "z".repeat(20),
+    status: "approved",
+    appliedAt: Number.MAX_SAFE_INTEGER,
+    decidedAt: Number.MAX_SAFE_INTEGER,
+    note: "\u0001".repeat(MAX_NOTE_LENGTH),
+    rate: 90,
+    paypal: `${wide}@example.org`,
+    share: { percent: 80, products: Array.from({ length: 200 }, (_, i) => `${"q".repeat(36)}${String(i).padStart(4, "0")}`) },
+    cleared: { paid: Number.MAX_SAFE_INTEGER, with: Array.from({ length: 50 }, (_, i) => i.toString(16).padStart(12, "a")) },
+    by: { id: "fffffffffff1", percent: 90 },
+    warned: Number.MAX_SAFE_INTEGER,
+  };
+  await real([["HSET", people, widest.id, JSON.stringify(widest)]]);
+  const kept = await readAffiliate(await store(), widest.id);
+  const keptBytes = Buffer.byteLength(JSON.stringify({ ...kept, decidedAt: Number.MAX_SAFE_INTEGER }));
+  console.log(`  the widest record: ${keptBytes} bytes`);
+  is("read back whole (its share, its addresses)", [kept?.share?.products.length, kept?.cleared?.with.length, kept?.email.length], [200, 50, MAX_EMAIL_LENGTH]);
+  is("no more than AFFILIATE_RECORD_MAX_BYTES as written", keptBytes <= AFFILIATE_RECORD_MAX_BYTES, true);
+  await real([["HDEL", people, widest.id]]);
+
   const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
   const measured = async (label: string, body: Record<string, unknown>) => {
     const used = await allowanceUsed(await store(), "studio");
@@ -89,8 +113,7 @@ async function main(): Promise<void> {
     console.log(`  ${label}: ${seen.commands} commands, ${seen.bytes} bytes, ${seen.hgetall} HGETALL, ${seen.lockTakes} lock takes; ${units} studio requests taken`);
     is(`${label}: at most one read of the whole program`, seen.hgetall <= 1, true);
     is(`${label}: at most one partner lock taken`, seen.lockTakes <= 1, true);
-    is(`${label}: every command inside the studio requests taken first`, seen.commands <= units * UNIT_COMMANDS, true);
-    is(`${label}: every byte inside the studio requests taken first`, seen.bytes <= units * UNIT_BYTES, true);
+    is(`${label}: every command and byte inside the studio requests taken first`, request("studio", seen.commands, seen.bytes) <= units * UNIT_COST.studio, true);
     return { status: response.status, answer };
   };
   const rateOf = async (n: number) => (await readAffiliate(await store(), id(n)))?.rate;

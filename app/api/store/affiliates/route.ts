@@ -29,8 +29,10 @@ import {
   setAffiliateRate,
   setPartnerShare,
   ShareCapError,
+  type Charge,
   withPartnerLock,
 } from "@/lib/affiliates";
+import { countStudio } from "@/lib/studio-route";
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
 import { leadProblem } from "@/lib/affiliate-lead-rules";
 import { planTerms, readNoticeDays } from "@/lib/affiliate-notice";
@@ -134,17 +136,21 @@ export async function POST(request: NextRequest) {
         const result = await setAffiliateSetting(guarded.ref, next);
         return result.ok ? Response.json({ ok: true }) : fail(result.reason);
       };
-      const next = nextOf(fresh);
-      // A commission that goes up anywhere (the program's, or a product's) is checked against the 90% cap on every
-      // product with partners, under the program's partner lock, the store and its people read again exactly now
-      // (#2995 follow-up). Over it: 409, nothing saved. A program with no records yet has no partners to check.
-      if (!fresh.statsId || !commissionRaised(fresh.affiliates, next)) return save(next);
+      // A program with no records yet has no partners to check, and nothing a partner could rely on.
+      if (!fresh.statsId) return save(nextOf(fresh));
+      // Every save is worked out and written under the program's partner lock, from the store read again exactly now
+      // (pre-review L3): judged against what the request read, a commission lowered meanwhile, and the room it left
+      // taken by a partner, would be put back by a save that "raises nothing". A commission that goes up anywhere (the
+      // program's, or a product's) over the terms as they are now is checked against the 90% cap on every product with
+      // partners, its people read exactly now (#2995 follow-up). Over it: 409, nothing saved.
       return await withPartnerLock(fresh, async (held) => {
         const now = await storeForEmail(guarded.ref);
         if (!now || now.statsId !== fresh.statsId) return fail("unavailable", 503);
         const again = nextOf(now);
-        const problem = await commissionProblem(now, { terms: again });
-        if (problem) return fail(`share_${problem}`, 409);
+        if (commissionRaised(now.affiliates, again)) {
+          const problem = await commissionProblem(now, { terms: again });
+          if (problem) return fail(`share_${problem}`, 409);
+        }
         if (!(await holdLock(held))) return fail("unavailable", 503);
         return save(again);
       });
@@ -153,6 +159,9 @@ export async function POST(request: NextRequest) {
     const store = await storeForEmail(guarded.ref);
     if (!store) return fail("none");
     if (!store.statsId) return fail("unknown");
+    // A change in bulk takes, before each part, the studio requests that part costs at its worst (lib/affiliates.ts
+    // bulkUnits), on top of the one this press took. Not taken (used up, or not counted): that part is left out, named.
+    const charge: Charge = async (units) => (await countStudio(store, null, units)).ok;
 
     // The creator looked at what was held (lib/affiliates.ts holdFlags) and lets it through.
     if (action === "release") {
@@ -177,7 +186,7 @@ export async function POST(request: NextRequest) {
         const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
         if (!ids.length) return fail("unknown");
         // Those left waiting (over the cap, or not checked just now) are named, so the studio can say who and why.
-        const { before, held } = await decideMany(store, ids, decision);
+        const { before, held } = await decideMany(store, ids, decision, charge);
         return Response.json({ ok: true, before, held });
       }
       const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
@@ -188,7 +197,7 @@ export async function POST(request: NextRequest) {
         // Only a pending application goes back: nothing else was decided in bulk.
         return id && v.status === "pending" && Number.isSafeInteger(decidedAt) && decidedAt >= 0 ? [{ id, status: "pending" as const, decidedAt }] : [];
       });
-      const undone = await undoMany(store, before, decision);
+      const undone = await undoMany(store, before, decision, Date.now(), charge);
       return Response.json({ ok: true, undone });
     }
     // The share of several affiliates at once, and its undo (630 [HN6](4) unit 2).
@@ -199,7 +208,7 @@ export async function POST(request: NextRequest) {
         const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
         if (!ids.length) return fail("unknown");
         // Those whose new share would pass the cap, or could not be checked just now, keep theirs and are named.
-        const changed = await setRatesMany(store, ids, rate);
+        const changed = await setRatesMany(store, ids, rate, charge);
         return changed ? Response.json({ ok: true, before: changed.before, refused: changed.refused }) : fail("rate");
       }
       const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
@@ -209,7 +218,7 @@ export async function POST(request: NextRequest) {
         const was = v.rate === null ? null : Number(v.rate);
         return id && (was === null || (Number.isInteger(was) && was >= MIN_COMMISSION && was <= MAX_COMMISSION)) ? [{ id, rate: was }] : [];
       });
-      return Response.json({ ok: true, undone: await undoRates(store, before, rate) });
+      return Response.json({ ok: true, undone: await undoRates(store, before, rate, charge) });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
       // A share that would pass the cap once its holder is approved again: refused, nothing written (lib/affiliates.ts).

@@ -102,13 +102,13 @@ async function main(): Promise<void> {
 
   part("3. Saving 30% again from a tab read before the commission was lowered and a partner took the room");
   beforeLock = async () => {
-    // Another tab: the commission is lowered to 10%, then X is made a partner with 85% of the oak course (85 + 10).
+    // Another tab: the commission is lowered to 10%, then X is made a partner with 80% of the oak course (80 + 10).
     await setAffiliateSetting(owner, { ...(await store()).affiliates, percent: 10 });
-    await real([["HSET", people, X, person(X, "approved", null, { percent: 85, products: [P] })]]);
+    await real([["HSET", people, X, person(X, "approved", null, { percent: 80, products: [P] })]]);
   };
   const stale = await post(terms);
   beforeLock = null;
-  is("refused by the cap (85 + 30 = 115%), not saved", [stale.status, stale.body.error, (await store()).affiliates.percent], [409, "share_committed", 10]);
+  is("refused by the cap (80 + 30 = 110%), not saved", [stale.status, stale.body.error, (await store()).affiliates.percent], [409, "share_committed", 10]);
   await real([["HDEL", people, X]]);
   is("(back to 30%)", (await post(terms)).body.ok, true);
 

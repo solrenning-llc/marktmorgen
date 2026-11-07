@@ -18,7 +18,8 @@ import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscri
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import * as affiliates from "@/lib/affiliates";
 import { acceptPartnership, answerShareChange, changeIdentity, decide, decideWhy, listPartners, proposePartnerShare, readAffiliate, setAffiliateRate, sharePromiseProblem } from "@/lib/affiliates";
-import { MAX_COMMITTED_SHARE } from "@/lib/partner-share";
+import { MAX_COMMITTED_SHARE, shareReadsExactly } from "@/lib/partner-share";
+import { LockBusyError } from "@/lib/redis-lock";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { is, part, done } from "./check";
@@ -227,6 +228,143 @@ async function main() {
       is("the field read, at the version read, is written", await put("1", read, v0, next), 1);
       is("and the version moved with it", [await field(statsId, p), await version(statsId)], [next, String(Number(v0) + 1)]);
       is("the script carries its version marker", String(script).startsWith("-- marktmorgen:affiliate-put:v1\n"), true);
+    }
+  }
+
+  // Codex G's review of #1924 (head 485c01c7), finding 1: a record whose share, or whose status beside a share,
+  // does not read is not "no commitment"; the cap read is unknown and nothing is promised on it.
+  part("A partner's share that does not read is unknown to the cap, never no share");
+  {
+    is("absent and null shares read as no share", [shareReadsExactly(undefined), shareReadsExactly(null)], [true, true]);
+    is("a whole share reads", shareReadsExactly({ percent: 40, products: [A], until }), true);
+    is("a whole-number percent typed as a string still reads", shareReadsExactly({ percent: "40", products: [A] }), true);
+    for (const [what, share] of [
+      ["a word", "unknown"],
+      ["a percent that is a word", { percent: "unknown", products: [A] }],
+      ["a percent out of range", { percent: 0, products: [A] }],
+      ["a product that does not read", { percent: 40, products: [A, 7] }],
+      ["no product list", { percent: 40 }],
+      ["an end that is a word", { percent: 40, products: [A], until: "soon" }],
+      ["a list", [40]],
+    ] as const) {
+      is(`${what} does not read`, shareReadsExactly(share), false);
+    }
+    for (const [what, change] of [
+      ["share", (value: Record<string, unknown>) => ({ ...value, share: "unknown" })],
+      ["percent", (value: Record<string, unknown>) => ({ ...value, share: { ...(value.share as object), percent: "unknown" } })],
+      ["status", (value: Record<string, unknown>) => ({ ...value, status: "unknown" })],
+    ] as const) {
+      const { store, statsId } = await fixture();
+      await proposePartnerShare(store, q, { percent: 40, products: [A], until }, now);
+      const people = `nl:aff:${statsId}:people`;
+      const stored = JSON.parse(String(await field(statsId, q))) as Record<string, unknown>;
+      await redis.pipeline([["HSET", people, q, JSON.stringify(change(stored))]]);
+      let refused: unknown = null;
+      try {
+        await sharePromiseProblem(store, p, { percent: 40, products: [A] }, now);
+      } catch (error) {
+        refused = error instanceof LockBusyError;
+      }
+      is(`a partner's ${what} that does not read makes the cap read unknown`, refused, true);
+      const started = await proposePartnerShare(store, p, { percent: 40, products: [A] }, now + 1).catch((error) => (error instanceof LockBusyError ? "busy" : error));
+      is(`a share started on it is answered busy (${what})`, started, "busy");
+      is(`nothing is promised on it (${what})`, (await readAffiliate(store, p))?.share ?? null, null);
+    }
+    {
+      const { store, statsId } = await fixture();
+      // A record from before shares existed: no share field at all, still read as holding none.
+      const old = { id: r, email: `${r}@example.test`, code: `c${r}`, status: "approved", appliedAt: 1, decidedAt: 5, note: "" };
+      await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, r, JSON.stringify(old)]]);
+      is("a record from before shares still reads: the cap is known", await sharePromiseProblem(store, p, { percent: 40, products: [A] }, now), null);
+    }
+  }
+
+  // Codex G's review of #1924 (head 485c01c7), finding 2: an invitation whose write's answer was lost and whose read
+  // back is lost too may have landed; its address and code are never let go on that, and its own record found again
+  // is the write made.
+  part("A new record whose write may have landed keeps its address and code");
+  {
+    const original = redis.pipeline.bind(redis);
+    const isPut = (commands: (string | number)[][]) =>
+      commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:affiliate-put:v1\n");
+    const isReadBack = (statsId: string, commands: (string | number)[][]) =>
+      commands.length === 1 && commands[0]?.[0] === "HGET" && commands[0][1] === `nl:aff:${statsId}:people`;
+    const claims = async (statsId: string, email: string) => {
+      const [id] = await original([["HGET", `nl:aff:${statsId}:emails`, email]]);
+      const [raw] = typeof id === "string" ? await original([["HGET", `nl:aff:${statsId}:people`, id]]) : [null];
+      const record = typeof raw === "string" ? (JSON.parse(raw) as { code: string; status: string }) : null;
+      const [byCode] = record ? await original([["HGET", `nl:aff:${statsId}:codes`, record.code]]) : [null];
+      return { id, record, byCode };
+    };
+    for (const lost of ["empty", "null", "thrown"] as const) {
+      const { store, statsId } = await fixture();
+      let puts = 0;
+      let backs = 0;
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        const out = await original(commands);
+        if (isPut(commands) && puts === 0) {
+          puts += 1;
+          return [];
+        }
+        if (puts === 1 && backs === 0 && isReadBack(statsId, commands)) {
+          backs += 1;
+          if (lost === "thrown") throw new Error("read back lost");
+          return lost === "empty" ? [] : [null];
+        }
+        return out;
+      }) as typeof redis.pipeline;
+      let opened: Awaited<ReturnType<typeof acceptPartnership>>;
+      try {
+        opened = await acceptPartnership(store, "late@example.test", { percent: 20, products: [A] });
+      } finally {
+        redis.pipeline = original;
+      }
+      const held = await claims(statsId, "late@example.test");
+      is(`${lost} read back: one lost answer and one lost read back`, [puts, backs], [1, 1]);
+      is(`${lost} read back: its own record found again is the invitation opened`, opened.ok ? opened.affiliate.status : opened.reason, "approved");
+      is(`${lost} read back: the address and the code still name the record written`, [held.record?.status, held.byCode === held.id], ["approved", true]);
+    }
+    {
+      // Every write's answer and every read back lost (here none of the writes reached the store, which the code
+      // cannot tell): whether it landed stays unknown, so it is said busy and nothing claimed is let go.
+      const { store, statsId } = await fixture();
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        if (isPut(commands)) return [];
+        if (isReadBack(statsId, commands)) return [];
+        return original(commands);
+      }) as typeof redis.pipeline;
+      let thrown: unknown = null;
+      try {
+        await acceptPartnership(store, "late@example.test", { percent: 20, products: [A] });
+      } catch (error) {
+        thrown = error;
+      } finally {
+        redis.pipeline = original;
+      }
+      const [byEmail] = await original([["HGET", `nl:aff:${statsId}:emails`, "late@example.test"]]);
+      const codes = (await original([["HGETALL", `nl:aff:${statsId}:codes`]]))[0] as string[];
+      is("an outcome never known is answered busy", thrown instanceof LockBusyError, true);
+      is("and the address stays claimed, not let go on an unknown answer", typeof byEmail, "string");
+      is("and so does the code", codes.filter((_, i) => i % 2 === 1).includes(String(byEmail)), true);
+    }
+    {
+      // The record read before a write in a shape that is not a string or nothing: unknown, never "no record".
+      const { store, statsId } = await fixture();
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        const out = await original(commands);
+        if (commands.length === 2 && commands[0]?.[0] === "HGET" && commands[0][1] === `nl:aff:${statsId}:people` && commands[1]?.[0] === "GET") return [7, out[1]];
+        return out;
+      }) as typeof redis.pipeline;
+      let thrown: unknown = null;
+      try {
+        await setAffiliateRate(store, p, 15);
+      } catch (error) {
+        thrown = error;
+      } finally {
+        redis.pipeline = original;
+      }
+      is("a record read in another shape is answered busy", thrown instanceof LockBusyError, true);
+      is("and nothing is written over it", (await readAffiliate(store, p))?.rate, null);
     }
   }
 

@@ -46,6 +46,10 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     const gte = Number(url.searchParams.get("created[gte]") ?? 0);
     return new Response(JSON.stringify({ object: "list", data: refundsList.filter((r) => Number(r.created) >= gte), has_more: false }));
   }
+  // A payment answers as Stripe gives one (an object with its id and metadata), never as a list: the license key job
+  // reads a payment of another shape as unknown and leaves its refund unread (Claude 4's second review of #2868).
+  const intent = /^\/v1\/payment_intents\/(pi_[A-Za-z0-9]+)$/.exec(url.pathname)?.[1];
+  if (intent) return new Response(JSON.stringify({ id: intent, object: "payment_intent", metadata: {} }));
   if (url.pathname !== "/v1/events") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   if (url.pathname === "/v1/events" && eventsDown) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
   if (!eventsOn || url.searchParams.get("type") !== "charge.dispute.closed") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));

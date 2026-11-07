@@ -56,7 +56,7 @@ export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { StripeListUnreadable, type StripeRow, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -64,7 +64,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
+import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { hasProduct, readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -542,15 +542,71 @@ export function storeHasKeys(store: Store): boolean {
  * anchor where it was. The limit of the pages and lookups read per run,
  * which also keeps the anchor, was there before. Returns how many keys it revoked.
  */
-const idOf = (value: unknown): string =>
-  typeof value === "string"
-    ? value
-    : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string"
-      ? (value as { id: string }).id
-      : "";
+/**
+ * A Stripe reply of a shape these reads cannot tell a sale from (CX-123 rule 24): never "no sale" nor "not a plan".
+ * The refund that needed it stays unread, and the next run reads it again (Claude 4's second review of #2868).
+ */
+class StripeReplyUnreadable extends Error {
+  constructor(what: string) {
+    super(`Stripe answered ${what} in an unknown shape`);
+    this.name = "StripeReplyUnreadable";
+  }
+}
 
-/** A checkout row is read only with its metadata as Stripe gives it, a plain object; anything else proves nothing. */
-const checkoutLegible = (row: Record<string, unknown>): boolean => plainObject(ownField(row, "metadata"));
+/** Metadata as Stripe gives it: a plain object whose every value is text. */
+const stripeMetadata = (value: unknown): value is Record<string, string> =>
+  plainObject(value) && Object.keys(value).every((name) => typeof ownField(value, name) === "string");
+
+/** A checkout row is read only with its metadata as Stripe gives it; anything else proves nothing. */
+const checkoutLegible = (row: Record<string, unknown>): boolean => stripeMetadata(ownField(row, "metadata"));
+
+const INVOICE_PATTERN = /^in_[A-Za-z0-9]{8,255}$/;
+const SUBSCRIPTION_PATTERN = /^sub_[A-Za-z0-9]{8,255}$/;
+
+/** An id Stripe gives as text or as the expanded object holding it, of the expected pattern; "" for anything else. */
+const refOf = (value: unknown, pattern: RegExp): string => {
+  const id = typeof value === "string" ? value : plainObject(value) ? ownField(value, "id") : undefined;
+  return typeof id === "string" && pattern.test(id) ? id : "";
+};
+
+/**
+ * The subscription an invoice belongs to, read in its exact shape: the invoice itself (its object and id), then its
+ * subscription whichever way the API version names it (`subscription` before 2025-03-31, `parent` since). null only
+ * when it says for sure there is none (a null subscription, a null parent, or a quote's parent); any other shape
+ * throws StripeReplyUnreadable, never "not a plan" (Claude 4's second review of #2868).
+ */
+function subscriptionOfInvoice(read: unknown, invoice: string): string | null {
+  if (!plainObject(read) || ownField(read, "object") !== "invoice" || ownField(read, "id") !== invoice) {
+    throw new StripeReplyUnreadable("an invoice");
+  }
+  const named = hasOwnField(read, "subscription");
+  const parented = hasOwnField(read, "parent");
+  if (!named && !parented) throw new StripeReplyUnreadable("an invoice without its subscription");
+  let found: string | null = null;
+  if (named) {
+    const value = ownField(read, "subscription");
+    if (value !== null) {
+      found = refOf(value, SUBSCRIPTION_PATTERN);
+      if (!found) throw new StripeReplyUnreadable("an invoice's subscription");
+    }
+  }
+  if (parented) {
+    const parent = ownField(read, "parent");
+    if (parent !== null) {
+      if (!plainObject(parent)) throw new StripeReplyUnreadable("an invoice's parent");
+      const type = ownField(parent, "type");
+      if (type === "subscription_details") {
+        const details = ownField(parent, "subscription_details");
+        const id = plainObject(details) ? refOf(ownField(details, "subscription"), SUBSCRIPTION_PATTERN) : "";
+        if (!id || (found && found !== id)) throw new StripeReplyUnreadable("an invoice's subscription details");
+        found = id;
+      } else if (type !== "quote_details") {
+        throw new StripeReplyUnreadable("an invoice's parent of an unknown type");
+      }
+    }
+  }
+  return found;
+}
 
 /**
  * The one row of a lookup read with limit 1, in its exact shape (lib/stripe-list.ts): the row, or null only when
@@ -574,20 +630,28 @@ async function planSaleOf(
   intent: string,
   pi: Record<string, unknown>,
 ): Promise<{ session: string; meta: Record<string, string> } | null> {
-  let invoice = idOf(pi.invoice);
+  // The payment names its invoice (older API versions: an id, or null) or not at all (newer ones): anything else
+  // named there is unknown. Without one, the invoice payments list says for sure which invoice, or that there is none.
+  const named = ownField(pi, "invoice");
+  let invoice = refOf(named, INVOICE_PATTERN);
+  if (!invoice && named !== undefined && named !== null) throw new StripeReplyUnreadable("a payment's invoice");
   if (!invoice) {
     const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": intent, limit: "1" })}`);
     const row = onlyRow(listed);
-    invoice = idOf(row ? ownField(row, "invoice") : undefined);
+    if (!row) return null;
+    invoice = refOf(ownField(row, "invoice"), INVOICE_PATTERN);
+    if (!invoice) throw new StripeReplyUnreadable("an invoice payment's invoice");
   }
-  if (!/^in_[A-Za-z0-9]{8,255}$/.test(invoice)) return null;
-  const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
-  const parent = read.parent as { subscription_details?: { subscription?: unknown } } | null | undefined;
-  const subscription = idOf(read.subscription) || idOf(parent?.subscription_details?.subscription);
-  if (!/^sub_[A-Za-z0-9]{8,255}$/.test(subscription)) return null;
+  const subscription = subscriptionOfInvoice(await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`), invoice);
+  if (!subscription) return null;
   const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ subscription, limit: "1" })}`);
   const session = onlyRow(sessions, checkoutLegible);
-  if (!session || idOf(ownField(session, "invoice")) !== invoice) return null;
+  if (!session) return null;
+  // The checkout's first invoice, an id or null (not paid by invoice yet): a field missing or of another type is unknown.
+  const first = ownField(session, "invoice");
+  const firstInvoice = refOf(first, INVOICE_PATTERN);
+  if (!firstInvoice && first !== null) throw new StripeReplyUnreadable("a plan checkout's invoice");
+  if (firstInvoice !== invoice) return null;
   const meta = ownField(session, "metadata") as Record<string, string>;
   return meta.kind === "plan" ? { session: session.id, meta } : null;
 }
@@ -619,7 +683,8 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     // A page in another shape is not "no refunds": the run stops here unsure, so the place stays (CX-123 rule 30).
     let listed: ReturnType<typeof readStripePage>;
     try {
-      listed = readStripePage(await onAccount("GET", account, `/refunds?${query}`));
+      // Each row in the shape lib/refunds.ts reads a refund (its payment an id or null): any other row is unreadable.
+      listed = readStripePage(await onAccount("GET", account, `/refunds?${query}`), refundRowKnown);
     } catch (error) {
       if (!(error instanceof StripeListUnreadable)) throw error;
       console.error("reading a store's refunds for license keys failed", store.handle, error);
@@ -677,8 +742,16 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         if (handles.has(meta.store ?? "")) sales.push({ reference: session.id, products: deliveredIds(meta) });
       } else if (lookups > 0) {
         lookups -= 1;
-        const pi = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}`);
-        const meta = (pi.metadata ?? {}) as Record<string, string>;
+        const pi: unknown = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}`);
+        // The payment in its exact shape, its metadata as Stripe gives it: anything else is not "no offer" nor "not a
+        // plan", and the refund stays unread (Claude 4's second review of #2868, CX-123 rule 24).
+        const piMeta = plainObject(pi) ? ownField(pi, "metadata") : undefined;
+        if (!plainObject(pi) || ownField(pi, "object") !== "payment_intent" || ownField(pi, "id") !== intent || !stripeMetadata(piMeta)) {
+          console.error("reading a refunded payment failed", store.handle, new StripeReplyUnreadable("a payment"));
+          unsure = true;
+          continue;
+        }
+        const meta = piMeta;
         if (meta.kind === "upsell" && handles.has(meta.store ?? "")) sales.push({ reference: intent, products: deliveredIds(meta) });
         else if (lookups > 0) {
           // A payment plan's first payment belongs to an invoice, not to the
@@ -717,7 +790,9 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
             if (!product && hasProduct(store, productId)) throw new UnknownReplyError("a refunded product's listing");
             if (!product) continue;
             const key = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1)?.[0];
-            if (key !== null && typeof key !== "string") throw new UnknownReplyError("HGET of a sale's license key");
+            // No writer stores an empty key (settle writes one of at least MIN_KEY_LENGTH): "" is unknown, never "no key"
+            // (Claude 4's second review of #2868, CX-123 rule 24).
+            if (key !== null && (typeof key !== "string" || !key)) throw new UnknownReplyError("HGET of a sale's license key");
             if (key && (await setRevoked(store, product, key, true, "refund"))) here += 1;
             // A buyer still waiting for a key from an empty pool is not given one.
             const dropped = countOf(repliesFor(await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]), 1)?.[0]);

@@ -422,7 +422,10 @@ export default async function EmbedCard({ params, searchParams }: Params) {
       data-card-height={height}
     >
       <style>{SEE_THROUGH}</style>
-      {card}
+      {/* One main landmark around the card, as on every page (1.3.1); it fills the frame as the card did. */}
+      <main id="content" className="h-full">
+        {card}
+      </main>
       {messaging ? <EmbedMessenger to={messaging} height={height} /> : null}
     </div>
   );

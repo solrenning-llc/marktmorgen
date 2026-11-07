@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Only synthetic intercepted allowlist settings; never visits the listed origins or opens checkout. */
 export async function checkSitesAcknowledgment({browser,LOCAL,fixture,is}){
  const draft=" HTTPS://Example.TEST/shop\nhttps://blog.example.test/path ",expected=["https://example.test","https://blog.example.test"];
@@ -25,6 +27,7 @@ export async function checkSitesAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("#checkout-script");await section.waitFor();
    const field=section.locator("textarea").first(),save=section.getByRole("button",{name:"Save sites",exact:true});
+   await waitForReactChangeHandler(page,field);
    for(const clear of [false,true]){
     const raw=clear?"":draft,sites=clear?[]:expected;await field.fill(raw);
     for(const scenario of cases){

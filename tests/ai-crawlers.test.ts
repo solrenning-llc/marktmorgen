@@ -171,7 +171,7 @@ async function main(): Promise<void> {
   is("the studio page passes the permission", studioPage.includes('<StoreSearchCheck check={searchCheck(store)} canChangeAi={may("settings")} />'), true);
   is("settings without products: the switch alone", studioPage.includes(': may("settings") ? <AiCrawlersOnly check={searchCheck(store)} /> : null}'), true);
   const only = (aiCrawlers: "open" | "closed", ownDomain: boolean) =>
-    renderToStaticMarkup(AiCrawlersOnly({ check: { description: true, indexed: true, suspended: false, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain, aiCrawlers } }));
+    renderToStaticMarkup(AiCrawlersOnly({ check: { ownDomain, aiCrawlers } }));
   is("alone: a card with its own h2 and the switch where it does something", [only("open", true).includes("<h2"), only("open", true).includes('data-ai-crawlers="open"'), only("closed", false).includes('data-ai-crawlers="closed"')], [true, true, true]);
   is("alone: nothing where it would do nothing", only("open", false), "");
   done();

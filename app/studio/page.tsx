@@ -153,7 +153,7 @@ import { ContactBoxEditor } from "@/components/contact-box-editor";
 import { FaqEditor } from "@/components/faq-editor";
 import { StoreCoach } from "@/components/store-coach";
 import { StoreAccessCheck } from "@/components/store-access-check";
-import { StoreSearchCheck } from "@/components/store-search-check";
+import { StoreSearchCheck, AiCrawlersOnly } from "@/components/store-search-check";
 import { searchCheck } from "@/lib/store-search-check";
 import { PageOrderEditor } from "@/components/page-order-editor";
 import { tipsOpen } from "@/lib/store-tip-checkout";
@@ -1334,7 +1334,8 @@ export default async function StudioPage({
             ) : null}
             {/* 98 [D2-COMPLIANCE-REVIEW] unit 1: pictures with no description, and what every store gets (lib/store-access-check.ts). */}
             {may("products") ? <StoreAccessCheck check={accessCheck(store)} /> : null}
-            {may("products") && accessCheck(store) ? <StoreSearchCheck check={searchCheck(store)} canChangeAi={may("settings")} /> : null}
+            {/* 601 [KB22] U8: settings without products (or nothing on the store yet) still gets the AI crawler switch. */}
+            {may("products") && accessCheck(store) ? <StoreSearchCheck check={searchCheck(store)} canChangeAi={may("settings")} /> : may("settings") ? <AiCrawlersOnly check={searchCheck(store)} /> : null}
             <StudioTools
               tools={[
                 // 491 [PP2]: payments, the domain, email and checkout, read now, each with where to fix it.

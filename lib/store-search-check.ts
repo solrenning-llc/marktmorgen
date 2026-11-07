@@ -103,10 +103,12 @@ export const AGENTS_GET: readonly string[] = [
  */
 export function agentsGet(check: Pick<SearchCheck, "aiCrawlers" | "ownDomain">): readonly string[] {
   if (check.aiCrawlers === "open") return AGENTS_GET;
+  // As AGENTS_GET's first line says: these need a buyer's or member's sign-in, open or closed.
+  const privatePages = "Buyers' own pages, courses and your community are not open to them anywhere.";
   return [
     check.ownDomain
-      ? "On your own domain, the AI crawlers we name are asked to stay out of your store. Your store's address on marktmorgen.com still lets them in."
-      : "You asked AI crawlers to stay out, which works on a domain of your own. You have none live now, so your store's address on marktmorgen.com still lets them in.",
+      ? `On your own domain, the AI crawlers we name are asked to stay out of your store. Your store's address on marktmorgen.com still lets them in. ${privatePages}`
+      : `You asked AI crawlers to stay out, which works on a domain of your own. You have none live now, so your store's address on marktmorgen.com still lets them in. ${privatePages}`,
     ...AGENTS_GET.slice(1),
   ];
 }

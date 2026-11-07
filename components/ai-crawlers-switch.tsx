@@ -7,9 +7,10 @@ import { AI_CRAWLERS } from "@/lib/ai-crawlers";
 /** What the switch says, in plain words, each what the code does (lib/ai-crawlers.ts, storeRobots). */
 export const AI_CRAWLERS_WORDS = {
   what: "This asks the AI crawlers named below to stay out of your store on your own domain. It adds a rule for each one to your domain's robots.txt, the file crawlers check first. Crawlers that follow these rules stay out. Not every crawler does, so we cannot promise that none will read your store.",
-  search: "Google Search, Bing and other search engines are not asked to stay out, so people can still find your store there. AI answers built on those search results may still show it.",
+  search: "It also asks the AI companies' own search, such as ChatGPT search and Perplexity, to stay out, so your store may stop showing up in their answers, not only stay out of what their AI learns from. Google Search, Bing and other search engines are not asked to stay out, so people can still find your store there. AI answers built on those search results may still show it.",
+  userAsked: "ChatGPT-User and Perplexity-User read a page when a person asks their AI to open it. They are named too, but visits a person asks for may not follow these rules.",
   address: "Your store's address on marktmorgen.com keeps our site's own rules, which let AI crawlers in.",
-  delay: "Crawlers keep a copy of these rules, so a change can take up to a day to reach them.",
+  delay: "Our copy of these rules updates within an hour of a change. Each AI company reads it again on its own schedule, often within a day or two.",
   noDomain: "You have no domain of your own live now, so this rule is not in use. It works again when your domain is live.",
 } as const;
 
@@ -30,7 +31,7 @@ export function AiCrawlersSwitch({ open: initial, ownDomain }: { open: boolean; 
       const body = (await response.json().catch(() => ({}))) as { ok?: boolean; open?: boolean };
       if (body.ok && typeof body.open === "boolean") {
         setOpen(body.open);
-        toast(body.open ? "AI crawlers may read your store on your own domain again." : "AI crawlers are now asked to stay out of your own domain.");
+        toast(body.open ? "Saved. Within an hour, your domain's rules let AI crawlers in again." : "Saved. Within an hour, your domain's rules ask AI crawlers to stay out.");
       } else toast("That did not save. Try again.");
     } catch {
       toast("That did not save. Check your connection and try again.");
@@ -45,11 +46,12 @@ export function AiCrawlersSwitch({ open: initial, ownDomain }: { open: boolean; 
         AI crawlers on your own domain
       </h3>
       <p className="mt-1 max-w-[80ch] text-sm text-ink">
-        {open ? "Now: AI crawlers may read your store's public pages on your own domain." : "Now: AI crawlers are asked to stay out of your store on your own domain."}
+        {open ? "Your choice: AI crawlers may read your store's public pages on your own domain." : "Your choice: ask AI crawlers to stay out of your store on your own domain."}
       </p>
       {!ownDomain ? <p className="mt-2 max-w-[80ch] text-sm text-ink">{AI_CRAWLERS_WORDS.noDomain}</p> : null}
       <p className="mt-2 max-w-[80ch] text-sm text-ink-soft">{AI_CRAWLERS_WORDS.what}</p>
       <p className="mt-2 max-w-[80ch] text-sm text-ink-soft">{AI_CRAWLERS_WORDS.search}</p>
+      <p className="mt-2 max-w-[80ch] text-sm text-ink-soft">{AI_CRAWLERS_WORDS.userAsked}</p>
       <p className="mt-2 max-w-[80ch] text-sm text-ink-soft">{AI_CRAWLERS_WORDS.address}</p>
       <p className="mt-2 max-w-[80ch] text-sm text-ink-soft">{AI_CRAWLERS_WORDS.delay}</p>
       <p className="mt-2 max-w-[80ch] text-sm text-ink-soft [overflow-wrap:anywhere]">

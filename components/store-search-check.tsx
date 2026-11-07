@@ -13,6 +13,28 @@ import { agentsGet, type SearchCheck, SEARCH_DONE_FOR_YOU } from "@/lib/store-se
  * [KB22] U8), shown only where it does something: a live domain of its own,
  * or a closed choice to undo.
  */
+/** Where the AI crawler switch does something: a live domain of the store's own, or a closed choice to undo. */
+function aiSwitchShown(check: Pick<SearchCheck, "ownDomain" | "aiCrawlers">): boolean {
+  return check.ownDomain || check.aiCrawlers === "closed";
+}
+
+/**
+ * The AI crawler switch in a card of its own, for a member who may change
+ * the store's settings but not its products, so does not get "Can people
+ * find your store?" (app/studio/page.tsx). Nothing where it does nothing.
+ */
+export function AiCrawlersOnly({ check }: { check: Pick<SearchCheck, "ownDomain" | "aiCrawlers"> }) {
+  if (!aiSwitchShown(check)) return null;
+  return (
+    <section aria-labelledby="ai-crawlers-title" className="card mt-8 p-6 sm:p-8">
+      <h2 id="ai-crawlers-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
+        Can AI crawlers read your store?
+      </h2>
+      <AiCrawlersSwitch open={check.aiCrawlers === "open"} ownDomain={check.ownDomain} />
+    </section>
+  );
+}
+
 export function StoreSearchCheck({ check, canChangeAi = false }: { check: SearchCheck; canChangeAi?: boolean }) {
   const { summaries } = check;
   return (
@@ -98,7 +120,7 @@ export function StoreSearchCheck({ check, canChangeAi = false }: { check: Search
           </li>
         ))}
       </ul>
-      {canChangeAi && (check.ownDomain || check.aiCrawlers === "closed") ? <AiCrawlersSwitch open={check.aiCrawlers === "open"} ownDomain={check.ownDomain} /> : null}
+      {canChangeAi && aiSwitchShown(check) ? <AiCrawlersSwitch open={check.aiCrawlers === "open"} ownDomain={check.ownDomain} /> : null}
       {check.agents.noPicture.length ? (
         <div className="mt-4 rounded-2xl bg-paper p-4 ring-1 ring-line" data-agents-no-picture={check.agents.noPicture.length}>
           <h4 className="font-semibold text-ink">

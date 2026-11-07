@@ -72,7 +72,7 @@ const whoKey = (statsId: string, email: string) =>
 /**
  * One address's note of checkouts (KEYS[1]) and their yeses (KEYS[2..]) deleted in one step, only while the note
  * still holds exactly the checkouts read (ARGV): a yes noted since then is not left without its note. Answers how
- * many keys went, or -1 when the note changed. Billed as the EVAL, its SMEMBERS and its DEL.
+ * many keys went, or -1 when the note changed. Billed as the EVAL, its SMEMBERS and its DELs (one per 1,000 keys).
  */
 export const FORGET_IF_SAME = [
   "-- marktmorgen:assist-remind-forget:v1",
@@ -81,7 +81,12 @@ export const FORGET_IF_SAME = [
   "local read = {}",
   "for _, member in ipairs(ARGV) do read[member] = true end",
   "for _, member in ipairs(members) do if not read[member] then return -1 end end",
-  "return redis.call('DEL', unpack(KEYS))",
+  // Deleted in blocks: Redis refuses to unpack past about 8,000 values ("too many results to unpack").
+  "local gone = 0",
+  "for first = 1, #KEYS, 1000 do",
+  "  gone = gone + redis.call('DEL', unpack(KEYS, first, math.min(first + 999, #KEYS)))",
+  "end",
+  "return gone",
 ].join("\n");
 /** How many times the note is read again when a yes keeps landing during the erasure; then the part is not finished. */
 const FORGET_ROUNDS = 3;

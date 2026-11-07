@@ -141,9 +141,14 @@ export type Owed = { owed: true; period: string; from: number; until: number | n
 
 const PAID_ONCE = new Set(["active", "past_due", "unpaid"]);
 
-/** Whether an invoice proves a payment: paid, and made once any free trial was over (0: there was none). */
-export function paidAfterTrial(invoice: { status: string; created: number }, trialEnd: number): boolean {
-  return invoice.status === "paid" && invoice.created >= trialEnd;
+/**
+ * Whether an invoice proves a payment: paid, made once any free trial was
+ * over (0: there was none), and its total above 0. A free trial's invoice and
+ * one a 100% code took to nothing are "paid" with nothing charged; the total,
+ * not amount_paid, so a total paid from the customer's credit balance counts.
+ */
+export function paidAfterTrial(invoice: { status: string; created: number; total: number }, trialEnd: number): boolean {
+  return invoice.status === "paid" && invoice.created >= trialEnd && invoice.total > 0;
 }
 
 /** Whether a one-time benefit needs an earlier payment read for this member: in a state that may have been paid for, its newest invoice not proof. */

@@ -143,7 +143,7 @@ export function TierBenefits({
         <>
           {!panel.complete || panel.unreadable ? (
             <p className="notice notice-info mt-4">
-              {`Some of your memberships could not be read${panel.unreadable ? ` (${panel.unreadable})` : ""}, or there were more than one reading takes, so someone may be missing from these lists. Nobody is shown as given who was not marked.`}
+              {`Some of your memberships could not be read${panel.unreadable ? ` (${panel.unreadable})` : ""}, or you have more memberships than we can read at once, so someone may be missing from these lists. Nobody is shown as given unless it was marked.`}
             </p>
           ) : null}
           {panel.benefits.map((b) => {
@@ -269,7 +269,7 @@ export function TierBenefits({
                 {canDefine && !b.retired ? (
                   retiring === b.id ? (
                     <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label="Confirm retiring">
-                      <p className="text-sm text-ink">Retire it? Nobody is owed it from now on; what was owed before stays listed.</p>
+                      <p className="text-sm text-ink">Retire it? Nobody who joins from now on gets it. A one-time benefit stays listed for people who joined before, while their membership runs. A monthly one stays listed only until each member&apos;s current month ends. People who left, and past months not marked, are not listed.</p>
                       <button type="button" className="btn btn-primary btn-sm" disabled={busy !== ""} onClick={() => void act(`retire:${b.id}`, { action: "retire", benefit: b.id }, () => "Benefit retired.").then(() => setRetiring(""))}>
                         Confirm retiring
                       </button>

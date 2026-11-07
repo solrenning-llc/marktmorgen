@@ -20,7 +20,9 @@
  * membership was ever paid for is read from its invoices, never from its
  * status (lib/tier-benefit-rules.ts): its newest invoice comes with the list;
  * a one-time benefit on a membership whose newest invoice is not paid reads
- * its newest paid invoice, one read each, at most MAX_PROOF_READS a list,
+ * its newest paid invoices (PROOF_PAGE), one read each, at most
+ * MAX_PROOF_READS a list; a paid invoice of total 0 (a free trial's, or one a
+ * 100% code took to nothing) proves no payment,
  * and one that cannot be read keeps it "unknown", never owed. A person's
  * marks that cannot be read (lib/redis-reply.ts) are "unknown" on each of
  * their rows, never "given" and never "waiting", and nothing is written for
@@ -69,6 +71,8 @@ const SLOT = "tb";
 const MAX_PROOF_READS = 100;
 /** Of those, read at once. */
 const PROOF_AT_ONCE = 10;
+/** Paid invoices read for one proof, newest first: two years of months a 100% code took to nothing; past them, unknown. */
+const PROOF_PAGE = 24;
 const SUB_ID = /^sub_[A-Za-z0-9]{6,64}$/;
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
 const PERSON = /^[0-9a-f]{32}$/;
@@ -152,27 +156,38 @@ function invoiceProof(raw: unknown, sub: string, trialEnd: number): boolean | nu
   const id = ownField(raw, "id");
   const status = ownField(raw, "status");
   const created = ownField(raw, "created");
+  const total = ownField(raw, "total");
   if (typeof id !== "string" || !INVOICE_ID.test(id) || typeof status !== "string" || !safeWhole(created)) return null;
+  // A total below 0 (a credit) is read too: it proves no payment, like 0.
+  if (typeof total !== "number" || !Number.isSafeInteger(total)) return null;
   const parent = ownField(raw, "parent");
   const details = plainObject(parent) ? ownField(parent, "subscription_details") : undefined;
   const owner = plainObject(details) ? ownField(details, "subscription") : undefined;
   const ownerId = typeof owner === "string" ? owner : plainObject(owner) ? ownField(owner, "id") : undefined;
   if (ownerId !== sub) return null;
-  return paidAfterTrial({ status, created }, trialEnd);
+  return paidAfterTrial({ status, created, total }, trialEnd);
 }
 
-/** Whether a membership was paid for after its trial: its newest paid invoice, read in its exact shape; null when not known. */
+/**
+ * Whether a membership was paid for after its trial: its newest paid
+ * invoices, at most PROOF_PAGE, read in their exact shape; null when not known.
+ */
 async function paidBefore(account: string, member: Member): Promise<boolean | null> {
   try {
-    const query = new URLSearchParams({ subscription: member.sub, status: "paid", limit: "1" });
+    const query = new URLSearchParams({ subscription: member.sub, status: "paid", limit: String(PROOF_PAGE) });
     const read = readStripePage(
       await onAccount("GET", account, `/invoices?${query}`, undefined, STRIPE_LIST_VERSION),
       (row) => ownField(row, "status") === "paid" && invoiceProof(row, member.sub, member.trialEnd) !== null,
       INVOICE_ID,
     );
     if (read.unreadable) return null;
-    // Newest first: when the newest paid one is the trial's own, none came after it.
-    if (read.rows.length) return invoiceProof(read.rows[0], member.sub, member.trialEnd);
+    // Newest first. One that charged something proves it; once one is the
+    // trial's own, none older came after it. Those a 100% code took to
+    // nothing prove nothing, so an older one is read past them.
+    for (const row of read.rows) {
+      if (invoiceProof(row, member.sub, member.trialEnd)) return true;
+      if ((ownField(row, "created") as number) < member.trialEnd) return false;
+    }
     return read.hasMore ? null : false;
   } catch (error) {
     if (!(error instanceof StripeListUnreadable)) console.error("reading a membership's paid invoices failed", error);

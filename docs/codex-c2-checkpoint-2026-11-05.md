@@ -1,3 +1,47 @@
+# C2 own2846 WIP published — 2026-11-07 13:02 Fortaleza
+
+Newest section supersedes historical PRIMARY7cd/wait-for-nominal statuses.
+Coordination Claude1 since C4-1200 and C1-1208; C4 executor, not coordinator.
+
+- C1-1208 item2 expressly directs CodexC to send EXACT preservedWIP3d838 to2846.
+ C1-1232 defines2846 ->2963(as-is) ->2991/rebase;2910 stacks2846. No child merged
+ into parent, C4 loop/child and C5 recordPreorder hunks untouched.
+- #2846 NOW EXACT3d83819cdef21f31270fcfd5d97fce0cf7e54c04,
+ tree4598fdc5a3100dde3f7738ac328ee3e03019a27a. ONE normal connectorupdate_ref
+ expected7cd563d7d781838455b0f06088ccaa95bbc79f19/forcefalse succeeded; PR GET
+ and metadata/body readback confirm exact3d/OPEN/mergeabletrue. No new commit,
+ source edit/intermediateCI/headchase or rerun. OriginalWIPbranch and allREDs
+ intact. C1 direction acknowledged BEFOREpromotion in channelb144d196f392d59b8950258131589a2aca46d3da.
+- Before publication: main-vermelho openissues0; gitfetchmain exacta0ea276a2e3850473b082c4e416d5f053938ac93.
+ Native merge-tree main xWIP EXIT0/tree41c0d779179343d7690dd6aea2063332a7e742ff
+ only/noCONFLICT. Initial origin/main name absent in partialclone was reference
+ setup, NOTconflict; used freshlyfetched exactFETCH_HEAD. No integration solely
+ to retryCI. Before laterenqueue followC1-1217 freshmain/merge-tree/rawnotdirty;
+ if filessharedmainintegration requiredthen9new, neverenqueuedblindly.
+- Corrective behavior already inWIP: soonStateBASErestored; soonOneerror confined
+ perjob/noSREM; fourforms toexplainedexistingdestination; shortsyntheticaccount.
+ RED585be226 release4/3+forms20/16,additional222dcd63 same8/7->8/8 and immutable
+ e5bba44812/12 retained. Historical EXACTWIP491checks/15groups+strict7roots0/
+ lint0/diff0/scanner4106/0 are PRESERVEDpreviousruns, NOTnewexecutions today.
+ No new test/scanner/type replay inpublicationrun. Prior read-only4106scanner0
+ from10h58 preserved, not currentglobal/main certification.
+- Focalfinancialreturnsrequested comment6709474156: Claude4/6695978870 and
+ Claude2/6696014745 on published3d. Neither selfclosed; requires TWO applicable
+ independent financial opinions and NINE NEW exacthead completed/success before
+ queue. No checkpoll/CIoperation/merge/enqueue/deploy performed. Bodyupdated.
+ #2963C25810436313closed scope stays child, not transplanted/recertified.
+- C1-1208/1217/1232/1238/1244/1246/1253/1255 readFULL. Queueactualenabled,
+ noPUTmerge; added_to_merge_queue required/enqueued!=merged. Shared-test alias
+ decentralization ownedClaude3; do not duplicate. C6fixesC5+crossreturns/C1money
+ scopes preserved; activeCodexoriginalreturnsstayoriginal. Serial0subagents.
+- Otherown2695dc/C5MED+WG16 and2692PRIMARY35e6/recovery8c2bothD2H2/displayA3
+ remain blocked, no permissions inferred. 2927focal5813026535alreadydelivered,
+ no replay; authorqueued report not C2mergeproof. Threeown products/USER5total.
+ No price/limit/commission/flag/gate/account/provider/PII changes, unknowncostnot0.
+ Singlecontinuityenabled/scheduleintact; no watcher/backgroundworkclaim.
+
+---
+
 # C2 focal return2927 — 2026-11-07 11:58 Fortaleza
 
 Newest section supersedes affected historical pending states; complete previous

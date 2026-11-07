@@ -23,6 +23,7 @@ const FILE = "components/email-sync-editor.tsx";
 const SOURCE = readFileSync(FILE, "utf8");
 type Target = { id: string; name: string };
 type Screen = { targets: Target[] | null; error: string | null; listsRead: string };
+type Ref = { current: number };
 // The component's own words for lists not read, passed to its handlers as they read them.
 const LISTS_UNREAD = /const LISTS_UNREAD = "([^"]+)";/.exec(SOURCE)?.[1];
 const READING = "Reading your account…";
@@ -37,7 +38,9 @@ function screen() {
     (value: Screen[K] | ((was: Screen[K]) => Screen[K])) => {
       now[name] = typeof value === "function" ? (value as (was: Screen[K]) => Screen[K])(now[name]) : value;
     };
-  return { now, setTargets: setter("targets"), setError: setter("error"), setListsRead: setter("listsRead") };
+  // The component's count of list reads (a ref), one per screen, as React keeps one per mounted box.
+  const readNo: Ref = { current: 0 };
+  return { now, readNo, setTargets: setter("targets"), setError: setter("error"), setListsRead: setter("listsRead") };
 }
 type Live = ReturnType<typeof screen>;
 
@@ -61,7 +64,7 @@ const told = (live: Live) => [live.now.error, box(live).note].some((w) => typeof
 
 const opening = compile<() => (() => void) | undefined>(
   `const effect = ${cutBlock(FILE, "useEffect(() => {\n    if (!connectedProvider) return;").slice("useEffect(".length)};`,
-  ["fetch", "connectedProvider", "setTargets", "setError", "setListsRead", "LISTS_UNREAD"],
+  ["fetch", "connectedProvider", "setTargets", "setError", "setListsRead", "LISTS_UNREAD", "readNo"],
   "effect",
 );
 
@@ -83,7 +86,7 @@ const toast = () => {};
 
 const refreshing = compile<() => Promise<void>>(
   cutBlock(FILE, "async function refresh() {"),
-  ["post", "setTargets", "setError", "setListsRead", "toast", "LISTS_UNREAD"],
+  ["post", "setTargets", "setError", "setListsRead", "toast", "LISTS_UNREAD", "readNo"],
   "refresh",
 );
 const testing = compile<() => Promise<void>>(cutBlock(FILE, "async function test() {"), ["post", "setError", "toast"], "test");
@@ -99,7 +102,7 @@ const save = (live: Live, answer: typeof fetch) =>
 
 const connecting = compile<(event: { preventDefault: () => void }) => Promise<void>>(
   cutBlock(FILE, "async function connect(event: React.FormEvent) {"),
-  ["post", "provider", "key", "setKey", "setReplacing", "setTargets", "setTarget", "setListsRead", "toast", "byKey", "setError", "LISTS_UNREAD"],
+  ["post", "provider", "key", "setKey", "setReplacing", "setTargets", "setTarget", "setListsRead", "toast", "byKey", "setError", "LISTS_UNREAD", "readNo"],
   "connect",
 );
 
@@ -192,9 +195,36 @@ async function main() {
   is("and the creator is told they could not be read", told(without), true);
   is("and the box does not say it is reading", box(without).first !== READING, true);
 
+  part("A late opening read never takes back lists read since (Claude 5's focal return on #2972)");
+  // The opening read is still under way when Refresh is pressed (its button is not held by it); Refresh reads the
+  // lists; then the opening read comes back with a failure. The lists just read are what is true now.
+  const late = screen();
+  let answerOpening: (response: Response) => void = () => {};
+  const waiting = (() => new Promise<Response>((resolve) => { answerOpening = resolve; })) as typeof fetch;
+  opening({ fetch: waiting, connectedProvider: "kit", ...late, LISTS_UNREAD })();
+  await refresh(late, fetchAnswering({ ok: true, targets: lists }));
+  answerOpening(new Response(JSON.stringify({ ok: false, message: "The platform could not be contacted just now. Try again in a moment." }), { status: 400, headers: { "Content-Type": "application/json" } }));
+  await settle();
+  await settle();
+  is("the lists the Refresh read stay", late.now.targets, lists);
+  is("with no note that they could not be read", box(late).note, null);
+  is("and no error line from the late read", late.now.error, null);
+  const lateGood = screen();
+  let answerGood: (response: Response) => void = () => {};
+  const waitingGood = (() => new Promise<Response>((resolve) => { answerGood = resolve; })) as typeof fetch;
+  opening({ fetch: waitingGood, connectedProvider: "kit", ...lateGood, LISTS_UNREAD })();
+  await refresh(lateGood, fetchAnswering({ ok: false, error: "server_error" }, 500));
+  answerGood(new Response(JSON.stringify({ ok: true, targets: [{ id: "t0", name: "Old" }] }), { status: 200, headers: { "Content-Type": "application/json" } }));
+  await settle();
+  await settle();
+  is("a late opening read that succeeds after a failed Refresh: the failure the creator was told stays", told(lateGood), true);
+
   part("The note under the box");
   is("the component has a status line for lists not read", noteLine !== null, true);
   is("drawn as a status message", /role="status"[^>]*>\s*\{listsNote\}/.test(SOURCE), true);
+  // A live region a screen reader announces is on the page before its words change (4.1.3; the way
+  // components/email-studio.tsx keeps its own): never mounted only together with the words.
+  is("the status line is always on the page, not mounted with its words", /\{listsNote \? \(/.test(SOURCE), false);
 
   done();
 }

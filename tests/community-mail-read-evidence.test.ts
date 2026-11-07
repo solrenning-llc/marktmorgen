@@ -97,6 +97,29 @@ async function main(): Promise<void> {
     is("once the token is kept, the same batch goes out", [resumed?.status, resumed?.sent, sent.length], ["sent", 2, 1]);
     members[0].t = kept;
   }
+  part("event reminder: a stop link that could not be kept is never sent, and the send stays pending");
+  {
+    reset();
+    const job = { id, community: store.community!.id, handle: store.handle, event: event.id, kind: "24",
+      start: event.start, was: 0, wasMinutes: 0, total: 2, done: 0, sent: 0, status: "sending", note: "", failures: 0,
+    } as EventMailJob;
+    db.run(["SET", "nl:cm:evmail:" + id, JSON.stringify(job)]);
+    db.run(["RPUSH", "nl:cm:evmail:" + id + ":to", ...keys]);
+    db.run(["SADD", "nl:cm:evmailq", id]);
+    const kept = members[1].t;
+    members[1].t = "";
+    setTokenWriteFails(true);
+    let result: Awaited<ReturnType<typeof advanceEventJob>> | "thrown" = null;
+    try { result = await advanceEventJob(id, async () => store, Date.now() + 10_000); } catch { result = "thrown"; }
+    const saved = JSON.parse(String(db.run(["GET", "nl:cm:evmail:" + id])));
+    is("nothing sent, no progress", [sent.length, saved.done, saved.sent], [0, 0, 0]);
+    is("said as still pending, never thrown out of the mail job", result !== "thrown" && [result?.status, /couldn.t save/i.test(result?.note ?? "")], ["sending", true]);
+    is("the list survives", db.run(["LRANGE", "nl:cm:evmail:" + id + ":to", 0, -1]), keys);
+    setTokenWriteFails(false);
+    const resumed = await advanceEventJob(id, async () => store, Date.now() + 10_000);
+    is("once the token is kept, the same batch goes out", [resumed?.status, resumed?.sent, sent.length], ["sent", 2, 1]);
+    members[1].t = kept;
+  }
   done();
 }
 void main();

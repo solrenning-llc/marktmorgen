@@ -339,9 +339,16 @@ export async function advanceEventJob(
       }
       if (recipients.length) {
         const messages: BatchMessage[] = [];
+        let unkept = false;
         for (const member of recipients) {
           if (reminder) {
-            const token = await tokenFor(store, job.community, member);
+            // A stop link that could not be kept on its member (CX-123 rule 24) is never emailed:
+            // nothing of the batch is sent and the send stays where it was, to be tried again.
+            const token = await tokenFor(store, job.community, member).catch(() => null);
+            if (token === null) {
+              unkept = true;
+              break;
+            }
             const r = render(store, words.subject, words.body, null, {
               page: `${SITE_URL}/unsubscribe?c=${token}`,
               oneClick: `${SITE_URL}/api/mail/unsubscribe?c=${token}`,
@@ -360,6 +367,10 @@ export async function advanceEventJob(
               replyTo: store.email,
             });
           }
+        }
+        if (unkept) {
+          job = { ...job, note: "We couldn't save every recipient's unsubscribe link. The send is still pending." };
+          break;
         }
         const outcome = await sendBatch(messages, `cmev:${id}:${job.done}:${keys.length}`, { by: "store", store, kind: "email" });
         if (outcome !== "sent") {

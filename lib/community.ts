@@ -402,13 +402,18 @@ export async function lastSeenIn(id: string, emails: string[]): Promise<Map<stri
  * communityViewer, touchMember's re-read).
  */
 export async function readMember(id: string, key: string): Promise<Member | null> {
+  return (await readMemberExact(id, key))?.member ?? null;
+}
+
+/** The record as readMember reads it, with the exact text it was kept as (what a compare-and-set writes over). */
+async function readMemberExact(id: string, key: string): Promise<{ raw: string; member: Member } | null> {
   const replies = repliesFor(await redisPipeline([["HGET", membersKey(id), key]]), 1);
   if (!replies) throw new UnknownReplyError("a community member record");
   const raw = replies[0];
   if (raw === null) return null;
   const member = exactMember(raw, key);
-  if (!member) throw new UnknownReplyError("a community member record");
-  return member;
+  if (!member || typeof raw !== "string") throw new UnknownReplyError("a community member record");
+  return { raw, member };
 }
 
 /** The record kept under `key`, when it is one: its own key, and a mute and a removal each a yes or a no. */
@@ -453,19 +458,26 @@ const CAS_MEMBER = [
 /**
  * Changes some of a member's fields on the record as it is now, so a change
  * the member makes never writes back a mute or a removal the creator just
- * undid, or undoes one they just made. Null when there is no record.
+ * undid, or undoes one they just made. Null only when Redis said there is no
+ * record. A read or a write answered in any other shape throws
+ * UnknownReplyError (CX-123 rule 24): read as "no record", it let a stop
+ * link say "Unsubscribed." with the emails still on, and a mute say done
+ * with nothing written.
  */
 async function patchMember(id: string, key: string, change: (member: Member) => Partial<Member>): Promise<Member | null> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const [raw] = await redisPipeline([["HGET", membersKey(id), key]]);
-    const member = parseMember(raw);
-    if (!member || typeof raw !== "string") return null;
+    const read = await readMemberExact(id, key);
+    if (!read) return null;
+    const { raw, member } = read;
     const next: Member = { ...member, ...change(member), k: member.k };
     const listed = next.dir && next.n && !next.removed ? "1" : "0";
-    const [written] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
-    ]);
-    if (Number(written) !== 1) continue;
+    ]), 1);
+    // 1 written, 0 changed since it was read (read again); anything else is not known to be either.
+    const written = replies?.[0];
+    if (written === 0) continue;
+    if (written !== 1) throw new UnknownReplyError("a change to a community member record");
     // The search index follows the very same switch the directory does, from
     // the very same place, so the two can never come to disagree about who is
     // findable. Somebody who took themselves off the list is taken out of the

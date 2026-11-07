@@ -25,6 +25,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -246,17 +247,26 @@ export async function advanceAnnouncement(
           break;
         }
         const messages: BatchMessage[] = [];
-        for (const member of recipients) {
-          const token = await tokenFor(store, job.community, member);
-          const fromName = store.mail?.fromName || store.name;
-          const r = render(store, job.subject, job.body, null, {
-            page: `${SITE_URL}/unsubscribe?c=${token}`,
-            oneClick: `${SITE_URL}/api/mail/unsubscribe?c=${token}`,
-            why: communityWords(store.language).announceWhy(fromName, config.name),
-            label: communityWords(store.language).stopLabel,
-            after: communityWords(store.language).stopAfterAnnounce,
-          });
-          messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
+        try {
+          for (const member of recipients) {
+            const token = await tokenFor(store, job.community, member);
+            const fromName = store.mail?.fromName || store.name;
+            const r = render(store, job.subject, job.body, null, {
+              page: `${SITE_URL}/unsubscribe?c=${token}`,
+              oneClick: `${SITE_URL}/api/mail/unsubscribe?c=${token}`,
+              why: communityWords(store.language).announceWhy(fromName, config.name),
+              label: communityWords(store.language).stopLabel,
+              after: communityWords(store.language).stopAfterAnnounce,
+            });
+            messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
+          }
+        } catch {
+          // A stop link that could not be kept on its member (CX-123 rule 24) is never
+          // emailed: nothing of the batch is sent, its emails are given back, and the
+          // send stays where it was, to be tried again.
+          await release(store, recipients.length);
+          job = { ...job, status: "waiting", note: "We couldn't save every recipient's unsubscribe link. The send is still pending." };
+          break;
         }
         const outcome = await sendBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
         if (outcome !== "sent") {
@@ -296,20 +306,33 @@ export async function advanceAnnouncements(load: (handle: string) => Promise<Sto
   return touched;
 }
 
-/** Who a stop link belongs to, without acting on it. */
+/**
+ * Who a stop link belongs to, without acting on it. Null only when Redis
+ * said there is no such link or member; a read in any other shape throws
+ * UnknownReplyError (CX-123 rule 24), so a link that exists is never called
+ * unknown, and the stop door and page say they could not do it just now.
+ */
 export async function readCommunityUnsub(
   token: string,
 ): Promise<{ community: string; handle: string; member: Member } | null> {
   if (!COMMUNITY_UNSUB.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", unsubKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", unsubKey(token)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community stop link");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a community stop link");
   const [community, key, handle] = raw.split("|");
   if (!community || !key || !handle) return null;
   const member = await readMember(community, key);
   return member && member.t === token ? { community, handle, member } : null;
 }
 
-/** Stops a member's announcement emails. Safe to press twice. */
+/**
+ * Stops a member's announcement emails. Safe to press twice. True only once
+ * the stop is written (or was already); throws when a read or the write was
+ * answered in another shape, so the door never says "Unsubscribed." for a
+ * stop that was not kept.
+ */
 export async function stopAnnouncements(token: string): Promise<boolean> {
   const found = await readCommunityUnsub(token);
   if (!found) return false;

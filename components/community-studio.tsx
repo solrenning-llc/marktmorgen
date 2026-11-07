@@ -76,6 +76,7 @@ const MESSAGES: Record<string, string> = {
   level: "Pick who may start posts here.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, first.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  not_confirmed: "We could not confirm that change just now. Reload the page to see where it stands, then try again.",
 };
 
 type Answer = { ok?: boolean; error?: string; config?: CommunityConfig };

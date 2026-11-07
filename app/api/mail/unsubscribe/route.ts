@@ -56,7 +56,8 @@ export async function POST(request: NextRequest) {
     // A stop whose write cannot be confirmed is not done (CX-123 rule 24): null, answered below.
     ? await stopReviewRequests(review).catch(() => null)
     : COMMUNITY_UNSUB.test(community)
-    ? await stopAnnouncements(community)
+    // A stop whose read or write cannot be confirmed is not done (CX-123 rule 24): null, answered below.
+    ? await stopAnnouncements(community).catch(() => null)
     : STOP_TOKEN.test(reminder)
       // A stop whose write cannot be confirmed is not done (CX-123 rule 24): null, answered below.
       ? await stopReminders(reminder).catch(() => null)

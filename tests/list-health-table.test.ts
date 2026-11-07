@@ -24,7 +24,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { healthLevels, shareWords, type HealthLevel } from "@/lib/mail-health-levels";
 import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
-import { ListHealthTable } from "@/components/list-health-table";
+import { ListHealthTable, ListHealthUnread } from "@/components/list-health-table";
 import { overTheLine } from "@/lib/mail-health";
 import { done, is, part } from "./check";
 
@@ -57,6 +57,13 @@ function main(): void {
   is("scrolls by keyboard at 320 px and 400%: a named, focusable region", /<div[^>]*class="[^"]*overflow-x-auto[^"]*"[^>]*role="region"[^>]*aria-label="[^"]+"[^>]*tabindex="0"/.test(html) || /<div(?=[^>]*overflow-x-auto)(?=[^>]*role="region")(?=[^>]*aria-label="[^"]+")(?=[^>]*tabindex="0")/.test(html), true);
   is("numbers in tabular figures", count(html, /tabular-nums/g) >= 4, true);
   is("only text tokens calibrated for 7:1", [...html.matchAll(/\btext-(?!sm|xs|base|lg|left|right|center)([a-z-]+)/g)].every((m) => m[1] === "ink" || m[1] === "ink-soft"), true);
+
+  // Claude 5's review of #2314 (6704385828), two LOW findings: the site's ring on the focusable region (2.4.13),
+  // and a sentence in the last column read from the left, numbers alone on the right (1.4.8).
+  is("the focusable region draws the site's own ring", /<div(?=[^>]*role="region")(?=[^>]*class="[^"]*focus-visible:\[outline:3px_solid_var\(--focus\)\])[^>]*>/.test(html), true);
+  const lastCell = (markup: string, label: string) => markup.split("<tr").find((r) => r.includes(`>${label}</th>`))?.match(/<td[^>]*class="([^"]*)"[^>]*>[^<]*<\/td>\s*<\/tr>|<td class="([^"]*)"[^>]*>(?:(?!<td).)*<\/td><\/tr>/s)?.slice(1).find(Boolean) ?? "";
+  is("short of the level, the room is a number on the right", lastCell(html, "Bounced for good").split(" ").includes("text-right"), true);
+  is("at the level, the room is a sentence read from the left", lastCell(render(h(1000, 30, 0)), "Bounced for good").split(" ").includes("text-right"), false);
 
   part("Levels in words, from KB20's own levels");
   const cases: [string, ReturnType<typeof h>][] = [
@@ -115,6 +122,11 @@ function main(): void {
   is("one sentence that nothing was sent", none, "<p class=\"mt-3 text-sm text-ink-soft\">Nothing was sent in these 7 days, so there is nothing yet to compare with the level that pauses email to your list.</p>");
   is("unreadable counts: nothing at all", render(h(10, Number.NaN)), "");
 
+  part("Not read just now (Codex S and Claude 5 on #2314)");
+  const unread = renderToStaticMarkup(createElement(ListHealthUnread));
+  is("says the counts could not be read just now, with no table and no figure", [unread.includes("could not be read just now"), unread.includes("<table"), /\d/.test(unread)], [true, false, false]);
+  is("never says nothing was sent, or how far a pause is", /Nothing was sent|would pause it|more bounces/.test(unread), false);
+
   part("Words");
   const all = [h(1000, 4, 1), h(1000, 30, 6), h(0), h(3, 0, 4)].map(render).join("");
   is("the honest sentence is there", html.includes(TERMS.spamUnknown), true);
@@ -135,7 +147,8 @@ function main(): void {
   const start = page.indexOf('aria-labelledby="mail-health-title"');
   const section = start < 0 ? "" : page.slice(start, page.indexOf("</section>", start));
   is("shown in the health section, from the seven days already read", /<ListHealthTable health=\{health\} \/>/.test(section), true);
-  is("imported from the component", page.includes('import { ListHealthTable } from "@/components/list-health-table";'), true);
+  is("imported from the component", page.includes('import { ListHealthTable, ListHealthUnread } from "@/components/list-health-table";'), true);
+  is("a read that failed with no pause confirmed: the health section says so, never hidden as if nothing were there", /confirmedPause === null && health === null \? \([\s\S]{0,600}<ListHealthUnread \/>/.test(page), true);
   is("one reading of the seven days on the page", count(page, /listHealth\(/g), 1);
   is("no reading of its own: the page imports nothing from Redis", /@\/lib\/redis/.test(page), false);
   const component = readFileSync("components/list-health-table.tsx", "utf8");

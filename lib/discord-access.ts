@@ -233,9 +233,11 @@ export async function forgetDiscordPerson(store: Store, email: string, productId
     records += 1;
   }
   if (productIds.length) {
-    const gone = countOf(repliesFor(await redisPipeline([["DEL", ...productIds.map((id) => cacheKey(store, email, id))]]), 1)?.[0]);
+    const keys = productIds.map((id) => cacheKey(store, email, id));
+    const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
     // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
-    if (gone === null) throw new UnknownReplyError("the deletion of a person's Discord access checks");
+    // DEL removes at most one per distinct key, so a larger count is unknown too (Codex Z on #2932, same pattern as forgetMember).
+    if (gone === null || gone > new Set(keys).size) throw new UnknownReplyError("the deletion of a person's Discord access checks");
     records += gone;
   }
   return { records, rolesLeft };

@@ -224,8 +224,11 @@ export async function forgetMember(room: string, sid: string, userId: string, em
     ...(held === userId ? [["DEL", addressKey(room, email)]] : []),
   ];
   // The deletes are read too: a missing, short or queued answer is not "forgotten", so the erasure is retried.
+  // Each command targets exactly one field, member or key, so only 0 or 1 is known; any other count is unknown (Codex Z on #2932).
   const replies = repliesFor(await redisPipeline(commands), commands.length);
-  if (!replies || !replies.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("the deletion of a Discord member");
+  if (!replies || !replies.every((reply) => { const count = countOf(reply); return count === 0 || count === 1; })) {
+    throw new UnknownReplyError("the deletion of a Discord member");
+  }
 }
 
 /** Puts a person first in line to be checked: a refund made in the studio, say. */

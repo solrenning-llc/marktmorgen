@@ -8,9 +8,12 @@
  *     and write nothing, so the other platforms' tokens and Pinterest's ad
  *     account are never wiped by a guess. Nil (nothing kept yet) stays a
  *     fresh, empty setup;
- *   - serverSetup reads the same way, and the route (app/api/store/ads-server)
- *     answers 503 "unavailable" and writes neither the setup nor the store's
- *     own list of platforms when it cannot read it;
+ *   - serverSetup reads the same way, `last` included (a JSON object other
+ *     than { at, kind?, ...answers } is unknown), and the route
+ *     (app/api/store/ads-server) answers 503 "unavailable" and writes neither
+ *     the setup nor the store's own list of platforms when it cannot read it
+ *     before a change; when only the read back after a change fails, it
+ *     answers 503 "saved_unread" and the editor says the change was saved;
  *   - the studio shows that the setup could not be read rather than an empty
  *     one (and does not write an empty list on the store from it);
  *   - customerType: a Stripe list without its `data` list is unknown (null),
@@ -112,6 +115,25 @@ async function main(): Promise<void> {
   where = "last";
   reply = "{cut sh";
   is("serverSetup refuses", await rejects(() => serverSetup(statsId)), true);
+  // Each producer writes { at, kind, ...answers }: a JSON object of another shape is unknown too (Q-2845).
+  for (const [label, bad] of [
+    ["an empty object", "{}"],
+    ["`at` not a number", '{"at":"yesterday","meta":"Received"}'],
+    ["`at` an object", '{"at":{"toString":null,"valueOf":null},"meta":"Received"}'],
+    ["`at` not a whole time", '{"at":1.5e400}'],
+    ["a kind that is not one", '{"at":1700000000000,"kind":"refund"}'],
+    ["an answer that is not text", '{"at":1700000000000,"meta":5}'],
+    ["a field no producer writes", '{"at":1700000000000,"note":"x"}'],
+  ] as const) {
+    reply = bad;
+    is(`last ${label}: serverSetup refuses`, await rejects(() => serverSetup(statsId)), true);
+  }
+  reply = '{"at":1700000000000,"kind":"lead","meta":"Received","pinterest":"Refused: bad"}';
+  is("a last as written: read as it is", (await serverSetup(statsId)).last, { at: 1700000000000, kind: "lead", meta: "Received", pinterest: "Refused: bad" });
+  reply = '{"at":1700000000000,"tiktok":"Did not answer"}';
+  is("a last without its kind: read as it is", (await serverSetup(statsId)).last, { at: 1700000000000, tiktok: "Did not answer" });
+  reply = null;
+  is("no last kept: nothing answered yet", (await serverSetup(statsId)).last, null);
   reply = undefined;
 
   part("the route answers 503 and writes nothing");
@@ -132,8 +154,10 @@ async function main(): Promise<void> {
   is("the store's list is as it was", await adsServer(), ["meta", "tiktok", "google", "pinterest"]);
   where = "setup";
   reply = "drop";
-  is("the setup cannot be read after a change: 503 unavailable", await post({ testCode: "TEST333" }), [503, "unavailable"]);
+  // The change was written; only reading it back failed. Said so, never "did not save" (C6-2845).
+  is("the setup cannot be read after a change: 503 saved_unread", await post({ testCode: "TEST333" }), [503, "saved_unread"]);
   reply = undefined;
+  is("and the change is kept", JSON.parse(String(await kept())).testCode, "TEST333");
   is("and the store's list is not written empty", await adsServer(), ["meta", "tiktok", "google", "pinterest"]);
   is("healthy: the route answers ok and keeps the tokens", [await post({ testCode: "TEST444" }), (await serverSetup(statsId)).on], [[200, "ok"], { meta: true, tiktok: true, google: true, pinterest: true }]);
 
@@ -146,6 +170,11 @@ async function main(): Promise<void> {
   const studio = readFileSync("app/studio/page.tsx", "utf8");
   is("no fall back to an empty setup", studio.includes("serverSetup(store.statsId).catch(() => NO_SETUP)"), false);
   is("an honest notice instead", studio.includes("Server-sent conversions could not be read just now."), true);
+
+  part("the editor says a change saved but not read back is saved");
+  const editor = readFileSync("components/server-events-editor.tsx", "utf8");
+  is("its own answer to saved_unread", editor.includes('answer.error === "saved_unread"'), true);
+  is("in plain words", editor.includes("Saved. The setup could not be read back just now; reload the page."), true);
 
   part("customerType: a list without its data is unknown");
   const store = (await storeForEmail(OWNER))!;

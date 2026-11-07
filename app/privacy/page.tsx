@@ -668,16 +668,24 @@ export default function PrivacyPage() {
           continue from there: in its storage, under <code>mm:lp:</code>{" "}
           followed by the course, the lesson and a code made on our server
           that cannot be worked out from their email address. It holds the
-          second they reached and when, and nothing else, and is never sent to
-          us. The speed they chose is kept the same way, under{" "}
+          second they reached and when, and is never sent to us. The speed
+          they chose is kept the same way, under{" "}
           <code>mm:lp-speed</code>. A place is removed when the video is
           watched to its end and when they press Start over. One older than
           90 days is never used, and is removed the next time that lesson is
           opened in that browser. Whenever the course page opens in that
           browser without confirming their access (because it ended, or
           because it could not be checked at that moment), all their places in
-          that course are removed. Clearing the browser&apos;s site data
-          removes them at any time.
+          that course are removed. The same browser also keeps
+          the last lesson they opened, so their library on this site can offer &quot;Continue
+          where you left off&quot;: under <code>mm:ll:</code> followed by
+          another code made on our server from their email address alone, it
+          holds that lesson&apos;s address, its name, the course&apos;s and the
+          store&apos;s names and when, and is never sent to us. It is never
+          used after 90 days, and it is also removed with their places when
+          the course page opens without confirming their access to that
+          course. Clearing the browser&apos;s site data removes all of it at
+          any time.
         </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}

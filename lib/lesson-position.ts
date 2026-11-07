@@ -18,3 +18,15 @@ export function devicePlaceKey(courseId: string, email: string): string | null {
   if (!key || !courseId || !email) return null;
   return createHmac("sha256", key).update(`${courseId}\n${normaliseEmail(email)}`).digest("hex").slice(0, 32);
 }
+
+/**
+ * The key a student's last lesson is kept under on their own device (650 [WG10], unit 2,
+ * lib/lesson-position-rules.ts lastKey): a keyed hash of the address alone, so their library, which knows the address
+ * but not the course, can find it. Its own derived key, so it never equals a course's place key. Null without a server
+ * key: then nothing is kept or offered.
+ */
+export function deviceLastKey(email: string): string | null {
+  const key = deriveKey("lesson-last");
+  if (!key || !email) return null;
+  return createHmac("sha256", key).update(normaliseEmail(email)).digest("hex").slice(0, 32);
+}

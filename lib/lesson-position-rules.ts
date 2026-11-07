@@ -21,6 +21,7 @@
  *   - The speed the student chose is kept the same way, on the device, and
  *     used for the next lessons.
  */
+import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 /** At most one write while playing in this many seconds (the item's ceiling). */
 export const SAVE_EVERY_SECONDS = 15;
@@ -149,4 +150,88 @@ export function resumeWordsOf(w: { resumeLabel: string; resumeStopped: (at: stri
 /** A resume sentence with the time put in where RESUME_AT stands. */
 export function sayAt(sentence: string, at: string): string {
   return sentence.split(RESUME_AT).join(at);
+}
+
+/**
+ * The last lesson a student opened, kept on their own device the same way
+ * (650 [WG10], unit 2), so their library can offer it back as "Continue where
+ * you left off" (components/library-continue.tsx). One record a student,
+ * under a code made on our server from their address alone
+ * (lib/lesson-position.ts deviceLastKey), holding the lesson page's address,
+ * the lesson's, the course's and the store's names, the course id (to forget
+ * it with the course) and when. Nothing of it is sent to us.
+ */
+export const LAST_PREFIX = "mm:ll:";
+/** The longest name kept for a lesson, a course or a store; a longer one is cut when written and refused when read. */
+export const LAST_TITLE_MOST = 200;
+const LAST_RAW_MOST = 2000;
+/** A lesson page of this site: the store's handle as lib/store-handle-pattern.ts makes it, then the product and the lesson. */
+const LESSON_PATH = new RegExp(`^/@${HANDLE_PATTERN.source.slice(1, -1)}/course/[A-Za-z0-9_-]{1,64}/[A-Za-z0-9_-]{1,64}$`);
+
+/** The storage key of one student's last lesson; null when the code is not one we make. */
+export function lastKey(person: string): string | null {
+  return /^[0-9a-f]{32}$/.test(person) ? `${LAST_PREFIX}${person}` : null;
+}
+
+/** A lesson page's own address on this site, or null when any part is not one we make. */
+export function lessonPath(handle: string, productId: string, lessonId: string): string | null {
+  if (!HANDLE_PATTERN.test(handle) || !ID.test(productId) || !ID.test(lessonId)) return null;
+  return `/@${handle}/course/${productId}/${lessonId}`;
+}
+
+export type LastLesson = { path: string; courseId: string; lesson: string; course: string; store: string; at: number };
+
+const name = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+};
+
+/** What is written for the last lesson; null (nothing written) when its address, course id or a name is not usable. */
+export function writeLast(last: Omit<LastLesson, "at">, nowMs: number): string | null {
+  const lesson = name(last.lesson);
+  const course = name(last.course);
+  const store = name(last.store);
+  if (!LESSON_PATH.test(last.path) || !ID.test(last.courseId) || !lesson || !course || !store) return null;
+  const cut = (text: string) => text.slice(0, LAST_TITLE_MOST);
+  return JSON.stringify({ p: last.path, c: last.courseId, l: cut(lesson), n: cut(course), s: cut(store), t: Math.floor(nowMs) });
+}
+
+/**
+ * The last lesson read back whole, or null: an address that is not a lesson page of this site (so a value changed on
+ * the device can never send anyone elsewhere), a name longer than any written, a time in the future or older than
+ * KEEP_DAYS, or anything else.
+ */
+export function readLast(raw: string | null, nowMs: number): LastLesson | null {
+  if (typeof raw !== "string" || raw.length > LAST_RAW_MOST) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { p, c, l, n, s, t } = value as Record<string, unknown>;
+  if (typeof p !== "string" || !LESSON_PATH.test(p) || typeof c !== "string" || !ID.test(c)) return null;
+  const titles = [l, n, s].map(name);
+  if (titles.some((title) => title === null || title.length > LAST_TITLE_MOST)) return null;
+  if (typeof t !== "number" || !Number.isSafeInteger(t) || t <= 0 || t > nowMs + 60_000) return null;
+  if (nowMs - t > KEEP_DAYS * 86_400_000) return null;
+  const [lesson, course, store] = titles as string[];
+  return { path: p, courseId: c, lesson, course, store, at: t };
+}
+
+/**
+ * Removes this student's last lesson from the device when it is in this course, or when it cannot be read; returns
+ * whether it removed it. Another student's, and one in another course, are left.
+ */
+export function forgetLastIn(store: Pick<Storage, "getItem" | "removeItem">, person: string, courseId: string, nowMs: number): boolean {
+  const key = lastKey(person);
+  if (!key) return false;
+  const raw = store.getItem(key);
+  if (raw === null) return false;
+  const last = readLast(raw, nowMs);
+  if (last && last.courseId !== courseId) return false;
+  store.removeItem(key);
+  return true;
 }

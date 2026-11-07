@@ -24,7 +24,8 @@ import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
 import { ForgetLessonPositions } from "@/components/forget-lesson-positions";
-import { devicePlaceKey } from "@/lib/lesson-position";
+import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
+import { ForgetLastLesson } from "@/components/remember-last-lesson";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
@@ -77,6 +78,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const access = await courseAccess(store, product, jar);
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
   const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
+  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2).
+  const forgetPerson = access.state !== "open" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
   const open = access.state === "open";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
@@ -139,6 +142,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
         {/* Access not open for a signed-in student (a refund, a lost dispute, an ended membership, taken off):
             where they stopped in this course's videos is removed from their device (650 [WG10]). */}
         {forgetKey ? <ForgetLessonPositions courseId={course.id} learner={forgetKey} /> : null}
+        {forgetPerson ? <ForgetLastLesson courseId={course.id} person={forgetPerson} /> : null}
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element

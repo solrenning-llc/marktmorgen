@@ -31,7 +31,9 @@ import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { LessonPlayer } from "@/components/lesson-player";
-import { devicePlaceKey } from "@/lib/lesson-position";
+import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
+import { RememberLastLesson } from "@/components/remember-last-lesson";
+import { lessonPath } from "@/lib/lesson-position-rules";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
 
@@ -163,6 +165,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
+  // This lesson kept on the student's device as the last one they opened, offered back in their library (650 [WG10],
+  // unit 2, components/library-continue.tsx), under a key made from their address alone; never for the creator or a visitor.
+  const lastPerson = student ? deviceLastKey(student.email) : null;
+  const lastPath = lessonPath(store.handle, product.id, lesson.id);
   // Plain text only: a function cannot cross to the client player (Claude 5 on #2728).
   const resumeWords = resumeWordsOf(w);
   const moduleNumber = course.modules.findIndex((m) => m.id === unit.id) + 1;
@@ -174,6 +180,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
+        {lastPerson && lastPath ? <RememberLastLesson person={lastPerson} path={lastPath} courseId={course.id} lesson={lesson.title} course={product.title} store={store.name} /> : null}
         <p className="text-sm">
           <Link href={base} className="st-footer-link font-semibold">{product.title}</Link>
           <span className="st-muted">{w.crumb(moduleNumber, unit.title)}</span>

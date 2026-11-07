@@ -9,6 +9,8 @@ import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { libraryOwner, storesBoughtFrom } from "@/lib/buyer-library";
+import { LibraryContinue } from "@/components/library-continue";
+import { deviceLastKey } from "@/lib/lesson-position";
 
 export const metadata: Metadata = {
   title: "Your library — Marktmorgen",
@@ -35,6 +37,8 @@ export default async function LibraryPage({ searchParams }: Params) {
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
   const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
   const email = token ? await libraryOwner(token) : null;
+  // The last lesson this address opened in this browser, read there only (650 [WG10], unit 2).
+  const continuePerson = email ? deviceLastKey(email) : null;
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
   const shelves: { store: Store; open: string | null }[] = [];
@@ -69,6 +73,7 @@ export default async function LibraryPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">
                 What you bought from a store is here while that store is open on Marktmorgen. A store whose creator closes it takes what was bought from it along, so download the files you want to keep. <Link href="/terms#closing" className="underline underline-offset-4">How a store closes</Link>.
               </p>
+              {continuePerson ? <LibraryContinue person={continuePerson} /> : null}
               {shelves.length ? (
                 <ul className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {shelves.map(({ store, open }) => (

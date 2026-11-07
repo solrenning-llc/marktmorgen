@@ -27,6 +27,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, noteTakedown, removeStoreLink, setKit, setProductHidden, storeForHandle, storeRef } from "@/lib/store";
 import { del } from "@/lib/blob";
 import { withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
 
@@ -118,21 +119,26 @@ export async function openReport(token: string): Promise<{ report: Report; store
 }
 
 /**
- * The takedowns of this notice whose content is down but whose notice to the creator has not gone out (the press
- * that took it down could not send it), with what was taken down and the action that sends it: pressed again,
- * takeDown finds the content down and the steps unfinished, and sends only the notice. A read that fails throws: an
- * unknown is never "nothing owed".
+ * The takedowns of this notice whose notice to the creator has not been confirmed as sent (the press that took it
+ * down could not send it), with what was taken down and the action that sends it (sendOwedNotice). The statement of
+ * reasons is owed once the content was restricted, even if it is up again since (EU DSA Art. 17(1)), so content that
+ * is up again (a store switched back on, a product published again) stays listed, marked `up`. Every reply is read in
+ * its exact shape (rule 24; Claude 6 on #3087): a read that fails or answers in another shape throws, so an unknown is
+ * never "nothing owed".
  */
-export async function unsentNotices(report: Pick<Report, "id">): Promise<{ action: TakedownAction; what: string }[]> {
-  const [members] = await redisPipeline([["SMEMBERS", owedKey(report.id)]]);
-  if (members === null || members === undefined) return [];
-  if (!Array.isArray(members) || members.some((m) => typeof m !== "string")) throw new Error("a notice's owed takedowns could not be read");
-  const owed: { action: TakedownAction; what: string }[] = [];
-  for (const part of (members as string[]).slice().sort().slice(0, MAX_OWED)) {
+export async function unsentNotices(report: Pick<Report, "id">, store: Store): Promise<{ action: TakedownAction; what: string; up?: true }[]> {
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", owedKey(report.id)]]), 1);
+  const members = replies ? stringList(replies[0]) : null;
+  if (!members) throw new UnknownReplyError("a notice's owed takedowns");
+  const owed: { action: TakedownAction; what: string; up?: true }[] = [];
+  for (const part of members.slice().sort().slice(0, MAX_OWED)) {
     const action = actionOfPart(part);
-    if (!action) continue;
+    if (!action || (action.type === "store" && !action.on)) continue;
     const steps = await readSteps(noticeKey(report.id, part));
-    if (steps && !steps.sent) owed.push({ action, what: steps.what });
+    if (!steps || steps.sent) continue;
+    // Only a note for the operator: when whether it is up cannot be read, the page claims nothing about it.
+    const up = await stillUp(store, action, "").then(Boolean, () => false);
+    owed.push(up ? { action, what: steps.what, up: true } : { action, what: steps.what });
   }
   return owed;
 }
@@ -187,11 +193,16 @@ const owedKey = (report: string) => reportKey(`${report}:n`);
 const MAX_OWED = 50;
 type Steps = { what: string; howLong: string; at: string; noted: boolean; counted: boolean; sent: boolean };
 
+/**
+ * A takedown's steps, or null only when Redis itself answers null (no steps). A pipeline that answers nothing, or a
+ * reply of any other shape, throws (Codex P on #3087, MEDIUM 1): an unknown is never "nothing owed".
+ */
 async function readSteps(key: string): Promise<Steps | null> {
-  const [raw] = await redisPipeline([["GET", key]]);
-  if (raw === null || raw === undefined) return null;
-  // A mark that cannot be read is an unknown, never "nothing owed".
-  if (typeof raw !== "string") throw new Error("a takedown's steps could not be read");
+  const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
+  if (!replies) throw new UnknownReplyError("a takedown's steps");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a takedown's steps");
   const value: unknown = JSON.parse(raw);
   const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   if (!v || typeof v.what !== "string" || !v.what || typeof v.howLong !== "string" || typeof v.at !== "string" || !/^\d+$/.test(v.at) ||
@@ -201,8 +212,19 @@ async function readSteps(key: string): Promise<Steps | null> {
   return { what: v.what, howLong: v.howLong, at: v.at, noted: v.noted, counted: v.counted, sent: v.sent };
 }
 
+/**
+ * Writes a takedown's steps, and throws unless Redis answers exactly "OK" (Codex P on #3087, MEDIUM 2): the first
+ * write is the recovery record, so content is never taken down without it being confirmed.
+ */
 async function writeSteps(key: string, steps: Steps): Promise<void> {
-  await redisPipeline([["SET", key, JSON.stringify(steps), "EX", REPORT_SECONDS]]);
+  const replies = repliesFor(await redisPipeline([["SET", key, JSON.stringify(steps), "EX", REPORT_SECONDS]]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a takedown's steps write");
+}
+
+/** Lists a takedown as owed until its notice goes out; throws unless both replies are in their exact shape. */
+async function markOwed(report: string, part: string): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["SADD", owedKey(report), part], ["EXPIRE", owedKey(report), REPORT_SECONDS]]), 2);
+  if (!replies || countOf(replies[0]) === null || replies[1] !== 1) throw new UnknownReplyError("a notice's owed takedowns write");
 }
 
 /**
@@ -280,6 +302,8 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
   if (action.type === "store" && !action.on) {
     if (!store.suspended) return null;
     if (!(await noteTakedown(ref, null, false))) throw new Error("the store could not be written");
+    // A switch-off whose notice was not sent stays owed: the statement of reasons is owed once the restriction was
+    // imposed, even after it is lifted (EU DSA Art. 17(1)); the page still offers it (sendOwedNotice).
     // Back on: the creator is told, and nothing is added to the record.
     await sendEmail({ meter: { by: "company" },
       from: NIMBUS_FROM,
@@ -291,15 +315,38 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
     }).catch(() => false);
     return "The store's pages and sales are back on.";
   }
+  return underLock(report, store, action, (now, part, key) => finish(report, now, action, origin, part, key));
+}
+
+/**
+ * The email still owed for a takedown of this notice, from the page's "Send the email to the creator" (Claude 6 on
+ * #3087, MEDIUM 3): it only finishes the kept steps (the strike if not yet written, the count, the statement of
+ * reasons in the kept words, under the same idempotency key) and never takes anything down, so content the operator
+ * switched back on, or the creator published again, stays up. The statement is still sent then: it is owed once the
+ * restriction was imposed, even if it was lifted since (EU DSA Art. 17(1)). Nothing kept, or a notice already sent,
+ * is null.
+ */
+export async function sendOwedNotice(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string): Promise<string | null> {
+  return underLock(report, store, action, async (now, part, key) => {
+    const kept = await readSteps(key);
+    if (!kept || kept.sent) return null;
+    return complete(report, now, action, origin, part, key, kept);
+  });
+}
+
+/**
+ * One press at a time for one piece of content under one notice (Claude 6, #3087, LEVE 3): two presses at once
+ * would both see it up, both write it on the store's record and both tell the creator. The second waits, then reads
+ * the store again, so it finds the content down and the first one's steps, and has only what is left to finish.
+ */
+async function underLock<T>(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, work: (now: Store, part: string, key: string) => Promise<T>): Promise<T> {
+  const ref = storeRef(store);
   const part = `${action.type}-${"id" in action ? action.id : ""}`;
   const key = noticeKey(report.id, part);
-  // One press at a time for one piece of content under one notice (Claude 6, #3087, LEVE 3): two presses at once
-  // would both see it up, both write it on the store's record and both tell the creator. The second waits, then reads
-  // the store again, so it finds the content down and the first one's steps, and has only what is left to finish.
   return withLock(`${key}:lock`, TAKEDOWN_LOCK_SECONDS, TAKEDOWN_LOCK_WAIT_MS, async () => {
     const now = await storeForHandle(store.handle);
     if (!now || storeRef(now) !== ref) throw new Error("the store could not be read again");
-    return finish(report, now, action, origin, part, key);
+    return work(now, part, key);
   });
 }
 
@@ -313,9 +360,10 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
   let steps: Steps;
   if (up) {
     steps = { ...up, at: String(Date.now()), noted: false, counted: false, sent: false };
+    // The recovery record first, each write confirmed, so nothing is taken down without it (Codex P on #3087).
     await writeSteps(key, steps);
     // Owed from here until its notice goes out, so a page opened again can still send it (unsentNotices).
-    await redisPipeline([["SADD", owedKey(report.id), part], ["EXPIRE", owedKey(report.id), REPORT_SECONDS]]);
+    await markOwed(report.id, part);
     if (!(await apply(ref, store, action))) {
       await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
       return null;
@@ -326,16 +374,33 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
     if (!kept || kept.sent) return null;
     steps = kept;
   }
+  return complete(report, store, action, origin, part, key, steps);
+}
+
+/** Whether the store already keeps this strike (as lib/store.ts parseStrikes keeps it: report, time and words). */
+function heldStrike(store: Store, strike: { at: string; what: string; report: string }): boolean {
+  return store.strikes.some((s) => s.report === strike.report.slice(0, 40) && s.at === strike.at.slice(0, 30) && s.what === strike.what.slice(0, 200));
+}
+
+/** The steps left after the content is down: the strike, the count, the notice to the creator, each once. */
+async function complete(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string, part: string, key: string, kept: Steps): Promise<string> {
+  const ref = storeRef(store);
+  let steps = kept;
   const { what, howLong } = steps;
   if (!steps.noted) {
-    if (!(await noteTakedown(ref, { at: new Date().toISOString(), what, report: report.id }))) throw new Error("the store could not be written");
+    // One strike per takedown (Claude 6 on #3087, MEDIUM 2): dated when this takedown began, so a retry after the
+    // mark below failed finds it on the store, read under this content's lock (underLock), and writes none.
+    const strike = { at: new Date(Number(steps.at)).toISOString(), what, report: report.id };
+    if (!heldStrike(store, strike) && !(await noteTakedown(ref, strike))) throw new Error("the store could not be written");
     steps = { ...steps, noted: true };
     await writeSteps(key, steps);
   }
   if (!steps.counted) {
-    await countStep(report, action.type);
+    // Marked before counting: if the count is then lost, the transparency figure is one short, never one too many
+    // (countStep itself never throws and already drops a count it could not write).
     steps = { ...steps, counted: true };
     await writeSteps(key, steps);
+    await countStep(report, action.type);
   }
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,

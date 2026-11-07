@@ -1,12 +1,14 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { type TakedownAction, TakedownNoticeUnsent, openReport, takeDown } from "@/lib/takedown";
+import { type TakedownAction, TakedownNoticeUnsent, openReport, sendOwedNotice, takeDown } from "@/lib/takedown";
 
 /**
  * Acts on a notice (app/takedown/[token]): `{ token, action }`, where the
  * token is the one in the email the notice was sent in. Only the store the
- * notice is about can be touched with it.
+ * notice is about can be touched with it. With `owed: true` (the page's
+ * "Send the email to the creator") it only sends the notice still owed, in
+ * its kept words, and never takes anything down, even content up again.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -32,7 +34,14 @@ export async function POST(request: NextRequest) {
     : raw.type === "store" ? { type: "store", on: raw.on === true }
     : null;
   if (!action) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+  const owed = body.owed === true;
+  if (owed && action.type === "store" && !action.on) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   try {
+    if (owed) {
+      const sent = await sendOwedNotice(opened.report, opened.store, action, originFrom(request));
+      if (!sent) return Response.json({ ok: false, error: "nothing" }, { status: 409 });
+      return Response.json({ ok: true, done: sent });
+    }
     const done = await takeDown(opened.report, opened.store, action, originFrom(request));
     if (!done) return Response.json({ ok: false, error: "nothing" }, { status: 409 });
     return Response.json({ ok: true, done });

@@ -7,8 +7,11 @@
  *       without its recovery record; a healthy retry then takes it down and tells the creator.
  *   C6-1 (Claude 6, comment 6712347123): unsentNotices throws on an unknown SMEMBERS or steps reply, never [].
  *   C6-2 (Claude 6): a strike is written once per takedown, even when the write after it fails and the press is retried.
- *   C6-3 (Claude 6): "Send the email to the creator" only finishes the kept steps; content that is up again (a store
- *       switched back on, a product published again) is not taken down again, not listed as owed, and gets no strike.
+ *   C6-3 (Claude 6): "Send the email to the creator" only finishes the kept steps and never takes anything down:
+ *       content that is up again (a store switched back on, a product published again) stays up and gets no new
+ *       strike. Its statement of reasons is still owed (EU DSA Art. 17(1): owed once the restriction was imposed, even
+ *       if lifted since), so it stays listed, with a note that it is back up, and the press sends it once, in the kept
+ *       words, under the takedown's own idempotency key (coordinator's legal correction, 7 Nov 2026).
  *   LOW1 the owed list says what is known: "Taken down, but we could not confirm the creator was told".
  *   LOW2 the page keeps working when the owed list cannot be read, and says so.
  *   LOW3 the owed set's SADD/EXPIRE replies are checked: unknown stops before the content is touched.
@@ -215,7 +218,7 @@ async function main(): Promise<void> {
     is("one strike, one email", [(await strikes()) - before, sent.length], [1, 1]);
   }
 
-  part("C6-3, store: the owed email never switches a store off again (Claude 6)");
+  part("C6-3, store: the owed email never switches a store off again, and is still sent (Claude 6; DSA Art. 17(1))");
   {
     sent.length = 0;
     tried.length = 0;
@@ -227,15 +230,21 @@ async function main(): Promise<void> {
     const back = await answer({ type: "store", on: false });
     is("the operator switches it back on", [back.status, Boolean((await store()).suspended)], [200, false]);
     const listed = await owedNow();
-    is("a store back on is not listed as owed", listed === "threw" ? "threw" : listed.value.some((o) => o.action.type === "store"), false);
-    is("restoring clears its owed entry", ((await realPipeline([["SMEMBERS", owedKey]]))[0] as string[]).includes("store-"), false);
+    is("a store back on stays listed as owed, marked as up again", listed === "threw" ? "threw" : listed.value.filter((o) => o.action.type === "store").map((o) => o.up ?? false), [true]);
+    is("restoring keeps its owed entry", ((await realPipeline([["SMEMBERS", owedKey]]))[0] as string[]).includes("store-"), true);
     sent.length = 0;
     const press = await answer({ type: "store", on: true }, true);
-    is("the owed press does not answer Done", press.status === 200, false);
-    is("and the store stays on, with no new strike and no email", [Boolean((await store()).suspended), (await strikes()) - before, sent.length], [false, 0, 0]);
+    is("the owed press sends the statement and says Done", [press.status, press.done], [200, "Your store's pages and sales, now switched off"]);
+    is("and the store stays on, with no new strike and one email to the creator", [Boolean((await store()).suspended), (await strikes()) - before, sent.length, [sent[0]?.to].flat()], [false, 0, 1, [owner]]);
+    const storeKeys = [...new Set(tried.filter((k) => k.startsWith(`takedown-${report.id}-store--`)))];
+    is("under the same idempotency key as the refused try", storeKeys.length, 1);
+    const again = await answer({ type: "store", on: true }, true);
+    is("pressed again: nothing to do, nothing sent, the store still on", [again.status, again.error, sent.length, Boolean((await store()).suspended)], [409, "nothing", 1, false]);
+    const after = await owedNow();
+    is("and it is no longer listed", after === "threw" ? "threw" : after.value.some((o) => o.action.type === "store"), false);
   }
 
-  part("C6-3, product: the owed email never unpublishes a product published again (Claude 6)");
+  part("C6-3, product: the owed email never unpublishes a product published again, and is still sent (Claude 6; DSA Art. 17(1))");
   {
     const id = ids[0];
     sent.length = 0;
@@ -246,10 +255,12 @@ async function main(): Promise<void> {
     if (!(await setProductHidden(owner, id, false)).ok || (await published(id)) !== "published") throw new Error("setup: the product did not publish again");
     const before = await strikes();
     const listed = await owedNow();
-    is("a product published again is not listed as owed", listed === "threw" ? "threw" : listed.value.some((o) => o.action.type === "product" && o.action.id === id), false);
+    is("a product published again stays listed as owed, marked as up again", listed === "threw" ? "threw" : listed.value.filter((o) => o.action.type === "product" && o.action.id === id).map((o) => o.up ?? false), [true]);
     const press = await answer({ type: "product", id }, true);
-    is("the owed press does not answer Done", press.status === 200, false);
-    is("and the product stays published, with no new strike and no email", [await published(id), (await strikes()) - before, sent.length], ["published", 0, 0]);
+    is("the owed press sends the statement and says Done", [press.status, press.done], [200, "The product \"Song Pack 1\", now unpublished"]);
+    is("and the product stays published, with no new strike and one email", [await published(id), (await strikes()) - before, sent.length], ["published", 0, 1]);
+    const again = await answer({ type: "product", id }, true);
+    is("pressed again: nothing to do, still published", [again.status, again.error, sent.length, await published(id)], [409, "nothing", 1, "published"]);
   }
 
   part("The owed press, when the content is still down, only sends the kept notice");
@@ -268,7 +279,21 @@ async function main(): Promise<void> {
     const again = await answer({ type: "link", id }, true);
     is("pressed again after it went out: nothing to do, nothing sent", [again.status, again.error, sent.length], [409, "nothing", 1]);
     const unknownItem = await answer({ type: "product", id: ids[2] }, true);
-    is("an owed press for content never taken down takes nothing down", [unknownItem.status, await published(ids[2]), sent.length], [409, "published", 1]);
+    is("an owed press for content never taken down takes nothing down", [unknownItem.status, unknownItem.error, await published(ids[2]), sent.length], [409, "nothing", "published", 1]);
+  }
+
+  part("C6-2, store: a skipped strike still switches the store off");
+  {
+    const key = stepsKey("store-");
+    sent.length = 0;
+    const before = await strikes();
+    if ((await store()).suspended) throw new Error("setup: the store should be on");
+    fault = (commands) => (on("SET", key, (c) => String(c[2]).includes('"noted":true'))(commands) ? "throw" : undefined);
+    const first = await answer({ type: "store", on: true });
+    fault = null;
+    is("the first press fails after the strike, and the store is off", [first.status, first.error, Boolean((await store()).suspended)], [500, "error", true]);
+    const second = await answer({ type: "store", on: true });
+    is("the retry finishes: one strike, one email, the store still off", [second.status, (await strikes()) - before, sent.length, Boolean((await store()).suspended)], [200, 1, 1, true]);
   }
 
   part("LOW1, LOW2: the page says only what is known");
@@ -278,7 +303,8 @@ async function main(): Promise<void> {
     is("the old heading is gone", page.includes("the creator was not told yet"), false);
     is("an owed list that cannot be read is said, and the page goes on", page.includes("We could not check whether an email to the creator is still owed."), true);
     is("the owed button presses the owed path", /label="Send the email to the creator"[^>]*owed|owed[^>]*label="Send the email to the creator"/.test(page), true);
-    is("the button has words for content that is up again", readFileSync("components/takedown-actions.tsx", "utf8").includes("up_again"), true);
+    is("content up again is noted, still owed", page.includes("It is back up now; the email still explains why it was taken down."), true);
+    is("no answer refuses the owed email for content up again", [readFileSync("components/takedown-actions.tsx", "utf8").includes("up_again"), readFileSync("app/api/takedown/route.ts", "utf8").includes("up_again")], [false, false]);
   }
   done();
 }

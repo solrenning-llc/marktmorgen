@@ -157,7 +157,7 @@ async function main(): Promise<void> {
   is("the button has words for that answer", readFileSync("components/takedown-actions.tsx", "utf8").includes("notice_unsent"), true);
   // Claude 6's focal review of #3087, LEVE 1: the press that failed may be the only one; the page opened again (or
   // by someone else) has no button for content that is already down, so it lists what is down without its notice.
-  is("the page opened again lists the notice still owed, with what was taken down", await unsentNotices(report), [{ action: { type: "link", id: linkId }, what: 'The link "My mixtape" (https://soundcloud.com/someone/a-track)' }]);
+  is("the page opened again lists the notice still owed, with what was taken down", await unsentNotices(report, await store()), [{ action: { type: "link", id: linkId }, what: 'The link "My mixtape" (https://soundcloud.com/someone/a-track)' }]);
   is("and the page offers it", readFileSync("app/takedown/[token]/page.tsx", "utf8").includes("unsentNotices("), true);
   const stepsBefore = await steps();
   const again = await answer({ type: "link", id: linkId });
@@ -166,7 +166,7 @@ async function main(): Promise<void> {
   const linkKeys = [...new Set([...tried, sent[0]?.key])];
   is("under the same idempotency key every try used, this takedown's own", [linkKeys.length, linkKeys[0]?.startsWith(`${linkKey}-`)], [1, true]);
   is("nothing written or counted twice", [await strikes(), JSON.stringify(await steps()) === JSON.stringify(stepsBefore)], [2, true]);
-  is("once it went out, nothing is owed any more", await unsentNotices(report), []);
+  is("once it went out, nothing is owed any more", await unsentNotices(report, await store()), []);
   const third = await answer({ type: "link", id: linkId });
   is("pressed a third time, after the notice went out: nothing to do, nothing sent", [third.status, third.error, sent.length], [409, "nothing", 1]);
 

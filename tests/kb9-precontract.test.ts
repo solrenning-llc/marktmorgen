@@ -8,10 +8,11 @@
  * withdrawal function is ("information about the existence and placement of
  * the withdrawal function referred to in Article 11a"). Checked:
  *
- *   - the checkout box's sentence, in every buyer language and for both kinds
- *     (digital, membership), names the function by its own label
- *     (lib/buyer-words/withdrawal.ts, withdrawLink) and says it is on the
- *     buyer's list of purchases; the sentence is quoted back in the email, so
+ *   - the membership box's sentence, in every buyer language, names the
+ *     function by its own label (lib/buyer-words/withdrawal.ts, withdrawLink)
+ *     and says it is on the buyer's list of purchases; the digital box does
+ *     not, because its own yes closes the function at payment for everything
+ *     but a pre-order; the sentence is quoted back in the email, so
  *     its version (EU_WITHDRAWAL_CONSENT_VERSION) moves past "2026-10-30.2"
  *     with the words, as lib/digital-consent.ts requires;
  *   - the order confirmation email (lib/purchase-email.ts, confirmationFor,

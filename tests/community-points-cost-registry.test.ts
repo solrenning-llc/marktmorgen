@@ -40,7 +40,7 @@ const mutations = [
   ["a protected call is added", script.replace("local raw =", "redis.pcall('ZCARD', key)\n  local raw =")],
   // Claude 5 focal 6701759336: extra helper calls can keep every call-site pattern unchanged.
   ["take is called as a statement", script.replace("return {take(KEYS[1], total)", "take(KEYS[1], total)\nreturn {take(KEYS[1], total)")],
-  ["score is called in a loop", script.replace("local today =", "for i = 1, 9 do total = score(KEYS[1]) end\nlocal today =")],
+  ["score is called in a loop", script.replace("local total = score(KEYS[1])", "local total = 0\nfor i = 1, 9 do total = score(KEYS[1]) end")],
   ["score is called through an alias", script.replace("local today =", "local s = score\ns(KEYS[1]); s(KEYS[2])\nlocal today =")],
 ] as const;
 

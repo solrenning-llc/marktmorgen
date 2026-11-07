@@ -21,6 +21,7 @@ const api = toastModule as unknown as {
   coversFocus?: (toast: Box, focus: Box, room?: number) => boolean;
   chooseToastPlace?: (focus: Box | null, rectAt: (place: Place) => Box, preferred: Place) => Place;
   keepToastClear?: (region: HTMLElement, active: Element | null, preferred?: Place) => Place;
+  followToastFocus?: (region: HTMLElement, onHidden: (hidden: boolean) => void, win?: Window) => () => void;
 };
 
 let passed = 0;
@@ -59,6 +60,71 @@ function fakeRegion(layout: typeof wide, place?: Place) {
   return { region: region as unknown as HTMLElement, inside, data: region.dataset };
 }
 const focusAt = (b: Box) => ({ getBoundingClientRect: () => b }) as unknown as Element;
+
+// A fake window and document: listeners, animation frames and layout observers, driven by hand.
+function fakePage() {
+  type Listener = () => void;
+  const listeners = new Map<string, Set<Listener>>();
+  const add = (type: string, fn: Listener) => (listeners.get(type) ?? listeners.set(type, new Set()).get(type)!).add(fn);
+  const remove = (type: string, fn: Listener) => listeners.get(type)?.delete(fn);
+  const frames = new Map<number, Listener>();
+  let nextFrame = 0;
+  const mutations = new Set<(records: { target: unknown }[]) => void>();
+  const resizes = new Set<Listener>();
+  const body = { nodeName: "BODY" };
+  const content = { nodeName: "MAIN" };
+  const doc = { activeElement: null as unknown, body, documentElement: {}, addEventListener: add, removeEventListener: remove };
+  class FakeMutationObserver {
+    constructor(private readonly fn: (records: { target: unknown }[]) => void) {}
+    observe() {
+      mutations.add(this.fn);
+    }
+    disconnect() {
+      mutations.delete(this.fn);
+    }
+  }
+  class FakeResizeObserver {
+    constructor(private readonly fn: Listener) {}
+    observe() {
+      resizes.add(this.fn);
+    }
+    disconnect() {
+      resizes.delete(this.fn);
+    }
+  }
+  const win = {
+    document: doc,
+    addEventListener: add,
+    removeEventListener: remove,
+    requestAnimationFrame: (fn: Listener) => {
+      nextFrame += 1;
+      frames.set(nextFrame, fn);
+      return nextFrame;
+    },
+    cancelAnimationFrame: (id: number) => frames.delete(id),
+    MutationObserver: FakeMutationObserver,
+    ResizeObserver: FakeResizeObserver,
+  };
+  return {
+    win: win as unknown as Window,
+    content,
+    focus: (element: Element) => {
+      doc.activeElement = Object.assign(element, { ownerDocument: doc });
+    },
+    fire: (type: string) => [...(listeners.get(type) ?? [])].forEach((fn) => fn()),
+    frame: () => {
+      const waiting = [...frames.values()];
+      frames.clear();
+      waiting.forEach((fn) => fn());
+    },
+    framesWaiting: () => frames.size,
+    mutate: (target: unknown) => [...mutations].forEach((fn) => fn([{ target }])),
+    resizeBody: () => [...resizes].forEach((fn) => fn()),
+    mutationWatchers: () => mutations.size,
+    resizeWatchers: () => resizes.size,
+    listeners: () => [...listeners.values()].reduce((sum, set) => sum + set.size, 0),
+  };
+}
 
 function main() {
   const source = readFileSync("components/toast.tsx", "utf8");
@@ -111,6 +177,48 @@ function main() {
   is("focus inside the toast (its Dismiss button): the toast does not jump", [keep(two.region, dismiss as Element), two.data.place], ["top-end", "top-end"]);
   const three = fakeRegion(wide, "hidden");
   is("after being hidden, the first clear corner is used again", [keep(three.region, focusAt(box(40, 300, 200, 44))), three.data.place], ["bottom-end", "bottom-end"]);
+
+  // While a toast shows, it follows the page: a layout change with no event (a refresh that grows the content
+  // above the focused Save button) moves it too, and a hidden box tells the Toaster so its countdown waits.
+  is("the toast exports what follows the page while it shows", typeof api.followToastFocus, "function");
+  const follow = api.followToastFocus!;
+  const page = fakePage();
+  const four = fakeRegion(wide, "bottom-end");
+  const save = { rect: box(1100, 600, 140, 44) };
+  page.focus({ getBoundingClientRect: () => save.rect } as unknown as Element);
+  const hiddenSaid: boolean[] = [];
+  const stop = follow(four.region, (hidden) => hiddenSaid.push(hidden), page.win);
+  is("it watches the page's layout while the toast shows", [page.mutationWatchers(), page.resizeWatchers()], [1, 1]);
+  save.rect = box(1100, 730, 140, 44); // the refresh pushed the focused button down, under the toast
+  page.mutate(page.content);
+  page.frame();
+  is("a page change with no event moves the toast off the focused control", four.data.place, "top-end");
+  save.rect = box(1100, 40, 140, 44);
+  page.resizeBody();
+  page.frame();
+  is("so does the content's size changing", four.data.place, "bottom-end");
+  four.data.place = "bottom-end";
+  page.mutate(four.region);
+  is("the toast's own changes never start another check", page.framesWaiting(), 0);
+  is("while it shows, the countdown is never told to wait", hiddenSaid, []);
+  page.focus({ getBoundingClientRect: () => box(0, 0, 1280, 800) } as unknown as Element);
+  page.fire("focusin");
+  is("a focused control under every corner hides the box, and the countdown is told to wait", [four.data.place, hiddenSaid], ["hidden", [true]]);
+  page.fire("focusin");
+  is("still hidden: nothing new is said", hiddenSaid, [true]);
+  page.focus({ getBoundingClientRect: () => box(40, 300, 200, 44) } as unknown as Element);
+  page.fire("focusin");
+  is("a corner clears: the box shows again and the countdown goes on", [four.data.place, hiddenSaid], ["bottom-end", [true, false]]);
+  stop();
+  is("when the toast goes, nothing is left watching", [page.mutationWatchers(), page.resizeWatchers(), page.listeners()], [0, 0, 0]);
+  const fromHidden = fakeRegion(wide, "hidden");
+  const said: boolean[] = [];
+  const stopHidden = follow(fromHidden.region, (hidden) => said.push(hidden), page.win);
+  page.fire("focusin");
+  is("a toast placed hidden before it was painted is said visible once a corner clears", [fromHidden.data.place, said], ["bottom-end", [false]]);
+  stopHidden();
+  is("the countdown never starts while the box is hidden", /const startTimer = useCallback\(\(\) => \{\s*stopTimer\(\);\s*if \([^)]*hidden\.current[^)]*\) return;/.test(source), true);
+  is("the Toaster pauses and resumes the countdown with the box", /followToastFocus\(region\.current, \(isHidden\) => \{[\s\S]*?isHidden \? pauseTimer\(\) : startTimer\(\)/.test(source), true);
 
   // The component re-checks whenever focus or the page moves, before the box is painted.
   is("the Toaster re-checks on focus, typing, scrolling and resizing", ["\"focusin\"", "\"input\"", "\"scroll\"", "\"resize\""].every((event) => source.includes(event)), true);

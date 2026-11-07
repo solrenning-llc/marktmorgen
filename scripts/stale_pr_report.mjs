@@ -22,7 +22,11 @@
  *
  * Cost per pull request: two GETs (the pull request and its head commit), three more when its last
  * commit is older than 3 days (comments, reviews, check runs), one more when GitHub had not yet
- * computed its conflict state. Bounded by MAX_PAGES per listing and MAX_CALLS per run.
+ * computed its conflict state. Bounded by MAX_PAGES per listing and MAX_CALLS per run. The pull
+ * requests are read least recently updated first; when the budget would not cover the next one and
+ * the writes (WRITE_CALLS), reading stops and the report says it is partial and names every pull
+ * request not read (Claude 6 on #3059): a spent budget is not an unreadable reply, and it never
+ * leaves yesterday's report standing as if it were today's.
  *
  * tests/stale-pr-report.test.ts holds the classification on synthetic pull requests and one whole
  * run against a synthetic GitHub; this file makes no call unless it is run directly.
@@ -37,6 +41,10 @@ export const CLOSE_DAYS = 10;
 export const MAX_PAGES = 10;
 /** Calls per run before the script gives up and fails, visibly (GITHUB_TOKEN allows 1,000 an hour). */
 export const MAX_CALLS = 900;
+/** Kept for the writes: the issue listing, the label read and creation, the issue itself. */
+const WRITE_CALLS = 4;
+/** Thrown when the next read would eat into the calls kept for the writes. */
+class BudgetSpent extends Error {}
 const DAY = 86400000;
 /** Lines per section; the rest is counted, never silently dropped. */
 const MAX_LINES = 80;
@@ -53,8 +61,8 @@ export const REQUIRED_CHECKS = [
 const SEVERITIES = ["GRAVE", "ALTO", "MÉDIO", "LEVE"];
 const SEVERITY = /(?<![A-Za-zÀ-ÿ])(GRAVE|ALTO|M[ÉE]DIO|LEVE)S?(?![A-Za-zÀ-ÿ])/g;
 const VERDICT = /(?<![A-Za-zÀ-ÿ])(Veredito|Verdict)(?![A-Za-zÀ-ÿ])([^:\n]{0,60}):([^\n]*)/i;
-const CHANGE = /pedir mudança|pede mudança|não entra|request changes|changes requested|do not merge/i;
-const CLEAN = /^(pode entrar|can merge|ready to merge|approved?|aprovad[oa])/i;
+const CHANGE = /pedir mudança|pede mudança|não entra|não pode entrar|não incorporar|request changes|changes requested|do not merge|not yet|not ready/i;
+const CLEAN = /^(pode entrar|can merge|ready to merge|ready(?![A-Za-zÀ-ÿ])|approved?|aprovad[oa])/i;
 
 /**
  * @typedef {{ kind: "clean" | "finding" | "unclear", severity: string | null }} Verdict
@@ -104,8 +112,9 @@ function time(value, what) {
 }
 
 /**
- * The latest verdict among comments and reviews, by time; later in the list wins a tie.
- * @param {{ body: string, at: string }[]} items @returns {DatedVerdict | null}
+ * The latest verdict among comments and reviews, by time; later in the list wins a tie. A review
+ * that requests changes (`changes`) is a finding even when its text has no verdict line.
+ * @param {{ body: string, at: string, changes?: boolean }[]} items @returns {DatedVerdict | null}
  */
 export function latestVerdict(items) {
   /** @type {DatedVerdict | null} */
@@ -114,7 +123,7 @@ export function latestVerdict(items) {
   for (const item of items) {
     const at = time(item?.at, "comment date");
     if (typeof item.body !== "string") throw new Error("unreadable comment body");
-    const verdict = verdictOf(item.body);
+    const verdict = verdictOf(item.body) ?? (item.changes ? { kind: "finding", severity: highest(item.body) } : null);
     if (verdict && at >= latestAt) {
       latest = { ...verdict, at: item.at, body: item.body };
       latestAt = at;
@@ -223,9 +232,10 @@ function capped(lines) {
 
 /**
  * The issue body.
- * @param {Row[]} rows @param {Date} now @param {{ read: number, drafts: number }} counts
+ * @param {Row[]} rows @param {Date} now @param {{ read: number, drafts: number, unread?: number[] }} counts
  */
 export function reportBody(rows, now, counts) {
+  const unread = counts.unread ?? [];
   const by = (/** @type {number} */ s) => rows.filter((r) => r.sections.includes(s));
   const oldest = (/** @type {Row} */ a, /** @type {Row} */ b) => b.commitDays - a.commitDays || a.number - b.number;
   const findingOrder = (/** @type {Row} */ a, /** @type {Row} */ b) => (b.finding?.days ?? 0) - (a.finding?.days ?? 0) || a.number - b.number;
@@ -237,6 +247,10 @@ export function reportBody(rows, now, counts) {
   const body = [
     `Relatório automático de PRs parados (regra PV de AGENTS.md), gerado em ${now.toISOString().slice(0, 16).replace("T", " ")} UTC: ${counts.read} PRs abertos fora de rascunho lidos; ${counts.drafts} rascunhos fora da conta.`,
     "",
+    ...(unread.length ? [
+      `**Relatório parcial:** ${counts.read} de ${counts.read + unread.length} PRs lidos; o limite de ${MAX_CALLS} chamadas por execução acabou. Os PRs lidos foram os atualizados há mais tempo. Não lidos nesta execução (fora de todas as seções abaixo, nunca contados como sem problema): ${unread.map((n) => `\`#${n}\``).join(", ")}.`,
+      "",
+    ] : []),
     "Este relatório só lê os PRs: não fecha, não comenta, não rotula e não incorpora nenhum. O aviso dos 5 dias e o fechamento dos 10 dias são do coordenador, depois de conferir as três exceções. Os números aparecem entre crases para não criar referência em cada PR.",
     "",
     `## 1. Sem commit há mais de ${STALE_DAYS} dias (${by(1).length})`,
@@ -279,8 +293,10 @@ function authorOf(ref, login) {
  */
 export async function report({ api: raw, now, log = console.log }) {
   let calls = 0;
+  let reading = true;
   /** @type {Api} */
   const api = (method, path, body, absentIsNull) => {
+    if (reading && calls + 1 > MAX_CALLS - WRITE_CALLS) throw new BudgetSpent("call budget spent");
     calls += 1;
     if (calls > MAX_CALLS) throw new Error(`call budget spent: more than ${MAX_CALLS} calls`);
     return raw(method, path, body, absentIsNull);
@@ -298,24 +314,46 @@ export async function report({ api: raw, now, log = console.log }) {
       throw new Error("unreadable listed pull request: " + JSON.stringify(p)?.slice(0, 300));
     }
   }
-  const open = listed.filter((p) => !p.draft);
+  // Least recently updated first: the ones most likely to age are read before the budget can run out.
+  const open = listed.filter((p) => !p.draft)
+    .map((p) => ({ p, at: time(p.updated_at, `#${p.number} update date`) }))
+    .sort((a, b) => a.at - b.at || a.p.number - b.p.number).map(({ p }) => p);
   const byHead = new Map(listed.map((p) => [p.head.ref, p.number]));
 
   /** @type {Pull[]} */
   const pulls = [];
+  /** @type {number[]} */
+  const unread = [];
   for (const p of open) {
-    pulls.push(await readPull(api, p.number, byHead, now));
+    if (unread.length) {
+      unread.push(p.number);
+      continue;
+    }
+    try {
+      pulls.push(await readPull(api, p.number, byHead, now));
+    } catch (error) {
+      if (!(error instanceof BudgetSpent)) throw error;
+      unread.push(p.number);
+    }
   }
-  // GitHub computes the conflict state after the first read; one more read, once, for those.
+  // GitHub computes the conflict state after the first read; one more read, once, for those, while
+  // the budget lasts. One still unknown stays "not yet computed", never "no conflict".
   for (let i = 0; i < pulls.length; i += 1) {
     if (pulls[i].mergeableState !== "unknown") continue;
-    const again = await api("GET", `pulls/${pulls[i].number}`);
+    let again;
+    try {
+      again = await api("GET", `pulls/${pulls[i].number}`);
+    } catch (error) {
+      if (!(error instanceof BudgetSpent)) throw error;
+      break;
+    }
     if (typeof again?.mergeable_state !== "string") throw new Error(`#${pulls[i].number}: unreadable conflict state`);
     pulls[i] = { ...pulls[i], mergeableState: again.mergeable_state };
   }
+  reading = false;
 
   const rows = pulls.map((p) => classify(p, now));
-  const body = reportBody(rows, now, { read: open.length, drafts: listed.length - open.length });
+  const body = reportBody(rows, now, { read: pulls.length, drafts: listed.length - open.length, unread });
 
   const issues = list(await api("GET", `issues?labels=${LABEL}&state=open&per_page=100`), "issue listing")
     .filter((i) => !i?.pull_request).sort((a, b) => a.number - b.number);
@@ -332,6 +370,19 @@ export async function report({ api: raw, now, log = console.log }) {
   await api("PATCH", `issues/${issue.number}`, { body });
   log(`updated #${issue.number}; ${calls} calls`);
   return rows;
+}
+
+/**
+ * A comment's or review's text: a string, or null for none. A missing field or any other shape is
+ * unreadable, never an empty comment (rule 24).
+ * @param {unknown} item @param {string} what
+ */
+function bodyOf(item, what) {
+  const o = /** @type {Record<string, unknown>} */ (item);
+  if (!o || typeof o !== "object" || !Object.hasOwn(o, "body") || !(o.body === null || typeof o.body === "string")) {
+    throw new Error(`unreadable ${what} body`);
+  }
+  return o.body ?? "";
 }
 
 /**
@@ -359,15 +410,16 @@ async function readPull(api, number, byHead, now) {
   const items = [];
   for (let page = 1; ; page += 1) {
     const comments = list(await api("GET", `issues/${number}/comments?per_page=100&page=${page}`), `#${number} comment listing`);
-    for (const c of comments) items.push({ body: c?.body ?? "", at: c?.created_at });
+    for (const c of comments) items.push({ body: bodyOf(c, `#${number} comment`), at: c?.created_at });
     if (comments.length < 100) break;
     if (page >= MAX_PAGES) throw new Error(`#${number}: comment listing too long`);
   }
   for (let page = 1; ; page += 1) {
     const reviews = list(await api("GET", `pulls/${number}/reviews?per_page=100&page=${page}`), `#${number} review listing`);
     for (const r of reviews) {
-      if (r?.state === "PENDING") continue;
-      items.push({ body: r?.body ?? "", at: r?.submitted_at });
+      if (typeof r?.state !== "string") throw new Error(`#${number}: unreadable review state`);
+      if (r.state === "PENDING") continue;
+      items.push({ body: bodyOf(r, `#${number} review`), at: r.submitted_at, changes: r.state === "CHANGES_REQUESTED" });
     }
     if (reviews.length < 100) break;
     if (page >= MAX_PAGES) throw new Error(`#${number}: review listing too long`);

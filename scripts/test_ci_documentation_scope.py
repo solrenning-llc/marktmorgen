@@ -5,8 +5,8 @@ from ci_documentation_scope import documentation_diff, documentation_path, requi
 
 A = "a" * 40
 B = "b" * 40
-# The workflows that are not CI: the PV daily report (AGENTS.md) only reads pull requests and has no
-# documentation scope (tests/stale-pr-report.test.ts).
+# The one workflow that is not CI: the MV alarm (AGENTS.md) runs only after the nine below
+# complete on main and has no documentation scope (tests/main-red-alarm.test.ts).
 NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
 
 def ci_workflows():

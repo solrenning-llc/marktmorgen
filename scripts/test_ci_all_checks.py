@@ -14,8 +14,8 @@ from ci_full_tree_proof import WORKFLOWS  # noqa: E402
 ROOT = os.path.dirname(HERE)
 WORKFLOW_DIR = os.path.join(ROOT, ".github", "workflows")
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7"
-# The workflows that are not CI: the PV daily report (AGENTS.md) only reads pull requests, is never a
-# required check and has no final check (tests/stale-pr-report.test.ts).
+# The one workflow that is not CI: the MV alarm (AGENTS.md) runs only after these complete on
+# main, is never a required check and has no final check (tests/main-red-alarm.test.ts).
 NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
 
 

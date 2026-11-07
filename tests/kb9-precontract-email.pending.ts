@@ -13,12 +13,12 @@
  * withdrawal function is ("information about the existence and placement of
  * the withdrawal function referred to in Article 11a"). Checked:
  *
- *   - the checkout box's sentence, in every buyer language and for both kinds
- *     (digital, membership), names the function by its own label
- *     (lib/buyer-words/withdrawal.ts, withdrawLink) and says it is on the
- *     buyer's list of purchases; the sentence is quoted back in the email, so
- *     its version (EU_WITHDRAWAL_CONSENT_VERSION) moves past "2026-10-30.2"
- *     with the words, as lib/digital-consent.ts requires;
+ *   - before the contract (held in tests/kb9-precontract.test.ts, not here):
+ *     the membership box's sentence names the function by its own label
+ *     (lib/buyer-words/withdrawal.ts, withdrawLink); the digital box keeps
+ *     its 2026-10-30.2 words and does not; and one conditional line outside
+ *     both sentences (withdrawal words, checkoutWhere) says where it is,
+ *     beside every box and, where there is none (shipped items), in its place;
  *   - the order confirmation email (lib/purchase-email.ts, confirmationFor,
  *     called here with synthetic data) of an order still inside its
  *     withdrawal period carries the label in the store's language beside a

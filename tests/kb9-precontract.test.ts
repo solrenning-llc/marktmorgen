@@ -11,10 +11,14 @@
  *   - the membership box's sentence, in every buyer language, names the
  *     function by its own label (lib/buyer-words/withdrawal.ts, withdrawLink)
  *     and says it is on the buyer's list of purchases; the digital box does
- *     not, because its own yes closes the function at payment for everything
- *     but a pre-order; the sentence is quoted back in the email, so
+ *     not, and keeps exactly its published 2026-10-30.2 words (Claude 5's
+ *     second review of #2953); the sentence is quoted back in the email, so
  *     its version (EU_WITHDRAWAL_CONSENT_VERSION) moves past "2026-10-30.2"
  *     with the words, as lib/digital-consent.ts requires;
+ *   - one plain conditional line (checkoutWhere, components/withdrawal-where.tsx),
+ *     outside both sentences, says where the function is: drawn by every
+ *     consent box and, where there is none (a shipped item, a cart of shipped
+ *     items only), in its place in the checkout form;
  *   - the order confirmation email (lib/purchase-email.ts, confirmationFor,
  *     called here with synthetic data) of an order still inside its
  *     withdrawal period carries the label in the store's language beside a

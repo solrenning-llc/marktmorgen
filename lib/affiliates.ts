@@ -2151,7 +2151,11 @@ export async function addPayout(
   // What the creator writes down takes room in the store's data room first (DataRoomError when it does not fit).
   const json = JSON.stringify(payout);
   await needData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }]);
-  await redisPipeline([["HSET", payoutsKey(store.statsId as string), payout.id, json]]);
+  // Written only on HSET's exact 1, a new field (rule 24): a reply missing or of another shape may have written
+  // nothing, and a book still owing what was paid pays it again (the next payout file, PayPal on payday); 0 means
+  // another payout under the same id was overwritten. Thrown either way; the room stays counted (more, never less).
+  const reply = repliesFor(await redisPipeline([["HSET", payoutsKey(store.statsId as string), payout.id, json]]), 1);
+  if (!reply || reply[0] !== 1) throw new UnknownReplyError("a payout written down");
   return payout;
 }
 

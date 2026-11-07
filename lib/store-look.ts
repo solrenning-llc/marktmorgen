@@ -346,15 +346,17 @@ export function lookColours(look: LookPaint): LookColours {
   const accentSoft = nearestPassing(
     mix(fill, palette.card, palette.dark ? 0.72 : 0.86),
     palette.card,
-    // Muted words sit on it too (a chosen or highlighted thing's note): 7:1, which the card always reaches.
-    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7,
+    // Muted words sit on it too (a chosen or highlighted thing's note), and words in the creator's color (the buyer's
+    // own chat bubble, an icon's disc, a picked pill): 7:1, which the card always reaches.
+    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 7,
   );
 
   const band = nearestPassing(
     mix(fill, palette.card, palette.dark ? 0.78 : 0.87),
     palette.card,
-    // Muted words on a band are small text too: 7:1, which the card always reaches, so a band only grows paler to pass.
-    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 4.5,
+    // Muted words on a band are small text too, and so are words in the creator's color: 7:1, which the card always
+    // reaches, so a band only grows paler to pass.
+    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 7,
   );
 
   // The band behind the name on the Colour theme runs from the fill to a

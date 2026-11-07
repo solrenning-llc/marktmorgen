@@ -70,16 +70,39 @@ def main():
         print("PASS: what expires by itself comes off the room once its month is over")
 
         redis.command("DEL", room)
-        # A store idle for years: at most two months that are over come off a call, the oldest first,
-        # so one call's commands stay bounded (review of #3001); the rest stay listed and counted.
+        # A store idle for years: every month that is over comes off in one call, exactly, read with one HMGET and
+        # removed with one HDEL, so one call's commands stay bounded however many there are (review of #3001).
+        # Changed (rule 23): b518e114f took at most two a call and left the rest counted, the room fuller than it was.
         idle = ["2020-%02d" % m for m in range(1, 13)] + ["2021-01"]
-        redis.command("HSET", room, "#", str(len(idle) * 164), "~", ",".join(idle), *[part for m in idle for part in ("~" + m, "100")])
-        assert take(redis, 100_000, ("a", "p:new", 10), month="2026-11") == [1, (len(idle) - 2) * 164 + 74]
-        assert redis.command("HGET", room, "~") == ",".join(idle[2:])
-        assert [redis.command("HEXISTS", room, "~" + m) for m in idle[:3]] == [0, 0, 1]
-        assert take(redis, 100_000, ("a", "p:new", 10), month="2026-11") == [1, (len(idle) - 4) * 164 + 84]
-        assert redis.command("HGET", room, "~") == ",".join(idle[4:])
-        print("PASS: a long-idle room sheds at most two expired months a call, oldest first")
+
+        def commands():
+            stats = redis.command("INFO", "commandstats")
+            return sum(int(n) for n in re.findall(r"^cmdstat_[^:]+:calls=(\d+)", stats, re.M))
+
+        def billed(months):
+            redis.command("DEL", room)
+            redis.command("HSET", room, "#", str(len(months) * 164), "~", ",".join(months), *[part for m in months for part in ("~" + m, "100")])
+            before = commands()
+            assert take(redis, 100_000, ("a", "p:new", 10), month="2026-11") == [1, 74]
+            return commands() - before
+
+        assert billed(idle[:1]) == billed(idle)
+        assert redis.command("HEXISTS", room, "~") == 0
+        assert [redis.command("HEXISTS", room, "~" + m) for m in idle] == [0] * len(idle)
+        assert take(redis, 100_000, ("a", "p:new", 10), month="2026-11") == [1, 84]
+        # A month listed twice is taken off once.
+        redis.command("DEL", room)
+        redis.command("HSET", room, "#", "328", "~", "2020-01,2020-01,2020-02", "~2020-01", "100", "~2020-02", "100")
+        assert take(redis, 100_000, ("a", "p:new", 10), month="2026-11") == [1, 74]
+        # Past DATA_MONTHS_CLEARED_MOST (512) the oldest 512 come off and the rest on the next call: it converges, exactly.
+        many = ["%04d-%02d" % (1900 + i // 12, i % 12 + 1) for i in range(520)]
+        redis.command("DEL", room)
+        redis.command("HSET", room, "#", str(len(many) * 164), "~", ",".join(many), *[part for m in many for part in ("~" + m, "100")])
+        assert take(redis, 10**9, ("a", "p:new", 10), month="2026-11") == [1, 8 * 164 + 74]
+        assert redis.command("HGET", room, "~") == ",".join(many[512:])
+        assert take(redis, 10**9, ("a", "p:new", 10), month="2026-11") == [1, 84]
+        assert redis.command("HEXISTS", room, "~") == 0
+        print("PASS: a long-idle room sheds every expired month in one call, in the same commands as one month")
 
         redis.command("DEL", room)
         assert take(redis, 10_000, ("a", "~2026-09", 100), month="2026-10")[0] == -1

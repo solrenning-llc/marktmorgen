@@ -197,26 +197,34 @@ async function main(): Promise<void> {
   }
   is("the script reads first and writes only a sale not yet numbered", RECEIPT_NUMBER.indexOf("HGET', KEYS[2]") < RECEIPT_NUMBER.indexOf("INCR"), true);
 
-  part("A store idle for years: one numbering clears at most two expired months");
+  part("A store idle for years: one numbering clears every expired month, in two commands");
   // Review of #3001 (M1): the data room's script cleared every expired month in one call, two commands each, and a
   // workflow's run is kept well past 400 days (lib/flows.ts, runGoneBy), so a store idle long enough lists dozens of
   // expired months: 13 measured 37 commands on a real Redis, past RECEIPT_NUMBER_COMMANDS. Forty listed here.
+  // Changed (rule 23): b518e114f bounded it by clearing at most two months a call, which kept the rest counted, so the
+  // room looked fuller than it was and refused writes that fitted (scripts/test_order_admission_redis.py: +1,690 bytes
+  // after three passes). Now one HMGET reads every expired month and one HDEL removes them: exact at once, and still
+  // two commands however many (at most DATA_MONTHS_CLEARED_MOST a call, so the arguments stay bounded too).
   const idleRoom = dataKey(other)!;
   const expired = Array.from({ length: 40 }, (_, i) => `${2020 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`);
+  const hget = async (key: string, field: string) => (await redis.pipeline([["HGET", key, field]]))[0];
+  const slotBefore = Number((await hget(idleRoom, RECEIPT_SLOT)) ?? 0);
   await redis.pipeline([["HSET", idleRoom, "#", String(expired.length * 164), "~", expired.join(","), ...expired.flatMap((m) => [`~${m}`, "100"])]]);
-  const listed = async () => (await redis.pipeline([["HGET", idleRoom, "~"]]))[0];
   const fields = async (months: string[]) => Promise.all(months.map(async (m) => (await redis.pipeline([["HEXISTS", idleRoom, `~${m}`]]))[0]));
   is("the idle store's next sale is numbered", await assignReceiptNumber(other, "cs_test_idlestore000000001"), { ok: true, number: "R-000002" });
-  is("only the two oldest expired months came off; the rest stay listed, and counted, for later calls", await listed(), expired.slice(2).join(","));
-  is("their own fields with them, the third's kept", await fields(expired.slice(0, 3)), [0, 0, 1]);
-  is("the room's total still counts what is left", Number((await redis.pipeline([["HGET", idleRoom, "#"]]))[0]) >= (expired.length - 2) * 164, true);
+  is("every expired month came off the list in that one call", await hget(idleRoom, "~"), null);
+  is("and their own fields with them", (await fields(expired)).every((n) => n === 0), true);
+  const slotAfter = Number(await hget(idleRoom, RECEIPT_SLOT));
+  // Exact: the expired months' 40 × 164 bytes are all gone; only the number's own growth is left.
+  is("the room's total is exactly what is left, never fuller", Number(await hget(idleRoom, "#")), slotAfter - slotBefore + (slotBefore === 0 ? 64 : 0));
   await assignReceiptNumber(other, "cs_test_idlestore000000002");
-  is("the next new number clears the next two", await listed(), expired.slice(4).join(","));
+  is("the next number finds nothing left to clear", [await hget(idleRoom, "~"), Number(await hget(idleRoom, "#"))], [null, Number(await hget(idleRoom, RECEIPT_SLOT)) - slotBefore + (slotBefore === 0 ? 64 : 0)]);
   const cleared = (storeData as Record<string, unknown>).DATA_MONTHS_CLEARED_MOST;
-  is("the data room names how many expired months a call clears at the most", cleared, 2);
-  is("and its script clears no more than that", TAKE_DATA.includes(`cleared < ${String(cleared)}`), true);
-  // Measured with INFO commandstats on a real Redis (review of #3001): 10 commands with no expired month, 11 + 2 a month cleared.
-  is("RECEIPT_NUMBER_COMMANDS covers the most the script can bill", RECEIPT_NUMBER_COMMANDS >= 11 + 2 * Number(cleared), true);
+  is("the data room names how many expired months a call clears at the most", cleared, 512);
+  is("and its script clears no more than that", TAKE_DATA.includes(`#over < ${String(cleared)}`), true);
+  is("reading them with one HMGET and removing them with one HDEL, never a command a month", [TAKE_DATA.includes("'HMGET'"), TAKE_DATA.includes("HGET', KEYS[1], '~' .. m")], [true, false]);
+  // Measured with INFO commandstats on a real Redis (review of #3001): 10 commands with no expired month, 12 with any number.
+  is("RECEIPT_NUMBER_COMMANDS covers the most the script can bill", RECEIPT_NUMBER_COMMANDS >= 12, true);
 
   part("Its cost: inside the receipt's studio requests");
   const worst = request("step", 40 + RECEIPT_NUMBER_COMMANDS, 200_000 + 2 * RECEIPT_NUMBER_BYTES) + RECEIPT_PDF_MAX_BYTES * ORIGIN_PER_BYTE;

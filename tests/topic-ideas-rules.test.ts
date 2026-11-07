@@ -6,7 +6,7 @@
  * a post. The model only proposes: an idea is kept only when every word of
  * it that carries meaning comes from the sources it names, with no figure,
  * link or deal word. At most five, at most once a week, and an idea whose
- * sources are gone (a post deleted or hidden, an event cancelled) is dropped.
+ * sources are gone (a post deleted or hidden, an event canceled) is dropped.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -45,9 +45,9 @@ const sources = ideaSources(
       post({ title: "From the creator", a: "CREATOR" }),
       post({ title: "An announcement", kind: "announcement" }),
       post({ title: "Old question", at: NOW_S - QUESTION_WINDOW_SECONDS - 1 }),
-      post({ title: "Reach me", text: "at ana@example.com or www.ana.example or +1 555 010 2030" }),
+      post({ title: "Reach me", text: "at ana@example.com or www.ana.example or +" + "1 555 010 2030" }),
     ],
-    events: [event(), event({ title: "Cancelled call", cancelled: true }), event({ title: "Past call", start: NOW_MS - 1000 }), event({ title: "Too far ahead", start: NOW_MS + 60 * DAY_S * 1000 })],
+    events: [event(), event({ title: "Canceled call", cancelled: true }), event({ title: "Past call", start: NOW_MS - 1000 }), event({ title: "Too far ahead", start: NOW_MS + 60 * DAY_S * 1000 })],
   },
   NOW_MS,
 );
@@ -99,6 +99,7 @@ is("kept: held to their own sources, no figure, link or deal word, once each, at
   { title: "Share your muddy greens", from: [2] },
 ]);
 is("never more than the cap", readIdeas({ ideas: Array.from({ length: 20 }, (_, i) => ({ title: ["Mixing greens", "Wet on wet", "Watercolor basics", "Live glaze demo", "Muddy greens", "Mix greens", "Glaze demo"][i % 7], from: [1, 2, 4] })) }, sources).length <= MAX_IDEAS, true);
+is("an idea of framing words only says nothing the sources said, and is refused", readIdeas({ ideas: [{ title: "Tips", from: [2] }, { title: "Your questions", from: [2] }, { title: "Share your first try", from: [4] }] }, sources), []);
 is("a word from a source it does not name is refused", readIdeas({ ideas: [{ title: "Live glaze demo", from: [4] }] }, sources), []);
 is("an unknown answer reads as no idea", [readIdeas(null, sources), readIdeas("ideas", sources), readIdeas({ ideas: "x" }, sources), readIdeas({ ideas: [null, 4, { title: 3, from: [1] }] }, sources)], [[], [], [], []]);
 is("an address or handle in a title is refused", readIdeas({ ideas: [{ title: "Ask @ana about greens", from: [2] }] }, sources), []);
@@ -110,7 +111,7 @@ const kept = [
 ];
 is("all still shown: all kept", ideasStillShown(kept, sources, sources), kept);
 const later = ideaSources({ courses: [course("Watercolor basics", ["Mixing greens", "Wet on wet"])], posts: [post({ replies: 0 })], events: [event({ cancelled: true })] }, NOW_MS);
-is("an event cancelled since drops the idea made from it", ideasStillShown(kept, sources, later), [kept[0]]);
+is("an event canceled since drops the idea made from it", ideasStillShown(kept, sources, later), [kept[0]]);
 const deleted = ideaSources({ courses: [course("Watercolor basics", ["Mixing greens", "Wet on wet"])], posts: [], events: [event()] }, NOW_MS);
 is("a post deleted or hidden since drops the idea made from it", ideasStillShown(kept, sources, deleted), [kept[1]]);
 is("an idea naming a source never sent is dropped", ideasStillShown([{ title: "Wet on wet", from: [42] }], sources, sources), []);

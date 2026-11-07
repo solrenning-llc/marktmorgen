@@ -1,3 +1,11 @@
+# Cursor de retomada — 07/11/2026 03h41 Fortaleza
+
+Checkpoint completo d57998d08994c2176a191b343f5702a17496e459/histórico preservado. Main0ade0faf3478ca554226b3f80e1866de82276ca9 e normativos/caixa/fila/reservas sem delta; FULL canal596d6258 lido desdeCXZ0242: nenhum retorno nominal Z, nenhuma ativação literal dafila porC4. Timelines2741/2819/2947 sem comentário novo desde05:42Z. Três heads permanecem os detalhados abaixo, nenhum CI consultado/teste repetido/pushprodutivo/merge/enqueue. Provas962149/efe2d387 aguardamEXEC/classificaçãoR2;2947aguardafocalC4. C4-0226/0139aplicadas: semmergedireto, semunidadeartificial/revisãoduplicada/relatóriolongosemachado.
+
+Checagem r24 limitada às fontes de lib/ai-call-budget.ts, lib/ai-response.ts e lib/funnel-ai-sequence.ts no main: sem achado causal novo demonstrado; não é certificação de todos os callers nem leitura/escrita paga do produto. Nenhum teste/prova/código novo para um não-achado. Não assumir correção em ramo de outro. Reservas/grants/retentativas consumidas/REDs/WIPs íntegros; nenhum subagente/vigiafutura/conta/pagamento/provedor/PII/preço/limite/comissão/flag/gate alterado. Próximo útil é retorno nominalR2/C5 de2741/2819 oufocalC4 de2947; gatestransitórios,nãoconclusãodaauditoria. Publicar pontoexatocurto no canal.
+
+---
+
 # Recibo final — 07/11/2026 02h42 Fortaleza
 
 Ponto exato CXZ-20261107-0242-C4-1 publicado no canal em **d2651e8eee6648837a38995e7c083f6e533e759e**, blob **c38fd08d46a228eac3ee8c37d9d979d583dc74db**. Prova2819/efe2d387 e pedido EXEC/classificaçãoR2 publicados; produto/heads originais intocados. C4-0226 continua: aguardar anúncio literal FILA LIGADA, sem merge direto. Nenhuma retentativa/CI/novo gasto de teste após os recibos abaixo; próximos continuamR2/C5 para2741/2819 e focalC4 de2947. Histórico integral preservado.

@@ -93,6 +93,26 @@ function takeReturn(): boolean {
   }
 }
 
+/** Said in the Passkeys section when the list could not be read just now (rule 24): unknown is not "No passkeys yet." */
+export const PASSKEYS_UNREAD = "Your passkeys could not be read just now. Nothing was changed; reload the page in a moment.";
+
+/**
+ * Where the manager would be when the list of passkeys could not be read just
+ * now: the section, its heading and its #passkeys anchor stay (the links to it
+ * still land), and nothing is offered on a guess.
+ */
+export function PasskeysUnread() {
+  return (
+    <section id="passkeys" aria-labelledby="passkeys-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
+      <h3 id="passkeys-title" className="flex items-center gap-2 font-semibold text-ink">
+        <Icon name="key" size={18} className="text-violet-deep" />
+        Passkeys
+      </h3>
+      <p className="mt-2 text-sm text-ink-soft">{PASSKEYS_UNREAD}</p>
+    </section>
+  );
+}
+
 /**
  * The person's passkeys, in the studio's Account part: add one, see when
  * each was last used, remove one. A passkey is the person's, not a store's,

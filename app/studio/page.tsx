@@ -220,7 +220,7 @@ import { liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-s
 import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
-import { PasskeyManager } from "@/components/passkey-manager";
+import { PasskeyManager, PasskeysUnread } from "@/components/passkey-manager";
 import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { AppCodeInvite } from "@/components/app-code-invite";
@@ -848,7 +848,7 @@ export default async function StudioPage({
   const mayAdd = email ? early(mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : null;
   const liveStep = email ? early(liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : null;
   const afterRemoval = <T,>(read: () => Promise<T>): Promise<T> => early((removing ?? Promise.resolve(null)).then(read));
-  const passkeysLeft = early(Promise.all([removing, mayAdd, liveStep]).then(() => (email ? listPasskeys(email).catch(() => []) : [])));
+  const passkeysLeft = early(Promise.all([removing, mayAdd, liveStep]).then(() => (email ? listPasskeys(email).catch(() => null) : [])));
   const firstReads = {
     folder: early(store ? storeFolder(ref) : Promise.resolve("")),
     pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
@@ -1226,7 +1226,9 @@ export default async function StudioPage({
   const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
-  const [passkeys, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  const [passkeysRead, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  // Not read just now (null) is not "no passkeys": each Passkeys section says so in place of its manager (rule 24).
+  const passkeys = passkeysRead ?? [];
   // Not read just now (null) is not "none": the recovery section says so in place of its manager (rule 24).
   const recoveryShown = recoveryRead ?? "";
   // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
@@ -1258,8 +1260,8 @@ export default async function StudioPage({
               },
             ]
           : []),
-        // A way back in that needs no email, for the day the sign-in inbox is lost (lib/recovery-address.ts); listed only when its tick is known.
-        ...(role === "owner" && (recoveryRead !== null || passkeys.length > 0)
+        // A way back in that needs no email, for the day the sign-in inbox is lost (lib/recovery-address.ts); listed only when its check mark is known: a way back that was read, or both read as none.
+        ...(role === "owner" && (Boolean(recoveryRead) || passkeys.length > 0 || (recoveryRead !== null && passkeysRead !== null))
           ? [{ key: "recovery", title: "Keep a way back in", hint: "A recovery address or a passkey: if you ever cannot open your email, either lets you straight back in.", done: Boolean(recoveryShown) || passkeys.length > 0, href: "#account-recovery" }]
           : []),
         { key: "share", title: "Share your address", hint: "Put it in your bio. This checks itself off when your first visitor arrives.", done: (numbers?.totals.d30.visitors ?? 0) > 0, href: "#details" },
@@ -3451,6 +3453,7 @@ export default async function StudioPage({
               </>
               )}
 
+              {passkeysRead === null ? <PasskeysUnread /> : (
               <PasskeyManager
                 initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                 fresh={freshLogin}
@@ -3459,6 +3462,7 @@ export default async function StudioPage({
                 removals={passkeyRemovals}
                 removalDays={REMOVAL_DAYS}
               />
+              )}
               {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
               <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
 
@@ -3541,6 +3545,7 @@ export default async function StudioPage({
               </Link>
             ) : (
               <div className="mt-6 space-y-6">
+                {passkeysRead === null ? <PasskeysUnread /> : (
                 <PasskeyManager
                   initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                   fresh={freshLogin}
@@ -3549,6 +3554,7 @@ export default async function StudioPage({
                   removals={passkeyRemovals}
                   removalDays={REMOVAL_DAYS}
                 />
+                )}
                 {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
                 <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
                 <p className="text-sm text-ink-soft">

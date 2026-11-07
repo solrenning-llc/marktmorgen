@@ -1,0 +1,157 @@
+=== j-review-3031-private-notes.proof.ts: status=1 signal=null ===
+{"case":"healthy-sequential","commands":11}
+{"case":"same-note-concurrency","result":[{"ok":true,"text":"first replacement"},{"ok":true,"text":"second replacement"}],"kept":{"state":"kept","text":"second replacement","at":1794009600},"commands":13}
+{"case":"count-concurrency","result":[{"ok":true,"text":"new A"},{"ok":true,"text":"new B"}],"count":301,"commands":10}
+{"case":"download-ceiling","commands":8,"replyBytes":4824321,"responseBytes":3209639,"transferAlone":0.00014472963,"admitted":0.00006329111111111112}
+✔ healthy sequential saves retain the latest note and refuse a stale tab (20.421413ms)
+✖ two simultaneous saves from one original cannot both acknowledge conflicting replacements (3.178142ms)
+✖ the 300-note ceiling still holds when two different notes share the last available place (2.21359ms)
+✖ a maximum legitimate notes download fits the one public request that admits it (130.399566ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 1
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 177.735579
+
+✖ failing tests:
+
+test at ../../../../tmp/j3031-jbKbE0/j-review-3031-private-notes.proof.ts.cjs:5474:27
+✖ two simultaneous saves from one original cannot both acknowledge conflicting replacements (3.178142ms)
+  AssertionError [ERR_ASSERTION]: only one conflicting save may be confirmed; the other must be changed/unknown
+
+  2 !== 1
+
+      at TestContext.<anonymous> (/tmp/j3031-jbKbE0/j-review-3031-private-notes.proof.ts.cjs:5483:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/j3031-jbKbE0/j-review-3031-private-notes.proof.ts.cjs:5485:27
+✖ the 300-note ceiling still holds when two different notes share the last available place (2.21359ms)
+  AssertionError [ERR_ASSERTION]: two acknowledged saves must not turn a valid 299-note hash into 301 notes
+      at TestContext.<anonymous> (/tmp/j3031-jbKbE0/j-review-3031-private-notes.proof.ts.cjs:5496:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/j3031-jbKbE0/j-review-3031-private-notes.proof.ts.cjs:5498:27
+✖ a maximum legitimate notes download fits the one public request that admits it (130.399566ms)
+  AssertionError [ERR_ASSERTION]: database transfer alone must fit the existing single public-request cost, before commands/compute/origin overhead
+      at TestContext.<anonymous> (/tmp/j3031-jbKbE0/j-review-3031-private-notes.proof.ts.cjs:5516:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+Public data check: 4158 tracked files; 0 file(s) require correction.
+✘ [ERROR] Top-level await is currently not supported with the "cjs" output format
+
+    tests/sq1-lesson-notes.test.ts:241:0:
+      241 │ await owner();
+          ╵ ~~~~~
+
+✘ [ERROR] Top-level await is currently not supported with the "cjs" output format
+
+    tests/sq1-lesson-notes.test.ts:242:0:
+      242 │ await caps();
+          ╵ ~~~~~
+
+✘ [ERROR] Top-level await is currently not supported with the "cjs" output format
+
+    tests/sq1-lesson-notes.test.ts:243:0:
+      243 │ await room();
+          ╵ ~~~~~
+
+✘ [ERROR] Top-level await is currently not supported with the "cjs" output format
+
+    tests/sq1-lesson-notes.test.ts:244:0:
+      244 │ await unknown();
+          ╵ ~~~~~
+
+✘ [ERROR] Top-level await is currently not supported with the "cjs" output format
+
+    tests/sq1-lesson-notes.test.ts:245:0:
+      245 │ await page();
+          ╵ ~~~~~
+
+✘ [ERROR] Top-level await is currently not supported with the "cjs" output format
+
+    tests/sq1-lesson-notes.test.ts:246:0:
+      246 │ await exportText();
+          ╵ ~~~~~
+
+✘ [ERROR] Top-level await is currently not supported with the "cjs" output format
+
+    tests/sq1-lesson-notes.test.ts:247:0:
+      247 │ await erasure();
+          ╵ ~~~~~
+
+✘ [ERROR] Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/lib/lesson-notes" (originally "@/lib/lesson-notes")
+
+    tests/sq1-lesson-notes.test.ts:34:7:
+      34 │ } from "@/lib/lesson-notes";
+         ╵        ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/lib/lesson-notes" was remapped to "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/lib/lesson-notes" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/lib/buyer-words/lesson-notes" (originally "@/lib/buyer-words/lesson-notes")
+
+    tests/sq1-lesson-notes.test.ts:35:33:
+      35 │ import { lessonNotesWords } from "@/lib/buyer-words/lesson-notes";
+         ╵                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/lib/buyer-words/lesson-notes" was remapped to "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/lib/buyer-words/lesson-notes" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/components/lesson-notes" (originally "@/components/lesson-notes")
+
+    tests/sq1-lesson-notes.test.ts:36:28:
+      36 │ import { LessonNotes } from "@/components/lesson-notes";
+         ╵                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/lesson-notes" was remapped to "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/components/lesson-notes" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 10 errors:
+tests/sq1-lesson-notes.test.ts:34:7: ERROR: Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/lib/lesson-notes" (originally "@/lib/lesson-notes")
+tests/sq1-lesson-notes.test.ts:35:33: ERROR: Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/lib/buyer-words/lesson-notes" (originally "@/lib/buyer-words/lesson-notes")
+tests/sq1-lesson-notes.test.ts:36:28: ERROR: Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3031-author-red/components/lesson-notes" (originally "@/components/lesson-notes")
+tests/sq1-lesson-notes.test.ts:241:0: ERROR: Top-level await is currently not supported with the "cjs" output format
+tests/sq1-lesson-notes.test.ts:242:0: ERROR: Top-level await is currently not supported with the "cjs" output format
+...
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1

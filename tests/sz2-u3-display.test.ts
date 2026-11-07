@@ -22,8 +22,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductImage, setProductLegal, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { catalogRecord, listingOf, parseCatalog, parseProduct, readListing, readProduct, readProductLegal } from "@/lib/catalog";
-import { parseShipping } from "@/lib/shipping";
-import { GPSR_AREA, unitWords } from "@/lib/physical-legal";
+import { parseShipping, shipsToWords } from "@/lib/shipping";
+import { GPSR_AREA, safetyGaps, unitWords } from "@/lib/physical-legal";
+import { deliveryWords } from "@/lib/answers";
+import { SHIPPING_WORDS } from "@/lib/buyer-words/shipping";
 import type { PhysicalLegal } from "@/lib/physical-legal-record";
 import { shippingNow, shipsNowhere } from "@/lib/physical-legal-ship";
 import { cartItemOf, cartShipping } from "@/lib/cart-shipping";
@@ -81,6 +83,27 @@ async function main(): Promise<void> {
   const worldNow = shippingNow(world)!;
   is("a region that loses countries is said as the countries left", [worldNow.region, worldNow.countries.some((code) => GPSR_AREA.includes(code)), worldNow.countries.length > 0], ["custom", false, true]);
   is("an unreadable legal record reads as not filled", shippingNow(parseProduct({ ...RAW, legal: { safety: "full" }, image: IMAGE })!)?.countries, ["US"]);
+
+  // Independent review of #3029 at aaba5bd4f, findings 1 and 2 (their proof, kept here).
+  part("EU and EEA territory with its own two letters; a world product said in a few words");
+  // Åland (TFEU art. 355(4)) and the French outermost regions (arts. 349 and 355(1); OJ C 202, 7.6.2016).
+  const TERRITORIES = ["AX", "GF", "GP", "MF", "MQ", "RE", "YT"];
+  is("Åland and the French outermost regions are in the Union: closed on a world product not filled", TERRITORIES.filter((code) => worldNow.countries.includes(code)), []);
+  is("shipped to Réunion, Guadeloupe and the US, not filled: only the US", shippingNow(parseProduct({ ...RAW, shipping: { cents: 600, region: "custom", countries: ["RE", "GP", "US"], note: "" } })!)?.countries, ["US"]);
+  is("Svalbard and Jan Mayen share one code, and Jan Mayen is in the EEA: closed while not filled", worldNow.countries.includes("SJ"), false);
+  const worldFilled = shippingNow(parseProduct({ ...RAW, shipping: { cents: 600, region: "world", note: "" }, legal: FULL, image: IMAGE })!)!;
+  is("filled: every one of them opens again, and the region is kept", [[...TERRITORIES, "SJ"].every((code) => worldFilled.countries.includes(code)), worldFilled.region], [true, "world"]);
+  is("a manufacturer in Réunion is in the Union: no responsible person asked for", safetyGaps({ ...SAFETY, manufacturer: { ...SAFETY.manufacturer, country: "RE" }, responsible: null }, true), []);
+  is("a responsible person in Martinique is in the Union", safetyGaps({ ...SAFETY, responsible: { ...SAFETY.responsible, country: "MQ" } }, true), []);
+  is("a manufacturer on Svalbard, outside the EEA, still needs one", safetyGaps({ ...SAFETY, manufacturer: { ...SAFETY.manufacturer, country: "SJ" }, responsible: null }, true).includes("responsible"), true);
+  const worldWords = deliveryWords(listingOf(world));
+  is("the delivery fact of a world product not filled stays short", [worldWords.length < 400, worldWords.includes("AD, AE")], [true, false]);
+  is("it names the region and what is left out", worldWords.includes("to: everywhere Stripe can ship to, except for now the European Union, Iceland, Liechtenstein and Norway."), true);
+  is("the buy box says it in a few words", shipsToWords(worldNow, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, Iceland, Liechtenstein and Norway");
+  for (const code of LANGUAGE_CODES) is(`${code}: said, not listed`, shipsToWords(worldNow, code, SHIPPING_WORDS[code]).length < 160, true);
+  is("a custom list stays a list", shipsToWords(shippingNow(bare)!, "en-US", SHIPPING_WORDS.en), "United States");
+  const cartRoute = readFileSync("app/api/store/cart/route.ts", "utf8");
+  is("the cart says it the same way", /everywhereButGpsr\(sending\.countries\)/.test(cartRoute), true);
 
   part("The listing carries a computed mark, never the record");
   const listing = listingOf(filled);

@@ -125,6 +125,39 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
+        if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, book, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", book, json]);
+          return 1;
+        }
+        // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
+        if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, about, expected, text] = args;
+          const now = this.run(["GET", about]);
+          const held = typeof now === "string" ? now : "";
+          if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+          this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
+          return [1];
+        }
+        // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
+        if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
+          const [, imported, own, field, job, ...known] = args;
+          const members = this.run(["SMEMBERS", own]);
+          if ((Array.isArray(members) ? members : []).some((member) => !known.includes(String(member)))) return 0;
+          const raw = this.run(["HGET", imported, field]);
+          if (raw === null || raw === undefined) return 2;
+          let record: unknown;
+          try {
+            record = JSON.parse(String(raw));
+          } catch {
+            return 0;
+          }
+          if (!record || typeof record !== "object" || (record as { job?: unknown }).job !== job) return 0;
+          this.run(["HDEL", imported, field]);
+          return 1;
+        }
         // lib/assistant-memory-store.ts MEMORY_WRITE: the notes written or deleted only while the change's lock is its own.
         if (key.startsWith("-- marktmorgen:amem-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, notes, token, json] = args;
@@ -221,6 +254,15 @@ export class MemoryRedis {
           this.run(["EXPIRE", ledger, seconds]); return 1;
         }
 
+        // lib/redis-lock.ts releaseLock and holdLock: the lock deleted, or made to last, only while it holds the token.
+        if (key.startsWith("-- marktmorgen:release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, lock, token] = args;
+          return this.run(["GET", lock]) === token ? this.run(["DEL", lock]) : 0;
+        }
+        if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, lock, token, seconds] = args;
+          return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;
@@ -639,7 +681,76 @@ export class MemoryRedis {
           this.data.set(args[1], String(n - 1));
           return n - 1;
         }
-        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v1\n")) {
+        if (key.startsWith("-- marktmorgen:lesson-comments-add:v2\n") && args[0] === "4" && args.length === 13) {
+          const [, comments, lesson, all, replies, parentId, lessonId, id, raw, score, rawMost, rawRecent, rawLessonMost] = args;
+          let count = 0;
+          if (parentId !== "") {
+            const parentRaw = this.run(["HGET", comments, parentId]);
+            if (typeof parentRaw !== "string") return [1, 0, 0, 0, 0];
+            try {
+              const parent = JSON.parse(parentRaw) as { id?: unknown; l?: unknown; r?: unknown };
+              if (parent.id !== parentId || parent.l !== lessonId || (parent.r !== undefined && parent.r !== null)) return [3, 0, 0, 0, 0];
+            } catch { return [3, 0, 0, 0, 0]; }
+            count = Number(this.run(["HGET", replies, parentId]) ?? 0);
+            const most = Number(rawMost);
+            if (!Number.isSafeInteger(count) || count < 0 || !Number.isSafeInteger(most) || most < 1) return [3, 0, 0, 0, 0];
+            if (count >= most) return [2, 0, 0, 0, 0];
+          } else {
+            const lessonCount = Number(this.run(["ZCARD", lesson])), most = Number(rawLessonMost);
+            if (!Number.isSafeInteger(lessonCount) || lessonCount < 0 || !Number.isSafeInteger(most) || most < 1) return [3, 0, 0, 0, 0];
+            if (lessonCount >= most) return [4, 0, 0, 0, 0];
+          }
+          const kept = this.run(["HSET", comments, id, raw]);
+          const underLesson = this.run(["ZADD", lesson, score, id]);
+          const newest = this.run(["ZADD", all, score, id]);
+          const trimmed = this.run(["ZREMRANGEBYRANK", all, 0, -Number(rawRecent) - 1]);
+          const answers = parentId === "" ? 0 : this.run(["HINCRBY", replies, parentId, 1]);
+          return [kept, underLesson, newest, trimmed, answers];
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comment-thread-delete:v1\n") && args[0] === "4" && args.length === 10) {
+          const [, comments, lesson, all, replies, target, lessonId, rawMost, rawEntry, rawStep] = args;
+          const raw = this.run(["HGET", comments, target]);
+          if (typeof raw !== "string") return [0, 0];
+          const validId = (value: unknown): value is string => typeof value === "string" && /^[a-z0-9]{12}$/.test(value);
+          const parsed = (value: string, expected: string): { r: string | null; hidden: boolean } | null => {
+            try {
+              const row = JSON.parse(value) as { id?: unknown; l?: unknown; b?: unknown; t?: unknown; r?: unknown; h?: unknown };
+              if (row.id !== expected || row.l !== lessonId || typeof row.b !== "string" || typeof row.t !== "string") return null;
+              if (row.r !== undefined && row.r !== null && !validId(row.r)) return null;
+              return { r: typeof row.r === "string" ? row.r : null, hidden: row.h === true };
+            } catch { return null; }
+          };
+          const root = parsed(raw, target);
+          if (!root) return [-1, 0];
+          const gone: [string, string, boolean][] = [[target, raw, root.hidden]], known = new Set([target]);
+          const most = Number(rawMost), entry = Number(rawEntry), step = Number(rawStep);
+          if (![most, entry, step].every(Number.isSafeInteger) || most < 1 || entry < 0 || step < 1) return [-1, 0];
+          if (root.r === null) {
+            const ids = this.zset(lesson).slice().sort((a, b) => a.score - b.score || a.member.localeCompare(b.member)).slice(0, most + 1).map(row => row.member);
+            if (ids.length > most) return [-1, 0];
+            for (const id of ids) {
+              const value = this.run(["HGET", comments, id]);
+              if (typeof value !== "string") return [-1, 0];
+              const row = parsed(value, id);
+              if (!row) return [-1, 0];
+              if (row.r === target && !known.has(id)) { known.add(id); gone.push([id, value, row.hidden]); }
+            }
+          } else {
+            const count = Number(this.run(["HGET", replies, root.r]));
+            if (!Number.isSafeInteger(count) || count < 1) return [-1, 0];
+          }
+          const hiddenMark = new TextEncoder().encode(',"h":true').length;
+          const freed = gone.reduce((sum, [, value, hidden]) => sum + Math.ceil((new TextEncoder().encode(value).length - (hidden ? hiddenMark : 0) + entry * 4) / step) * step, 0);
+          for (const [id] of gone) {
+            this.run(["HDEL", comments, id]);
+            this.run(["ZREM", lesson, id]);
+            this.run(["ZREM", all, id]);
+            this.run(["HDEL", replies, id]);
+          }
+          if (root.r !== null) this.run(["HINCRBY", replies, root.r, -1]);
+          return [gone.length, freed];
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
@@ -653,7 +764,8 @@ export class MemoryRedis {
             try { rows.set(id, JSON.parse(raw)); } catch { /* not a comment */ }
           }
           const tops = new Set([...rows].filter(([, c]) => c.b === who && !c.r).map(([id]) => id));
-          let gone = 0;
+          const raws = new Map(held instanceof Map ? [...held] : []);
+          const gone: string[] = [];
           for (const [id, c] of rows) {
             const parent = c.r ?? null;
             if (c.b !== who && !(parent && tops.has(parent))) continue;
@@ -666,9 +778,59 @@ export class MemoryRedis {
               const counts = this.hash(replies);
               counts.set(parent, String((Number(counts.get(parent)) || 0) - 1));
             }
-            gone += 1;
+            gone.push(raws.get(id) ?? "");
           }
+          const name = this.hash(names).get(who) ?? "";
           this.hash(names).delete(who);
+          return [name, gone];
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comments-hide:v1\n") && args[0] === "1" && args.length === 4) {
+          if (this.run(["HEXISTS", args[1], args[2]]) !== 1) return 0;
+          this.run(["HSET", args[1], args[2], args[3]]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:lesson-comments-take:v2\n")) {
+          const count = Number(args[0]);
+          const [comments, all, replies, ...lessonKeys] = args.slice(1, 1 + count);
+          const drop = args[1 + count] === "drop";
+          const asked = drop ? lessonKeys.flatMap((k) => (this.run(["ZREVRANGE", k, 0, -1]) as string[]).reverse()) : args.slice(2 + count);
+          const askedSet = new Set(asked);
+          const taken = new Set<string>();
+          const tops = new Set<string>();
+          const gone: string[] = [];
+          const decode = (raw: string): { r?: unknown } | null => {
+            try { const c = JSON.parse(raw); return c && typeof c === "object" ? c : null; } catch { return null; }
+          };
+          for (const id of asked) {
+            if (taken.has(id)) continue;
+            const raw = this.run(["HGET", comments, id]);
+            this.run(["ZREM", all, id]);
+            this.run(["HDEL", replies, id]);
+            for (const k of lessonKeys) this.run(["ZREM", k, id]);
+            if (typeof raw !== "string") continue;
+            taken.add(id);
+            this.run(["HDEL", comments, id]);
+            gone.push(raw);
+            const c = decode(raw);
+            if (!c) continue;
+            const parent = typeof c.r === "string" ? c.r : null;
+            if (parent === null) tops.add(id);
+            else if (!askedSet.has(parent) && !taken.has(parent) && this.run(["HEXISTS", comments, parent]) === 1) this.run(["HINCRBY", replies, parent, -1]);
+          }
+          if (tops.size) for (const k of lessonKeys) {
+            for (const id of this.zset(k).map((e) => e.member)) {
+              const raw = this.run(["HGET", comments, id]);
+              if (typeof raw !== "string") continue;
+              const c = decode(raw);
+              if (!c || typeof c.r !== "string" || !tops.has(c.r)) continue;
+              this.run(["HDEL", comments, id]);
+              this.run(["HDEL", replies, id]);
+              this.run(["ZREM", all, id]);
+              this.run(["ZREM", k, id]);
+              gone.push(raw);
+            }
+          }
+          if (drop) for (const k of lessonKeys) this.run(["DEL", k]);
           return gone;
         }
         if (key.startsWith("-- marktmorgen:kept-any:v1\n")) {
@@ -704,27 +866,38 @@ export class MemoryRedis {
           }
           return n;
         }
-        if (key.startsWith("-- marktmorgen:form-forget:v1\n")) {
+        if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
+          const listKey = args[1];
+          this.live(listKey);
+          const list = this.list(listKey);
+          list.unshift(args[2]);
+          const out: string[] = [];
+          while (list.length > Number(args[3])) out.push(list.pop()!);
+          return out;
+        }
+        if (key.startsWith("-- marktmorgen:form-forget:v2\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const address = args[1 + count];
-          let removed = 0;
-          for (const listKey of keys) {
+          const out: (string | number)[] = [];
+          keys.forEach((listKey, k) => {
             this.live(listKey);
-            if (!this.data.has(listKey)) continue;
+            if (!this.data.has(listKey)) return;
+            const counts = new Map<string, number>();
             const kept = this.list(listKey).filter((raw) => {
               try {
                 const value = JSON.parse(raw) as { answers?: Record<string, unknown> };
                 const hit = value && typeof value.answers === "object" && value.answers !== null && Object.values(value.answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === address);
-                if (hit) removed += 1;
+                if (hit) counts.set(raw, (counts.get(raw) ?? 0) + 1);
                 return !hit;
               } catch {
                 return true;
               }
             });
             this.data.set(listKey, kept);
-          }
-          return removed;
+            for (const [raw, n] of counts) out.push(k + 1, raw, n);
+          });
+          return out;
         }
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
         if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {
@@ -798,6 +971,41 @@ export class MemoryRedis {
             }
           }
           return taken;
+        }
+        // lib/stock.ts STOCK_ADMIT and STOCK_BIND (513 [PF1], Codex G2's review of #1730, 5 November 2026), step for step.
+        if (key.startsWith("-- marktmorgen:stock-admit:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          const n = Number(argv[0]);
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== 2 * n || argv.length !== n + 2) return -1;
+          const pending = argv[n + 1];
+          for (const k of keys) this.live(k);
+          let ours = true;
+          for (let i = 0; i < n; i += 1) {
+            if (this.data.get(keys[i]) !== argv[1 + i]) ours = false;
+            const hold = this.data.get(keys[n + i]);
+            if (hold !== undefined && !(hold instanceof Map)) return -1;
+            if (!(hold instanceof Map) || !hold.has(pending)) ours = false;
+          }
+          if (ours) return 1;
+          for (let i = 0; i < n; i += 1) {
+            const hold = this.data.get(keys[n + i]);
+            if (hold instanceof Map) this.run(["HDEL", keys[n + i], pending]);
+          }
+          return 0;
+        }
+        if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          const n = Number(argv[0]);
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== n || argv.length !== 3) return -1;
+          for (const k of keys) this.live(k);
+          for (const k of keys) {
+            const hold = this.data.get(k);
+            if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
+          }
+          for (const k of keys) this.run(["HDEL", k, argv[1]]);
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);

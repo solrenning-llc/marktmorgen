@@ -147,4 +147,12 @@ is(`at most ${MAX_WARNINGS} warnings`, capped.length <= MAX_WARNINGS, true);
 is(`text past ${MAX_TEXT} characters is not read`, capped.some((w) => w.kind === "other_company"), false);
 is("not a string: no warnings, no error", checkCreatorTerms({ ...base, text: undefined as unknown as string }), []);
 
+part("Terms keep the narrower urgency and price words: plain facts are not urgency (review of 4 November 2026)");
+const plainFacts = ["Act today to protect your data.", "Last day of the course is a review.", "Prices increase each year with inflation.", "Support ends in 30 days after refund.", "Your access ends on 12/31 unless renewed.", "Membership expires soon after you cancel.", "Final hours of the video show the build.", "Don't miss out on the lessons in module 2."];
+is("none of these warn in terms", plainFacts.filter((text) => kinds(text).includes("false_urgency")), []);
+is("but the same sentences in an ad are urgency where they are", ["Act today.", "Last day!", "Prices increase soon."].filter((text) => !kinds(text, { asAd: true }).includes("false_urgency")), []);
+is("'from $10' is a price only in an ad", [kinds("Plans start from $10 per month.").includes("price_mismatch"), kinds("Courses from $10.", { asAd: true }).includes("price_mismatch")], [false, true]);
+is("the old phrases still warn in terms, spaced or hyphenated", ["Last-chance offer.", "Limited  time only.", "Hurry!"].filter((text) => !kinds(text).includes("false_urgency")), []);
+is("a weekday in terms is a fact, not urgency; in an ad it is", [kinds("Support ends Friday.").includes("false_urgency"), kinds("Sale ends Friday.", { asAd: true }).includes("false_urgency")], [false, true]);
+
 done();

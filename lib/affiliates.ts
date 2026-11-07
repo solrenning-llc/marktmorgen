@@ -80,6 +80,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { giveData, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -567,12 +568,28 @@ export async function signInLinkFor(store: Store, email: string, origin: string)
   return `${origin}/@${store.handle}/affiliates?token=${token}`;
 }
 
-async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+/** A whole number from one up after INCR, or null when the reply is not exactly that. */
+function incremented(reply: unknown): number | null {
+  const count = countOf(reply);
+  return count !== null && count >= 1 ? count : null;
+}
+
+/**
+ * Whether one more request fits in the hour: true or false on a count read in
+ * its exact shape, null when the answer is missing, cut short or of another
+ * shape, which is never taken as room (CX-123 rule 24).
+ */
+async function within(key: string, limit: number): Promise<boolean | null> {
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
+  const count = incremented(both[1]);
+  return count === null ? null : count <= limit;
 }
 
 /** A name that can sit inside the quotes of an email's From line. */
@@ -652,8 +669,13 @@ export async function requestAffiliateLink(input: {
   const email = normaliseEmail(raw);
   if (!canApply(store)) return "unavailable";
   if (canonicalEmail(email) === canonicalEmail(store.email)) return "owner";
-  if (!(await within(applyIpKey(ip, store.handle), APPLY_IP_LIMIT))) return "limited";
-  if (!(await within(applyAddressKey(email), APPLY_ADDRESS_LIMIT))) return "limited";
+  // A count that could not be read sends nothing and keeps nothing; it is said as an error, never as too many requests.
+  const byConnection = await within(applyIpKey(ip, store.handle), APPLY_IP_LIMIT);
+  if (byConnection === null) return "error";
+  if (!byConnection) return "limited";
+  const byAddress = await within(applyAddressKey(email), APPLY_ADDRESS_LIMIT);
+  if (byAddress === null) return "error";
+  if (!byAddress) return "limited";
 
   const [known] = await redisPipeline([["HGET", emailsKey(store.statsId as string), email]]);
   const token = randomBytes(32).toString("hex");
@@ -1292,7 +1314,10 @@ export async function recordClick(
   const own = await affiliateForSession(store, visitor.session);
   if (own?.id === affiliate.id) return false;
   const statsId = store.statsId as string;
-  if (!(await within(clickIpKey(visitor.ip, statsId), CLICK_IP_LIMIT))) return false;
+  // A count that could not be read counts no click; thrown so the visit's log says why (lib/visit.ts).
+  const allowed = await within(clickIpKey(visitor.ip, statsId), CLICK_IP_LIMIT);
+  if (allowed === null) throw new UnknownReplyError("an affiliate click count");
+  if (!allowed) return false;
   const day = Math.floor(Date.now() / 86_400_000);
   const [fresh] = await redisPipeline([
     ["SET", seenKey(`${statsId}|${affiliate.id}|${visitor.ip}|${visitor.userAgent}|${day}`), "1", "NX", "EX", 2 * 86_400],

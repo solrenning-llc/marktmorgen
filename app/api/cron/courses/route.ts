@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured } from "@/lib/email";
 import { storeForHandle } from "@/lib/store";
 import { readCourse } from "@/lib/course";
@@ -27,8 +28,12 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isSenderConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:courses:lock", "1", "NX", "EX", 300]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts): held by another run is busy; an unknown answer
+  // runs nothing this time, and the lock is let go at the end only while it still holds this run's own value.
+  const lock = claimValue();
+  const got = await claimMark("nl:courses:lock", 300, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     const counts = await sendDripEmails(storeForHandle, readCourse, SITE_URL);
     const stale = await staleTaskUploads().catch(() => [] as string[]);
@@ -39,6 +44,6 @@ export async function GET(request: NextRequest) {
     console.error("sending course emails failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   } finally {
-    await redisPipeline([["DEL", "nl:courses:lock"]]).catch(() => {});
+    await releaseMark("nl:courses:lock", lock);
   }
 }

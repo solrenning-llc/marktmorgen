@@ -78,11 +78,16 @@ export async function checkPublicKeyboardFocusRegressions({browser}) {
    await tall.addScriptTag({content:source.script});
    assert.equal(await tall.locator(".reveal").evaluate(node=>getComputedStyle(node).opacity),"0","below-fold section starts unrevealed");
    assert.deepEqual(await tall.locator("summary").evaluate(node=>({bottom:getComputedStyle(document.documentElement).scrollPaddingBottom,margin:getComputedStyle(node).scrollMarginBlock})),{bottom:"48px",margin:"48px"},"real help focus insets are active in the browser fixture");
-   await checkPublicKeyboardCycle({page:tall,path:"real-reveal-tall-section",is});
-   await tall.waitForFunction(()=>{
-    const node=document.querySelector(".reveal"),style=getComputedStyle(node);
-    return node.classList.contains("is-in")&&style.opacity==="1"&&style.transform==="none";
-   },undefined,{timeout:3000});
+   let revealObserved=false;
+   await checkPublicKeyboardCycle({page:tall,path:"real-reveal-tall-section",is,onFocusSettled:async()=>{
+    if(revealObserved||!await tall.locator("summary").evaluate(node=>document.activeElement===node))return;
+    await tall.waitForFunction(()=>{
+     const node=document.querySelector(".reveal"),style=getComputedStyle(node);
+     return node.classList.contains("is-in")&&style.opacity==="1"&&style.transform==="none";
+    },undefined,{timeout:3000});
+    revealObserved=true;
+   }});
+   assert.equal(revealObserved,true,"the reveal transition settles while native focus remains inside the tall section");
   }finally{await tall.close();}
   // Firefox left a short linked topic card at 457.2px tall because h-full
   // stretched it to the height of the much longer card beside it. Its top was

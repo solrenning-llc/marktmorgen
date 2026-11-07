@@ -49,7 +49,7 @@ export const en = {
   // ---- Sales and fair prices ----------------------------------------------
   fairHead: (country: string, percent: number) => `A fair price for ${country}: ${percent}% off`,
   fairNote: (store: string, plan: boolean) =>
-    `${store} lowers prices where money buys less. Taken off on the payment page, no code needed${plan ? "; the lower price is for paying in full" : ""}.`,
+    `${store} lowers prices where money buys less. This price was set automatically for you, from the country of your internet connection. Taken off on the payment page, no code needed${plan ? "; the lower price is for paying in full" : ""}.`,
   saleHead: (name: string, percent: number, ends: string) => `${name ? `${name}: ` : ""}${percent}% off · ${ends}`,
   saleNote: (until: string, plan: boolean) =>
     `Until ${until}. Taken off on the payment page, no code needed${plan ? "; the sale price is for paying in full" : ""}.`,
@@ -153,7 +153,8 @@ export const en = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store: string) => `The ${store} blog`,
-  blogEmpty: "Nothing here yet.",
+  blogPastEnd: "No posts on this page",
+  blogPastEndBody: "This page is past the last post.",
   blogMinutes: (n: number) => `${n} min read`,
   blogNewer: "Newer posts",
   blogOlder: "Older posts",
@@ -166,6 +167,7 @@ export const en = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent: number) => `save ${percent}%`,
   chooseOptionFor: (title: string) => `Choose an option for ${title}`,
+  chooseOne: "Choose one",
   recommended: "Recommended",
   recommendedAfter: " (recommended)",
   howToPayFor: (title: string) => `How to pay for ${title}`,
@@ -327,6 +329,7 @@ export const en = {
   newer: "Newer",
   older: "Older",
   askUnknown: (store: string) => `This page does not say. Ask ${store} before you buy.`,
+  askTermsCut: () => "I don't have the full terms here. Please ask the creator before you buy.",
 
   // ---- The card on the creator's own website ---------------------------------------------
   noLongerOnSale: "This product is no longer on sale.",

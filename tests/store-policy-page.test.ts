@@ -6,11 +6,15 @@
  * from its source, as other store page checks do.
  */
 import { readFileSync } from "node:fs";
-import { policyInputFrom } from "@/lib/store-policy-input";
+import { addProduct, claimHandle, ensureStatsId, moveProduct, setSubscription, storeForEmail } from "@/lib/store";
+import { visibleIds } from "@/lib/catalog";
+import { policyInput, policyInputFrom } from "@/lib/store-policy-input";
 import { policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
 import { RESERVED_SLUGS } from "@/lib/site-page-rules";
 import { NO_PIXELS } from "@/lib/pixels";
 import { done, is, part } from "./check";
+import { store as redis } from "./redis-stub";
+import { paidPeriod } from "./billing-period-fixture";
 
 const store = { name: "Harbor Kitchen", pixels: { ...NO_PIXELS }, mail: { address: "1 Main St, Portland, OR 97201" } } as unknown as Parameters<typeof policyInputFrom>[0];
 const ebook = { priceCents: 1900, file: { pathname: "x" } };
@@ -41,4 +45,58 @@ is("one h1, a titled h2 per section, the page's language marked", [(page.match(/
 is("a product read that fails is never quietly left out", [readFileSync("lib/store-policy-input.ts", "utf8").includes("const products = await readListingsExact(store, visibleIds(store));"), /\bcatch\b|\breadListings\(/.test(readFileSync("lib/store-policy-input.ts", "utf8").replace(/\/\/.*$/gm, ""))], [true, false]);
 is("a creator's page cannot take its address", RESERVED_SLUGS.has("policies"), true);
 
-done();
+/**
+ * A stored membership schedule that cannot be read (Codex G's review of #1824): a listing outside the head
+ * whose `recurring` is there but not a schedule is unknown, so the page is not built, never built as a store
+ * that sells no memberships. An absent or null `recurring` is a product that is not a membership. The record
+ * is written by the real writers and then changed in Redis, as a damaged or foreign record would be.
+ */
+async function storedSchedule() {
+  part("A stored membership schedule that cannot be read is unknown, never \"no memberships\"");
+  redis.clear();
+  const owner = "policy-recurring@example.test";
+  await claimHandle(owner, "policyrecurring", "Policy Recurring", "");
+  await ensureStatsId(owner);
+  await setSubscription(owner, { customerId: "cus_PolicyRec01", subscriptionId: "sub_PolicyRec01", active: true, period: paidPeriod() });
+  for (let i = 0; i < 25; i++) if (!(await addProduct(owner, `Free ${i}`, "", "0", null)).ok) throw Error("fixture free product failed");
+  const member = await addProduct(owner, "Monthly club", "", "9", { interval: "month", trialDays: 0, payments: 0 });
+  if (!member.ok) throw Error("fixture membership failed");
+  await moveProduct(owner, member.product.id, "bottom");
+  const shop = (await storeForEmail(owner))!;
+  is("the membership is listed outside the head", [visibleIds(shop).includes(member.product.id), shop.catalog.head.some((p) => p.id === member.product.id)], [true, false]);
+  const key = `nl:catalog:${shop.catalog.id}:l:${member.product.id}`;
+  const original = String((await redis.pipeline([["GET", key]]))[0]);
+  const stored = async (recurring: unknown, drop = false) => {
+    const value = JSON.parse(original);
+    if (drop) delete value.recurring;
+    else value.recurring = recurring;
+    await redis.pipeline([["SET", key, JSON.stringify(value)]]);
+    try {
+      const input = await policyInput(shop);
+      return { memberships: input.sellsMemberships };
+    } catch {
+      return "unknown";
+    }
+  };
+  is("a readable schedule: memberships", await stored(JSON.parse(original).recurring), { memberships: true });
+  for (const [what, recurring] of [
+    ["an interval it does not know", { interval: "fortnight", trialDays: 0, payments: 0 }],
+    ["a schedule with no interval", { trialDays: 0, payments: 0 }],
+    ["an empty object", {}],
+    ["a list", []],
+    ["true", true],
+    ["false", false],
+    ["a bare word", "month"],
+    ["a number", 1],
+  ] as const) {
+    is(`${what}: unknown, the page not built`, await stored(recurring), "unknown");
+  }
+  is("null: not a membership", await stored(null), { memberships: false });
+  is("no recurring field at all: not a membership", await stored(undefined, true), { memberships: false });
+  is("the readable schedule back: memberships again", await stored(JSON.parse(original).recurring), { memberships: true });
+}
+
+storedSchedule().then(done, (e) => {
+  console.error(e);
+  process.exitCode = 1;
+});

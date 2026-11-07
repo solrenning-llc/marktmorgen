@@ -25,7 +25,7 @@ import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -60,18 +60,49 @@ const INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
 
 export type SoonState = { soon: Set<string>; days: Map<string, string> };
 
+function knownSoonMember(raw: unknown): boolean {
+  if (raw === 1 || raw === "1") return true;
+  if (raw === 0 || raw === "0") return false;
+  throw new UnknownReplyError("coming-soon membership");
+}
+
+function exactDays(raw: unknown): Map<string, string> {
+  const fields = stringList(raw);
+  if (!fields || fields.length % 2 !== 0) throw new UnknownReplyError("coming-soon days");
+  const out = new Map<string, string>();
+  for (let i = 0; i < fields.length; i += 2) {
+    const day = keptDay(fields[i + 1]);
+    if (day) out.set(fields[i], day);
+  }
+  return out;
+}
+
 /** The products coming soon, and the day each pre-ordered one is expected: one request, for the store page. */
 export async function soonState(store: Store): Promise<SoonState> {
   if (!store.statsId || !isRedisConfigured()) return { soon: new Set(), days: new Map() };
-  const [members, raw] = await redisPipeline([["SMEMBERS", soonKey(store.statsId)], ["HGETALL", dayKey(store.statsId)]]);
-  return { soon: new Set(Array.isArray(members) ? (members as string[]) : []), days: daysOf(raw) };
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", soonKey(store.statsId)], ["HGETALL", dayKey(store.statsId)]]), 2);
+  if (!replies) throw new UnknownReplyError("coming-soon state");
+  const members = stringList(replies[0]);
+  if (!members) throw new UnknownReplyError("coming-soon products");
+  return { soon: new Set(members), days: exactDays(replies[1]) };
 }
 
 /** One product: coming soon or not, and the day it is expected when it takes pre-orders. One request. */
 export async function soonOne(store: Store, productId: string): Promise<{ soon: boolean; day: string | null }> {
   if (!store.statsId || !isRedisConfigured()) return { soon: false, day: null };
-  const [member, day] = await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId], ["HGET", dayKey(store.statsId), productId]]);
-  return { soon: member === 1 || member === "1", day: keptDay(day) };
+  const replies = repliesFor(await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId], ["HGET", dayKey(store.statsId), productId]]), 2);
+  if (!replies) throw new UnknownReplyError("coming-soon product");
+  const day = replies[1];
+  if (day !== null && typeof day !== "string") throw new UnknownReplyError("coming-soon day");
+  return { soon: knownSoonMember(replies[0]), day: keptDay(day) };
+}
+
+/** One exact membership read for callers that do not need the pre-order day. */
+export async function isComingSoon(store: Store, productId: string): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  const replies = repliesFor(await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId]]), 1);
+  if (!replies) throw new UnknownReplyError("coming-soon product");
+  return knownSoonMember(replies[0]);
 }
 
 function daysOf(raw: unknown): Map<string, string> {

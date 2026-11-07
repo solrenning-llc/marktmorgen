@@ -169,11 +169,18 @@ export async function GET(request: NextRequest) {
   // A product taken in one click after paying: only once Stripe said so.
   // `step` names which offer, and is left out for the first.
   if (request.nextUrl.searchParams.get("item") === "upsell") {
-    const added = await upsellDelivery(
-      store,
-      request.nextUrl.searchParams.get("session_id") ?? "",
-      request.nextUrl.searchParams.get("step") ?? "",
-    );
+    let added: Awaited<ReturnType<typeof upsellDelivery>>;
+    try {
+      added = await upsellDelivery(
+        store,
+        request.nextUrl.searchParams.get("session_id") ?? "",
+        request.nextUrl.searchParams.get("step") ?? "",
+      );
+    } catch (error) {
+      // The offer's answer could not be read (CX-123 rule 24): never said as nothing added.
+      console.error("reading an added product failed", error);
+      return plain(502, say.error);
+    }
     if (!added) return plain(404, say.nothingAdded);
     const inside = pid ? pick(added.items, pid) : null;
     if (pid && !inside) return plain(404, say.addedNoPart);

@@ -51,15 +51,22 @@ export async function POST(request: NextRequest) {
     return new Response("Too many tries. Wait a few minutes.", { status: 429, headers: { "Cache-Control": "no-store" } });
   }
 
-  const result = await takeUpsell({
-    store,
-    session,
-    secret: request.cookies.get(UPSELL_COOKIE)?.value,
-    origin: linkOrigin(request, store),
-    step,
-    answer,
-    consent: answer === "yes" ? consent : null,
-  });
+  let result: Awaited<ReturnType<typeof takeUpsell>>;
+  try {
+    result = await takeUpsell({
+      store,
+      session,
+      secret: request.cookies.get(UPSELL_COOKIE)?.value,
+      origin: linkOrigin(request, store),
+      step,
+      answer,
+      consent: answer === "yes" ? consent : null,
+    });
+  } catch (error) {
+    // Something the answer depends on could not be read (CX-123 rule 24): thrown before anything is charged.
+    console.error("answering an offer failed", error);
+    return new Response("That offer could not be answered just now, and nothing was charged for it. Go back and try again in a moment.", { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   const back = (status: string) =>
     new Response(null, {
       status: 303,

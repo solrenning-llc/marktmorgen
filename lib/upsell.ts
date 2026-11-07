@@ -46,6 +46,8 @@
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
   type FunnelStep,
@@ -92,6 +94,8 @@ type UpsellRecord = {
    * offer was taken, which is what this buyer gets (lib/bundle-rules.ts).
    */
   items?: string[];
+  /** This press's own value on its once-only claim (lib/claim-mark.ts claimValue), until the answer is written over it. */
+  claim?: string;
 };
 
 /**
@@ -145,11 +149,19 @@ function parseRecord(raw: unknown): UpsellRecord | null {
   }
 }
 
-/** The answer to one offer of this order, or null when there is none yet. */
+/**
+ * The answer to one offer of this order, or null when there is none yet (GET null). A reply in any other shape,
+ * or a record that does not parse, is unknown and throws (CX-123 rule 24): an offer waiting on Stripe is never
+ * let go, and a paid one never read as not there, on it.
+ */
 export async function readUpsell(session: string, slot = ""): Promise<UpsellRecord | null> {
   if (!isRedisConfigured() || !SESSION_ID.test(session) || (slot && !SLOT_PATTERN.test(slot))) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(session, slot)]]);
-  return parseRecord(raw);
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(session, slot)]]), 1);
+  if (!replies) throw new UnknownReplyError("an offer's answer");
+  if (replies[0] === null) return null;
+  const record = parseRecord(replies[0]);
+  if (!record || typeof record !== "object" || typeof record.state !== "string") throw new UnknownReplyError("an offer's answer");
+  return record;
 }
 
 /** Every answer this order has, keyed by slot ("" for the first offer). */
@@ -318,11 +330,25 @@ export async function takeUpsell(input: {
   const digital = deliversDigitally(target);
   if (digital && !validConsent(input.consent)) return { kind: "consent" };
 
-  // Once, however many times the button is pressed.
-  const [claimed] = await redisPipeline([
-    ["SET", recordKey(session, slot), JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now() }), "NX", "EX", RECORD_SECONDS],
-  ]);
-  if (claimed === null) {
+  // An order that came through an affiliate's link carries them on to what
+  // is added after it, at the share this product earns today. Read before
+  // anything is written or charged: a share that cannot be read throws
+  // (CX-123 rule 24), and the offer is not charged without it.
+  const via = view.metadata?.via ?? "";
+  const rate = via ? await funnelRate(store, via, target.id) : 0;
+
+  // Once, however many times the button is pressed (lib/claim-mark.ts): the claim carries a value only this press
+  // writes, so a SET NX that landed with its reply lost is read back as ours, never taken for another press, which
+  // would leave the offer pending with nothing charged (Revisor 1 on #2897). Null is another press's. Unknown even
+  // after the read-back: the claim is let go only while it holds this press's own value, so a retry can claim it
+  // again, and this answer throws before anything is charged (CX-123 rule 24).
+  const value = JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now(), claim: claimValue() });
+  const claimed = await claimMark(recordKey(session, slot), RECORD_SECONDS, value);
+  if (claimed === "unknown") {
+    await releaseMark(recordKey(session, slot), value);
+    throw new UnknownReplyError("an offer's once-only claim");
+  }
+  if (claimed === "taken") {
     const existing = await readUpsell(session, slot);
     return existing?.state === "failed" ? { kind: "failed" } : existing?.state === "declined" ? { kind: "declined" } : { kind: "done" };
   }
@@ -376,10 +402,6 @@ export async function takeUpsell(input: {
   // The yes to start access at once, its version and its time, on the offer's own payment.
   if (digital && input.consent) body.set(`metadata[${CONSENT_META}]`, consentMetaValue(input.consent, consentKind(target)));
   if (email) body.set("receipt_email", email);
-  // An order that came through an affiliate's link carries them on to what
-  // is added after it, at the share this product earns today.
-  const via = view.metadata?.via ?? "";
-  const rate = via ? await funnelRate(store, via, target.id).catch(() => 0) : 0;
   if (via && rate > 0) {
     body.set("metadata[via]", via);
     body.set("metadata[via_rate]", String(rate));

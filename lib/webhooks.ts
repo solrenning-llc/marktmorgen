@@ -68,6 +68,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 // The repository's compare-and-set script (GET equals what was read, then SET), also modelled by lib/redis-memory.ts.
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -349,9 +350,18 @@ function parseDelivery(raw: unknown): Delivery | null {
   }
 }
 
+/**
+ * A store's webhook settings: null only when there are none (GET null). A reply in any other shape, or settings
+ * that do not parse, are unknown and throw (CX-123 rule 24): never read as a store with no endpoints, which would
+ * leave an event unsent or let the store go from the Stripe watch.
+ */
 async function readConfig(statsId: string): Promise<Config | null> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  return parseConfig(raw);
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's webhook settings");
+  if (replies[0] === null) return null;
+  const config = parseConfig(replies[0]);
+  if (!config) throw new UnknownReplyError("a store's webhook settings");
+  return config;
 }
 
 /** How many times a change is tried again from a fresh read when another one landed first. */
@@ -510,8 +520,12 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
  * writes down how it went, putting it back on the queue for its next try.
  */
 async function runClaimed(statsId: string, id: string, now = Date.now()): Promise<Delivery | null> {
-  const [raw] = await redisPipeline([["GET", deliveryKey(id)]]);
-  const delivery = parseDelivery(raw);
+  const replies = repliesFor(await redisPipeline([["GET", deliveryKey(id)]]), 1);
+  // Gone (GET null) is taken off the queue; a reply in any other shape, or a record that does not parse, is unknown
+  // (CX-123 rule 24) and throws: it stays queued, and comes back when its lease ends.
+  if (!replies) throw new UnknownReplyError("a webhook delivery");
+  const delivery = replies[0] === null ? null : parseDelivery(replies[0]);
+  if (replies[0] !== null && !delivery) throw new UnknownReplyError("a webhook delivery");
   if (!delivery || delivery.state === "delivered" || delivery.state === "failed") {
     await redisPipeline([["ZREM", QUEUE_KEY, `${statsId}|${id}`]]);
     return delivery;
@@ -578,8 +592,17 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   const listening = await liveEndpoints(store, config?.endpoints.filter((e) => e.events.includes(type)) ?? []);
   if (!listening.length) return 0;
   const eventId = eventIdFor(statsId, type, seed);
-  const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
-  if (fresh === null) return 0;
+  // The once-mark read exactly (lib/claim-mark.ts; CX-123 rule 24): somebody else's is "already sent". An unknown one
+  // writes nothing: the mark this run may have written is let go only while it holds this run's value, and the
+  // throw says so, so the event is written when it is noticed again, never twice.
+  const mark = eventKey(eventId);
+  const mine = claimValue(now);
+  const claimed = await claimMark(mark, EVENT_SECONDS, mine);
+  if (claimed === "taken") return 0;
+  if (claimed !== "ours") {
+    await releaseMark(mark, mine);
+    throw new UnknownReplyError("a webhook event's mark");
+  }
 
   // Every text cleaned and bounded where the message is made (cleanText), so what a delivery keeps is bounded.
   const body = JSON.stringify(cleanData({
@@ -1950,7 +1973,14 @@ export async function watchStripe(deadline: number, now = Date.now()): Promise<{
   for (let n = 0; n < ids.length && Date.now() < deadline; n += 1) {
     const statsId = ids[(start + n) % ids.length];
     await redisPipeline([["SET", POSITION_KEY, statsId]]);
-    const config = await readConfig(statsId);
+    let config: Config | null;
+    try {
+      config = await readConfig(statsId);
+    } catch (error) {
+      // Unknown (CX-123 rule 24): the store stays watched, and is read again next run.
+      console.error("reading a store's webhook settings failed", statsId, error);
+      continue;
+    }
     if (!config || !config.endpoints.length) {
       await redisPipeline([["SREM", STORES_KEY, statsId]]);
       continue;

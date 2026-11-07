@@ -77,12 +77,24 @@ themselves or the contract again.
   Directive 2011/83/EU as read for item 91 (`lib/digital-consent.ts`):
   - **Digital content sold once,** where the buyer gave the art. 16(m) consent and
     acknowledgment and got the confirmation: the right ends when supply begins. No
-    function is owed after that.
+    function is owed after that. The code reads "got the confirmation" as the
+    order's confirmation email known sent: its `nl:confirm:<session>` mark
+    (`lib/purchase-email.ts`) read exactly as `sent` (`withConfirmations` in
+    `lib/withdrawal.ts`; Claude 5, PR #2827). No mark, any other value or a read
+    that fails keeps the 14 days. An order confirmed by a path that writes no
+    such mark (a reserved origin in `lib/order-confirmation-outbox.ts`, a PayPal
+    order) also keeps them: the more protective reading, never a guess.
   - **The same content without that consent** (an older order, or a form that did
     not ask): 14 days from the contract.
   - **A pre-order:** 14 days from the contract until it is actually handed over
     (with the consent, that ends the right). Its planned release day proves no
-    supply, so it ends nothing (Codex N, PR #2827).
+    supply, so it ends nothing (Codex N, PR #2827). Once handed over it returns
+    on the buyer's list as brought over (job `pre:`), but it is still a
+    contract made here: 14 days from its payment (the checkout's time, never
+    the hand-over). The yes is not kept with it, and the hand-over email does
+    not carry the art. 8(7) confirmation (the `nl:confirm:` mark written for a
+    hand-over does not prove one either), so its confirmation is never taken
+    as known and it keeps the 14 days (Claude 5, PR #2827).
   - **A membership** (at least partly a service): 14 days from the contract. The
     right is lost only once the service is fully performed (art. 16(a)), and the
     consumer pays in proportion (art. 14(3)).
@@ -97,6 +109,37 @@ themselves or the contract again.
     the creator's to do.
   - None of these has the label, the statement with name, contract and email, the
     "confirm withdrawal" step, or the acknowledgment with content, date and time.
+
+## How the 14 days are counted (Claude 5, PR #2827)
+
+Reading used in `withdrawalEnd` (`lib/withdrawal-rules.ts`), the protective one:
+
+- The day of payment is not counted. It is taken as the latest calendar day
+  anywhere on Earth at the moment of payment (the date at UTC+14), so a buyer
+  east of UTC who paid late in the UTC day keeps all 14 of their own days
+  (Claude 5's focal return, PR #2827). The period ends at the end of the 14th
+  calendar day after that day.
+- A last day on a Saturday or a Sunday moves to the following Monday.
+- "The end of the day" is the end of that calendar day anywhere on Earth:
+  23:59:59 at UTC−12, which is 11:59:59 UTC on the next calendar day.
+- So the start day is the latest calendar day anywhere at payment and the end
+  is the end of the last day anywhere: no buyer's first or last day is cut
+  short, wherever they are. The weekend move reads that same latest day.
+- The page promises that last day, and the function stays open until that
+  instant. A statement submitted up to it is in time (art. 11a(5)).
+
+Source: recital 41 of Directive 2011/83/EU applies Regulation (EEC, Euratom)
+No 1182/71 to its periods; arts. 3(1), 3(2)(b) and 3(4) of that regulation
+as the reviewer recalls them. **Not verified against the official text in
+this session**: EUR-Lex (eur-lex.europa.eu), publications.europa.eu and
+legislation.gov.uk were refused by the network proxy (CONNECT 403) on
+7 November 2026. The reading is to be checked against the official text.
+
+**Limitation:** art. 3(4) also moves a period that ends on a public holiday.
+Public holidays differ by country (and the buyer's country is not what the
+code counts on), so they are **not applied**. Until they are, a period ending
+on a public holiday that is not a weekend closes a day early under that
+reading.
 
 ## Proposed units (each with its own RESERVA and RED; none started)
 
@@ -115,7 +158,11 @@ themselves or the contract again.
        the consent record;
      - email the buyer an acknowledgment quoting it with its date and time;
      - put it in the creator's inbox with what the terms already say: the refund
-       is theirs, from their Stripe account.
+       is theirs, from their Stripe account (their PayPal account for an order
+       paid with PayPal).
+     - when neither the creator's note nor the acknowledgement went, say so
+       ("unreached": recorded with its time, not received by the store or the
+       buyer's email, send it again), never that it was sent.
    - **Does not:** refund, cancel or change anything in Stripe by itself. Whether
      to cancel the membership at once is a question for the owner (below).
 2. **Pre-contract information.** The checkout's box sentence and the confirmation
@@ -140,6 +187,10 @@ themselves or the contract again.
   reading, used above unless told otherwise).
 
 ## Not verified
+
+- Regulation (EEC, Euratom) No 1182/71, arts. 3(1), 3(2)(b) and 3(4), and
+  recital 41 of Directive 2011/83/EU: applied as recalled, not read (see "How
+  the 14 days are counted"). Public holidays are not applied.
 
 - National laws transposing Art. 11a (for example the German § 356a BGB). Their
   wording may add requirements.

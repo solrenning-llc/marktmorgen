@@ -106,6 +106,12 @@ const ref = (v: unknown, what: string): string => {
   if (typeof id !== "string" || !id) throw new UnreadInvoiceError(what);
   return id;
 };
+/** A count Stripe gave (a quantity, an interval count): a number, null when it gave none (absent or null). Text throws, even text that reads as a number. */
+const whole = (v: unknown, what: string): number | null => {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "number" || !Number.isFinite(v)) throw new UnreadInvoiceError(what);
+  return v;
+};
 /** A yes or no Stripe gave: false when it gave none (absent or null). Anything else throws. */
 const bool = (v: unknown, what: string): boolean => {
   if (v === undefined || v === null) return false;
@@ -143,8 +149,9 @@ export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<str
         return ref((l as Line).subscription, "an invoice line's subscription") || ref(details(l as Line)?.subscription, "an invoice line's subscription");
       });
       const members = new Set([...subs.values()].map((s) => s.customer).filter((c): c is string => typeof c === "string" && c !== ""));
+      // No customer given may be a member's (with Accounts v2 an invoice can carry only customer_account): unknown.
       const customer = ref(invoice.customer, "an invoice's customer");
-      if (subs.has(fromInvoice) || lineIds.some((id) => subs.has(id)) || (customer !== "" && members.has(customer))) {
+      if (subs.has(fromInvoice) || lineIds.some((id) => subs.has(id)) || customer === "" || members.has(customer)) {
         throw new UnreadInvoiceError("an invoice with more lines than it gave");
       }
       continue;
@@ -163,7 +170,7 @@ export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<str
       // A line without its price says only what a part of a period cost; that is not a month's worth.
       if (!unit && proration) continue;
       // None given counts one; 0 is worth nothing, never one at the full price.
-      const given = num(line.quantity, "an invoice line's quantity");
+      const given = whole(line.quantity, "an invoice line's quantity");
       if (given !== null && (given < 0 || !Number.isInteger(given))) throw new UnreadInvoiceError("an invoice line's quantity");
       const quantity = given === null ? 1 : given;
       const recurring = obj(price?.recurring, "an invoice line's recurring terms");
@@ -172,7 +179,7 @@ export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<str
       if (every !== undefined && every !== null && (typeof every !== "string" || !INTERVALS.has(every))) throw new UnreadInvoiceError("an invoice line's interval");
       const interval = typeof every === "string" ? every : sub.interval;
       // A whole number from 1; none given is one with the line's interval, or the membership's own.
-      const counted = num(recurring?.interval_count, "an invoice line's interval count");
+      const counted = whole(recurring?.interval_count, "an invoice line's interval count");
       if (counted !== null && (counted < 1 || !Number.isInteger(counted))) throw new UnreadInvoiceError("an invoice line's interval count");
       const count = counted ?? (typeof every === "string" ? 1 : sub.count);
       const value = unit ? perMonth(unit * quantity, interval, count) : perMonth(amount, sub.interval, sub.count);

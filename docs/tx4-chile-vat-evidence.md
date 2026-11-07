@@ -11,6 +11,12 @@ Read on November 5, 2026 (UTC). This is dated public evidence of possible compli
 
 The linked Spanish resolutions are the original regulatory sources. SII's English PDFs for [107](https://www.sii.cl/vat/resolucion_107_2024_eng.pdf), [84](https://www.sii.cl/vat/directive_84_2025_eng.pdf) and [93](https://www.sii.cl/vat/directive_93_2025_eng.pdf) expressly identify themselves as non-authoritative free translations; they were read as aids, not substitutes. This note does not assert that every supplier uses the platform procedure or that older service instructions alone resolve the later platform rules.
 
+## Threshold and statute not established
+
+No monetary registration threshold was identified in the sources read. That is not proof that none exists or that one applies: until the statute is read, registration timing must not be gated on a sales counter, and Chile must not be treated as below any threshold.
+
+Statute not read: only the SII resolutions and the portal above were read for this note. The law or laws these resolutions implement, with article and date, were not read, so no statutory obligation, exception or threshold is cited here.
+
 ## Complete cost and records still unknown
 
 Complete records and retention remain unverified, including reporting-list contents, supporting evidence, access controls and applicable exceptions. This note supplies no universal retention/deletion period.

@@ -126,7 +126,8 @@ async function main(): Promise<void> {
     threw = true;
   }
   failTeams = false;
-  is("a failed team read leaves the booking unconfirmed, for the next confirmation", [threw, await isConfirmed(session)], [false, false]);
+  // Thrown, not returned (Codex G on #3080): the mail job keeps a confirmation that throws in its queue.
+  is("a failed team read throws and leaves the booking unconfirmed, for the next confirmation", [threw, await isConfirmed(session)], [true, false]);
   await confirmBooking(booked);
   is("confirmed once the team can be read, its host's claim is kept for good", [await isConfirmed(session), (await claimAt("quay@example.com", Q))?.until], [true, 0]);
 

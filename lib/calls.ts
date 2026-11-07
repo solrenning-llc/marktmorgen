@@ -1554,13 +1554,14 @@ export async function confirmBooking(input: {
   cancel = cancel ?? null;
   // A team booking's hosts are read before the once-only mark too, the same way: a failed read is not known, never "no
   // team" (rule 24), which would confirm the booking without them and let their claim run out with the hold. It is
-  // left for the next confirmation.
+  // left for the next confirmation, and thrown rather than returned (Codex G on #3080): the mail job counts a
+  // confirmation that returned and takes it off its queue, so only a throw keeps it there for the next run; the
+  // thanks page and catchUpBookings catch it and try again later.
   let team: Awaited<ReturnType<typeof bookingTeam>>;
   try {
     team = await bookingTeam(store, product, session);
   } catch (error) {
-    console.error("reading a team booking's hosts failed; confirmed later", error);
-    return;
+    throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
   }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;

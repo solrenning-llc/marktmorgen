@@ -12,6 +12,9 @@
  *      took your place"; on a full purchase it is told "full", as takePlace says.
  * E.   N1: the grant of a place answers in another shape. Not landed: the place is given back and the link works
  *      again; landed: the place is taken. Two places paid for: two people hold the product.
+ * F.   N2 (Claude 1 on #2872): a give-back's two commands run one at a time, and a second taker past the places paid
+ *      for runs its whole take (and the count heal) between them. No reply is altered. Two places paid for: the count
+ *      stays at two, a later address is told full, and only two people hold the product.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -234,6 +237,32 @@ async function main(): Promise<void> {
   const hal = await take(await e2.link("hal@example.com"));
   is("fy taken (its grant is on the address), then already; gus taken; hal full", [fy1, fy2, gus, hal], ["taken", "already", "taken", "full"]);
   is("fy and gus hold the product, hal nothing; two counted", [await owns("fy@example.com"), await owns("gus@example.com"), await owns("hal@example.com"), await placesTaken(e2.id)], [[product.id], [product.id], [], 2]);
+
+  part("F. N2: a give-back's two commands with a second taker's whole take (and its heal) run between them");
+  const f1 = await paidGroup(2);
+  is("al and bo take the two places", [await take(await f1.link("al2@example.com")), await take(await f1.link("bo2@example.com"))], ["taken", "taken"]);
+  const diToken = await f1.link("di2@example.com");
+  const isGiveBack = (commands: Command[]) =>
+    commands.length === 2 &&
+    commands.some((c) => c[0] === "EVAL" && c[3] === `nl:grp:${f1.id}:m`) &&
+    commands.some((c) => c[0] === "DECR" && c[1] === `nl:grp:${f1.id}:n`);
+  let between: string | null = null;
+  redis.pipeline = (async (commands: Command[]) => {
+    if (between !== null || !isGiveBack(commands)) return real(commands);
+    between = "running";
+    const first = await real([commands[0]]);
+    restore();
+    between = await take(diToken);
+    const second = await real([commands[1]]);
+    return [...first, ...second];
+  }) as typeof redis.pipeline;
+  const ce = await take(await f1.link("ce2@example.com"));
+  restore();
+  is("ce and di are told full", [ce, between], ["full", "full"]);
+  is("two places still counted for al and bo", await placesTaken(f1.id), 2);
+  is("a fifth address later is told full: never a place more than paid", await take(await f1.link("fy2@example.com")), "full");
+  const holders = (await Promise.all(["al2", "bo2", "ce2", "di2", "fy2"].map((x) => owns(`${x}@example.com`)))).filter((o) => o.length).length;
+  is("only two people hold the product", holders, 2);
 
   done();
 }

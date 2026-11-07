@@ -20,7 +20,7 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | Storage | 5 GiB | 5 GiB | 40 GiB → **33 GiB** | 40 GiB → **4 GiB** | 80 GiB | 80 GiB → **8 GiB** |
 | Orders a month | 200 | 200 | 450 | 450 → **45** | 1,500 | 1,500 → **1,200** |
 | Store emails a month | 75 | 75 | 300 | 300 → **30** | 800 | 800 |
-| Access emails a month | 150 | 150 | 400 | 400 → **62** | 1,000 | 1,000 |
+| Access emails a month | 150 | 150 | 400 | 400 → **61** | 1,000 | 1,000 |
 | List emails a month | none today | none today | 7,000 | 7,000 | 10,000 | 10,000 |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
 | Net with the cuts | not reachable | not reachable | **60.00%** | **60.00%** | **60.00%** | **60.00%** |

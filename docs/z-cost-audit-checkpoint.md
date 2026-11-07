@@ -1,3 +1,9 @@
+# Recibo final do corretivo #2947
+
+Ponto **CXZ-20261107-0549-C4-1** publicado no canal em **a27535156596dc4b1f33f45d2c248661cae0d8ec**, blob **9ef07327f416e1ef2b4b6c884ef88ab673b357bd**, após409semgravação e>=120s/FULLfresco. Oficial2947/10ba aguarda C5focal6704646327 e noveNOVOSgates; nenhum deles presumido. OutrosdoisMEDsR2 eWIPLOW2741preservados. C4-0226semmergedireto/FILALIGADAaindaausente. Nenhumteste/CI/produto/retentativa/merge adicional após os recibos abaixo. Histórico completo e correção de inventário abaixo prevalecem sobre esperasC4antigas.
+
+---
+
 # Estado vigente — corretivo do LOW remanescente #2947 publicado em 07/11/2026
 
 **Este bloco corrige o inventário anterior:** C5/6701759336 JÁ havia dado retorno no c1fc3298; eu não o incorporara ao checkpoint e vinha dizendo incorretamente somente “falta focalC4”. O LOW foi fechado em parte, com outro LOW não bloqueante ainda demonstrado: helper statement/loop/alias podem aumentar custo sem mudar padrões sintáticos. Não é achado novo. Agora corrigido no MESMO PR; não autofechado por testes autorais.

@@ -12,6 +12,7 @@
  * that cannot be made, and nothing is taken and the use is refused.
  */
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { LONGEST_WINDOW_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
 import { poolPlace } from "@/lib/free-pool";
@@ -21,6 +22,7 @@ import { planAboveSold } from "@/lib/larger-plan";
 import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
@@ -214,12 +216,37 @@ export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind
   const k = key(kind, id, window);
   try {
     // Only a counter that is there: one gone (expired, erased) is not made again below zero, with no expiry.
-    const [left] = await redisPipeline([["DECRBY", k, n]]);
-    const after = Number(left);
-    if (Number.isSafeInteger(after) && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
+    const reply = ownAllowanceReplies(await redisPipeline([["DECRBY", k, n]]), 1);
+    const after = reply?.[0];
+    // Redis integer commands answer numbers. A missing counter can fall no lower than -n.
+    if (typeof after === "number" && Number.isSafeInteger(after) && after >= -n && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
   } catch {
     // Best effort: counted higher, never lower.
   }
+}
+
+/** Local exact reader while the shared repliesFor correction is independently reviewed. */
+function ownAllowanceReplies(reply: unknown, count: number): unknown[] | null {
+  try {
+    if (types.isProxy(reply) || !Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return null;
+    const length = Object.getOwnPropertyDescriptor(reply, "length");
+    if (!length || !Object.hasOwn(length, "value") || length.value !== count || Object.getOwnPropertyNames(reply).length !== count + 1) return null;
+    const values: unknown[] = [];
+    for (let i = 0; i < count; i++) {
+      const slot = Object.getOwnPropertyDescriptor(reply, String(i));
+      if (!slot || !Object.hasOwn(slot, "value")) return null;
+      values.push(slot.value);
+    }
+    return values;
+  } catch { return null; }
+}
+
+/** GET returns text, or null only when the counter does not exist: nothing was taken in this window. */
+function allowanceCount(raw: unknown): number | null {
+  if (raw === null) return 0;
+  if (typeof raw !== "string" || !/^(0|[1-9][0-9]*)$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) ? n : null;
 }
 
 /** Fixed-size own-data reply from the existing SET NX + INCRBY pipeline. */
@@ -248,13 +275,12 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
   if (!window || !id || !isRedisConfigured() || !kinds.length) return null;
   try {
     const reply: unknown = await redisPipeline(kinds.map((kind) => ["GET", key(kind, id, window.id)]));
-    if (!Array.isArray(reply) || reply.length !== kinds.length) return null;
+    const values = ownAllowanceReplies(reply, kinds.length);
+    if (!values) return null;
     const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
     for (const [i, kind] of kinds.entries()) {
-      const raw: unknown = reply[i];
-      if (raw !== null && typeof raw !== "string" && typeof raw !== "number") return null;
-      const n = raw === null ? 0 : Number(raw);
-      if (!Number.isSafeInteger(n) || n < 0) return null;
+      const n = allowanceCount(values[i]);
+      if (n === null) return null;
       out.push({ kind, used: n, figure: allowanceFor(store, kind, now / 1000) });
     }
     return out;
@@ -268,16 +294,13 @@ export function allowanceUsedWords(store: AllowanceStore, kind: AllowanceKind, n
   return usedWords(kind, allowanceFor(store, kind, now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended[kind] === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
-/** What has been taken of a kind in the store's window, for the studio; 0 when it cannot be read. */
+/** Confirmed use in the store's window; an unreadable count throws before any dependent spending. */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
   const window = allowanceWindow(store, now);
   const id = idOf(store);
-  if (!window || !id || !isRedisConfigured()) return 0;
-  try {
-    const [raw] = await redisPipeline([["GET", key(kind, id, window.id)]]);
-    const n = Number(raw);
-    return Number.isSafeInteger(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
+  if (!window || !id || !isRedisConfigured()) throw new UnknownReplyError("an allowance window");
+  const reply = ownAllowanceReplies(await redisPipeline([["GET", key(kind, id, window.id)]]), 1);
+  const n = reply ? allowanceCount(reply[0]) : null;
+  if (n === null) throw new UnknownReplyError("an allowance count");
+  return n;
 }

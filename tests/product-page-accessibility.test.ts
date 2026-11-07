@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_product_page_a11y";
   process.env.RESEND_API_KEY = "re_test_product_page_a11y";
 
-  part("1.4.6: the creator's colour as text keeps 7:1, in every theme and for any colour picked");
+  part("1.4.6: the creator's color as text keeps 7:1, in every theme and for any color picked");
   const accents = [...ACCENTS.map((a) => a.hex), "#5a36ee", "#ffff00", "#00ffff", "#ffffff", "#000000", "#7f7f7f", "#ff00ff", "#00ff88"];
   let worst = { card: 99, item: 99, bg: 99, at: "" };
   for (const theme of THEMES) {
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   const violet = lookColours({ theme: "light", accent: "#5a36ee" });
   is("the default violet, measured at 6.56:1 in the browser, now reads at 7:1", contrast(violet.accentText, violet.card) >= 7, true);
 
-  part("2.5.5: every box a buyer ticks on the product page is a 44 px target");
+  part("2.5.5: every box a buyer checks on the product page is a 44 px target");
   const OWNER = "a11y-test@example.com";
   await claimHandle(OWNER, "a11ytest", "Quiet Oven Test", "");
   await ensureStatsId(OWNER);
@@ -94,12 +94,32 @@ async function main(): Promise<void> {
 
   part("1.4.8: a line of text on the product page is at most 80 characters");
   const measure = css.match(/\.st-measure :where\(([^)]*)\)\s*\{([^}]*)\}/);
-  is("a rule caps the page's paragraphs, items and notes", Boolean(measure && /\bp\b/.test(measure[1]) && /\bli\b/.test(measure[1])), true);
+  const capped = (measure?.[1] ?? "").split(",").map((s) => s.trim());
+  is("a rule caps the page's paragraphs, definitions, quotes and captions", ["p", "dd", "blockquote", "figcaption"].every((s) => capped.includes(s)), true);
+  // A list item of plain text: the long description's and a block's lists, and what an option includes.
+  is("and the lines of its lists (the description's, and what an option includes)", [".st-about li", ".st-includes li"].every((s) => capped.includes(s)), true);
+  // A question keeps up to MAX_QUESTION (200) characters, an item MAX_ITEM (200), a detail MAX_ITEM_DETAIL (300).
+  is("and the FAQ's questions, which can be 200 characters long, without narrowing the row that opens them", capped.includes(".sp-faq summary > span"), true);
+  is("and the words of a block's benefits, fit lists, steps, contents and bonuses, each in its own size", [".sp-benefit > span", ".sp-fit-side li > span", ".sp-inside span.block", ".sp-step span.block", ".sp-bonus span.block"].every((s) => capped.includes(s)), true);
+  // A card or a row is an li too (a review, "More from", a bundle's row, a call's length button): capped as a box it would
+  // stop short of its column. Its words are capped instead, as on the store front.
+  is("but not every li, so cards, rows and buttons keep their width", capped.includes("li"), false);
+  // 1ch is the width of "0". A line holds the cap divided by its glyphs' width in ch, and ch follows each capped
+  // element's own font size, so the count does not depend on the size. Counted line by line in Chromium at 56ch (Geist):
+  // the product page's real sentences reached 78 a line; words of narrow letters only (i, l, t, f, j, r, s) reached 126 on
+  // the store front, a property of the font, which the product page shares. A line scales with the cap.
   const width = Number(measure?.[2].match(/max-width:\s*(\d+)ch/)?.[1] ?? 999);
-  // 1ch is the width of "0", wider than an average letter: in Chromium 72ch still held 92-101 letters a line, 56ch at most 78.
-  is("at no more than 56ch, so a line stays under 80 letters", width <= 56, true);
-  is("a centred line stays centred under the cap", /\.st-measure :where\([^)]*\.text-center[^)]*\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
+  const at = (count: number) => (count * width) / 56;
+  is("so a real sentence stays at or under 80 characters a line", at(78) <= 80, true);
+  is("and so do words of the narrowest letters", at(126) <= 80, true);
+  is("while a real sentence keeps at least 45 characters a line, so the cap does not chop ordinary reading", at(78) >= 45, true);
+  is("a centered line stays centered under the cap", /\.st-measure :where\([^)]*\.text-center[^)]*\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
   is("the product page, its reviews page and a call's booking page use it", [/<main id="content" className=\{`st-measure /.test(page), /<main id="content" className="st-measure /.test(reviewsPage), /<main id="content" className="st-measure /.test(bookPage)], [true, true, true]);
+  // Narrower glyphs still exist (an apostrophe is 0.27ch in Geist): no width holds 80 of any glyph without chopping
+  // ordinary sentences, so that case and its alternative are recorded, as AX274 asks.
+  const programme = readFileSync("docs/accessibility-programme.md", "utf8");
+  const section = programme.match(/## Store front lines and the narrowest glyphs[\s\S]*?(?=\n## |$)/)?.[0] ?? "";
+  is("the glyphs narrower than the cap holds are recorded in the programme, for the product page too", [section.length > 0, /\.st-measure/.test(section), /product page/.test(section)], [true, true, true]);
 
   part("2.4.10 and 1.3.1: the reviews page has one level-one heading");
   const own = renderToStaticMarkup(createElement(ReviewsSection, { heading: "Reviews of Rye Week", summary, reviews: [], storeName: "Quiet Oven", productTitle: "Rye Week", moreHref: null, level: 1 }));

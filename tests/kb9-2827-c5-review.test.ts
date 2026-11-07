@@ -353,12 +353,12 @@ test("F: a pre-order withdrawn from before its hand-over is not offered again af
     const first = await post({ handle: "mara", token, ref: session.id, name: "Ana Souza", email: BUYER });
     assert.equal(stateOf(first), "done", "precondition: withdrawn from before the hand-over");
     const notes = (await readInbox(store.statsId!)).length;
-    const acks = mails.filter((m) => m.to === BUYER).length;
 
-    // Released: handed over, it comes back on the list as brought over.
+    // Released: handed over, it comes back on the list as brought over (and its own email goes to the buyer).
     await redis.pipeline([["SREM", `nl:wl:${store.statsId}:soon`, product]]);
     store = (await storeForEmail(OWNER)) as Store;
     assert.equal(await handOverPreorder(store, (await readListing(store, product))!, session.id, deps), "given", "precondition: handed over");
+    const acks = mails.filter((m) => m.to === BUYER).length;
     store = (await storeForEmail(OWNER)) as Store;
     const meter = new OrdersMeter(store);
     const pre = (await purchasesFor(store, BUYER, meter)).find((p) => p.preorder?.given);
@@ -387,9 +387,9 @@ test("F: the creator's note for a handed-over pre-order names its checkout, whic
     const pre = (await purchasesFor(store, BUYER, new OrdersMeter(store))).find((p) => p.preorder?.given);
     assert.ok(pre, "precondition: on the list as handed over");
     assert.equal(stateOf(await post({ handle: "mara", token, ref: pre!.reference, name: "Ana Souza", email: BUYER })), "done");
-    const inbox = JSON.stringify(await readInbox(store.statsId!));
-    assert.ok(inbox.includes(session.id), `the note names the checkout ${session.id}`);
-    assert.ok(!inbox.includes(pre!.reference) || pre!.reference === session.id, "never a reference Stripe does not know");
+    const inbox = JSON.stringify(await Promise.all((await readInbox(store.statsId!)).map((c) => openConversation(store.statsId!, c.id))));
+    assert.ok(inbox.includes(`order ${session.id}`), `the note names the checkout ${session.id}`);
+    assert.ok(!inbox.includes(`order ${pre!.reference}`) || pre!.reference === session.id, "never a reference Stripe does not know");
     assert.ok(redis.keys().includes(withdrawalKey(store.sid!, session.id)), "kept under the checkout");
   } finally {
     Date.now = realNow;

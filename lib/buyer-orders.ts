@@ -383,6 +383,12 @@ export type Purchase = {
    * with that day when one is set, or handed over since.
    */
   preorder?: { day: string | null; given: boolean };
+  /**
+   * A pre-order handed over (job "pre:<checkout>"): the checkout it was paid at. The list names it by its brought-over
+   * reference, but the contract is the checkout's, so the withdrawal function keeps its record and names the order to the
+   * creator by it (lib/withdrawal.ts, withdrawalReference; Claude 5's F on #2827).
+   */
+  checkout?: string;
 };
 
 /**
@@ -809,6 +815,22 @@ async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines
   };
 }
 
+/**
+ * A pre-order handed over (job "pre:<checkout>"): its checkout, when the job names one, and whether it is shipped, read
+ * from its entry (one HGET, taken through the meter before it is made). Shipped unless the entry says exactly it is not:
+ * an entry written before the shipping was kept with it, a read that fails or no entry are not known, and its withdrawal
+ * function is then kept open with no end rather than closed on a guess (CX-123; Claude 5's G on #2827).
+ */
+async function handedOver(store: Store, productId: string, checkout: string, meter?: OrdersMeter): Promise<{ checkout: string | null; shipped: boolean }> {
+  if (!SESSION_ID_PATTERN.test(checkout)) return { checkout: null, shipped: true };
+  await meter?.take(1);
+  const entry = await readPreorder(store, productId, checkout).catch((error) => {
+    console.error("a handed-over pre-order's entry could not be read", error);
+    return null;
+  });
+  return { checkout, shipped: entry?.ship !== false };
+}
+
 /** What one purchase brought over or given hands over again, or null: the list's reading and one download's. */
 async function purchaseFromImported(store: Store, statsId: string, email: string, given: ImportedPurchase, find: Finder, meter?: OrdersMeter, lines = true): Promise<Purchase | null> {
   const product = await find(given.productId);
@@ -822,6 +844,8 @@ async function purchaseFromImported(store: Store, statsId: string, email: string
   if (!delivery && !courseProduct && !podcastProduct && !items) return null;
   // Who gave it is one read more.
   if (given.job.startsWith("gift:")) await meter?.take(1);
+  // A pre-order handed over: its checkout, and whether it is shipped, one read of its entry more (lib/preorders.ts).
+  const handed = given.job.startsWith("pre:") ? await handedOver(store, product.id, given.job.slice(4), meter) : null;
   return {
     reference,
     kind: "imported",
@@ -830,6 +854,8 @@ async function purchaseFromImported(store: Store, statsId: string, email: string
     ...(given.job.startsWith("paypal:") ? { paidWith: "paypal" as const } : {}),
     ...(given.job.startsWith("api:") ? { givenByStore: true } : {}),
     ...(given.job.startsWith("pre:") ? { preorder: { day: null, given: true } } : {}),
+    ...(handed?.checkout ? { checkout: handed.checkout } : {}),
+    ...(handed?.shipped ? { shipped: true } : {}),
     podcastProduct,
     title: product.title,
     option,

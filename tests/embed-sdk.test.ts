@@ -258,8 +258,11 @@ async function main(): Promise<void> {
   const shut = box.children[1] as { tag: string; style: Record<string, string>; onfocus?: () => void; onblur?: () => void };
   shut.onfocus?.();
   is("its close button shows its focus in two colors, 3 px each, seen on any page under it (2.4.13)", [shut.tag, shut.style.boxShadow], ["button", "0 0 0 3px #15112e,0 0 0 6px #fff"]);
+  // Forced colors (high contrast) drop box-shadow: an outline, transparent elsewhere, is what shows the focus there (2.4.7, 2.4.13).
+  is("with an outline too, which forced colors paint in the system's color", /^\d+px solid transparent$/.test(shut.style.outline ?? ""), true);
+  is("never the browser's own outline taken away for good", shut.style.cssText.includes("outline:none"), false);
   shut.onblur?.();
-  is("and only while it has the focus", shut.style.boxShadow, "none");
+  is("and only while it has the focus", [shut.style.boxShadow, shut.style.outline ?? ""], ["none", ""]);
   is("the page under it stops scrolling", (page.document.documentElement as { style: { overflow: string } }).style.overflow, "hidden");
   is("a second press opens no second frame", [page.click(buy), page.appended.length], [true, 1]);
   const before = page.fired.length;

@@ -5,6 +5,7 @@ import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, dollars } from "@/lib/auto-
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
+import { EARNINGS_NOTICE_ANCHOR, EARNINGS_NOTICE_TEXT } from "@/lib/earnings-notice";
 import { DISPUTE_KEPT_WORDS, DISPUTE_OUTCOME_WORDS, DISPUTE_PAUSED_WORDS } from "@/lib/plan-dispute-rules";
 import { RENEWAL_KEPT_WORDS, RENEWAL_PAUSED_WORDS, RENEWAL_RESUME_WORDS } from "@/lib/renewal-unpaid-words";
 import { isDomainsConfigured } from "@/lib/domains";
@@ -40,7 +41,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 4, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 7, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -1003,7 +1004,18 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="12. Limitation of liability">
+      {/* 561 [NE1]: the same words as the footer of every page (lib/earnings-notice.ts), under a fixed anchor. */}
+      <LegalSection title="12. No promise of earnings" id={EARNINGS_NOTICE_ANCHOR}>
+        <p>{EARNINGS_NOTICE_TEXT}</p>
+        <p>
+          Nothing on this website or in the Services, including examples, demo
+          stores, sample figures and suggestions, is a statement of what you
+          will sell or earn. Marktmorgen does not publish what other customers
+          have sold or earned.
+        </p>
+      </LegalSection>
+
+      <LegalSection title="13. Limitation of liability">
         <p>
           TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, MARKTMORGEN AND
           ITS OWNERS, OFFICERS, AND CONTRACTORS WILL NOT BE LIABLE FOR ANY
@@ -1027,7 +1039,7 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="13. Indemnification">
+      <LegalSection title="14. Indemnification">
         <p>
           You agree to indemnify and hold Marktmorgen harmless from claims
           arising out of your User Content, the products you sell through a
@@ -1036,7 +1048,7 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="14. Termination">
+      <LegalSection title="15. Termination">
         <p>
           We may suspend or terminate your access if you breach these Terms, if
           required by law, or if we discontinue the Services. Upon termination,
@@ -1053,7 +1065,7 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="15. Changes to these Terms">
+      <LegalSection title="16. Changes to these Terms">
         <p>
           We may update these Terms from time to time. The &ldquo;Last
           updated&rdquo; date at the top of this page will change when we do. Material changes
@@ -1062,7 +1074,7 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="16. Governing law">
+      <LegalSection title="17. Governing law">
         <p>
           These Terms are governed by the laws of the Federative Republic of
           Brazil, without regard to conflict-of-law rules. Courts located in
@@ -1071,7 +1083,7 @@ export default function TermsPage() {
         </p>
       </LegalSection>
 
-      <LegalSection title="17. Contact">
+      <LegalSection title="18. Contact">
         <p>
           Marktmorgen
           <br />

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { MorningLogo } from "@/components/morning-header";
 import { feeWords } from "@/lib/fee-words";
+import { EARNINGS_NOTICE_HREF, EARNINGS_NOTICE_SHORT, EARNINGS_NOTICE_TEXT } from "@/lib/earnings-notice";
 
 const SUPPORT_EMAIL = "support@marktmorgen.com";
 const SUPPORT = `mailto:${SUPPORT_EMAIL}`;
@@ -126,6 +127,8 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
   if (variant === "slim") {
     return (
       <footer className="border-t border-line bg-paper text-ink-mute">
+        {/* 561 [NE1]: the notice as text only, so nothing pulls the person out of logging in. */}
+        <p className="container-page max-w-[80ch] pt-5 text-[0.8125rem] leading-relaxed">{EARNINGS_NOTICE_TEXT}</p>
         <div className="container-page flex flex-col gap-2 py-5 text-[0.8125rem] leading-relaxed sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <p>{`© ${year} Marktmorgen.`}</p>
           <ul className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -195,6 +198,22 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
 
       {/* pb clears the home indicator on an iPhone; the inset is zero everywhere else. */}
       <div className="container-page border-t border-white/12 pt-7 pb-[max(1.75rem,env(safe-area-inset-bottom))] text-[0.8125rem] leading-relaxed text-white/70">
+        {/* 561 [NE1]: above the copyright line on every page. The home page, held to 30 links and
+            600 words (498 [ME3]), shows the one sentence that carries the promise, with no link. */}
+        {variant === "home" ? (
+          <p className="mb-4 max-w-[80ch]">{EARNINGS_NOTICE_SHORT}</p>
+        ) : (
+          <p className="mb-4 max-w-[80ch]">
+            {EARNINGS_NOTICE_TEXT}{" "}
+            <Link
+              prefetch={false}
+              href={EARNINGS_NOTICE_HREF}
+              className="inline-flex min-h-11 -my-2.5 items-center font-medium text-white underline underline-offset-4"
+            >
+              Our Terms on earnings claims
+            </Link>
+          </p>
+        )}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-8">
           <p>
             {`© ${year} Marktmorgen, by Solrenning — an independent software studio.`}

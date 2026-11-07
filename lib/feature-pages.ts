@@ -565,7 +565,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     slug: "checkout",
     section: "platform",
     eyebrow: "Checkout tools",
-    title: "Earn more from every buyer,",
+    title: "Offer more to every buyer,",
     highlight: `on the ${PLAN_AT.creator} plan`,
     intro:
       "Discount codes, a product added at checkout, one-click offers after paying, payment plans, pay what you want, questions at checkout, limited quantities and sales tax. On Stan, the first four are on the $99 plan.",

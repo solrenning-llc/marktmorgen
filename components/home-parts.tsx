@@ -417,7 +417,7 @@ export function Pricing({ domains = false }: { domains?: boolean }) {
           groups={[
             { icon: "check", title: "Everything in Studio", body: "The same selling tools and email features, with larger allowances." },
             // The figures are under the price, once; these say what the larger allowances are for.
-            { icon: "mail", title: "More room to grow", body: "Larger monthly allowances than Studio for emails, visits and orders, for a bigger list and more sales." },
+            { icon: "mail", title: "More room to grow", body: "Larger monthly allowances than Studio for emails, visits and orders, sized for a bigger list and a busier store." },
             { icon: "sparkle", title: "More AI and more room", body: "More AI writing, more answers to visitors and more storage than Studio, for a catalog that keeps growing." },
           ]}
           perks={[`Everything in ${PLAN_TITLES.pro}`, `${PLAN_NUMBER_FORMAT.format(SCALE_MONTHLY_EMAILS)} emails a month`, `${PLAN_NUMBER_FORMAT.format(VISITS_INCLUDED.scale)} visits a month`, `${PLAN_NUMBER_FORMAT.format(ORDERS_INCLUDED.scale)} orders a month`, `${PLAN_NUMBER_FORMAT.format(AI_MONTHLY.scale)} AI writing jobs and ${PLAN_NUMBER_FORMAT.format(ANSWERS_MONTHLY.scale)} visitor answers a month`, `Each billing month: ${allowanceListWords("scale")}`]}

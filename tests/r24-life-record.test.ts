@@ -62,6 +62,7 @@ async function main() {
     ["a list holding a number", ["r:instagram", 4]],
     ["a count in words", ["r:instagram", "four", "u", "3"]],
     ["a count that is not whole", ["r:instagram", "4.5", "u", "3"]],
+    ["a negative count (no writer ever subtracts)", ["r:instagram", "-4", "u", "3"]],
     ["no reply in the pipeline", "drop"],
     ["the request failed", "throw"],
   ];

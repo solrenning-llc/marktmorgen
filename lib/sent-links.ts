@@ -335,6 +335,93 @@ export async function sentEmailBytes(id: string): Promise<number | null> {
   }
 }
 
+/** The emails the page "Change where a link goes" reads, newest first: as many as it read before (lib/broadcasts.ts, listBroadcastsStrict's default). */
+export const SHOWN_EMAILS_READ = 30;
+const STATUSES = new Set(["scheduled", "sending", "sent", "waiting", "cancelled", "failed"]);
+
+/** A sent email as the studio page needs it (lib/broadcasts.ts, Broadcast). */
+export type ShownEmail = { id: string; subject: string; body: string; sent: number; links?: true; finishedAt: number; sendAt: number };
+/** The store's newest emails, or why none was read. */
+export type ShownEmails = { ok: true; emails: ShownEmail[] } | { ok: false; refused: string };
+
+/**
+ * The studio requests the page takes, beyond its own, to read the emails
+ * whose sizes as stored are `sizes`, each up to its size and `growth` bytes
+ * more (GETRANGE), both ways as JSON (each byte escaped once more at the
+ * most, wireOf), and the take itself. 0 when there is nothing to read. Held
+ * over what is measured in tests/f2-sent-links-page-emails-cost.test.ts.
+ */
+export function sentEmailsShownUnits(sizes: readonly number[], growth = 0): number {
+  const read = sizes.filter((size) => Number.isSafeInteger(size) && size > 0);
+  if (!read.length) return 0;
+  const bytes = 512 + read.reduce((sum, size) => sum + SHOWN_READ_COMMAND_BYTES + wireOf(size + growth), 0);
+  const commands = TAKE_COMMANDS + read.length;
+  return Math.max(Math.ceil(bytes / STUDIO_UNIT_BYTES), Math.ceil(commands / STUDIO_UNIT_COMMANDS));
+}
+
+/** One email's record, checked as listBroadcastsStrict checks what the page uses of it: null when it is not one (or was read short). */
+function parseShownEmail(raw: unknown, id: string, listId: string): ShownEmail | null {
+  if (typeof raw !== "string" || !raw) return null;
+  let value: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    value = parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const count = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  const words = (s: unknown): s is string => typeof s === "string" && s.trim().length > 0;
+  const { subject, body, sent, total, finishedAt, sendAt, createdAt } = value;
+  if (value.id !== id || value.listId !== listId || !words(value.handle) || !words(subject) || !words(body) || !STATUSES.has(value.status as string)) return null;
+  if (!count(sent) || !count(total) || sent > total || !count(finishedAt) || !count(sendAt) || !sendAt || !count(createdAt) || !createdAt) return null;
+  return { id, subject, body, sent, finishedAt, sendAt, ...(value.links === true ? { links: true as const } : {}) };
+}
+
+/**
+ * The store's newest emails for the studio page "Change where a link goes"
+ * (#3034, Claude 5's review): the list and each email's size first (one
+ * LRANGE, then one STRLEN each, inside the page's own studio requests), then
+ * the studio requests reading them comes to (sentEmailsShownUnits) are taken
+ * through `pay`, and only then is each read, no further than its size. One
+ * that grew since (its send moving on: its count, its note) is read once more
+ * up to EMAIL_GROWTH_BYTES further, paid first. All or nothing, as
+ * listBroadcastsStrict (lib/broadcasts.ts): an index or a record that is not
+ * one throws, and the page says the emails could not be read. Without the
+ * studio requests nothing is read and the refusal says why.
+ */
+export async function readShownSentEmails(listId: string | null, pay: (units: number) => Promise<{ ok: true } | { ok: false; message: string }>, limit = SHOWN_EMAILS_READ): Promise<ShownEmails> {
+  if (!listId) return { ok: true, emails: [] };
+  if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
+  const index = repliesFor(await redisPipeline([["LRANGE", `nl:mail:bcs:${listId}`, 0, limit - 1]]), 1);
+  if (!index || !Array.isArray(index[0])) throw new Error("Campaign index is unavailable");
+  const ids: unknown[] = index[0];
+  if (ids.length > limit || ids.some((id) => typeof id !== "string" || !ID.test(id)) || new Set(ids).size !== ids.length) throw new Error("Campaign index is incomplete");
+  if (!ids.length) return { ok: true, emails: [] };
+  const wanted = ids as string[];
+  const key = (id: string) => `nl:mail:bc:${id}`;
+  const sized = repliesFor(await redisPipeline(wanted.map((id) => ["STRLEN", key(id)])), wanted.length);
+  if (!sized || sized.some((size) => !Number.isSafeInteger(size) || (size as number) <= 0)) throw new Error("Campaign records are incomplete");
+  const sizes = sized as number[];
+  const paid = await pay(sentEmailsShownUnits(sizes));
+  if (!paid.ok) return { ok: false, refused: paid.message };
+  const replies = repliesFor(await redisPipeline(wanted.map((id, i) => ["GETRANGE", key(id), 0, sizes[i] - 1])), wanted.length);
+  if (!replies) throw new Error("Campaign records are incomplete");
+  const emails = wanted.map((id, i) => parseShownEmail(replies[i], id, listId));
+  const again = wanted.flatMap((id, i) => (emails[i] ? [] : [{ i, id, size: sizes[i] }]));
+  if (again.length) {
+    // Grown since its size was asked, or not one: read once more, paid first, no further than a send can write on it.
+    const more = await pay(sentEmailsShownUnits(again.map(({ size }) => size), EMAIL_GROWTH_BYTES));
+    if (!more.ok) return { ok: false, refused: more.message };
+    const second = repliesFor(await redisPipeline(again.map(({ id, size }) => ["GETRANGE", key(id), 0, size + EMAIL_GROWTH_BYTES - 1])), again.length);
+    if (!second) throw new Error("Campaign records are incomplete");
+    again.forEach(({ i, id }, j) => (emails[i] = parseShownEmail(second[j], id, listId)));
+  }
+  if (emails.some((email) => email === null)) throw new Error("Invalid campaign record");
+  return { ok: true, emails: emails as ShownEmail[] };
+}
+
 /** The email as the studio and the change need it (lib/broadcasts.ts, Broadcast). */
 export type SentEmail = { id: string; listId: string; handle: string; body: string; sent: number; links?: true };
 

@@ -1039,23 +1039,56 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
   let missing = listed.some((entry) => !ORDER_ID.test(entry.order));
   const readable = listed.filter((entry) => ORDER_ID.test(entry.order));
-  const [records] = readable.length ? await redisPipeline([["MGET", ...readable.map((entry) => paidKey(entry.order))]]) : [[]];
-  const raws = Array.isArray(records) ? (records as unknown[]) : [];
+  // The records, read exactly (Codex Z on #2964; CX-123 rule 24): one reply to the one MGET, holding exactly one
+  // record per order asked. A record Redis answered as missing (null) leaves the reading partial; one in any other
+  // shape, or whose order, capture, cents or currency is not its own exact value, throws, so it is never a refund row
+  // read as complete.
+  const what = "a refunded PayPal sale's record";
+  const records = readable.length ? repliesFor(repliesFor(await redisPipeline([["MGET", ...readable.map((entry) => paidKey(entry.order))]]), 1)?.[0], readable.length) : [];
+  if (!records) throw new UnknownReplyError(what);
   readable.forEach((entry, i) => {
-    let paid: Paid | null = null;
-    try {
-      paid = typeof raws[i] === "string" ? (JSON.parse(raws[i] as string) as Paid) : null;
-    } catch {
-      paid = null;
+    const raw = records[i];
+    if (raw === null) {
+      missing = true;
+      return;
     }
-    if (paid && paid.store === statsId) out.push({ order: paid.order, capture: paid.capture, cents: paid.cents, currency: paid.currency, at: entry.at });
+    if (typeof raw !== "string") throw new UnknownReplyError(what);
+    let v: unknown;
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      throw new UnknownReplyError(what);
+    }
+    if (!v || typeof v !== "object" || Array.isArray(v)) throw new UnknownReplyError(what);
+    const r = v as Record<string, unknown>;
+    if (
+      r.order !== entry.order ||
+      typeof r.store !== "string" ||
+      typeof r.capture !== "string" ||
+      !CAPTURE_ID.test(r.capture) ||
+      !Number.isSafeInteger(r.cents) ||
+      (r.cents as number) < 0 ||
+      typeof r.currency !== "string" ||
+      !/^[A-Za-z]{3}$/.test(r.currency)
+    ) {
+      throw new UnknownReplyError(what);
+    }
+    // Another store's record under this store's refunds: not one of its refunds, and the reading is not complete.
+    if (r.store === statsId) out.push({ order: entry.order, capture: r.capture, cents: r.cents as number, currency: r.currency, at: entry.at });
     else missing = true;
   });
   return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
 }
 
+/**
+ * Every PayPal refund in full since `since`, or a throw: a partial reading (past PAYPAL_REFUNDS_READ, or a record
+ * missing) is not every refund, so the affiliate book (lib/affiliates.ts) reads it as refunds not checked and pays
+ * no commission on it, never as "these are all the refunds".
+ */
 export async function readPayPalRefunds(statsId: string | null, since: number): Promise<{ order: string; capture: string; cents: number; currency: string; at: number }[]> {
-  return (await readPayPalRefundsWithCoverage(statsId, since)).rows;
+  const read = await readPayPalRefundsWithCoverage(statsId, since);
+  if (read.partial) throw new Error("The PayPal refunds were not all read");
+  return read.rows;
 }
 
 /** What a payment is called where a refund names it: the capture, so it never mixes with a Stripe payment's id. */

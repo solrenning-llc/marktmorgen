@@ -10,7 +10,7 @@
  * for the next invoice, and a total that with the tax on top could pass
  * Stripe's largest charge all refuse, and a fact that is missing refuses too.
  */
-import { PAYOFF_QUIET_SECONDS, STRIPE_MAX_CHARGE, payoffQuote, payoffWords, type PayoffFacts } from "@/lib/payoff-rules";
+import { PAYOFF_QUIET_SECONDS, PAYOFF_TAX_ROOM_BPS, STRIPE_MAX_CHARGE, payoffQuote, payoffWords, type PayoffFacts } from "@/lib/payoff-rules";
 import { addPeriods } from "@/lib/plans";
 import { done, is, part } from "./check";
 
@@ -131,6 +131,7 @@ part("Refused when the amount cannot be sure");
   is("Stripe's largest single charge", STRIPE_MAX_CHARGE, 99_999_999);
   // Nine payments of MX$100,000 left: MX$90,000,000 before tax; 16% IVA on
   // top makes MX$104,400,000, above Stripe's largest single charge.
+  is("the room kept for tax on top is the dearest buyer tax of the cost model, 27%", PAYOFF_TAX_ROOM_BPS, 2_700);
   const nineLeft = { currency: "mxn", customerCurrency: "mxn", payments: 12, cancelAt: at(12), currentPeriodStart: at(2), paidInvoices: 3, unitAmountCents: big, nowSeconds: at(2) + 10 * DAY };
   is("with tax on top, room is kept for the tax before Stripe's cap", reason(facts({ ...nineLeft, latestInvoice: { status: "paid", subtotalCents: big, taxCents: 1_600_000, periodStart: at(2) } })), "too_large");
   is("with tax on top, room is kept for the dearest tax even when the latest invoice carried none", reason(facts({ ...nineLeft, latestInvoice: { status: "paid", subtotalCents: big, taxCents: 0, periodStart: at(2) } })), "too_large");

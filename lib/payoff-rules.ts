@@ -36,11 +36,19 @@
  *   - "customer_balance": the customer holds a credit or owes an amount on
  *     the creator's account, which Stripe applies to the next invoice, so
  *     the payoff charge and that invoice would not be what the words say;
+ *     or the customer's balance is kept in another currency than the plan's,
+ *     so the balance in the plan's currency is not known;
+ *   - "pending_items": invoice items wait for the customer's next invoice
+ *     and would be added to it;
  *   - "mismatch": two sources disagree (the payments counted from the dates
  *     and the paid invoices, the period Stripe is in and the one the dates
  *     say, the plan's end and the one it must have, the item and the
  *     invoice, more than one item or a quantity above one);
- *   - "too_large": above the largest single charge Stripe takes;
+ *   - "too_large": above the largest single charge Stripe takes; with tax
+ *     on top, room is kept first for the dearest tax (PAYOFF_TAX_ROOM_BPS
+ *     of the total, or the tax on the latest invoice for each payment
+ *     left, whichever is more), since the tax is worked out only when the
+ *     buyer pays;
  *   - "not_plan": not a payment plan (a membership that ends by itself is
  *     not one; it is paid for time, not for a product already delivered);
  *   - "unknown": a fact is missing or malformed, the tax behavior included.
@@ -56,12 +64,16 @@
 import { CURRENCIES, formatMoney } from "@/lib/money";
 import { addPeriods } from "@/lib/plans";
 import { MAX_PLAN_PAYMENTS, MIN_PLAN_PAYMENTS } from "@/lib/product-extras";
+import { MOST_CORRECT_READING } from "@/lib/receiving-costs";
 
 /** No payoff this close to the next automatic payment: Stripe makes the invoice when the period starts and takes it about an hour later, then retries. */
 export const PAYOFF_QUIET_SECONDS = 2 * 86_400;
 
 /** The largest amount Stripe takes in one charge, in the smallest unit of any currency. */
 export const STRIPE_MAX_CHARGE = 99_999_999;
+
+/** Room kept for a buyer's tax on top of an exclusive price before Stripe's cap: the dearest buyer tax the cost model allows (27%). */
+export const PAYOFF_TAX_ROOM_BPS = MOST_CORRECT_READING.salesTaxOnTopBps;
 
 /** What the later units read from Stripe, already parsed. A missing number is NaN or null, never 0 taken as true. */
 export type PayoffFacts = {
@@ -115,6 +127,10 @@ export type PayoffFacts = {
   pendingUpdate: boolean | null;
   /** customer.balance on the creator's account, in the smallest unit: below zero a credit, above zero owed; NaN when not read. */
   customerBalanceCents: number;
+  /** customer.currency, the currency customer.balance is kept in, lower case; null when not read or not set. */
+  customerCurrency: string | null;
+  /** How many invoice items wait for the customer's next invoice (invoiceitems with pending=true); NaN when not read. */
+  pendingItems: number;
   nowSeconds: number;
 };
 
@@ -129,6 +145,7 @@ export type PayoffRefusal =
   | "scheduled"
   | "update_pending"
   | "customer_balance"
+  | "pending_items"
   | "mismatch"
   | "too_large"
   | "not_plan"
@@ -178,6 +195,8 @@ export function payoffQuote(f: PayoffFacts): PayoffQuote | { ok: false; reason: 
   const taxBehavior = f.taxBehavior;
   if (typeof f.paused !== "boolean" || typeof f.scheduled !== "boolean" || typeof f.pendingUpdate !== "boolean") return no("unknown");
   if (!whole(f.customerBalanceCents)) return no("unknown");
+  if (typeof f.customerCurrency !== "string" || !CURRENCIES.some((c) => c.code === f.customerCurrency)) return no("unknown");
+  if (!whole(f.pendingItems) || f.pendingItems < 0) return no("unknown");
   const rule = CURRENCIES.find((c) => c.code === f.currency);
   if (!rule) return no("unknown");
   if (!whole(f.unitAmountCents) || f.unitAmountCents < rule.minCharge || f.unitAmountCents > rule.maxPrice) return no("unknown");
@@ -192,7 +211,10 @@ export function payoffQuote(f: PayoffFacts): PayoffQuote | { ok: false; reason: 
   if (f.paused) return no("paused");
   if (f.scheduled) return no("scheduled");
   if (f.pendingUpdate) return no("update_pending");
-  if (f.customerBalanceCents !== 0) return no("customer_balance");
+  // customer.balance is kept in customer.currency only; in another currency
+  // than the plan's it says nothing about a credit in the plan's currency.
+  if (f.customerCurrency !== f.currency || f.customerBalanceCents !== 0) return no("customer_balance");
+  if (f.pendingItems > 0) return no("pending_items");
 
   // The count starts at the first payment, after a trial when there was one,
   // exactly as lib/plans.ts counts the plan's end.
@@ -216,6 +238,13 @@ export function payoffQuote(f: PayoffFacts): PayoffQuote | { ok: false; reason: 
   if (nextDueAt - f.nowSeconds < PAYOFF_QUIET_SECONDS) return no("due_soon");
   const totalCents = remaining * f.unitAmountCents;
   if (!whole(totalCents) || totalCents > STRIPE_MAX_CHARGE) return no("too_large");
+  // With tax on top, the charge is the total plus a tax worked out only when
+  // the buyer pays: keep room for the dearest one, or for the tax the plan's
+  // invoices already carry if that is more, before Stripe's cap.
+  if (taxBehavior === "exclusive") {
+    const taxRoom = Math.max(Math.ceil((totalCents * PAYOFF_TAX_ROOM_BPS) / 10_000), remaining * invoice.taxCents);
+    if (!whole(taxRoom) || totalCents + taxRoom > STRIPE_MAX_CHARGE) return no("too_large");
+  }
   return { ok: true, payments: f.payments, paid, remaining, eachCents: f.unitAmountCents, totalCents, currency: f.currency, nextDueAt, taxBehavior };
 }
 

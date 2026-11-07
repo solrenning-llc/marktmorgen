@@ -163,7 +163,10 @@ const leaks: Record<string, string> = {
   cyrillicScheme: "httpѕ://example.com/f?token=abc123",
 };
 is("none comes through as written", Object.entries(leaks).filter(([, text]) => clean(text) === text).map(([name]) => name), []);
-is("an env line keeps its name, a key its words around", [clean("OPENAI_API_KEY=sk-proj-abc123def456ghi789"), clean("API_TOKEN=Zm9vYmFyMTIzNDU2Nzg5MA"), clean("AWS secret: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY")], [`OPENAI_API_KEY=${K}`, `API_TOKEN=${K}`, `AWS secret: ${K}`]);
+is("an env line keeps its name, a key its words around", [clean("OPENAI_API_KEY=sk-proj-abc123def456ghi789"), clean("API_TOKEN=Zm9vYmFyMTIzNDU2Nzg5MA"), clean("AWS secret: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"), clean('{"api_key": "abc123def456ghi789jkl"}'), clean("PASSWORD: hunter22")], [`OPENAI_API_KEY=${K}`, `API_TOKEN=${K}`, `AWS secret: ${K}`, `{"api_key": "${K}"}`, `PASSWORD: ${K}`]);
+is("words with a colon that are not settings stay", clean("Season pass: 12 months. Key: practice daily."), "Season pass: 12 months. Key: practice daily.");
+is("a public track id stays, a shared document goes", [clean("https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"), clean("https://docs.google.com/document/d/1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdEF/edit")], ["https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC", L]);
+is("phone numbers written the French and Spanish way", clean(`Call ${PLUS}33 1 23 45 67 89 or 01 23 45 67 89 or 612 345 678`), `Call ${P} or ${P} or ${P}`);
 is("an encoded address: only it goes, the words around stay", [clean('<a href="mailto:ana%40example.com">mail</a>'), clean("Write ana&#64;example.com today"), clean('<a href="https&#58;//example.com/f?token=abc">x</a>')], [`<a href="${E}">mail</a>`, `Write ${E} today`, `<a href="${L}">x</a>`]);
 is("phone numbers with spaced dashes and slashes", [clean("Call 555 - 123 - 4567"), clean("Call 555/123/4567"), clean("Call 555 – 123 – 4567")], [`Call ${P}`, `Call ${P}`, `Call ${P}`]);
 is("a private video or hook in a button's link field is emptied", [scrubTemplateUrl("https://vimeo.com/123456789/abcdef1234"), scrubTemplateUrl("https://hooks.zapier.com/hooks/catch/1/a/")], [{ ok: true, url: null }, { ok: true, url: null }]);

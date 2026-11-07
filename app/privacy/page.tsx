@@ -673,10 +673,11 @@ export default function PrivacyPage() {
           <code>mm:lp-speed</code>. A place is removed when the video is
           watched to its end and when they press Start over. One older than
           90 days is never used, and is removed the next time that lesson is
-          opened in that browser. Once their access to the course ends, all
-          their places in it are removed the next time they open the course in
-          that browser. Clearing the browser&apos;s site data removes them at
-          any time.
+          opened in that browser. Whenever the course page opens in that
+          browser without confirming their access (because it ended, or
+          because it could not be checked at that moment), all their places in
+          that course are removed. Clearing the browser&apos;s site data
+          removes them at any time.
         </p>
         <p id="lesson-comments">
           <strong className="text-black">Comments under lessons.</strong>{" "}

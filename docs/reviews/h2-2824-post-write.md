@@ -96,8 +96,12 @@ native backend/route proof also passed 43/43, 43 pipeline commands; its
 single-item route fixture has the same explicit terminal metadata. ESLint
 on the two changed test/launcher paths is clean with max-warnings 0.
 
-The prepared delta is only the permanent test, its launcher and this report.
-All three production blobs remain byte-identical to the candidate `66a52a05`.
+The prepared delta in the local worktree is only the permanent test, its
+launcher and this report. The three production blobs **in that local
+worktree/execution** are byte-identical to candidate `66a52a05`.
+The evidence branch snapshot is different: it deliberately retains the
+unchanged historical product `0adf6bbe` to preserve the RED. Its stored
+production files are not the corrected files from `66a52a05`.
 No second product push or main integration was performed during its new CI.
 Coordinate incorporation with N/C5; a necessary future integration must include
 these fixtures, an applicable focal return and nine NEW final checks.
@@ -109,7 +113,25 @@ fetching both existing branches:
 H2_PRODUCT_REF=66a52a0555dbeca8cf354d2c03acf400883169fe H2_PLATFORM_REF=33577e2d3f61f616718fd35247db1dfbee5be5cd node --max-old-space-size=512 tests/h2-2824-post-write-native.mjs
 ```
 
-The executed local product sources were byte-identical to `66a52a05`; the
-incoming platform source was pinned to `33577e2d3`. All synthetic boundaries
-and limitations above continue to apply. Neither source was edited by this
-composition check.
+The actual local native invocation set `H2_PLATFORM_REF=33577e2d3...` and
+read the corrected product files from the local worktree (the default when
+`H2_PRODUCT_REF` is absent). Their Git blob identities were checked against
+`66a52a05`. The two-ref command above is a portable reproduction recipe for
+the historical evidence snapshot; that exact two-ref invocation was not
+separately executed. It explicitly replaces the three stored historical
+product files in the module loader, rather than changing the evidence tree.
+All synthetic boundaries and limitations above continue to apply.
+
+Clarification requested by N in CXN-20261107-0225-H2-1; no test repeated and
+no product source changed:
+
+| Path | Stored historical RED source | Corrected local/executed source and candidate66 |
+| --- | --- | --- |
+| lib/email-sync.ts | 989a3972 | 2d195e8c |
+| app/api/store/email-sync/route.ts | 962a913e | 44a0fe32 |
+| components/email-sync-editor.tsx | 48039a0a | bceefea9 |
+
+The earlier unqualified sentence about all three product blobs referred to
+the local preparation, but could incorrectly be read as a claim about the
+stored evidence snapshot. This clarification supersedes that wording and
+the same shorthand in H2's channel checkpoint at 02h02.

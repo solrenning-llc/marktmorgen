@@ -40,7 +40,7 @@ import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { IMAGE_SIZES } from "@/lib/product-image";
+import { IMAGE_SIZES, smallerCopies } from "@/lib/product-image";
 import { aboutBlocks, aboutExcerpt, readAbout } from "@/lib/product-about";
 import { activePlan, bumpTargets } from "@/lib/product-extras";
 import { activePwyw } from "@/lib/pay-what-you-want";
@@ -562,7 +562,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
               <img
                 src={servedImageUrl(product.image)}
                 srcSet={servedSrcSet(product.image)}
-                sizes={product.image.small ? IMAGE_SIZES.hero : undefined}
+                sizes={smallerCopies(product.image).length ? IMAGE_SIZES.hero : undefined}
                 alt={product.image.alt}
                 width={product.image.width}
                 height={product.image.height}

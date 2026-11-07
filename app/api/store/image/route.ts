@@ -142,12 +142,12 @@ export async function POST(request: NextRequest) {
         const smallWidth = side(sent?.width);
         try {
           const copy = await head(smallPath);
-          const first = await firstBytes(smallPath);
+          // Its size and width first: a copy that fails them is never read (Claude 1 on #2801, rule 30).
+          const fits = smallWidth > 0 && smallWidth < width && copy.size <= MAX_IMAGE_BYTES;
+          const first = fits ? await firstBytes(smallPath) : null;
           const copyKind = first ? sniffPhotoType(first) : null;
           const good =
-            smallWidth > 0 &&
-            smallWidth < width &&
-            copy.size <= MAX_IMAGE_BYTES &&
+            fits &&
             copyKind !== null &&
             (IMAGE_CONTENT_TYPES as readonly string[]).includes(copyKind) &&
             copyKind === copy.contentType;
@@ -165,13 +165,13 @@ export async function POST(request: NextRequest) {
         const thumbWidth = side(sentThumb?.width);
         try {
           const copy = await head(thumbPath);
-          const first = await firstBytes(thumbPath);
+          // Its size and width first: the upload token allows MAX_IMAGE_BYTES under any picture name, so a file over
+          // MAX_THUMB_BYTES is dropped unread, and the read its cost line counts is never more than that (Claude 1 on #2801).
+          const fits = thumbWidth > 0 && thumbWidth < (small ? small.width : width) && copy.size > 0 && copy.size <= MAX_THUMB_BYTES;
+          const first = fits ? await firstBytes(thumbPath) : null;
           const copyKind = first ? sniffPhotoType(first) : null;
           const good =
-            thumbWidth > 0 &&
-            thumbWidth < (small ? small.width : width) &&
-            copy.size > 0 &&
-            copy.size <= MAX_THUMB_BYTES &&
+            fits &&
             copyKind !== null &&
             (IMAGE_CONTENT_TYPES as readonly string[]).includes(copyKind) &&
             copyKind === copy.contentType;

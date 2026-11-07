@@ -62,5 +62,27 @@ const line = COST_LINES.find((each) => each.id === "studio-blob");
 is("the studio's Blob line counts the thumbnail copy", Boolean(line) && (line?.sources ?? []).some((source) => source.names.includes("MAX_THUMB_BYTES")), true);
 is("and the thumbnail's own line is gone", COST_LINES.some((each) => each.id === "picture-thumbnails"), false);
 is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);
+is("the signing request is named among its sources", line?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);
+// One typed CDN price only (Claude 4 on #2801, 6711058322, finding 2): the registry types no CDN request price of its
+// own; the studio-blob line's reads take traffic-cost's CDN_PER_REQUEST (tests/picture-upload-costs.test.ts).
+const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+is("the registry types no second CDN request price", /export const CDN_REQUEST\b/.test(registry), false);
+
+part("Its size is checked before its bytes are read, so the read is at most MAX_THUMB_BYTES (Claude 1 on #2801, finding 2)");
+// The upload token for any picture name allows MAX_IMAGE_BYTES, so a file sent under the thumbnail's name may be far
+// larger than MAX_THUMB_BYTES; the line counts one read of MAX_THUMB_BYTES, true only when no larger file is ever read.
+const thumbBlock = route.slice(route.indexOf("const copy = await head(thumbPath)"), route.indexOf("firstBytes(thumbPath)"));
+is("between the thumbnail's head and its read, its size is checked against MAX_THUMB_BYTES", route.includes("const copy = await head(thumbPath)") && /copy\.size <= MAX_THUMB_BYTES/.test(thumbBlock), true);
+// Rule 30: the smaller copy's read waits on its own size check the same way.
+const smallBlock = route.slice(route.indexOf("const copy = await head(smallPath)"), route.indexOf("firstBytes(smallPath)"));
+is("the smaller copy's size is checked before its bytes are read too", route.includes("const copy = await head(smallPath)") && /copy\.size <= MAX_IMAGE_BYTES/.test(smallBlock), true);
+
+part("A picture with only a thumbnail is offered at the size of its place (Claude 1 on #2801, finding 3)");
+// Without sizes the browser takes 100vw and never picks the 240w copy in a 56 px row.
+const storeProduct = readFileSync("components/store-product.tsx", "utf8");
+is("the store's product picture gives sizes whenever there is a smaller copy, not only the 800 px one", !/sizes=\{image\.small \?/.test(storeProduct) && /sizes=\{smallerCopies\(image\)\.length \?/.test(storeProduct), true);
+// Claude 4's focal 6711058322, LOW 1: the product page's own picture was still offered at 100vw when it has only a thumbnail.
+const productPage = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
+is("the product page's picture gives sizes whenever there is a smaller copy, not only the 800 px one", !/sizes=\{product\.image\.small \?/.test(productPage) && /sizes=\{smallerCopies\(product\.image\)\.length \?/.test(productPage), true);
 
 done();

@@ -110,6 +110,7 @@ import {
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { POLL_SEND_BYTES, POLL_SEND_COMMANDS } from "@/lib/mail-poll-votes";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -215,6 +216,16 @@ const micro = (n: number) => n / 1_000_000;
 export const COMMAND = micro(UPSTASH_MICRO_USD_PER_MILLION_COMMANDS) / 1_000_000;
 export const DB_BYTE = micro(UPSTASH_MICRO_USD_PER_GB_TRANSFER) / 1e9;
 export const DB_BYTE_MONTH = micro(UPSTASH_MICRO_USD_PER_GB_MONTH) / 1e9;
+/**
+ * What an email with a poll adds to sending it (125 [F2-EMAIL-POLLS],
+ * lib/mail-poll-votes.ts): POLL_SEND_COMMANDS commands and POLL_SEND_BYTES
+ * through the database, at the most. Every list email is priced as if it held
+ * one (LIST_EMAIL_USD): the line list-email, the trial's emails, the
+ * list-email pack and the list emails priced for Store.
+ */
+export const POLL_SEND_USD = POLL_SEND_COMMANDS * COMMAND + POLL_SEND_BYTES * DB_BYTE;
+/** A list email at the most it costs: the provider's price and its poll's work. */
+export const LIST_EMAIL_USD = PER_EMAIL + POLL_SEND_USD;
 const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1_000_000;
 const CPU_SECOND = micro(VERCEL_CPU_MICRO_USD_PER_HOUR) / 3600;
 const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCTION_GB) / 3600;
@@ -905,12 +916,13 @@ export const COST_LINES: CostLine[] = [
   {
     id: "list-email",
     feature: "The monthly emails: list email, sequences and workflows (#507), their notices to the owner, and emails to people brought over on Studio and Scale",
-    monthlyUsd: (tier) => monthlyEmails(tier) * PER_EMAIL,
+    monthlyUsd: (tier) => monthlyEmails(tier) * LIST_EMAIL_USD,
     sources: [
       { file: "lib/plan.ts", names: ["PRO_MONTHLY_EMAILS", "SCALE_MONTHLY_EMAILS", "TRIAL_MONTHLY_EMAILS"] },
-      { file: "lib/mail.ts", names: ["reserve", "takeFromMonth"] },
+      { file: "lib/mail.ts", names: ["reserve", "takeFromMonth", "openPoll"] },
+      { file: "lib/mail-poll-votes.ts", names: ["POLL_SEND_COMMANDS", "POLL_SEND_BYTES", "MAX_POLLS_KEPT"] },
     ],
-    basis: "Every monthly email sent, at the most an email costs.",
+    basis: "Every monthly email sent, at the most an email costs: the provider's price, and the most its poll adds (125 [F2-EMAIL-POLLS]: POLL_SEND_COMMANDS commands and POLL_SEND_BYTES through the database before it goes), taken as if every email held a poll that had to be written down.",
   },
   {
     id: "transactional-email",
@@ -1472,7 +1484,7 @@ export function nonPayingWorst(): number {
   return TRIAL_VISITS * visitCost()
     + requests
     + TRIAL_ORDERS * ORDER_COST
-    + TRIAL_MONTHLY_EMAILS * PER_EMAIL
+    + TRIAL_MONTHLY_EMAILS * LIST_EMAIL_USD
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)

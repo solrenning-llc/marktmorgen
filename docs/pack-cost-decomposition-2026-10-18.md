@@ -8,17 +8,17 @@
 
 ## The short answer
 
-The list-email pack sells 2,500 list emails for $62: 27.56× the $2.25 the emails cost. That multiplier is four factors that multiply back to it exactly:
+The list-email pack sells 2,500 list emails for $64: 27.83× the $2.30 the emails cost. That multiplier is four factors that multiply back to it exactly:
 
 | Factor | What it is | List-email pack | Share of the multiplier (by logarithm) |
 | --- | --- | --- | --- |
-| 1. The 60% floor and the 27.5% profit tax | Net must be 60% after a 27.5% tax, so pretax profit must be 82.76% of revenue and every cost together at most 17.24% | 5.81× | 53% |
-| 2. The fee's and the reserves' percentages | 6.6% of the amount charged (the price plus the buyer's 27% tax on top), 1.5% remittance, 1% refund reserve, 1% of the amount charged as dispute reserve | 3.43× | 37% |
-| 3. The fixed cents of one payment | the fee's 30¢ and the dispute reserve's 1% of $30 | 1.24× | 6% |
-| 4. A whole-dollar price and the add-on's 25¢ of room | what the price leaves unused | 1.12× | 3% |
-| **Price over cost** | | **27.56×** | 100% |
+| 1. The 60% floor and the 27.5% profit tax | Net must be 60% after a 27.5% tax, so pretax profit must be 82.76% of revenue and every cost together at most 17.24% | 5.80× | 53% |
+| 2. The fee's and the reserves' percentages | 6.6% of the amount charged (the price plus the buyer's 27% tax on top), 1.5% remittance, 1% refund reserve, 1% of the amount charged as dispute reserve | 3.41× | 37% |
+| 3. The fixed cents of one payment | the fee's 30¢ and the dispute reserve's 1% of $30 | 1.23× | 6% |
+| 4. A whole-dollar price and the add-on's 25¢ of room | what the price leaves unused | 1.14× | 4% |
+| **Price over cost** | | **27.83×** | 100% |
 
-Factors 1 and 2 together are 19.94×: the "twenty times" of the proposal, and the floor no pack size can go under. Factor 1 alone is the owner's rule (60% after at least 27.5%): it makes any cost cost 5.81× in price. Factor 2 is the receiving model shared with Hazelsong. **The email itself is 3.63% of the pack's price; the supplier's rate is not what makes the pack dear.**
+Factors 1 and 2 together are 19.81×: the "twenty times" of the proposal, and the floor no pack size can go under. Factor 1 alone is the owner's rule (60% after at least 27.5%): it makes any cost cost 5.80× in price. Factor 2 is the receiving model shared with Hazelsong. **The email itself is 3.59% of the pack's price; the supplier's rate is not what makes the pack dear.**
 
 ## The structure, on $100 with nothing used
 
@@ -44,14 +44,14 @@ Each pack of the proposal at its price, on its own payment, used in full. Every 
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 5,000 visits | **$44** | $1.36 (3.09%) | $3.71 (8.43%) | $0.30 (0.68%) | $0.66 (1.50%) | $0.44 (1.00%) | $0.56 (1.27%) | $0.30 (0.68%) | $0.00 (0.00%) | $10.09 (22.93%) | $0.25 (0.57%) | $26.58 (60.41%) |
 | 250 orders, with their access and store emails | **$35** | $0.89 (2.54%) | $2.96 (8.46%) | $0.30 (0.86%) | $0.53 (1.51%) | $0.35 (1.00%) | $0.45 (1.29%) | $0.30 (0.86%) | $0.00 (0.00%) | $8.04 (22.97%) | $0.25 (0.71%) | $21.18 (60.51%) |
-| 2,500 list emails | **$62** | $2.25 (3.63%) | $5.23 (8.44%) | $0.30 (0.48%) | $0.93 (1.50%) | $0.62 (1.00%) | $0.79 (1.27%) | $0.30 (0.48%) | $0.00 (0.00%) | $14.19 (22.89%) | $0.26 (0.42%) | $37.39 (60.31%) |
+| 2,500 list emails | **$64** | $2.30 (3.59%) | $5.38 (8.41%) | $0.30 (0.47%) | $0.96 (1.50%) | $0.64 (1.00%) | $0.82 (1.28%) | $0.30 (0.47%) | $0.00 (0.00%) | $14.66 (22.91%) | $0.33 (0.52%) | $38.64 (60.38%) |
 | 20 AI writing jobs and 100 answers | **$50** | $1.60 (3.20%) | $4.22 (8.44%) | $0.30 (0.60%) | $0.75 (1.50%) | $0.50 (1.00%) | $0.64 (1.28%) | $0.30 (0.60%) | $0.00 (0.00%) | $11.47 (22.94%) | $0.31 (0.62%) | $30.22 (60.44%) |
 | 25 GB of storage | **$43** | $1.29 (3.00%) | $3.63 (8.44%) | $0.30 (0.70%) | $0.65 (1.51%) | $0.43 (1.00%) | $0.55 (1.28%) | $0.30 (0.70%) | $0.00 (0.00%) | $9.86 (22.93%) | $0.26 (0.60%) | $25.99 (60.44%) |
 | 20 video hours watched | **$24** | $0.29 (1.21%) | $2.04 (8.50%) | $0.30 (1.25%) | $0.36 (1.50%) | $0.24 (1.00%) | $0.31 (1.29%) | $0.30 (1.25%) | $0.00 (0.00%) | $5.55 (23.13%) | $0.29 (1.21%) | $14.61 (60.88%) |
 
 Every column but the unused room adds up to the price: use, fee, remittance, reserves and tax are the unit's costs, and the net is what is left. The unused room is part of the net: what the whole-dollar price leaves above 60%, the add-on's 25¢ included.
 
-- **Of the fee and the dispute reserve, what is charged on the buyer's tax added on top**: visits $0.92, orders $0.73, list-email $1.30, ai $1.06, storage $0.89, video $0.52. The providers charge their percentages on the whole amount the buyer pays, 27% more than the price at the worst.
+- **Of the fee and the dispute reserve, what is charged on the buyer's tax added on top**: visits $0.92, orders $0.73, list-email $1.33, ai $1.06, storage $0.89, video $0.52. The providers charge their percentages on the whole amount the buyer pays, 27% more than the price at the worst.
 - **Free-account share: none.** A pack's own payment carries none of the stores that pay nothing; their share (line free-share, 1/40 of a free store's worst window) is in each plan's own payment. Selling packs to stores whose plan carries that share leaves it where it is.
 - **Sales tax on top** is not revenue and not a cost of its own here: it is collected for the state and passed on; what it costs is the fee and dispute reserve charged on it, in the line above.
 
@@ -61,7 +61,7 @@ The four factors, for every pack:
 | --- | --- | --- | --- | --- | --- |
 | 5,000 visits | 5.80× | 3.43× | 1.37× | 1.18× | **32.35×** |
 | 250 orders, with their access and store emails | 5.80× | 3.47× | 1.53× | 1.28× | **39.33×** |
-| 2,500 list emails | 5.81× | 3.43× | 1.24× | 1.12× | **27.56×** |
+| 2,500 list emails | 5.80× | 3.41× | 1.23× | 1.14× | **27.83×** |
 | 20 AI writing jobs and 100 answers | 5.80× | 3.43× | 1.31× | 1.19× | **31.25×** |
 | 25 GB of storage | 5.80× | 3.45× | 1.39× | 1.20× | **33.33×** |
 | 20 video hours watched | 5.81× | 3.50× | 2.03× | 2.00× | **82.76×** |
@@ -88,7 +88,7 @@ No rate in use is shown too high by its own page at its dearest tier. Two are hi
 
 ## Option 1: a line on the renewal invoice (not offered)
 
-Not offered, by the owner's rule of 18 October 2026: the customer always pays first, then receives, so every pack, credit and per-use service is prepaid and stops at zero. Billed after use it would save only a pack's own fixed cents (2,500 list emails at $50 instead of $62) and create a non-payment exposure to fund; `lineOption` keeps the arithmetic for the record.
+Not offered, by the owner's rule of 18 October 2026: the customer always pays first, then receives, so every pack, credit and per-use service is prepaid and stops at zero. Billed after use it would save only a pack's own fixed cents (2,500 list emails at $51 instead of $64) and create a non-payment exposure to fund; `lineOption` keeps the arithmetic for the record.
 
 ## Option 2: larger packs
 
@@ -98,7 +98,7 @@ The same packs at one, four, ten and forty times their amount, each prepaid on i
 | --- | --- | --- | --- | --- |
 | 5,000 visits | $44, $8.80 per 1,000 visits, 32.35× | $124, $6.20 per 1,000 visits, 22.88× | $284, $5.68 per 1,000 visits, 20.96× | $1,083, $5.42 per 1,000 visits, 19.98× |
 | 250 orders, with their access and store emails | $35, $0.14 per order, 39.33× | $87, $0.09 per order, 24.65× | $191, $0.08 per order, 21.66× | $711, $0.07 per order, 20.16× |
-| 2,500 list emails | $62, $24.80 per 1,000 emails, 27.56× | $195, $19.50 per 1,000 emails, 21.67× | $460, $18.40 per 1,000 emails, 20.44× | $1,786, $17.86 per 1,000 emails, 19.84× |
+| 2,500 list emails | $64, $25.60 per 1,000 emails, 27.83× | $199, $19.90 per 1,000 emails, 21.65× | $469, $18.76 per 1,000 emails, 20.43× | $1,822, $18.22 per 1,000 emails, 19.84× |
 | 20 AI writing jobs and 100 answers | $50, $2.50 per writing job with 5 answers, 31.25× | $143, $1.79 per writing job with 5 answers, 22.45× | $331, $1.66 per writing job with 5 answers, 20.78× | $1,269, $1.59 per writing job with 5 answers, 19.92× |
 | 25 GB of storage | $43, $1.72 per GB, 33.33× | $118, $1.18 per GB, 22.96× | $270, $1.08 per GB, 21.01× | $1,028, $1.03 per GB, 20.01× |
 | 20 video hours watched | $24, $1.20 per hour, 82.76× | $41, $0.51 per hour, 35.34× | $74, $0.37 per hour, 25.61× | $244, $0.31 per hour, 21.16× |
@@ -111,11 +111,11 @@ A credit balance bought on its own payment and spent on any of the six resources
 
 | Credit bought | Price over cost | Per 1,000 visits | Per order | Per 1,000 emails | Per writing job with 5 answers | Per GB | Per hour | Net, the whole credit on its dearest-to-serve resource |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| $50 | 30.12× | $8.17 | $0.11 | $27.11 | $2.40 | $1.55 | $0.44 | 60.36% |
-| $100 | 23.70× | $6.43 | $0.09 | $21.33 | $1.89 | $1.22 | $0.35 | 60.18% |
-| $250 | 21.11× | $5.73 | $0.08 | $19.01 | $1.69 | $1.09 | $0.31 | 60.07% |
-| $500 | 20.35× | $5.52 | $0.08 | $18.32 | $1.63 | $1.05 | $0.30 | 60.03% |
-| $1,000 | 19.98× | $5.42 | $0.08 | $17.99 | $1.60 | $1.03 | $0.29 | 60.01% |
+| $50 | 30.12× | $8.17 | $0.11 | $27.66 | $2.40 | $1.55 | $0.44 | 60.36% |
+| $100 | 23.70× | $6.43 | $0.09 | $21.76 | $1.89 | $1.22 | $0.35 | 60.18% |
+| $250 | 21.11× | $5.73 | $0.08 | $19.39 | $1.69 | $1.09 | $0.31 | 60.07% |
+| $500 | 20.35× | $5.52 | $0.08 | $18.69 | $1.63 | $1.05 | $0.30 | 60.03% |
+| $1,000 | 19.98× | $5.42 | $0.08 | $18.35 | $1.60 | $1.03 | $0.29 | 60.01% |
 
 Each rate column is per the unit its pack prints (per 1,000 visits, per order with its emails, per 1,000 list emails, per writing job with 5 answers, per GB of storage for a window and its closing days, per video hour watched).
 
@@ -132,10 +132,10 @@ Credits do what larger packs do without asking the buyer to guess which resource
 
 | List emails | At Resend's $0.90 (today): price, per 1,000 | At SES's $0.23, SES only: price, per 1,000 | Net at SES |
 | --- | --- | --- | --- |
-| 2,500 | $62, $24.80 | $29, $11.60 | 60.65% |
-| 10,000 | $195, $19.50 | $64, $6.40 | 60.37% |
-| 25,000 | $460, $18.40 | $131, $5.24 | 60.15% |
-| 100,000 | $1,786, $17.86 | $470, $4.70 | 60.04% |
+| 2,500 | $64, $25.60 | $29, $11.60 | 60.65% |
+| 10,000 | $199, $19.90 | $64, $6.40 | 60.37% |
+| 25,000 | $469, $18.76 | $131, $5.24 | 60.15% |
+| 100,000 | $1,822, $18.22 | $470, $4.70 | 60.04% |
 
 What must be built: the pack's emails sent with `only: "amazon"` and held, not handed to Resend, while Amazon is down or out of its day; the pack's figure counting only what SES took; no attachments on list emails, or their $0.12 a GB counted; and the page saying pack emails can wait. The order pack's access and store emails must not wait (a buyer is owed their access), so they stay at Resend's rate.
 
@@ -147,17 +147,17 @@ No other unit cost can be lowered from its own page: visits, the database and AI
 
 | How it is sold | Per 1,000 list emails | Against HighLevel's $0.675 |
 | --- | --- | --- |
-| The proposal: 2,500 in a prepaid pack | $24.80 | 36.74× |
-| Option 2: 100,000 in a prepaid pack | $17.86 | 26.46× |
-| Option 3: from a $250 prepaid credit | $19.01 | 28.16× |
-| Option 3: from a $1,000 prepaid credit | $17.99 | 26.65× |
+| The proposal: 2,500 in a prepaid pack | $25.60 | 37.93× |
+| Option 2: 100,000 in a prepaid pack | $18.22 | 26.99× |
+| Option 3: from a $250 prepaid credit | $19.39 | 28.73× |
+| Option 3: from a $1,000 prepaid credit | $18.35 | 27.19× |
 | Option 4: 2,500 in a prepaid pack, SES only | $11.60 | 17.19× |
 | Options 3 and 4: from a $250 prepaid credit, SES only | $4.86 | 7.20× |
 | Options 3 and 4: from a $1,000 prepaid credit, SES only | $4.60 | 6.81× |
 
 ## The one structural option that does the most
 
-**Prepaid credits bought in larger amounts (option 3).** It is the only option that lowers factors 3 and 4 for every resource at once while staying prepaid, as the owner's rule requires (bought before use, stopping at zero), and with no bet by the buyer on one resource (option 2). At $250 a credit buys list email at $19.01 a thousand, at $1,000 $17.99, against $24.80 in the proposal's pack; every other resource falls the same way (table above). Its floor is factors 1 and 2, about 19.94× a unit's cost, which no structure removes while the 60% rule and the receiving model stand.
+**Prepaid credits bought in larger amounts (option 3).** It is the only option that lowers factors 3 and 4 for every resource at once while staying prepaid, as the owner's rule requires (bought before use, stopping at zero), and with no bet by the buyer on one resource (option 2). At $250 a credit buys list email at $19.39 a thousand, at $1,000 $18.35, against $25.60 in the proposal's pack; every other resource falls the same way (table above). Its floor is factors 1 and 2, about 19.81× a unit's cost, which no structure removes while the 60% rule and the receiving model stand.
 
 For email specifically the larger lever is the supplier, not the structure: sending what a credit buys through Amazon SES alone (option 4) takes the $1,000 credit's rate to $4.60 a thousand. Even so it stays 6.81× HighLevel's rate: a creator who sends a lot of email will still compare it with ClickFunnels' and Kajabi's allowances.
 

@@ -41,7 +41,7 @@ import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
 import { assessMinimumCustomerBase } from "./historical-margin-model";
 import { MOST_TAX_READING, SIZING_READING, unitUnder, type UnitResult } from "./historical-margin-model";
 import { ORDER, figures, tidy, usageCents, type Printed } from "./limits-proposal-table";
-import { FETCHED_AHEAD, GB, PER_EMAIL } from "./plan-cost-registry";
+import { FETCHED_AHEAD, GB, LIST_EMAIL_USD } from "./plan-cost-registry";
 import { CREDIT_AMOUNTS, creditOption } from "./pack-cost-decomposition-table";
 
 export const READ_ON = "18 October 2026";
@@ -225,9 +225,9 @@ const months = (c: Cycle) => (c === "year" ? 12 : 1);
 export type Shares = Record<Printed, number>;
 export const ones = (): Shares => Object.fromEntries(ORDER.map((id) => [id, 1])) as Shares;
 const zeros = (): Shares => Object.fromEntries(ORDER.map((id) => [id, 0])) as Shares;
-/** A plan's usage at full use under shares of each #553 figure, plus list emails given to Store (which carries none at #553), at the registry's PER_EMAIL. */
+/** A plan's usage at full use under shares of each #553 figure, plus list emails given to Store (which carries none at #553), at the registry's LIST_EMAIL_USD. */
 export function usageFor(tier: Tier, cycle: Cycle, shares: Shares, storeEmails = 0): number {
-  return usageCents(tier, cycle, shares) + Math.ceil(storeEmails * PER_EMAIL * months(cycle) * 100);
+  return usageCents(tier, cycle, shares) + Math.ceil(storeEmails * LIST_EMAIL_USD * months(cycle) * 100);
 }
 export const priceOf = (cycle: Cycle, monthCents: number) => (cycle === "year" ? monthCents * 10 : monthCents);
 const memo = new Map<string, UnitResult>();

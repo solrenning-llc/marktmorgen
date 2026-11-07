@@ -284,6 +284,9 @@ export function CartButton({
                         onClick={() => {
                           refocus.current = at;
                           write(handle, read(handle).filter((id) => id !== line.id));
+                          // Nothing came out (the browser refused to keep it): the focus stays here, and nothing stays armed to move
+                          // it later, on a change the person did not make (3.2.1).
+                          if (read(handle).includes(line.id)) refocus.current = null;
                         }}
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">

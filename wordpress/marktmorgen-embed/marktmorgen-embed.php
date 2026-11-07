@@ -58,8 +58,8 @@ box.style.cssText="position:fixed;inset:0;z-index:2147483646;display:flex;align-
 frame.src=u.href;frame.title=name;frame.referrerPolicy="origin";frame.onload=function(){try{frame.contentWindow.focus()}catch(x){}};
 frame.style.cssText="display:block;width:100%;max-width:400px;height:420px;max-height:calc(100vh - 96px);border:0;border-radius:24px;background:transparent";
 x.type="button";x.setAttribute("aria-label","Close");x.textContent="\u00d7";
-x.style.cssText="position:absolute;top:16px;right:16px;width:44px;height:44px;border:0;border-radius:999px;background:#fff;color:#15112e;font:600 26px/1 system-ui,sans-serif;cursor:pointer;outline:none";
-x.onfocus=function(){x.style.boxShadow="0 0 0 3px #15112e,0 0 0 6px #fff"};x.onblur=function(){x.style.boxShadow="none"};
+x.style.cssText="position:absolute;top:16px;right:16px;width:44px;height:44px;border:0;border-radius:999px;background:#fff;color:#15112e;font:600 26px/1 system-ui,sans-serif;cursor:pointer";
+x.onfocus=function(){x.style.outline="3px solid transparent";x.style.boxShadow="0 0 0 3px #15112e,0 0 0 6px #fff"};x.onblur=function(){x.style.outline="";x.style.boxShadow="none"};
 x.onclick=function(){shut("button")};box.onclick=function(ev){if(ev.target===box)shut("backdrop")};box.oncancel=function(ev){ev.preventDefault();shut("escape")};
 box.appendChild(frame);box.appendChild(x);
 open={box:box,frame:frame,el:a,info:info,over:d.documentElement.style.overflow};

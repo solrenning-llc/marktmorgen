@@ -54,6 +54,6 @@ part("Only the generated link's colors change");
 const html = scriptCode({ ...base, fill: "#ffffff", onFill: "#ffffff", text: 'Buy <this> & "that"' });
 is("the same destination, mode and referrer policy remain", html.includes('href="https://marktmorgen.com/embed/synthetic-store/abc123?mm=page&amp;utm_source=blog&amp;utm_medium=checkout-script" data-mm="page" referrerpolicy="origin"'), true);
 is("the creator's label remains escaped", html.endsWith('>Buy &lt;this&gt; &amp; &quot;that&quot;</a>'), true);
-// Version 2 of the loader (the browser's own modal dialog, 2.4.3/2.4.13) is its own exact bytes; any other change needs a new version.
-is("the loader keeps the exact SHA-256 of its version 2", createHash("sha256").update(loaderSource("https://marktmorgen.com")).digest("hex"), "d608d06dcb27df4ae8a7ee07c5a4ff18e98b8bcf963bdced1d06863046379bf7");
+// Version 2 of the loader (the browser's own modal dialog, 2.4.3/2.4.13, and Close's outline in forced colors, 2.4.7) is its own exact bytes; any other change needs a new version.
+is("the loader keeps the exact SHA-256 of its version 2", createHash("sha256").update(loaderSource("https://marktmorgen.com")).digest("hex"), "0b3cdb6d36ae0bcd618466e41e79f428612c77b7552fcbd5ff7c36723bf30dcb");
 done();

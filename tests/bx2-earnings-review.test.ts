@@ -15,8 +15,21 @@
  *   MEDIUM 5  a zone more than 14 hours ahead of UTC broke the month's floor;
  *   LOW 1     a record in year 10000, a reading outside four-digit years;
  *   LOW 2     the words of the number (tax collected from buyers).
+ *
+ * Then a pre-review of the fix at 925ae7d9ec, what was still open:
+ *
+ *   MEDIUM A  `notRead` took any kind, so a Stripe reading that said its
+ *             renewals, refunds or disputes were never read still had a total
+ *             (and every kind said left out was a confirmed zero); a total
+ *             without disputes was still called "after refunds and disputes";
+ *   MEDIUM B  money given back had no reading of its own (a dispute opened
+ *             before `since` and won after it is never read);
+ *   LOW 3     a record "stripe:paypal:…" passed as Stripe's own id;
+ *   LOW 4     the design said the rule refuses a duplicate id across sources
+ *             (an ES1 payment already in Stripe); it did not.
  */
 import { readFileSync } from "node:fs";
+import * as rule from "@/lib/earnings-by-month";
 import {
   earningsByMonth,
   earningsMonths,
@@ -157,5 +170,100 @@ part("LOW 1: year 10000 and years not of four digits (already closed with Codex 
 
 part("LOW 2: what a sale's amount holds");
 is("the design says sales include tax collected from buyers on top", doc.includes("tax collected from buyers"), true);
+
+part("PRE-REVIEW A: only kinds a provider truly cannot read may be said left out, and the total says what it is after");
+{
+  const stripeSaid = (notRead: MoneyKind[]) => earningsByMonth(input({ providers: [{
+    source: "stripe",
+    lists: [list("sale", [{ id: "stripe:cs_1", at: utc(2026, 10, 3), cents: 5000, currency: "usd" }]), ...(["renewal", "refund", "dispute", "reinstated"] as MoneyKind[]).filter((k) => !notRead.includes(k)).map((k) => list(k, []))],
+    notRead,
+  }] }));
+  // The proof of the pre-review, as it was (prerev-bx2-proof.test.ts, part A).
+  const proof = stripeSaid(["renewal", "refund", "dispute", "reinstated"]);
+  is("Stripe may not say its refunds and disputes are never read (only PayPal's disputes are)", source(proof, "2026-10", "stripe").state, "unknown");
+  is("and October is not given a total 'after refunds and disputes'", month(proof, "2026-10").totals, null);
+  const none = earningsByMonth(input({ providers: [{ source: "stripe", lists: [], notRead: ["sale", "renewal", "refund", "dispute", "reinstated"] }] }));
+  is("Stripe with every kind said left out is not a confirmed zero", month(none, "2026-10").totals, null);
+  // Each kind that must be read, alone.
+  for (const kind of ["renewal", "refund"] as MoneyKind[]) {
+    is(`Stripe saying its ${kind}s are not read: unknown, never a total`, [source(stripeSaid([kind]), "2026-10", "stripe").state, month(stripeSaid([kind]), "2026-10").totals], ["unknown", null]);
+  }
+  const noSales = earningsByMonth(input({ providers: [{ source: "stripe", lists: (["renewal", "refund", "dispute", "reinstated"] as MoneyKind[]).map((k) => list(k, [])), notRead: ["sale"] }] }));
+  is("Stripe saying its sales are not read: unknown", source(noSales, "2026-10", "stripe").state, "unknown");
+  for (const kind of ["sale", "refund"] as MoneyKind[]) {
+    const out = earningsByMonth(input({ providers: [{ source: "paypal", lists: (["sale", "refund"] as MoneyKind[]).filter((k) => k !== kind).map((k) => list(k, [])), notRead: ["dispute", kind] }] }));
+    is(`PayPal saying its ${kind}s are not read: unknown`, [source(out, "2026-10", "paypal").state, month(out, "2026-10").totals], ["unknown", null]);
+  }
+  const paypalBack = earningsByMonth(input({ providers: [{ ...fullPayPal([]), notRead: ["dispute", "reinstated"] }] }));
+  is("PayPal saying a kind left out that it may not (money given back): unknown", source(paypalBack, "2026-10", "paypal").state, "unknown");
+  // The year reading (claude5/bx2-u2-year-read-fix2) says Stripe disputes and money given back, and PayPal disputes, are not read.
+  const year = earningsByMonth(input({ providers: [
+    fullStripe([list("sale", [{ id: "stripe:cs_1", at: utc(2026, 10, 3), cents: 5000, currency: "usd" }]), list("refund", [{ id: "stripe:re_1", at: utc(2026, 10, 9), cents: 1000, currency: "usd" }])], ["dispute", "reinstated"]),
+    fullPayPal([list("sale", [{ id: "paypal:sale:O1", at: utc(2026, 10, 4), cents: 2000, currency: "usd" }])]),
+  ] }));
+  const oct = month(year, "2026-10");
+  is("control: the year reading's own sayings still give October a total", oct.totals?.map((l) => l.netCents), [6000]);
+  is("and the month lists what it left out", oct.leftOut, [{ source: "stripe", kinds: ["dispute", "reinstated"] }, { source: "paypal", kinds: ["dispute"] }]);
+  const words = (rule as Record<string, unknown>).netWords as ((sources: unknown) => string) | undefined;
+  is("the rule says in words what a difference is after (netWords)", typeof words, "function");
+  const said = typeof words === "function" ? words(oct.sources) : "";
+  is("a total without disputes is never called after refunds and disputes", said.includes("and disputes"), false);
+  is(
+    "it says what was taken off and what was not",
+    said,
+    "After refunds, before disputes: Stripe and PayPal disputes are not read, so they are not taken off. Money given back by Stripe is not read, so it is not added. Partial PayPal refunds are not recorded, so they are not taken off.",
+  );
+  const all = earningsByMonth(input({ providers: [fullStripe([])] }));
+  is("control: every kind read, the words are after refunds and disputes", typeof words === "function" ? words(month(all, "2026-10").sources) : "", "After refunds and disputes.");
+  const some = earningsByMonth(input({ providers: [fullStripe([]), fullPayPal([])] }));
+  is(
+    "Stripe's disputes read, PayPal's not: it says whose disputes were taken off",
+    typeof words === "function" ? words(month(some, "2026-10").sources) : "",
+    "After refunds and Stripe disputes, before PayPal disputes, which are not read. Partial PayPal refunds are not recorded, so they are not taken off.",
+  );
+  is("the design no longer calls every difference after refunds and disputes", doc.includes('and the difference, called "after refunds and disputes"'), false);
+  is("the design names the words the rule gives (netWords)", doc.includes("`netWords`"), true);
+}
+
+part("PRE-REVIEW B: money given back is said not read until it has a reading of its own");
+is("the design says the year reading says money given back not read", doc.includes("says `reinstated` not read"), true);
+is("and why: a dispute opened before the reading began and won after it is never read", doc.includes("opened before the reading began"), true);
+
+part("PRE-REVIEW LOW 3: a record whose id holds another provider's prefix is not its source's own");
+{
+  // The proof of the pre-review, as it was (part B): readPaidSales's PayPal row prefixed again by a caller.
+  const proof = earningsByMonth(input({ providers: [
+    fullStripe([list("sale", [{ id: "stripe:paypal:ORDER1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])]),
+    fullPayPal([list("sale", [{ id: "paypal:ORDER1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])]),
+  ] }));
+  is("October is never US$ 40", month(proof, "2026-10").totals, null);
+  is("Stripe is the source refused", [source(proof, "2026-10", "stripe").state, source(proof, "2026-10", "paypal").state], ["unknown", "read"]);
+  const upper = earningsByMonth(input({ providers: [fullStripe([list("sale", [{ id: "stripe:PayPal:ORDER1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])])] }));
+  is("whatever its case", source(upper, "2026-10", "stripe").state, "unknown");
+  const back = earningsByMonth(input({ providers: [fullPayPal([list("sale", [{ id: "paypal:stripe:pi_1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])])] }));
+  is("the same the other way (paypal:stripe:…)", source(back, "2026-10", "paypal").state, "unknown");
+}
+
+part("PRE-REVIEW LOW 4: the same id in two sources is refused, as the design says");
+{
+  // The proof of the pre-review, as it was (part C): an ES1 entry carrying a Stripe payment id already read.
+  const proof = earningsByMonth(input({
+    manual: [{ id: "stripe:pi_1", date: "2026-10-03", cents: 3000, currency: "usd" }],
+    providers: [fullStripe([list("sale", [{ id: "stripe:pi_1", at: utc(2026, 10, 3), cents: 3000, currency: "usd" }])])],
+  }));
+  is("the same payment id in Stripe and in an entry is refused, never US$ 60", month(proof, "2026-10").totals, null);
+  const apart = earningsByMonth(input({
+    manual: [{ id: "stripe:pi_1", date: "2026-09-28", cents: 3000, currency: "usd" }],
+    providers: [fullStripe([list("sale", [{ id: "stripe:pi_1", at: utc(2026, 10, 3), cents: 3000, currency: "usd" }])])],
+  }));
+  is("in two different months, neither month has a total", [month(apart, "2026-09").totals, month(apart, "2026-10").totals], [null, null]);
+  is("a month without the id keeps its total", month(apart, "2026-08").totals, []);
+  const other = earningsByMonth(input({
+    manual: [{ id: "deal-1", date: "2026-10-03", cents: 3000, currency: "usd" }],
+    providers: [fullStripe([list("sale", [{ id: "stripe:pi_1", at: utc(2026, 10, 3), cents: 3000, currency: "usd" }])])],
+  }));
+  is("control: different ids are both added", month(other, "2026-10").totals?.map((l) => l.netCents), [6000]);
+  is("the design says the rule refuses the same id in two sources", doc.includes("the same id in two sources"), true);
+}
 
 done();

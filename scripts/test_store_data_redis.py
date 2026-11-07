@@ -1,4 +1,5 @@
-"""Exercise the actual data room Lua (lib/store-data.ts, TAKE_DATA) against disposable local CI Redis.
+"""Exercise the actual data room Lua (lib/store-data.ts, TAKE_DATA), and the receipt number script built on it
+(lib/receipt-number.ts, RECEIPT_NUMBER), against disposable local CI Redis.
 No application credentials or production host configuration are read.
 """
 import concurrent.futures
@@ -17,12 +18,36 @@ def script(path, name):
     return match.group(1)
 
 
+def receipt_script(root, take_data):
+    """RECEIPT_NUMBER as lib/receipt-number.ts builds it: TAKE_DATA and the slot's name put in, nothing else."""
+    source = (root / "lib/receipt-number.ts").read_text(encoding="utf-8")
+    match = re.search(r"export const RECEIPT_NUMBER = `([^`]+)`;", source)
+    slot = re.search(r'export const RECEIPT_SLOT = "([a-z]+)";', source)
+    if not match or not slot or "\\" in match.group(1):
+        raise RuntimeError("Expected application script RECEIPT_NUMBER")
+    body = match.group(1).replace("${TAKE_DATA}", take_data).replace("${RECEIPT_SLOT}", slot.group(1))
+    if "${" in body:
+        raise RuntimeError("RECEIPT_NUMBER puts in something this test does not")
+    return body
+
+
+def receipt_ceiling(root):
+    """RECEIPT_NUMBER_COMMANDS, read from the code it is written in."""
+    own = re.search(r"export const RECEIPT_NUMBER_COMMANDS = (\d+) \+ DATA_EXPIRED_COMMANDS;", (root / "lib/receipt-number.ts").read_text(encoding="utf-8"))
+    expired = re.search(r"export const DATA_EXPIRED_COMMANDS = (\d+);", (root / "lib/store-data.ts").read_text(encoding="utf-8"))
+    if not own or not expired:
+        raise RuntimeError("Expected RECEIPT_NUMBER_COMMANDS = n + DATA_EXPIRED_COMMANDS")
+    return int(own.group(1)) + int(expired.group(1))
+
+
 def main():
     if os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1":
         raise RuntimeError("Run only against dedicated CI Redis on loopback port 16379")
     root = Path(__file__).resolve().parents[1]
     take_data = script(root / "lib/store-data.ts", "TAKE_DATA")
     room = "marktmorgen:integration:data:" + uuid.uuid4().hex
+    numbers = "marktmorgen:integration:rcpt:n:" + uuid.uuid4().hex
+    counter = "marktmorgen:integration:rcpt:seq:" + uuid.uuid4().hex
     redis = Redis()
 
     def take(client, limit, *triples, always=False, month="2026-10"):
@@ -133,8 +158,63 @@ def main():
         assert sum(1 for r in results if r == 1) == 10 and all(r in (0, 1) for r in results)
         assert total() == 64 * 10 + 10 * 100
         print("PASS: concurrent writes never take more room than there is")
+
+        # A receipt's number (lib/receipt-number.ts): the commands one numbering bills, counted with INFO commandstats,
+        # never past RECEIPT_NUMBER_COMMANDS, the figure tests/kb22-receipt-number.test.ts prices inside the receipt's
+        # studio requests (review of #3001, M1, comment 6697804893: 37 measured at 13 expired months against 16).
+        receipt_number = receipt_script(root, take_data)
+        ceiling = receipt_ceiling(root)
+
+        def calls():
+            stats = redis.command("INFO", "commandstats")
+            return sum(int(n) for n in re.findall(r"^cmdstat_[^:]+:calls=(\d+)", stats, re.M))
+
+        def number(reference, limit=10**9):
+            return redis.command("EVAL", receipt_number, 3, room, numbers, counter, limit, "2026-11", reference, 352, 368)
+
+        def billed(reference, limit=10**9):
+            before = calls()
+            reply = number(reference, limit)
+            # Less the INFO that read the count before it.
+            return reply, calls() - before - 1
+
+        most = 0
+        for idle in (0, 1, 13, 40, 520):
+            redis.command("DEL", room, numbers, counter)
+            months = ["%04d-%02d" % (1900 + i // 12, i % 12 + 1) for i in range(idle)]
+            if months:
+                redis.command("HSET", room, "#", str(idle * 164), "~", ",".join(months), *[part for m in months for part in ("~" + m, "100")])
+            for reference, want in (("cs_test_first", [3, 1]), ("cs_test_first", [2, 1]), ("cs_test_next", [3, 2])):
+                reply, used = billed(reference)
+                assert reply == want and used <= ceiling, (idle, reference, reply, used, ceiling)
+                most = max(most, used)
+            redis.command("HSET", room, "#", "999999999999", "~", ",".join(months) or "2026-12")
+            reply, used = billed("cs_test_full", 10)
+            assert reply == [0, 999999999999] and used <= ceiling, (idle, reply, used, ceiling)
+        assert most == 13, most
+        print("PASS: one receipt number bills at most RECEIPT_NUMBER_COMMANDS (%d; %d measured), however long the store sat idle" % (ceiling, most))
+
+        # A count Redis cannot add to takes no room and gives no number (review of #3001, L1, comment 6704251804).
+        for bad in ("abc", "1.5", "007", "9999999999999"):
+            redis.command("DEL", room, numbers, counter)
+            redis.command("SET", counter, bad)
+            assert number("cs_test_bad") == [-1, 0] and number("cs_test_bad") == [-1, 0]
+            assert redis.command("EXISTS", room) == 0 and redis.command("HEXISTS", numbers, "cs_test_bad") == 0
+            assert redis.command("GET", counter) == bad
+        redis.command("DEL", room, numbers, counter)
+        redis.command("HSET", counter, "n", "1")
+        try:
+            number("cs_test_bad")
+            raise AssertionError("a count of another type was read as a number")
+        except RuntimeError as error:
+            assert "WRONGTYPE" in str(error)
+        assert redis.command("EXISTS", room) == 0
+        redis.command("DEL", counter)
+        redis.command("SET", counter, "7")
+        assert number("cs_test_bad") == [3, 8]
+        print("PASS: a receipt count that is not a whole number takes no room and gives no number")
     finally:
-        redis.command("DEL", room)
+        redis.command("DEL", room, numbers, counter)
         redis.close()
 
 

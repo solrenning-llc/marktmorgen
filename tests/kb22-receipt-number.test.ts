@@ -224,8 +224,38 @@ async function main(): Promise<void> {
   is("and its script clears no more than that", TAKE_DATA.includes(`#over < ${String(cleared)}`), true);
   is("reading them with one HMGET and removing them with one HDEL, never a command a month", [TAKE_DATA.includes("'HMGET'"), TAKE_DATA.includes("HGET', KEYS[1], '~' .. m")], [true, false]);
   // Measured with INFO commandstats on a real Redis (review of #3001): 10 commands with no expired month, 13 with any number
-  // (their read, their removal and the list written back).
+  // (their read, their removal and the list written back). scripts/test_store_data_redis.py measures the script itself
+  // against RECEIPT_NUMBER_COMMANDS in CI (first number, again, next, full; 0 to 520 expired months), so the ceiling is
+  // held by a count and not only by this figure.
   is("RECEIPT_NUMBER_COMMANDS covers the most the script can bill", RECEIPT_NUMBER_COMMANDS >= 13, true);
+
+  part("A count that is not a whole number takes no room and gives no number");
+  // Review of #3001 (Claude 2, L1, comment 6704251804): the room was taken before the INCR, so a count Redis cannot
+  // add to failed the script after its room was spent, and every try took one more number's room. The in-memory
+  // model read such a count as 0 and gave R-000001 again. The count is read before anything is taken.
+  const THIRD = "third-numbers@example.com";
+  await claimHandle(THIRD, "thirdnumbers", "Third Kitchen", "");
+  await ensureStatsId(THIRD);
+  const third = (await storeForEmail(THIRD))!;
+  const thirdRoom = dataKey(third)!;
+  const counter = receiptCounterKey(third.sid);
+  const roomNow = async () => (await redis.pipeline([["HGET", thirdRoom, "#"], ["HGET", thirdRoom, RECEIPT_SLOT]])).map((v) => Number(v ?? 0));
+  is("the store's first sale is numbered", await assignReceiptNumber(third, "cs_test_thirdstore00000001"), { ok: true, number: "R-000001" });
+  for (const bad of ["abc", "1.5", "007", "9999999999999"]) {
+    await redis.pipeline([["SET", counter, bad]]);
+    const held = await roomNow();
+    const tries = [await assignReceiptNumber(third, "cs_test_thirdstore00000002"), await assignReceiptNumber(third, "cs_test_thirdstore00000002")];
+    is(`a count of "${bad}": no number, twice`, tries, [{ ok: false, reason: "unknown" }, { ok: false, reason: "unknown" }]);
+    is(`a count of "${bad}": the room untouched by either try`, await roomNow(), held);
+    is(`a count of "${bad}": nothing written for the sale, the count left as it was`, await redis.pipeline([["HEXISTS", receiptNumbersKey(third.sid), "cs_test_thirdstore00000002"], ["GET", counter]]), [0, bad]);
+  }
+  await redis.pipeline([["DEL", counter], ["HSET", counter, "n", "1"]]);
+  const heldTyped = await roomNow();
+  is("a count of another type: no number", await assignReceiptNumber(third, "cs_test_thirdstore00000002"), { ok: false, reason: "unknown" });
+  is("and the room untouched", await roomNow(), heldTyped);
+  await redis.pipeline([["DEL", counter], ["SET", counter, "7"]]);
+  is("a whole count still gives the next number", await assignReceiptNumber(third, "cs_test_thirdstore00000002"), { ok: true, number: "R-000008" });
+  is("the script reads the count before it takes any room", RECEIPT_NUMBER.indexOf("'GET', KEYS[3]") > 0 && RECEIPT_NUMBER.indexOf("'GET', KEYS[3]") < RECEIPT_NUMBER.indexOf("receiptRoom(ARGV[1]"), true);
 
   part("Its cost: inside the receipt's studio requests");
   const worst = request("step", 40 + RECEIPT_NUMBER_COMMANDS, 200_000 + 2 * RECEIPT_NUMBER_BYTES) + RECEIPT_PDF_MAX_BYTES * ORIGIN_PER_BYTE;

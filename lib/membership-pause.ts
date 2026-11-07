@@ -137,8 +137,10 @@ const sentSeconds = (pause: PauseSpan, now: number) => Math.min(Math.max(pause.u
  * age would read negative, as recent, and keep a press repeating the key well past the day Stripe keeps it. It is
  * unknown, and nothing is sent. No room is left for clocks: the time is written by this code's own clock just before
  * the send and read back by a later press, so a later time means a clock that went back or a record that is not what
- * was written; any room would also come out of the hour left before Stripe's 24. A press refused this way changes
- * nothing, and the member can press again once the record reads as written.
+ * was written; any room would also come out of the hour left before Stripe's 24. Refusing it only while it is in the
+ * future would not do: once the clock passed that time its age would read small again, and the key would be repeated
+ * past Stripe's day. So the record is marked unknown (markSentUnknown) and every later press of that pause is refused
+ * as a record that cannot be read, until it expires with the pause, like any other unreadable record.
  */
 const RESUME_REPEAT_MS = 23 * 3_600_000;
 /** Whether a press may send the record's key again: only from a first send that is not in the future and at most RESUME_REPEAT_MS ago. */
@@ -184,6 +186,20 @@ async function markSent(subscription: string, pause: PauseSpan, sent: Sent, fres
   } catch (error) {
     console.error("writing a resume's record failed", error);
     return false;
+  }
+}
+
+/**
+ * Marks a resume's record unknown (its time 0, which sentResume never reads as a send), keeping its key and pause and
+ * only if it is still there (XX). A write that fails is logged; that press still sends nothing.
+ */
+async function markSentUnknown(subscription: string, pause: PauseSpan, sent: Sent, now: number): Promise<void> {
+  const command: (string | number)[] = ["SET", resumeSentKey(subscription, pause), JSON.stringify({ k: sent.key, p: sent.asked, s: 0 }), "EX", sentSeconds(pause, now), "XX"];
+  try {
+    const replies = repliesFor(await redisPipeline([command]), 1);
+    if (replies === null || (replies[0] !== "OK" && replies[0] !== null)) console.error("marking a resume's record unknown got an answer in another shape");
+  } catch (error) {
+    console.error("marking a resume's record unknown failed", error);
   }
 }
 
@@ -303,8 +319,9 @@ export async function resumeMembership(store: Store, token: string, subscription
       // A press of this pause already sent its key, and the read says nothing of another pause: the same key again.
       const clock = Date.now();
       if (sent.at > clock) {
-        // A first send in the future is unknown, never proof of being inside the window: nothing is sent.
+        // A first send in the future is unknown, never proof of being inside the window: nothing is sent, now or once the clock passes it.
         console.error(`resuming a membership whose resume record reads a send time in the future; nothing is sent (${subscription}, ${sent.key})`);
+        await markSentUnknown(subscription, pause, sent, now);
         return { ok: false, reason: "error" };
       }
       if (!insideRepeatWindow(sent.at, clock)) {

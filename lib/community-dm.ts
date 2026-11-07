@@ -49,6 +49,7 @@
  * is what makes one conversation rather than two halves of one.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf as replyCount, repliesFor } from "@/lib/redis-reply";
 import { countOf, holdsAll } from "@/lib/community-search";
 import { CREATOR } from "@/lib/community";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
@@ -200,27 +201,40 @@ export async function send(
   if (!words) return { ok: false, reason: "empty" };
   const pair = pairOf(from, to);
 
-  const [declined, already, size] = await redisPipeline([
-    ["SISMEMBER", shutKey(id, to), from],
-    ["EXISTS", chatKey(id, pair)],
-    ["ZCARD", inboxKey(id, to)],
-  ]);
+  // Each reply in its exact shape (CX-123 rule 24): SISMEMBER and EXISTS 0 or 1,
+  // ZCARD a whole count. A hole, null, text or a short pipeline is not "not
+  // declined", "under the cap" or "already talking": nothing is written and
+  // the route answers 503.
+  const checks = repliesFor(
+    await redisPipeline([
+      ["SISMEMBER", shutKey(id, to), from],
+      ["EXISTS", chatKey(id, pair)],
+      ["ZCARD", inboxKey(id, to)],
+    ]),
+    3,
+  );
+  const declined = replyCount(checks?.[0]);
+  const already = replyCount(checks?.[1]);
+  const size = replyCount(checks?.[2]);
+  if (declined === null || declined > 1 || already === null || already > 1 || size === null) {
+    throw new UnknownReplyError("a private message's declined, conversation or count check");
+  }
   // Declined once is declined for good, and the sender is told nothing that
   // would let them work out they were declined rather than ignored.
-  if (Number(declined) === 1) return { ok: false, reason: "declined" };
-  if (Number(size) >= MAX_CONVERSATIONS && !Number(already)) return { ok: false, reason: "full" };
+  if (declined === 1) return { ok: false, reason: "declined" };
+  if (size >= MAX_CONVERSATIONS && !already) return { ok: false, reason: "full" };
 
   const message: Message = { a: from, text: words, at: now() };
   // A request when this is the first thing said and the community asks for
   // one. The creator writing to a member never is; a member writing to the
   // creator never is either.
-  const asking = setting.ask && !Number(already) && from !== CREATOR && to !== CREATOR;
+  const asking = setting.ask && !already && from !== CREATOR && to !== CREATOR;
 
   // Its room first (DataRoomError when it does not fit). A conversation at
   // MAX_MESSAGES lets its oldest go, and that one's room comes back.
   const [length, oldest] = await redisPipeline([["LLEN", chatKey(id, pair)], ["LINDEX", chatKey(id, pair), 0]]);
   const dropped = Number(length) >= MAX_MESSAGES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
-  await needData(room, [{ slot: PAIR_SLOT(pair), bytes: dataBytes([JSON.stringify(message)], 1) + (Number(already) ? 0 : PAIR_BYTES) - dropped }]);
+  await needData(room, [{ slot: PAIR_SLOT(pair), bytes: dataBytes([JSON.stringify(message)], 1) + (already ? 0 : PAIR_BYTES) - dropped }]);
 
   await redisPipeline([
     ["RPUSH", chatKey(id, pair), JSON.stringify(message)],

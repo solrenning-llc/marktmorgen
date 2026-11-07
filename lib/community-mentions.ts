@@ -168,6 +168,15 @@ export function withMentions(
   return out;
 }
 
+/**
+ * Deletes a handle only while the member it names still holds it, in the same
+ * step: a handle given back and taken by somebody else after it was read is
+ * theirs now, and stays (0).
+ */
+export const FORGET_HANDLE_IF_THEIRS = `-- marktmorgen:community-handle-forget:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+return redis.call("HDEL", KEYS[1], ARGV[1])`;
+
 /** Lets go of the handle a deleted member held, if it is still theirs (lib/community-erasure.ts). */
 export async function forgetHandle(id: string, handle: string, who: string): Promise<number> {
   if (!handle) return 0;
@@ -175,7 +184,8 @@ export async function forgetHandle(id: string, handle: string, who: string): Pro
   const owner = repliesFor(await redisPipeline([["HGET", handlesKey(id), handle]]), 1)?.[0];
   if (owner !== null && typeof owner !== "string") throw new UnknownReplyError("a community handle's owner");
   if (owner !== who) return 0;
-  const gone = countOf(repliesFor(await redisPipeline([["HDEL", handlesKey(id), handle]]), 1)?.[0]);
+  // Checked again where it is deleted: somebody may have taken it since the read.
+  const gone = countOf(repliesFor(await redisPipeline([["EVAL", FORGET_HANDLE_IF_THEIRS, 1, handlesKey(id), handle, who]]), 1)?.[0]);
   if (gone === null || gone > 1) throw new UnknownReplyError("a community handle's erasure");
   return gone;
 }

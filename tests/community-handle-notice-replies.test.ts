@@ -32,6 +32,8 @@ const HANDLES = `nl:cm:${COMMUNITY}:h`;
 const LIST = `nl:cm:${COMMUNITY}:nt:${MEMBER}`;
 const room = { sid: "handle-notice-replies-1", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_synthetic", trialEnds: 0, planEndedAt: "" };
 const TAKE_DATA = "-- marktmorgen:store-data:v1";
+/** The handle's deletion: one step that checks it is still theirs (FORGET_HANDLE_IF_THEIRS). */
+const isForget = (command: (string | number)[]) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:community-handle-forget:v1\n");
 
 type Batch = (string | number)[][];
 
@@ -80,13 +82,13 @@ test("forgetHandle: a deletion reply in an unknown shape is said as not done, ne
   for (const reply of shapes) {
     store.clear();
     await claimHandle(COMMUNITY, MEMBER, "Maria Synthetic", "");
-    await withPipeline(async (batch, original) => (batch[0][0] === "HDEL" ? (reply as unknown[]) : original(batch)), async () => {
-      await assert.rejects(forgetHandle(COMMUNITY, "maria-synthetic", MEMBER), `HDEL reply ${JSON.stringify(reply)}`);
+    await withPipeline(async (batch, original) => (isForget(batch[0]) ? (reply as unknown[]) : original(batch)), async () => {
+      await assert.rejects(forgetHandle(COMMUNITY, "maria-synthetic", MEMBER), `deletion reply ${JSON.stringify(reply)}`);
     });
   }
   store.clear();
   await claimHandle(COMMUNITY, MEMBER, "Maria Synthetic", "");
-  await withPipeline(async (batch, original) => (batch[0][0] === "HDEL" ? [0] : original(batch)), async () => {
+  await withPipeline(async (batch, original) => (isForget(batch[0]) ? [0] : original(batch)), async () => {
     assert.equal(await forgetHandle(COMMUNITY, "maria-synthetic", MEMBER), 0);
   });
 });

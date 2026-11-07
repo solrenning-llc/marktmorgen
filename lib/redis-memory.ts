@@ -543,6 +543,12 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[4]);
           return 1;
         }
+        // lib/community-mentions.ts, FORGET_HANDLE_IF_THEIRS: the handle deleted only while it still names this member.
+        if (key.startsWith("-- marktmorgen:community-handle-forget:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, handles, handle, who] = args;
+          if (this.run(["HGET", handles, handle]) !== who) return 0;
+          return this.run(["HDEL", handles, handle]);
+        }
         if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lease, queue, member, score, next] = args;
           if (this.run(["ZSCORE", lease, member]) === null) return 0;

@@ -25,6 +25,11 @@ import { readReviewStop, stopReviewRequests } from "@/lib/review-requests";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { POST as unsubscribePost } from "@/app/api/mail/unsubscribe/route";
 import { store as redis } from "./redis-stub";
+import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import UnsubscribePage from "@/app/unsubscribe/page";
+import { affiliatesWords } from "@/lib/buyer-words/affiliates";
+import { LANGUAGE_CODES } from "@/lib/store-language";
 
 globalThis.fetch = (async () => {
   throw new Error("No real provider call allowed");
@@ -192,4 +197,43 @@ test("R3 at the door: an unknown stop write never says 'Unsubscribed.' nor 'Not 
       assert.equal((await readReviewStop(token))?.stopped, false, "not stopped, so the page shows the button again");
     });
   }
+});
+
+// ---- Claude 5's LOW on #3010: the page path says when the last press was not saved (AX274 3.3.1, 4.1.3) ----
+async function settle(node: ReactNode): Promise<ReactNode> {
+  if (Array.isArray(node)) return Promise.all(node.map(settle));
+  if (!isValidElement(node)) return node;
+  const element = node as ReactElement<{ children?: ReactNode }>;
+  if (typeof element.type === "function") {
+    return settle(await (element.type as (props: unknown) => ReactNode | Promise<ReactNode>)(element.props));
+  }
+  return "children" in element.props ? cloneElement(element, undefined, await settle(element.props.children)) : element;
+}
+const page = async (query: Record<string, string>) => renderToStaticMarkup(await settle(await UnsubscribePage({ searchParams: Promise.resolve(query) })));
+const notSaved = (): string => {
+  const said = (affiliatesWords("en") as unknown as Record<string, unknown>).reviewsNotSaved;
+  return typeof said === "string" ? said : "<no reviewsNotSaved>";
+};
+
+test("the stop page says the last press was not saved when the route answered done=0, and offers the button again", async () => {
+  const token = await stopToken(unique("page not saved"));
+  const html = await page({ v: token, done: "0" });
+  assert.ok(html.includes(notSaved()), "the buyer is told the last press was not saved");
+  assert.match(html, new RegExp(`role="status"[^>]*>${notSaved().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), "said in a status region");
+  assert.match(html, /<form /, "the button is offered again");
+});
+
+test("control: no such sentence without done=0, nor once the stop is saved", async () => {
+  const token = await stopToken(unique("page saved"));
+  for (const query of [{ v: token }, { v: token, done: "1" }]) assert.ok(!(await page(query)).includes(notSaved()), `no failure said for ${JSON.stringify(query)}`);
+  assert.equal(await stopReviewRequests(token), true);
+  const html = await page({ v: token, done: "0" });
+  assert.ok(!html.includes(notSaved()), "a stop already saved is not said to have failed");
+  assert.doesNotMatch(html, /<form /, "and no button is offered");
+});
+
+test("the sentence exists in every buyer language and differs in each", () => {
+  const all = LANGUAGE_CODES.map((code) => (affiliatesWords(code) as unknown as Record<string, unknown>).reviewsNotSaved);
+  assert.ok(all.every((s) => typeof s === "string" && s.length > 15), "set in every language");
+  assert.equal(new Set(all).size, LANGUAGE_CODES.length, "each its own");
 });

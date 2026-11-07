@@ -182,12 +182,16 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   // month's claim either: a sale that lands later today should still be able
   // to bring the email.
   if (lines.length === 0) return false;
+  // Whether it pays by itself is read before the claim: a link that could not
+  // be read throws here with the month still unclaimed, so the next run of the
+  // job pays or reminds as a healthy one would (Codex J's MEDIUM on 7b1baef6).
+  const auto = book.refundsChecked && (await paysAutomatically(store));
   // Claimed last, so that whichever run gets here first is the only one that
   // sends. A second run reads the same book and stops here.
   if (!(await claimMonth(store.statsId, month))) return false;
   // Paying by itself, from the creator's own PayPal (lib/paypal-payouts.ts):
   // the email then says what was sent, or why it could not be.
-  if (book.refundsChecked && (await paysAutomatically(store))) {
+  if (auto) {
     const paid = await payWithPayPal(store);
     const { subject, text } = autoPayEmail(paid, book.currency);
     return sendEmail({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });

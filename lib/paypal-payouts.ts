@@ -31,8 +31,9 @@
 import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, UnknownReplyError } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
+import { type Book, type BookedPayouts, bookPayPalPayout, bookedPayouts, payAddress, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
@@ -65,16 +66,25 @@ export type PayPalView = { client: string; at: number; auto: boolean; broken: bo
 type OpenBatch = PendingPayoutBatch;
 type Sent = OpenBatch["lines"][number];
 
+/** The creator's link: null only when Redis confirms there is none; an answer in any other shape throws (rule 24). */
 async function readLink(store: Store): Promise<Link | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(store.statsId)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", linkKey(store.statsId)]]), 1);
+  if (!reply) throw new UnknownReplyError("the PayPal link");
+  const [raw] = reply;
+  if (raw === null) return null;
+  let v: unknown;
   try {
-    const v = JSON.parse(raw) as Link;
-    return typeof v.client === "string" && typeof v.secret === "string" ? v : null;
+    v = typeof raw === "string" ? JSON.parse(raw) : undefined;
   } catch {
-    return null;
+    v = undefined;
   }
+  // The auto-pay switch is true or false, written so since the link existed: "false", 1, null or a missing switch is a
+  // record in an unknown shape, neither permission to pay nor "off" (Codex J's MEDIUM on 7b1baef6).
+  if (!record(v) || typeof v.client !== "string" || typeof v.secret !== "string" || typeof v.auto !== "boolean") {
+    throw new UnknownReplyError("the PayPal link");
+  }
+  return v as Link;
 }
 
 /** What the studio shows: never the Secret. */
@@ -451,6 +461,7 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   const auth = await bearer(store).catch(() => null);
   if (!auth) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
   const day = new Date().toISOString().slice(0, 10);
+  let booked: BookedPayouts | undefined;
   for (const [batch, sent] of open) {
     // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a
     // day, and its people stay on their way whatever comes back (decision C1-20261105-1830-C5-1, option A).
@@ -484,11 +495,14 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
       if (status === PAID && got?.item) {
-        const [fresh] = await redisPipeline([["SET", itemKey(got.item), batch, "NX", "EX", 400 * 86_400]]);
-        if (fresh !== null) {
-          await addPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference: `PayPal ${got.item}` });
-          out.paid += 1;
-        }
+        // Booked first, exactly once per PayPal item (lib/affiliates.ts bookPayPalPayout), then marked. Anything not
+        // known on the way throws before the open batch is rewritten: the line stays on its way, never owed again,
+        // and the next run finds it in the book (Revisor 1's GRAVE on 7bd48a58).
+        booked ??= await bookedPayouts(store);
+        const done = await bookPayPalPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, item: got.item }, booked);
+        const reply = repliesFor(await redisPipeline([["SET", itemKey(got.item), batch, "NX", "EX", 400 * 86_400]]), 1);
+        if (!reply || (reply[0] !== "OK" && reply[0] !== null)) throw new UnknownReplyError("the mark of a paid PayPal item");
+        if (done === "booked") out.paid += 1;
       } else if (NOT_PAID.has(status)) {
         out.released += 1;
       } else {
@@ -583,7 +597,14 @@ export async function settleAllPayPal(deadline: number): Promise<number> {
   let done = 0;
   for (const sid of Array.isArray(sids) ? (sids as string[]) : []) {
     if (Date.now() >= deadline) break;
-    const store = await storeForId(sid).catch(() => null);
+    // Only a store confirmed absent leaves the set; one that could not be read stays, for the next run.
+    let store: Store | null;
+    try {
+      store = await storeForId(sid);
+    } catch (error) {
+      console.error("reading a store with open PayPal payouts failed", error);
+      continue;
+    }
     if (!store) {
       await redisPipeline([["SREM", STORES, sid]]);
       continue;

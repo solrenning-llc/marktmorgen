@@ -9,7 +9,7 @@
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
-import { type Paid, deliverPayPal, handOverKey, readPaidExact, watchPayPal } from "@/lib/paypal-sales";
+import { type Paid, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
@@ -91,11 +91,11 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
 
 /**
  * Tries again the orders still owed their hand-over, oldest try first, a few a sweep, once their grace is over. One
- * handed over, or whose product Redis answers is gone, leaves the list; one whose paid record Redis answers is not
- * there any more (erased, or past its time) leaves it too, with nothing to hand over; one whose paid record or product
- * does not read, or reads in another shape, is kept and tried again at the next sweep (Claude 6's MEDIUM on #2909:
- * unknown is never "no paid record"). The list itself read in another shape throws UnknownReplyError. Returns how
- * many were handed over.
+ * handed over, whose product Redis answers is gone, or that PayPal refunded in full meanwhile, leaves the list; one
+ * whose paid record Redis answers is not there any more (erased, or past its time) leaves it too, with nothing to hand
+ * over; one whose paid record, refund mark or product does not read, or reads in another shape, is kept and tried
+ * again at the next sweep (Claude 6's MEDIUM on #2909: unknown is never "no paid record"). The list itself read in
+ * another shape throws UnknownReplyError. Returns how many were handed over.
  */
 async function handOverAgain(store: Store, deadline: number): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
@@ -111,6 +111,14 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
       if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
       if (paid === null) {
         console.error("a PayPal order waiting to be handed over has no paid record any more", store.handle, order);
+        await redisPipeline([["ZREM", key, order]]);
+        continue;
+      }
+      // Refunded in full meanwhile (the refund watch saw it before anything was granted, and looks at it no more):
+      // never handed over, it leaves the list. Unknown throws below and it is kept (Claude 5's MEDIUM on #2909). A
+      // refund seen after a hand-over is taken back by the watch, as for any other order. One ZSCORE an order tried.
+      if (await refundSeen(store.statsId, order)) {
+        console.error("a PayPal order waiting to be handed over was refunded in full; nothing handed over", store.handle, order);
         await redisPipeline([["ZREM", key, order]]);
         continue;
       }

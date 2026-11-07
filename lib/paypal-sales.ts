@@ -45,7 +45,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -451,6 +451,17 @@ export async function stillPending(store: Store, order: string): Promise<boolean
   if (!ORDER_ID.test(order) || !store.statsId || !isRedisConfigured()) return false;
   const [score] = await redisPipeline([["ZSCORE", pendingKey(store.statsId), order]]);
   return score !== null && score !== undefined;
+}
+
+/**
+ * Whether PayPal was seen refunding this order in full (its mark in refundedKey, written by the refund watch), read
+ * exactly (CX-123 rule 24): null is not seen; a score of whole seconds, as the watch writes it, is seen; anything else
+ * throws UnknownReplyError.
+ */
+export async function refundSeen(statsId: string, order: string): Promise<boolean> {
+  const read = repliesFor(await redisPipeline([["ZSCORE", refundedKey(statsId), order]]), 1);
+  if (!read || (read[0] !== null && (typeof read[0] !== "string" || !REDIS_SCORE.test(read[0])))) throw new UnknownReplyError("a PayPal order's refund mark");
+  return read[0] !== null;
 }
 
 export async function readPaid(order: string): Promise<Paid | null> {

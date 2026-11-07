@@ -17,7 +17,8 @@
  */
 import { createHash } from "node:crypto";
 import { LOCK_DAYS, alignRecoveryLock, confirmRecoveryAddress, keepRecoveryAddress, moveRecoveryAddress, recoveryAddress, recoveryLockUntil, removeRecoveryAddress, startRecoveryAddress } from "@/lib/recovery-address";
-import { RESET_DAYS, enterLocked, finishSetup, holdSignIn, resetIfDue, startSetup } from "@/lib/two-step";
+import { RESET_DAYS, endRecoveryAccess, enterLocked, finishSetup, holdSignIn, openLockedSession, resetIfDue, startSetup } from "@/lib/two-step";
+import { emailForSession } from "@/lib/auth";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -195,6 +196,34 @@ async function main(): Promise<void> {
     const again = await enterLocked(held);
     is(`${label}: the waiting login is not spent; asked again, both addresses are told`, [again?.email, mails.map((m) => m.to).sort()], [OWNER, [BACKUP, OWNER].sort()]);
   }
+
+  // Claude 6 on #2883 (MEDIUM, rule 30): a full login ends what the recovery address opened. The lock's DEL answered
+  // in no known shape was read as "there was no lock", so the recovery session stayed alive, nobody was told, and it
+  // opened everything after its day. Only a confirmed 0 is "no lock"; anything else goes on as if there was one.
+  for (const [label, reply] of [["no answer", undefined], ["9", 9], ["QUEUED", "QUEUED"], ["an error", "throw"]] as [string, unknown][]) {
+    part(`A full login ends the recovery login when the lock's delete answers ${label}`);
+    redis.clear();
+    await keepRecoveryAddress(ME, OLD);
+    const until = await recoveryLockUntil(ME);
+    const intruder = await openLockedSession(ME, until);
+    mails.length = 0;
+    const ended = await writesAnswer((c) => c[0] === "DEL" && c[1] === untilKey(ME), reply, () => endRecoveryAccess(ME));
+    is(`${label}: the call does not fail`, ended, undefined);
+    is(`${label}: the recovery session is logged out`, await emailForSession(intruder), null);
+    is(`${label}: the owner is told`, mails.some((m) => m.to === ME), true);
+  }
+  part("Control: a full login with a recovery lock ends it and tells the owner");
+  redis.clear();
+  await keepRecoveryAddress(ME, OLD);
+  const healthyIntruder = await openLockedSession(ME, await recoveryLockUntil(ME));
+  mails.length = 0;
+  await endRecoveryAccess(ME);
+  is("logged out and told", [await emailForSession(healthyIntruder), mails.some((m) => m.to === ME)], [null, true]);
+  part("A full login with no recovery lock (a confirmed 0) tells nobody");
+  redis.clear();
+  mails.length = 0;
+  await endRecoveryAccess(ME);
+  is("nobody is told", mails.length, 0);
 
   part("Controls");
   redis.clear();

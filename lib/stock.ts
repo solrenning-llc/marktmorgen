@@ -11,7 +11,7 @@
  * paid for or is paying for right now.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { HOLD_SECONDS, StripeError, onAccount } from "@/lib/stripe-account";
+import { HOLD_SECONDS, StripeError, onAccount, watchCheckoutOpening } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { limitedStock } from "@/lib/product-extras";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
@@ -37,6 +37,14 @@ const CHECK_MS = 2_000;
  */
 const LOCK_WAIT_MS = 500;
 const LOCK_SECONDS = 15;
+/**
+ * The most limited products a checkout counts again at once after the holds
+ * that ran out were settled (Claude 4's review of #1732, 6 November 2026):
+ * the second count's locks, counts and hand-over stay, with the first, inside
+ * CART_STOCK_COMMANDS_MOST (tests/cart-stock.test.ts); a larger cart is told
+ * to press again instead, and its next try opens.
+ */
+const RECOUNT_MOST = 2;
 
 type Entry = { until: number; paid?: boolean };
 
@@ -146,7 +154,9 @@ export type StockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldou
  * checking, was held while Stripe opened the checkout, which can take longer
  * than the lock lasted, so a second checkout could count the same last unit.
  * Paused orders and a missing consent are refused before Stripe is asked
- * (refusedBeforeStripe), so they hand the unit back at once.
+ * (refusedBeforeStripe), so they hand the unit back at once; since Claude 4's
+ * review of #1732 (6 November 2026) so does any error raised before Stripe is
+ * asked to open the checkout (watchCheckoutOpening), such as a false option.
  */
 export async function withStockHold<T extends { id: string }>(
   store: Store,
@@ -298,8 +308,9 @@ export const refusedBeforeStripe = (error: unknown): boolean => error instanceof
  * has it asked about once the locks are let go, every product at once.
  *
  * The provisional holds are let go only when it is proven they are no
- * longer needed: when Stripe refused to make the checkout (`refused`, and
- * Stripe's own 4xx), or once the checkout's own hold is written and
+ * longer needed: when Stripe was never asked to make the checkout (any error
+ * before that request, watchCheckoutOpening), when it refused to (`refused`,
+ * and Stripe's own 4xx), or once the checkout's own hold is written and
  * STOCK_BIND hands over. An opening whose outcome is unknown (no answer: the
  * checkout may exist at Stripe) keeps them until they lapse, after any
  * checkout made under them has closed. A checkout whose own hold cannot be
@@ -324,59 +335,74 @@ export async function withCartStockHolds<T extends { id: string }>(
   const pending = `${PENDING}${crypto.randomUUID().replace(/-/g, "")}`;
   // Our own provisional holds, and nothing else, taken back while no checkout was opened under them; one that stays lapses.
   const withdraw = () => redisPipeline(keys.map((key) => ["HDEL", key, pending])).catch(() => {});
-  const taken: Held[] = [];
-  // Locks the admission let go in its own step (STOCK_ADMIT), not to be let go again.
-  let admittedLocks = false;
-  // Products refused only for holds that ran out and are not settled yet: asked about once the locks are let go.
-  const unsettled: Listing[] = [];
-  let refusal: CartStockHold<T> | null = null;
-  try {
-    for (const product of limited) taken.push(await takeLock(lockKey(statsId, product.id), LOCK_SECONDS, LOCK_WAIT_MS));
-    const now = Date.now();
-    const out: string[] = [];
-    for (const product of limited) {
-      // Never Stripe under a lock (review of 5 November 2026). A count that cannot be read throws: nothing opens, every lock is let go below.
-      const counted = await countStock(store, product, now, false);
-      if (counted !== null && counted.left <= 0) {
-        out.push(product.id);
-        if (counted.unresolved > 0) unsettled.push(product);
+  // A count refused only for holds that ran out, which Stripe says gave their units back, is never "Sold out" (Claude 4's review
+  // of #1732, 6 November 2026): they are settled once the locks are let go, and a checkout of at most RECOUNT_MOST limited
+  // products is counted again at once, so its first click opens; a larger cart is told to press again ("busy"), which opens.
+  for (let round = 0; ; round += 1) {
+    const taken: Held[] = [];
+    // Locks the admission let go in its own step (STOCK_ADMIT), not to be let go again.
+    let admittedLocks = false;
+    // Products refused only for holds that ran out and are not settled yet: asked about once the locks are let go.
+    const unsettled: Listing[] = [];
+    let refusal: CartStockHold<T> | null = null;
+    try {
+      for (const product of limited) taken.push(await takeLock(lockKey(statsId, product.id), LOCK_SECONDS, LOCK_WAIT_MS));
+      const now = Date.now();
+      const out: string[] = [];
+      for (const product of limited) {
+        // Never Stripe under a lock (review of 5 November 2026). A count that cannot be read throws: nothing opens, every lock is let go below.
+        const counted = await countStock(store, product, now, false);
+        if (counted !== null && counted.left <= 0) {
+          out.push(product.id);
+          if (counted.unresolved > 0) unsettled.push(product);
+        }
       }
+      if (out.length > 0) {
+        refusal = { ok: false, reason: "soldout", ids: out };
+      } else {
+        const receipt = await redisPipeline(keys.map((key) => ["HSET", key, pending, JSON.stringify({ until: Date.now() + PENDING_MS })])).catch(() => null);
+        if (!acknowledged(receipt, keys.length)) {
+          await withdraw();
+          return { ok: false, reason: "busy" };
+        }
+        const admitted = scriptAnswer(
+          await redisPipeline([["EVAL", STOCK_ADMIT, keys.length * 2, ...taken.map((held) => held.key), ...keys, keys.length, ...taken.map((held) => held.token), pending]]).catch(() => null),
+        );
+        if (admitted !== 1) {
+          // 0: taken back in the same step. Unknown: never opened on; taken back again, or lapsing.
+          if (admitted === null) await withdraw();
+          return { ok: false, reason: "busy" };
+        }
+        admittedLocks = true;
+      }
+    } catch (error) {
+      if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+      throw error;
+    } finally {
+      if (!admittedLocks) for (const held of taken) await releaseLock(held);
     }
-    if (out.length > 0) {
-      refusal = { ok: false, reason: "soldout", ids: out };
-    } else {
-      const receipt = await redisPipeline(keys.map((key) => ["HSET", key, pending, JSON.stringify({ until: Date.now() + PENDING_MS })])).catch(() => null);
-      if (!acknowledged(receipt, keys.length)) {
-        await withdraw();
-        return { ok: false, reason: "busy" };
-      }
-      const admitted = scriptAnswer(
-        await redisPipeline([["EVAL", STOCK_ADMIT, keys.length * 2, ...taken.map((held) => held.key), ...keys, keys.length, ...taken.map((held) => held.token), pending]]).catch(() => null),
-      );
-      if (admitted !== 1) {
-        // 0: taken back in the same step. Unknown: never opened on; taken back again, or lapsing.
-        if (admitted === null) await withdraw();
-        return { ok: false, reason: "busy" };
-      }
-      admittedLocks = true;
-    }
-  } catch (error) {
-    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
-    throw error;
-  } finally {
-    if (!admittedLocks) for (const held of taken) await releaseLock(held);
-  }
-  if (refusal) {
-    // The holds that ran out are asked about now, with no lock held, every product at once, so the next try counts them right.
-    if (unsettled.length > 0) await Promise.all(unsettled.map((product) => stockLeft(store, product).catch(() => null)));
-    return refusal;
+    if (!refusal) break;
+    if (refusal.reason !== "soldout") return refusal;
+    // Stripe is asked about the lapsed holds once a click (Claude 5's review of #1732): a second round that still finds
+    // them (their settling write was refused while reads answer) is told to press again, so a click never waits more
+    // than one wave of MAX_CHECKS × CHECK_MS (CART_STOCK_STRIPE_WAIT_MS). Never "Sold out" on that guess.
+    if (round > 0) return { ok: false, reason: "busy" };
+    // The holds that ran out are asked about now, with no lock held, every product at once, so the next count is right.
+    const settled = await Promise.all(unsettled.map((product) => stockLeft(store, product).catch(() => null)));
+    // Freed: every product refused had nothing but such holds, and each has a unit back now; otherwise it is sold out.
+    const freed = unsettled.length === refusal.ids.length && settled.every((left) => left !== null && left > 0);
+    if (!freed) return refusal;
+    if (limited.length > RECOUNT_MOST) return { ok: false, reason: "busy" };
   }
   let value: T;
+  const opening = watchCheckoutOpening(() => open(true));
   try {
-    value = await open(true);
+    value = await opening.done;
   } catch (error) {
     // Only a proven refusal hands the units back: a lost answer may hide a checkout Stripe made (Codex G2, 5 November 2026).
-    if (refused(error) || stripeRefusedOpening(error)) await withdraw();
+    // Proven: Stripe was never asked to open one (any error before that request; Claude 4's review of #1732, 6 November
+    // 2026: a false option id held the last unit for the provisional hold's whole term), or refused to.
+    if (!opening.asked() || refused(error) || stripeRefusedOpening(error)) await withdraw();
     throw error;
   }
   // Counted from after the checkout exists, so its hold outlasts it; the provisional one goes only once this one is written (STOCK_BIND).
@@ -389,7 +415,8 @@ export async function withCartStockHolds<T extends { id: string }>(
   // Nobody is sent to a checkout whose units are not proven its own: it is closed at Stripe, and only Stripe's "expired" lets its holds go.
   if (store.stripeAccountId) {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => null);
-    if (closed?.status === "expired") await redisPipeline(keys.flatMap((key) => [["HDEL", key, value.id], ["HDEL", key, pending]])).catch(() => {});
+    // One command a product, both fields at once, so the failure path stays inside CART_STOCK_COMMANDS_MOST (tests/cart-stock.test.ts).
+    if (closed?.status === "expired") await redisPipeline(keys.map((key) => ["HDEL", key, value.id, pending])).catch(() => {});
   }
   return { ok: false, reason: "busy" };
 }

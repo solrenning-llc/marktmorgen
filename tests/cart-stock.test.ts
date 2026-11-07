@@ -30,7 +30,7 @@ import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
 import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
 import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { StripeError } from "@/lib/stripe-account";
+import { StripeError, onAccount } from "@/lib/stripe-account";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
 import { NO_DEAL } from "@/lib/cart-rules";
 import { NO_RECOVERY } from "@/lib/recovery-setting";
@@ -129,6 +129,9 @@ async function main(): Promise<void> {
   is("a refusal the caller names, raised before Stripe is asked, holds nothing", await stockLeft(creator, limited("print20", 5)), 5);
   let lostOpen = "";
   await withCartStockHolds(creator, [limited("print21", 5), limited("print22", 5)], async () => {
+    // Stripe was asked and made the checkout; its answer never reached the cart (since Claude 4's review of #1732, 6 November
+    // 2026, an error raised before Stripe is asked gives the units back at once, so the opening asks Stripe here).
+    await onAccount("POST", creator.stripeAccountId!, "/checkout/sessions", new URLSearchParams({ mode: "payment" }));
     throw new TypeError("Connection lost after the checkout was made");
   }).catch((error: Error) => {
     lostOpen = error.message;
@@ -279,10 +282,17 @@ async function main(): Promise<void> {
   const worst = await withCartStockHolds(costly, cart4, async () => ({ id: "cs_test_cartstockcost0001" }));
   const opening = commands;
   commands = 0;
+  // The hand-over's failure path, in one count: four other products in the same state as the opening's (each with one unit
+  // left beside its holds that ran out), so the cart opens and its hand-over fails, never a refusal for sold out (measured
+  // by mistake until the review of #1732, 6 November 2026).
+  const fail4 = ["f1", "f2", "f3", "f4"].map((id) => limited(id, 6));
+  for (const id of ["f1", "f2", "f3", "f4"]) await lapse(id, MAX_LAPSED);
+  const closedBefore = expired.length;
   redis.pipeline = async (batch) => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v1\n") ? (await counting(batch), []) : counting(batch));
-  await withCartStockHolds(costly, cart4, async () => ({ id: "cs_test_cartstockcost0002" }));
+  const failed4 = await withCartStockHolds(costly, fail4, async () => ({ id: "cs_test_cartstockcost0002" }));
   const failing = commands;
   redis.pipeline = original;
+  is("the failure path measured is the hand-over's: opened, closed at Stripe, nobody sent to it", [failed4, expired.slice(closedBefore)], [{ ok: false, reason: "busy" }, ["cs_test_cartstockcost0002"]]);
   const most = handedBack + Math.max(opening, failing) + cart4.length * (tries - 1);
   is("the order's stock work at its worst stays inside its declared commands", [worst.ok, most <= CART_STOCK_COMMANDS_MOST], [true, true]);
   is("and those commands inside their declared share of an order's compute", CART_STOCK_COMMANDS_MOST * COMMAND <= CART_STOCK_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE, true);
@@ -301,6 +311,27 @@ async function main(): Promise<void> {
   is("the holds that ran out are asked about every product at once, at most MAX_CHECKS each", [mostInFlight, asked <= refusedCart.length * MAX_LAPSED], [refusedCart.length, true]);
   is("so the stock work waits on Stripe at most its declared time", MAX_LAPSED * 2_000 <= CART_STOCK_STRIPE_WAIT_MS, true);
   is("and a cart refused for them costs no more, and opens on its next try", [refusedCost + refusedCart.length * (tries - 1) <= CART_STOCK_COMMANDS_MOST, nextTry.ok], [true, true]);
+  // Claude 4's review of #1732 (6 November 2026): such a cart is never told "Sold out". One of four is told to press again,
+  // and opens then (above); one of at most two limited products is counted again at once once they are settled, and opens.
+  is("a cart of four refused only for them is told to press again, never sold out", firstTry, { ok: false, reason: "busy" });
+  const pair = ["s1", "s2"].map((id) => limited(id, MAX_LAPSED));
+  for (const id of ["s1", "s2"]) await lapse(id, MAX_LAPSED);
+  is("a cart of two refused only for them opens at the first click", (await withCartStockHolds(costly, pair, async () => ({ id: "cs_test_cartstockpair0001" }))).ok, true);
+  // Its worst: the first count refused, the holds settled, the second count and the hand-over's failure path, each lock at its
+  // most tries in both counts, and the previous checkout's units handed back first.
+  const pairFailing = ["t1", "t2"].map((id) => limited(id, MAX_LAPSED));
+  for (const id of ["t1", "t2"]) await lapse(id, MAX_LAPSED);
+  await withCartStockHolds(costly, ["t3", "t4"].map((id) => limited(id, 2)), async () => ({ id: "cs_test_cartstockprev0002" }));
+  commands = 0;
+  redis.pipeline = counting;
+  await releaseCartStockHolds(costly, ["t3", "t4"].map((id) => limited(id, 2)), "cs_test_cartstockprev0002");
+  const pairHandedBack = commands;
+  commands = 0;
+  redis.pipeline = async (batch) => (batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:stock-bind:v1\n") ? (await counting(batch), []) : counting(batch));
+  const pairWorst = await withCartStockHolds(costly, pairFailing, async () => ({ id: "cs_test_cartstockpair0002" }));
+  const pairRecount = commands;
+  redis.pipeline = original;
+  is("and its worst, counted twice, stays inside the declared commands", [pairWorst, pairHandedBack + pairRecount + 2 * pairFailing.length * (tries - 1) <= CART_STOCK_COMMANDS_MOST], [{ ok: false, reason: "busy" }, true]);
 
   part("The checkout closes before the hold");
   const shop = { handle: "prints", name: "Prints", email: "prints@example.com", language: "en", currency: "usd", stripeAccountId: "acct_test_cartstock1", sale: { ...NO_SALE }, cartDeal: { ...NO_DEAL }, recovery: { ...NO_RECOVERY }, hasDiscounts: false, tax: { enabled: false, included: false, ids: false, invoices: false }, affiliates: { enabled: false, percent: 0, days: 30, rates: {}, payday: 0, hold: 0 }, catalog: { id: null, items: [], head: [], inline: null } } as unknown as Store;

@@ -320,9 +320,15 @@ export async function keyCounts(store: Store, product: Listing): Promise<KeyCoun
 export async function outOfKeys(store: Store, product: Listing): Promise<boolean> {
   if (activeKeys(product)?.source !== "pool") return false;
   if (!store.statsId || !isRedisConfigured()) throw new Error("Key count unavailable");
-  const receipt = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  if (!Array.isArray(receipt) || receipt.length !== 1 || !Object.hasOwn(receipt, 0)) throw new Error("Key count unavailable");
-  const left: unknown = receipt[0];
+  const receipt: unknown = await redisPipeline([["LLEN", poolKey(store, product)]]);
+  // Read through the envelope's own data properties only, so an accessor is
+  // never run and never taken for a reply, and a value counts only when it is
+  // the descriptor's own, never one inherited from a polluted prototype
+  // (reviews of #2665).
+  const length = Array.isArray(receipt) ? Object.getOwnPropertyDescriptor(receipt, "length") : undefined;
+  const slot = Array.isArray(receipt) ? Object.getOwnPropertyDescriptor(receipt, "0") : undefined;
+  if (!length || !Object.hasOwn(length, "value") || length.value !== 1 || !slot || !Object.hasOwn(slot, "value")) throw new Error("Key count unavailable");
+  const left: unknown = slot.value;
   if (typeof left !== "number" || !Number.isSafeInteger(left) || left < 0) throw new Error("Key count unavailable");
   return left === 0;
 }

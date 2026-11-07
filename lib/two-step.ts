@@ -215,9 +215,22 @@ function parse(raw: unknown): TwoStep | null {
     since: typeof v.since === "number" ? v.since : 0,
     codes: Array.isArray(v.codes) ? v.codes.filter((c): c is string => typeof c === "string" && /^[0-9a-f]{64}$/.test(c)) : [],
     last: typeof v.last === "number" ? v.last : -1,
-    reset: typeof v.reset === "number" && v.reset > 0 ? v.reset : 0,
+    reset: resetOf(v.reset, typeof v.since === "number" ? v.since : 0),
     backup: typeof v.backup === "string" && EMAIL_PATTERN.test(v.backup) ? v.backup : "",
   };
+}
+
+/**
+ * The day two-step login turns off by itself, read only in a shape this code writes (Claude 5 on #2896): 0 (none
+ * asked; an older record with no day reads so too), or a whole millisecond at least RESET_DAYS after it was turned
+ * on (enterLocked writes the moment of the first request plus RESET_DAYS). Any other value is unknown and throws,
+ * never a day already past that turns the second step off and opens a session on the emailed link alone.
+ */
+function resetOf(reset: unknown, since: number): number {
+  if (reset === undefined || reset === 0) return 0;
+  // An hour of room for one server's clock behind another's between turning it on and the first request.
+  if (typeof reset === "number" && Number.isSafeInteger(reset) && reset > 0 && reset >= since + RESET_DAYS * 86_400_000 - 3_600_000) return reset;
+  throw new UnknownReplyError("the two-step record's turn-off day");
 }
 
 async function read(email: string): Promise<TwoStep | null> {
@@ -482,7 +495,7 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
     held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
-  if (Number(removed) !== 1) return null;
+  if (countOf(removed) !== 1) return null;
   const marked = await withTwoStep(email, async (held) => {
     const current = await read(email);
     if (!current) return null;
@@ -795,7 +808,7 @@ export async function spendRescue(token: string): Promise<string | null> {
   } catch {
     const [readBack] = await redisPipeline([["GET", rescueKey(token)]]);
     const [removed] = await redisPipeline([["DEL", rescueKey(token)]]);
-    email = Number(removed) === 1 ? readBack : null;
+    email = countOf(removed) === 1 ? readBack : null;
   }
   if (typeof email !== "string" || !email) return null;
   const address = email;
@@ -900,7 +913,9 @@ export async function finishSignIn(token: string, typed: string, now = Date.now(
     hold = {};
   }
   if (typeof hold.e !== "string") return { ok: false, reason: "expired" };
-  const tries = Number(hold.n) || 0;
+  // The count of wrong codes, read only as the whole number this code writes (Claude 5 on #2896): any other shape
+  // spends the wait, never counts from zero again.
+  const tries = typeof hold.n === "number" && Number.isSafeInteger(hold.n) && hold.n >= 0 ? hold.n : TRIES;
   if (tries >= TRIES) {
     await redisPipeline([["DEL", key]]);
     return { ok: false, reason: "expired" };
@@ -909,7 +924,7 @@ export async function finishSignIn(token: string, typed: string, now = Date.now(
   if (checked === "app" || checked === "recovery") {
     // Spent: only the caller whose delete removed it opens the session.
     const [removed] = await redisPipeline([["DEL", key]]);
-    if (Number(removed) !== 1) return { ok: false, reason: "expired" };
+    if (countOf(removed) !== 1) return { ok: false, reason: "expired" };
     // The owner has the second step after all: anything opened without it is called off.
     await cancelReset(hold.e, "login");
     await endRecoveryAccess(hold.e);

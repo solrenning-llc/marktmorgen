@@ -142,7 +142,9 @@ async function main(): Promise<void> {
   const [votesTtl] = (await redis.pipeline([["TTL", votes]])) as [number];
   is("its answers go with the round", votesTtl > 0 && votesTtl <= closes + SEQUENCE_POLL_KEEP_DAYS * DAY - now + 1, true);
   const results = (await pollResults(list)) ?? [];
-  is("the totals", results.map((r) => [r.id, r.total, r.answers.map((a) => a.count), r.campaign]), [[id, 2, [1, 1], campaign]]);
+  // Two answers are below the fewest shown (tests/f2-email-polls-sequences-review.test.ts): what is kept is read straight from the store.
+  const [kept] = (await redis.pipeline([["HVALS", votes]])) as [string[]];
+  is("the round's answers are kept", [kept.map(Number).sort(), results.map((r) => [r.id, r.shown, r.total, r.campaign])], [[0, 1], [[id, false, null, campaign]]]);
 
   part("A read that cannot be confirmed sends nothing");
   await upsertContact(list, "dee@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
@@ -157,13 +159,13 @@ async function main(): Promise<void> {
 
   part("The studio: the round's totals under the step's subject");
   const html = renderToStaticMarkup(await MailPollResults({ listId: list, subjects: new Map([[campaign, "Your first week"]]) }));
-  is("the question, the step and the totals", [html.includes("Which lesson helped most?"), html.includes("Your first week"), html.includes("The first one: 1 (50%)"), html.includes("sequence")], [true, true, true, true]);
+  is("the question, the step and the totals", [html.includes("Which lesson helped most?"), html.includes("Your first week"), html.includes("Totals show once 5 people have answered."), html.includes("sequence")], [true, true, true, true]);
   is("never who answered", [html.includes("ana"), html.includes("ben@")], [false, false]);
 
   part("Privacy: the person's answers go with them");
   is("in the copy", await pollAnswersOf(list, "ana@example.com"), [{ question: poll.question, answer: "The second one" }]);
   is("erased", await forgetPollPerson(list, "ana@example.com"), 1);
-  is("gone from the totals", (await pollResults(list))?.[0]?.total, 1);
+  is("gone from what is kept", Number(((await redis.pipeline([["HLEN", votes]])) as [number])[0]), 1);
 
   mail.restore();
   done();

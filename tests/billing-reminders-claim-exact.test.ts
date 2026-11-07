@@ -8,9 +8,10 @@
  * means the write landed while its answer was lost, so the notice still goes,
  * once; another value (or a "1" written before marks carried their own value)
  * is taken, and nothing goes. Read back as nothing known, nothing is sent, the
- * charge is counted as failed, the mark is not deleted, and the rest of that
- * pass is given up (Redis is not answering). A send that fails lets go of the
- * mark only while it still holds that run's value.
+ * charge is counted as failed, the mark is let go only while it holds that
+ * run's own value (releaseMark, so the next run can send it, once), and the
+ * rest of that pass is given up (Redis is not answering). A send that fails
+ * lets go of the mark only while it still holds that run's value.
  *
  * Synthetic subscriptions and Stripe answers; no email leaves this machine.
  */
@@ -104,23 +105,31 @@ const markOf = async (key: string) => (await original([["GET", key]]))[0];
 const OWN_VALUE = /^\d{13}\.\d{9}$/;
 const trialKey = (id: string) => `nl:remind:trial:${id}:${NOW + 7 * DAY}`;
 const failedKey = (id: string) => `nl:remind:failed:in_${id.slice(4)}inv`;
-const touchesMarks = (commands: Cmd[]) => commands.some((cmd) => String(cmd[1] ?? "").startsWith("nl:remind:"));
+const touchesMarks = (commands: Cmd[]) => commands.some((cmd) => cmd.some((part) => String(part).startsWith("nl:remind:")));
+const isRelease = (commands: Cmd[]) => commands.some((cmd) => cmd[0] === "EVAL" && String(cmd[1]).startsWith("-- marktmorgen:release:v1"));
+type Down = { landed: boolean; releaseWorks: boolean };
 /**
  * Redis stops answering about the marks: every pipeline that touches one rejects. With `landed`, the claim's SET runs
- * for real first (the write landed, then the answer and the read back were lost). Counts the claims tried.
+ * for real first (the write landed, then the answer and the read back were lost); with `releaseWorks`, the
+ * compare-and-delete script that lets a mark go still runs. Counts the claims and the releases tried.
  */
-async function withRedisDown<T>(landed: boolean, work: () => Promise<T>): Promise<{ result: T; claims: number }> {
+async function withRedisDown<T>(down: Down, work: () => Promise<T>): Promise<{ result: T; claims: number; releases: number }> {
   let claims = 0;
+  let releases = 0;
   redis.pipeline = (async (commands: Cmd[]) => {
     if (!touchesMarks(commands)) return original(commands);
+    if (isRelease(commands)) {
+      releases += 1;
+      if (down.releaseWorks) return original(commands);
+    }
     if (commands.some(isClaim)) {
       claims += 1;
-      if (landed) await original(commands);
+      if (down.landed) await original(commands);
     }
     throw new Error("fetch failed: Redis is down");
   }) as typeof redis.pipeline;
   try {
-    return { result: await work(), claims };
+    return { result: await work(), claims, releases };
   } finally {
     redis.pipeline = original;
   }
@@ -284,9 +293,18 @@ test("a lost answer on one claim does not stop the run: both trial notices go, o
   }
 });
 
-for (const landed of [true, false]) {
-  const how = landed ? "the SET landed" : "the SET never landed";
-  test(`Redis down (${how}): no trial notice, one failure, and the pass stops at the first claim, trials and renewals both`, async () => {
+// Changed with releaseMark on "unknown" (coordinator, 7 November 2026; rule 23): a mark that landed while Redis stopped
+// answering was kept and the notice never went; it is now let go while it holds the lost run's own value, so the next
+// run sends it, once. When the release cannot run either, the mark stays and no run ever sends it twice.
+const DOWN: [string, Down][] = [
+  ["the SET landed, the release runs", { landed: true, releaseWorks: true }],
+  ["the SET landed, the release fails too", { landed: true, releaseWorks: false }],
+  ["the SET never landed", { landed: false, releaseWorks: true }],
+];
+for (const [how, down] of DOWN) {
+  // Sent by a later run: once when the mark is gone (never landed, or let go); never while the lost run's value stays.
+  const laterSends = !down.landed || down.releaseWorks ? 1 : 0;
+  test(`Redis down (${how}): no trial notice, one failure, the pass stops at the first claim, and later at most one email`, async () => {
     const first = nextId("Trial");
     const second = nextId("Trial");
     const yearly = nextId("Year");
@@ -295,36 +313,36 @@ for (const landed of [true, false]) {
       active: [{ ...trial(yearly), status: "active", trial_end: null, items: { data: [{ current_period_start: NOW - 340 * DAY, current_period_end: NOW + 25 * DAY, price: { lookup_key: "nimbus_labs_creator_year", unit_amount: 29000, recurring: { interval: "year" } } }] } }],
     };
     emails.length = 0;
-    const { result, claims } = await withRedisDown(landed, () => sendReminders(NOW));
+    const { result, claims, releases } = await withRedisDown(down, () => sendReminders(NOW));
     assert.deepEqual([emails.length, result.sent, result.failed], [0, 0, 1], "nothing sent, said as failed");
     assert.equal(claims, 1, "no further claim waits out its own timeout once Redis did not answer");
+    assert.equal(releases, 1, "the unknown claim's own mark is let go, best effort");
     const mark = await markOf(trialKey(first));
-    if (landed) assert.match(String(mark), OWN_VALUE, "the mark is left as it landed, never deleted");
-    else assert.equal(mark, null);
-    // The next healthy run: a mark that landed holds the lost run's value, so it is taken and nothing goes (never two
-    // emails); a mark that never landed is claimed now and the notice goes, once.
+    if (down.landed && !down.releaseWorks) assert.match(String(mark), OWN_VALUE, "a release that could not run leaves the mark as it landed");
+    else assert.equal(mark, null, "the lost run's own mark is gone");
     const later = await sendReminders(NOW);
-    const firstSent = emails.filter((to) => to === `${first}@example.com`).length;
-    assert.equal(firstSent, landed ? 0 : 1, landed ? "taken by the lost run's value: not sent" : "sent once");
     assert.equal(later.failed, 0);
+    await sendReminders(NOW);
+    assert.equal(emails.filter((to) => to === `${first}@example.com`).length, laterSends, laterSends ? "sent by the next run, exactly once" : "never sent twice");
     assert.deepEqual(
-      [emails.includes(`${second}@example.com`), emails.includes(`${yearly}@example.com`)],
-      [true, true],
-      "the subscriptions after it are claimed on the next run",
+      [emails.filter((to) => to === `${second}@example.com`).length, emails.filter((to) => to === `${yearly}@example.com`).length],
+      [1, 1],
+      "the subscriptions after it are claimed on the next run, once each",
     );
   });
 
-  test(`Redis down (${how}): no failed payment notice, one failure, and the pass stops at the first claim`, async () => {
+  test(`Redis down (${how}): no failed payment notice, one failure, the pass stops at the first claim, and later at most one email`, async () => {
     const first = nextId("Fail");
     const second = nextId("Fail");
     lists = { past_due: [pastDue(first), pastDue(second)] };
     emails.length = 0;
-    const { result, claims } = await withRedisDown(landed, () => sendFailedPlanNotices());
-    assert.deepEqual([emails.length, result.sent, result.failed, claims], [0, 0, 1, 1]);
-    if (landed) assert.match(String(await markOf(failedKey(first))), OWN_VALUE);
+    const { result, claims, releases } = await withRedisDown(down, () => sendFailedPlanNotices());
+    assert.deepEqual([emails.length, result.sent, result.failed, claims, releases], [0, 0, 1, 1, 1]);
+    if (down.landed && !down.releaseWorks) assert.match(String(await markOf(failedKey(first))), OWN_VALUE);
     else assert.equal(await markOf(failedKey(first)), null);
     await sendFailedPlanNotices();
-    assert.equal(emails.filter((to) => to === `${first}@example.com`).length, landed ? 0 : 1);
+    await sendFailedPlanNotices();
+    assert.equal(emails.filter((to) => to === `${first}@example.com`).length, laterSends);
     assert.equal(emails.filter((to) => to === `${second}@example.com`).length, 1);
   });
 }

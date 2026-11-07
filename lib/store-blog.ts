@@ -30,7 +30,6 @@ import { MAX_POST_BODY } from "@/lib/store-blog-rules";
 export { MAX_POST_BODY, postBlocks, type PostBlock } from "@/lib/store-blog-rules";
 import { slugOf } from "@/lib/product-slug";
 import { blogReadArray, blogReadBody } from "@/lib/blog-read-replies";
-import { UnknownReplyError } from "@/lib/redis-reply";
 
 export const MAX_POSTS = 200;
 export const MAX_POST_TITLE = 120;

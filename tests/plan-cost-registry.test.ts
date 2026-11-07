@@ -42,6 +42,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
+import { STUDIO_REQUEST_BYTES, flowHistoryUnits, keepVersionBytes, listVersionsBytes, restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -331,6 +332,16 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   }
   assert.ok(TASKS_RECOUNT_UNITS * UNIT_COST.studio >= request("studio", 4, TASKS_RECOUNT_BYTES));
   console.log(`a recount of a store's tasks: ${TASKS_RECOUNT_BYTES} bytes at most, ${TASKS_RECOUNT_UNITS} studio requests at most, once a store`);
+  // A workflow's history (lib/flow-versions-rules.ts; Claude 5 on #1927, decision B): each path takes flowHistoryUnits of what it moves, measured
+  // first, at UNIT_COST.studio's 50 KB, which covers its commands and those bytes at a whole studio request's shape.
+  assert.equal(STUDIO_REQUEST_BYTES, 50_000);
+  assert.ok(read("tests/plan-cost-registry.ts").includes(`studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, ${STUDIO_REQUEST_BYTES.toLocaleString("en-US").replace(/,/g, "_")})`), "UNIT_COST.studio is priced at STUDIO_REQUEST_BYTES");
+  for (const flows of [0, 1, 50_000, 400_000, 8_000_000]) for (const versions of [0, 1, 50_000, 4_000_000]) {
+    const size = { flows, versions, largest: Math.min(versions, 400_000) };
+    for (const [path, commands, bytes] of [["list", 4, listVersionsBytes(size)], ["restore", 14, restoreBytes(size)], ["restore again", 8, restoreTryBytes(size)], ["keep", 8, keepVersionBytes(size, 400_000)]] as const) {
+      assert.ok(flowHistoryUnits(bytes) * UNIT_COST.studio >= request("studio", commands, bytes), `${path} ${flows}/${versions}: ${flowHistoryUnits(bytes)} x ${UNIT_COST.studio} < ${request("studio", commands, bytes)}`);
+    }
+  }
   // A buyer action is priced above a webhook's try and a call out: it waits as long, and does more.
   assert.ok(UNIT_COST.buyer >= UNIT_COST.integration && UNIT_COST.buyer >= UNIT_COST.webhook);
 });

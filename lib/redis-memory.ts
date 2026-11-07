@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 /**
  * A Redis that lives in memory, for testing the parts of this codebase whose
@@ -125,13 +126,23 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
-        // lib/flows.ts WRITE_FLOWS_IF: the workflows written only over the text they were read from.
-        if (key.startsWith("-- marktmorgen:flows-write-if:v1\n") && args[0] === "1" && args.length === 5) {
+        // lib/flows.ts WRITE_FLOWS_IF: the workflows written only over the text they were read from, sent as its SHA-1.
+        if (key.startsWith("-- marktmorgen:flows-write-if:v2\n") && args[0] === "1" && args.length === 5) {
           const [, list, had, expected, json] = args;
           const now = this.run(["GET", list]);
-          if (had === "0" ? now !== null && now !== undefined : now !== expected) return 0;
+          if (had === "0" ? now !== null && now !== undefined : typeof now !== "string" || createHash("sha1").update(now, "utf8").digest("hex") !== expected) return 0;
           this.run(["SET", list, json]);
           return 1;
+        }
+        // lib/flow-versions.ts FLOW_HISTORY_SIZE: the workflows' length and the kept versions' total and longest, nothing read out.
+        if (key.startsWith("-- marktmorgen:flow-history-size:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, flows, list, most] = args;
+          // Read as Redis does, without making an empty list where there is none (this stand-in's LRANGE would).
+          const held = this.data.get(list);
+          if (held !== undefined && !Array.isArray(held)) throw new Error("WRONGTYPE");
+          const items = ((held ?? []) as string[]).slice(0, Number(most));
+          const lengths = items.map((item) => Buffer.byteLength(item, "utf8"));
+          return [this.run(["STRLEN", flows]), lengths.reduce((sum, n) => sum + n, 0), lengths.reduce((most, n) => Math.max(most, n), 0)];
         }
         // lib/flow-versions.ts KEEP_FLOW_VERSION: a version pushed only onto the list it was counted from.
         // lib/flow-versions.ts DROP_FLOW_VERSIONS: the list deleted, with how many versions it held and their length.

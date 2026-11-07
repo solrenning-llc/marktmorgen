@@ -1193,6 +1193,13 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
+      // A workflow's history (639 [GL7](19)): listing its versions, putting one back (and each try again) and the save that keeps one measure what they move
+      // in Redis and take that many studio requests at UNIT_COST.studio's 50 KB before any of it is read; an ordinary save keeps a version at most once a
+      // pause of edits, so an autosave inside it reads no versions (Claude 5 on #1927, coordinator's decision B; held in tests/flow-history-cost.test.ts).
+      { file: "lib/flow-versions-rules.ts", names: ["FLOW_VERSION_PAUSE_SECONDS = 600", "STUDIO_REQUEST_BYTES = 50_000", "FLOW_HISTORY_OVERHEAD_BYTES", "flowHistoryUnits", "listVersionsBytes", "restoreTryBytes", "restoreBytes", "keepVersionBytes"] },
+      { file: "lib/flow-versions.ts", names: ["FLOW_HISTORY_SIZE", "payFlowHistory", "countStudio(store, null, flowHistoryUnits(bytes))", "keepFlowVersionOnce", "\"NX\", \"EX\", FLOW_VERSION_PAUSE_SECONDS"] },
+      { file: "lib/flows.ts", names: ["keepFlowVersionOnce(store, store.listId, flows[at], flow)", "payFlowHistory(store, restoreBytes(", "payFlowHistory(store, restoreTryBytes(", "opts.again", "redis.sha1hex(now)"] },
+      { file: "app/api/store/mail/route.ts", names: ["payFlowHistory(store, listVersionsBytes(", "FlowHistoryNotPaid"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
   },

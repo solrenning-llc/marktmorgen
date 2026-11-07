@@ -1,12 +1,13 @@
 /**
  * A workflow's earlier versions, and putting one back (639 [GL7](19); the
  * owner's HighLevel audit). The sales page already keeps what it was before
- * each save (lib/sales-page-store.ts); a workflow now does the same: every
- * save that changes what it does keeps the version before it, the newest
- * MAX_FLOW_VERSIONS of them, and the studio can put one back.
+ * each save (lib/sales-page-store.ts); a workflow now does much the same:
+ * the first save in a pause of edits that changes what it does keeps the
+ * version before it (below), the newest MAX_FLOW_VERSIONS of them, and the
+ * studio can put one back.
  *
  *   nl:wf:ver:<listId>:<flowId> -> list: the workflow before each of its last
- *                                  saves, newest first, "<ms>\n<json>"
+ *                                  kept saves, newest first, "<ms>\n<json>"
  *   nl:wf:ver:idx:<listId>      -> set: the workflows of the list that have
  *                                  earlier versions kept, written in the same
  *                                  step as each push and each deletion, so
@@ -37,18 +38,34 @@
  * read whole keeps no version and is never an empty history; a version is
  * pushed only onto the list it was counted from (KEEP_FLOW_VERSION); room is
  * given back only once the list is confirmed deleted.
+ *
+ * What the history moves is paid for (Claude 5 on #1927, the coordinator's
+ * decision B). An ordinary save keeps a version at most once a pause of
+ * edits (FLOW_VERSION_PAUSE_SECONDS, marked by
+ *
+ *   nl:wf:ver:pause:<listId>:<flowId> -> "1", set only when absent, for the pause
+ *
+ * ), so an autosave inside the pause reads and writes no version. Listing the
+ * versions, putting one back and the save that keeps one measure what they
+ * will move in Redis first (FLOW_HISTORY_SIZE: lengths only, nothing read
+ * out), and take that many studio requests (lib/flow-versions-rules.ts) before
+ * any of it is read; without them nothing of the history is read.
  */
 import type { Flow } from "@/lib/flows";
 import { parseFlowList } from "@/lib/flow-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import type { Store } from "@/lib/store";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
-import { dataBytes, dataBytesOfLength } from "@/lib/store-data-rules";
-import { MAX_FLOW_VERSIONS } from "@/lib/flow-versions-rules";
+import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
+import { countStudio } from "@/lib/studio-route";
+import { FLOW_VERSION_PAUSE_SECONDS, type FlowHistorySize, MAX_FLOW_VERSIONS, flowHistoryUnits, keepVersionBytes } from "@/lib/flow-versions-rules";
 
 export { MAX_FLOW_VERSIONS };
 
 const versionsKey = (listId: string, flowId: string) => `nl:wf:ver:${listId}:${flowId}`;
 const indexKey = (listId: string) => `nl:wf:ver:idx:${listId}`;
+/** The pause of edits a workflow's last kept version was kept in: no other is kept until it ends. */
+const pauseKey = (listId: string, flowId: string) => `nl:wf:ver:pause:${listId}:${flowId}`;
 /** The workflows themselves (lib/flows.ts flowsKey): a version is pushed only while its workflow is still there. */
 const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const SLOT = (flowId: string) => `wv:${flowId}`;
@@ -139,6 +156,75 @@ export async function keepFlowVersion(store: DataStore, listId: string, before: 
     return false;
   } catch (error) {
     if (!(error instanceof DataRoomError)) console.error("keeping a workflow's earlier version failed", error);
+    return false;
+  }
+}
+
+/**
+ * What a workflow's history weighs, in Redis, without reading any of it out:
+ * {STRLEN of the store's workflows, total length of its kept versions, the
+ * longest}. Modelled by lib/redis-memory.ts.
+ */
+export const FLOW_HISTORY_SIZE = `-- marktmorgen:flow-history-size:v1
+local items = redis.call('LRANGE', KEYS[2], 0, tonumber(ARGV[1]) - 1)
+local length = 0
+local largest = 0
+for _, item in ipairs(items) do
+  local n = string.len(item)
+  length = length + n
+  if n > largest then largest = n end
+end
+return {redis.call('STRLEN', KEYS[1]), length, largest}`;
+
+/** What a workflow's history weighs, on Redis's exact answer only: FlowVersionsUnavailable when it cannot be known. */
+export async function flowHistorySize(listId: string, flowId: string): Promise<FlowHistorySize> {
+  if (!isRedisConfigured()) throw new FlowVersionsUnavailable();
+  const reply: unknown = await redisPipeline([["EVAL", FLOW_HISTORY_SIZE, 2, flowsKey(listId), versionsKey(listId, flowId), MAX_FLOW_VERSIONS]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (!Array.isArray(answer) || answer.length !== 3 || !answer.every(whole) || answer[2] > answer[1]) throw new FlowVersionsUnavailable();
+  const [flows, versions, largest] = answer as [number, number, number];
+  return { flows, versions, largest };
+}
+
+/** The studio would not take the requests what a workflow's history moves costs: nothing of it was read. */
+export class FlowHistoryNotPaid extends Error {
+  constructor(
+    readonly reason: string,
+    readonly words: string,
+  ) {
+    super("The studio requests for a workflow's history were not taken");
+    this.name = "FlowHistoryNotPaid";
+  }
+}
+
+/** Takes the studio requests for `bytes` of a workflow's history, before any of it is read; FlowHistoryNotPaid when refused. */
+export async function payFlowHistory(store: Store, bytes: number): Promise<void> {
+  const counted = await countStudio(store, null, flowHistoryUnits(bytes));
+  if (!counted.ok) throw new FlowHistoryNotPaid(counted.reason, counted.message);
+}
+
+/**
+ * An ordinary save's version (lib/flows.ts saveFlow): kept only when `after`
+ * changes what the workflow does and no pause of edits is marked for it
+ * (SET NX: inside a pause, or when the mark is not known, nothing of the
+ * versions is read or written); then its history is measured and the studio
+ * requests for what keeping the version moves are taken, before the versions
+ * are read. Best effort, as keepFlowVersion: a refusal keeps no version and
+ * the save goes on. The pause is spent once it is marked, whatever follows,
+ * so a full room or a spent studio never reads the versions again on each
+ * autosave.
+ */
+export async function keepFlowVersionOnce(store: Store, listId: string, before: Flow, after: Flow, now = Date.now()): Promise<boolean> {
+  if (!isRedisConfigured() || !changesWhatItDoes(before, after)) return false;
+  try {
+    const mark: unknown = await redisPipeline([["SET", pauseKey(listId, before.id), "1", "NX", "EX", FLOW_VERSION_PAUSE_SECONDS]]);
+    if (!Array.isArray(mark) || mark.length !== 1 || mark[0] !== "OK") return false;
+    const size = await flowHistorySize(listId, before.id);
+    await payFlowHistory(store, keepVersionBytes(size, utf8Length(`${now}\n${JSON.stringify(before)}`)));
+    return await keepFlowVersion(store, listId, before, after, now);
+  } catch (error) {
+    if (!(error instanceof FlowHistoryNotPaid) && !(error instanceof FlowVersionsUnavailable)) console.error("keeping a workflow's earlier version failed", error);
     return false;
   }
 }

@@ -19,7 +19,9 @@ import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, advanceBro
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
 import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, restoreFlowVersion, saveFlow, setFlowActive } from "@/lib/flows";
-import { FlowVersionsUnavailable, readFlowVersions } from "@/lib/flow-versions";
+import { FlowHistoryNotPaid, FlowVersionsUnavailable, flowHistorySize, payFlowHistory, readFlowVersions } from "@/lib/flow-versions";
+import { listVersionsBytes } from "@/lib/flow-versions-rules";
+import { studioRefusal } from "@/lib/person-tasks";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FlowRunUnavailable, PERSON_KEY, listRuns, readRun } from "@/lib/flow-runs";
 import { RUNS_LISTED } from "@/lib/flow-limits";
@@ -95,7 +97,9 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
  *   { action: "flow", flow: {...} }  /  { action: "flow-remove", id }
  *   { action: "flow-activate", id, active }   switch a saved workflow on or off
  *   { action: "flow-versions", id }           its earlier versions, newest first (lib/flow-versions.ts)
- *   { action: "flow-restore", id, at }        put one back: a save, checked whole, that can be undone the same way
+ *   { action: "flow-restore", id, at }        put one back: a save, checked whole, that can be undone the same way;
+ *                                             both take studio requests for what they move first
+ *                                             (lib/flow-versions-rules.ts), 429 or 503 without them
  *   { action: "flow-runs", id }               its most recent runs
  *   { action: "flow-run", id, run }           one run's history, step by step
  *   { action: "flow-resolve", id, run, choice }   a held run: "continue" | "retry" | "end"
@@ -298,7 +302,10 @@ export async function POST(request: NextRequest) {
 
     if (action === "flow-versions") {
       const id = text(body.id, 40);
-      const flows = FLOW_ID.test(id) ? await readFlowListStrict(store.listId) : [];
+      if (!FLOW_ID.test(id) || !store.listId) return fail("unknown", 404);
+      // What it moves is measured and paid for in studio requests before any of it is read (Claude 5 on #1927).
+      await payFlowHistory(store, listVersionsBytes(await flowHistorySize(store.listId, id)));
+      const flows = await readFlowListStrict(store.listId);
       if (!flows.some((f) => f.id === id)) return fail("unknown", 404);
       const versions = await readFlowVersions(store.listId, id);
       return Response.json({ ok: true, versions: versions.map((v) => ({ at: v.at, name: v.flow.name, trigger: v.flow.trigger, steps: v.flow.steps.length })) });
@@ -399,6 +406,11 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // What does not fit in the store's data room is not written (lib/store-data.ts).
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // The studio would not take the requests a workflow's history costs: nothing of it was read (lib/flow-versions.ts).
+    if (error instanceof FlowHistoryNotPaid) {
+      const refused = studioRefusal(error.reason, error.words);
+      return Response.json(refused.body, { status: refused.status });
+    }
     console.error("an email action failed", error);
     if (error instanceof BroadcastCancellationUnconfirmed) return fail("broadcast_cancel_unconfirmed", 502);
     if (error instanceof BroadcastWriteUnconfirmed) return fail("broadcast_write_unconfirmed", 502);

@@ -1,6 +1,7 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListRaw, readFlowListStrict } from "@/lib/flow-list";
-import { changesWhatItDoes, dropFlowVersions, keepFlowVersion, readFlowVersions, versionedFlowIds } from "@/lib/flow-versions";
+import { changesWhatItDoes, dropFlowVersions, flowHistorySize, keepFlowVersion, keepFlowVersionOnce, payFlowHistory, readFlowVersions, versionedFlowIds } from "@/lib/flow-versions";
+import { restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
@@ -245,13 +246,15 @@ export class FlowWriteUnconfirmed extends Error {
  * Writes the store's workflows only over the text they were read from
  * (`expected`, null for none yet): 1 when written, 0 when they changed in
  * between, so nothing is written over a change made meanwhile (a pause, a
- * save, a removal; Codex G2 on #1927). Modelled by lib/redis-memory.ts.
+ * save, a removal; Codex G2 on #1927). What they were read as is sent as its
+ * SHA-1 (ARGV[2]), never as a second copy of them, so a save moves what it
+ * moved before (Claude 5 on #1927). Modelled by lib/redis-memory.ts.
  */
-export const WRITE_FLOWS_IF = `-- marktmorgen:flows-write-if:v1
+export const WRITE_FLOWS_IF = `-- marktmorgen:flows-write-if:v2
 local now = redis.call('GET', KEYS[1])
 if ARGV[1] == '0' then
   if now then return 0 end
-elseif now ~= ARGV[2] then
+elseif not now or redis.sha1hex(now) ~= ARGV[2] then
   return 0
 end
 redis.call('SET', KEYS[1], ARGV[3])
@@ -275,7 +278,7 @@ async function writeFlows(store: Store, listId: string, flows: Flow[], expected:
   if (bytes > before) await needData(store, [{ slot: "wf:defs", bytes: bytes - before }]);
   let replies: unknown;
   try {
-    replies = await redisPipeline([["EVAL", WRITE_FLOWS_IF, 1, flowsKey(listId), expected === null ? "0" : "1", expected ?? "", json]]);
+    replies = await redisPipeline([["EVAL", WRITE_FLOWS_IF, 1, flowsKey(listId), expected === null ? "0" : "1", expected === null ? "" : createHash("sha1").update(expected, "utf8").digest("hex"), json]]);
   } catch {
     throw new FlowWriteUnconfirmed();
   }
@@ -328,7 +331,12 @@ export type FlowResult =
  * the plan's number of active workflows (lib/flow-limits.ts).
  */
 export async function saveFlow(store: Store, raw: Record<string, unknown>, opts: SaveOptions = {}): Promise<FlowResult> {
-  return changing(() => saveFlowOnce(store, raw, opts));
+  let tries = 0;
+  return changing(async () => {
+    // A try again reads and writes everything again: putting a version back pays for it first (`again`).
+    if (tries++ > 0 && opts.again) await opts.again();
+    return saveFlowOnce(store, raw, opts);
+  });
 }
 
 /**
@@ -336,9 +344,11 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
  * version (restoreFlowVersion): the workflow keeps the on or off it has as it
  * is written, read in the same step as the write, never one read before; and
  * the version it replaces is kept first, or nothing is put back (Codex G2 on
- * #1927), so the undo the studio promises is always there.
+ * #1927), so the undo the studio promises is always there. `again`: what a
+ * try again after the workflows changed under it costs is taken first
+ * (restoreFlowVersion; Claude 5 on #1927).
  */
-type SaveOptions = { activate?: boolean; restoring?: boolean };
+type SaveOptions = { activate?: boolean; restoring?: boolean; again?: () => Promise<void> };
 
 async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: SaveOptions): Promise<FlowResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
@@ -438,8 +448,9 @@ async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: Sa
   const replaces = Boolean(opts.restoring && at >= 0 && changesWhatItDoes(flows[at], flow));
   if (replaces && !(await keepFlowVersion(store, store.listId, flows[at], flow))) return { ok: false, reason: "history_room" };
   await writeFlows(store, store.listId, next, listRaw);
-  // What it did before this save, kept so it can be put back (lib/flow-versions.ts); never stops the save.
-  if (at >= 0 && !opts.restoring) await keepFlowVersion(store, store.listId, flows[at], flow);
+  // What it did before this save, kept so it can be put back (lib/flow-versions.ts), at most once a pause of edits and
+  // paid for before the versions are read (Claude 5 on #1927); never stops the save.
+  if (at >= 0 && !opts.restoring) await keepFlowVersionOnce(store, store.listId, flows[at], flow);
   return opts.restoring ? { ok: true, flows: next, kept: replaces } : { ok: true, flows: next };
 }
 
@@ -450,15 +461,23 @@ export type RestoreResult = FlowResult | { ok: false; reason: "version" };
  * was kept: an ordinary save of that version's content, checked whole against
  * the store as it is now, keeping the workflow's on or off; the version it
  * replaces is kept in turn, so this can be undone the same way.
+ *
+ * What it moves is measured first and paid for in studio requests before any
+ * of it is read (lib/flow-versions-rules.ts, restoreBytes; Claude 5 on
+ * #1927), and a try again pays for itself the same way: FlowHistoryNotPaid
+ * when the studio will not, with nothing read.
  */
 export async function restoreFlowVersion(store: Store, id: string, at: number): Promise<RestoreResult> {
   if (!store.listId) return { ok: false, reason: "unknown" };
-  const current = (await readFlowListStrict(store.listId)).find((f) => f.id === id);
+  const listId = store.listId;
+  await payFlowHistory(store, restoreBytes(await flowHistorySize(listId, id)));
+  const current = (await readFlowListStrict(listId)).find((f) => f.id === id);
   if (!current) return { ok: false, reason: "unknown" };
-  const version = (await readFlowVersions(store.listId, id)).find((v) => v.at === at);
+  const version = (await readFlowVersions(listId, id)).find((v) => v.at === at);
   if (!version) return { ok: false, reason: "version" };
+  const again = async () => payFlowHistory(store, restoreTryBytes(await flowHistorySize(listId, id)));
   // On or off is read again in the same step as the write (saveFlow, restoring), never taken from the read above.
-  return saveFlow(store, { ...version.flow, id } as unknown as Record<string, unknown>, { restoring: true });
+  return saveFlow(store, { ...version.flow, id } as unknown as Record<string, unknown>, { restoring: true, again });
 }
 
 export async function removeFlow(store: Store, id: string): Promise<FlowResult> {

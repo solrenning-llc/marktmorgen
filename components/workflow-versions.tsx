@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { MailAnswer } from "@/lib/mail-response";
-import { MAX_FLOW_VERSIONS } from "@/lib/flow-versions-rules";
+import { FLOW_VERSION_PAUSE_SECONDS, MAX_FLOW_VERSIONS } from "@/lib/flow-versions-rules";
 
 type Request = (payload: Record<string, unknown>) => Promise<MailAnswer>;
 type Version = { at: number; name: string; trigger: string; steps: number };
@@ -21,6 +21,10 @@ const ERRORS: Record<string, string> = {
   flow_versions_unavailable: "The earlier versions could not be read just now. This does not mean there are none. Try again in a moment.",
   history_room: "The version in use could not be kept, so nothing was put back and nothing changed. Your store may be out of room for data. Free some room, or try again in a moment.",
 };
+
+/** What the studio said when it would not take the requests this costs (lib/person-tasks.ts, studioRefusal): its own words. */
+const errorOf = (a: MailAnswer, fallback: string) =>
+  (a.error === "studio_used" || a.error === "unavailable") && typeof a.message === "string" && a.message ? a.message : ERRORS[a.error ?? ""] ?? fallback;
 
 const when = (ms: number) =>
   new Date(ms).toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
@@ -41,7 +45,7 @@ export function WorkflowVersions({ flowId, request, onRestored }: { flowId: stri
     request({ action: "flow-versions", id: flowId }).then((a) => {
       if (!live) return;
       if (a.ok && Array.isArray(a.versions)) setVersions(a.versions as Version[]);
-      else setError(ERRORS[a.error ?? ""] ?? "The earlier versions could not be read just now. Try again in a moment.");
+      else setError(errorOf(a, "The earlier versions could not be read just now. Try again in a moment."));
     });
     return () => {
       live = false;
@@ -54,7 +58,7 @@ export function WorkflowVersions({ flowId, request, onRestored }: { flowId: stri
     setDone(null);
     const a = await request({ action: "flow-restore", id: flowId, at: version.at });
     setBusy(false);
-    if (!a.ok) return setError(ERRORS[a.error ?? ""] ?? "That version could not be put back just now. Try again in a moment.");
+    if (!a.ok) return setError(errorOf(a, "That version could not be put back just now. Try again in a moment."));
     // Said only when a version was kept: putting back what is already in use replaces nothing (Claude 5 on #1927).
     setDone(
       a.kept === true
@@ -73,7 +77,7 @@ export function WorkflowVersions({ flowId, request, onRestored }: { flowId: stri
         Earlier versions
       </h4>
       <p className="mt-1 text-ink-soft">
-        {`Each time you save a change to what this workflow does, the version before it is kept here: the last ${MAX_FLOW_VERSIONS}, while your store has room. Putting one back keeps it switched on or off as it is now. Who is already in it goes on at the same step number in the version you put back; if that version has fewer steps, their run ends there, as when you remove a step.`}
+        {`When you save a change to what this workflow does, the version before it is kept here, at most one every ${FLOW_VERSION_PAUSE_SECONDS / 60} minutes while you keep editing: the last ${MAX_FLOW_VERSIONS}, while your store has room. Reading this list and putting a version back use more of your studio requests when the workflow is long. Putting one back keeps it switched on or off as it is now. Who is already in it goes on at the same step number in the version you put back; if that version has fewer steps, their run ends there, as when you remove a step.`}
       </p>
       {done ? (
         <p className="notice mt-3" role="status">

@@ -18,10 +18,11 @@ import { NextRequest } from "next/server";
 import { WorkflowVersions } from "@/components/workflow-versions";
 import { forgetStoreWorkflows, readFlows, removeFlow, saveFlow, setFlowActive } from "@/lib/flows";
 import { MAX_FLOW_VERSIONS, readFlowVersions } from "@/lib/flow-versions";
+import { FLOW_VERSION_PAUSE_SECONDS } from "@/lib/flow-versions-rules";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { POST as mailRoute } from "@/app/api/store/mail/route";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -60,6 +61,8 @@ async function main(): Promise<void> {
   is("switching it on keeps none", (await readFlowVersions(list, id)).length, 1);
 
   part("The route lists them, newest first");
+  // A version is kept at most once a pause of edits (lib/flow-versions-rules.ts, FLOW_VERSION_PAUSE_SECONDS): past it.
+  advance((FLOW_VERSION_PAUSE_SECONDS + 1) * 1000);
   await saveFlow(await store(), { id, active: true, ...welcome("Hi", "Welcome, short") });
   const listed = await post({ action: "flow-versions", id });
   is("name, trigger and steps of each, newest first", listed.data.versions?.map((v) => [v.name, v.trigger, v.steps]), [["Welcome", "joined", 1], ["Welcome", "joined", 1]]);
@@ -77,7 +80,10 @@ async function main(): Promise<void> {
   is("an unknown version is refused", [(await post({ action: "flow-restore", id, at: 12345 })).status, (await post({ action: "flow-restore", id, at: 12345 })).data.error], [404, "version"]);
 
   part("At most ten, and they go with the workflow");
-  for (let i = 0; i < MAX_FLOW_VERSIONS + 3; i += 1) await saveFlow(await store(), { id, active: true, ...welcome(`Subject ${i}`) });
+  for (let i = 0; i < MAX_FLOW_VERSIONS + 3; i += 1) {
+    advance((FLOW_VERSION_PAUSE_SECONDS + 1) * 1000);
+    await saveFlow(await store(), { id, active: true, ...welcome(`Subject ${i}`) });
+  }
   const kept = await readFlowVersions(list, id);
   is(`only the newest ${MAX_FLOW_VERSIONS}`, [kept.length, kept[0].flow.steps[0].subject], [MAX_FLOW_VERSIONS, `Subject ${MAX_FLOW_VERSIONS + 1}`]);
   await removeFlow(await store(), id);

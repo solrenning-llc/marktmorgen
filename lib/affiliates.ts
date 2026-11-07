@@ -2470,10 +2470,46 @@ function exactPairs(reply: unknown, what: string): [string, string][] {
   return out;
 }
 
+/** A number JSON can hold that is not Infinity (`1e999` parses to it). */
+const finiteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+/** Absent (older records, in US dollars) or a three-letter code as Stripe writes it; anything else is of an unknown shape. */
+const exactCurrency = (value: unknown): boolean => value === undefined || (typeof value === "string" && /^[a-z]{3}$/.test(value));
+
 /**
- * Throws UnknownReplyError when a reply is not in its exact shape, so the
- * directory shows the program without numbers, never with zeros
- * (lib/affiliate-directory.ts, readDirectory).
+ * One record of a program's public numbers, read exactly: what the shared
+ * parser reads, or UnknownReplyError. The shared parsers drop a record they
+ * cannot read and default a missing number to 0, which their other callers
+ * rely on; the public numbers never show such a record as nothing or as 0.
+ */
+function exactAffiliate(raw: string): Affiliate {
+  const affiliate = parseAffiliate(raw);
+  if (!affiliate) throw new UnknownReplyError("a program's affiliate");
+  return affiliate;
+}
+
+/** A sale, read exactly: its base and its share are numbers, its currency absent or Stripe's code. */
+function exactReferral(raw: string): Referral {
+  const referral = parseReferral(raw);
+  const value = referral ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  if (!referral || !value || !finiteNumber(value.base) || !finiteNumber(value.rate) || !exactCurrency(value.currency)) {
+    throw new UnknownReplyError("a program's sale");
+  }
+  return referral;
+}
+
+/** A payment the creator wrote down, read exactly: its amount a finite number, its currency absent or Stripe's code. */
+function exactPayout(raw: string): Payout {
+  const payout = parsePayout(raw);
+  const value = payout ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  if (!payout || !value || !finiteNumber(payout.cents) || !exactCurrency(value.currency)) throw new UnknownReplyError("a program's payment");
+  return payout;
+}
+
+/**
+ * Throws UnknownReplyError when a reply, or a record inside it, is not in its
+ * exact shape, so the directory shows the program without numbers, never
+ * with zeros (lib/affiliate-directory.ts, readDirectory).
  */
 export async function programNumbers(store: Store): Promise<ProgramNumbers | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
@@ -2497,13 +2533,11 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
   });
   const sales = exactPairs(replies[2], "a program's sales");
   const payouts = exactPairs(replies[3], "a program's payments");
-  const approved = people
-    .map(([, raw]) => parseAffiliate(raw))
-    .filter((a): a is Affiliate => a !== null && a.status === "approved");
+  const approved = people.map(([, raw]) => exactAffiliate(raw)).filter((a) => a.status === "approved");
   const currency = store.currency.toLowerCase();
   const referrals = sales
-    .map(([, raw]) => parseReferral(raw))
-    .filter((r): r is Referral => r !== null && !r.self && (r.currency || "usd").toLowerCase() === currency);
+    .map(([, raw]) => exactReferral(raw))
+    .filter((r) => !r.self && (r.currency || "usd").toLowerCase() === currency);
   const earned = (r: Referral) => commissionOn(r.base, r.rate);
   const byClick = referrals.filter((r) => r.how === "click");
   return {
@@ -2514,8 +2548,8 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
     sales: referrals.length,
     earnedCents: referrals.reduce((sum, r) => sum + earned(r), 0),
     paidCents: payouts
-      .map(([, raw]) => parsePayout(raw))
-      .filter((p): p is Payout => p !== null && (p.currency || "usd").toLowerCase() === currency)
+      .map(([, raw]) => exactPayout(raw))
+      .filter((p) => (p.currency || "usd").toLowerCase() === currency)
       .reduce((sum, p) => sum + p.cents, 0),
     since: approved.reduce((first, a) => (first === 0 || (a.decidedAt > 0 && a.decidedAt < first) ? a.decidedAt : first), 0),
   };

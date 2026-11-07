@@ -144,6 +144,13 @@ class Graph(WithSyntheticSuite):
             "same in a re-exported component": {"components/c.tsx": "export const c = new URL(\n  'x;'.slice(0, 0) + '../lib/' + leaf,\n  import.meta.url);",
                                                 "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "method on the specifier": {"app/page.tsx": "export default await import('../lib/b'.concat(x));"},
+            # Claude 5 on #3037: a comment at the start of a line, a generator method line
+            # starting with "*", and a createRequire bound to another name hid the import.
+            "block comment before a computed import": {"app/page.tsx": "/* c8 ignore next */ const m = await import(`../lib/${leaf}.js`);\nexport default m;"},
+            "generator method line starting with *": {"app/page.tsx": "export default {\n  *items() { yield require(`../lib/${leaf}.js`).text; },\n};"},
+            "createRequire bound to another name": {"app/page.tsx": "import { createRequire } from 'node:module';\nconst load = createRequire(import.meta.url);\nexport default load('../lib/' + leaf + '.js');"},
+            "createRequire imported under another name": {"app/page.tsx": "import { createRequire as make } from 'node:module';\nconst require = make(import.meta.url);\nexport default require(`../lib/${leaf}.js`).b;"},
+            "require passed on as a value": {"app/page.tsx": "const load = require;\nexport default load('../lib/' + leaf);"},
             "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "unresolved import": {"app/page.tsx": 'import "@/lib/missing";'},
@@ -194,8 +201,14 @@ class Graph(WithSyntheticSuite):
             suites_unaffected(["lib/b.ts"], [(files, lambda path: broken[path])])
 
     def test_comment_lines_are_not_computed_imports(self):
-        quiet = dict(BASE, **{"lib/a.ts": " * an import (lib/team.ts, \"x\")\n// require(name)\nexport const a = 1;"})
+        quiet = dict(BASE, **{"lib/a.ts": "/**\n * an import (lib/team.ts, \"x\")\n */\n// require(name)\nexport const a = 1; // an import (x)\nconst u = 'http://x'; /* require(name) */"})
         self.assertTrue(unaffected(["lib/b.ts"], quiet))
+
+    def test_the_literal_require_from_createrequire_is_still_followed(self):
+        for code in ("import { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nrequire('../lib/b');",
+                     "const require = module.createRequire(import.meta.url);"):
+            with self.subTest(code=code):
+                self.assertFalse(ui.computed("\n".join(ui.code_lines(code))))
 
     def test_empty_change_or_no_tree_never_skips(self):
         self.assertFalse(unaffected([]))

@@ -35,7 +35,7 @@ import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
@@ -534,6 +534,22 @@ function pairs(reply: unknown): [string, number][] {
   return out;
 }
 
+/**
+ * A day's HGETALL read exactly, for the all-time fill: field and count strings, an even number of them ([] for a day
+ * with nothing kept), each count a whole number. Anything else throws (CX-123 rule 24).
+ */
+function exactPairs(reply: unknown): [string, number][] {
+  const flat = stringList(reply);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a kept day's counts");
+  const out: [string, number][] = [];
+  for (let i = 0; i < flat.length; i += 2) {
+    const count = /^-?\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    if (!Number.isSafeInteger(count)) throw new UnknownReplyError("a kept day's counts");
+    out.push([flat[i], count]);
+  }
+  return out;
+}
+
 /** The dates of the last `count` days, oldest first, ending today (UTC). */
 function lastDays(now: number, count: number): string[] {
   const dates: string[] = [];
@@ -693,12 +709,27 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
       let visitors = 0;
       let first = "";
       if (dates.length) {
-        const replies = await redisPipeline([
-          ...dates.map((d) => ["HGETALL", countsKey(statsId, d)]),
-          ...dates.map((d) => ["PFCOUNT", visitorsKey(statsId, d)]),
-        ]);
+        // The kept days read exactly (CX-123 rule 24; review of #2905): the fill happens once, so a day read as empty
+        // from an answer in another shape would be gone from the all-time record for good. Any such answer marks
+        // nothing filled, lets this read's lock go and throws, so this view has no all-time record (readStats) and
+        // the next read fills it once.
+        let days: [string, number][][];
+        let counts: number[];
+        try {
+          const replies = repliesFor(await redisPipeline([
+            ...dates.map((d) => ["HGETALL", countsKey(statsId, d)]),
+            ...dates.map((d) => ["PFCOUNT", visitorsKey(statsId, d)]),
+          ]), 2 * dates.length);
+          if (!replies) throw new UnknownReplyError("the all-time record's kept days");
+          days = dates.map((_, i) => exactPairs(replies[i]));
+          counts = dates.map((_, i) => countOf(replies[dates.length + i]) ?? -1);
+          if (counts.some((n) => n < 0)) throw new UnknownReplyError("the all-time record's kept visitors");
+        } catch (error) {
+          await releaseMark(lifeLockKey(statsId), mine);
+          throw error;
+        }
         dates.forEach((date, i) => {
-          const day = pairs(replies[i]);
+          const day = days[i];
           if (day.length && !first) first = date;
           // Countries and devices are kept by the day only: copied into the
           // all-time record they would start it on whatever day it was filled.
@@ -706,7 +737,7 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
             if (field.startsWith("k:") || field.startsWith("d:") || field.startsWith("sr:") || field.startsWith("h:") || field.startsWith("hc:") || field.startsWith("q:")) continue;
             tally.set(field, (tally.get(field) ?? 0) + count);
           }
-          visitors += Number(replies[dates.length + i]) || 0;
+          visitors += counts[i];
         });
       }
       await redisPipeline([

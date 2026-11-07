@@ -134,3 +134,62 @@ test("confirmed absence: not connected, or connected with nothing read yet, is n
   await withMetaRead([0, null], async () => assert.deepEqual(await metaLines(statsId), []));
   await withMetaRead([1, null], async () => assert.deepEqual(await metaLines(statsId), []));
 });
+
+// Codex Z on #2924: a list or a hash whose envelope is right but holds a member in another shape is not read whole.
+// Dropping that member silently left the rest standing as all of the spend; now the whole read is unknown.
+const BAD_LINES: [string, unknown][] = [
+  ["a line with no id", { channel: "facebook", campaign: "", cents: 300, from: today, to: today }],
+  ["a line whose id is not Meta's", { ...META_LINE, id: "typed-01" }],
+  ["a line of no amount", { ...META_LINE, id: "meta-ffffffffffff", cents: 0 }],
+  ["text", "junk"],
+  ["null", null],
+];
+for (const [label, member] of BAD_LINES) {
+  test(`metaLines: a kept list holding ${label} beside a whole line is unknown, never that line alone`, async () => {
+    const { statsId } = await fixture;
+    await withMetaRead([1, JSON.stringify([META_LINE, member])], () => assert.rejects(() => metaLines(statsId)));
+  });
+}
+
+test("the model is told ad spend is unknown when a Meta line is in another shape, never handed the rest as all of it", async () => {
+  const { store } = await fixture;
+  await withMetaRead([1, JSON.stringify([META_LINE, "junk"])], () => askNumbers(store, "What did ads cost?", data));
+  assert.equal(prompts.at(-1)?.includes('"untagged_ad_spend":null'), true);
+});
+
+/** The typed lines' HGETALL answered with what is kept plus `extra` (field, value pairs) while `run` runs. */
+async function withTypedExtra<T>(extra: string[], run: () => Promise<T>): Promise<T> {
+  redis.pipeline = (async (commands: Command[]) => {
+    const out = await real(commands);
+    return commands.length === 1 && commands[0][0] === "HGETALL" && String(commands[0][1]).endsWith(":spend") ? [[...(out[0] as string[]), ...extra]] : out;
+  }) as typeof redis.pipeline;
+  try { return await run(); }
+  finally { redis.pipeline = real; }
+}
+
+const BAD_TYPED: [string, string[]][] = [
+  ["a field that is not an id", ["not-an-id", JSON.stringify({ channel: "podcast", campaign: "", cents: 900, from: today, to: today })]],
+  ["a value that is not JSON", ["abcdef01", "{"]],
+  ["a value that is not a record", ["abcdef02", "7"]],
+  ["a record of no channel", ["abcdef03", JSON.stringify({ channel: "", campaign: "", cents: 900, from: today, to: today })]],
+];
+for (const [label, extra] of BAD_TYPED) {
+  test(`typed spend holding ${label} beside a whole entry is unknown, never that entry alone`, async () => {
+    const { statsId } = await fixture;
+    await withTypedExtra(extra, () => assert.rejects(() => readSpends(statsId)));
+  });
+}
+
+test("the model is told ad spend is unknown when a typed entry is in another shape", async () => {
+  const { store } = await fixture;
+  await withTypedExtra(["abcdef01", "{"], () => askNumbers(store, "What did ads cost?", data));
+  assert.equal(prompts.at(-1)?.includes('"untagged_ad_spend":null'), true);
+});
+
+test("the spend route answers 503 when a typed entry is in another shape, never the rest as all of it", async () => {
+  const { cookie } = await fixture;
+  const response = await withTypedExtra(["abcdef01", "{"], () =>
+    spendRoute(new NextRequest("https://marktmorgen.com/api/store/spend", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", cookie, "content-type": "application/json" }, body: JSON.stringify({ action: "remove", id: "deadbeef" }) })),
+  );
+  assert.equal(response.status, 503);
+});

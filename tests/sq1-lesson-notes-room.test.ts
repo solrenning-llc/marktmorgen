@@ -61,7 +61,7 @@ async function noteSlots(): Promise<number> {
 
 /** The notes' count dataUsed reads for the studio, or the reply as it is when it has no such count. */
 async function notesCount(): Promise<unknown> {
-  const used = typeof data.dataUsed === "function" ? await (data.dataUsed as (s: DataStore) => Promise<Record<string, unknown> | null>)(SHOP) : null;
+  const used = typeof data.dataUsed === "function" ? await (data.dataUsed as (s: DataStore, now: number, ask: { notes: boolean }) => Promise<Record<string, unknown> | null>)(SHOP, Date.now(), { notes: true }) : null;
   return used ? used.notes : "no dataUsed";
 }
 
@@ -101,6 +101,11 @@ async function fillsATenth(): Promise<void> {
 async function atTheCap(): Promise<void> {
   part("R2: at the cap a note may shrink or be emptied, never grow");
   const who = emailKey("r1-a@example.com");
+  // Fill what a big note left, with short notes of another student, to the brim.
+  const filler = emailKey("r2-filler@example.com");
+  let last: Awaited<ReturnType<typeof saveNote>> = { ok: true, text: "" };
+  for (let n = 0; n < 280 && last.ok; n++) last = await saveNote({ statsId: STATS, learner: filler, courseId: COURSE, lessonId: lessonId(n), text: "x", was: "", room: SHOP });
+  is("setup: short notes fill the share until one is refused as notes_full", last.ok ? "never refused" : last.reason, "notes_full");
   const before = await noteSlots();
   const grow = await saveNote({ statsId: STATS, learner: who, courseId: COURSE, lessonId: "growing00001", text: "A new short note.", was: "", room: SHOP });
   is("a new note, however short, is refused at the cap", grow.ok ? "saved" : grow.reason, "notes_full");
@@ -207,7 +212,7 @@ function studio(): void {
   const page = read("app/studio/page.tsx");
   is("the studio's data room shows the line from dataUsed's notes count", /studentNotesLine\(data\.notes, studentNotesRoomFor\(current\)\)/.test(page), true);
   const en = words.lessonNotesWords("en") as unknown as Record<string, unknown>;
-  is("en: the student is told the notes of this store reached their room, theirs stay, and what to do", typeof en.notesFull === "string" && /were not saved/.test(en.notesFull) && /stay|kept/.test(en.notesFull), true);
+  is("en: the student is told the notes of this store reached their room, theirs stay, and what to do", typeof en.notesFull === "string" && /was not saved/.test(en.notesFull) && /stay|kept/.test(en.notesFull), true);
   for (const language of ["es", "fr", "de", "it", "nl", "pt"] as const) {
     const said = (words.lessonNotesWords(language) as unknown as Record<string, unknown>).notesFull;
     is(`${language}: the sentence is in the store's language`, typeof said === "string" && said.length > 20 && said !== en.notesFull, true);

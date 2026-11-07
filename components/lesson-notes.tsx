@@ -102,6 +102,8 @@ export function LessonNotes({
         too_many: w.tooMany(MAX_NOTES_PER_STUDENT),
         changed: w.changed,
         full: w.full,
+        // The students' notes of the store have reached their share of its room (lib/lesson-notes.ts).
+        notes_full: w.notesFull,
         slow: w.slow,
         // Trying again cannot help: the lesson is not open to them now (signed out, access ended, held by a quiz).
         closed: w.closed,

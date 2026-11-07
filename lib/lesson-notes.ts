@@ -18,7 +18,14 @@
  * MAX_NOTES_PER_STUDENT notes in one store. Every note takes its room in the
  * store's data room (lib/store-data.ts), one slot a note set to what it
  * weighs, so storage is paid by the plan's room and an emptied note gives all
- * of it back.
+ * of it back. All the store's students' notes together take at most
+ * studentNotesRoomFor of it, a tenth of the plan's room (decision
+ * C1-20261107-1453-TODOS-9 on Claude 2's finding on #3031), counted in the
+ * room's NOTES_TOTAL_FIELD in the same step as each slot: past it a new or
+ * longer note is refused as "notes_full", the notes already kept stay, and
+ * a shorter or emptied note is always taken. So students never fill the room
+ * the creator's own work needs. A count that cannot be read refuses a new or
+ * longer note and never blocks an emptying.
  *
  * Unknown is closed. A note whose stored value is not one as saved, or a
  * reply of another shape, reads as "unknown": the lesson page then says the
@@ -36,8 +43,8 @@
  * never writes it back after it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, TAKE_DATA, dataKey, dataTakenOf, monthOf } from "@/lib/store-data";
-import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
+import { type DataStore, NOTES_TOTAL_FIELD, TAKE_DATA, dataKey, dataTakenOf, monthOf } from "@/lib/store-data";
+import { contentRoomFor, dataBytes, studentNotesRoomFor } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { COURSE_ID_PATTERN, ITEM_ID_PATTERN } from "@/lib/course";
 import { emailKey } from "@/lib/learn";
@@ -89,7 +96,7 @@ export async function readNote(statsId: string, learner: string, courseId: strin
   }
 }
 
-export type SaveRefusal = "invalid" | "too_long" | "too_many" | "changed" | "full" | "unknown";
+export type SaveRefusal = "invalid" | "too_long" | "too_many" | "notes_full" | "changed" | "full" | "unknown";
 export type SaveResult = { ok: true; text: string } | { ok: false; reason: SaveRefusal; message?: string };
 
 /**
@@ -134,9 +141,10 @@ export async function saveNote(input: {
     const [reply] = await redisPipeline([[
       "EVAL", SAVE_NOTE, 2, roomKey, key,
       contentRoomFor(room, now / 1000), monthOf(now), field, slot, size, raw === null ? "0" : "1", raw ?? "", json, MAX_NOTES_PER_STUDENT,
+      studentNotesRoomFor(room, now / 1000),
     ]]);
-    if (Array.isArray(reply) && reply.length === 2 && reply[1] === 0 && (reply[0] === 2 || reply[0] === 3)) {
-      return { ok: false, reason: reply[0] === 2 ? "changed" : "too_many" };
+    if (Array.isArray(reply) && reply.length === 2 && reply[1] === 0 && (reply[0] === 2 || reply[0] === 3 || reply[0] === 4)) {
+      return { ok: false, reason: reply[0] === 2 ? "changed" : reply[0] === 3 ? "too_many" : "notes_full" };
     }
     const taken = dataTakenOf(room, reply, now / 1000);
     if (taken.ok) return { ok: true, text };
@@ -156,55 +164,98 @@ ${TAKE_DATA}
 end`;
 
 /**
+ * The notes' count in the room (NOTES_TOTAL_FIELD) and a slot's weight, read
+ * exactly inside a script whose KEYS[1] is the room: a count absent is none
+ * yet, a whole number is itself, anything else is unknown (nil). A note
+ * takes its slot's bytes and the slot's own 64-byte field, as the room
+ * counts it.
+ */
+const NOTE_COUNT = `local function exactCount(v)
+  if v == false or v == nil then return 0 end
+  if v == '0' or string.match(v, '^[1-9]%d*$') then return tonumber(v) end
+  return nil
+end
+local function notesCount() return exactCount(redis.call('HGET', KEYS[1], '${NOTES_TOTAL_FIELD}')) end
+local function noteWeight(n) if n > 0 then return n + 64 end return 0 end
+local function setNotesCount(n)
+  if n > 0 then redis.call('HSET', KEYS[1], '${NOTES_TOTAL_FIELD}', n) else redis.call('HDEL', KEYS[1], '${NOTES_TOTAL_FIELD}') end
+end`;
+
+/**
  * KEYS[1] the store's room, KEYS[2] the student's notes. ARGV[1] how far the
  * room may grow, ARGV[2] this month, ARGV[3] the note's field, ARGV[4] its
  * slot, ARGV[5] its size, ARGV[6] "1" when a note was read and "0" for none,
  * ARGV[7] the value read, ARGV[8] the new value ("" deletes the note),
- * ARGV[9] the most notes a student keeps. Answers {2, 0} when the note is no
- * longer the one read, {3, 0} when a new note would pass the most, or the
- * room's answer: {1, total} written, {0, total} full (nothing written),
- * {-1, total} unknown. Modelled by lib/redis-memory.ts.
+ * ARGV[9] the most notes a student keeps, ARGV[10] the most all the store's
+ * notes take (studentNotesRoomFor). Answers {2, 0} when the note is no
+ * longer the one read, {3, 0} when a new note would pass the most a student
+ * keeps, {4, 0} when a new or longer note would pass the notes' share,
+ * {-1, 0} when the notes' count or the slot cannot be read, or the room's
+ * answer: {1, total} written, {0, total} full (nothing written), {-1, total}
+ * unknown. The notes' count moves with the slot, in the same step.
+ * Modelled by lib/redis-memory.ts.
  */
-export const SAVE_NOTE = `-- marktmorgen:lesson-note-save:v1
+export const SAVE_NOTE = `-- marktmorgen:lesson-note-save:v2
 ${NOTE_ROOM}
+${NOTE_COUNT}
 local held = redis.call('HGET', KEYS[2], ARGV[3])
 if ARGV[6] == '1' then
   if held ~= ARGV[7] then return {2, 0} end
 elseif held then
   return {2, 0}
 end
+local notes = notesCount()
+local was = exactCount(redis.call('HGET', KEYS[1], ARGV[4]))
 if ARGV[8] == '' then
   if held then redis.call('HDEL', KEYS[2], ARGV[3]) end
-  return noteRoom(ARGV[1], '1', ARGV[2], {'s', ARGV[4], '0'})
+  local gone = noteRoom(ARGV[1], '1', ARGV[2], {'s', ARGV[4], '0'})
+  -- An emptying is always taken; a count that cannot be read is left as it is (it keeps refusing growth).
+  if gone[1] == 1 and notes and was then setNotesCount(math.max(0, notes - noteWeight(was))) end
+  return gone
 end
 if not held and redis.call('HLEN', KEYS[2]) >= tonumber(ARGV[9]) then return {3, 0} end
+local share = tonumber(ARGV[10])
+local size = tonumber(ARGV[5])
+if not notes or not was or not share or share < 0 or not size or size < 0 then return {-1, 0} end
+local grows = noteWeight(math.floor(size)) - noteWeight(was)
+if grows > 0 and notes + grows > share then return {4, 0} end
 local taken = noteRoom(ARGV[1], '0', ARGV[2], {'s', ARGV[4], ARGV[5]})
 if taken[1] ~= 1 then return taken end
 redis.call('HSET', KEYS[2], ARGV[3], ARGV[8])
+setNotesCount(math.max(0, notes + grows))
 return taken`;
 
 /**
  * KEYS[1] the store's room, KEYS[2] the student's notes. ARGV[1] how far the
  * room may grow, ARGV[2] this month, ARGV[3] the start of the student's
  * slots ("ln:<student>:"). Deletes the notes and sets the slot of every note
- * named as this file names them to nothing, in one step. Answers {notes
- * deleted, then the room's answer}. Modelled by lib/redis-memory.ts.
+ * named as this file names them to nothing, and takes what those slots
+ * weighed off the notes' count, in one step (a count that cannot be read is
+ * left as it is). Answers {notes deleted, then the room's answer}. Modelled
+ * by lib/redis-memory.ts.
  */
-export const FORGET_NOTES = `-- marktmorgen:lesson-note-forget:v1
+export const FORGET_NOTES = `-- marktmorgen:lesson-note-forget:v2
 ${NOTE_ROOM}
+${NOTE_COUNT}
 local fields = redis.call('HKEYS', KEYS[2])
 if #fields == 0 then return {0, 1, 0} end
 redis.call('DEL', KEYS[2])
 local changes = {}
+local freed = 0
+local known = true
 for _, f in ipairs(fields) do
   if #f == 45 and string.match(f, '^[0-9a-f]+:[a-z0-9]+$') and string.sub(f, 33, 33) == ':' then
+    local weighed = exactCount(redis.call('HGET', KEYS[1], ARGV[3] .. f))
+    if weighed then freed = freed + noteWeight(weighed) else known = false end
     changes[#changes + 1] = 's'
     changes[#changes + 1] = ARGV[3] .. f
     changes[#changes + 1] = '0'
   end
 end
+local notes = notesCount()
 local taken = {1, 0}
 if #changes > 0 then taken = noteRoom(ARGV[1], '1', ARGV[2], changes) end
+if taken[1] == 1 and notes and known then setNotesCount(math.max(0, notes - freed)) end
 return {#fields, taken[1], taken[2]}`;
 
 /** A field name a student's hash holds, read exactly: every one a string, or UnknownReply. */

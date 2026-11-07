@@ -883,28 +883,49 @@ export class MemoryRedis {
           });
           return out;
         }
-        // lib/lesson-notes.ts SAVE_NOTE and FORGET_NOTES: a student's note, its count and its data-room slot in one step.
-        if (key.startsWith("-- marktmorgen:lesson-note-save:v1\n") && args[0] === "2" && args.length === 12) {
-          const [, room, notes, limit, month, field, slot, size, wasHeld, was, json, most] = args;
+        // lib/lesson-notes.ts SAVE_NOTE and FORGET_NOTES: a student's note, its count, its data-room slot and the notes' count in the room in one step.
+        if (key.startsWith("-- marktmorgen:lesson-note-save:v2\n") && args[0] === "2" && args.length === 13) {
+          const [, room, notes, limit, month, field, slot, size, wasHeld, was, json, most, share] = args;
           const held = this.run(["HGET", notes, field]);
           if (wasHeld === "1" ? held !== was : held !== null) return [2, 0];
+          const count = this.noteCount(this.run(["HGET", room, "ln#"]));
+          const weighed = this.noteCount(this.run(["HGET", room, slot]));
+          const weight = (n: number) => (n > 0 ? n + 64 : 0);
           if (json === "") {
             if (held !== null) this.run(["HDEL", notes, field]);
-            return this.storeData([room, limit, "1", month, "s", slot, "0"]);
+            const gone = this.storeData([room, limit, "1", month, "s", slot, "0"]);
+            if (Array.isArray(gone) && gone[0] === 1 && count !== null && weighed !== null) this.setNoteCount(room, Math.max(0, count - weight(weighed)));
+            return gone;
           }
           if (held === null && Number(this.run(["HLEN", notes])) >= Number(most)) return [3, 0];
+          const cap = Number(share);
+          const bytes = Number(size);
+          if (count === null || weighed === null || share === "" || !Number.isFinite(cap) || cap < 0 || size === "" || !Number.isFinite(bytes) || bytes < 0) return [-1, 0];
+          const grows = weight(Math.floor(bytes)) - weight(weighed);
+          if (grows > 0 && count + grows > cap) return [4, 0];
           const taken = this.storeData([room, limit, "0", month, "s", slot, size]);
           if (!Array.isArray(taken) || taken[0] !== 1) return taken;
           this.run(["HSET", notes, field, json]);
+          this.setNoteCount(room, Math.max(0, count + grows));
           return taken;
         }
-        if (key.startsWith("-- marktmorgen:lesson-note-forget:v1\n") && args[0] === "2" && args.length === 6) {
+        if (key.startsWith("-- marktmorgen:lesson-note-forget:v2\n") && args[0] === "2" && args.length === 6) {
           const [, room, notes, limit, month, prefix] = args;
           const fields = this.run(["HKEYS", notes]) as string[];
           if (fields.length === 0) return [0, 1, 0];
           this.run(["DEL", notes]);
-          const changes = fields.filter((f) => /^[0-9a-f]{32}:[a-z0-9]{12}$/.test(f)).flatMap((f) => ["s", prefix + f, "0"]);
+          const named = fields.filter((f) => /^[0-9a-f]{32}:[a-z0-9]{12}$/.test(f));
+          let freed = 0;
+          let known = true;
+          for (const f of named) {
+            const weighed = this.noteCount(this.run(["HGET", room, prefix + f]));
+            if (weighed === null) known = false;
+            else if (weighed > 0) freed += weighed + 64;
+          }
+          const count = this.noteCount(this.run(["HGET", room, "ln#"]));
+          const changes = named.flatMap((f) => ["s", prefix + f, "0"]);
           const taken = changes.length > 0 ? this.storeData([room, limit, "1", month, ...changes]) : [1, 0];
+          if (Array.isArray(taken) && taken[0] === 1 && count !== null && known) this.setNoteCount(room, Math.max(0, count - freed));
           return Array.isArray(taken) ? [fields.length, taken[0], taken[1]] : taken;
         }
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
@@ -1671,6 +1692,17 @@ export class MemoryRedis {
       room.set("#", String(Math.max(total, 0) + charged + (old <= 0 ? 64 : 0)));
     }
     return [charged, ...replies];
+  }
+
+  /** lib/lesson-notes.ts NOTE_COUNT: a room count read exactly; absent is 0, anything but a whole number is unknown (null). */
+  private noteCount(value: unknown): number | null {
+    if (value === null || value === undefined) return 0;
+    if (typeof value !== "string" || !/^(0|[1-9][0-9]*)$/.test(value)) return null;
+    return Number(value);
+  }
+
+  private setNoteCount(room: string, n: number): void {
+    this.run(n > 0 ? ["HSET", room, "ln#", String(n)] : ["HDEL", room, "ln#"]);
   }
 
   private storeData(args: string[]): unknown {

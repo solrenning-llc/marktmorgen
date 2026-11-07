@@ -678,7 +678,10 @@ export default function PrivacyPage() {
           We keep what they wrote and when, for that student alone: the
           creator, the creator&apos;s team and the other students never see
           them. A note holds at most 4,000 characters, and a student keeps at
-          most 300 notes in one store. The student can download a course&apos;s
+          most 300 notes in one store. All the students&apos; notes in one
+          store together take at most a tenth of the store&apos;s data room:
+          past that, a new or longer note is refused and the notes already
+          saved stay. The student can download a course&apos;s
           notes as a text file whenever they are signed in with the address
           they took it with: from each lesson while the course is open to
           them, and from the course&apos;s own page also after the course is no longer open to them

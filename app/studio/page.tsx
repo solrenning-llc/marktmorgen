@@ -12,7 +12,7 @@ import { activationTiming } from "@/lib/store-activation";
 import { PathStudioReminder } from "@/components/path-studio-reminder";
 import { UsageMeter } from "@/components/usage-meter";
 import { dataUsed } from "@/lib/store-data";
-import { dataFullWords, dataWords } from "@/lib/store-data-rules";
+import { dataFullWords, dataWords, studentNotesLine, studentNotesRoomFor } from "@/lib/store-data-rules";
 import { isDiscordConfigured } from "@/lib/discord";
 import { RecentSalesSwitch } from "@/components/recent-sales-switch";
 import { firstSaleAt } from "@/lib/yearly-offer";
@@ -983,7 +983,8 @@ export default async function StudioPage({
     ? await Promise.all(ALLOWANCE_KINDS.map(async (kind) => ({ kind, used: await allowanceUsed(current, kind), limit: allowanceFor(current, kind) })))
     : null;
   // How full the store's data room is (lib/store-data.ts), and what its orders keep of it.
-  const data = current && may("settings") ? await dataUsed(current).catch(() => null) : null;
+  // With what the students' private lesson notes take of it (lib/lesson-notes.ts), in the same read.
+  const data = current && may("settings") ? await dataUsed(current, undefined, { notes: true }).catch(() => null) : null;
   const orderRoom = standing === "paid" && store ? ordersIncluded(store.tier) : TRIAL_ORDERS;
   // A store whose plan has ended and that keeps more than a store with no
   // plan may: the day what it keeps is removed, counted the way the daily
@@ -2730,7 +2731,7 @@ export default async function StudioPage({
                     </p>
                   </div>
                 ) : null}
-                {data ? (
+                {data && current ? (
                   <div className="mt-6 border-t border-line pt-5">
                     <p className="font-semibold text-ink">Your data room</p>
                     <p className="mt-2 text-sm text-ink-soft">{`${dataWords(data.used)} of ${dataWords(data.room)} used, ${dataWords(data.orders)} of it kept for your orders.`}</p>
@@ -2741,6 +2742,10 @@ export default async function StudioPage({
                     ) : null}
                     <p className="mt-3 text-sm text-ink-soft">
                       {`It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps. When it is full, what you or your buyers would add is refused until you delete something${standing === "paid" && largerOnSale ? " or move to a larger plan" : ""}; deleting is never refused, and an order already paid for is never refused.`}
+                    </p>
+                    <p className="mt-3 text-sm text-ink-soft">{studentNotesLine(data.notes, studentNotesRoomFor(current))}</p>
+                    <p className="mt-1 text-sm text-ink-soft">
+                      Your students&rsquo; private notes on your lessons count in your data room, and all of them together take at most a tenth of it. Past that, a student&rsquo;s new or longer note is refused and the notes already saved stay, so they never fill the room your own work needs.
                     </p>
                   </div>
                 ) : null}

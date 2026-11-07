@@ -61,7 +61,7 @@ import { maySendPathReminder } from "@/lib/path-reminder-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { type Store, accountStores, setPhoneSales, storeRef } from "@/lib/store";
 import { normaliseEmail } from "@/lib/auth";
 import { type Permission, type Role, can } from "@/lib/team-roles";
@@ -189,9 +189,21 @@ function parseState(raw: unknown): DeviceState | null {
   }
 }
 
+/**
+ * The device list from its GET answer: null only when Redis confirms there is none. Any other shape, or a record
+ * that does not read, throws (rule 24): read as "no devices", a device added on it would write the list back alone.
+ */
+function configOf(raw: unknown): Config | null {
+  if (raw === null) return null;
+  const config = typeof raw === "string" ? parseConfig(raw) : null;
+  if (!config) throw new UnknownReplyError("the phone devices");
+  return config;
+}
+
 async function readConfig(statsId: string): Promise<Config | null> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  return parseConfig(raw);
+  const reply = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!reply) throw new UnknownReplyError("the phone devices");
+  return configOf(reply[0]);
 }
 
 async function writeConfig(store: Store, config: Config): Promise<void> {
@@ -429,13 +441,15 @@ export async function phoneView(store: Store, who: string, role: Role): Promise<
   const keys = vapidKeys();
   const allowed = eventsFor(role);
   if (!store.statsId || !isRedisConfigured()) return { publicKey: keys?.publicKey ?? null, devices: [], allowed };
-  const [rawConfig, rawStates] = await redisPipeline([
+  const reply = repliesFor(await redisPipeline([
     ["GET", cfgKey(store.statsId)],
     ["HGETALL", stateKey(store.statsId)],
-  ]);
-  const config = parseConfig(rawConfig);
+  ]), 2);
+  if (!reply) throw new UnknownReplyError("the phone devices");
+  const config = configOf(reply[0]);
   const states = new Map<string, DeviceState>();
-  const flat = Array.isArray(rawStates) ? (rawStates as unknown[]).map(String) : [];
+  const flat = stringList(reply[1]);
+  if (!flat || flat.length % 2) throw new UnknownReplyError("the phone device states");
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const state = parseState(flat[i + 1]);
     if (state) states.set(flat[i], state);

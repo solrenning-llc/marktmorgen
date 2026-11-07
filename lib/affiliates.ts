@@ -75,7 +75,7 @@
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPayPalRefunds, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
-import { MAX_STORE_BYTES, saleHandles, storeForEmail, storeForId, storeRef } from "@/lib/store";
+import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -382,7 +382,7 @@ export function payAddress(affiliate: Pick<Affiliate, "email" | "paypal">): stri
  * partners, ShareCapError and nothing written. Unknown reply: UnknownReplyError; the lock not held: LockBusyError;
  * nothing written either way.
  */
-export async function setAffiliateRate(store: Store, id: string, rate: number | null): Promise<Affiliate | null> {
+export async function setAffiliateRate(store: Store, id: string, rate: number | null, charge: Charge = PAID): Promise<Affiliate | null> {
   if (rate !== null && (!Number.isInteger(rate) || rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return null;
   const lowers = (a: Affiliate) => rate !== null && a.rate !== null && rate <= a.rate;
   const plain = await changeAffiliate(store, id, (affiliate) => (lowers(affiliate) ? { ...affiliate, rate } : null));
@@ -398,7 +398,7 @@ export async function setAffiliateRate(store: Store, id: string, rate: number | 
     if (!lowered) return null;
     if (lowered.next) return lowered.next;
     if (lowered.before.rate === rate) return lowered.before;
-    const problem = await commissionProblem(now, { rate: { id, rate } });
+    const problem = await commissionProblem(now, { rate: { id, rate } }, charge);
     if (problem) throw new ShareCapError(problem);
     if (!(await holdLock(held))) throw lost();
     return (await changeAffiliate(store, id, (affiliate) => ({ ...affiliate, rate })))?.next ?? null;
@@ -446,10 +446,11 @@ export async function withPartnerLock<T>(store: Store, work: (held: Held) => Pro
  * (lib/partner-share.ts shareProblem). `self`'s own current share is replaced, not added. Throws UnknownReplyError
  * when the people could not be read exactly: never "nobody".
  */
-export async function partnerShareProblem(store: Store, share: PartnerShare, self: string | null): Promise<ShareProblem | null> {
+export async function partnerShareProblem(store: Store, share: PartnerShare, self: string | null, charge: Charge = PAID): Promise<ShareProblem | null> {
   // The commission as it is now, not as the request read it before the lock: a raise saved meanwhile counts.
   const now = await storeNow(store);
-  return shareProblemAmong(now.affiliates, await listAffiliates(now), share, self);
+  // The people read paid for first at their worst and settled at what was read (paidPeople, rule 30).
+  return shareProblemAmong(now.affiliates, await paidPeople(now, charge), share, self);
 }
 
 /** partnerShareProblem against `people` and `terms` already read (a batch checks many against one read). */
@@ -469,8 +470,8 @@ function shareProblemAmong(terms: CommissionTerms, people: readonly Affiliate[],
  * The store as it is this moment, read again, never the copy a request read before taking the partner lock. Throws
  * UnknownReplyError when it cannot be read, or reads as another program: the cap is never checked against a guess.
  */
-async function storeNow(store: Store): Promise<Store> {
-  const now = await storeForEmail(storeRef(store));
+async function storeNow(store: Store, meter?: Meter): Promise<Store> {
+  const now = await storeForEmailSeen(storeRef(store), (commands, reply) => counted(meter, commands, reply));
   if (!now || now.statsId !== store.statsId) throw new UnknownReplyError("the store's affiliate commission");
   return now;
 }
@@ -538,8 +539,13 @@ export function commissionCapProblem(input: {
  * own share (`rate`), against `now` (the store read under the partner lock, which the caller holds) and the
  * program's people read exactly now. Throws UnknownReplyError when the people could not be read.
  */
-export async function commissionProblem(now: Store, change: { terms?: CommissionTerms; rate?: { id: string; rate: number | null } }): Promise<ShareProblem | null> {
-  const people = await listAffiliates(now);
+export async function commissionProblem(
+  now: Store,
+  change: { terms?: CommissionTerms; rate?: { id: string; rate: number | null } },
+  charge: Charge = PAID,
+): Promise<ShareProblem | null> {
+  // Paid for first at its worst and settled at what was read (paidPeople, rule 30).
+  const people = await paidPeople(now, charge);
   const rate = change.rate;
   const nextPeople = rate ? people.map((person) => (person.id === rate.id ? { ...person, rate: rate.rate } : person)) : people;
   return commissionCapProblem({ terms: now.affiliates, people, nextTerms: change.terms ?? now.affiliates, nextPeople });
@@ -691,14 +697,21 @@ export async function listAffiliates(store: Store): Promise<Affiliate[]> {
   return [...(await peopleExact(store)).values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
 }
 
+/** One pipeline, counted on `meter` when there is one (what a paid part of a change moved). */
+async function piped(meter: Meter | undefined, commands: (string | number)[][]): Promise<unknown[]> {
+  const replies = await redisPipeline(commands);
+  counted(meter, commands, replies);
+  return replies;
+}
+
 /** One record as read, with the text it was read as, so it can be written over exactly that (changeAffiliate). */
 type Read = { raw: string; affiliate: Affiliate };
 
 /** Every record of the program by its field (its id), each with its text (one HGETALL). Throws UnknownReplyError like listAffiliates. */
-async function peopleExact(store: Store): Promise<Map<string, Read>> {
+async function peopleExact(store: Store, meter?: Meter): Promise<Map<string, Read>> {
   const out = new Map<string, Read>();
   if (!store.statsId || !isRedisConfigured()) return out;
-  for (const [field, raw] of hashPairsExact(await redisPipeline([["HGETALL", peopleKey(store.statsId)]]), "an affiliate program's people")) {
+  for (const [field, raw] of hashPairsExact(await piped(meter, [["HGETALL", peopleKey(store.statsId)]]), "an affiliate program's people")) {
     const affiliate = parseAffiliate(raw);
     if (affiliate) out.set(field, { raw, affiliate });
   }
@@ -709,10 +722,10 @@ async function peopleExact(store: Store): Promise<Map<string, Read>> {
  * The records of these people, in one HMGET, each with its text; null for one not there (or not readable as a
  * record). Throws UnknownReplyError when the reply is not exactly one string or nil for each: never "nobody".
  */
-async function recordsExact(store: Store, ids: readonly string[]): Promise<Map<string, Read | null>> {
+async function recordsExact(store: Store, ids: readonly string[], meter?: Meter): Promise<Map<string, Read | null>> {
   const out = new Map<string, Read | null>();
   if (!ids.length) return out;
-  const reply = repliesFor(await redisPipeline([["HMGET", peopleKey(store.statsId as string), ...ids]]), 1);
+  const reply = repliesFor(await piped(meter, [["HMGET", peopleKey(store.statsId as string), ...ids]]), 1);
   const slots = reply ? repliesFor(reply[0], ids.length) : null;
   if (!slots) throw new UnknownReplyError("an affiliate program's records");
   ids.forEach((id, i) => {
@@ -725,8 +738,8 @@ async function recordsExact(store: Store, ids: readonly string[]): Promise<Map<s
 }
 
 /** How many records the program keeps (one HLEN), read exactly: UnknownReplyError otherwise. */
-async function peopleCount(store: Store): Promise<number> {
-  const reply = repliesFor(await redisPipeline([["HLEN", peopleKey(store.statsId as string)]]), 1);
+async function peopleCount(store: Store, meter?: Meter): Promise<number> {
+  const reply = repliesFor(await piped(meter, [["HLEN", peopleKey(store.statsId as string)]]), 1);
   const count = reply ? countOf(reply[0]) : null;
   if (count === null) throw new UnknownReplyError("how many records an affiliate program keeps");
   return count;
@@ -759,6 +772,9 @@ if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
 end
 return 0`;
 
+/** What rememberAffiliate's two commands move at the most, both ways: two keys of a hash, a store's id, an expiry. */
+const REMEMBER_BYTES = 600;
+
 /** How many times a change reads again after the record changed under it, before it gives up. */
 const SWAP_ATTEMPTS = 5;
 
@@ -781,6 +797,8 @@ async function changeAffiliate(
    * batch never reads a record twice and its cost stays what it took for it (bulkUnits).
    */
   known?: string,
+  /** What the write moved, counted for a batch that pays for it (settle). */
+  meter?: Meter,
 ): Promise<{ before: Affiliate; next: Affiliate | null } | null> {
   if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return null;
   const key = peopleKey(store.statsId);
@@ -789,14 +807,19 @@ async function changeAffiliate(
     if (!before) return null;
     const next = change(before);
     if (!next) return { before, next: null };
-    const swapped = repliesFor(await redisPipeline([["EVAL", AFFILIATE_SWAP, 1, key, id, known, JSON.stringify(next)]]), 1);
+    const swapped = repliesFor(await piped(meter, [["EVAL", AFFILIATE_SWAP, 1, key, id, known, JSON.stringify(next)]]), 1);
     const written = swapped ? countOf(swapped[0]) : null;
     if (written === 1) {
       await rememberAffiliate(store.sid, next.email);
+      // The hub's two commands (lib/affiliate-hub.ts), counted at their widest: a key, the store's id and an expiry.
+      if (meter) {
+        meter.commands += 2;
+        meter.bytes += REMEMBER_BYTES;
+      }
       return { before, next };
     }
     if (written !== 0) throw new UnknownReplyError("an affiliate's record swap");
-    const there = repliesFor(await redisPipeline([["HEXISTS", key, id]]), 1);
+    const there = repliesFor(await piped(meter, [["HEXISTS", key, id]]), 1);
     const exists = there ? countOf(there[0]) : null;
     if (exists === 0) return null;
     if (exists !== 1) throw new UnknownReplyError("whether an affiliate's record is there");
@@ -1481,7 +1504,7 @@ export class ShareCapError extends Error {
  * exactly now (#2995, rule 30). Over it: ShareCapError, nothing written. Unknown reply: UnknownReplyError; the lock
  * not held: LockBusyError; nothing written either way.
  */
-export async function decide(store: Store, id: string, decision: Decision): Promise<Affiliate | null> {
+export async function decide(store: Store, id: string, decision: Decision, charge: Charge = PAID): Promise<Affiliate | null> {
   const found = await readAffiliate(store, id);
   if (!found) return null;
   const status: AffiliateStatus =
@@ -1508,7 +1531,7 @@ export async function decide(store: Store, id: string, decision: Decision): Prom
       const now = await readAffiliate(store, id);
       if (!now) return null;
       if (counts(now) && now.share) {
-        const problem = await partnerShareProblem(store, now.share, now.id);
+        const problem = await partnerShareProblem(store, now.share, now.id, charge);
         if (problem) throw new ShareCapError(problem);
         if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before the decision was written");
       }
@@ -1627,15 +1650,70 @@ const readBytes = (records: number) => records * (2 * AFFILIATE_RECORD_MAX_BYTES
 const writeBytes = (raw: number, next: number) => 2 * (raw + next) + 1_200;
 const utf8 = (text: string) => Buffer.byteLength(text, "utf8");
 
-/** Takes this many of the store's studio requests before the work they pay for: false when they were not taken. */
-export type Charge = (units: number) => Promise<boolean>;
+/**
+ * What a part of a change has read and written so far, measured as it went: its commands, and the bytes of their
+ * JSON sent and of the replies' JSON answered (lib/redis.ts sends and reads JSON), never less than moved.
+ */
+export type Meter = { commands: number; bytes: number; /** A reply was not understood: what moved is not known, nothing is given back. */ unsure?: boolean };
+const meterOf = (): Meter => ({ commands: 0, bytes: 0 });
+/** Counts one pipeline on `meter` as Upstash moves it. */
+function counted(meter: Meter | undefined, commands: readonly (readonly (string | number)[])[], replies: unknown): void {
+  if (!meter) return;
+  meter.commands += commands.length;
+  meter.bytes += utf8(JSON.stringify(commands)) + utf8(JSON.stringify(replies ?? null)) + 16 * commands.length;
+}
+
+/** Studio requests taken before a reading; `give(n)` gives back `n` of them, in the window they were taken in. */
+export type Hold = { give: (units: number) => Promise<void> };
+/** Takes this many of the store's studio requests before the work they pay for: null when they were not taken. */
+export type Charge = (units: number) => Promise<Hold | null>;
 /** For a caller that already paid for the work, or a test of the work alone. */
-const PAID: Charge = async () => true;
-/** Commands one take of studio requests uses itself (lib/studio-route.ts countStudio: the window's count and its key). */
+const PAID: Charge = async () => ({ give: async () => {} });
+/** Commands one take of studio requests uses itself, and its give-back (lib/studio-route.ts holdStudio). */
 const TAKE_COMMANDS = 6;
-/** Takes, before the work, the studio requests `commands` commands and `bytes` bytes cost, with the take's own commands. */
-const take = async (charge: Charge, commands: number, bytes: number) =>
-  (commands <= 0 && bytes <= 0) || (await charge(bulkUnits(commands + TAKE_COMMANDS, bytes)).catch(() => false));
+type Taken = { units: number; hold: Hold };
+/** Takes, before the work, the studio requests `commands` commands and `bytes` bytes cost at most, with the take's own. */
+async function take(charge: Charge, commands: number, bytes: number): Promise<Taken | null> {
+  if (commands <= 0 && bytes <= 0) return { units: 0, hold: { give: async () => {} } };
+  const units = bulkUnits(commands + TAKE_COMMANDS, bytes);
+  const hold = await charge(units).catch(() => null);
+  return hold ? { units, hold } : null;
+}
+/**
+ * Once the part is done and measured, gives back what was taken beyond the measure, rounded up: the store pays what
+ * was really read and written, never less (coordinator, 2026-11-07). A part that moved more than it took (records
+ * added between the count and the read) takes the rest, best effort, since it was read.
+ */
+async function settle(charge: Charge, taken: Taken, meter: Meter): Promise<void> {
+  if (meter.unsure) return;
+  const needed = bulkUnits(meter.commands + TAKE_COMMANDS, meter.bytes);
+  if (needed < taken.units) await taken.hold.give(taken.units - needed).catch(() => {});
+  else if (needed > taken.units) await charge(needed - taken.units).catch(() => null);
+}
+
+/** The studio requests a reading needs were not taken (used up, or not counted just now): nothing was read or written. */
+export class StudioNotPaidError extends Error {
+  constructor() {
+    super("the studio requests this reading needs were not taken");
+    this.name = "StudioNotPaidError";
+  }
+}
+
+/**
+ * The program's people, read for the 90% cap: counted first (HLEN), the read taken at its worst (that many records of
+ * AFFILIATE_RECORD_MAX_BYTES), then settled at what it moved. StudioNotPaidError when not taken, nothing read;
+ * UnknownReplyError as listAffiliates. A caller that pays nothing (PAID) reads as listAffiliates does.
+ */
+async function paidPeople(store: Store, charge: Charge): Promise<Affiliate[]> {
+  if (charge === PAID || !store.statsId || !isRedisConfigured()) return listAffiliates(store);
+  const meter = meterOf();
+  const count = await peopleCount(store, meter);
+  const taken = await take(charge, 2, readBytes(count));
+  if (!taken) throw new StudioNotPaidError();
+  const people = await peopleExact(store, meter);
+  await settle(charge, taken, meter);
+  return [...people.values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
+}
 
 type BatchWrite = { id: string; raw: string; change: (now: Affiliate) => Affiliate | null };
 type BatchResult = { before: Affiliate; next: Affiliate } | HeldWhy | null;
@@ -1644,21 +1722,28 @@ type BatchResult = { before: Affiliate; next: Affiliate } | HeldWhy | null;
  * Writes each change over exactly the record as the batch read it (changeAffiliate with `known`): no record is read
  * again. Per id: the record before and after, null when `change` wrote nothing, or why not ("gone": no longer there;
  * "unavailable": changed meanwhile, an unknown reply, or the partner lock lost). With `held`, the lock is confirmed
- * before the first write and every BATCH_HOLD_EVERY after; once lost, nothing more is written.
+ * before the first write and every BATCH_HOLD_EVERY after; once lost, nothing more is written. What it moved is
+ * counted on `meter`.
  */
-async function writeBatch(store: Store, writes: readonly BatchWrite[], held?: Held): Promise<Map<string, BatchResult>> {
+async function writeBatch(store: Store, writes: readonly BatchWrite[], meter: Meter, held?: Held): Promise<Map<string, BatchResult>> {
   const out = new Map<string, BatchResult>();
   let lost = false;
   for (const [i, one] of writes.entries()) {
-    if (held && !lost && i % BATCH_HOLD_EVERY === 0 && !(await holdLock(held))) lost = true;
+    if (held && !lost && i % BATCH_HOLD_EVERY === 0) {
+      // One script that keeps the lock: its key, token and term, both ways.
+      meter.commands += 1;
+      meter.bytes += 400;
+      if (!(await holdLock(held))) lost = true;
+    }
     if (lost) {
       out.set(one.id, "unavailable");
       continue;
     }
     try {
-      const changed = await changeAffiliate(store, one.id, one.change, one.raw);
+      const changed = await changeAffiliate(store, one.id, one.change, one.raw, meter);
       out.set(one.id, changed === null ? "gone" : changed.next ? { before: changed.before, next: changed.next } : null);
     } catch (error) {
+      if (error instanceof UnknownReplyError) meter.unsure = true;
       if (error instanceof UnknownReplyError || error instanceof LockBusyError) out.set(one.id, "unavailable");
       else throw error;
     }
@@ -1670,15 +1755,72 @@ async function writeBatch(store: Store, writes: readonly BatchWrite[], held?: He
 const batchIds = (ids: readonly string[]) => [...new Set(ids)].slice(0, MAX_BULK_DECISIONS);
 
 /**
+ * The records a batch asks about (one HMGET), taken first at their worst and settled at what was read: null when the
+ * studio requests were not taken ("used"), or the reply was not exact ("unavailable", nothing given back).
+ */
+async function batchRecords(store: Store, ids: readonly string[], charge: Charge): Promise<Map<string, Read | null> | "used" | "unavailable"> {
+  const taken = await take(charge, 1, readBytes(ids.length));
+  if (!taken) return "used";
+  const meter = meterOf();
+  const records = await recordsExact(store, ids, meter).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+  if (!records) return "unavailable";
+  await settle(charge, taken, meter);
+  return records;
+}
+
+/**
+ * Runs `work` under the partner lock with the store read again exactly now, the lock's commands and the store's read
+ * taken first at their worst (LOCK_COMMANDS, MAX_STORE_BYTES) and settled once the store is read. False when the
+ * studio requests were not taken: nothing done.
+ */
+async function withPaidStore(store: Store, charge: Charge, work: (now: Store, lock: Held) => Promise<void>): Promise<boolean> {
+  const taken = await take(charge, LOCK_COMMANDS + 1, 2 * MAX_STORE_BYTES);
+  if (!taken) return false;
+  // The lock's own commands are counted at their most (its tries are not counted one by one).
+  const meter: Meter = { commands: LOCK_COMMANDS, bytes: LOCK_COMMANDS * 300 };
+  let entered = false;
+  try {
+    await withPartnerLock(store, async (lock) => {
+      entered = true;
+      const now = await storeNow(store, meter);
+      await settle(charge, taken, meter);
+      await work(now, lock);
+    });
+  } finally {
+    // The lock never taken: the store was not read, so what was set aside for it is given back. Taken but the store
+    // not read exactly: what moved is not known, so nothing is given back.
+    if (!entered) await settle(charge, taken, meter);
+  }
+  return true;
+}
+
+/**
+ * The program's people, read under the partner lock for the cap: counted (HLEN), taken at their worst, read (HGETALL)
+ * and settled at what was read. "used" when not taken: nothing read.
+ */
+async function batchPeople(now: Store, charge: Charge): Promise<Map<string, Read> | "used"> {
+  const meter = meterOf();
+  const count = await peopleCount(now, meter);
+  const taken = await take(charge, 2, readBytes(count));
+  if (!taken) return "used";
+  const people = await peopleExact(now, meter);
+  await settle(charge, taken, meter);
+  return people;
+}
+
+/**
  * Approves or declines several pending applications at once. Only pending ones are touched; anybody already decided
  * is left as they are. Each approval emails its link, as one at a time does. Returns how each stood before, for an
  * undo, and who was left out and why (lib/affiliate-bulk-words.ts), never a silent gap in the count.
  *
  * One read of the people asked for (HMGET). Approving somebody who holds a share makes it count, so those are
  * checked, together, under ONE partner lock, against ONE read of the store and of the program's people: each one in
- * turn against the partners as they would stand with the ones before it approved (pre-review M2). Each part is paid
- * for in studio requests first (`charge`, bulkUnits); one that was not is left out as "used", nothing read or written
- * for it.
+ * turn against the partners as they would stand with the ones before it approved (pre-review M2). Each part is taken
+ * in studio requests first at its worst (`charge`, bulkUnits) and, once done, settled at what it really moved; one
+ * that was not taken is left out as "used", nothing read or written for it.
  */
 export async function decideMany(
   store: Store,
@@ -1706,12 +1848,8 @@ export async function decideMany(
   const valid = asked.filter((id) => AFFILIATE_ID_PATTERN.test(id));
   if (!valid.length) return finish();
   if (!store.statsId || !isRedisConfigured()) return (leave(valid, "unavailable"), finish());
-  if (!(await take(charge, 1, readBytes(valid.length)))) return (leave(valid, "used"), finish());
-  const records = await recordsExact(store, valid).catch((error: unknown) => {
-    if (error instanceof UnknownReplyError) return null;
-    throw error;
-  });
-  if (!records) return (leave(valid, "unavailable"), finish());
+  const records = await batchRecords(store, valid, charge);
+  if (typeof records === "string") return (leave(valid, records), finish());
 
   const plain: BatchWrite[] = [];
   const shared: string[] = [];
@@ -1729,51 +1867,49 @@ export async function decideMany(
     else plain.push({ id, raw: read.raw, change: (now) => (now.status === "pending" ? decided(now) : null) });
   }
   const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0) + shared.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
-  if (!(await take(charge, WRITE_COMMANDS * (plain.length + shared.length), writing))) {
-    leave([...plain.map((one) => one.id), ...shared], "used");
-    return finish();
-  }
-  for (const [id, result] of await writeBatch(store, plain)) outcome.set(id, result);
+  const writes = await take(charge, WRITE_COMMANDS * (plain.length + shared.length), writing);
+  if (!writes) return (leave([...plain.map((one) => one.id), ...shared], "used"), finish());
+  const wrote = meterOf();
+  for (const [id, result] of await writeBatch(store, plain, wrote)) outcome.set(id, result);
 
   if (shared.length) {
     try {
-      if (!(await take(charge, LOCK_COMMANDS + 2, 2 * MAX_STORE_BYTES))) leave(shared, "used");
-      else
-        await withPartnerLock(store, async (lock) => {
-          const now = await storeNow(store);
-          if (!(await take(charge, 1, readBytes(await peopleCount(now))))) return leave(shared, "used");
-          const everyone = await peopleExact(now);
-          const people = [...everyone.values()].map((one) => one.affiliate);
-          const at = new Map(people.map((one, i) => [one.id, i]));
-          const writes: BatchWrite[] = [];
-          for (const id of shared) {
-            const read = everyone.get(id);
-            const i = at.get(id);
-            if (!read || i === undefined) {
-              outcome.set(id, "gone");
+      const ran = await withPaidStore(store, charge, async (now, lock) => {
+        const everyone = await batchPeople(now, charge);
+        if (everyone === "used") return leave(shared, "used");
+        const people = [...everyone.values()].map((one) => one.affiliate);
+        const at = new Map(people.map((one, i) => [one.id, i]));
+        const approving: BatchWrite[] = [];
+        for (const id of shared) {
+          const read = everyone.get(id);
+          const i = at.get(id);
+          if (!read || i === undefined) {
+            outcome.set(id, "gone");
+            continue;
+          }
+          const share = read.affiliate.share;
+          if (read.affiliate.status !== "pending") continue;
+          if (share) {
+            // Against the partners as they stand with those approved before it in this batch.
+            const problem = shareProblemAmong(now.affiliates, people, share, id);
+            if (problem) {
+              outcome.set(id, problem === "crowded" ? "crowded" : "cap");
               continue;
             }
-            const share = read.affiliate.share;
-            if (read.affiliate.status !== "pending") continue;
-            if (share) {
-              // Against the partners as they stand with those approved before it in this batch.
-              const problem = shareProblemAmong(now.affiliates, people, share, id);
-              if (problem) {
-                outcome.set(id, problem === "crowded" ? "crowded" : "cap");
-                continue;
-              }
-            }
-            people[i] = { ...read.affiliate, status };
-            writes.push({ id, raw: read.raw, change: (x) => (x.status === "pending" ? decided(x) : null) });
           }
-          for (const [id, result] of await writeBatch(store, writes, lock)) outcome.set(id, result);
-        });
+          people[i] = { ...read.affiliate, status };
+          approving.push({ id, raw: read.raw, change: (x) => (x.status === "pending" ? decided(x) : null) });
+        }
+        for (const [id, result] of await writeBatch(store, approving, wrote, lock)) outcome.set(id, result);
+      });
+      if (!ran) leave(shared, "used");
     } catch (error) {
       if (!(error instanceof UnknownReplyError || error instanceof LockBusyError)) throw error;
     }
     // Not reached for an unknown reply, or the lock held elsewhere: nothing was written for them.
     leave(shared.filter((id) => !outcome.has(id)), "unavailable");
   }
+  await settle(charge, writes, wrote);
   if (status === "approved") {
     for (const id of asked) {
       const result = outcome.get(id);
@@ -1788,20 +1924,15 @@ export async function decideMany(
  * still exactly as that decision left them and within BULK_UNDO_MS of it: a
  * later decision by hand is never overwritten. An approval email already
  * sent is not taken back; the studio says so. Returns how many were put back.
- * One read of them all (HMGET), paid for first, like the decision (decideMany).
+ * One read of them all (HMGET); each part taken first and settled once done, like the decision (decideMany).
  */
 export async function undoMany(store: Store, before: Before[], decision: "approve" | "decline", now = Date.now(), charge: Charge = PAID): Promise<number> {
   const left: AffiliateStatus = decision === "approve" ? "approved" : "declined";
   const entries = new Map<string, Before>();
   for (const entry of before.slice(0, MAX_BULK_DECISIONS)) if (entry.status === "pending" && AFFILIATE_ID_PATTERN.test(entry.id)) entries.set(entry.id, entry);
   if (!entries.size || !store.statsId || !isRedisConfigured()) return 0;
-  const ids = [...entries.keys()];
-  if (!(await take(charge, 1 + WRITE_COMMANDS * ids.length, readBytes(ids.length) + ids.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES)))) return 0;
-  const records = await recordsExact(store, ids).catch((error: unknown) => {
-    if (error instanceof UnknownReplyError) return null;
-    throw error;
-  });
-  if (!records) return 0;
+  const records = await batchRecords(store, [...entries.keys()], charge);
+  if (typeof records === "string") return 0;
   const writes: BatchWrite[] = [];
   for (const [id, entry] of entries) {
     const read = records.get(id);
@@ -1816,8 +1947,12 @@ export async function undoMany(store: Store, before: Before[], decision: "approv
           : { ...affiliate, status: entry.status, decidedAt: entry.decidedAt },
     });
   }
+  const taken = await take(charge, WRITE_COMMANDS * writes.length, writes.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0));
+  if (!taken) return 0;
+  const wrote = meterOf();
   let undone = 0;
-  for (const result of (await writeBatch(store, writes)).values()) if (result && typeof result === "object") undone += 1;
+  for (const result of (await writeBatch(store, writes, wrote)).values()) if (result && typeof result === "object") undone += 1;
+  await settle(charge, taken, wrote);
   return undone;
 }
 
@@ -1832,9 +1967,9 @@ type RateAsk = { id: string; rate: number | null; when: (now: Affiliate) => bool
  * their own that only goes down is written at once. Every other change is judged together, under ONE partner lock,
  * against ONE read of the store: one that pays no more on any product (paysNoMore) is written without reading the
  * people; the rest are checked against the cap with ONE read of the program's people, each in turn against the
- * program as it stands with the ones before it changed (pre-review M2). Each part is paid for in studio requests
- * first (`charge`); one that was not is left out as "used". Returns those written, with their share before, and who
- * was left out and why.
+ * program as it stands with the ones before it changed (pre-review M2). Each part is taken in studio requests first
+ * at its worst (`charge`) and settled once done at what it really moved; one that was not taken is left out as
+ * "used". Returns those written, with their share before, and who was left out and why.
  */
 async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charge): Promise<{ done: RateBefore[]; held: HeldOne[] }> {
   const outcome = new Map<string, BatchResult>();
@@ -1856,12 +1991,8 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
   const ids = valid.map((ask) => ask.id);
   if (!valid.length) return finish();
   if (!store.statsId || !isRedisConfigured()) return (leave(ids, "unavailable"), finish());
-  if (!(await take(charge, 1, readBytes(valid.length)))) return (leave(ids, "used"), finish());
-  const records = await recordsExact(store, ids).catch((error: unknown) => {
-    if (error instanceof UnknownReplyError) return null;
-    throw error;
-  });
-  if (!records) return (leave(ids, "unavailable"), finish());
+  const records = await batchRecords(store, ids, charge);
+  if (typeof records === "string") return (leave(ids, records), finish());
 
   const plain: BatchWrite[] = [];
   const judged: RateAsk[] = [];
@@ -1879,63 +2010,61 @@ async function changeRates(store: Store, asks: readonly RateAsk[], charge: Charg
     else judged.push(ask);
   }
   const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 8), 0) + judged.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
-  if (!(await take(charge, WRITE_COMMANDS * (plain.length + judged.length), writing))) {
-    leave([...plain.map((one) => one.id), ...judged.map((ask) => ask.id)], "used");
-    return finish();
-  }
-  for (const [id, result] of await writeBatch(store, plain)) outcome.set(id, result);
+  const writes = await take(charge, WRITE_COMMANDS * (plain.length + judged.length), writing);
+  if (!writes) return (leave([...plain.map((one) => one.id), ...judged.map((ask) => ask.id)], "used"), finish());
+  const wrote = meterOf();
+  for (const [id, result] of await writeBatch(store, plain, wrote)) outcome.set(id, result);
 
   if (judged.length) {
     try {
-      if (!(await take(charge, LOCK_COMMANDS + 2, 2 * MAX_STORE_BYTES))) leave(judged.map((ask) => ask.id), "used");
-      else
-        await withPartnerLock(store, async (lock) => {
-          const now = await storeNow(store);
-          const terms = now.affiliates;
-          const writes: BatchWrite[] = [];
-          const write = (ask: RateAsk, raw: string) => writes.push({ id: ask.id, raw, change: (x) => (ask.when(x) ? { ...x, rate: ask.rate } : null) });
-          // Paying no more anywhere, under the terms as they are now (they cannot change while the lock is held).
-          const lower = judged.filter((ask) => paysNoMore(terms, records.get(ask.id)?.affiliate.rate ?? null, ask.rate));
-          const raise = judged.filter((ask) => !lower.includes(ask));
-          for (const ask of lower) write(ask, records.get(ask.id)?.raw as string);
-          if (raise.length) {
-            if (!(await take(charge, 1, readBytes(await peopleCount(now))))) leave(raise.map((ask) => ask.id), "used");
-            else {
-              const everyone = await peopleExact(now);
-              const people = [...everyone.values()].map((one) => one.affiliate);
-              const at = new Map(people.map((one, i) => [one.id, i]));
-              for (const ask of lower) {
-                const i = at.get(ask.id);
-                if (i !== undefined) people[i] = { ...people[i], rate: ask.rate };
+      const ran = await withPaidStore(store, charge, async (now, lock) => {
+        const terms = now.affiliates;
+        const changes: BatchWrite[] = [];
+        const write = (ask: RateAsk, raw: string) => changes.push({ id: ask.id, raw, change: (x) => (ask.when(x) ? { ...x, rate: ask.rate } : null) });
+        // Paying no more anywhere, under the terms as they are now (they cannot change while the lock is held).
+        const lower = judged.filter((ask) => paysNoMore(terms, records.get(ask.id)?.affiliate.rate ?? null, ask.rate));
+        const raise = judged.filter((ask) => !lower.includes(ask));
+        for (const ask of lower) write(ask, records.get(ask.id)?.raw as string);
+        if (raise.length) {
+          const everyone = await batchPeople(now, charge);
+          if (everyone === "used") leave(raise.map((ask) => ask.id), "used");
+          else {
+            const people = [...everyone.values()].map((one) => one.affiliate);
+            const at = new Map(people.map((one, i) => [one.id, i]));
+            for (const ask of lower) {
+              const i = at.get(ask.id);
+              if (i !== undefined) people[i] = { ...people[i], rate: ask.rate };
+            }
+            for (const ask of raise) {
+              const read = everyone.get(ask.id);
+              const i = at.get(ask.id);
+              if (!read || i === undefined) {
+                outcome.set(ask.id, "gone");
+                continue;
               }
-              for (const ask of raise) {
-                const read = everyone.get(ask.id);
-                const i = at.get(ask.id);
-                if (!read || i === undefined) {
-                  outcome.set(ask.id, "gone");
-                  continue;
-                }
-                if (!ask.when(read.affiliate) || read.affiliate.rate === ask.rate) continue;
-                // Against the program as it stands with those changed before it in this batch.
-                const next = people.slice();
-                next[i] = { ...people[i], rate: ask.rate };
-                if (commissionCapProblem({ terms, people, nextTerms: terms, nextPeople: next })) {
-                  outcome.set(ask.id, "cap");
-                  continue;
-                }
-                people[i] = next[i];
-                write(ask, read.raw);
+              if (!ask.when(read.affiliate) || read.affiliate.rate === ask.rate) continue;
+              // Against the program as it stands with those changed before it in this batch.
+              const next = people.slice();
+              next[i] = { ...people[i], rate: ask.rate };
+              if (commissionCapProblem({ terms, people, nextTerms: terms, nextPeople: next })) {
+                outcome.set(ask.id, "cap");
+                continue;
               }
+              people[i] = next[i];
+              write(ask, read.raw);
             }
           }
-          for (const [id, result] of await writeBatch(store, writes, lock)) outcome.set(id, result);
-        });
+        }
+        for (const [id, result] of await writeBatch(store, changes, wrote, lock)) outcome.set(id, result);
+      });
+      if (!ran) leave(judged.map((ask) => ask.id), "used");
     } catch (error) {
       if (!(error instanceof UnknownReplyError || error instanceof LockBusyError)) throw error;
     }
     // Not reached for an unknown reply, or the lock held elsewhere: nothing was written for them.
     leave(judged.map((ask) => ask.id).filter((id) => !outcome.has(id)), "unavailable");
   }
+  await settle(charge, writes, wrote);
   return finish();
 }
 

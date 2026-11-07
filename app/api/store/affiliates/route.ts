@@ -29,10 +29,11 @@ import {
   setAffiliateRate,
   setPartnerShare,
   ShareCapError,
+  StudioNotPaidError,
   type Charge,
   withPartnerLock,
 } from "@/lib/affiliates";
-import { countStudio } from "@/lib/studio-route";
+import { holdStudio } from "@/lib/studio-route";
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
 import { leadProblem } from "@/lib/affiliate-lead-rules";
 import { planTerms, readNoticeDays } from "@/lib/affiliate-notice";
@@ -86,6 +87,14 @@ export async function POST(request: NextRequest) {
   const body = guarded.body;
   const action = text(body.action, 20);
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // What reads the whole program (the 90% cap's checks, a change in bulk) takes, before each read, the studio
+  // requests it costs at its worst (lib/affiliates.ts bulkUnits), on top of the one this press took, and once read
+  // gives back what it did not need (rule 30; coordinator, 2026-11-07). Not taken: nothing read, the press refused
+  // (StudioNotPaidError, 429), or in bulk that part left out and named.
+  const charge: Charge = async (units) => {
+    const held = await holdStudio(guarded.store, units);
+    return held.ok ? { give: held.give } : null;
+  };
 
   try {
     if (action === "settings") {
@@ -148,7 +157,7 @@ export async function POST(request: NextRequest) {
         if (!now || now.statsId !== fresh.statsId) return fail("unavailable", 503);
         const again = nextOf(now);
         if (commissionRaised(now.affiliates, again)) {
-          const problem = await commissionProblem(now, { terms: again });
+          const problem = await commissionProblem(now, { terms: again }, charge);
           if (problem) return fail(`share_${problem}`, 409);
         }
         if (!(await holdLock(held))) return fail("unavailable", 503);
@@ -159,9 +168,6 @@ export async function POST(request: NextRequest) {
     const store = await storeForEmail(guarded.ref);
     if (!store) return fail("none");
     if (!store.statsId) return fail("unknown");
-    // A change in bulk takes, before each part, the studio requests that part costs at its worst (lib/affiliates.ts
-    // bulkUnits), on top of the one this press took. Not taken (used up, or not counted): that part is left out, named.
-    const charge: Charge = async (units) => (await countStudio(store, null, units)).ok;
 
     // The creator looked at what was held (lib/affiliates.ts holdFlags) and lets it through.
     if (action === "release") {
@@ -222,7 +228,7 @@ export async function POST(request: NextRequest) {
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
       // A share that would pass the cap once its holder is approved again: refused, nothing written (lib/affiliates.ts).
-      const done = await decide(store, text(body.id, 20), action).catch((error: unknown) => {
+      const done = await decide(store, text(body.id, 20), action, charge).catch((error: unknown) => {
         if (error instanceof ShareCapError) return error;
         throw error;
       });
@@ -248,7 +254,7 @@ export async function POST(request: NextRequest) {
       const rate = body.rate === null || body.rate === "" ? null : Number(body.rate);
       if (rate !== null && !Number.isInteger(rate)) return fail("rate");
       if (rate !== null && (rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return fail("rate");
-      const done = await setAffiliateRate(store, text(body.id, 20), rate);
+      const done = await setAffiliateRate(store, text(body.id, 20), rate, charge);
       return done ? Response.json({ ok: true, rate: done.rate }) : fail("unknown");
     }
     if (action === "answer") {
@@ -285,7 +291,7 @@ export async function POST(request: NextRequest) {
       const share = parsePartnerShare({ percent: body.percent, products: body.products });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
       // Checked again, under the partner lock, when the invitation is accepted.
-      const problem = await partnerShareProblem(store, share, null);
+      const problem = await partnerShareProblem(store, share, null, charge);
       if (problem) return fail(`share_${problem}`);
 
       // Only the products being shared in, never the whole catalogue: a store
@@ -320,7 +326,7 @@ export async function POST(request: NextRequest) {
       // program's partner lock, the same one an accepted partnership takes.
       // Awaited here, so a busy lock or an unknown read reaches the catch below (503), not the framework.
       return await withPartnerLock(store, async (held) => {
-        const problem = await partnerShareProblem(store, share, id);
+        const problem = await partnerShareProblem(store, share, id, charge);
         if (problem) return fail(`share_${problem}`);
         if (!(await holdLock(held))) return fail("unavailable", 503);
         return (await setPartnerShare(store, id, share)) ? Response.json({ ok: true }) : fail("unknown");
@@ -343,6 +349,8 @@ export async function POST(request: NextRequest) {
     return fail("unknown");
   } catch (error) {
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // The studio requests a read of the whole program needs were not taken: nothing was read or saved.
+    if (error instanceof StudioNotPaidError) return fail("studio_used", 429);
     // A reply that could not be read exactly (the program's people, for the partner-share cap): nothing was saved.
     if (error instanceof UnknownReplyError) {
       console.error("changing the affiliate programme stopped on an unknown reply", error);

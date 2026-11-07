@@ -1088,8 +1088,21 @@ function parseStore(raw: unknown): Store | null {
 export async function storeForEmail(
   email: string | null,
 ): Promise<Store | null> {
+  return storeForEmailSeen(email, null);
+}
+
+/**
+ * storeForEmail, handing the one read it makes (its commands and its reply) to `seen`, for a caller that pays for
+ * what that read moved (lib/affiliates.ts, the 90% cap's reads).
+ */
+export async function storeForEmailSeen(
+  email: string | null,
+  seen: ((commands: (string | number)[][], reply: unknown) => void) | null,
+): Promise<Store | null> {
   if (!email || !isRedisConfigured()) return null;
-  const reply = await redisPipeline([["GET", await ownerKey(email)]]);
+  const commands: (string | number)[][] = [["GET", await ownerKey(email)]];
+  const reply = await redisPipeline(commands);
+  seen?.(commands, reply);
   if (!Array.isArray(reply) || reply.length !== 1) return null;
   const store = parseStore(reply[0]);
   // A readable record must belong to this exact owner key. Preserve legacy

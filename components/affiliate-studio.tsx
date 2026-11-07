@@ -48,6 +48,8 @@ import { type HeldOne, heldLines, readHeld } from "@/lib/affiliate-bulk-words";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
+  // Checking the 90% cap reads your whole affiliate list, paid in studio requests before it is read (lib/affiliates.ts).
+  studio_used: "This needs more of your studio requests than are left this month, or they could not be counted just now. Nothing was changed.",
   percent: `Type a whole share from ${MIN_COMMISSION} to ${MAX_COMMISSION} percent.`,
   days: `Type a whole number of days from ${MIN_COOKIE_DAYS} to ${MAX_COOKIE_DAYS}.`,
   notice: `Type a whole number of days of notice from ${MIN_NOTICE_DAYS} to ${MAX_NOTICE_DAYS}, or leave it empty for none.`,

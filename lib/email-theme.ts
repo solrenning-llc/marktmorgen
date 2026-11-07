@@ -1,7 +1,7 @@
 /**
- * How a store's email looks (369 [SU2]): the store's own photo as its logo,
- * its theme's colors, its color and its letters, worked out from the look the
- * creator already set (lib/store-look.ts), with nothing new to configure.
+ * How a store's email looks (369 [SU2]): its name at the top, its theme's
+ * colors, its color and its letters, worked out from the look the creator
+ * already set (lib/store-look.ts), with nothing new to configure.
  *
  * Every word in an email keeps 7:1 against what is behind it (AX274, WCAG
  * 1.4.6). Where the creator's color cannot reach that, it is moved, only in
@@ -16,23 +16,18 @@
  * app has, ending in a generic family; the email may not look identical in
  * every app, and nothing says it will.
  *
- * The logo is the store photo at the address it already has, the same for
- * every reader, so it says nothing about who opened the email (no pixel).
+ * No picture is drawn at the top: the store's name is written there in its
+ * heading letters. The store photo is kept at 480 px and up to 200 kB, while a
+ * logo is drawn at 48 px, and every reader's fetch of it is paid at the region
+ * the reader opens it from; priced at the dearest region (Vercel, 14 September
+ * 2026), that passes the owner's US$65 ceiling on a refunded Store first year
+ * (Claude 1's re-review of #3030, comment 6709534250; tests/email-logo-region.test.ts).
+ * A logo comes back only with an email-size copy of the photo, its own costed
+ * line at the dearest region, and that ceiling still met.
  *
  * Pure and browser-safe: the studio reads the same notes as the sender.
  */
 import { DEFAULT_LOOK, type FontId, type LookPaint, contrast, lookColours, mix, normaliseHex } from "@/lib/store-look";
-import { photoUrl } from "@/lib/photo-limits";
-import { SITE_URL } from "@/lib/site-url";
-
-/**
- * How many times one email's logo is costed as fetched (tests/plan-cost-registry.ts, line email-logo): the reader's
- * app, their mail provider's picture proxy, a second device and a forward, each taken as a fetch the CDN did not
- * keep. A review ceiling, not a measurement: the logo is drawn at most once an email, only in emails counted against
- * the store's figures before they are sent (lib/mail.ts, lib/email.ts), and its address is kept for a year
- * everywhere, so a reader's app fetches it again only from a new device.
- */
-export const EMAIL_LOGO_READS = 4;
 
 /** What every word in an email reads at, at least (WCAG 1.4.6). */
 export const EMAIL_TEXT_RATIO = 7;
@@ -81,9 +76,8 @@ export type EmailTheme = {
   band: { fill: string; ink: string } | null;
   bodyFont: string;
   headFont: string;
-  /** The store's name: the logo's alt text, or the words at the top when there is no photo. */
+  /** The store's name, written at the top in the heading letters. */
   name: string;
-  logo: { src: string; alt: string } | null;
   notes: EmailColourNote[];
 };
 
@@ -101,7 +95,7 @@ function direction(picked: string, sent: string): "darker" | "lighter" {
 }
 
 /** Every color, letter and picture a store's email is drawn with. */
-export function emailTheme(look: LookPaint | undefined, store: { name: string; photoId: string | null }): EmailTheme {
+export function emailTheme(look: LookPaint | undefined, store: { name: string }): EmailTheme {
   const paint = look ?? DEFAULT_LOOK;
   const c = lookColours(paint);
   const picked = normaliseHex(paint.accent) ?? DEFAULT_LOOK.accent;
@@ -135,14 +129,13 @@ export function emailTheme(look: LookPaint | undefined, store: { name: string; p
     bodyFont: fonts.body,
     headFont: fonts.head,
     name,
-    logo: store.photoId ? { src: `${SITE_URL}${photoUrl(store.photoId)}`, alt: name } : null,
     notes,
   };
 }
 
 /** Where the creator's color is shown differently in emails; none when it reads as picked. */
 export function emailColourNotes(look: LookPaint): EmailColourNote[] {
-  return emailTheme(look, { name: "", photoId: null }).notes;
+  return emailTheme(look, { name: "" }).notes;
 }
 
 /** The sentence the studio shows under the color, or null when emails use the color as picked. */

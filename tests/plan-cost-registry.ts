@@ -109,9 +109,7 @@ import {
   PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
-import { CDN_PER_REQUEST, PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
-import { EMAIL_LOGO_READS } from "@/lib/email-theme";
-import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
+import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -348,17 +346,6 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
-/** What the CDN sends on to the browser, by the byte ("Fast Data Transfer", docs/ses-callback-cost-2026-11-05.md; as mailReportCallbackCost takes it). */
-export const CDN_TRANSFER_PER_BYTE = 0.15 / 1e9;
-/**
- * One fetch of a store email's logo (369 [SU2], lib/email-theme.ts), taken as one the CDN did not keep: the CDN's
- * request, the photo route's call with its one read of the photo as it is kept (base64, a third more than the
- * picture, lib/store-photo.ts), and the photo at the most one may weigh (MAX_PHOTO_BYTES) sent on by the function
- * and by the CDN.
- */
-export const EMAIL_LOGO_READ = CDN_PER_REQUEST + request("light", 1, Math.ceil((MAX_PHOTO_BYTES * 4) / 3)) + MAX_PHOTO_BYTES * (ORIGIN_PER_BYTE + CDN_TRANSFER_PER_BYTE);
-/** One store email's logo, at every read it is costed at (EMAIL_LOGO_READS). */
-export const EMAIL_LOGO_EMAIL = EMAIL_LOGO_READS * EMAIL_LOGO_READ;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
 /**
@@ -970,20 +957,6 @@ export const COST_LINES: CostLine[] = [
     basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
   },
   {
-    id: "email-logo",
-    feature: "The store's photo as the logo of its emails, on by default when there is a photo (369 [SU2], 7 November 2026)",
-    monthlyUsd: (tier) => (monthlyEmails(tier) + STORE_ALLOWANCES[tier].email) * EMAIL_LOGO_EMAIL,
-    sources: [
-      { file: "lib/email-theme.ts", names: ["EMAIL_LOGO_READS", "logo: store.photoId ?"] },
-      { file: "lib/mail.ts", names: ["emailTheme(store.look", "t.logo", "reserve", "takeFromMonth"] },
-      { file: "lib/photo-limits.ts", names: ["MAX_PHOTO_BYTES", "photoUrl"] },
-      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
-      { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
-      { file: "app/api/photo/[id]/route.ts", names: ["readPhoto(id)", "public, max-age=31536000, immutable", "readRefusal("] },
-    ],
-    basis: "Every email drawn by render (lib/mail.ts), the only one that carries the logo: the plan's monthly emails (reserve) and its store emails (the email figure), each counted and refused past its figure before it is sent, all taken as carrying the logo; access emails are written by their own code with no logo (held in tests/su2-email-theme.test.ts). The logo is drawn at most once an email, drawn at most once an email, and each logo fetched EMAIL_LOGO_READS times, every fetch as one the CDN did not keep (EMAIL_LOGO_READ). A fetch past those by one reader is the store photo's own public address, the same as on the store page: the CDN keeps it a year and the function answering it is paced (lib/picture-pace.ts).",
-  },
-  {
     id: "ai",
     feature: "AI: writing jobs and visitor answers, AI funnel drafts (#517) and every other AI route",
     monthlyUsd: (tier) => micro(AUTOMATIC_AI_STORE_MICRO_USD[tier]),
@@ -1524,8 +1497,6 @@ export function nonPayingWorst(): number {
     + requests
     + TRIAL_ORDERS * ORDER_COST
     + TRIAL_MONTHLY_EMAILS * PER_EMAIL
-    // Every email of the trial may carry the store's logo (line email-logo, 369 [SU2]).
-    + (TRIAL_MONTHLY_EMAILS + allowances.email) * EMAIL_LOGO_EMAIL
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)

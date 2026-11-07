@@ -1,6 +1,6 @@
 /**
- * 369 [SU2]: a store's emails wear the store's own look — its photo as the
- * logo, its theme's colors, its color and its letters — with nothing new to
+ * 369 [SU2]: a store's emails wear the store's own look — its name at the
+ * top, its theme's colors, its color and its letters — with nothing new to
  * set up, while every word in them keeps 7:1 (AX274, WCAG 1.4.6). A color
  * that cannot reach 7:1 is moved only in the email, to the nearest shade that
  * does, and the studio says which one; the store page never changes.
@@ -10,14 +10,10 @@
  * the check cannot agree with the code by sharing its mistake.
  */
 import { readFileSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { render } from "@/lib/mail";
 import * as emailThemeModule from "@/lib/email-theme";
 import { emailColourNotes, emailColourNotice, emailTheme } from "@/lib/email-theme";
-import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
-import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES } from "@/lib/store-allowance-rules";
-import { TRIAL_MONTHLY_EMAILS, monthlyEmails } from "@/lib/plan";
-import { COST_LINES, nonPayingWorst } from "./plan-cost-registry";
+import { COST_LINES } from "./plan-cost-registry";
 import { FONTS, THEMES, lookColours, type FontId, type StoreLook, type ThemeId } from "@/lib/store-look";
 import type { Store } from "@/lib/store";
 import { done, is, part } from "./check";
@@ -131,7 +127,7 @@ for (const theme of THEMES.map((t) => t.id as ThemeId)) {
   is("a store color that already reads at 7:1 is used on links as it is", bodyLinks(html).length > 0 && bodyLinks(html).every((s) => /color:#15112e/i.test(s)), true);
 }
 {
-  const theme = emailTheme(storeWith({ font: "editorial" }).look, { name: "Oven Notes", photoId: null });
+  const theme = emailTheme(storeWith({ font: "editorial" }).look, { name: "Oven Notes" });
   const { html } = render(storeWith({ font: "editorial" }), "New loaf", BODY, "tok");
   is("Editorial headings ask for the store's serif, then a serif every mail app has", /<h2 [^>]*font-family:Fraunces,Georgia/.test(html), true);
   is("the theme names the same heading letters", theme.headFont.startsWith("Fraunces,Georgia"), true);
@@ -143,58 +139,25 @@ for (const font of fonts) {
   is(`${font}: no font is downloaded from anywhere`, /@import|<link|url\(|fonts\.googleapis|fonts\.gstatic/i.test(html), false);
 }
 
-part("The logo is the store's own photo, served from where it already is, with its name as alt text");
+part("No picture at the top: the store's name in words, until an email-size copy of the photo exists (Claude 1's re-review of #3030, comment 6709534250, MEDIUM money)");
 {
-  const a = render(storeWith({}, PHOTO), "New loaf", BODY, "tok-a").html;
-  const b = render(storeWith({}, PHOTO), "New loaf", BODY, "tok-b").html;
-  const logo = a.match(/<img src="https:\/\/marktmorgen\.com\/api\/photo\/[0-9a-f]{32}"[^>]*>/)?.[0] ?? "";
-  is("the logo is the store photo on this site", logo.includes(`/api/photo/${PHOTO}"`), true);
-  is("the logo has the store's name as its alt text", logo.includes('alt="Oven Notes"'), true);
-  is("the logo has a fixed size", /width="48" height="48"/.test(logo), true);
-  const src = (html: string) => html.match(/<img src="([^"]+\/api\/photo\/[^"]+)"/)?.[1];
-  is("every reader gets the same logo address: nothing in it tells who opened it", src(a) === src(b) && !/[?#]/.test(src(a) ?? "?"), true);
+  // The store photo is 480 px and up to MAX_PHOTO_BYTES; drawn at 48 px in every email, each reader's fetch of it,
+  // priced at the dearest region, passes the owner's US$65 refunded first year (tests/email-logo-region.test.ts). So
+  // the header draws no picture of this site, with or without a photo, and no cost line prices one.
+  const withPhoto = render(storeWith({}, PHOTO), "New loaf", BODY, "tok").html;
   const plain = render(storeWith({}, null), "New loaf", BODY, "tok").html;
-  is("without a photo there is no logo picture", plain.includes("/api/photo/"), false);
-  is("without a photo the store's name is written as text instead", walk(plain).texts.some((t) => t.text === "Oven Notes"), true);
-  is("with a photo the name is not said twice", walk(a).texts.some((t) => t.text === "Oven Notes"), false);
-}
-
-part("The logo's reads are a costed line with a ceiling before anything is sent (MR; review rv34 of #3030 at ac244fff, MEDIUM)");
-{
-  // Every email render draws may carry the logo, on by default, and each reader's app may fetch it from the CDN: up
-  // to MAX_PHOTO_BYTES each time. Priced here independently of the registry: the CDN's request (US$2 a million) and
-  // its Fast Data Transfer of the photo (US$0.15 a GB, docs/ses-callback-cost-2026-11-05.md), which the line must
-  // cover at least, for every monthly email and store email a plan sends (the two figures render's emails are taken
-  // from; access emails are written without it, held below), each fetched EMAIL_LOGO_READS times.
-  const reads = (emailThemeModule as Record<string, unknown>).EMAIL_LOGO_READS;
-  is("the reads one email's logo is costed at are a whole number of at least one", typeof reads === "number" && Number.isSafeInteger(reads) && reads >= 1, true);
-  const perRead = 2 / 1_000_000 + MAX_PHOTO_BYTES * (0.15 / 1e9);
-  const line = COST_LINES.find((l) => l.id === "email-logo");
-  is("the registry has a line for the logo in store emails", Boolean(line), true);
-  for (const tier of ["creator", "pro", "scale"] as const) {
-    const emails = monthlyEmails(tier) + STORE_ALLOWANCES[tier].email;
-    const floor = emails * (typeof reads === "number" ? reads : 1) * perRead;
-    is(`${tier}: the line prices every email's logo at every read, at least`, line ? line.monthlyUsd(tier) >= floor && floor > 0 : false, true);
+  for (const theme of THEMES.map((t) => t.id as ThemeId)) {
+    const html = render(storeWith({ theme }, PHOTO), "New loaf", BODY, "tok").html;
+    is(`${theme}: an email of a store with a photo draws no picture at all (the body here has none)`, /<img\b/i.test(html) || html.includes("/api/photo/"), false);
   }
-  is("the line names where the emails are counted before sending and where the logo is drawn",
-    line ? ["lib/mail.ts", "lib/email-theme.ts", "lib/photo-limits.ts", "lib/store-allowance-rules.ts"].every((f) => line.sources.some((s) => s.file === f)) : false, true);
-  const trialEmails = TRIAL_MONTHLY_EMAILS + NON_PAYING_ALLOWANCES.trial.email;
-  const trialFloor = trialEmails * (typeof reads === "number" ? reads : 1) * perRead;
+  is("with a photo, the store's name is written at the top, once", walk(withPhoto).texts.filter((t) => t.text === "Oven Notes").length, 1);
+  is("without a photo, the same", walk(plain).texts.filter((t) => t.text === "Oven Notes").length, 1);
+  is("the photo changes nothing in the email", withPhoto, plain);
+  is("the theme carries no logo", "logo" in emailTheme(storeWith({}, PHOTO).look, { name: "Oven Notes" }), false);
+  is("no cost line prices a logo that is not sent", COST_LINES.some((l) => l.id === "email-logo"), false);
+  is("the reads of a logo that is not sent are not exported", "EMAIL_LOGO_READS" in emailThemeModule, false);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
-  const nonPaying = registry.slice(registry.indexOf("export function nonPayingWorst"), registry.indexOf("export type AddOnLine"));
-  is("a trial's emails carry the logo too, and its worst window prices them", nonPaying.includes("EMAIL_LOGO_EMAIL") && nonPayingWorst() > trialFloor, true);
-  // No email render draws is sent as an access email (the figure the line leaves out): after each render, the next
-  // figure named is never "transactional".
-  const renderers = ["lib/community-event-mail.ts", "lib/community-mail.ts", "lib/member-nudge.ts", "lib/product-updates.ts", "lib/review-requests.ts", "lib/winback-send.ts", "lib/yearly-ask.ts", "lib/welcome-offer-send.ts", "lib/waitlist.ts", "app/api/store/mail/route.ts", "lib/mail.ts"];
-  const sentAsAccess = renderers.filter((file) => {
-    const code = readFileSync(file, "utf8");
-    return [...code.matchAll(/\brender\(/g)].some((m) => /^kind: "transactional"/.test(code.slice(m.index).match(/kind: "[a-z]+"/)?.[0] ?? ""));
-  });
-  is("no email render draws is sent as an access email", sentAsAccess, []);
-  const importers = execSync("grep -rlE 'import \\{[^}]*\\brender\\b[^}]*\\} from \"@/lib/mail\"' lib app || true", { encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
-  is("and that is every file that draws one", importers.length > 0 && importers.every((f) => renderers.includes(f)), true);
-  const one = render(storeWith({ theme: "bold" }, PHOTO), "New loaf", BODY, "tok").html;
-  is("one email draws the logo once, never more, whatever its theme", [...one.matchAll(/\/api\/photo\//g)].length, 1);
+  is("a trial's worst window prices no logo either", /EMAIL_LOGO/.test(registry), false);
 }
 
 part("The text version does not change");

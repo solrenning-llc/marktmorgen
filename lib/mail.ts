@@ -427,10 +427,9 @@ export function render(
   const counting = Boolean(readerKey && token && !door && tag?.medium === "sequence");
   const stopCounting = counting ? `${SITE_URL}/unsubscribe?l=${token}` : "";
   // The store's own look, every color checked to read at 7:1 (lib/email-theme.ts, 369 [SU2]); the text version does not change.
-  const t = emailTheme(store.look, { name: store.name ?? fromName, photoId: store.photoId ?? null });
-  const top = t.logo
-    ? `<img src="${escape(t.logo.src)}" alt="${escape(t.logo.alt)}" width="48" height="48" style="display:block;width:48px;height:48px;border:0;border-radius:999px">`
-    : `<p style="margin:0;font-family:${t.headFont};font-size:18px;font-weight:700;line-height:1.3">${escape(t.name)}</p>`;
+  // The store's name in words, never its photo: no picture of this site in the header (lib/email-theme.ts).
+  const t = emailTheme(store.look, { name: store.name ?? fromName });
+  const top = `<p style="margin:0;font-family:${t.headFont};font-size:18px;font-weight:700;line-height:1.3">${escape(t.name)}</p>`;
   const header = t.band
     ? `<div style="background:${t.band.fill};color:${t.band.ink};border-radius:16px;padding:16px 24px;margin:0 0 12px">${top}</div>`
     : `<div style="color:${t.text};padding:0 4px 16px">${top}</div>`;

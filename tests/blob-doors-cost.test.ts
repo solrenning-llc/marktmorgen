@@ -70,7 +70,7 @@ for (const tier of TIERS) {
 }
 const buyerFiles = new Set(buyer?.sources.map((source) => source.file) ?? []);
 is("its sources: both doors, the post's check and the hand-in", ["app/api/store/community/upload/route.ts", "app/api/store/community/route.ts", "lib/community-image.ts", "lib/community-files.ts", "app/api/store/course/task/upload/route.ts", "app/api/store/course/task/route.ts", "lib/store-allowance-rules.ts"].every((file) => buyerFiles.has(file)), true);
-is("its basis says the source, the date and why a read is counted whole", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(buyer?.basis ?? "") && /6 November 2026/.test(buyer?.basis ?? "") && /206/.test(buyer?.basis ?? ""), true);
+is("its basis says the source, the date and why a read is counted whole", (buyer?.basis ?? "").includes("vercel.com/docs/vercel-blob/usage-and-pricing") && /6 November 2026/.test(buyer?.basis ?? "") && /206/.test(buyer?.basis ?? ""), true);
 
 part("An email's picture: line mail-picture-blob");
 const mail = COST_LINES.find((line) => line.id === "mail-picture-blob");
@@ -80,7 +80,7 @@ for (const tier of TIERS) {
 }
 const mailFiles = new Set(mail?.sources.map((source) => source.file) ?? []);
 is("its sources: the route, the put and the figure", ["app/api/store/mail/picture/route.ts", "lib/mail-pictures.ts", "lib/metered-limits.ts", "lib/store-allowance-rules.ts"].every((file) => mailFiles.has(file)), true);
-is("its basis says the source and the date", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(mail?.basis ?? "") && /6 November 2026/.test(mail?.basis ?? ""), true);
+is("its basis says the source and the date", (mail?.basis ?? "").includes("vercel.com/docs/vercel-blob/usage-and-pricing") && /6 November 2026/.test(mail?.basis ?? ""), true);
 
 part("A store that pays nothing does the same with its own figures (nonPayingWorst)");
 const source = read("tests/plan-cost-registry.ts");

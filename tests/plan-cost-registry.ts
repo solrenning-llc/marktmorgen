@@ -364,6 +364,8 @@ export const BLOB_PUT_TRIES = 11;
  * plain fetch, sent once (Codex S on #2801; tests/picture-upload-costs.test.ts reads the installed SDK).
  */
 export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
+/** One CDN request, at the US$ 2.00 a million the SES notice's hosting attempt above already counts. */
+export const CDN_REQUEST = 2 / 1e6;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
@@ -870,14 +872,14 @@ export const COST_LINES: CostLine[] = [
   {
     id: "picture-thumbnails",
     feature: "The thumbnail copy of a product picture: its Blob put and the checks of its name and bytes (Encanto 5b-2, 6 November 2026)",
-    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (BLOB_PUT_TRIES * BLOB_ADVANCED_OP + (2 * BLOB_HEAD_TRIES + 1) * BLOB_SIMPLE_OP + MAX_THUMB_BYTES * BLOB_TRANSFER_PER_BYTE),
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * (2 * BLOB_PUT_TRIES * BLOB_ADVANCED_OP + (2 * BLOB_HEAD_TRIES + 1) * BLOB_SIMPLE_OP + MAX_THUMB_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_REQUEST),
     sources: [
-      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor"] },
+      { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor", "issueSignedToken"] },
       { file: "lib/studio-route.ts", names: ["countStudio"] },
       { file: "lib/product-image.ts", names: ["MAX_THUMB_BYTES"] },
       { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
     ],
-    basis: "Every thumbnail copy is put through its own upload request, a studio request (studioAccess, countStudio), so there are at most the plan's studio figure of them a month, a hard ceiling. Each is counted at its dearest: its put (an Advanced Operation) with every try again the Blob SDK may send (BLOB_PUT_TRIES), Simple Operations: two heads (the one that checks its name is free, and one when it is attached), each with its tries again (BLOB_HEAD_TRIES), and one read when it is attached, a plain fetch and the read of its whole bytes (MAX_THUMB_BYTES) at the dearer Blob transfer rate kept here. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. It adds no read on a public page: it replaces a larger copy in the same picture request (lib/picture-served.ts), already counted with the page. The Blob operations of the picture and its smaller copy, uploaded before this, are not counted by this line: that is reported apart (they are not a cost of the thumbnail).",
+    basis: "Every thumbnail copy is put through its own upload request, a studio request (studioAccess, countStudio), so there are at most the plan's studio figure of them a month, a hard ceiling. Each is counted at its dearest: its put (an Advanced Operation) with every try again the Blob SDK may send (BLOB_PUT_TRIES); the signed token its upload request asks the Blob for (issueSignedToken, through the same requestApi, so tried as often), at the dearer Advanced Operation since no official page names its class; Simple Operations: two heads (the one that checks its name is free, and one when it is attached), each with its tries again (BLOB_HEAD_TRIES); and one read when it is attached, a plain fetch and the read of its whole bytes (MAX_THUMB_BYTES; the route checks the size before it reads, so no larger file is read) at the dearer Blob transfer rate kept here, with Fast Origin Transfer on those bytes and one CDN request, as PICTURE_READ counts them (Claude 1 on #2801). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026. It adds no read on a public page: it replaces a larger copy in the same picture request (lib/picture-served.ts), already counted with the page. The Blob operations of the picture and its smaller copy, uploaded before this, are not counted by this line: that is reported apart (they are not a cost of the thumbnail).",
   },
   {
     id: "picture-uploads",

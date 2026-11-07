@@ -16,6 +16,8 @@ export type LockedWords = {
   forSpace: (space: string) => string;
   notYet: string;
   unknown: string;
+  /** A space whose products past the read cap were never read: reloading would read the same ones, so the member asks the creator. */
+  capped: string;
 };
 
 const en: LockedWords = {
@@ -26,6 +28,7 @@ const en: LockedWords = {
   forSpace: (space) => `, to open ${space}`,
   notYet: "Access isn't available yet.",
   unknown: "We couldn't load how to get in. Reload the page to try again.",
+  capped: "Ask the creator how to get in.",
 };
 
 const es: LockedWords = {
@@ -36,6 +39,7 @@ const es: LockedWords = {
   forSpace: (space) => `, para abrir ${space}`,
   notYet: "El acceso aún no está disponible.",
   unknown: "No hemos podido cargar cómo entrar. Vuelve a cargar la página para intentarlo de nuevo.",
+  capped: "Pregunta al creador cómo entrar.",
 };
 
 const fr: LockedWords = {
@@ -46,6 +50,7 @@ const fr: LockedWords = {
   forSpace: (space) => `, pour ouvrir ${space}`,
   notYet: "L’accès n’est pas encore disponible.",
   unknown: "Nous n’avons pas pu charger comment entrer. Rechargez la page pour réessayer.",
+  capped: "Demandez au créateur comment entrer.",
 };
 
 const de: LockedWords = {
@@ -56,6 +61,7 @@ const de: LockedWords = {
   forSpace: (space) => `, um ${space} zu öffnen`,
   notYet: "Der Zugang ist noch nicht verfügbar.",
   unknown: "Wir konnten nicht laden, wie man hineinkommt. Lade die Seite neu, um es noch einmal zu versuchen.",
+  capped: "Frag den Ersteller, wie du hineinkommst.",
 };
 
 const it: LockedWords = {
@@ -66,6 +72,7 @@ const it: LockedWords = {
   forSpace: (space) => `, per aprire ${space}`,
   notYet: "L’accesso non è ancora disponibile.",
   unknown: "Non siamo riusciti a caricare come entrare. Ricarica la pagina per riprovare.",
+  capped: "Chiedi al creatore come entrare.",
 };
 
 const nl: LockedWords = {
@@ -76,6 +83,7 @@ const nl: LockedWords = {
   forSpace: (space) => `, om ${space} te openen`,
   notYet: "Toegang is nog niet beschikbaar.",
   unknown: "We konden niet laden hoe je binnenkomt. Laad de pagina opnieuw om het nog eens te proberen.",
+  capped: "Vraag de maker hoe je binnenkomt.",
 };
 
 const pt: LockedWords = {
@@ -86,6 +94,7 @@ const pt: LockedWords = {
   forSpace: (space) => `, para abrir ${space}`,
   notYet: "O acesso ainda não está disponível.",
   unknown: "Não conseguimos carregar como entrar. Recarregue a página para tentar de novo.",
+  capped: "Pergunte ao criador como entrar.",
 };
 
 const WORDS: Record<LanguageCode, LockedWords> = { en, es, fr, de, it, nl, pt };

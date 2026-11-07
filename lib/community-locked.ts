@@ -18,9 +18,9 @@
  * (productsBuyableNow, lib/mail-product-sellable.ts): published, not coming
  * soon, not sold out, and a store that can sell it (or give it, when free).
  * With none, the space says access is not available yet; when the products
- * could not be read, it says so, and names nothing. Only what was read is
- * judged: a space reaching a product that was not read (past the read cap)
- * before one on sale is "unknown", never "none".
+ * could not be read, it says so ("unknown"), and names nothing. Only what
+ * was read is judged: a space reaching a product that was not read (past the
+ * read cap) before one on sale is "capped", never "none".
  *
  * The way in is worked out for every space shown locked at once (unlocksOf),
  * so the studio's "View as a member" (components/community-member-preview.tsx)
@@ -30,8 +30,8 @@
  * cards (lib/page-read-rules.ts): at most MAX_UNLOCK_PRODUCTS listings with
  * their stock and keys (collectionUnits), then the items of any bundle among
  * them (bundleItemUnits), each through the `take` the page passes, which
- * takes the store's public requests (lib/traffic.ts). Refused, nothing is
- * read and the answer is null.
+ * takes the store's public requests (lib/traffic.ts). Refused, nothing more
+ * is read and the answer is null.
  */
 import type { CommunityConfig } from "@/lib/community";
 import { type LockedSpace, type Unlock, lockedList, lockedOf } from "@/lib/community-gate";
@@ -49,17 +49,22 @@ export { type LockedSpace, type Unlock, lockedOf } from "@/lib/community-gate";
 export const MAX_UNLOCK_PRODUCTS = MAX_COLLECTION_PRODUCTS;
 
 /**
- * The products to read for them, once each, at most MAX_UNLOCK_PRODUCTS:
- * taken in turns, each space's first product, then each one's second, and so
- * on, so one space with many products cannot leave the next with none read.
+ * The products to read next for the spaces not settled yet, once each, at
+ * most MAX_UNLOCK_PRODUCTS read in all: each space's next products not read,
+ * at most `share` of them, taken in turns (each space's first, then each
+ * one's second, and so on), so one space with many products cannot leave the
+ * next with none read. A space settled by a product already read is not
+ * passed in, so it takes nothing more from the cap.
  */
-export function unlockCandidates(locked: readonly { needs: string[] }[]): string[] {
+export function unlockCandidates(locked: readonly { needs: string[] }[], read: ReadonlySet<string> = new Set(), share = MAX_UNLOCK_PRODUCTS): string[] {
+  const room = MAX_UNLOCK_PRODUCTS - read.size;
   const picked = new Set<string>();
-  const longest = Math.max(0, ...locked.map((entry) => entry.needs.length));
+  const pending = locked.map(({ needs }) => needs.filter((id) => !read.has(id)));
+  const longest = Math.min(share, Math.max(0, ...pending.map((ids) => ids.length)));
   for (let turn = 0; turn < longest; turn++) {
-    for (const { needs } of locked) {
-      if (picked.size >= MAX_UNLOCK_PRODUCTS) return [...picked];
-      if (turn < needs.length) picked.add(needs[turn]);
+    for (const ids of pending) {
+      if (picked.size >= room) return [...picked];
+      if (turn < ids.length) picked.add(ids[turn]);
     }
   }
   return [...picked];
@@ -68,12 +73,12 @@ export function unlockCandidates(locked: readonly { needs: string[] }[]): string
 /**
  * A space's way in from what was read: its first product on sale, in its
  * order. A product asked for and not returned is gone from the store (read,
- * not on sale); one reached before any on sale and never asked for makes the
- * answer "unknown".
+ * not on sale); one reached before any on sale and not read yet leaves the
+ * space "unread".
  */
-function unlockOf(needs: readonly string[], read: ReadonlySet<string>, byId: ReadonlyMap<string, Listing>, buyable: ReadonlySet<string>): Listing | "none" | "unknown" {
+function unlockOf(needs: readonly string[], read: ReadonlySet<string>, byId: ReadonlyMap<string, Listing>, buyable: ReadonlySet<string>): Listing | "none" | "unread" {
   for (const id of needs) {
-    if (!read.has(id)) return "unknown";
+    if (!read.has(id)) return "unread";
     const product = byId.get(id);
     if (product && buyable.has(id)) return product;
   }
@@ -86,6 +91,13 @@ function unlockOf(needs: readonly string[], read: ReadonlySet<string>, byId: Rea
  * "View as a member" name the same product for a space (or none). Null when
  * `take` refused the reads; an empty answer when the products could not be
  * read, which each space then says ("unknown", lockedList).
+ *
+ * Read in rounds, one product per unsettled space first and twice as many
+ * each round after, so a space settled by its first product leaves the rest
+ * of the cap to the others; each round is paid before it is read, and the
+ * rounds together pay exactly what reading them at once would. A space still
+ * unread when the cap is spent is "capped": reloading would read the same
+ * products again, so the page says to ask the creator instead.
  */
 export async function unlocksOf(
   store: Store,
@@ -94,25 +106,39 @@ export async function unlocksOf(
 ): Promise<Record<string, Unlock> | null> {
   const locked = lockedOf(config, new Set());
   if (locked.length === 0) return {};
-  const ids = unlockCandidates(locked);
-  let listings: Listing[];
-  let buyable: Set<string>;
-  if (!(await take(collectionUnits(ids.length)))) return null;
-  try {
-    listings = await readListings(store, ids);
-    const items = bundleItemsToRead(listings);
-    if (items.length > 0 && !(await take(bundleItemUnits(items.length)))) return null;
-    buyable = await productsBuyableNow(store, listings);
-  } catch (error) {
-    console.error("reading a locked space's products failed", error);
-    return {};
+  const read = new Set<string>();
+  const byId = new Map<string, Listing>();
+  const buyable = new Set<string>();
+  const items = new Set<string>();
+  const pay = async (units: number) => units <= 0 || (await take(units));
+  for (let share = 1; ; share *= 2) {
+    const open = locked.filter(({ needs }) => unlockOf(needs, read, byId, buyable) === "unread");
+    const ids = unlockCandidates(open, read, share);
+    if (ids.length === 0) break;
+    if (!(await pay(collectionUnits(read.size + ids.length) - collectionUnits(read.size)))) return null;
+    let listings: Listing[];
+    try {
+      listings = await readListings(store, ids);
+    } catch (error) {
+      console.error("reading a locked space's products failed", error);
+      return {};
+    }
+    const before = items.size;
+    for (const item of bundleItemsToRead(listings)) items.add(item);
+    if (!(await pay(bundleItemUnits(items.size) - bundleItemUnits(before)))) return null;
+    try {
+      for (const id of await productsBuyableNow(store, listings)) buyable.add(id);
+    } catch (error) {
+      console.error("reading a locked space's products failed", error);
+      return {};
+    }
+    for (const id of ids) read.add(id);
+    for (const listing of listings) byId.set(listing.id, listing);
   }
-  const byId = new Map(listings.map((p) => [p.id, p]));
-  const read = new Set(ids);
   return Object.fromEntries(
     locked.map(({ space, needs }) => {
       const way = unlockOf(needs, read, byId, buyable);
-      const unlock: Unlock = typeof way === "string" ? way : { title: way.title, href: `/@${store.handle}/p/${productSegment(way)}` };
+      const unlock: Unlock = way === "unread" ? "capped" : way === "none" ? "none" : { title: way.title, href: `/@${store.handle}/p/${productSegment(way)}` };
       return [space.id, unlock];
     }),
   );

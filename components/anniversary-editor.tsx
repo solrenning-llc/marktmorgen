@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { MAX_ANNIVERSARY_ADDRESS, MAX_ANNIVERSARY_MESSAGE, MAX_ANNIVERSARY_PRODUCTS, anniversaryEmail, parseAnniversary, type Anniversary } from "@/lib/anniversary-rules";
+import { MAX_ANNIVERSARY_ADDRESS, MAX_ANNIVERSARY_MESSAGE, MAX_ANNIVERSARY_PRODUCTS, anniversaryEmail, anniversaryOn, parseAnniversary, type Anniversary } from "@/lib/anniversary-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -46,6 +46,22 @@ export function AnniversaryEditor({
   const [picked, setPicked] = useState<string[]>(Array.isArray(setting.products) ? setting.products : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped each time a choice is refused, so focus goes to the products again on a second refusal.
+  const [refusedChoice, setRefusedChoice] = useState(0);
+  const productsRef = useRef<HTMLFieldSetElement>(null);
+  const productsErrorRef = useRef<HTMLParagraphElement>(null);
+  // Whether the email really goes out as saved: on, with an address and a known, non-empty choice.
+  const sending = anniversaryOn({ anniversary: setting });
+  // Left on with none chosen, as when the last chosen product was deleted: nothing goes out, and the creator decides what to do.
+  const noneChosen = setting.on && Array.isArray(setting.products) && setting.products.length === 0;
+  // A refused choice is said at the products, when they are shown; anything else below the form.
+  const productsError = error === MESSAGES.products && which === "some";
+  const full = picked.length >= MAX_ANNIVERSARY_PRODUCTS;
+
+  useEffect(() => {
+    if (refusedChoice === 0) return;
+    (productsRef.current?.querySelector<HTMLElement>("input:not([disabled])") ?? productsErrorRef.current)?.focus();
+  }, [refusedChoice]);
 
   async function save() {
     if (busy) return;
@@ -53,6 +69,7 @@ export function AnniversaryEditor({
     const products = which === "all" ? "all" : choices ? choices.map((p) => p.id).filter((id) => picked.includes(id)) : picked;
     if (on && products !== "all" && products.length === 0) {
       setError(MESSAGES.products);
+      setRefusedChoice((count) => count + 1);
       return;
     }
     setBusy(true);
@@ -78,6 +95,7 @@ export function AnniversaryEditor({
       }
       const reason = typeof data.error === "string" ? data.error : "";
       setError(!response.ok && data.ok === false && Object.prototype.hasOwnProperty.call(MESSAGES, reason) ? MESSAGES[reason] : MESSAGES.server_error);
+      if (reason === "products") setRefusedChoice((count) => count + 1);
     } catch {
       setError(MESSAGES.server_error);
     } finally {
@@ -101,7 +119,7 @@ export function AnniversaryEditor({
         <h2 id="anniversary-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
           Email buyers a year after they buy
         </h2>
-        <span className={`tag ${setting.on ? "tag-live" : ""}`}>{setting.on ? "On" : "Off"}</span>
+        <span className={`tag ${sending ? "tag-live" : ""}`}>{sending ? "On" : "Off"}</span>
       </div>
       <ul className="mt-4 space-y-2 text-sm text-ink-soft">
         {bullets.map((line) => (
@@ -116,7 +134,12 @@ export function AnniversaryEditor({
           Connect your Stripe account first. The date of each purchase is read from your sales there.
         </p>
       ) : null}
-      {setting.on ? <p className="mt-3 text-sm text-ink">{`Sent this month: ${sent}`}</p> : null}
+      {noneChosen ? (
+        <p className="notice mt-3" role="note">
+          No product is chosen, so no email goes out. Choose at least one.
+        </p>
+      ) : null}
+      {sending ? <p className="mt-3 text-sm text-ink">{`Sent this month: ${sent}`}</p> : null}
       <form
         className="mt-5 space-y-4"
         onSubmit={(event) => {
@@ -148,11 +171,26 @@ export function AnniversaryEditor({
           </label>
         </fieldset>
         {which === "some" ? (
-          <fieldset className="space-y-1 rounded-xl border border-line p-4" aria-describedby="anniversary-products-help">
+          <fieldset
+            ref={productsRef}
+            className="space-y-1 rounded-xl border border-line p-4"
+            aria-invalid={productsError || undefined}
+            aria-describedby={`anniversary-products-help${productsError ? " anniversary-products-error" : ""}`}
+          >
             <legend className="field-label px-1">Products that get this email</legend>
             <span id="anniversary-products-help" className="block text-sm text-ink-soft">
               {`Choose at least one, up to ${MAX_ANNIVERSARY_PRODUCTS}. If you delete a product from your store, it is taken off this list by itself.`}
             </span>
+            {productsError ? (
+              <p id="anniversary-products-error" ref={productsErrorRef} tabIndex={-1} className="notice notice-error" role="alert">
+                {error}
+              </p>
+            ) : null}
+            {full && choices && choices.length > picked.length ? (
+              <p id="anniversary-products-full" className="text-sm text-ink">
+                {`You have chosen ${MAX_ANNIVERSARY_PRODUCTS}, the most you can. To choose another, uncheck one first, or choose "Every product".`}
+              </p>
+            ) : null}
             {choices === null ? (
               <p className="notice" role="note">
                 We could not load your products. Reload this page to choose them.
@@ -160,22 +198,26 @@ export function AnniversaryEditor({
             ) : choices.length === 0 ? (
               <p className="text-sm text-ink">Your store has no product with a one-time price yet.</p>
             ) : (
-              choices.map((product) => (
-                <label key={product.id} className="flex min-h-11 items-center gap-3 text-sm text-ink" htmlFor={`anniversary-product-${product.id}`}>
-                  <input
-                    id={`anniversary-product-${product.id}`}
-                    type="checkbox"
-                    className="h-5 w-5"
-                    disabled={busy || (!picked.includes(product.id) && picked.length >= MAX_ANNIVERSARY_PRODUCTS)}
-                    checked={picked.includes(product.id)}
-                    onChange={(event) => {
-                      const checked = event.target.checked;
-                      setPicked((now) => (checked ? [...now.filter((id) => id !== product.id), product.id] : now.filter((id) => id !== product.id)));
-                    }}
-                  />
-                  <span>{product.title}</span>
-                </label>
-              ))
+              choices.map((product) => {
+                const capped = full && !picked.includes(product.id);
+                return (
+                  <label key={product.id} className="flex min-h-11 items-center gap-3 text-sm text-ink" htmlFor={`anniversary-product-${product.id}`}>
+                    <input
+                      id={`anniversary-product-${product.id}`}
+                      type="checkbox"
+                      className="h-5 w-5"
+                      aria-describedby={capped ? "anniversary-products-full" : undefined}
+                      disabled={busy || capped}
+                      checked={picked.includes(product.id)}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setPicked((now) => (checked ? [...now.filter((id) => id !== product.id), product.id] : now.filter((id) => id !== product.id)));
+                      }}
+                    />
+                    <span>{product.title}</span>
+                  </label>
+                );
+              })
             )}
             {choices && choices.length > 0 ? <p className="text-sm text-ink-soft" aria-live="polite">{`Chosen: ${choices.filter((p) => picked.includes(p.id)).length}`}</p> : null}
           </fieldset>
@@ -211,7 +253,7 @@ export function AnniversaryEditor({
           {busy ? "Saving…" : "Save"}
         </button>
       </form>
-      {error ? (
+      {error && !productsError ? (
         <p className="notice notice-error mt-3" role="alert">
           {error}
         </p>

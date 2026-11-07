@@ -63,8 +63,18 @@ LITERAL = re.compile(
 _CALL = r"""(?:\bimport\.meta\.resolve|\brequire\.resolve|\brequire|\bimport)\s*\("""
 COMPUTED = re.compile(
     _CALL + r"""(?!\s*(?P<q1>["'])[^"'\n]*(?P=q1)\s*[),])"""
-    + r"""|\bnew\s+URL\s*\((?!\s*(?P<q2>["'])[^"'\n]*(?P=q2)\s*,)[^;]*?\bimport\.meta\.url"""
     + r"""|\brequire\.context\b|\bimport\.meta\.glob\b""")
+# new URL(x, import.meta.url) resolves a file by name. Searching from the call to the next
+# ";" can be fooled by a ";" inside a string (Codex G on #3037), so the test is per file:
+# a file that uses import.meta.url and builds any URL from more than one whole literal is
+# computed. Only reviewed files may do it (REVIEWED_COMPUTED).
+NEW_URL_COMPUTED = re.compile(r"""\bnew\s+URL\s*\((?!\s*(?P<q>["'])[^"'\n]*(?P=q)\s*,)""")
+
+
+def computed(code):
+    return bool(COMPUTED.search(code)) or ("import.meta.url" in code and bool(NEW_URL_COMPUTED.search(code)))
+
+
 LISTING = re.compile(r"""\b(?:readdirSync|readdir|opendirSync|opendir|globSync|glob)\s*\(""")
 CSS_URL = re.compile(r"""url\(\s*(["']?)(\.{1,2}/[^"')\s]+)\1\s*\)""")
 # A string that names a repository file: "lib/x.ts", "../../lib/x.ts", "seed.ts".
@@ -79,6 +89,8 @@ REVIEWED_COMPUTED = frozenset({
     "tests/e2e/accessibility-buyer-actions.mjs",
     "tests/e2e/agreements.mjs",
     "tests/e2e/mobile-render.mjs",
+    # Its new URL calls parse page addresses at run time; import.meta.url only names its folder.
+    "tests/e2e/run.mjs",
     "tests/e2e/services.mjs",
     "tests/e2e/store-copy.mjs",
 })
@@ -223,7 +235,7 @@ def reachable(files, read):
         except (OSError, UnicodeError, KeyError) as error:
             raise Uncertain("unreadable " + current) from error
         code = "\n".join(code_lines(text))
-        if COMPUTED.search(code) and current not in REVIEWED_COMPUTED:
+        if computed(code) and current not in REVIEWED_COMPUTED:
             # Only the named end-to-end runners below load a bundle built from a file
             # they name in a string, which named_files() follows. Any other computed
             # import, a page or component included (Codex G on #3037), is unknown.

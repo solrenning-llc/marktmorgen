@@ -174,7 +174,7 @@ class Graph(WithSyntheticSuite):
                         continue
                     with open(os.path.join(here, path), encoding="utf8") as handle:
                         code = "\n".join(ui.code_lines(handle.read()))
-                    if ui.COMPUTED.search(code):
+                    if ui.computed(code):
                         found.add(path)
         self.assertEqual(found, set(REAL_REVIEWED))
 
@@ -185,7 +185,7 @@ class Graph(WithSyntheticSuite):
                      "new URL('./a.png' , import.meta.url)",
                      "await import('../lib/b', { with: {} })"):
             with self.subTest(code=code):
-                self.assertFalse(ui.COMPUTED.search(code))
+                self.assertFalse(ui.computed(code))
 
     def test_unreadable_file_raises(self):
         files = list(BASE) + ["lib/ghost.ts"]

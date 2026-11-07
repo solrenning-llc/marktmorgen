@@ -3,7 +3,8 @@
  * who "has no second step yet". A teammate whose passkey list answers out of shape (lib/passkeys.ts throws
  * UnknownReplyError) is unknown, never "none": the page must not name them as lacking a second step, and must not
  * tell the owner they "logged in without your passkey or app code" when their own second step could not be read.
- * The switch then waits, with the page's own "cannot be changed right now" line, as it already does for the preview.
+ * The switch then waits, with the page's own "cannot be changed right now" line, as it already does for the preview,
+ * and the rule's current state, which is known from the team record, is still said above that line.
  *
  * Synthetic store and Redis (tests/redis-stub.ts); one reply is made malformed on purpose.
  */
@@ -86,6 +87,7 @@ async function main() {
   const mateSwitch = find(mate, TeamTwoStepSwitch);
   is("the teammate is never named as having no second step", Boolean(mateSwitch && (mateSwitch.waiting as string[]).includes(MATE)), false);
   is("the page says the switch cannot be changed right now", words(mate).includes("This cannot be changed right now"), true);
+  is("the page still says the rule is off", words(mate).includes("Off: team members may log in with the emailed link alone."), true);
 
   part("the owner's own passkey list answers out of shape");
   const own = await render([passkeyList(OWNER)]);

@@ -316,6 +316,10 @@ export async function giveBackUnused(
         if (!isOwnReply(pi, intent)) throw new Error("Stripe answered for another payment");
         const charge = pi.latest_charge && typeof pi.latest_charge === "object" ? (pi.latest_charge as Record<string, unknown>) : {};
         if (Object.hasOwn(charge, "payment_intent") && idOf(charge.payment_intent) !== intent) throw new Error("Stripe answered with another payment's charge");
+        // What was already given back is read exactly (Codex G's second money review of #3097): a charge not expanded,
+        // or an amount_refunded that is not a whole, non-negative number, would read as 0 and give it back again.
+        if (!(pi.latest_charge && typeof pi.latest_charge === "object")) throw new Error("this payment's charge could not be read");
+        if (!Number.isSafeInteger(charge.amount_refunded) || (charge.amount_refunded as number) < 0) throw new Error("what this payment's charge gave back could not be read");
         if (charge.disputed === true) {
           await settle("disputed");
           out.disputed += 1;
@@ -335,7 +339,7 @@ export async function giveBackUnused(
           else out.done.push({ sub: row.sub, amount: prior.amount, cur: row.paid.cur });
           continue;
         }
-        const refunded = typeof charge.amount_refunded === "number" ? charge.amount_refunded : 0;
+        const refunded = charge.amount_refunded as number;
         const give = Math.min(stillToGive(row.unused, refunded), Math.max(0, (row.paid.tot ?? row.paid.amt) - refunded));
         if (give <= 0) {
           await settle("none");

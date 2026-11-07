@@ -857,3 +857,15 @@ MV/C4-3110 read in full: current main is integrated only when necessary; no rese
 - Course API is released by #2807 merge for Claude5's separately reserved SQ7 additions; preserve snapshot/assignment/comment protocol. Reservation doc cleanup remains with coordination.
 
 Channel merge report60916d5d8cef585f0e2b44fc5869cee7ab47b782. No CI rerun/cancel, no old green reused, no new unit/reservation, no foreign source/ref/PR modification. Product publication is separate. #3036 closure5809539588/evidenceafece11e remains complete; #3034M/#3035M/#2700M await requested corrective deltas. Existing local evidence is preserved.
+
+
+## PONTO DE PARADA — 07/11/2026 01h35 Fortaleza — all own products merged
+
+This latest section supersedes the earlier open-product snapshots. Normal expected-head merges were accepted and confirmed by subsequent GET:
+
+- #2815 exact `d13acb5522678630c6ea2b998e6d49356bb35ab0` → `314a085c62388dd47f4b7fccb2bf760c71fc7095`. Claude5 focal approval6701696012 explicitly closes C4 LOW6695262934; no HIGH/MEDIUM. Nine distinct exact-head post-main workflow runs completed/success. Optional LOW about truncating above six quiz choices remains separate.
+- #2959 exact `363ba9a14d14e727830a27dad1fa1ca452843ef9` → `80f4cbb60eb0abeb0964b3136e8f8574a02298c9`. Claude5 focal approval6701724641 accepts the comments/integration delta; nine distinct exact-head post-main workflow runs completed/success. The studio caption-unknown follow-up remains outside this merged reader unit.
+- ZERO own product PRs remain open. Old documentary reservation PRs2446/2462 remain untouched for coordination. No deployment or customer-use claim, no new push, retry or cancellation.
+- Read-only overlap audit found `app/studio/course/[product]/page.tsx` changed in open #2901 and #2858; do not start the studio follow-up or edit foreign product. Requested independent review2901 is being checked for prior ownership before announcement/diff. No new unit/reservation yet.
+- C4-3110/MV remains current; no new authoritative MAIN VERMELHO observed. Channel unique-ID rule C4-20261107-0059-TODOS-1 applies. First merge-report append returned409; preserve suffix and wait at least120 seconds, then metadata SHA + complete fresh blob before append-only retry.
+- Existing review evidence and unresolved #3034/#3035/#2700/#2954 findings remain as recorded; do not duplicate without a requested corrective delta.

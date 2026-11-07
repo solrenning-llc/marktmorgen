@@ -241,7 +241,11 @@ export async function settleGroup(input: {
   const id = session.metadata?.group ?? "";
   const group = await readGroupExactly(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
-  if (group.paid) return "already";
+  // Paid already. The receipt with the link that hands out the places comes after the write that marks it paid, so
+  // a run whose reply to that write came back in another shape threw before sending it (#2872 review M1): a later run
+  // with no "sent" mark (the caller checked) still sends it, once (its own idempotency key), while that is recent.
+  // Taken back by a refund, or paid longer ago than a run is retried, there is nothing to send.
+  if (group.paid && (group.revoked || now() - group.paid >= RECEIPT_WITHIN_SECONDS)) return "already";
   const settling = `${groupKey(id)}:settling`;
   // Claimed with this run's own value and read exactly (C4-3000): an answer in another shape is read back, never taken
   // as ours, and the mark is let go only while it still holds this run's value (lib/claim-mark.ts).
@@ -254,6 +258,13 @@ export async function settleGroup(input: {
     // (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and the next run tries again.
     if ((await readGroupExactly(id))?.paid) return "already";
     throw new Error("another run is settling this purchase for several right now");
+  }
+  // The mark is kept, not let go, once the purchase is paid: it runs out by itself, after the caller has kept its
+  // "sent" mark, so a run that comes in meanwhile reads "taken" and paid and says "already" instead of sending and
+  // confirming a second time (#2872 review M1).
+  if (group.paid) {
+    await sendPaidReceipt(input, group);
+    return "settled";
   }
 
   const sessionId = typeof session.id === "string" ? session.id : "";
@@ -279,12 +290,23 @@ export async function settleGroup(input: {
     await releaseMark(settling, mark);
     throw new UnknownReplyError("a paid purchase for several's record");
   }
-  await releaseMark(settling, mark);
+  await sendPaidReceipt(input, paid);
+  return "settled";
+}
 
-  await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
+/**
+ * How long after a purchase was paid a run still sends its receipt when the caller kept no "sent" mark: the window
+ * the checkout sweep confirms in (lib/purchase-email.ts CONFIRM_WITHIN_SECONDS, one day), inside the receipt's own
+ * idempotency, so a late run never sends it a second time.
+ */
+const RECEIPT_WITHIN_SECONDS = 24 * 60 * 60;
+
+/** The buyer's receipt for a paid purchase, with the link that hands out its places, under its own idempotency key. */
+async function sendPaidReceipt(input: Parameters<typeof settleGroup>[0], paid: Group): Promise<void> {
+  const { store } = input;
+  await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${paid.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),
   );
-  return "settled";
 }
 
 /** The buyer's receipt, with the link that hands out the places. False when it has nobody to go to or was not sent. */
@@ -358,6 +380,16 @@ type Member = { e: string; at: number; k?: string };
  */
 const HDEL_OWN = '-- marktmorgen:hdel-own:v1\nif redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) else return 0 end';
 
+/**
+ * The places counter brought back to the records of places, in one script, only ever down and never below them
+ * (#2872 review L1): every count is a run's INCR taken while it held a record, and a record goes only with its DECR or
+ * after an INCR whose reply came back unknown. So a count above the number of records is an INCR that landed for a
+ * record that went, a paid place nobody can take; brought down to the records, it is never below the places that
+ * were counted and are held, so never a place more than paid. Answers the count after, or -1 when it is not a whole
+ * number. The first line names it for the local stand-in (lib/redis-memory.ts).
+ */
+const PLACES_HEAL = '-- marktmorgen:places-heal:v1\nlocal raw = redis.call("GET", KEYS[1])\nlocal c = 0\nif raw then c = tonumber(raw) end\nif not c or c ~= math.floor(c) then return -1 end\nlocal h = redis.call("HLEN", KEYS[2])\nif c > h then redis.call("DECRBY", KEYS[1], c - h) return h end\nreturn c';
+
 function parseMember(raw: unknown): Member | null {
   if (typeof raw !== "string") return null;
   try {
@@ -415,16 +447,23 @@ export async function askPlace(input: {
 
   // Whether this address holds a place, and how many are taken, read exactly (sweep A3; CX-123 rule 24): an answer
   // in another shape sends nothing and says so ("unavailable": nothing was taken or lost), never "nobody, none".
+  // A place is held only with the product on the address, as takePlace reads it (#2872 review, rule 30): a record of
+  // a place without it is never said to be a place taken. Taken is the lower of the count and the places' records,
+  // as takePlace brings the count down to them (PLACES_HEAL), so a paid place nobody holds is never said to be full.
   const looked = repliesFor(await redisPipeline([
     ["HEXISTS", membersKey(group.id), addressHash(email)],
+    ["HEXISTS", importedKey(group.s, email), group.p],
     ["GET", takenKey(group.id)],
-  ]), 2);
+    ["HLEN", membersKey(group.id)],
+  ]), 4);
   const held = looked?.[0];
-  const takenRaw = looked?.[1];
-  const taken = takenRaw === null ? 0 : typeof takenRaw === "string" && /^\d{1,15}$/.test(takenRaw) ? Number(takenRaw) : null;
-  if (!looked || (held !== 0 && held !== 1) || taken === null) return "unavailable";
-  const has = held === 1;
-  if (!has && taken >= group.people) return "full";
+  const owned = looked?.[1];
+  const takenRaw = looked?.[2];
+  const records = looked?.[3];
+  const counted = takenRaw === null ? 0 : typeof takenRaw === "string" && /^\d{1,15}$/.test(takenRaw) ? Number(takenRaw) : null;
+  if (!looked || (held !== 0 && held !== 1) || (owned !== 0 && owned !== 1) || counted === null || typeof records !== "number" || !Number.isSafeInteger(records) || records < 0) return "unavailable";
+  const has = held === 1 && owned === 1;
+  if (!has && Math.min(counted, records) >= group.people) return "full";
 
   // The link can be passed to anybody, and each address typed on it is sent
   // one email: counted per purchase and per day, generously for a real team
@@ -487,6 +526,34 @@ export type Taken =
   | { outcome: "pending"; email: string; group: Group }
   | { outcome: "gone" };
 
+/**
+ * Writes the product down under the address that took a place. "ours" is the grant written now; "other" is the
+ * product already on the address another way. When the grant answers in another shape (#2872 review N1), what is on
+ * the address is read exactly: this purchase's job is "ours" (the grant landed), nothing is "not", another job is
+ * "other", and anything else is "unknown".
+ */
+async function grantPlace(group: Group, email: string, at: number, sid: string): Promise<"ours" | "other" | "not" | "unknown"> {
+  try {
+    const [fresh] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], at, sid);
+    return fresh ? "ours" : "other";
+  } catch (error) {
+    console.error("a place's grant answered in another shape; read back", error);
+  }
+  const read = repliesFor(await redisPipeline([["HGET", importedKey(group.s, email), group.p]]).catch(() => null), 1);
+  if (!read) return "unknown";
+  if (read[0] === null) return "not";
+  if (typeof read[0] !== "string") return "unknown";
+  let job: unknown;
+  try {
+    const record = JSON.parse(read[0]) as unknown;
+    job = record && typeof record === "object" && !Array.isArray(record) ? (record as { job?: unknown }).job : undefined;
+  } catch {
+    job = undefined;
+  }
+  if (typeof job !== "string") return "unknown";
+  return job === groupJob(group.id) ? "ours" : "other";
+}
+
 /** Whether the room its checkout held for its places is still held now (lib/order-admission.ts). */
 export function placesHeld(group: Pick<Group, "h">, nowMs = Date.now()): boolean {
   return typeof group.h === "number" && Math.floor(nowMs / 3_600_000) - group.h < OPEN_HOURS - 1;
@@ -539,7 +606,8 @@ export async function takePlace(input: {
   // Let go of this address's hold on a place it was not given, so its link works again on a later try, and only while
   // the record is still this run's own: a hold whose write came back unknown may be another run's of the same link (a
   // double click), whose place is the one a refund takes back. The count is left alone, since whether it moved is
-  // unknown: at worst a place stays counted, never one handed out too many. When the script cannot run, the hold
+  // unknown: at worst a place stays counted, never one handed out too many, and the next take past the places paid for
+  // brings it back to the records (PLACES_HEAL, #2872 review L1), so it is not lost. When the script cannot run, the hold
   // stays and the link says "pending" with nothing more handed out; never another run's record deleted.
   const letGo = () => redisPipeline([dropOwn]).catch(() => null);
   const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, hold]]), 1)?.[0];
@@ -569,8 +637,18 @@ export async function takePlace(input: {
     throw new UnknownReplyError("the count of places taken");
   }
   if (count > group.people) {
-    await giveBack();
-    return { outcome: "full", email, group };
+    // Past the places paid for: the count brought down to the places' records first (L1), so a place counted for a
+    // record that went is taken by this run, under the count after, never one past the number paid for.
+    const healed = repliesFor(await redisPipeline([["EVAL", PLACES_HEAL, 2, takenKey(group.id), membersKey(group.id)]]), 1)?.[0];
+    if (typeof healed !== "number" || !Number.isSafeInteger(healed) || healed < 1) {
+      // Unknown, or not a count: whether a place is free is unknown. This run's own INCR given back; nothing handed out.
+      await giveBack();
+      throw new UnknownReplyError("the count of places taken");
+    }
+    if (healed > group.people) {
+      await giveBack();
+      return { outcome: "full", email, group };
+    }
   }
   // One of the store's orders this month: inside the room its checkout held
   // when that is still held, admitted now otherwise, before anything is
@@ -590,8 +668,19 @@ export async function takePlace(input: {
     ["EXPIRE", takenKey(group.id), GROUP_KEPT_SECONDS],
   ]);
 
-  const [given] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], at, store.sid);
-  if (!given) {
+  const given = await grantPlace(group, email, at, store.sid);
+  if (given === "unknown") {
+    // Neither on the address nor said to be off it: the place is kept as it is, and the next open of the link says
+    // "pending", never a second place.
+    throw new UnknownReplyError("a place's grant");
+  }
+  if (given === "not") {
+    // The grant did not land: the place given back, so the link works again on a later try (#2872 review N1).
+    await giveBack();
+    if (!held && hour !== null) await settleAdmitted(store, hour);
+    throw new UnknownReplyError("a place's grant");
+  }
+  if (given === "other") {
     // It reached this address another way in the same instant.
     await giveBack();
     if (!held && hour !== null) await settleAdmitted(store, hour);

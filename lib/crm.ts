@@ -162,6 +162,29 @@ export async function readFields(statsId: string | null): Promise<CrmField[]> {
 }
 
 /**
+ * The store's fields exactly as saved, for a decision that writes: none only
+ * when none were ever saved. A reply in an unknown shape, or a saved list
+ * with an entry that does not read, throws CrmSchemaReadUnavailable, never
+ * "no fields" (CX-123 rules 24 and 30): a sequence's field step is never
+ * turned away, saved or ended as "removed" against fields that are not the
+ * store's.
+ */
+export async function readFieldsWhole(statsId: string | null): Promise<CrmField[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  try {
+    const response = await redisPipeline([["GET", fieldsKey(statsId)]]);
+    if (!Array.isArray(response) || response.length !== 1) throw new CrmSchemaReadUnavailable();
+    if (response[0] === null) return [];
+    if (typeof response[0] !== "string") throw new CrmSchemaReadUnavailable();
+    const raw: unknown = JSON.parse(response[0]);
+    if (!Array.isArray(raw)) throw new CrmSchemaReadUnavailable();
+    const fields = parseFields(raw);
+    if (fields.length !== raw.length) throw new CrmSchemaReadUnavailable();
+    return fields;
+  } catch { throw new CrmSchemaReadUnavailable(); }
+}
+
+/**
  * Saves the fields; the answers kept for a field that is gone go with it.
  * With `keepAll`, nothing is written when a field kept now would be gone
  * (CrmFieldsKept). The fields are read just before the write, not in the
@@ -169,19 +192,7 @@ export async function readFields(statsId: string | null): Promise<CrmField[]> {
  * but its answers are never deleted, since only fields read as gone are.
  */
 export async function writeFields(statsId: string, fields: CrmField[], keepAll = false): Promise<CrmField[]> {
-  let before: CrmField[];
-  try {
-    const response = await redisPipeline([["GET", fieldsKey(statsId)]]);
-    if (!Array.isArray(response) || response.length !== 1) throw new CrmSchemaReadUnavailable();
-    if (response[0] === null) before = [];
-    else {
-      if (typeof response[0] !== "string") throw new CrmSchemaReadUnavailable();
-      const raw: unknown = JSON.parse(response[0]);
-      if (!Array.isArray(raw)) throw new CrmSchemaReadUnavailable();
-      before = parseFields(raw);
-      if (before.length !== raw.length) throw new CrmSchemaReadUnavailable();
-    }
-  } catch { throw new CrmSchemaReadUnavailable(); }
+  const before = await readFieldsWhole(statsId);
   const gone = before.filter(f => !fields.some(n => n.id === f.id));
   if (keepAll && gone.length) throw new CrmFieldsKept();
   try {

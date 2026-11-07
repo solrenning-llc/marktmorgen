@@ -67,7 +67,7 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { CrmDealReadUnavailable, readDealExact, readFieldsWhole, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
 import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
@@ -291,7 +291,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   }
   const formOutcome = trigger === "form" && typeof raw.formOutcome === "string" ? raw.formOutcome : "";
   // The store's fields and stages, for a step that sets one or moves a deal (lib/crm.ts).
-  const [crmFields, stages] = await Promise.all([readFields(store.statsId), readStages(store.statsId)]);
+  // Both exactly as saved: unknown ones throw CrmSchemaReadUnavailable, never "none" or the defaults (CX-123 rule 30).
+  const [crmFields, stages] = await Promise.all([readFieldsWhole(store.statsId), readStages(store.statsId)]);
   // A stage of one of the store's pipelines; one workflow a stage, so a deal entering it starts one run at the most.
   const stageId = trigger === "stage" && typeof raw.stageId === "string" ? raw.stageId : "";
   if (trigger === "stage" && !stages.some((st) => st.id === stageId)) return { ok: false, reason: "stage" };
@@ -737,9 +738,10 @@ async function actOnPeople(
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
   if (action.do === "field") {
-    let fields: Awaited<ReturnType<typeof readFields>>;
+    let fields: Awaited<ReturnType<typeof readFieldsWhole>>;
     try {
-      fields = await readFields(statsId);
+      // Exactly as saved: a reply in an unknown shape is unknown, never "the field was removed" (CX-123 rule 24).
+      fields = await readFieldsWhole(statsId);
     } catch {
       // Nothing was written: tried again later, which is safe (never "uncertain", held for the creator, for a read).
       return each(emails, "deferred", "Your fields could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "retry" as const }));

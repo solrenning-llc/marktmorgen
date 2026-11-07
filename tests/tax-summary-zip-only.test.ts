@@ -39,8 +39,8 @@ const html = renderToStaticMarkup(createElement(TaxCollected, { data: { taxColle
 const rowLabels = [...html.matchAll(/<th scope="row"[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]);
 
 part("A payment that gave no state is not shown as the whole country, and the state rows say they may not hold every sale");
-is("the US row without a state is not labelled as all of the United States", rowLabels.includes("United States"), false);
-is("the Canadian row without a province is not labelled as all of Canada", rowLabels.includes("Canada"), false);
+is("the US row without a state is not labeled as all of the United States", rowLabels.includes("United States"), false);
+is("the Canadian row without a province is not labeled as all of Canada", rowLabels.includes("Canada"), false);
 is("the page says a state's row may miss sales whose payment gave no state", /(state|province)[^.]*(not given|not known|not on the payment|unknown)/i.test(html), true);
 is("control: the sale whose payment gave the state stays under that state", rowLabels.includes("United States, NY"), true);
 is("control: the totals are still every sale's tax", summary.d7.currencies.map((c) => [c.currency, c.taxCents]), [["usd", 1100]]);

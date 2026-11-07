@@ -149,7 +149,9 @@ async function main() {
   is("the unread region says it could not be read, never $0.00", [waRow.includes("Could not be read"), waRow.includes("$0.00")], [true, false]);
   is("says it is a record, not tax advice", html.includes("This is a record of what was collected, not tax advice"), true);
   is("says currencies are never added together", html.includes("currencies are never added together"), true);
-  is("says renewals and refunds are not in it", html.includes("Renewals, later payments of payment plans and refunds are not in these figures"), true);
+  is("says renewals are not in it", html.includes("Renewals and later payments of payment plans are not in these figures"), true);
+  // Claude 2's review of #2980 (LOW): a refunded sale's tax is still counted, and the page says so.
+  is("says the tax of refunded sales is still counted", html.includes("Tax on sales later refunded is still counted here: refunds are not taken off."), true);
 
   const partialHtml = renderToStaticMarkup(createElement(TaxCollected, { data: { ...panel, taxCollected: { ...panel.taxCollected!, partial: true } }, range: "d7" }));
   is("an incomplete reading shows no figure and says why", [partialHtml.includes("$7.50"), partialHtml.includes("Not every sale could be read")], [false, true]);

@@ -1,7 +1,7 @@
 /**
  * The creator's tax summary (601 [KB22], unit U4): the tax Stripe added to
- * the store's checkouts in each window, by where the buyer is, each currency
- * on its own. A record for the creator, not tax advice and not Marktmorgen's
+ * the store's checkouts in each window, by the address Stripe taxed, each
+ * currency on its own. A record for the creator, not tax advice and not Marktmorgen's
  * own filing (that is 335 [FR1]): every sale is a direct charge on the
  * creator's own Stripe account, so the tax is theirs and never passes through
  * Marktmorgen.
@@ -25,7 +25,7 @@ export const TAX_REGION_ROWS = 20;
 /** The currencies listed per window at the most; sales in the rest are counted, never added to another currency. */
 export const TAX_CURRENCY_ROWS = 4;
 /** Countries whose buyers are placed by state or province: where Stripe Tax registrations are per state. */
-const BY_STATE = new Set(["US", "CA"]);
+export const BY_STATE = new Set(["US", "CA"]);
 
 export type TaxSale = { created: number; currency: string; row: Record<string, unknown>; upsell: boolean };
 export type SaleTax = { kind: "read"; cents: number } | { kind: "unread" } | { kind: "paypal" };
@@ -46,13 +46,27 @@ export function taxOf(sale: TaxSale): SaleTax {
   return typeof tax === "number" && Number.isSafeInteger(tax) && tax >= 0 ? { kind: "read", cents: tax } : { kind: "unread" };
 }
 
-/** Where the buyer is, from the payment's address: "US-NY", "CA-ON", "DE"; "" when the payment gave none. */
+/**
+ * Where Stripe taxed the sale: "US-NY", "CA-ON", "DE"; "" when the payment gave no place. Stripe taxes a checkout
+ * at the shipping address when it collected one, and at the payment's address otherwise (docs.stripe.com/tax/
+ * checkout/page, "Collect a shipping address", read by Claude 2 on 7 November 2026), so a shipped order is placed
+ * by where it went, read in the order lib/shipping-address.ts reads it (Claude 2's review of #2980, HIGH). A
+ * shipping address with no country that reads is no place, never the payment's: that is not where it was taxed.
+ * "US" or "CA" alone is a payment that gave no state or province (Checkout with tax on asks only for what the tax
+ * needs, often the ZIP code), never the whole country (stateNotGiven).
+ */
 export function regionOf(row: Record<string, unknown>): string {
-  const address = obj(obj(row.customer_details)?.address);
+  const shipped = obj(obj(row.collected_information)?.shipping_details) ?? obj(row.shipping_details) ?? obj(row.shipping);
+  const address = shipped ? obj(shipped.address) : obj(obj(row.customer_details)?.address);
   const country = typeof address?.country === "string" && /^[A-Z]{2}$/.test(address.country) ? address.country : "";
   if (!country) return "";
   const state = typeof address?.state === "string" && /^[A-Z0-9]{1,3}$/.test(address.state) ? address.state : "";
   return BY_STATE.has(country) && state ? `${country}-${state}` : country;
+}
+
+/** Whether a region is a country placed by state whose payment gave no state or province ("US", "CA"). */
+export function stateNotGiven(region: string): boolean {
+  return BY_STATE.has(region);
 }
 
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);

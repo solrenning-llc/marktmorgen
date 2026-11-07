@@ -1,5 +1,5 @@
 import type { StatsData } from "@/lib/stats";
-import type { TaxRegion } from "@/lib/tax-summary";
+import { type TaxRegion, stateNotGiven } from "@/lib/tax-summary";
 import { formatMoney } from "@/lib/money";
 
 const REGION = typeof Intl !== "undefined" && "DisplayNames" in Intl ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
@@ -10,9 +10,10 @@ function countryName(code: string): string {
     return code;
   }
 }
-/** "US-NY" as "United States, NY"; "DE" as "Germany". */
+/** "US-NY" as "United States, NY"; "DE" as "Germany"; "US" alone as "United States, state not given". */
 function regionName(region: string): string {
   if (!region) return "No address on the payment";
+  if (stateNotGiven(region)) return `${countryName(region)}, ${region === "CA" ? "province" : "state"} not given`;
   const [country, state] = region.split("-");
   return state ? `${countryName(country)}, ${state}` : countryName(country);
 }
@@ -31,8 +32,8 @@ function TaxCell({ row, currency }: { row: TaxRegion; currency: string }) {
 }
 
 /**
- * The tax Stripe added to the store's checkouts in the window, by where the
- * buyer is, one table per currency (lib/tax-summary.ts; 601 [KB22] U4). A
+ * The tax Stripe added to the store's checkouts in the window, by the address
+ * Stripe taxed, one table per currency (lib/tax-summary.ts; 601 [KB22] U4). A
  * record of what was collected, never tax advice; an incomplete reading shows
  * no figure, and tax that could not be read is never shown as $0.
  */
@@ -44,10 +45,12 @@ export function TaxCollected({ data, range }: { data: StatsData; range: "d7" | "
     <section className="mt-6 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line" aria-labelledby="numbers-tax">
       <h3 id="numbers-tax" className="text-sm font-bold text-ink">Tax collected at checkout, last {span}</h3>
       <p className="mt-1 text-xs text-ink-soft">
-        The tax Stripe added to your buyers&apos; payments at checkout, by where the buyer is. Each currency has its own table:
-        nothing is converted and currencies are never added together. The money went to your own Stripe account.
-        This is a record of what was collected, not tax advice: your Stripe account&apos;s tax reports have every detail.
-        Renewals, later payments of payment plans and refunds are not in these figures.
+        The tax Stripe added to your buyers&apos; payments at checkout, by the address Stripe taxed: where a shipped order
+        went, and the payment&apos;s address for everything else. Each currency has its own table: nothing is converted
+        and currencies are never added together. The money went to your own Stripe account. This is a record of what
+        was collected, not tax advice: your Stripe account&apos;s tax reports have every detail. Renewals and later
+        payments of payment plans are not in these figures. Tax on sales later refunded is still counted here: refunds
+        are not taken off.
       </p>
       {!summary || !window ? (
         <p className="mt-3 text-sm text-ink-soft" role="status">
@@ -69,7 +72,7 @@ export function TaxCollected({ data, range }: { data: StatsData; range: "d7" | "
                 <caption className="text-left text-xs font-semibold text-ink-soft">{name}</caption>
                 <thead>
                   <tr className="border-b border-line text-xs text-ink-soft">
-                    <th scope="col" className="py-2 font-semibold">Where the buyer is</th>
+                    <th scope="col" className="py-2 font-semibold">Where it was taxed</th>
                     <th scope="col" className="py-2 pl-3 text-right font-semibold">Sales</th>
                     <th scope="col" className="py-2 pl-3 text-right font-semibold">Tax collected</th>
                   </tr>
@@ -93,6 +96,13 @@ export function TaxCollected({ data, range }: { data: StatsData; range: "d7" | "
           );
         })
       )}
+      {window && !summary?.partial && window.currencies.some((c) => c.regions.some((r) => stateNotGiven(r.region))) ? (
+        <p className="mt-2 text-xs text-ink-soft">
+          Some payments gave only a ZIP or postal code, not a state or province: those sales are in a &ldquo;state not
+          given&rdquo; or &ldquo;province not given&rdquo; row, so a state&apos;s own row may not hold every sale made there.
+          Your Stripe account&apos;s tax reports place every sale.
+        </p>
+      ) : null}
       {window && !summary?.partial && window.moreCurrencies ? (
         <p className="mt-2 text-xs text-ink-soft">{`${plural(window.moreCurrencies, "sale", "sales")} in other currencies are not listed here; see them in the sales file.`}</p>
       ) : null}

@@ -64,6 +64,7 @@ import { DEMO_CONNECTED_ACCOUNT } from "@/lib/demo-account";
 import { preorderProblem } from "@/lib/preorder-rules";
 import { type MayComeOff, applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
+import { type UnpaidProof, unpaidProof } from "@/lib/checkout-return";
 
 /**
  * How long a paid link keeps working.
@@ -937,8 +938,10 @@ export type Order =
        */
       reusable: boolean;
     }
+  /** Not paid: what can be proved about it from this session alone (648 [WG8], lib/checkout-return.ts). */
+  | { state: "unpaid"; proof: UnpaidProof }
   /** Refunded in full: what it bought is closed, on every page (lib/refunds.ts). */
-  | { state: "unpaid" | "processing" | "expired" | "invalid" | "unavailable" | "error" | "refunded" };
+  | { state: "processing" | "expired" | "invalid" | "unavailable" | "error" | "refunded" };
 
 /**
  * Decides whether this buyer may have the file.
@@ -1010,7 +1013,7 @@ export async function readOrder(
     return { state: "processing" };
   }
   if (!isSettled(session)) {
-    return { state: "unpaid" };
+    return { state: "unpaid", proof: unpaidProof(session) };
   }
   // Given back in full: the download, the course and the offers after it
   // close, whatever time is left on the link.

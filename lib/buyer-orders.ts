@@ -33,7 +33,7 @@ import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
@@ -264,11 +264,17 @@ export async function withinOpening<T>(work: Promise<T>, meter: OrdersMeter, ms 
  * requests taken before anything is read, then the link's address. A token not
  * shaped like one takes nothing and reads nothing; without room, nothing is read.
  */
-export async function openOrders(store: Store, token: string): Promise<{ admitted: boolean; email: string | null; meter: OrdersMeter }> {
+export async function openOrders(store: Store, token: string): Promise<{ admitted: boolean; email: string | null; unknown: boolean; meter: OrdersMeter }> {
   const meter = new OrdersMeter(store);
-  if (!ORDERS_TOKEN_PATTERN.test(token)) return { admitted: true, email: null, meter };
-  if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return { admitted: false, email: null, meter };
-  return { admitted: true, email: await ordersGrant(store, token), meter };
+  if (!ORDERS_TOKEN_PATTERN.test(token)) return { admitted: true, email: null, unknown: false, meter };
+  if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return { admitted: false, email: null, unknown: false, meter };
+  // A grant that could not be read just now is said as such (`unknown`), never as an expired link.
+  try {
+    return { admitted: true, email: await ordersGrant(store, token), unknown: false, meter };
+  } catch (error) {
+    console.error("reading a purchases link failed", error);
+    return { admitted: true, email: null, unknown: true, meter };
+  }
 }
 
 const IP_LIMIT = 10;
@@ -1146,12 +1152,18 @@ export async function ordersLinkFor(store: Store, email: string, base: string): 
  * field, a duplicated member or any other spelling is unknown; and an
  * address the request form itself would accept. Anything else, like an
  * exact null (expired), grants nothing and never returns an address.
+ *
+ * An answer that is not exactly one reply, null or a string (no answer, a
+ * number, an object, two replies for the one GET) is not known: it throws
+ * UnknownReplyError, never "no grant", so each caller says the link could
+ * not be checked just now rather than that it expired (rule 24).
  */
 export async function ordersGrant(store: Store, token: string): Promise<string | null> {
   if (!ORDERS_TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
   const replies = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
-  const raw = replies?.[0];
-  if (typeof raw !== "string" || !raw) return null;
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a purchases link");
+  const raw = replies[0];
+  if (!raw) return null;
   return grantFrom(raw, grantAccount(store));
 }
 

@@ -383,7 +383,9 @@ async function main(): Promise<void> {
   const ordersLib = read("lib/buyer-orders.ts");
   const ordersPage = read("app/[handle]/orders/page.tsx");
   is("orders: an opening takes ORDERS_OPEN_UNITS buyer requests before its grant is read, and its meter takes more as buyer requests", [
-    /takePublicRequest\(store, "buyer", Date\.now\(\), ORDERS_OPEN_UNITS\)\)\) return \{ admitted: false, email: null, meter \};\n\s*return \{ admitted: true, email: await ordersGrant\(store, token\), meter \};/.test(ordersLib),
+    // Rule 23 (Claude 5, claude5/orders-grant-exact): the opening now also says an unknown grant (`unknown`); the units
+    // are still taken before the grant is read.
+    /takePublicRequest\(store, "buyer", Date\.now\(\), ORDERS_OPEN_UNITS\)\)\) return \{ admitted: false, email: null, unknown: false, meter \};\n[\s\S]{0,200}?return \{ admitted: true, email: await ordersGrant\(store, token\), unknown: false, meter \};/.test(ordersLib),
     /takePublicRequest\(this\.store, "buyer", Date\.now\(\), units\)\)\) \{\n\s*this\.ended \?\?= "busy";\n\s*throw new OrdersBusy\(\)/.test(ordersLib),
     ordersPage.includes("await openOrders(store, token)") && ordersPage.indexOf("await openOrders(store, token)") < ordersPage.indexOf("purchasesFor(store, email, meter)"),
   ], [true, true, true]);

@@ -34,6 +34,7 @@ import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
@@ -230,8 +231,14 @@ async function readLink(store: Store, token: string): Promise<LinkGrant | null> 
 /**
  * The order a door opens, proved, and only for the buyer who holds it. The
  * address a link was sent to has to be the address the order was paid with.
+ * A link whose grant could not be read just now (UnknownReplyError, from
+ * ordersGrant) is an error the page says as such, never an expired link.
  */
 export async function openDoor(store: Store, door: Door, nowSeconds = Date.now() / 1000): Promise<ProofResult> {
+  return doorOpened(store, door, nowSeconds).catch((error: unknown) => (error instanceof UnknownReplyError ? ({ state: "error" } as const) : Promise.reject(error)));
+}
+
+async function doorOpened(store: Store, door: Door, nowSeconds: number): Promise<ProofResult> {
   if (door.via === "session") {
     if (!SESSION_ID.test(door.session)) return { state: "no" };
     const result = await provePurchase(store, door.session);

@@ -194,7 +194,8 @@ export default async function OrdersPage({ params, searchParams }: Params) {
     }
   }
   const NOTICES = words.notices;
-  const notice = token && !admitted ? NOTICES.busy : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
+  // A link whose grant could not be read just now is said as an error to try again, never as expired (rule 24).
+  const notice = token && !admitted ? NOTICES.busy : token && opened?.unknown ? NOTICES.error : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
 
   // An unchecked older purchase may be the one that gives a role. Keep the
   // entry available; the Discord callback still checks what this buyer holds

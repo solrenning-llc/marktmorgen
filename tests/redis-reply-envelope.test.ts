@@ -12,7 +12,7 @@
  * stand-in answers the one grant GET, and fetch is refused.
  */
 import { ordersGrant } from "@/lib/buyer-orders";
-import { repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -114,7 +114,16 @@ async function main() {
       return Reflect.getOwnPropertyDescriptor(target, field);
     },
   });
-  is("an executable reply does not authorize an address", await ordersGrant(owner, token), null);
+  // Rule 23 (Claude 5, claude5/orders-grant-exact): this was `null`; an unknown reply is now UnknownReplyError, so the
+  // link is said as "could not be checked", never as expired. Still no address, and still no trap run (below).
+  is(
+    "an executable reply does not authorize an address: it is unknown, never an address or no grant",
+    await ordersGrant(owner, token).then(
+      (got) => `resolved ${String(got)}`,
+      (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : String(error)),
+    ),
+    "unknown",
+  );
   is("the consumer executes no reply traps", [consumerGets, descriptors], [0, 0]);
   is("transport Promise probing is explicitly accounted for", transportThen, 1);
   reply = Object.freeze([raw]) as unknown as unknown[];

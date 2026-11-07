@@ -187,3 +187,65 @@ test("imported buyers that cannot be read make the reading partial, and no ten-m
   const healthy = await buyerLedger(pastBuyers);
   assert.deepEqual([healthy.partial, [...healthy.buyers.keys()]], [false, ["old@example.com"]]);
 });
+
+// ------------------------------------------------------------ the list write after the record (Claude 6, LOW 2 on #2892)
+
+/** Runs `run` while a one-command HSET to `key` is applied by Redis but answered with `reply`, or not applied at all when `apply` is false. */
+async function withHsetReply<T>(key: string, reply: unknown, apply: boolean, run: () => Promise<T>): Promise<T> {
+  const original = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === key) {
+      if (apply) await original.call(redis, commands);
+      return reply;
+    }
+    return original.call(redis, commands);
+  }) as Pipeline;
+  try {
+    return await run();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+for (const [what, reply, apply] of [
+  ["applied, answered in an unknown shape", ["OK"], true],
+  ["not applied, answered with no slot", [], false],
+  ["applied, answered with a negative count", [-1], true],
+] as const) {
+  test(`fails closed: an HSET to the store's links ${what} never leaves a working code outside the list`, async () => {
+    const other = { sid: "list-limits-sid-3", statsId: `listlimitshset${String(apply)}${reply.length}` };
+    const codes: string[] = [];
+    const original = redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands[0][0] === "SET" && typeof commands[0][1] === "string" && /^nl:slink:[^:]+$/.test(commands[0][1])) codes.push(commands[0][1]);
+      return original.call(redis, commands);
+    }) as Pipeline;
+    try {
+      const added = await withHsetReply(`nl:slink:store:${other.statsId}`, reply, apply, () => addLink(other, { name: "Fresh", place: "x", target: { kind: "store" } }, isProduct));
+      assert.deepEqual(added, { ok: false, reason: "unavailable" }, `got ${JSON.stringify(added).slice(0, 120)}`);
+    } finally {
+      redis.pipeline = original;
+    }
+    assert.equal(codes.length, 1);
+    assert.equal(Number((await redis.pipeline([["EXISTS", codes[0]]]))[0]), 0, "the link's own record is taken back, so its code does not open outside the store's list");
+    assert.equal(await hlen(`nl:slink:store:${other.statsId}`), 0);
+  });
+}
+
+test("fails closed: an HSET of a new group answered in an unknown shape is not said saved, and the group is taken back", async () => {
+  const fresh = { listId: "listlimitshsetnew" } as unknown as Store;
+  const key = `nl:mail:segs:${fresh.listId}`;
+  const saved = await withHsetReply(key, ["OK"], true, () => saveSegment(fresh, { name: "Fresh group", narrow: { minSpent: 100 } }));
+  assert.deepEqual(saved, { ok: false, reason: "unavailable" }, `got ${JSON.stringify(saved).slice(0, 120)}`);
+  assert.equal(await hlen(key), 0);
+});
+
+test("fails closed: an HSET replacing a group answered in an unknown shape is not said saved, and the group read before is put back", async () => {
+  const fresh = { listId: "listlimitshsetsame" } as unknown as Store;
+  const key = `nl:mail:segs:${fresh.listId}`;
+  assert.equal((await saveSegment(fresh, { name: "Kept group", narrow: { minSpent: 100 } })).ok, true);
+  const [before] = await listSegments(fresh.listId);
+  const saved = await withHsetReply(key, [], true, () => saveSegment(fresh, { name: "kept group", narrow: { minSpent: 900 } }));
+  assert.deepEqual(saved, { ok: false, reason: "unavailable" }, `got ${JSON.stringify(saved).slice(0, 120)}`);
+  assert.deepEqual(await listSegments(fresh.listId), [before]);
+});

@@ -16,9 +16,33 @@ console.log = (...args: unknown[]) => {
   print(...args);
 };
 
+/**
+ * The key=value pairs after a proof line's "label: ", read in one pass with no regular expression (a key runs to its
+ * "=", so "A sent" stays one key; a value in quotes runs to the closing quote, any other to the next space).
+ */
 function seen(prefix: string): Record<string, string> {
   const line = lines.find((l) => l.startsWith(prefix)) ?? "";
-  return Object.fromEntries([...line.matchAll(/([A-Za-z.]+(?: sent)?)=("[^"]*"|\S+)/g)].map((m) => [m[1], m[2]]));
+  const start = line.indexOf(": ");
+  const out: Record<string, string> = {};
+  if (start < 0) return out;
+  let at = start + 2;
+  while (at < line.length) {
+    while (line[at] === " ") at += 1;
+    const eq = line.indexOf("=", at);
+    if (eq < 0) break;
+    const key = line.slice(at, eq);
+    let end: number;
+    if (line[eq + 1] === '"') {
+      const close = line.indexOf('"', eq + 2);
+      end = close < 0 ? line.length : close + 1;
+    } else {
+      const space = line.indexOf(" ", eq + 1);
+      end = space < 0 ? line.length : space;
+    }
+    out[key] = line.slice(eq + 1, end);
+    at = end;
+  }
+  return out;
 }
 
 async function main(): Promise<void> {

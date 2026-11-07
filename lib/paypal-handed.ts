@@ -2,14 +2,14 @@
  * Whether a paid PayPal order was handed over, for the thanks page (PF1, Claude 5's MEDIUM on #2911).
  *
  * The proof is the buyer's grant: deliverPayPal (lib/paypal-sales.ts) writes the buyer's record
- * `nl:imp:buy:<statsId>:<address hash>` field <product> = { job: "paypal:<order>", ... } as its first step of the
- * hand-over. The pending mark is no proof: settle() clears it BEFORE anything is handed over, so a paid order with no
+ * (importedKey: the store's imported purchases for that address) field <product> = { job: "paypal:<order>", ... } as
+ * its first step of the hand-over. The pending mark is no proof: settle() clears it BEFORE anything is handed over, so a paid order with no
  * mark may still be waiting for (or have failed) its hand-over.
  *
  * grantImported writes with HSETNX, so the record keeps the FIRST grant's job (the Claude 4 team's re-review of #2911):
  * when the address already held the product (an earlier PayPal purchase, a gift, an import, a place), this order's own
  * hand-over leaves the earlier job there. Then the address holds what it bought, and this order counts as handed over
- * only while it is one of the paid orders standing behind that product (`nl:ppsell:own:`, written by settle() and
+ * only while it is one of the paid orders standing behind that product (the set ownKey names, written by settle() and
  * taken off when PayPal refunds it in full), read exactly.
  *
  *   true       the grant names this order; or another grant holds the product and this order stands behind it

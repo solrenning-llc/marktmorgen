@@ -461,21 +461,35 @@ function feedbackOf(raw: Raw): { feedback: string; feedbackText: string } {
   return { feedback: typeof raw.cancellation_details?.feedback === "string" ? raw.cancellation_details.feedback : "", feedbackText: "" };
 }
 
+/** The intervals a Stripe price recurs by. */
+const SUB_INTERVALS = new Set(["day", "week", "month", "year"]);
+/** A whole number Stripe gave, at least `least`: null when it gave none (absent or null); any other shape throws. */
+function exactCount(v: unknown, least: number, what: string): number | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < least) throw new Error(`Stripe gave ${what} in a shape that cannot be read`);
+  return v;
+}
+
 /** A membership as Stripe holds it, when it is one of this store's (not a plan). */
 export function readSub(raw: Raw, handles: Set<string>): Sub | null {
   const meta = raw.metadata ?? {};
   if (!handles.has(meta.store ?? "") || !meta.product || meta.kind === "plan") return null;
   const item = raw.items?.data?.[0];
-  const unit = num(item?.price?.unit_amount);
-  const quantity = num(item?.quantity) || 1;
+  // What a member is worth a month is shown as a fact, so its parts are read in their exact shape (CX-123 rule 24):
+  // absent or null reads as before (no price, one, a month, once); any other shape throws, never one, a month or free.
+  const unit = exactCount(item?.price?.unit_amount, 0, "a membership's price") ?? 0;
+  const quantity = exactCount(item?.quantity, 0, "a membership's quantity") ?? 1;
+  const every = item?.price?.recurring?.interval;
+  if (every !== undefined && every !== null && (typeof every !== "string" || !SUB_INTERVALS.has(every))) throw new Error("Stripe gave a membership's interval in a shape that cannot be read");
+  const count = exactCount(item?.price?.recurring?.interval_count, 1, "a membership's interval count") ?? 1;
   return {
     id: typeof raw.id === "string" ? raw.id : "",
     status: typeof raw.status === "string" ? raw.status : "",
     product: meta.product,
     amount: unit * quantity,
     currency: typeof raw.currency === "string" ? raw.currency : "",
-    interval: typeof item?.price?.recurring?.interval === "string" ? item.price.recurring.interval : "month",
-    count: num(item?.price?.recurring?.interval_count) || 1,
+    interval: typeof every === "string" ? every : "month",
+    count,
     start: num(raw.start_date),
     ended: num(raw.ended_at),
     trialEnd: num(raw.trial_end),

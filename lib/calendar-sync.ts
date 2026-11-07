@@ -55,6 +55,8 @@ import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
 import { MEET_STORES } from "@/lib/meet-links";
+// A write lands only over the exact text read (the script lib/webhooks.ts changes its settings with).
+import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 
 /** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
 export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
@@ -172,6 +174,83 @@ async function readConfig(store: Store): Promise<Config | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", cfgKey(store.statsId)]]);
   return parseConfig(raw);
+}
+
+/** The settings are there but do not read whole: nothing is written over them (review of #2882, CX-123 rule 24). */
+export class CalendarSettingsUnreadable extends Error {
+  constructor() {
+    super("The calendar settings could not be read whole");
+    this.name = "CalendarSettingsUnreadable";
+  }
+}
+/** The settings changed between their read and the write over it: nothing was written. */
+export class CalendarSettingsChanged extends Error {
+  constructor() {
+    super("The calendar settings changed while being saved");
+    this.name = "CalendarSettingsChanged";
+  }
+}
+/** Redis answered the write over the settings in no known shape: it may or may not have landed. */
+export class CalendarSettingsUnconfirmed extends Error {
+  constructor() {
+    super("The calendar settings write was not confirmed");
+    this.name = "CalendarSettingsUnconfirmed";
+  }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const textOrAbsent = (value: unknown): boolean => value === undefined || typeof value === "string";
+
+/**
+ * The settings for a change, read whole: null only when none are saved (a
+ * store's first calendar or address). Settings that are there but not in the
+ * shape written here ({}, [], broken text, calendars that are not a list or
+ * more than MAX_FEEDS, a calendar or a token of another shape) throw, so no
+ * change writes them again without what could not be read (parseConfig, for
+ * showing, would have dropped it).
+ */
+function parseConfigWhole(raw: unknown): Config | null {
+  if (raw === null) return null;
+  if (typeof raw !== "string" || !raw) throw new CalendarSettingsUnreadable();
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new CalendarSettingsUnreadable();
+  }
+  if (!isRecord(value) || !Array.isArray(value.feeds) || value.feeds.length > MAX_FEEDS) throw new CalendarSettingsUnreadable();
+  const feedsWhole = value.feeds.every(
+    (f: unknown) => isRecord(f) && typeof f.id === "string" && FEED_ID_PATTERN.test(f.id) && typeof f.url === "string" && Boolean(f.url) && textOrAbsent(f.addedAt),
+  );
+  const tokenWhole = value.token === undefined || value.token === null || (typeof value.token === "string" && TOKEN_PATTERN.test(value.token));
+  const restWhole = textOrAbsent(value.handle) && textOrAbsent(value.tokenAt) && textOrAbsent(value.stoppedAt) && (textOrAbsent(value.callsId) || value.callsId === null);
+  if (!feedsWhole || !tokenWhole || !restWhole) throw new CalendarSettingsUnreadable();
+  const config = parseConfig(raw);
+  if (!config || config.feeds.length !== value.feeds.length) throw new CalendarSettingsUnreadable();
+  return config;
+}
+
+/** The settings read whole for a change, with the exact text read ("" when none), which the write must land over. */
+async function readConfigWhole(store: Store): Promise<{ raw: string; config: Config | null }> {
+  if (!store.statsId || !isRedisConfigured()) return { raw: "", config: null };
+  const [raw] = await redisPipeline([["GET", cfgKey(store.statsId)]]);
+  const config = parseConfigWhole(raw);
+  return { raw: config ? (raw as string) : "", config };
+}
+
+/**
+ * Writes the settings only if they are still the text read (COMPARE_AND_SET:
+ * a GET and, when equal, the SET, in one step). Two changes at once can no
+ * longer each write over the other's read: the one that lost writes nothing
+ * and says so (CalendarSettingsChanged).
+ */
+async function writeConfigOver(store: Store, raw: string, config: Config): Promise<void> {
+  if (!store.statsId) return;
+  const text = JSON.stringify({ ...config, handle: store.handle, callsId: store.callsId ?? null });
+  const [saved] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(store.statsId), raw, text]]);
+  if (saved === 1) return;
+  if (Array.isArray(saved) && saved[0] === -1) throw new CalendarSettingsChanged();
+  throw new CalendarSettingsUnconfirmed();
 }
 
 async function writeConfig(store: Store, config: Config): Promise<void> {
@@ -363,7 +442,9 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
   if (!store.statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
   const text = raw.trim();
   if (text.length > MAX_FEED_URL) return { ok: false, reason: "long", message: "That address is longer than any calendar address we know of." };
-  const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+  // Read whole before anything is written or fetched: settings that cannot be read throw here (review of #2882).
+  const { raw: before, config: saved } = await readConfigWhole(store);
+  const config = saved ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
   if (config.feeds.length >= MAX_FEEDS) return { ok: false, reason: "full", message: `A store can read ${MAX_FEEDS} calendars. Remove one first.` };
   let url: string;
   try {
@@ -380,20 +461,20 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
     return { ok: false, reason: "invalid", message: error instanceof Error ? error.message : "The calendar could not be read." };
   }
   const feed: Feed = { id: randomBytes(8).toString("hex"), url, addedAt: new Date(now).toISOString() };
-  await writeConfig(store, { ...config, feeds: [...config.feeds, feed] });
-  const saved = JSON.stringify(reading);
+  await writeConfigOver(store, before, { ...config, feeds: [...config.feeds, feed] });
+  const read = JSON.stringify(reading);
   await redisPipeline([
-    ["SET", busyKey(feed.id), saved, "EX", CACHE_SECONDS],
-    ["SET", goodKey(feed.id), saved, "EX", STALE_SECONDS],
+    ["SET", busyKey(feed.id), read, "EX", CACHE_SECONDS],
+    ["SET", goodKey(feed.id), read, "EX", STALE_SECONDS],
   ]);
   return { ok: true, view: await calendarView(store), busyTimes: reading.busy.length };
 }
 
 /** Stops reading a calendar and forgets its address and everything read from it. */
 export async function removeFeed(store: Store, id: string): Promise<CalendarView> {
-  const config = await readConfig(store);
+  const { raw, config } = await readConfigWhole(store);
   if (config && config.feeds.some((f) => f.id === id)) {
-    await writeConfig(store, { ...config, feeds: config.feeds.filter((f) => f.id !== id) });
+    await writeConfigOver(store, raw, { ...config, feeds: config.feeds.filter((f) => f.id !== id) });
     await redisPipeline([["DEL", busyKey(id), goodKey(id), errKey(id)]]);
   }
   return calendarView(store);
@@ -404,27 +485,36 @@ export async function removeFeed(store: Store, id: string): Promise<CalendarView
  * which stops answering at once.
  */
 export async function newFeedToken(store: Store, keepStopped = false): Promise<CalendarView> {
-  const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+  // Read whole first: settings that cannot be read throw before any token is made or deleted (review of #2882).
+  const { raw, config: saved } = await readConfigWhole(store);
+  const config = saved ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
   const token = randomBytes(24).toString("hex");
-  const commands: (string | number)[][] = [["SET", tokenKey(token), store.statsId as string]];
-  if (config.token) commands.push(["DEL", tokenKey(config.token)]);
-  await redisPipeline(commands);
+  await redisPipeline([["SET", tokenKey(token), store.statsId as string]]);
+  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
+  const { stoppedAt, ...rest } = config;
+  try {
+    await writeConfigOver(store, raw, { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() });
+  } catch (error) {
+    // Nothing written: the new token leads nowhere, so it goes; an unconfirmed write keeps both, either may be the saved one.
+    if (error instanceof CalendarSettingsChanged) await redisPipeline([["DEL", tokenKey(token)]]).catch(() => {});
+    throw error;
+  }
+  // The old address stops once the settings name the new one (storeIdForToken checks both, so it stopped already).
+  if (config.token) await redisPipeline([["DEL", tokenKey(config.token)]]);
   // The last copy stays, so the new address answers at once even when the day's makings are spent; only a
   // tombstone (the store's handle once led elsewhere) goes, since this store is plainly its handle's own.
   if (store.statsId) {
     const [kept] = await redisPipeline([["GET", outKey(store.statsId)]]);
     if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(store.statsId)]]);
   }
-  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
-  const { stoppedAt, ...rest } = config;
-  await writeConfig(store, { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() });
   return calendarView(store);
 }
 
 /** Makes the subscription address the first time the studio needs one. */
 export async function ensureFeedToken(store: Store): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
-  const config = await readConfig(store);
+  // Read whole: settings that cannot be read are never taken for none and written again empty (review of #2882).
+  const { config } = await readConfigWhole(store);
   if (config?.token) {
     // Renamed, or written before the settings named the store's calls: written again, so the feed reads its marks.
     if (config.handle !== store.handle || (config.callsId ?? null) !== (store.callsId ?? null)) await writeConfig(store, config);
@@ -709,7 +799,13 @@ const refusedKey = (statsId: string) => `nl:cal:refused:${statsId}`;
 /** The address let go for being asked too often: its token deleted, the settings told when, so the studio says so. */
 async function stopFeedToken(statsId: string, token: string, now: number): Promise<void> {
   const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  const config = parseConfig(raw);
+  // The token goes whatever the settings say; settings that do not read whole are left as they are (review of #2882).
+  let config: Config | null;
+  try {
+    config = parseConfigWhole(raw);
+  } catch {
+    config = null;
+  }
   const commands: (string | number)[][] = [["DEL", tokenKey(token)], ["DEL", refusedKey(statsId)]];
   if (config && config.token === token) commands.push(["SET", cfgKey(statsId), JSON.stringify({ ...config, token: null, stoppedAt: new Date(now).toISOString() })]);
   await redisPipeline(commands);

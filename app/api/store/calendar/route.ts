@@ -1,7 +1,14 @@
 import type { NextRequest } from "next/server";
 import { ensureStatsId, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_FEED_URL, addFeed, newFeedToken, removeFeed } from "@/lib/calendar-sync";
+import { CalendarSettingsChanged, CalendarSettingsUnconfirmed, CalendarSettingsUnreadable, MAX_FEED_URL, addFeed, newFeedToken, removeFeed } from "@/lib/calendar-sync";
+
+/** What the studio says when the settings could not be changed safely (review of #2882): never a plain "done". */
+const CALENDAR_SETTINGS_WORDS = {
+  unreadable: "Your calendar settings could not be read, so nothing was changed. Try again later.",
+  changed: "Your calendars were changed somewhere else at the same moment, so nothing was changed. Reload the page and try again.",
+  unconfirmed: "We could not confirm that this change was saved. Reload the page to see your calendars as they are now.",
+} as const;
 
 /**
  * The creator's calendars: adds one (after reading it once), removes one, or
@@ -31,6 +38,9 @@ export async function POST(request: NextRequest) {
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
+    if (error instanceof CalendarSettingsUnreadable) return Response.json({ ok: false, error: "unreadable", message: CALENDAR_SETTINGS_WORDS.unreadable }, { status: 503 });
+    if (error instanceof CalendarSettingsChanged) return Response.json({ ok: false, error: "changed", message: CALENDAR_SETTINGS_WORDS.changed }, { status: 409 });
+    if (error instanceof CalendarSettingsUnconfirmed) return Response.json({ ok: false, error: "unconfirmed", message: CALENDAR_SETTINGS_WORDS.unconfirmed }, { status: 503 });
     console.error("changing calendars failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

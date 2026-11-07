@@ -30,6 +30,7 @@ import { addFeed, calendarView, ensureFeedToken, newFeedToken, removeFeed, store
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
+import { LOCKED_UNTIL_STAR_COMMANDS, TAKE_COMMANDS } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 const ICS = [
@@ -200,6 +201,31 @@ async function main(): Promise<void> {
   is("refused, nothing written over the change that landed", [lost.status, lost.body.ok, lost.body.error, JSON.parse(String(await raw())).tokenAt], [409, false, "changed", "changed meanwhile"]);
   is("the words say nothing was changed", /nothing was changed/i.test(lost.body.message ?? ""), true);
   is("no address token left behind", await tokenKeys(), tokensBeforeLost);
+
+  part("Each change stays inside a studio request's commands");
+  // UNIT_COST.studio prices a request at 20 commands besides its take and lockedUntil's: the write over the text read is
+  // an EVAL that runs a GET and a SET, billed one by one (3), where a SET was 1.
+  await set(good);
+  const studioCommands = 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS;
+  const measured = async (body: Record<string, unknown>, around?: () => void) => {
+    const counting = redis.pipeline;
+    let commands = 0;
+    redis.pipeline = (async (sent: (string | number)[][]) => {
+      commands += sent.reduce((sum, command) => sum + (command[0] === "EVAL" ? 3 : 1), 0);
+      return counting.call(redis, sent);
+    }) as typeof redis.pipeline;
+    around?.();
+    try {
+      return { answer: await post(body), commands };
+    } finally {
+      redis.pipeline = counting;
+    }
+  };
+  const viewed = JSON.parse(String(await raw())) as { feeds: { id: string }[] };
+  for (const body of [{ action: "rotate" }, { action: "remove", id: viewed.feeds[0].id }]) {
+    const { answer, commands } = await measured(body);
+    is(`${body.action}: done within ${studioCommands} commands`, [answer.status, commands <= studioCommands], [200, true]);
+  }
 
   server.close();
   redis.clear();

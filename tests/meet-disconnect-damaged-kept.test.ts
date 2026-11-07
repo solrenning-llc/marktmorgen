@@ -7,7 +7,8 @@
  *   - the provider refuses, fails or does not answer: disconnect throws (the
  *     route answers 500, "try again") and the text is kept, so a retry can
  *     still give the access back;
- *   - Google's "already given back" (400) is done, as for a healthy one;
+ *   - Google's "already given back" (400 invalid_token) is done, as for a
+ *     healthy one; a Google 400 with any other code, or none, is not;
  *   - Google's refresh token does not open but its access token does: the
  *     access token gives the grant back;
  *   - an account id still in the text: its store is taken off that account's
@@ -31,6 +32,7 @@ const GRANT = "synthetic-kept-grant";
 
 let asked = 0;
 let answer: number | "throw" = 200;
+let body = "{}";
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input));
   if (init?.method !== "POST" || !url.pathname.endsWith("/revoke")) throw Error("Unexpected external request in a synthetic test");
@@ -38,7 +40,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (token !== GRANT) throw Error("Unexpected synthetic token");
   asked++;
   if (answer === "throw") throw Error("synthetic network failure");
-  return new Response("{}", { status: answer });
+  return new Response(body, { status: answer });
 }) as typeof fetch;
 
 type Provider = "google" | "zoom";
@@ -65,10 +67,11 @@ const outcome = async (provider: Provider, host = "") => {
   }
 };
 const kept = async (key: string) => typeof (await redisPipeline([["GET", key]]))[0] === "string";
-const start = async (key: string, record: object, reply: number | "throw") => {
+const start = async (key: string, record: object, reply: number | "throw", replyBody = "{}") => {
   redis.clear();
   asked = 0;
   answer = reply;
+  body = replyBody;
   await redisPipeline([["SET", key, JSON.stringify(record)]]);
 };
 
@@ -78,6 +81,8 @@ async function main(): Promise<void> {
     ["Google store, the provider answered 503", "google", "", 503],
     ["Google store, the provider could not be reached", "google", "", "throw"],
     ["Google host, the provider answered 500", "google", HOST, 500],
+    ["Google store, the provider answered 400 with no error code", "google", "", 400],
+    ["Google host, the provider answered 400 with no error code", "google", HOST, 400],
     ["Zoom store, the provider answered 400", "zoom", "", 400],
     ["Zoom store, the provider answered 401", "zoom", "", 401],
   ] as const) {
@@ -89,8 +94,8 @@ async function main(): Promise<void> {
   }
 
   part("Confirmed give-backs");
-  await start(keyOf("google"), damaged("google"), 400);
-  is("Google's \"already given back\" (400) is done: none, and nothing kept", [await outcome("google"), asked, await kept(keyOf("google"))], ["none", 1, false]);
+  await start(keyOf("google"), damaged("google"), 400, JSON.stringify({ error: "invalid_token", error_description: "Token expired or revoked" }));
+  is("Google's \"already given back\" (400 invalid_token) is done: none, and nothing kept", [await outcome("google"), asked, await kept(keyOf("google"))], ["none", 1, false]);
   await start(keyOf("google"), { ...damaged("google"), refresh: 7 }, 200);
   is("Google with only its access token opening: given back by it, and nothing kept", [await outcome("google"), asked, await kept(keyOf("google"))], ["none", 1, false]);
 

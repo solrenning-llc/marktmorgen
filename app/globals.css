@@ -5047,11 +5047,12 @@ html:has([data-product-editor]) {
  * 34ch holds 126 x 34 / 56 = 77 and real sentences about 47. The words are capped, each in its own size (a detail is
  * smaller than its title), never a card, a row or a button (li), so those keep their width. Narrower glyphs:
  * docs/accessibility-programme.md. :where keeps it at no weight, so any width a block sets for itself still wins; a
- * centred line stays centred (tests/product-page-accessibility.test.ts).
+ * centred line stays centred (tests/product-page-accessibility.test.ts), and so do the lines of a box that centers its
+ * words with text-align (the countdown, a "By the numbers" card), which would otherwise sit at the left of it.
  */
 .st-measure :where(p, dd, blockquote, figcaption, .st-about li, .st-includes li, .sp-faq summary > span, .sp-benefit > span, .sp-fit-side li > span, .sp-inside span.block, .sp-step span.block, .sp-bonus span.block) {
   max-width: 34ch;
 }
-.st-measure :where(p.text-center, li.text-center, .text-center > p) {
+.st-measure :where(p.text-center, li.text-center, .text-center > p, .sp-countdown > p, .sp-fact > dd) {
   margin-inline: auto;
 }

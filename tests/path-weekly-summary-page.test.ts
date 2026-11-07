@@ -174,3 +174,13 @@ test("the current streak survives a time-zone move while the saved week is unava
     assert.doesNotMatch(view, /Current streak:|check-in days? in your current streak/);
   }
 });
+
+test("an impossible retained date does not produce a numerical streak outside the unavailable card", async t => {
+  const days = ["2026-02-30", "2026-11-06"];
+  configure(days, "UTC");
+  const html = await pageAt(t, "2026-11-06T12:00:00Z");
+  assert.match(card(html), /Your saved check-in days could not be read for this week\./);
+  assert.doesNotMatch(html, /Current streak:|check-in days? in your current streak/);
+  assert.deepEqual(savedCheckins(), days);
+  assert.deepEqual(calls, { cookies: 1, studioView: 1, readPath: 1, visitPath: 1, allowanceUsed: 1, readGrowth: 0, readBoard: 0, chargeStudio: 0 });
+});

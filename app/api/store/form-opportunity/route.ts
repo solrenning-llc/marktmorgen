@@ -26,7 +26,9 @@ export async function POST(request: NextRequest) {
     if (existing) return Response.json({ ok: true, state: "existing", deal: existing });
     const form = await readForm(store.statsId, body.form);
     if (!form) return refuse("unknown", 404);
-    const { responses } = await readResponses(store.statsId, form.id, MAX_CONVERTIBLE_FORM_RESPONSES);
+    const read = await readResponses(store.statsId, form.id, MAX_CONVERTIBLE_FORM_RESPONSES).catch(() => null);
+    if (read === null) return refuse("unavailable", 503);
+    const { responses } = read;
     const response = responses.find(response => formOpportunityRef(store.statsId!, form.id, response) === body.responseRef);
     if (!response) return refuse("response_gone", 409);
     const raw = body.deal && typeof body.deal === "object" && !Array.isArray(body.deal) ? body.deal as Record<string, unknown> : {};

@@ -91,6 +91,7 @@ import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
 import { forgetReviewsPerson } from "@/lib/reviews";
+import { forgetVoicePerson } from "@/lib/customer-voice";
 import { forgetLibraryPerson } from "@/lib/buyer-library";
 import { forgetNoted } from "@/lib/erasure-index";
 import { forgetRequestsPerson } from "@/lib/payment-request-store";
@@ -126,7 +127,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
-  { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email) },
+  { module: "lib/form-store.ts", run: (s) => forgetFormsPerson(s.statsId, s.email, s.store) },
   {
     module: "lib/learn.ts",
     run: (s) => forgetLearnerPerson(s.store, s.email, s.courses.map((c) => ({ courseId: c.courseId, moduleIds: c.moduleIds }))),
@@ -145,12 +146,12 @@ export const ERASERS: Eraser[] = [
       return records;
     },
   },
-  { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email) },
+  { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email, s.store) },
   {
     module: "lib/lesson-comments.ts",
     run: async (s) => {
       let records = 0;
-      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner);
+      for (const c of s.courses) records += await forgetLessonCommentsPerson(c.courseId, c.lessonIds, s.learner, s.store);
       return records;
     },
   },
@@ -196,6 +197,8 @@ export const ERASERS: Eraser[] = [
       return done.records;
     },
   },
+  // The month's summary of what customers say quotes their reviews (rule 28): it goes after them, and a reading under way is not kept.
+  { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
   { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },

@@ -23,7 +23,9 @@ export async function GET(request: NextRequest) {
   if (!FORM_ID.test(id) || !FORM_RESPONSE_ID.test(responseId)) return plain(400, "Which form, and which answer?");
   const form = await readForm(store.statsId, id);
   if (!form) return plain(404, "That form is gone.");
-  const response = (await readResponses(store.statsId, id)).responses.find((r) => r.id === responseId);
+  const read = await readResponses(store.statsId, id).catch(() => null);
+  if (read === null) return plain(503, "unavailable");
+  const response = read.responses.find((r) => r.id === responseId);
   if (!response) return plain(404, "That answer is no longer kept.");
   const when = new Date(response.at * 1000);
   const sentLine = `Sent on ${new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(when)}`;

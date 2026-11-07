@@ -13,6 +13,7 @@ import { emailEquivalence } from "@/lib/email-equivalence";
 import { useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useLeaveGuard } from "@/components/leave-guard";
+import { NewTab } from "@/components/new-tab";
 import { isAiEmailCopy, isAiSequenceDraft } from "@/lib/ai-response";
 import { RFM_GROUPS, type RfmGroup } from "@/lib/rfm-rules";
 import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
@@ -79,7 +80,7 @@ const MESSAGES: Record<string, string> = {
   paid_request_taken: "Another workflow already starts when someone pays a payment request. Paying one starts one workflow; that one can start others with a step.",
   unknown: "That is not there anymore. Reload the page.",
   send: "The email service did not take it just now. Nothing was sent; try again in a moment.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: "Your session ended. What you wrote stays on this page: log in again in a new tab, then come back to this tab and press the same button again.",
   unavailable: "Email is not switched on yet, so nothing was sent.",
   draft_remove_conflict: "A newer version of this draft was saved. It was not deleted. Reload saved drafts and review the latest version before deleting it.",
   draft_conflict: "A newer version of this draft was saved. Your text is still here. Keep a copy of it, then reload saved drafts and open the latest version before saving again.",
@@ -298,6 +299,12 @@ const TIME: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour:
  * first render says UTC and the browser swaps in local time straight after.
  */
 const noSubscription = () => () => {};
+/** To the composer's title, gliding only for whoever has not asked for less motion (WCAG 2.3.3). */
+function scrollToComposer(): void {
+  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  document.getElementById("compose-title")?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+}
+
 function When({ seconds }: { seconds: number }) {
   const inBrowser = useSyncExternalStore(noSubscription, () => true, () => false);
   const date = new Date(seconds * 1000);
@@ -305,6 +312,15 @@ function When({ seconds }: { seconds: number }) {
 }
 
 function Feedback({ error, done }: { error: string | null; done: string | null }) {
+  // A session that ended: logging in again in another tab keeps everything on this one (WCAG 2.2.5).
+  if (error === MESSAGES.signed_out) {
+    return (
+      <p className="notice notice-error mt-3" role="alert">
+        {error}{" "}
+        <a href="/signin" target="_blank" rel="noopener" className="inline-flex min-h-11 items-center font-bold underline underline-offset-4">Log in again<NewTab /></a>
+      </p>
+    );
+  }
   if (error) return <p className="notice notice-error mt-3" role="alert">{error}</p>;
   if (done) return <p className="notice notice-success mt-3" role="status">{done}</p>;
   return null;
@@ -467,13 +483,13 @@ export function EmailStudio(props: {
           </>
         ) : props.canSettings ? (
           <div className="card p-6 sm:p-8">
-            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">First, how your emails are signed</p>
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">First, how your emails are signed</h2>
             <p className="mt-2 text-ink-soft">One minute, once. Then you can write.</p>
             <Settings name={props.name} mail={props.mail} />
           </div>
         ) : (
           <div className="card p-6 sm:p-8">
-            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Not set up yet</p>
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Not set up yet</h2>
             <p className="mt-2 text-ink-soft">
               The store&apos;s owner or an Admin first saves the name and postal address its emails carry. Then you can write here.
             </p>
@@ -482,7 +498,7 @@ export function EmailStudio(props: {
       </div>
       <div className="min-w-0">
         <div className="card mt-8 p-6 sm:p-8 lg:mt-0">
-          <p className="text-lg font-semibold tracking-[-0.02em] text-ink">This month</p>
+          <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">This month</h2>
           <p className="mt-2 text-3xl font-semibold tabular-nums">{`${n(props.used)} of ${n(props.allowance)}`}</p>
           <p className="mt-1 text-sm text-ink-soft">
             {props.trial
@@ -514,7 +530,7 @@ export function EmailStudio(props: {
         <ListCard counts={props.counts} canExport={props.canExport} canImport={props.canSend} />
         {ready && props.canSettings ? (
           <div className="card mt-8 p-6 sm:p-8">
-            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">How your emails are signed</p>
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">How your emails are signed</h2>
             <Settings name={props.name} mail={props.mail} />
           </div>
         ) : null}
@@ -580,7 +596,7 @@ function ListCard({
   const [done, setDone] = useState<string | null>(null);
   return (
     <div className="card mt-8 p-6 sm:p-8">
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your list</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Your list</h2>
       <p className="mt-2 text-ink-soft">
         {`${n(counts.mailable)} ${counts.mailable === 1 ? "person" : "people"} you can write to. ${n(counts.left)} left through the unsubscribe link, and ${n(counts.total - counts.agreed)} gave their address for one thing only and are never written to.`}
       </p>
@@ -593,7 +609,7 @@ function ListCard({
       ) : null}
       {canImport ? (
       <details className="mt-5">
-        <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">Import addresses</summary>
+        <summary className="flex min-h-11 cursor-pointer items-center text-sm font-bold text-ink underline underline-offset-2">Import addresses</summary>
         <form
           className="mt-3 space-y-3"
           onSubmit={async (e) => {
@@ -618,14 +634,14 @@ function ListCard({
             <input
               type="file"
               accept=".csv,.txt,text/csv,text/plain"
-              className="mt-1 block w-full text-sm"
+              className="mt-1 block min-h-11 w-full text-sm"
               onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (file) setText(await file.text());
               }}
             />
           </label>
-          <label className="flex items-start gap-2 text-sm text-ink">
+          <label className="flex min-h-11 items-start gap-2 text-sm text-ink">
             <input type="checkbox" className="mt-1" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />
             <span>These people agreed to get emails from me. None of them came from a bought or borrowed list.</span>
           </label>
@@ -896,7 +912,7 @@ function Compose(props: {
           {draftId ? "Draft" : "New email"}
         </h2>
         {draftId ? (
-          <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" disabled={locked} onClick={props.onStartNew}>
+          <button type="button" className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4" disabled={locked} onClick={props.onStartNew}>
             Start a new one instead
           </button>
         ) : null}
@@ -955,12 +971,12 @@ function Compose(props: {
         */}
         {props.canSend ? (
           <div>
-            <label className="flex items-start gap-3 text-sm font-semibold text-ink">
+            <label className="flex min-h-11 items-center gap-3 text-sm font-semibold text-ink">
               <input
                 type="checkbox"
                 checked={testing}
                 onChange={(e) => setTesting(e.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-violet-brand"
+                className="h-4 w-4 shrink-0 accent-violet-brand"
               />
               Try a second subject line
             </label>
@@ -1112,7 +1128,7 @@ function Compose(props: {
           (lib/segments.ts); nothing is recorded about anybody to do it.
         */}
         <details className="rounded-[12px] bg-paper px-4 py-3 ring-1 ring-line" open={more} onToggle={(e) => setMore((e.currentTarget as HTMLDetailsElement).open)}>
-          <summary className="cursor-pointer text-sm font-semibold text-ink">More ways to choose: what they spent, where they came from, when they last bought, what kind of buyer they are</summary>
+          <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold text-ink">More ways to choose: what they spent, where they came from, when they last bought, what kind of buyer they are</summary>
           <div className="mt-3 space-y-4">
             <label className="block">
               <span className="field-label">Spent with you at least</span>
@@ -1221,13 +1237,13 @@ function Compose(props: {
           ) : null}
         </div>
         {props.canSend ? (
-        <fieldset>
+        <fieldset className="min-w-0">
           <legend className="field-label">When</legend>
           <div className="mt-2 flex flex-wrap gap-4 text-sm">
-            <label className="flex items-center gap-2">
+            <label className="flex min-h-11 items-center gap-2">
               <input id={later ? undefined : "mail-when"} type="radio" name="when" checked={!later} onChange={() => { setLater(false); setConfirming(false); setError(value => value === MESSAGES.when ? null : value); }} /> Now
             </label>
-            <label className="flex items-center gap-2">
+            <label className="flex min-h-11 items-center gap-2">
               <input type="radio" name="when" checked={later} onChange={() => { setLater(true); setScheduleNow(Date.now()); setConfirming(false); setError(value => value === MESSAGES.when ? null : value); }} /> At a time I choose
             </label>
           </div>
@@ -1338,7 +1354,7 @@ function Compose(props: {
               >
                 {later ? `Yes, schedule it for ${n(reach)}` : `Yes, send it to ${n(reach)}`}
               </button>
-              <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={() => setConfirming(false)}>
+              <button type="button" className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4" onClick={() => setConfirming(false)}>
                 Not yet
               </button>
             </>
@@ -1428,12 +1444,12 @@ function Drafts({
             <span className="flex items-center gap-4">
               <button
                 type="button"
-                className="inline-flex min-h-11 -my-2.5 items-center text-sm font-bold text-violet-deep underline underline-offset-4"
+                className="inline-flex min-h-11 min-w-11 -my-2.5 items-center justify-center text-sm font-bold text-violet-deep underline underline-offset-4"
                 aria-current={open?.id === d.id ? "true" : undefined}
                 disabled={locked}
                 onClick={() => {
                   onOpen(d);
-                  document.getElementById("compose-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  scrollToComposer();
                 }}
               >
                 {open?.id === d.id ? "Open above" : "Open"}
@@ -1582,7 +1598,7 @@ function History({
     // No id: it is a new email, not the draft of an old one. The time makes
     // the composer start afresh even when the same email is opened twice.
     onOpen({ id: "", subject: copy.subject, body: copy.body, productId: copy.productId, who: copy.who, notProductId: copy.notProductId, narrow: copy.narrow, label: copy.label ?? null, by: "", savedAt: String(Date.now()) });
-    document.getElementById("compose-title")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollToComposer();
   }
 
   /** The email joins a sequence, and goes by itself to everybody who arrives from now on. */
@@ -1618,11 +1634,11 @@ function History({
       <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,auto)]">
         <label className="text-sm font-semibold text-ink" htmlFor="history-search">
           Search campaign subjects
-          <input id="history-search" type="search" className="input mt-1 w-full" value={query} maxLength={150} disabled={busy} aria-describedby="history-scope history-results" onChange={e => setQuery(e.target.value)} placeholder="Find a campaign…" />
+          <input id="history-search" type="search" className="field mt-1 w-full" value={query} maxLength={150} disabled={busy} aria-describedby="history-scope history-results" onChange={e => setQuery(e.target.value)} placeholder="Find a campaign…" />
         </label>
         <label className="text-sm font-semibold text-ink" htmlFor="history-status">
           Campaign status
-          <select id="history-status" className="input mt-1 w-full" value={status} disabled={busy} aria-describedby="history-scope history-results" onChange={e => setStatus(e.target.value as HistoryStatus)}>
+          <select id="history-status" className="field mt-1 w-full" value={status} disabled={busy} aria-describedby="history-scope history-results" onChange={e => setStatus(e.target.value as HistoryStatus)}>
             {HISTORY_STATUSES.map(value => <option key={value} value={value}>{value === "all" ? "All statuses" : STATUS[value]} ({n(view.counts[value])})</option>)}
           </select>
         </label>
@@ -2336,7 +2352,7 @@ function Flows({
               {f.money ? <p className="mt-1 text-sm font-semibold text-ink">{soldWords(f.money, currency)}</p> : null}
               {f.steps.length ? (
                 <details className="mt-1 text-sm text-ink-soft">
-                  <summary className="cursor-pointer font-semibold">Map of its steps</summary>
+                  <summary className="flex min-h-11 cursor-pointer items-center font-semibold">Map of its steps</summary>
                   <WorkflowMap steps={f.steps} conditionText={conditionText} />
                 </details>
               ) : null}
@@ -2357,13 +2373,13 @@ function Flows({
               {runsOpen === f.id ? <WorkflowRuns flowId={f.id} steps={f.steps} request={call} /> : null}
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
                 {f.active ? (
-                  <button type="button" className="text-ink-soft underline underline-offset-4 hover:text-violet-deep" disabled={locked || draft !== null} onClick={() => setActive(f, false)}>
+                  <button type="button" className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep" disabled={locked || draft !== null} onClick={() => setActive(f, false)}>
                     Pause
                   </button>
                 ) : (
                   <button
                     type="button"
-                    className="text-ink-soft underline underline-offset-4 hover:text-violet-deep"
+                    className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep"
                     disabled={locked || draft !== null || activating === f.id || (limits ? activeCount >= limits.maxActive : false)}
                     title={limits && activeCount >= limits.maxActive ? "Your plan has as many workflows switched on as it allows. Pause one first." : undefined}
                     onClick={() => setActivating(f.id)}
@@ -2371,12 +2387,12 @@ function Flows({
                     Preview and switch on
                   </button>
                 )}
-                <button type="button" className="text-ink-soft underline underline-offset-4 hover:text-violet-deep" onClick={() => setRunsOpen(runsOpen === f.id ? null : f.id)}>
+                <button type="button" className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep" onClick={() => setRunsOpen(runsOpen === f.id ? null : f.id)}>
                   {runsOpen === f.id ? "Hide runs" : "Runs"}
                 </button>
                 <button
                   type="button"
-                  className="text-ink-soft underline underline-offset-4 hover:text-violet-deep"
+                  className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep"
                   disabled={locked || draft !== null}
                   onClick={() => {
                     openDraft(f);
@@ -2387,8 +2403,10 @@ function Flows({
                 <button
                   type="button"
                   aria-busy={busy} disabled={locked || draft !== null}
-                  className="text-ink-soft underline underline-offset-4 hover:text-danger"
+                  className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-danger"
                   onClick={async () => {
+                    // Removing erases its runs and their history, and cannot be undone: asked first, as deleting a draft is (WCAG 3.3.6).
+                    if (!window.confirm(`Remove the sequence “${f.name}”? Its emails still to come are not sent, and its runs and their history are erased. This cannot be undone.`)) return;
                     setBusy(true);
                     setError(null);
                     const a = await call({ action: "flow-remove", id: f.id });
@@ -2954,7 +2972,7 @@ function Flows({
                 {draft.steps.length > 1 ? (
                   <button
                     type="button"
-                    className="mt-2 text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+                    className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
                     onClick={() =>
                       setDraft(current => current ? {
                         ...current,
@@ -2990,7 +3008,7 @@ function Flows({
           {!draft.id ? (
             <p className="text-sm text-ink-soft">New workflows are saved paused. Preview it from its card, then switch it on there when it is ready.</p>
           ) : (
-            <label className="flex items-center gap-2 text-sm text-ink">
+            <label className="flex min-h-11 items-center gap-2 text-sm text-ink">
               <input type="checkbox" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
               <span>On. Switched off, nobody new starts it, and those already in it get none of its steps that are still to come.</span>
             </label>
@@ -2999,7 +3017,7 @@ function Flows({
             <button type="submit" aria-busy={busy} disabled={locked || invalidWait || overCapacity} className="btn btn-primary">Save the sequence</button>
             <button
               type="button"
-              className="text-sm font-bold text-ink-soft underline underline-offset-4"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center text-sm font-bold text-ink-soft underline underline-offset-4"
               onClick={() => {
                 setDraft(null);
                 setImported(null);

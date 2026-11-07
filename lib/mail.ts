@@ -426,7 +426,8 @@ export function render(
   // Said only in a sequence's email to somebody who allowed it, with the way to stop it.
   const counting = Boolean(readerKey && token && !door && tag?.medium === "sequence");
   const stopCounting = counting ? `${SITE_URL}/unsubscribe?l=${token}` : "";
-  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><body style="margin:0;padding:0;background:#f7f5f0">
+  // The subject as the document's title and the character set said, for an app or browser that opens the HTML on its own.
+  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title></head><body style="margin:0;padding:0;background:#f7f5f0">
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
 <div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, store.look ? lookColours(store.look).accent : undefined)}</div>
 <div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">

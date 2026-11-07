@@ -51,7 +51,7 @@ async function main(): Promise<void> {
   const read = `nl:stats:statsttl00001:${DAY}`;
   is("the day's record is made", exists(read), 1);
   is("and it is given the day's expiry, not kept for ever", keptAsADay(read), true);
-  is("in one request of one command, as the reading is priced (tests/traffic-cost.ts, readBeacon)", sent.map((l) => l.length), [1]);
+  is("in one request carrying the count alone (one EVAL, whose cost is the commands it runs inside, one EXPIRE more when it makes the record)", sent.map((l) => l.length), [1]);
 
   part("A search that found nothing, on a day with no view yet");
   redis.clear();
@@ -119,6 +119,28 @@ async function main(): Promise<void> {
   await cappedCount("nl:test:ttl:d", DAY_FIELDS_MAX, [{ field: "x", by: 1 }]);
   is("a count asked with no expiry gives none", ttl("nl:test:ttl:d"), -1);
   is("and counts as before", redis.run(["HGET", "nl:test:ttl:d", "x"]), "1");
+
+  part("A day record already there with no expiry (made before this build, or left by a lost answer)");
+  redis.clear();
+  const bare = `nl:stats:statsttl00006:${DAY}`;
+  redis.run(["HSET", bare, "sr:0:prod000001:", "1"]);
+  is("it starts with no expiry", ttl(bare), -1);
+  sent = [];
+  await recordHit(shop("statsttl00006"), { kind: "view", source: "direct", ip: "192.0.2.6", userAgent: "Mozilla/5.0 (iPhone)" }, AFTER_MIDNIGHT);
+  is("the day's first view gives it the day's expiry, as it did before", keptAsADay(bare), true);
+  const dayExpiries = () => sent.flat().filter((c) => c[0] === "EXPIRE" && c[1] === bare).length;
+  is("with one EXPIRE of the day's record, sent once", dayExpiries(), 1);
+  await recordHit(shop("statsttl00006"), { kind: "view", source: "direct", ip: "192.0.2.7", userAgent: "Mozilla/5.0 (iPhone)" }, AFTER_MIDNIGHT + 60_000);
+  is("and none again on the day's later views", dayExpiries(), 1);
+
+  redis.clear();
+  const bareProduct = `nl:stats:statsttl00007:${DAY}`;
+  redis.run(["HSET", bareProduct, "q:mug", "1"]);
+  sent = [];
+  await recordHit(shop("statsttl00007"), { kind: "product", id: "prod000001", ip: "192.0.2.8", userAgent: "Mozilla/5.0 (iPhone)" }, AFTER_MIDNIGHT);
+  is("a product's first count of the day gives it the day's expiry, as it did before", keptAsADay(bareProduct), true);
+  await recordHit(shop("statsttl00007"), { kind: "product", id: "prod000001", ip: "192.0.2.9", userAgent: "Mozilla/5.0 (iPhone)" }, AFTER_MIDNIGHT + 60_000);
+  is("and its later counts of the day send no second request", sent.map((l) => l.length), [1, 1, 1]);
 
   done();
 }

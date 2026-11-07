@@ -4745,6 +4745,7 @@ Pricing FAQ repair history: run39407143422 caught mobile target-size;39409356932
 - Documentação: docs/ht1-home-hero.md. Próximo item: HT2; nenhum B2 novo antes da sequência HT aprovada.
 
 - Histórico de HT1: head `fb2aab77bdead03f6cb212ae13a09d6b5c75d26e`, Product39450325455/verify118723113197 reprovou em tap-targets.test.ts: link secundário com min-h-11 precisava declarar alinhamento vertical. Corrigido com inline-flex/items-center; nenhuma aprovação anterior presumida. Verificação completa obrigatória no novo head, sem rerun isolado.
+- Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar docs/ht1-home-hero.md, que ainda descreve a página inicial deste item (título "Sell your work. Build your business.", pilar "Your store. Your Stripe. Your money." e o link "Start your store" repetido); a página inicial atual é a de 571 [VS1], com a ação única "Claim it" (components/home-claim.tsx), e o limite de 498 [ME3]. O documento deve dizer que essa versão foi substituída, por qual item e onde está a atual.
 
 
 184. **[HT2] Jornada do criador na página de recursos existente**
@@ -4756,6 +4757,7 @@ Pricing FAQ repair history: run39407143422 caught mobile target-size;39409356932
 - Documentação: docs/ht2-creator-journey.md. Próximo item: HT3; nenhum B2 novo antes da ordem HT aprovada.
 
 - Verificação HT2: CI integral39451679128 no head `54865f3c02c18bb1f77a866a2e4b1e6ca195c709` reprovou o salto para o catálogo nas duas larguras. O salto usa agora âncora HTML nativa, alvo com margem de rolagem e teste aguarda a navegação e confirma foco no título. Todos os heads derivados exigem CI integral novo; nenhum job isolado declara conclusão.
+- Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar docs/ht2-creator-journey.md, linha 11, que ainda diz "Full final-head CI and exact production proof are still required before publication"; a publicação funcional 109 deste item já está registrada na fila.
 
 
 185. **[HT3] Valor antes do preço e comparação honesta do modelo de taxas**
@@ -4768,6 +4770,7 @@ Pricing FAQ repair history: run39407143422 caught mobile target-size;39409356932
 - Documentação: docs/ht3-pricing-value.md. Próximo item: HT4; novos B2 permanecem depois da sequência HT.
 
 - Verificação HT3: CI integral39451939003 no head `6dfd61c1a9b0e3189a0929ebea7107cbebb5b83a` reprovou o inventário de acessibilidade porque o componente compartilhado novo não estava listado. Registro adicionado a docs/accessibility-inventory.json; exige nova execução integral no novo head, sem rerun isolado. HT0 incorporado via PR712, merge `7e5b166093cbcb9737b6900f8abcde2285eb1902`, em20/10/2026 às12:55:08 de Fortaleza; Product39449636974, verify118720699159, Redis118720696721 e security39449637090 aprovados. Alteração documental, sem incrementar publicação funcional.
+- Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar docs/ht3-pricing-value.md, que ainda descreve o valor antes dos preços, na página inicial (#pricing) e em /pricing; a ordem foi invertida pelo complemento 243 [CF6] (31/10/2026) e pelo 571 [VS1]: os planos vêm primeiro em /pricing e a lista de valor saiu da página inicial. O documento deve registrar essa substituição.
 
 186. **[HT4] Completar a comparação existente com a Hotmart**
 - Estado: **Publicado — publicação funcional111 confirmada**.

@@ -631,9 +631,10 @@ async function removeDue(held: Held, address: string, now: number): Promise<Due 
 }
 
 /**
- * Logs out the sessions these passkeys' marks opened. False, with nothing
- * changed, when the sessions could not be read (lib/auth.ts
- * SessionsUnknownError): what follows says so, never that they were.
+ * Logs out the sessions these passkeys' marks opened. False when the
+ * sessions could not be read or their logging out was not confirmed
+ * (lib/auth.ts SessionsUnknownError): some may have been logged out, and
+ * what follows says they could not be, never that they were.
  */
 async function dropPasskeySessions(address: string, gone: (mark: string) => boolean, keep?: string): Promise<boolean> {
   try {

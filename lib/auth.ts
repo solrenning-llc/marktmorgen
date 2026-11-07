@@ -315,8 +315,10 @@ export class SessionsUnknownError extends UnknownReplyError {
  * session making the change), which only loses its mark and stays logged in
  * as an emailed link would leave it. Answers how many were logged out.
  * Called when a passkey is removed ("passkey:<id>") and when the app is
- * turned off ("app" and "recovery"). Throws SessionsUnknownError, having
- * changed nothing, when the sessions or their marks cannot be read.
+ * turned off ("app" and "recovery"). Throws SessionsUnknownError when the
+ * sessions or their marks cannot be read (nothing changed then) or when the
+ * deletes' answers are not each 0 or 1 (some sessions may have been logged
+ * out then); either way it is never said as done.
  */
 export async function dropSecondStep(email: string, gone: (mark: string) => boolean, keep?: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
@@ -501,8 +503,9 @@ export async function openSession(email: string, second?: SecondStep, passkeyId?
   ];
   const replies = repliesFor(await redisPipeline([...writes, ["SADD", owned, opened], ["EXPIRE", owned, SESSION_TTL_SECONDS + 86_400]]), writes.length + 2);
   // Every write answered "OK", and the account's set its 0 or 1 twice (CX-123 rule 24): a session the set may not
-  // hold is out of reach of "Log out of all devices", so it is taken back and the login fails, said as such by the
-  // caller, never opened (tests/auth-sessions-exact.test.ts). Its id was never given out.
+  // hold is out of reach of "Log out of all devices", so it is taken back and the login fails, never opened
+  // (tests/auth-sessions-exact.test.ts). Its id was never given out and no cookie is set: lib/signin-finish.ts and
+  // the move route say the login failed; the other routes answer an error page, as a Redis error already did.
   const counted = (reply: unknown) => countOf(reply) === 0 || countOf(reply) === 1;
   if (!replies || !replies.slice(0, writes.length).every((reply) => reply === "OK") || !replies.slice(writes.length).every(counted)) {
     await redisPipeline([["DEL", opened, fresh, mark], ["SREM", owned, opened]]).catch((error: unknown) => console.error("taking back a session that could not be opened failed", error));

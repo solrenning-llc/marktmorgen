@@ -491,15 +491,23 @@ function parsePartnerEarning(raw: unknown): PartnerEarning | null {
   }
 }
 
+/**
+ * A payout as its writers leave it (addPayout: the route, "Mark as paid", PayPal's settlement), or null. Every one
+ * writes a whole number of at least one cent and a currency code, or none before there was a choice: a negative,
+ * fractional or unsafe amount would lower what the book says was paid and send it again (Codex G and Codex M on
+ * #3051), so it does not read, and the book that holds it is unknown (bookRecords).
+ */
 function parsePayout(raw: unknown): Payout | null {
   if (typeof raw !== "string") return null;
   try {
     const value = JSON.parse(raw) as Partial<Payout>;
-    if (typeof value.id !== "string" || typeof value.aff !== "string" || typeof value.cents !== "number") return null;
+    if (typeof value.id !== "string" || !value.id || typeof value.aff !== "string" || !value.aff) return null;
+    if (!Number.isSafeInteger(value.cents) || (value.cents as number) < 1) return null;
+    if (value.currency !== undefined && (typeof value.currency !== "string" || !/^[a-z]{3}$/.test(value.currency))) return null;
     return {
       id: value.id,
       aff: value.aff,
-      cents: value.cents,
+      cents: value.cents as number,
       currency: readCurrencyCode(value.currency),
       date: typeof value.date === "string" ? value.date : "",
       reference: typeof value.reference === "string" ? value.reference : "",

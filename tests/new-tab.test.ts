@@ -47,3 +47,105 @@ test("every link that opens a new tab carries the note", () => {
   }
   assert.deepEqual(missing, []);
 });
+
+/*
+ * The test above reads only target="_blank" written on the tag. A new tab
+ * also comes from a spread ({...aside}, where aside holds target: "_blank",
+ * or an inline {...(x ? {} : { target: "_blank" })}), from a form's target,
+ * and from window.open in a button's click; and an aria-label on the link
+ * replaces its contents, so a note inside it is never read. These hold all
+ * of them to the same rule (WCAG 3.2.5, technique G201).
+ */
+
+/**
+ * Left out, each with its reason:
+ *   - app/embed/[handle]/[product]/page.tsx: the same defect is there (the
+ *     card's links and its checkout in a frame open a new tab without saying
+ *     so, and the team button says "new tab" also as a page, where it stays in
+ *     the tab), but the file is reserved by Claude 6 (claude6/stock-unknown,
+ *     6 November 2026, 18:16 Fortaleza); it follows once that is merged;
+ *   - the full-size picture of a sales page (data-picture-group): with script
+ *     it opens on the page itself (components/picture-viewer.tsx), so its
+ *     aria-label rightly says nothing of a new tab.
+ */
+const PENDING = new Set(["app/embed/[handle]/[product]/page.tsx"]);
+const ON_THE_PAGE = /data-picture-group=/;
+
+type Source = { path: string; text: string; spreads: Set<string>; notes: Set<string> };
+
+function sources(): Source[] {
+  const out: Source[] = [];
+  for (const dir of ["app", "components"]) {
+    for (const path of files(join(root, dir))) {
+      const text = readFileSync(path, "utf8");
+      const name = path.slice(root.length + 1);
+      if (PENDING.has(name)) continue;
+      // A name that holds a new tab (const aside = ... { target: "_blank" ... }) and a name that holds the note (const away = ... <NewTab ...).
+      const spreads = new Set([...text.matchAll(/const (\w+) = [^\n]*target: "_blank"/g)].map((m) => m[1]));
+      const notes = new Set([...text.matchAll(/const (\w+) = [^\n]*<NewTab\b/g)].map((m) => m[1]));
+      out.push({ path: name, text, spreads, notes });
+    }
+  }
+  return out;
+}
+
+const line = (text: string, index: number) => text.slice(0, index).split("\n").length;
+const says = (body: string, notes: Set<string>) =>
+  /<NewTab\b/.test(body) || /newTab|new tab/i.test(body) || [...notes].some((n) => body.includes(`{${n}}`));
+
+test("a link whose new tab is spread in carries the note too", () => {
+  const missing: string[] = [];
+  for (const { path, text, spreads, notes } of sources()) {
+    for (const m of text.matchAll(/<(a|Link)\b[^>]*>/g)) {
+      const tag = m[0];
+      const opens = /target: "_blank"/.test(tag) || [...spreads].some((s) => tag.includes(`{...${s}}`));
+      if (!opens) continue;
+      const close = text.indexOf(`</${m[1]}>`, m.index);
+      if (!says(text.slice(m.index, close), notes)) missing.push(`${path}:${line(text, m.index)}`);
+    }
+  }
+  assert.deepEqual(missing, []);
+});
+
+test("a link that opens a new tab and is named by aria-label says so in that label", () => {
+  const hidden: string[] = [];
+  for (const { path, text, spreads } of sources()) {
+    for (const m of text.matchAll(/<(a|Link)\b[^>]*>/g)) {
+      const tag = m[0];
+      const opens = /target="_blank"|target: "_blank"/.test(tag) || [...spreads].some((s) => tag.includes(`{...${s}}`));
+      if (!opens || ON_THE_PAGE.test(tag)) continue;
+      const label = tag.match(/aria-label=(\{[^\n]*\}|"[^"]*")/);
+      if (label && !/newTab|new tab/i.test(label[1])) hidden.push(`${path}:${line(text, m.index)}`);
+    }
+  }
+  assert.deepEqual(hidden, []);
+});
+
+test("a button that opens a new tab with window.open says so", () => {
+  const missing: string[] = [];
+  for (const { path, text } of sources()) {
+    for (const m of text.matchAll(/window\.open\([^)]*"_blank"/g)) {
+      const start = text.lastIndexOf("<button", m.index);
+      const end = text.indexOf("</button>", m.index);
+      if (start < 0 || end < 0 || !/<NewTab\b/.test(text.slice(start, end))) missing.push(`${path}:${line(text, m.index)}`);
+    }
+  }
+  assert.deepEqual(missing, []);
+});
+
+test("a form that opens a new tab says so in its button", () => {
+  const missing: string[] = [];
+  for (const { path, text, notes } of sources()) {
+    for (const m of text.matchAll(/<form\b[^>]*target="_blank"[^>]*>/g)) {
+      const close = text.indexOf("</form>", m.index);
+      const body = text.slice(m.index, close);
+      // The fields may be drawn by a name of the same file ({inside}): read where it is made, up to the form.
+      const made = [...body.matchAll(/\{(\w+)\}/g)].map((n) => {
+        const at = text.lastIndexOf(`const ${n[1]} =`, m.index);
+        return at < 0 ? "" : text.slice(at, m.index);
+      });
+      if (!says(body, notes) && !made.some((def) => says(def, notes))) missing.push(`${path}:${line(text, m.index)}`);
+    }
+  }
+  assert.deepEqual(missing, []);
+});

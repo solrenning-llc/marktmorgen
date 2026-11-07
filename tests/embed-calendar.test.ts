@@ -41,7 +41,9 @@ is("a way back to the card, named by the product, a full-size target", [card.inc
 is("before paying, it says what the booking page says: where, the deposit, the cancellation deadline, the summary", [card.includes("b.inPersonLine(chosen ? chosen.minutes : call.call.minutes, placeLine(call.call.place))"), card.includes("b.cancelPolicy(call.call.cancelHours, store.name)"), card.includes("{product.summary ? <p")], [true, true, true]);
 is("a team that lets the buyer choose who they book with goes to the booking page, where the choice is", card.includes('const chooses = Boolean(read && "hosts" in read && read.hosts && read.hosts.length);'), true);
 is("the button that shows the times in this frame says nothing of a new tab", card.includes('    : calendar\n      ? ""\n      : action.kind === "checkout"'), true);
-is("a team the buyer picks from says its new tab (G201)", card.includes('className="btn st-btn btn-block">\n                {label}\n                <NewTab language={store.language} />'), true);
+// Rule 23: was "<NewTab language={store.language} />" on the button, said also as a page (?mm=page), where it stays in the tab;
+// now {away}, the note only in a frame (held in tests/new-tab.test.ts).
+is("a team the buyer picks from says its new tab in a frame, and only there (G201, VR 2)", card.includes('className="btn st-btn btn-block">\n                {label}\n                {away}'), true);
 is("the way back lands on the button that opened the times (2.4.3)", [card.includes('<a href={here({ view: "times" }, [], "times-title")} id="calendar-button"'), card.includes('href={here({}, ["view", "length"], "calendar-button")}')], [true, true]);
 is("the frame is asked to be tall enough for the times", [card.includes("const TIMES_HEIGHT = 640;"), card.includes("<EmbedMessenger to={open.site} height={TIMES_HEIGHT} />")], [true, true]);
 const words: SlotWords = { locale: "en-US", pickDay: "Pick a day", pickTime: "Pick a time", noneTitle: "None", noneBody: "None", yours: "Times are in your time zone, {zone}.", creators: "", chosen: "", submit: "Continue", note: "" };

@@ -148,5 +148,6 @@ test("the embed card says nothing of a new tab where it stays in the tab", () =>
   // target: "_top"), so no note may be written there unconditionally.
   const card = readFileSync(join(root, "app/embed/[handle]/[product]/page.tsx"), "utf8");
   assert.equal((card.match(/<NewTab\b/g) ?? []).length, 1, "one note, made once for the frame");
-  assert.match(card, /const away = open\?\.mode === "page" \? null : <NewTab language=\{store\.language\} \/>;/);
+  // The store may be missing on this line (the card of a product no longer on sale), hence store?.language.
+  assert.match(card, /const away = open\?\.mode === "page" \? null : <NewTab language=\{store\?\.language\} \/>;/);
 });

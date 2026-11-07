@@ -136,6 +136,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   const tag = (url: string) => (open ? withTags(url, open.tags, { via: open.via }) : tagged(url, place));
   // As a page of its own, links stay in the tab; in a frame, they open a new one.
   const aside = open?.mode === "page" ? { target: "_top" } : { target: "_blank", rel: "noopener" };
+  // And says so in each of them, in the store's language; as a page, nothing (3.2.5, G201; VR 2).
+  const away = open?.mode === "page" ? null : <NewTab language={store?.language} />;
 
   if (!store || !product) {
     return (
@@ -147,6 +149,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
               {`${speech(store).w.noLongerOnSale} `}
               <a href={tag(`/@${store.handle}`)} {...aside} className="font-semibold underline underline-offset-4">
                 {speech(store).w.seeStore(store.name)}
+                {away}
               </a>
             </>
           ) : (
@@ -262,10 +265,10 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           ) : null}
           {chooses ? (
             <p className="mt-4">
-              {/* A team the buyer picks from opens the booking page in a new tab, and says so (G201). */}
+              {/* A team the buyer picks from opens the booking page: in a new tab in a frame, and says so (G201); as a page, in the same tab, and says nothing. */}
               <a href={tag(`/@${store.handle}/book/${product.id}`)} {...aside} className="btn st-btn btn-block">
                 {label}
-                <NewTab language={store.language} />
+                {away}
               </a>
             </p>
           ) : read === null ? (
@@ -327,6 +330,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
         {open?.back ? <input type="hidden" name="return" value={open.back} /> : null}
         <button type="submit" className="btn st-btn btn-block">
           {label}
+          {/* In a frame the form opens Stripe in a new tab, and the button says so; as a page it stays in the tab. */}
+          {away}
         </button>
       </>
     ) : null;
@@ -337,6 +342,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           <a href={page} {...aside} tabIndex={-1} className="em-cover -mx-4 -mt-4 mb-4 h-[160px] shrink-0 overflow-hidden" style={{ background: "var(--st-item)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={imageUrl(image)} alt={image.alt} width={image.width} height={image.height} className="h-full w-full object-cover" decoding="async" />
+            {away}
           </a>
         ) : null}
         <div className="flex items-start gap-3">
@@ -344,12 +350,14 @@ export default async function EmbedCard({ params, searchParams }: Params) {
             <a href={page} {...aside} tabIndex={-1} className="em-thumb shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={imageUrl(image)} alt={image.alt} width={64} height={64} className="h-16 w-16 rounded-2xl object-cover" decoding="async" />
+              {away}
             </a>
           ) : null}
           <div className="min-w-0 flex-1">
             <h1 className="font-display line-clamp-2 text-[1.0625rem] font-semibold leading-snug">
               <a href={page} {...aside} className="st-title-link">
                 {product.title}
+                {away}
               </a>
             </h1>
             <p className="st-muted truncate text-sm">{store.name}</p>
@@ -395,6 +403,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
         ) : action.kind === "link" ? (
           <a href={action.href === "#buy" ? toBuyBox(into(action.href)) : into(action.href)} {...aside} className="btn st-btn btn-block mt-3">
             {label}
+            {away}
           </a>
         ) : (
           <p className="st-muted mt-3 text-center text-sm font-semibold">{action.text}</p>

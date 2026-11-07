@@ -16,6 +16,7 @@ import { newFeedToken } from "@/lib/calendar-sync";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { KIND, LISTINGS_PER_MGET, MAX_PRODUCT_BYTES, readListings } from "@/lib/catalog";
 import { ROOM_KEYS_PER_MGET, ROOM_NAME_LENGTH, VIDEO_ROOM_BASE, roomsFor } from "@/lib/call-rooms";
+import { MGET_CONCURRENCY } from "@/lib/redis-mget";
 import { CALENDAR_BUILD_SHAPE, CALENDAR_CALLS, CALENDAR_POLL_SHAPE, LISTING_READ_BYTES, calendarBuildCommands } from "@/lib/read-ceilings";
 import { claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -110,6 +111,32 @@ async function main(): Promise<void> {
     is(`measured (${commands}) within the answer and the making as priced (${CALENDAR_POLL_SHAPE.commands} + ${calendarBuildCommands(MAX_PRODUCTS, CALENDAR_CALLS)})`, commands <= CALENDAR_POLL_SHAPE.commands + calendarBuildCommands(MAX_PRODUCTS, CALENDAR_CALLS), true);
     is("the making's shape at its worst: 3,039 commands (5,531 when every listing and every room read was a GET)", CALENDAR_BUILD_SHAPE.commands, 3_039);
     is(`and the measured making is within that figure (${commands} <= ${CALENDAR_POLL_SHAPE.commands} + 3,039)`, commands <= CALENDAR_POLL_SHAPE.commands + 3_039, true);
+  }
+
+  part("The listing MGETs are sent a few at a time, never all at once (MGET_CONCURRENCY)");
+  {
+    fresh();
+    // Each trip to the database waits a turn of the event loop, so trips sent side by side are seen in flight together.
+    const real = redis.pipeline;
+    let inFlight = 0;
+    let most = 0;
+    redis.pipeline = async (batch: Batch) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      try {
+        await new Promise((resolve) => setImmediate(resolve));
+        return await real(batch);
+      } finally {
+        inFlight -= 1;
+      }
+    };
+    try {
+      const answer = await ask();
+      is("the file is still made", answer.status, 200);
+    } finally {
+      redis.pipeline = real;
+    }
+    is(`at most MGET_CONCURRENCY (${MGET_CONCURRENCY}) trips to the database at once (seen: ${most}), not the 1,000 listing MGETs together`, most <= MGET_CONCURRENCY, true);
   }
 
   /** A making whose listing or room reads are answered wrong: refused, nothing kept, never a file without them. */

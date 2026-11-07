@@ -1,8 +1,8 @@
 {
- "lote": 3,
+ "lot": 3,
  "main": "d7bbf9d35",
- "pedido": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
- "itens": [
+ "request": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
+ "items": [
   {
    "n": 152,
    "tag": "S11-HOME-CTAS",
@@ -745,7 +745,7 @@
     {
      "what": "Pairs response adds only the product id, no extra read",
      "status": "present",
-     "evidence": "app/api/store/pairs/route.ts:62 ({ ok, id, pairs })",
+     "evidence": "app/api/store/pairs/route.ts:20 ({ ok, id, pairs })",
      "where_it_should_be": ""
     },
     {

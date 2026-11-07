@@ -928,16 +928,17 @@ async function putAffiliate(store: Store, next: Affiliate, held: HeldAffiliate, 
   if (won === 0) return "not";
   if (won !== 1) {
     // Answered in another shape: the script may have run. Read back what is there: our own record written in full
-    // proves it was written, another record proves ours is not what stands. A read back that is lost, or that says
-    // nothing is there, does not settle it (Codex G's review of #1924): unknown, never "not written", so nothing
-    // claimed for the record is let go on it, and the caller reads the record again before deciding anything.
+    // proves it was written, another readable record proves ours is not what stands. A read back that is lost, that
+    // says nothing is there, or that does not parse does not settle it (Codex G's review of #1924): unknown, never
+    // "not written", so nothing claimed for the record is let go on it, and the caller reads the record again
+    // before deciding anything.
     const back = await redisPipeline([["HGET", peopleKey(statsId), next.id]]).then(
       (answer) => repliesFor(answer, 1),
       () => null,
     );
     const there = back ? back[0] : undefined;
     if (typeof there !== "string") return "unknown";
-    if (there !== JSON.stringify(next)) return "not";
+    if (there !== JSON.stringify(next)) return parseAffiliate(there) === null ? "unknown" : "not";
   }
   // Found again from their own page across every store (lib/affiliate-hub.ts).
   await rememberAffiliate(store.sid, next.email);
@@ -992,8 +993,9 @@ async function changeAffiliate<T>(
   let unsure = false;
   for (let attempt = 0; attempt < tries; attempt += 1) {
     const held = await holdAffiliate(store, id);
-    // Read in its exact shape: whatever an earlier write did is in what was just read.
-    unsure = false;
+    // Read in its exact shape: whatever an earlier write did is in what was just read, unless what is there does not
+    // parse, which proves nothing about it (Codex G's review of #1924).
+    unsure = unsure && held.raw !== null && held.affiliate === null;
     const { next, out } = await work(held);
     if (!next) return out;
     if (next.id !== id) throw new Error("an affiliate record is written under its own id");
@@ -1305,15 +1307,26 @@ export async function acceptPartnership(store: Store, email: string, share: Part
 }
 
 /**
- * Whether the record found under a new record's own id is the one this call
- * wrote: the id was drawn at random and claimed for this address just before,
- * so a record there with the same id, address and code is this write landed
- * although its answer was lost (Codex G's review of #1924).
+ * Whose is the record found under a new record's own id: "own" when it is the
+ * one this call wrote (the id was drawn at random and claimed for this address
+ * just before, so a record there with the same id, address and code is this
+ * write landed although its answer was lost); "other" when it reads and is
+ * another; "unknown" when it does not parse, which proves no other record
+ * stands there, so nothing claimed for this one may be let go on it (Codex G's
+ * review of #1924).
  */
-function ownRecord(there: string, record: Affiliate): boolean {
-  if (there === JSON.stringify(record)) return true;
+function ownRecord(there: string, record: Affiliate): "own" | "other" | "unknown" {
+  if (there === JSON.stringify(record)) return "own";
   const found = parseAffiliate(there);
-  return found !== null && found.id === record.id && found.email === record.email && found.code === record.code;
+  if (found === null) return "unknown";
+  return found.id === record.id && found.email === record.email && found.code === record.code ? "own" : "other";
+}
+
+/** What a new record's write does with what is under its id: nothing there is written; otherwise as ownRecord says. */
+function onOwnId<T>(there: string | null, record: Affiliate, made: T, other: T, unknown: T): { next: Affiliate | null; out: T } {
+  if (there === null) return { next: record, out: made };
+  const whose = ownRecord(there, record);
+  return { next: null, out: whose === "own" ? made : whose === "other" ? other : unknown };
 }
 
 /** Takes back the address and the code claimed for a record that was never written, while they still point to it. */
@@ -1468,8 +1481,8 @@ export async function openAffiliateLink(store: Store, token: string): Promise<Op
         id,
         nowSeconds,
         // Our own record already there is a write whose answer was lost and that landed (ownRecord): it was made.
-        async ({ raw: there }) =>
-          there === null ? { next: record, out: "made" } : { next: null, out: ownRecord(there, record) ? "made" : "there" },
+        // Text there that does not parse is unknown: it may be ours.
+        async ({ raw: there }) => onOwnId<"made" | "there" | "cap" | "busy" | "unsure">(there, record, "made", "there", "unsure"),
         () => "cap",
         (unsure) => (unsure ? "unsure" : "busy"),
       );
@@ -1665,7 +1678,8 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
         id,
         Math.floor(now / 1000),
         // Our own record already there is a write whose answer was lost and that landed (ownRecord): it was made.
-        async ({ raw: there }) => (there === null ? { next: record, out: true } : { next: null, out: ownRecord(there, record) }),
+        // Text there that does not parse is unknown: it may be ours.
+        async ({ raw: there }) => onOwnId<boolean | "unsure">(there, record, true, false, "unsure"),
         () => false,
         (unsure) => (unsure ? "unsure" : false),
       );

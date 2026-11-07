@@ -26,6 +26,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, noteTakedown, removeStoreLink, setKit, setProductHidden, storeForHandle, storeRef } from "@/lib/store";
 import { del } from "@/lib/blob";
+import { withLock } from "@/lib/redis-lock";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
 
@@ -253,6 +254,22 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
   }
   const part = `${action.type}-${"id" in action ? action.id : ""}`;
   const key = noticeKey(report.id, part);
+  // One press at a time for one piece of content under one notice (Claude 6, #3087, LEVE 3): two presses at once
+  // would both see it up, both write it on the store's record and both tell the creator. The second waits, then reads
+  // the store again, so it finds the content down and the first one's steps, and has only what is left to finish.
+  return withLock(`${key}:lock`, TAKEDOWN_LOCK_SECONDS, TAKEDOWN_LOCK_WAIT_MS, async () => {
+    const now = await storeForHandle(store.handle);
+    if (!now || storeRef(now) !== ref) throw new Error("the store could not be read again");
+    return finish(report, now, action, origin, part, key);
+  });
+}
+
+/** How long one press may hold the content's lock (the notice's send included), and how long another waits for it. */
+const TAKEDOWN_LOCK_SECONDS = 120;
+const TAKEDOWN_LOCK_WAIT_MS = 10_000;
+
+async function finish(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string, part: string, key: string): Promise<string | null> {
+  const ref = storeRef(store);
   const up = await stillUp(store, action, origin);
   let steps: Steps;
   if (up) {

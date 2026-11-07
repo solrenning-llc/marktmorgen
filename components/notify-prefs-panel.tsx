@@ -24,7 +24,9 @@ function refusal(data: Answer): string {
     case "store_gone":
       return "Nothing was changed: this store is closed.";
     case "not_changed":
-      return "Not changed yet: we could not confirm these emails started again. Reload this page to see where they stand, then try again.";
+      return "Not changed yet: the weekly email's stop link still holds. Reload this page to see where they stand, then try again.";
+    case "unconfirmed":
+      return "We could not confirm these emails started again. They may have. Reload this page to see where they stand.";
     case "invalid":
     case "always_on":
     case "none":
@@ -95,7 +97,11 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
     if (data?.ok && data.restarted) {
       setStopped(false);
       setSaid({ ok: true, text: "Started again. The alerts you chose, and the weekly, monthly and busy-day emails, come again." });
-    } else setSaid({ ok: false, text: data ? refusal(data) : UNCONFIRMED });
+    } else {
+      // Not confirmed either way: the stop link is now not known, so the notice says so and keeps the way to start them again.
+      if (data?.error === "unconfirmed") setStopped("unknown");
+      setSaid({ ok: false, text: data ? refusal(data) : UNCONFIRMED });
+    }
   }
 
   return (

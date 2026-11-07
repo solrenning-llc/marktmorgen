@@ -53,13 +53,18 @@ let invoiceReadCount = 0;
 let monthVoidFails = false;
 let yearVoidFails = false;
 let yearPaidOnVoid = false; // the year gets paid by the member right as we void
-/** Rule 30: undefined answers with the object's own id; a string answers with another object's id; null with no id. */
+/**
+ * Rule 30: undefined answers with the object's own id; a string answers with another object's id; null with no id;
+ * NULL_BODY with an HTTP 200 whose JSON body is `null` itself.
+ */
+const NULL_BODY = "null body";
 let subReplyId: string | null | undefined;
 let yearReplyAt = -1; // 1-based count of GET /invoices/YEAR answered with yearReplyId
 let yearReplyId: string | null | undefined;
 let yearReplyStatus: string | undefined; // the status that reply carries, when not the year's own
 const replyAs = (row: Record<string, unknown>, id: string | null | undefined, status?: string) => {
   if (id === undefined) return row;
+  if (id === NULL_BODY) return null;
   const copy: Record<string, unknown> = status === undefined ? { ...row } : { ...row, status };
   if (id === null) delete copy.id;
   else copy.id = id;
@@ -435,9 +440,9 @@ async function main(): Promise<void> {
   is("K. a membership paid by bank debit (no pending updates) is never offered, nothing sent", [reason(await move()), posts()], ["fallback", []]);
 
   // L. Rule 30 (from #2517): a Stripe reply decides only when it is the object asked for.
-  for (const [label, other] of [["another object's id", "other"], ["no id", null]] as const) {
-    const otherSub = other === null ? null : "sub_Somebody0001";
-    const otherInvoice = other === null ? null : "in_Somebody00001";
+  for (const [label, other] of [["another object's id", "other"], ["no id", null], ["a null body", NULL_BODY]] as const) {
+    const otherSub = other === "other" ? "sub_Somebody0001" : other;
+    const otherInvoice = other === "other" ? "in_Somebody00001" : other;
     part(`L. replies with ${label}`);
     await reset();
     subReplyId = otherSub;
@@ -457,7 +462,8 @@ async function main(): Promise<void> {
       ["error", 0, "open", true],
     );
 
-    for (const said of ["void", "paid"]) {
+    // A null body carries no status at all: one case for it (Claude 6 on #3098, the month already charged).
+    for (const said of other === NULL_BODY ? ["void"] : ["void", "paid"]) {
       await reset();
       yearVoidFails = true;
       yearReplyAt = 3;
@@ -465,7 +471,7 @@ async function main(): Promise<void> {
       yearReplyStatus = said;
       const l4 = await move();
       is(
-        `L4. moved and paid, the void failed, and the year read back ${said} with ${label}: left to void again for the daily job, never taken as ${said === "void" ? "voided" : "paid twice"}`,
+        `L4. moved and paid, the void failed, and the year read back ${other === NULL_BODY ? "" : `${said} `}with ${label}: left to void again for the daily job, never taken as ${said === "void" ? "voided" : "paid twice"}`,
         [reason(l4), st.year.status, await members(FALLBACK_VOID_KEY), await members(FALLBACK_BOTH_KEY)],
         ["moved-paid", "open", [`${ACCOUNT}|${YEAR}|${MONTH}`], []],
       );

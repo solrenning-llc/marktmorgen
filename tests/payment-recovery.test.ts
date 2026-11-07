@@ -70,7 +70,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return answer({ id, url: `https://checkout.stripe.com/c/setup/${id}` });
   }
   const session = path.match(/^\/checkout\/sessions\/(cs_test_\w+)$/);
-  if (session) return answer(state.sessions.get(session[1]) ?? {});
+  if (session) return answer(state.sessions.has(session[1]) ? state.sessions.get(session[1]) : {});
   const pay = path.match(/^\/invoices\/(in_\w+)\/pay$/);
   if (pay) return state.payDeclines ? answer({ error: { code: "card_declined", message: "Your card was declined." } }, 402) : answer({ id: pay[1], status: "paid" });
   if (path === "/invoices" && method === "GET") return answer({ object: "list", data: state.invoices, has_more: false });
@@ -230,7 +230,10 @@ async function main(): Promise<void> {
 
   part("Rule 30: a Stripe reply decides only when it is the object asked for");
   state.payDeclines = false;
-  const withId = (row: Record<string, unknown>, id: string | null) => {
+  /** NULL_BODY: an HTTP 200 whose JSON body is `null` itself (Claude 6 on #3098). */
+  const NULL_BODY = "null body";
+  const withId = (row: Record<string, unknown>, id: string | null): Record<string, unknown> => {
+    if (id === NULL_BODY) return null as unknown as Record<string, unknown>;
     const copy = { ...row };
     if (id === null) delete copy.id;
     else copy.id = id;
@@ -238,7 +241,7 @@ async function main(): Promise<void> {
   };
   const touched = (mark: number) => posts.slice(mark).map((p) => p.path);
   const owedElsewhere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_OtherOwed00001", status: "open", amount_due: 4900 } };
-  for (const [label, other] of [["another membership's id", "sub_Another0000001"], ["no id", null]] as const) {
+  for (const [label, other] of [["another membership's id", "sub_Another0000001"], ["no id", null], ["a null body", NULL_BODY]] as const) {
     state.subs.set("sub_Running000001", withId(owedElsewhere, other));
     const mark = posts.length;
     is(`the membership read back with ${label}: no card is set and nothing is paid on it`, [await finishCardUpdate(store, sessionId), touched(mark)], ["error", []]);
@@ -246,7 +249,7 @@ async function main(): Promise<void> {
   }
   state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
   const saved = state.sessions.get(sessionId)!;
-  for (const [label, other] of [["another page's id", `cs_test_${"d".repeat(20)}9`], ["no id", null]] as const) {
+  for (const [label, other] of [["another page's id", `cs_test_${"d".repeat(20)}9`], ["no id", null], ["a null body", NULL_BODY]] as const) {
     state.sessions.set(sessionId, withId(saved, other));
     const mark = posts.length;
     is(`Stripe's page read back with ${label}: no card is set from it`, [await finishCardUpdate(store, sessionId), touched(mark)], ["error", []]);

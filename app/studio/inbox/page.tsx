@@ -42,8 +42,16 @@ export default async function StudioInboxPage({ searchParams }: Params) {
   const first = asked && store.statsId ? await openConversation(store.statsId, asked, store) : null;
   const team = store.sid ? await readTeam(store.sid) : { members: [] };
   const people = [store.email, ...team.members.filter((m) => can(m.role, "orders")).map((m) => m.email)];
-  const aiOn = aiAvailableFor(store);
-  const left = aiOn ? await aiLeft(store) : 0;
+  let ai = { on: false, left: 0 };
+  let balanceUnknown = false;
+  if (aiAvailableFor(store)) {
+    try {
+      ai = { on: true, left: await aiLeft(store) };
+    } catch {
+      // Keep the inbox available without claiming a known writing balance.
+      balanceUnknown = true;
+    }
+  }
   // Why the chat cannot be turned on, when it cannot: the demo store takes no messages, and a store needs its address and our sender.
   const chatBlock = isHouseStore(store) ? "demo" : store.statsId && store.email && !store.suspended && isSenderConfigured() ? "" : "setup";
 
@@ -65,13 +73,16 @@ export default async function StudioInboxPage({ searchParams }: Params) {
             together for whoever on your team picks it up.
           </p>
           <div className="mt-8">
+            {balanceUnknown ? (
+              <p role="status" className="mb-4 text-sm text-ink-soft">Writing allowance couldn&apos;t be checked. Reload to try again.</p>
+            ) : null}
             <InboxStudio
               me={view.email}
               initial={first ? conversations.map((c) => (c.id === first.conversation.id ? first.conversation : c)) : conversations}
               first={first}
               people={people}
               setting={store.inbox}
-              ai={{ on: aiOn, left }}
+              ai={ai}
               canSettings={can(view.role, "settings")}
               readAt={readAt}
               chatBlock={chatBlock}

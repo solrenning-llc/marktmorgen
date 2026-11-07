@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useHydrated } from "@/components/use-hydrated";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -143,11 +143,16 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
     }
   }, []);
 
+  // Each read of the lists takes the next number; an answer that comes back after a later read began is dropped,
+  // so a slow opening read never takes back what Refresh or connecting just read.
+  const readNo = useRef(0);
+
   // The audiences are read fresh from the platform when the page opens.
   const connectedProvider = connected?.provider ?? null;
   useEffect(() => {
     if (!connectedProvider) return;
     let cancelled = false;
+    const mine = ++readNo.current;
     fetch("/api/store/email-sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -155,7 +160,7 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
     })
       .then((response) => response.json() as Promise<{ ok?: boolean; targets?: Target[]; message?: string }>)
       .then((data) => {
-        if (cancelled) return;
+        if (cancelled || mine !== readNo.current) return;
         if (data.ok && Array.isArray(data.targets)) {
           setTargets(data.targets);
           setListsRead("ready");
@@ -165,7 +170,7 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
         }
       })
       .catch(() => {
-        if (!cancelled) setListsRead("unread");
+        if (!cancelled && mine === readNo.current) setListsRead("unread");
       });
     return () => {
       cancelled = true;
@@ -174,8 +179,10 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
 
   async function connect(event: React.FormEvent) {
     event.preventDefault();
+    const mine = ++readNo.current;
     const data = await post({ action: "connect", provider, key: key.trim() }, "connect");
     if (!data?.view?.connected) return;
+    if (mine !== readNo.current) return;
     setKey("");
     setReplacing(false);
     if (Array.isArray(data.targets)) {
@@ -190,7 +197,9 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
   }
 
   async function refresh() {
+    const mine = ++readNo.current;
     const data = await post({ action: "targets" }, "targets");
+    if (mine !== readNo.current) return;
     if (data && Array.isArray(data.targets)) {
       setTargets(data.targets);
       setListsRead("ready");
@@ -220,6 +229,8 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
     const name = connected ? byKey(connected.provider).name : "the platform";
     const data = await post({ action: "disconnect" }, "disconnect");
     if (data) {
+      // A read still under way belongs to the account just disconnected.
+      readNo.current += 1;
       setTargets(null);
       setListsRead("reading");
       setTarget("");
@@ -317,11 +328,10 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
                   {busy === "targets" ? "Reading…" : "Refresh list"}
                 </button>
               </div>
-              {listsNote ? (
-                <p className="field-hint mt-2" role="status">
-                  {listsNote}
-                </p>
-              ) : null}
+              {/* Always on the page, so a screen reader announces the words when they come (4.1.3). */}
+              <p className={listsNote ? "field-hint mt-2" : undefined} role="status">
+                {listsNote}
+              </p>
               {targets !== null && targets.length === 0 ? (
                 <p className="field-hint mt-2">{`Your ${info.name} account has no ${info.target} yet. Make one there, then refresh the list.`}</p>
               ) : null}

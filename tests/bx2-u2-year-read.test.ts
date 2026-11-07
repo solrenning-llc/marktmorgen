@@ -3,8 +3,8 @@
  *
  * lib/earnings-read.ts reads twelve months of a store's money from the
  * creator's own Stripe account and the PayPal sales kept here, with the same
- * page caps as the sales reading (SALES_READ_SHAPE: 58 Stripe pages, 2,000
- * PayPal sales and PAYPAL_REFUNDS_READ refunds), as one of the store's two
+ * page caps as the sales reading (within SALES_READ_SHAPE: 55 of its 58 Stripe
+ * pages, 2,000 PayPal sales and PAYPAL_REFUNDS_READ refunds), as one of the store's two
  * heavy readings of the UTC day, counted before anything is read, and keeps
  * the months as a fourth kept reading ("earnings").
  *
@@ -17,6 +17,13 @@
  *   - a renewal dated by when its invoice was made rather than paid, or the
  *     oldest month's renewals said as known before Stripe's retry window is
  *     proved from dated documentation;
+ *   - the base's decided rules (#2941, docs/bx2-earnings-design.md "Units" 2)
+ *     not followed: every paid invoice of the store's memberships counted but
+ *     subscription_create; disputes read from their own balance transactions
+ *     or said not read (never DISPUTE_TAKES), with money given back
+ *     (`reinstated`) said not read; every record with its provider's id; a
+ *     paid-invoice list that stops knowing no month; the reading's time taken
+ *     once every list was read;
  *   - the fourth kept copy missing from READING_KINDS, or its cost not in the
  *     store-readings line.
  * Synthetic only: a stand-in Stripe (fetch) and the in-memory Redis.
@@ -24,7 +31,7 @@
 process.env.STRIPE_SECRET_KEY = "sk_test_earnings_stand_in";
 
 import { EARNINGS_PAYPAL_REFUNDS, EARNINGS_PAYPAL_SALES, EARNINGS_STRIPE_PAGES, RENEWAL_PAID_WITHIN_DAYS, readEarningsYear } from "@/lib/earnings-read";
-import { type Earnings, type SourceMonth, earningsMonths, readingSince } from "@/lib/earnings-by-month";
+import { type Earnings, type SourceMonth, earningsMonths, netWords, readingSince } from "@/lib/earnings-by-month";
 import { SALES_READ_SHAPE } from "@/lib/read-ceilings";
 import { PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, ReadingsUsed } from "@/lib/store-readings";
@@ -32,6 +39,7 @@ import type { Store } from "@/lib/store";
 import { COST_LINES, DB_BYTE_MONTH } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readFileSync } from "node:fs";
 
 const NOW = Date.UTC(2031, 5, 15, 12, 0); // 15 June 2031, 12:00 UTC
 const HOUR = 3_600_000;
@@ -46,11 +54,17 @@ let broken: Partial<Record<ListPath, "garbled" | "error" | "shuffled">> = {};
 const log: string[] = [];
 const pagesOf: Record<string, number> = {};
 let versions = new Set<string>();
+// The clock the reading sees: each Stripe page moves it on by `tick` ms (0 unless a check sets it).
+const realNow = Date.now.bind(Date);
+let clock: number | null = null;
+let tick = 0;
+Date.now = () => (clock === null ? realNow() : clock);
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "") as ListPath;
   log.push(`stripe ${path}`);
+  if (clock !== null) clock += tick;
   pagesOf[path] = (pagesOf[path] ?? 0) + 1;
   const version = (init?.headers as Record<string, string> | undefined)?.["Stripe-Version"];
   versions.add(version ?? "(none)");
@@ -89,6 +103,8 @@ function reset(): void {
   commands = 0;
   replyBytes = 0;
   garbleZrange = false;
+  clock = null;
+  tick = 0;
 }
 
 let storeCount = 0;
@@ -144,8 +160,9 @@ const months = earningsMonths(NOW, "UTC");
 async function main(): Promise<void> {
   part("The reading's caps are the sales reading's, no more");
   const pages = Object.values(EARNINGS_STRIPE_PAGES).reduce((a, b) => a + b, 0);
-  is("Stripe pages: checkouts 20, extras 20, invoices 10, refunds 5, disputes 3", EARNINGS_STRIPE_PAGES, { checkouts: 20, extras: 20, invoices: 10, refunds: 5, disputes: 3 });
-  is("their sum is SALES_READ_SHAPE's 58 pages", [pages, SALES_READ_SHAPE.stripePages], [58, 58]);
+  is("Stripe pages: checkouts 20, extras 20, invoices 10, refunds 5; disputes not read (their balance transactions' shape is not confirmed)", EARNINGS_STRIPE_PAGES, { checkouts: 20, extras: 20, invoices: 10, refunds: 5 });
+  is("their sum, 55, is within SALES_READ_SHAPE's 58 pages", [pages, pages <= SALES_READ_SHAPE.stripePages], [55, true]);
+  is("never DISPUTE_TAKES (it drops a dispute once won, so a month shown would be rewritten)", /DISPUTE_TAKES/.test(readFileSync("lib/earnings-read.ts", "utf8")), false);
   is("PayPal: 2,000 sales and PAYPAL_REFUNDS_READ refunds", [EARNINGS_PAYPAL_SALES, EARNINGS_PAYPAL_REFUNDS], [2000, PAYPAL_REFUNDS_READ]);
   is("the renewals' window before the oldest month is under four weeks, so only the oldest month is given up for it", RENEWAL_PAID_WITHIN_DAYS < 28 && RENEWAL_PAID_WITHIN_DAYS > 0, true);
 
@@ -163,6 +180,12 @@ async function main(): Promise<void> {
     stripe["/invoices"] = [
       invoice("late01", Date.UTC(2031, 4, 30), Date.UTC(2031, 5, 2), 2000),
       invoice("first1", Date.UTC(2031, 4, 30, 1), Date.UTC(2031, 4, 30, 1), 999, { billing_reason: "subscription_create" }),
+      // A member's switch charged at once (lib/tier-switch.ts, lib/yearly-switch.ts): paid money of the membership.
+      invoice("switch1", Date.UTC(2031, 5, 9), Date.UTC(2031, 5, 9), 64100, { billing_reason: "subscription_update" }),
+      // Another store's switch on the same account: not this store's.
+      invoice("switch2", Date.UTC(2031, 5, 9, 1), Date.UTC(2031, 5, 9, 1), 7000, { billing_reason: "subscription_update", parent: { type: "subscription_details", subscription_details: { metadata: { store: "elsewhere" } } } }),
+      // A one-off invoice the creator sent from Stripe, of no subscription: not a membership's, and it stops nothing.
+      invoice("manual1", Date.UTC(2031, 5, 9, 2), Date.UTC(2031, 5, 9, 2), 3000, { billing_reason: "manual", parent: null }),
     ];
     stripe["/refunds"] = [refund("a0001", Date.UTC(2031, 5, 5), 1000), refund("b0001", Date.UTC(2031, 5, 5, 1), 800, { status: "failed" })];
     stripe["/disputes"] = [dispute("a0001", Date.UTC(2031, 5, 6), 500), dispute("b0001", Date.UTC(2031, 5, 6, 1), 600, "won")];
@@ -173,23 +196,26 @@ async function main(): Promise<void> {
     const e = kept?.value ?? null;
     is("read now, not stale, twelve months from June 2031", [kept?.stale, kept?.at, e?.months.length, e?.months[0].month, e?.months[11].month], [false, NOW, 12, "2031-06", "2030-07"]);
     is("the reading begins at the oldest month's floor", e?.since, readingSince(NOW, "UTC"));
-    is("Stripe, June: the store's paid checkouts and extras, the renewal paid in June, refunds and money-taking disputes", of(e, "2031-06", "stripe"), {
+    is("Stripe, June: the store's paid checkouts and extras, every paid invoice of its memberships but the first (the renewal paid in June and the switch), refunds; disputes and money given back said not read", of(e, "2031-06", "stripe"), {
       source: "stripe", state: "read",
-      lines: [{ currency: "usd", salesCents: 6500, renewalCents: 2000, enteredCents: 0, refundCents: 1000, disputeCents: 500, netCents: 7000 }], leftOut: [],
+      lines: [{ currency: "usd", salesCents: 6500, renewalCents: 66100, enteredCents: 0, refundCents: 1000, disputeCents: 0, reinstatedCents: 0, netCents: 71600 }], leftOut: ["dispute", "reinstated"], partly: [],
     });
+    is("the disputes list is never read: no page of it is spent", pagesOf["/disputes"] ?? 0, 0);
+    is("June's words say disputes are not taken off and money given back is not added", netWords(month(e, "2031-06")?.sources ?? []),
+      "After refunds, before disputes: Stripe and PayPal disputes are not read, so they are not taken off. Money given back by Stripe is not read, so it is not added. Partial PayPal refunds are not recorded, so they are not taken off.");
     is("Stripe, May: the sale under an earlier address, in euros; the renewal made in May but paid in June is not in May", of(e, "2031-05", "stripe"), {
       source: "stripe", state: "read",
-      lines: [{ currency: "eur", salesCents: 3000, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0, netCents: 3000 }], leftOut: [],
+      lines: [{ currency: "eur", salesCents: 3000, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0, reinstatedCents: 0, netCents: 3000 }], leftOut: ["dispute", "reinstated"], partly: [],
     });
-    is("PayPal, June: the sale and its full refund; disputes said as not read", of(e, "2031-06", "paypal"), {
+    is("PayPal, June: the sale and its full refund; disputes said as not read, refunds read in full only", of(e, "2031-06", "paypal"), {
       source: "paypal", state: "read",
-      lines: [{ currency: "usd", salesCents: 4000, renewalCents: 0, enteredCents: 0, refundCents: 4000, disputeCents: 0, netCents: 0 }], leftOut: ["dispute"],
+      lines: [{ currency: "usd", salesCents: 4000, renewalCents: 0, enteredCents: 0, refundCents: 4000, disputeCents: 0, reinstatedCents: 0, netCents: 0 }], leftOut: ["dispute"], partly: ["refund"],
     });
-    is("PayPal, April: euros on their own line", (of(e, "2031-04", "paypal") as { lines?: unknown })?.lines, [{ currency: "eur", salesCents: 2500, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0, netCents: 2500 }]);
+    is("PayPal, April: euros on their own line", (of(e, "2031-04", "paypal") as { lines?: unknown })?.lines, [{ currency: "eur", salesCents: 2500, renewalCents: 0, enteredCents: 0, refundCents: 0, disputeCents: 0, reinstatedCents: 0, netCents: 2500 }]);
     is("a month with nothing, read in full: a confirmed zero, not unknown", [of(e, "2031-02", "stripe")?.state, (of(e, "2031-02", "stripe") as { lines?: unknown[] })?.lines?.length], ["read", 0]);
     is("the oldest month: Stripe's renewals there are not proved (a payment retried from before the window), so Stripe says unknown", of(e, "2030-07", "stripe"), { source: "stripe", state: "unknown", why: "not_reached" });
     is("the oldest month: PayPal is read", of(e, "2030-07", "paypal")?.state, "read");
-    is("no total for the oldest month; June's total adds Stripe and PayPal in dollars", [month(e, "2030-07")?.totals, month(e, "2031-06")?.totals], [null, [{ currency: "usd", salesCents: 10500, renewalCents: 2000, enteredCents: 0, refundCents: 5000, disputeCents: 500, netCents: 7000 }]]);
+    is("no total for the oldest month; June's total adds Stripe and PayPal in dollars", [month(e, "2030-07")?.totals, month(e, "2031-06")?.totals], [null, [{ currency: "usd", salesCents: 10500, renewalCents: 66100, enteredCents: 0, refundCents: 5000, disputeCents: 0, reinstatedCents: 0, netCents: 71600 }]]);
     is("every Stripe list read in the version its shapes are written for", [...versions], ["2026-08-26.dahlia"]);
     is("nothing ranks the creator by revenue (561 [NE1])", /best|growth|rank|status|level|badge/i.test(JSON.stringify(Object.keys(month(e, "2031-06") ?? {}))), false);
 
@@ -229,6 +255,7 @@ async function main(): Promise<void> {
     stripe["/invoices"] = rows(1200, 6 * HOUR, (i, at) => invoice(`busy${i}`, at, at + HOUR, 100));
     stripe["/refunds"] = rows(600, 10 * HOUR, (i, at) => refund(`busy${i}`, at, 10));
     stripe["/disputes"] = rows(400, 15 * HOUR, (i, at) => dispute(`busy${i}`, at, 10));
+    stripe["/invoices"] = rows(900, 6 * HOUR, (i, at) => invoice(`busy${i}`, at, at + HOUR, 100));
     for (let i = 0; i < 2500; i += 1) await paypalSale(shop, `PPBUSY${String(i).padStart(8, "0")}`, NOW - HOUR - i * 3 * HOUR, 100);
     for (let i = 0; i < 600; i += 1) {
       const order = `PPREFD${String(i).padStart(8, "0")}`;
@@ -238,22 +265,33 @@ async function main(): Promise<void> {
     commands = 0;
     replyBytes = 0;
     const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
-    is("Stripe pages per list never past their caps", [pagesOf["/checkout/sessions"], pagesOf["/payment_intents"], pagesOf["/invoices"], pagesOf["/refunds"], pagesOf["/disputes"]], [20, 20, 10, 5, 3]);
+    is("Stripe pages per list never past their caps, and no dispute page", [pagesOf["/checkout/sessions"], pagesOf["/payment_intents"], pagesOf["/invoices"], pagesOf["/refunds"], pagesOf["/disputes"] ?? 0], [20, 20, 9, 5, 0]);
     is("all Stripe pages at most SALES_READ_SHAPE's", Object.values(pagesOf).reduce((a, b) => a + b, 0) <= SALES_READ_SHAPE.stripePages, true);
     const mget = log.filter((l) => l.startsWith("redis MGET")).length;
     is("Redis commands at most SALES_READ_SHAPE's, two ranges and two reads of the records", [commands <= SALES_READ_SHAPE.commands, log.filter((l) => l.startsWith("redis ZREVRANGEBYSCORE")).length, mget], [true, 2, 2]);
     is("bytes read from Redis at most SALES_READ_SHAPE's", replyBytes <= SALES_READ_SHAPE.dbBytes, true);
-    // Disputes (300 read, one every 15 hours) reach back to 10 December 2030: January 2031 on is read, December before is not.
-    is("Stripe: the months every list reached are read, the rest unknown", states(e, "stripe"), [...Array(6).fill("read"), ...Array(6).fill("not_reached")]);
+    // Refunds (500 read, one every 10 hours) reach back to 19 November 2030: December 2030 on is read, November before is not.
+    // The 900 invoices end inside their ten pages, so they hold every month from the reading's start (but the oldest).
+    is("Stripe: the months every list reached are read, the rest unknown", states(e, "stripe"), [...Array(7).fill("read"), ...Array(5).fill("not_reached")]);
     // PayPal refunds (500 read, one every 10 hours) reach back to 19 November 2030.
     is("PayPal: likewise, by its own lists", states(e, "paypal"), [...Array(7).fill("read"), ...Array(5).fill("not_reached")]);
-    const june = (of(e, "2031-06", "stripe") as { lines: { salesCents: number }[] }).lines[0];
+    const june = (of(e, "2031-06", "stripe") as { lines?: { salesCents: number }[] }).lines?.[0];
     const expected = stripe["/checkout/sessions"].filter((r) => r.created * 1000 >= Date.UTC(2031, 5, 1)).length * 100 * 2;
-    is("a month reached is exact: every June checkout and extra counted", june.salesCents, expected);
+    is("a month reached is exact: every June checkout and extra counted", june?.salesCents, expected);
+  }
+
+  reset();
+  {
+    const shop = makeStore(false);
+    const rows = (n: number, every: number, make: (i: number, at: number) => Row) => Array.from({ length: n }, (_, i) => make(i, NOW - HOUR - i * every));
+    stripe["/checkout/sessions"] = rows(5, DAY, (i, at) => checkout(`few${i}`, at, 100));
+    stripe["/invoices"] = rows(1200, 6 * HOUR, (i, at) => invoice(`many${i}`, at, at + HOUR, 100));
+    const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
+    is("paid invoices past their ten pages: a list dated by payment knows no month when it stops, so every Stripe month is unknown", [pagesOf["/invoices"], states(e, "stripe")], [10, Array(12).fill("not_reached")]);
   }
 
   part("A list that cannot be read, or a record that cannot, makes its months unknown, never zero");
-  for (const [path, how] of [["/refunds", "garbled"], ["/disputes", "error"], ["/checkout/sessions", "shuffled"]] as const) {
+  for (const [path, how] of [["/refunds", "garbled"], ["/invoices", "error"], ["/checkout/sessions", "shuffled"]] as const) {
     reset();
     const shop = makeStore();
     stripe["/checkout/sessions"] = [checkout("a0003", Date.UTC(2031, 5, 3), 5000), checkout("b0003", Date.UTC(2031, 4, 3), 5000), checkout("c0003", Date.UTC(2031, 3, 3), 5000)];
@@ -275,7 +313,7 @@ async function main(): Promise<void> {
       checkout("c0004", Date.UTC(2031, 1, 3), 5000),
     ];
     const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
-    is("a checkout of the store whose amount cannot be read: months from it back unknown, the newer ones exact", [states(e, "stripe").slice(0, 3), (of(e, "2031-06", "stripe") as { lines: { salesCents: number }[] }).lines[0].salesCents], [["read", "read", "not_reached"], 5000]);
+    is("a checkout of the store whose amount cannot be read: months from it back unknown, the newer ones exact", [states(e, "stripe").slice(0, 3), (of(e, "2031-06", "stripe") as { lines?: { salesCents: number }[] }).lines?.[0]?.salesCents], [["read", "read", "not_reached"], 5000]);
     is("and every month before it unknown too", states(e, "stripe").slice(3), Array(9).fill("not_reached"));
   }
 
@@ -292,7 +330,28 @@ async function main(): Promise<void> {
     const shop = makeStore();
     stripe["/invoices"] = [invoice("nopaid", Date.UTC(2031, 5, 1), Date.UTC(2031, 5, 1), 2000, { status_transitions: { paid_at: null } })];
     const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
-    is("a paid renewal with no time of payment: never dated by its invoice instead", states(e, "stripe")[0], "not_reached");
+    is("a paid renewal with no time of payment: never dated by its invoice instead, and the list dated by payment knows no month, so every Stripe month is unknown", states(e, "stripe"), Array(12).fill("not_reached"));
+  }
+
+  reset();
+  {
+    const shop = makeStore();
+    stripe["/checkout/sessions"] = [checkout("a0009", Date.UTC(2031, 5, 3), 5000)];
+    stripe["/invoices"] = [invoice("switch9", Date.UTC(2031, 5, 3), Date.UTC(2031, 5, 3), 2000, { billing_reason: "subscription_update", parent: "in_garbled" })];
+    const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
+    is("a paid invoice whose subscription cannot be read: never skipped as not the store's, never dated by its invoice; every Stripe month unknown", states(e, "stripe"), Array(12).fill("not_reached"));
+  }
+
+  reset();
+  {
+    const shop = makeStore(false);
+    // A sale made while the reading ran: Stripe lists it, and it is money so far, since the reading's time is taken
+    // once every list was read (docs/bx2-earnings-design.md, "Exact, once, so far").
+    clock = NOW;
+    tick = 2_000;
+    stripe["/checkout/sessions"] = [checkout("during", NOW + 1_000, 5000), checkout("a0010", Date.UTC(2031, 5, 3), 2500)];
+    const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
+    is("a sale made while the reading ran is counted, and the reading's time is after it", [(of(e, "2031-06", "stripe") as { lines?: { salesCents: number }[] })?.lines?.[0]?.salesCents, (e?.at ?? 0) >= NOW + 1_000], [7500, true]);
   }
 
   reset();
@@ -303,7 +362,7 @@ async function main(): Promise<void> {
     await pipeline([["SET", "nl:ppsell:paid:PAYPALORDER0006", "{not json"]]);
     await paypalSale(shop, "PAYPALORDER0007", Date.UTC(2031, 1, 7), 4000);
     const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
-    is("a PayPal sale whose record cannot be read: from it back unknown, the newer months exact", [states(e, "paypal").slice(0, 3), (of(e, "2031-06", "paypal") as { lines: { salesCents: number }[] }).lines[0].salesCents], [["read", "read", "not_reached"], 4000]);
+    is("a PayPal sale whose record cannot be read: from it back unknown, the newer months exact", [states(e, "paypal").slice(0, 3), (of(e, "2031-06", "paypal") as { lines?: { salesCents: number }[] }).lines?.[0]?.salesCents], [["read", "read", "not_reached"], 4000]);
   }
 
   reset();
@@ -329,7 +388,7 @@ async function main(): Promise<void> {
     // 1 June 2031, 02:00 UTC is still 31 May in Fortaleza (UTC-3).
     stripe["/checkout/sessions"] = [checkout("a0005", Date.UTC(2031, 5, 1, 2), 5000)];
     const e = (await readEarningsYear(shop, "America/Fortaleza", NOW))?.value ?? null;
-    is("a sale counted in the month of the store's own calendar", [(of(e, "2031-05", "stripe") as { lines: { salesCents: number }[] }).lines[0]?.salesCents, (of(e, "2031-06", "stripe") as { lines: unknown[] }).lines.length], [5000, 0]);
+    is("a sale counted in the month of the store's own calendar", [(of(e, "2031-05", "stripe") as { lines?: { salesCents: number }[] }).lines?.[0]?.salesCents, (of(e, "2031-06", "stripe") as { lines?: unknown[] }).lines?.length], [5000, 0]);
     is("the months are those of the zone", e?.months.map((m) => m.month), months);
   }
 

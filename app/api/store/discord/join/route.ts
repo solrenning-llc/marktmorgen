@@ -33,28 +33,36 @@ export async function POST(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
   const page = (status: string) => new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/discord?status=${status}`, "Cache-Control": "no-store" } });
-  if (!isDiscordConfigured() || !store.sid || !(await readServer(storeKey(store)))) return page("off");
-  if (!(await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer"))) return page("failed");
+  const ordersPage = (status: string) => new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/orders?status=${status}`, "Cache-Control": "no-store" } });
 
-  // "none" (no purchase with Discord access) only when that was read exactly (CX-123 rule 24). What could not be read
-  // just now is "failed" (nothing changed, try again); a purchases link that ran out goes to the orders page's own
-  // expired-link notice and its form for a new link, and an order past its window to that form, because the Discord
-  // page's "expired" speaks of its ten-minute way back. No read is added: the same GET and the same Stripe read.
-  const ordersPage = (status: string) => new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/orders${status ? `?status=${status}` : ""}`, "Cache-Control": "no-store" } });
+  // "none" (no purchase with Discord access) only when that was read exactly (CX-123 rule 24). What could not be read or
+  // asked just now, on our side (the store's server, the link, the order, the limit), is "unchecked": nothing changed, try
+  // again; never "failed", which speaks of Discord refusing, since Discord was not asked. A store whose Stripe is not
+  // connected goes to the orders page's own "unavailable" notice, which says so; a purchases link that ran out to its
+  // expired-link notice and its form for a new link; an order past its window to "discord_window", which says the
+  // button is now with the purchases. No read is added: the same GET and the same Stripe read.
   let email: string | null = null;
-  if (sessionId) {
-    const order = await readOrder(store, sessionId);
-    if (order.state === "error" || order.state === "unavailable") return page("failed");
-    if (order.state === "expired") return ordersPage("");
-    email = order.state === "paid" && !order.gift && !order.group ? order.email : null;
-  } else if (token) {
-    const grant = await readOrdersGrant(store, token);
-    if (grant.state === "unknown") return page("failed");
-    if (grant.state === "none") return ordersPage("expired");
-    email = grant.email;
+  try {
+    if (!isDiscordConfigured() || !store.sid || !(await readServer(storeKey(store)))) return page("off");
+    if (!(await withinStore("discord-join", clientAddress(request), 20, 600, store, "buyer"))) return page("unchecked");
+    if (sessionId) {
+      const order = await readOrder(store, sessionId);
+      if (order.state === "unavailable") return ordersPage("unavailable");
+      if (order.state === "error") return page("unchecked");
+      if (order.state === "expired") return ordersPage("discord_window");
+      email = order.state === "paid" && !order.gift && !order.group ? order.email : null;
+    } else if (token) {
+      const grant = await readOrdersGrant(store, token);
+      if (grant.state === "unknown") return page("unchecked");
+      if (grant.state === "none") return ordersPage("expired");
+      email = grant.email;
+    }
+    if (!email) return page("none");
+    const redirect = redirectUri(origin);
+    const state = await startTrip({ k: "join", sid: store.sid, email, redirect, back: `/@${store.handle}` });
+    return new Response(null, { status: 303, headers: { Location: authorizeUrl("join", state, redirect), "Cache-Control": "no-store" } });
+  } catch (error) {
+    console.error("the Discord entry could not read what it needs", error);
+    return page("unchecked");
   }
-  if (!email) return page("none");
-  const redirect = redirectUri(origin);
-  const state = await startTrip({ k: "join", sid: store.sid, email, redirect, back: `/@${store.handle}` });
-  return new Response(null, { status: 303, headers: { Location: authorizeUrl("join", state, redirect), "Cache-Control": "no-store" } });
 }

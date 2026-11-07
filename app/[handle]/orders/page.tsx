@@ -12,7 +12,7 @@ import { notFound } from "next/navigation";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { type BookedCall, type Purchase, OrdersBusy, callsFor, canRecover, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
+import { type BookedCall, type Purchase, OrdersBusy, callsFor, olderOf, openOrders, purchasesFor, recoverHeldBy, withinOpening } from "@/lib/buyer-orders";
 import { canMove, icsLink, moveLink } from "@/lib/calls";
 import { isVideoRoom, roomKind } from "@/lib/call-rooms";
 import { type Extras, askBundle, askOlder, cardOf, extrasFor, ordersShared } from "@/lib/purchase-cards";
@@ -152,7 +152,10 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   let admitted = opened?.admitted ?? true;
   const email = opened?.email ?? null;
   const meter = opened?.meter;
-  const available = canRecover(store);
+  // Whether a new link can be asked for here, and if not why (lib/buyer-orders.ts, recoverHeldBy): without the form,
+  // nothing on the page points "below" to it, and the reason said is the true one.
+  const heldBy = recoverHeldBy(store);
+  const available = heldBy === null;
 
   let purchases: Purchase[] | null = null;
   let calls: BookedCall[] = [];
@@ -195,7 +198,10 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   }
   const NOTICES = words.notices;
   // A link whose grant could not be read just now is said as an error to try again, never as expired (rule 24).
-  const notice = token && !admitted ? NOTICES.busy : token && opened?.unknown ? NOTICES.error : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
+  const shown = token && !admitted ? NOTICES.busy : token && opened?.unknown ? NOTICES.error : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
+  // Without the form for a new link, the same title with a body that does not point "below" to it.
+  const withoutForm = shown === NOTICES.expired ? words.withoutForm.expired : shown === NOTICES.busy ? words.withoutForm.busy : shown === NOTICES.discord_window ? words.withoutForm.discord_window : null;
+  const notice = shown && !available && withoutForm ? { title: shown.title, body: withoutForm } : shown;
 
   // An unchecked older purchase may be the one that gives a role. Keep the
   // entry available; the Discord callback still checks what this buyer holds
@@ -294,7 +300,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                 {words.checkInbox}
               </h1>
               <p className="st-muted mt-4 text-lg leading-relaxed">{words.sentBody(store.name)}</p>
-              <p className="st-muted mt-4 text-sm">{words.nothingArrived}</p>
+              <p className="st-muted mt-4 text-sm">{available ? words.nothingArrived : words.withoutForm.nothingArrived}</p>
               {available ? form : null}
             </>
           ) : (
@@ -309,7 +315,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
                 {words.getAgainTitle}
               </h1>
               <p className="st-muted mt-4 text-lg leading-relaxed">
-                {available ? words.getAgainIntro(store.name) : words.cannotLookUp(store.name)}
+                {available ? words.getAgainIntro(store.name) : heldBy === "sending" ? words.cannotSend(store.name) : words.cannotLookUp(store.name)}
               </p>
               {available ? form : null}
             </>

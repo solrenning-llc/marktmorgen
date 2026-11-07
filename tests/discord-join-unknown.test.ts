@@ -5,13 +5,15 @@
  * its exact shape, a link that ran out after 24 hours, and an order Stripe
  * could not be asked about just now. Now:
  *
- * - not read (Redis or Stripe did not answer): the Discord page's "failed"
- *   notice ("Nothing was changed. Try again in a few minutes.");
+ * - not read (Redis or Stripe did not answer): the Discord page's "unchecked"
+ *   notice ("Nothing was changed. Try again in a few minutes."), never
+ *   "failed", which says Discord refused (tests/discord-join-honest.test.ts);
  * - a purchases link that ran out (an exact null): the orders page's own
  *   "This link has expired" notice, with the form for a new link, because
  *   the Discord page's "expired" notice speaks of its ten-minute way back;
  * - an order past its three-day window: the orders page's form to get what
- *   was bought again, which holds the Discord button;
+ *   was bought again, which holds the Discord button, with its
+ *   "discord_window" notice saying why;
  * - an order read exactly that gives nothing here (a session Stripe does not
  *   know): still "none".
  *
@@ -105,10 +107,11 @@ const UNKNOWN: [string, unknown][] = [
 ];
 
 for (const [name, reply] of UNKNOWN) {
-  test(`orders link, ${name}: said as failed (try again), never as no purchase`, async () => {
+  test(`orders link, ${name}: said as unchecked (try again), never as no purchase`, async () => {
     substitute = true;
     grantReply = reply;
-    assert.equal(await joined({ token: TOKEN }), `${DISCORD_PAGE}failed`);
+    // Rule 23: was `failed`; that notice blames Discord, which was never asked (VR item 2).
+    assert.equal(await joined({ token: TOKEN }), `${DISCORD_PAGE}unchecked`);
   });
 }
 
@@ -125,14 +128,16 @@ test("control: a live orders link still goes on to Discord's own page", async ()
   assert.match(location, /^https:\/\/discord\.com\//);
 });
 
-test("thanks page, Stripe could not be asked (readOrder error): said as failed, never as no purchase", async () => {
+test("thanks page, Stripe could not be asked (readOrder error): said as unchecked, never as no purchase", async () => {
   // fetch throws for Stripe: onAccount fails with no status, readOrder says "error".
-  assert.equal(await joined({ session_id: SESSION }), `${DISCORD_PAGE}failed`);
+  // Rule 23: was `failed`; that notice blames Discord, which was never asked (VR item 2).
+  assert.equal(await joined({ session_id: SESSION }), `${DISCORD_PAGE}unchecked`);
 });
 
-test("thanks page, Stripe answered 500: said as failed, never as no purchase", async () => {
+test("thanks page, Stripe answered 500: said as unchecked, never as no purchase", async () => {
   stripe = () => new Response(JSON.stringify({ error: { message: "server" } }), { status: 500, headers: { "content-type": "application/json" } });
-  assert.equal(await joined({ session_id: SESSION }), `${DISCORD_PAGE}failed`);
+  // Rule 23: was `failed`; that notice blames Discord, which was never asked (VR item 2).
+  assert.equal(await joined({ session_id: SESSION }), `${DISCORD_PAGE}unchecked`);
 });
 
 test("control: a session Stripe does not know (exact 404) is still no purchase", async () => {
@@ -157,7 +162,8 @@ test("thanks page, an order past its three-day window: the orders page's form, n
       }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
-  assert.equal(await joined({ session_id: SESSION }), `https://marktmorgen.test/@${HANDLE}/orders`);
+  // Rule 23: was `/orders` with no status; the page now says why the buyer is there (discord_window).
+  assert.equal(await joined({ session_id: SESSION }), `https://marktmorgen.test/@${HANDLE}/orders?status=discord_window`);
 });
 
 test("the orders page shows its own expired-link notice for status=expired, with no link to read", async () => {

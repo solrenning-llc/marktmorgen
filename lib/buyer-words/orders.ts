@@ -55,6 +55,10 @@ const en = {
       title: "This store can't show your purchases right now",
       body: "What you bought is kept. Try again later. If your link has expired by then, ask for a new one below.",
     },
+    discord_window: {
+      title: "Find the Discord button in your purchases",
+      body: "The Discord button after checkout works for 3 days. Now it is with your purchases. Ask for a link to them below; it takes a few seconds.",
+    },
   } as Record<string, { title: string; body: string }>,
 
   // ---- Asking for the link -------------------------------------------------------
@@ -63,6 +67,16 @@ const en = {
     `Lost a download, or got a new phone? Type the email you paid ${store} with, and we will email you a link to everything you bought here. No account and no password.`,
   cannotLookUp: (store: string) =>
     `${store} cannot take payments through Stripe right now, so there is nothing to look up from here. Try again later.`,
+  /** When payments are connected (or the store has buyers brought over) but no link can be emailed (lib/buyer-orders.ts, recoverHeldBy). */
+  cannotSend: (store: string) =>
+    `${store} cannot email links to purchases right now, so there is nothing to look up from here. Try again later.`,
+  /** What a notice and the page say instead of pointing below when no form for a new link is shown. */
+  withoutForm: {
+    expired: "A link to your purchases works for 24 hours. This store cannot send a new one right now. Try again later.",
+    busy: "What you bought is kept. Try again later.",
+    discord_window: "The Discord button after checkout works for 3 days. Now it is with your purchases, but this store cannot send a link to them right now. Try again later.",
+    nothingArrived: "Nothing arrived? You may have paid with a different address: the one you typed at checkout. This store cannot send a new link right now. Try again later.",
+  },
   emailYouPaidWith: "The email you paid with",
   emailMe: "Email me my purchases",
   formNote: (store: string) =>
@@ -330,6 +344,10 @@ const es: OrdersWords = {
       title: "Esta tienda no puede mostrar tus compras ahora mismo",
       body: "Lo que compraste se conserva. Vuelve a intentarlo más tarde. Si para entonces tu enlace ha caducado, pide uno nuevo abajo.",
     },
+    discord_window: {
+      title: "Encuentra el botón de Discord en tus compras",
+      body: "El botón de Discord después de pagar funciona durante 3 días. Ahora está en tus compras. Pide abajo un enlace a ellas; tarda unos segundos.",
+    },
   },
 
   getAgainTitle: "Vuelve a obtener lo que compraste",
@@ -337,6 +355,14 @@ const es: OrdersWords = {
     `¿Perdiste una descarga o cambiaste de teléfono? Escribe el email con el que le pagaste a ${store} y te enviaremos por email un enlace a todo lo que compraste aquí. Sin cuenta y sin contraseña.`,
   cannotLookUp: (store) =>
     `${store} no puede recibir pagos a través de Stripe en este momento, así que desde aquí no hay nada que buscar. Inténtalo de nuevo más tarde.`,
+  cannotSend: (store) =>
+    `${store} no puede enviar por email enlaces a las compras en este momento, así que desde aquí no hay nada que buscar. Inténtalo de nuevo más tarde.`,
+  withoutForm: {
+    expired: "Un enlace a tus compras funciona durante 24 horas. Esta tienda no puede enviar uno nuevo en este momento. Inténtalo de nuevo más tarde.",
+    busy: "Lo que compraste se conserva. Vuelve a intentarlo más tarde.",
+    discord_window: "El botón de Discord después de pagar funciona durante 3 días. Ahora está en tus compras, pero esta tienda no puede enviar un enlace a ellas en este momento. Inténtalo de nuevo más tarde.",
+    nothingArrived: "¿No te llegó nada? Puede que hayas pagado con otra dirección: la que escribiste al pagar. Esta tienda no puede enviar un enlace nuevo en este momento. Inténtalo de nuevo más tarde.",
+  },
   emailYouPaidWith: "El email con el que pagaste",
   emailMe: "Envíame mis compras por email",
   formNote: (store) =>
@@ -573,6 +599,10 @@ const fr: OrdersWords = {
       title: "Cette boutique ne peut pas afficher vos achats pour le moment",
       body: "Ce que vous avez acheté est conservé. Réessayez plus tard. Si votre lien a expiré d'ici là, demandez-en un nouveau ci-dessous.",
     },
+    discord_window: {
+      title: "Le bouton Discord se trouve dans vos achats",
+      body: `Le bouton Discord après le paiement fonctionne pendant 3${S}jours. Il se trouve maintenant dans vos achats. Demandez un lien vers eux ci-dessous${S}; cela ne prend que quelques secondes.`,
+    },
   },
 
   getAgainTitle: "Récupérez ce que vous avez acheté",
@@ -580,6 +610,14 @@ const fr: OrdersWords = {
     `Vous avez perdu un téléchargement ou changé de téléphone${S}? Saisissez l'e-mail avec lequel vous avez payé ${store}, et nous vous enverrons par e-mail un lien vers tout ce que vous avez acheté ici. Sans compte ni mot de passe.`,
   cannotLookUp: (store) =>
     `${store} ne peut pas accepter de paiements via Stripe pour le moment, il n'y a donc rien à rechercher ici. Réessayez plus tard.`,
+  cannotSend: (store) =>
+    `${store} ne peut pas envoyer de liens vers les achats par e-mail pour le moment, il n'y a donc rien à rechercher ici. Réessayez plus tard.`,
+  withoutForm: {
+    expired: `Un lien vers vos achats est valable 24${S}heures. Cette boutique ne peut pas en envoyer un nouveau pour le moment. Réessayez plus tard.`,
+    busy: "Ce que vous avez acheté est conservé. Réessayez plus tard.",
+    discord_window: `Le bouton Discord après le paiement fonctionne pendant 3${S}jours. Il se trouve maintenant dans vos achats, mais cette boutique ne peut pas envoyer de lien vers eux pour le moment. Réessayez plus tard.`,
+    nothingArrived: `Rien reçu${S}? Vous avez peut-être payé avec une autre adresse${S}: celle saisie lors du paiement. Cette boutique ne peut pas envoyer de nouveau lien pour le moment. Réessayez plus tard.`,
+  },
   emailYouPaidWith: "L'e-mail avec lequel vous avez payé",
   emailMe: "M'envoyer mes achats par e-mail",
   formNote: (store) =>
@@ -814,6 +852,10 @@ const de: OrdersWords = {
       title: "Dieser Shop kann Ihre Käufe gerade nicht anzeigen",
       body: "Was Sie gekauft haben, bleibt erhalten. Versuchen Sie es später noch einmal. Wenn Ihr Link bis dahin abgelaufen ist, fordern Sie unten einen neuen an.",
     },
+    discord_window: {
+      title: "Die Discord-Schaltfläche finden Sie bei Ihren Käufen",
+      body: "Die Discord-Schaltfläche nach dem Bezahlen gilt 3 Tage. Jetzt finden Sie sie bei Ihren Käufen. Fordern Sie unten einen Link dazu an; das dauert nur ein paar Sekunden.",
+    },
   },
 
   getAgainTitle: "Ihre Käufe erneut abrufen",
@@ -821,6 +863,14 @@ const de: OrdersWords = {
     `Einen Download verloren oder ein neues Handy? Geben Sie die E-Mail-Adresse ein, mit der Sie bei ${store} bezahlt haben, und wir schicken Ihnen per E-Mail einen Link zu allem, was Sie hier gekauft haben. Ohne Konto und ohne Passwort.`,
   cannotLookUp: (store) =>
     `${store} kann gerade keine Zahlungen über Stripe annehmen, daher gibt es hier nichts nachzuschlagen. Versuchen Sie es später noch einmal.`,
+  cannotSend: (store) =>
+    `${store} kann gerade keine Links zu Käufen per E-Mail senden, daher gibt es hier nichts nachzuschlagen. Versuchen Sie es später noch einmal.`,
+  withoutForm: {
+    expired: "Ein Link zu Ihren Käufen gilt 24 Stunden. Dieser Shop kann gerade keinen neuen senden. Versuchen Sie es später noch einmal.",
+    busy: "Was Sie gekauft haben, bleibt erhalten. Versuchen Sie es später noch einmal.",
+    discord_window: "Die Discord-Schaltfläche nach dem Bezahlen gilt 3 Tage. Jetzt finden Sie sie bei Ihren Käufen, aber dieser Shop kann gerade keinen Link dazu senden. Versuchen Sie es später noch einmal.",
+    nothingArrived: "Nichts angekommen? Vielleicht haben Sie mit einer anderen Adresse bezahlt: der, die Sie beim Bezahlen eingegeben haben. Dieser Shop kann gerade keinen neuen Link senden. Versuchen Sie es später noch einmal.",
+  },
   emailYouPaidWith: "Die E-Mail-Adresse, mit der Sie bezahlt haben",
   emailMe: "Meine Käufe per E-Mail senden",
   formNote: (store) =>
@@ -1060,6 +1110,10 @@ const it: OrdersWords = {
       title: "Questo negozio non può mostrare i tuoi acquisti in questo momento",
       body: "Ciò che hai acquistato è conservato. Riprova più tardi. Se nel frattempo il tuo link è scaduto, chiedine uno nuovo qui sotto.",
     },
+    discord_window: {
+      title: "Il pulsante di Discord è nei tuoi acquisti",
+      body: "Il pulsante di Discord dopo il pagamento funziona per 3 giorni. Ora è nei tuoi acquisti. Chiedi qui sotto un link per aprirli; ci vogliono pochi secondi.",
+    },
   },
 
   getAgainTitle: "Recupera ciò che hai acquistato",
@@ -1067,6 +1121,14 @@ const it: OrdersWords = {
     `Hai perso un download o hai cambiato telefono? Inserisci l'email con cui hai pagato ${store} e ti invieremo via email un link a tutto ciò che hai acquistato qui. Nessun account e nessuna password.`,
   cannotLookUp: (store) =>
     `${store} non può accettare pagamenti tramite Stripe in questo momento, quindi da qui non c'è nulla da cercare. Riprova più tardi.`,
+  cannotSend: (store) =>
+    `${store} non può inviare per email link agli acquisti in questo momento, quindi da qui non c'è nulla da cercare. Riprova più tardi.`,
+  withoutForm: {
+    expired: "Un link ai tuoi acquisti funziona per 24 ore. Questo negozio non può inviarne uno nuovo in questo momento. Riprova più tardi.",
+    busy: "Ciò che hai acquistato è conservato. Riprova più tardi.",
+    discord_window: "Il pulsante di Discord dopo il pagamento funziona per 3 giorni. Ora è nei tuoi acquisti, ma questo negozio non può inviare un link per aprirli in questo momento. Riprova più tardi.",
+    nothingArrived: "Non è arrivato nulla? Forse hai pagato con un altro indirizzo: quello che hai inserito al momento del pagamento. Questo negozio non può inviare un nuovo link in questo momento. Riprova più tardi.",
+  },
   emailYouPaidWith: "L'email con cui hai pagato",
   emailMe: "Inviami i miei acquisti via email",
   formNote: (store) =>
@@ -1302,6 +1364,10 @@ const nl: OrdersWords = {
       title: "Deze winkel kan je aankopen nu niet tonen",
       body: "Wat je hebt gekocht, blijft bewaard. Probeer het later opnieuw. Is je link tegen die tijd verlopen, vraag dan hieronder een nieuwe aan.",
     },
+    discord_window: {
+      title: "De Discord-knop staat bij je aankopen",
+      body: "De Discord-knop na het afrekenen werkt 3 dagen. Nu staat hij bij je aankopen. Vraag hieronder een link ernaar aan; dat duurt maar een paar seconden.",
+    },
   },
 
   getAgainTitle: "Haal je aankopen opnieuw op",
@@ -1309,6 +1375,14 @@ const nl: OrdersWords = {
     `Een download kwijt, of een nieuwe telefoon? Vul het e-mailadres in waarmee je ${store} hebt betaald, en we mailen je een link naar alles wat je hier hebt gekocht. Geen account en geen wachtwoord.`,
   cannotLookUp: (store) =>
     `${store} kan nu geen betalingen via Stripe ontvangen, dus hier valt niets op te zoeken. Probeer het later opnieuw.`,
+  cannotSend: (store) =>
+    `${store} kan nu geen links naar aankopen e-mailen, dus hier valt niets op te zoeken. Probeer het later opnieuw.`,
+  withoutForm: {
+    expired: "Een link naar je aankopen werkt 24 uur. Deze winkel kan nu geen nieuwe sturen. Probeer het later opnieuw.",
+    busy: "Wat je hebt gekocht, blijft bewaard. Probeer het later opnieuw.",
+    discord_window: "De Discord-knop na het afrekenen werkt 3 dagen. Nu staat hij bij je aankopen, maar deze winkel kan nu geen link ernaar sturen. Probeer het later opnieuw.",
+    nothingArrived: "Niets ontvangen? Misschien heb je met een ander adres betaald: het adres dat je bij het afrekenen hebt ingevuld. Deze winkel kan nu geen nieuwe link sturen. Probeer het later opnieuw.",
+  },
   emailYouPaidWith: "Het e-mailadres waarmee je hebt betaald",
   emailMe: "Mail me mijn aankopen",
   formNote: (store) =>
@@ -1543,6 +1617,10 @@ const pt: OrdersWords = {
       title: "Esta loja não pode mostrar as suas compras neste momento",
       body: "O que comprou fica guardado. Tente novamente mais tarde. Se entretanto a sua ligação expirar, peça uma nova abaixo.",
     },
+    discord_window: {
+      title: "O botão do Discord está nas suas compras",
+      body: "O botão do Discord depois do pagamento funciona durante 3 dias. Agora está nas suas compras. Peça abaixo uma ligação para elas; demora apenas alguns segundos.",
+    },
   },
 
   getAgainTitle: "Volte a obter o que comprou",
@@ -1550,6 +1628,14 @@ const pt: OrdersWords = {
     `Perdeu um ficheiro descarregado ou mudou de telemóvel? Introduza o email com que pagou a ${store} e enviamos-lhe por email uma ligação para tudo o que comprou aqui. Sem conta e sem palavra-passe.`,
   cannotLookUp: (store) =>
     `${store} não pode receber pagamentos através da Stripe neste momento, por isso não há nada a procurar aqui. Tente novamente mais tarde.`,
+  cannotSend: (store) =>
+    `${store} não pode enviar por email ligações para as compras neste momento, por isso não há nada a procurar aqui. Tente novamente mais tarde.`,
+  withoutForm: {
+    expired: "Uma ligação para as suas compras funciona durante 24 horas. Esta loja não pode enviar uma nova neste momento. Tente novamente mais tarde.",
+    busy: "O que comprou fica guardado. Tente novamente mais tarde.",
+    discord_window: "O botão do Discord depois do pagamento funciona durante 3 dias. Agora está nas suas compras, mas esta loja não pode enviar uma ligação para elas neste momento. Tente novamente mais tarde.",
+    nothingArrived: "Não recebeu nada? Talvez tenha pago com outro endereço: o que introduziu no pagamento. Esta loja não pode enviar uma nova ligação neste momento. Tente novamente mais tarde.",
+  },
   emailYouPaidWith: "O email com que pagou",
   emailMe: "Enviar-me as minhas compras por email",
   formNote: (store) =>

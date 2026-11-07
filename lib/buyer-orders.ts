@@ -404,8 +404,18 @@ async function linesOf(find: (id: string | undefined) => Promise<Listing | null>
  * platform (lib/imported-purchases.ts), who have no Stripe sale to look up.
  */
 export function canRecover(store: Store): boolean {
+  return recoverHeldBy(store) === null;
+}
+
+/**
+ * What keeps canRecover false, so the page says the true reason: "payments"
+ * (no Stripe account we can read and no buyers brought over) or "sending"
+ * (purchases to look up, but no link can be kept or emailed right now).
+ */
+export function recoverHeldBy(store: Store): "payments" | "sending" | null {
   const stripe = Boolean(store.stripeAccountId) && platformKey() !== null;
-  return (stripe || store.pastBuyers) && isRedisConfigured() && isSenderConfigured();
+  if (!stripe && !store.pastBuyers) return "payments";
+  return isRedisConfigured() && isSenderConfigured() ? null : "sending";
 }
 
 /**

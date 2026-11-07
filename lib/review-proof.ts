@@ -231,11 +231,18 @@ async function readLink(store: Store, token: string): Promise<LinkGrant | null> 
 /**
  * The order a door opens, proved, and only for the buyer who holds it. The
  * address a link was sent to has to be the address the order was paid with.
- * A link whose grant could not be read just now (UnknownReplyError, from
- * ordersGrant) is an error the page says as such, never an expired link.
+ * A link that could not be read just now (a reply not in its exact shape,
+ * UnknownReplyError from ordersGrant; a refused connection, a timeout or a
+ * reply that was not ok, from either link's GET) is an error the page and
+ * the route say as such, never an expired link and never a raw 500. The
+ * order's own read from Stripe already says its failures as "error"
+ * (provePurchase).
  */
 export async function openDoor(store: Store, door: Door, nowSeconds = Date.now() / 1000): Promise<ProofResult> {
-  return doorOpened(store, door, nowSeconds).catch((error: unknown) => (error instanceof UnknownReplyError ? ({ state: "error" } as const) : Promise.reject(error)));
+  return doorOpened(store, door, nowSeconds).catch((error: unknown) => {
+    console.error(error instanceof UnknownReplyError ? "a review door's link answered in no known shape" : "reading a review door's link failed", error);
+    return { state: "error" } as const;
+  });
 }
 
 async function doorOpened(store: Store, door: Door, nowSeconds: number): Promise<ProofResult> {

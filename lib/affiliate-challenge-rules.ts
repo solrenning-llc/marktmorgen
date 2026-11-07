@@ -13,8 +13,10 @@
  *     bonus, the second tier and a lead are not new sales;
  *   - the book already counts refunds and disputes from the creator's Stripe
  *     account, so a refunded or disputed sale is off, and a refund that comes
- *     after the end takes the sale off too. A book whose refunds could not be
- *     checked gives no standings at all, never a guess;
+ *     after the end takes the sale off too. The count is of whole sales only:
+ *     a sale refunded in part is off as well, never counted as a share of a
+ *     sale, and the page says so. A book whose refunds could not be checked
+ *     gives no standings at all, never a guess;
  *   - the affiliate's own purchase never counts; an affiliate who is not
  *     approved, who is held for the creator to look at (a shared address,
  *     paid search clicks) or whom the creator left out is not placed;
@@ -22,7 +24,11 @@
  *     number at the same second shares the place, and a shared winning
  *     place wins for everybody on it;
  *   - another affiliate is shown by the name they chose for the board, only
- *     when they chose one, and never by their address.
+ *     when they chose one, and never by their address; a name the board uses
+ *     itself ("You", "An affiliate") cannot be chosen;
+ *   - the title and the prize say no money and promise no earnings: a
+ *     currency sign, an amount with a currency code, cash, transfers,
+ *     payment services, gift cards, "guaranteed" and "earn" are refused.
  *
  * Marktmorgen holds no money and pays no prize: the prize is the creator's,
  * given by them. Nothing here changes a commission, a rate or a payout.
@@ -49,6 +55,8 @@ export const CHALLENGE_MAX_GOAL = 10_000;
 export const CHALLENGE_MAX_PRODUCTS = 50;
 /** The longest prize description, in characters. */
 export const CHALLENGE_MAX_PRIZE = 120;
+/** The most affiliates a challenge can leave out: every affiliate a store can have (lib/affiliate-setting.ts MAX_AFFILIATES). */
+export const CHALLENGE_MAX_EXCLUDED = 1_000;
 /** How many rows the board shows by default. */
 export const CHALLENGE_BOARD_ROWS = 10;
 
@@ -78,7 +86,7 @@ export type Challenge = {
   excluded?: string[];
 };
 
-export type ChallengeProblem = "title" | "dates" | "winners" | "prize" | "products";
+export type ChallengeProblem = "title" | "dates" | "winners" | "prize" | "products" | "excluded" | "money";
 
 export type ChallengePhase = "upcoming" | "running" | "settling" | "over";
 
@@ -95,11 +103,69 @@ export type BoardRow = { place: number; label: string; sales: number; you: boole
 
 /** The sales an affiliate brought, as the book credits them. */
 const BROUGHT_NEW: readonly Credit[] = ["click", "code", "buyer", "contact"];
-/** Book states of a sale that was paid and kept, in whole or in part. */
-const KEPT: readonly LineStatus[] = ["earned", "partly refunded"];
+/** The book state of a sale that was paid and kept whole; a sale refunded in part is not a whole sale. */
+const KEPT: readonly LineStatus[] = ["earned"];
 
 const LINK = /https?:|:\/\/|www\./i;
 const PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** The book's own affiliate id shape (lib/affiliates.ts AFFILIATE_ID_PATTERN), kept here so this file reads nothing. */
+const AFFILIATE_ID = /^[0-9a-f]{12}$/;
+
+/**
+ * ISO 4217 codes (as Intl.supportedValuesOf("currency") lists them on
+ * 7 November 2026), less the ones that are everyday words or names
+ * (ALL, AMD, BAM, BOB, CUP, GEL, MAD, MOP, PEN, PHP, RON, SOS, TOP, TRY), so
+ * "Top 3" or "My PHP 8 course" still pass. A code counts as money next to a
+ * number, in either order, with or without a space.
+ */
+const CURRENCY_CODES =
+  "AED AFN ANG AOA ARS AUD AWG AZN BBD BDT BGN BHD BIF BMD BND BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUC CVE CZK DJF DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GHS GIP GMD GNF GTQ GYD HKD HNL HRK HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MDL MGA MKD MMK MNT MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PGK PKR PLN PYG QAR RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SRD SSP STN SVC SYP SZL THB TJS TMT TND TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XCG XDR XOF XPF XSU YER ZAR ZMW ZWG ZWL".split(" ");
+/** The codes of the currencies most often written alone ("paid in USD"), which are never everyday words. */
+const MAJOR_CODES = "USD EUR GBP BRL JPY CHF AUD NZD MXN INR CNY HKD SGD ZAR SEK NOK DKK PLN KRW".split(" ");
+const AMOUNT = "\\d[\\d,.]*";
+const CODE_NEXT_TO_AMOUNT = new RegExp(`(?:^|[^\\p{L}])(?:${CURRENCY_CODES.join("|")})\\s?${AMOUNT}|${AMOUNT}\\s?(?:${CURRENCY_CODES.join("|")})(?![\\p{L}])`, "iu");
+/** Money, payment services and promises of earnings, as whole words in any case. */
+const MONEY_WORDS = new RegExp(
+  `(?:^|[^\\p{L}\\p{N}])(?:${[
+    ...MAJOR_CODES,
+    "cash\\w*",
+    "money",
+    "transfer\\w*",
+    "wire",
+    "paypal",
+    "venmo",
+    "zelle",
+    "payoneer",
+    "revolut",
+    "bitcoins?",
+    "btc",
+    "crypto(?:currenc(?:y|ies))?",
+    "usdt",
+    "usdc",
+    "ethereum",
+    "gift ?cards?",
+    "payouts?",
+    "income",
+    "profits?",
+    "salary",
+    "commissions?",
+    "dollars?",
+    "bucks",
+    "euros?",
+    "reais",
+    "guarantee[ds]?",
+    "earn\\w*",
+  ].join("|")})(?![\\p{L}\\p{N}])`,
+  "iu",
+);
+
+/** Whether free text says money or promises earnings: a currency sign, an amount with a code, or a money word. */
+function saysMoney(text: string): boolean {
+  return /\p{Sc}/u.test(text) || CODE_NEXT_TO_AMOUNT.test(text) || MONEY_WORDS.test(text);
+}
+
+/** Names the board uses itself, compared on letters and numbers only, in any case. */
+const RESERVED_NAMES = new Set(["you", "anaffiliate", "affiliate", "marktmorgen"]);
 
 const tidy = (raw: unknown): string => (typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "");
 const whole = (raw: unknown, min: number, max: number): number | null =>
@@ -112,6 +178,7 @@ export function readChallenge(raw: unknown, nowMs: number): { ok: true; challeng
 
   const title = tidy(value.title);
   if (!title || title.length > CHALLENGE_MAX_TITLE) return { ok: false, problem: "title" };
+  if (saysMoney(title)) return { ok: false, problem: "money" };
 
   const now = Math.floor(nowMs / 1000);
   const start = whole(value.start, 1, SECONDS_CEILING);
@@ -145,6 +212,7 @@ export function readChallenge(raw: unknown, nowMs: number): { ok: true; challeng
   ) {
     return { ok: false, problem: "prize" };
   }
+  if (saysMoney(label)) return { ok: false, problem: "money" };
 
   let products: string[] = [];
   if (value.products !== undefined && value.products !== null) {
@@ -153,7 +221,16 @@ export function readChallenge(raw: unknown, nowMs: number): { ok: true; challeng
     products = [...new Set(value.products as string[])];
   }
 
-  return { ok: true, challenge: { title, start, end, goal, places, products, prize: { kind: kind as PrizeKind, label } } };
+  let excluded: string[] | undefined;
+  if (value.excluded !== undefined && value.excluded !== null) {
+    if (!Array.isArray(value.excluded) || value.excluded.length > CHALLENGE_MAX_EXCLUDED) return { ok: false, problem: "excluded" };
+    if (!value.excluded.every((a) => typeof a === "string" && AFFILIATE_ID.test(a))) return { ok: false, problem: "excluded" };
+    excluded = [...new Set(value.excluded as string[])];
+  }
+
+  const challenge: Challenge = { title, start, end, goal, places, products, prize: { kind: kind as PrizeKind, label } };
+  if (excluded) challenge.excluded = excluded;
+  return { ok: true, challenge };
 }
 
 /** Where a challenge is in time. */
@@ -185,7 +262,7 @@ export function challengeStandings(
   const sold = new Map<string, { sales: number; reachedAt: number }>();
   for (const line of book.lines) {
     if (!BROUGHT_NEW.includes(line.how) || line.self || !KEPT.includes(line.status)) continue;
-    if (!(line.base - line.refunded > 0)) continue;
+    if (line.refunded !== 0 || !(line.base > 0)) continue;
     if (!(line.at >= c.start && line.at < c.end)) continue;
     if (products.size && !products.has(line.product)) continue;
     if (!approved.has(line.aff) || excluded.has(line.aff)) continue;
@@ -237,12 +314,13 @@ export function challengeBoard(
   return { rows, mine: own ? { place: own.place, sales: own.sales } : { place: null, sales: 0 } };
 }
 
-/** A name an affiliate chose for the board: letters, numbers, spaces and . ' _ -; never an address or a link. */
+/** A name an affiliate chose for the board: letters, numbers, spaces and . ' _ -; never an address, a link or a name the board uses itself. */
 export function readBoardName(raw: unknown): string | null {
   const name = tidy(raw);
   if (name.length < 2 || name.length > 30) return null;
   if (!/^[\p{L}\p{N}][\p{L}\p{N} .'_-]*$/u.test(name)) return null;
   if (LINK.test(name) || /\.[a-z]{2,}/i.test(name)) return null;
+  if (RESERVED_NAMES.has(name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, ""))) return null;
   return name;
 }
 
@@ -253,7 +331,7 @@ const day = (seconds: number): string =>
 export function challengeNotes(c: Challenge, nowMs: number): string[] {
   const notes = [
     `The prize comes from you: ${c.prize.label}. You give it yourself. Marktmorgen does not pay or hold prizes.`,
-    "Only paid sales your affiliates bring count. Their own purchases, refunded sales and chargebacks do not count.",
+    "Only whole paid sales your affiliates bring count. Their own purchases, sales refunded in whole or in part, and chargebacks do not count.",
   ];
   const lastDay = day(c.end - 1);
   switch (challengePhase(c, nowMs)) {

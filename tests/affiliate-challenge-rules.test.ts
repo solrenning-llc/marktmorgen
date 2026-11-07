@@ -168,7 +168,7 @@ for (const label of [
 for (const title of ["Win $500", "Earn $1,000 guaranteed", "500 USD challenge", "Cash race", "PayPal sprint", "Make money in May"]) {
   is(`a title that is money or a promise of earnings is refused: ${JSON.stringify(title)}`, refused({ title }), "money");
 }
-for (const label of ["Free access to my course", "10% off coupon", "My PHP 8 course, free", "All 5 templates", "Try 2 months of coaching", "A signed copy of my book", "Lifetime access to the community"]) {
+for (const label of ["Free access to my course", "10% off coupon", "My PHP 8 course, free", "All 5 templates", "Try 2 months of coaching", "A signed copy of my book", "Lifetime access to the community", "Cryptography for beginners", "Learn Spanish, free", "Wireless headphones"]) {
   is(`a neutral prize passes: ${JSON.stringify(label)}`, refused({ prize: { kind: "access", label } }), "accepted");
 }
 for (const title of ["Top 3 sellers win", "Spring push", "Summer sprint 2027", "Transformation challenge"]) {

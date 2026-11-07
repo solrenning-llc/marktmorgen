@@ -358,12 +358,44 @@ async function keepConnection(
   return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
 }
 
+/**
+ * The token that gives a connection's whole grant back, opened from its sealed
+ * texts in their own context, or "" when none of them opens. Zoom takes back
+ * the whole grant from its access token; Google from either, the refresh
+ * token first.
+ */
+function grantToken(statsId: string, provider: MeetProvider, sealed: { refresh: unknown; access: unknown }, host = ""): string {
+  const open = (part: "access" | "refresh") => {
+    const text = sealed[part];
+    if (typeof text !== "string" || !text) return "";
+    const opened = unseal(text, context(statsId, provider, part, host));
+    return opened.ok ? opened.value : "";
+  };
+  return provider === "zoom" ? open("access") : open("refresh") || open("access");
+}
+
 async function giveBack(statsId: string, c: Connection, host = ""): Promise<void> {
-  const opened = unseal(c.refresh, context(statsId, c.provider, "refresh", host));
-  // Zoom takes back the whole grant from its access token; Google from either.
-  const access = unseal(c.access, context(statsId, c.provider, "access", host));
-  const token = c.provider === "zoom" ? (access.ok ? access.value : "") : opened.ok ? opened.value : "";
+  const token = grantToken(statsId, c.provider, c, host);
   if (token) await revoke(c.provider, token);
+}
+
+/**
+ * What can still be given back from text kept as a connection that does not
+ * read as one (damaged): the grant's token, if a sealed text in it still opens
+ * in this connection's own context, and the account id it was listed under,
+ * if one is still there.
+ */
+function salvage(raw: string, statsId: string, provider: MeetProvider, host: string): { token: string; accountId: string } {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return { token: "", accountId: "" };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { token: "", accountId: "" };
+  const v = value as { refresh?: unknown; access?: unknown; account?: unknown };
+  const account = v.account && typeof v.account === "object" ? (v.account as { id?: unknown }).id : undefined;
+  return { token: grantToken(statsId, provider, { refresh: v.refresh, access: v.access }, host), accountId: typeof account === "string" ? account : "" };
 }
 
 /** Each reply of a pipeline that deletes, confirmed by its own count (DEL, SREM), or UnknownReplyError: never taken as done unseen. */
@@ -380,9 +412,13 @@ function confirmCounts(replies: unknown, commands: number, what: string): void {
  * answering null. A reply of another shape is unknown and throws, so the
  * creator is never told an account is gone while its tokens are still kept
  * (the route answers 500, "try again"). Text kept there that is not a
- * connection (damaged) is deleted, since the creator asked to end it, and
- * answered as null: nothing in it can be given back. Every deletion is
- * confirmed by its own count, or this throws.
+ * connection (damaged) is answered as null once it is gone: a token in it that
+ * still opens is given back first, and the text is deleted only after the
+ * provider confirmed it; a give-back that fails or is not confirmed keeps the
+ * text and throws, so disconnecting can be tried again while the access may
+ * still be live. Text with no token that opens is deleted at once, since the
+ * creator asked to end it and nothing in it can be given back. Every deletion
+ * is confirmed by its own count, or this throws.
  */
 export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<ConnectionView | null> {
   // Under the renewal lock: a renewal under way finishes first, and none can
@@ -393,8 +429,22 @@ export async function disconnect(statsId: string, provider: MeetProvider, host =
     if (read[0] === null) return null;
     const c = parseConnection(read[0], provider);
     if (!c) {
-      console.error("a damaged meeting connection was deleted without giving its access back", provider, host ? "host" : "store");
-      const gone = host ? [["DEL", connKey(statsId, provider, host)]] : [["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)]];
+      const left = salvage(read[0], statsId, provider, host);
+      if (left.token) {
+        // Not forgotten until the provider confirmed the access is back: a
+        // failed or unconfirmed revoke throws (ProviderError included) and
+        // keeps the text, so a retry can still give it back.
+        if (!(await revoke(provider, left.token))) throw new Error("a damaged meeting connection's access could not be given back");
+      } else {
+        console.error("a damaged meeting connection was deleted with no access in it that could be given back", provider, host ? "host" : "store");
+      }
+      const gone = host
+        ? [["DEL", connKey(statsId, provider, host)]]
+        : [
+            ["DEL", connKey(statsId, provider)],
+            ["DEL", testKey(statsId, provider)],
+            ...(left.accountId ? [["SREM", userKey(provider, left.accountId), statsId]] : []),
+          ];
       confirmCounts(await redisPipeline(gone), gone.length, "a meeting connection's deletion");
       return null;
     }

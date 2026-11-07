@@ -1,8 +1,11 @@
 /**
  * Three follow-ups to tests/picture-owner-paths.test.ts, from its independent security review (5 November 2026):
  *
- *   - a link that is not there is refused at once, before the picture door is touched: the in_use check used to run
- *     only when the link was found, and a fresh upload named for a missing link was taken from the door and deleted;
+ *   - a link that is not there answers "unknown" before any other refusal, and only a picture fresh from the door is
+ *     deleted then: a picture of another product, link or page named for it is never touched. (Changed on Claude 5's
+ *     correction on #2657: refusing before the door kept a fresh upload in storage for good, since the door's note
+ *     ends in a day, nothing sweeps such pictures and the studio always uploads under a new name, so it is never
+ *     chosen again.)
  *   - a product's file is never an episode's audio: the file route took an episode's audio (same product folder) as
  *     the product's file, and taking that file off (or replacing it) deleted the episode's audio. Today a podcast
  *     takes no file (lib/store.ts changeDelivery answers "course") and an option's file lives in the option's own
@@ -107,9 +110,12 @@ async function main(): Promise<void> {
   const fresh = await upload({ linkId: gone });
   is("the link taken off in another tab", await result(await links(post("/api/store/links", session, { action: "remove", id: gone }))), [200, "ok"]);
   is("the new picture put on the link that is gone: refused, unknown", await linkAttach(gone, fresh), [404, "unknown"]);
-  is("the picture is not deleted: nothing was taken from the door", files.has(fresh), true);
-  is("the same picture, chosen for a link that is there: put on, its note was still on the door", await linkAttach(kept, fresh), [200, "ok"]);
-  is("and that link shows it", await linkPicture(kept), fresh);
+  // Changed assertions, noted (Claude 5's correction on #2657): the fresh upload is taken from the door and deleted, never
+  // left in storage with no owner; a new picture for the link that is there is put on as before.
+  is("the fresh picture is taken from the door and deleted: it is never left in storage with no owner", files.has(fresh), false);
+  const again = await upload({ linkId: kept });
+  is("a new picture, chosen for a link that is there: put on", await linkAttach(kept, again), [200, "ok"]);
+  is("and that link shows it", await linkPicture(kept), again);
   const aPicture = await upload({ productId: a });
   is("a new picture on product A", await result(await productImage(post("/api/store/image", session, { action: "attach", id: a, path: aPicture, width: 1200, height: 800 }))), [200, "ok"]);
   is("A's picture named for the link that is gone, with sizes the link refuses: unknown first", await linkAttach(gone, aPicture, 0), [404, "unknown"]);

@@ -1,0 +1,601 @@
+
+## head
+J_3084_FOCAL head numbers-email-claim.test.ts TARGET e4afa5e4847ecf85db62006f3bfcdf58e226b22d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Weekly: a week with no visitors, read exactly, is quiet and stays claimed (control)
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  ok    quiet, nothing failed, nothing sent
+  ok    the week stays claimed, so nobody gets two
+
+Weekly: numbers that could not be read (unknown) let the week go, never 'quiet'
+weekly: {"looked":1,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    counted as failed, not as a quiet week
+  ok    the week's claim is let go, so a later run tries again
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  ok    the next run reads the numbers and claims the week
+
+Weekly: numbers that could not be read (throws) let the week go, never 'quiet'
+weekly: {"looked":1,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    counted as failed, not as a quiet week
+  ok    the week's claim is let go, so a later run tries again
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  ok    the next run reads the numbers and claims the week
+
+Weekly: a week with visitors is emailed once and stays claimed (control)
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    one email, nothing failed
+  ok    claimed for the week
+
+Weekly: an unreadable channel address takes no claim and sends nothing this run
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    counted as failed; no email went without the channel post
+  ok    the week is not claimed, so a later run sends both
+
+Monthly: unread numbers still let the month go (control)
+monthly: {"looked":1,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    failed, claim let go
+
+Monthly: a month with visitors is emailed once and stays claimed (control)
+monthly: {"looked":1,"sent":1,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    one email, nothing failed
+  ok    claimed for the month
+
+Monthly: an unreadable channel address takes no claim and sends nothing this run
+monthly: {"looked":0,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    counted as failed; no email went without the channel post
+  ok    the month is not claimed, so a later run sends both
+
+17 checks, all passing.
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 83
+J_CHILD_EXIT 0
+
+## old
+J_3084_FOCAL old-modules numbers-email-claim.test.ts TARGET e4afa5e4847ecf85db62006f3bfcdf58e226b22d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Weekly: a week with no visitors, read exactly, is quiet and stays claimed (control)
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  ok    quiet, nothing failed, nothing sent
+  ok    the week stays claimed, so nobody gets two
+
+Weekly: numbers that could not be read (unknown) let the week go, never 'quiet'
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  counted as failed, not as a quiet week
+        expected [true,0,1,0]
+        got      [true,1,0,0]
+  FAIL  the week's claim is let go, so a later run tries again
+        expected {"tried":true,"held":false}
+        got      {"tried":true,"held":true}
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  the next run reads the numbers and claims the week
+        expected [1,{"tried":true,"held":true}]
+        got      [0,{"tried":true,"held":true}]
+
+Weekly: numbers that could not be read (throws) let the week go, never 'quiet'
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  counted as failed, not as a quiet week
+        expected [true,0,1,0]
+        got      [true,1,0,0]
+  FAIL  the week's claim is let go, so a later run tries again
+        expected {"tried":true,"held":false}
+        got      {"tried":true,"held":true}
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  the next run reads the numbers and claims the week
+        expected [1,{"tried":true,"held":true}]
+        got      [0,{"tried":true,"held":true}]
+
+Weekly: a week with visitors is emailed once and stays claimed (control)
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    one email, nothing failed
+  ok    claimed for the week
+
+Weekly: an unreadable channel address takes no claim and sends nothing this run
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  counted as failed; no email went without the channel post
+        expected [true,1,0,0]
+        got      [true,0,1,1]
+  FAIL  the week is not claimed, so a later run sends both
+        expected false
+        got      true
+
+Monthly: unread numbers still let the month go (control)
+monthly: {"looked":1,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    failed, claim let go
+
+Monthly: a month with visitors is emailed once and stays claimed (control)
+monthly: {"looked":1,"sent":1,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    one email, nothing failed
+  ok    claimed for the month
+
+Monthly: an unreadable channel address takes no claim and sends nothing this run
+monthly: {"looked":1,"sent":1,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  counted as failed; no email went without the channel post
+        expected [true,1,0,0]
+        got      [true,0,1,1]
+  FAIL  the month is not claimed, so a later run sends both
+        expected false
+        got      true
+
+17 checks, 10 failing.
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 89
+J_CHILD_EXIT 1
+
+## recovery
+J_3084_FOCAL head j-3084-recovery.proof.ts TARGET e4afa5e4847ecf85db62006f3bfcdf58e226b22d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Weekly: a week with no visitors, read exactly, is quiet and stays claimed (control)
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  ok    quiet, nothing failed, nothing sent
+  ok    the week stays claimed, so nobody gets two
+
+Weekly: numbers that could not be read (unknown) let the week go, never 'quiet'
+weekly: {"looked":1,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    counted as failed, not as a quiet week
+  ok    the week's claim is let go, so a later run tries again
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  ok    the next run reads the numbers and claims the week
+
+Weekly: numbers that could not be read (throws) let the week go, never 'quiet'
+weekly: {"looked":1,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    counted as failed, not as a quiet week
+  ok    the week's claim is let go, so a later run tries again
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  ok    the next run reads the numbers and claims the week
+
+Weekly: a week with visitors is emailed once and stays claimed (control)
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    one email, nothing failed
+  ok    claimed for the week
+
+Weekly: an unreadable channel address takes no claim and sends nothing this run
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    counted as failed; no email went without the channel post
+  ok    the week is not claimed, so a later run sends both
+
+Monthly: unread numbers still let the month go (control)
+monthly: {"looked":1,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    failed, claim let go
+
+Monthly: a month with visitors is emailed once and stays claimed (control)
+monthly: {"looked":1,"sent":1,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    one email, nothing failed
+  ok    claimed for the month
+
+Monthly: an unreadable channel address takes no claim and sends nothing this run
+monthly: {"looked":0,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    counted as failed; no email went without the channel post
+  ok    the month is not claimed, so a later run sends both
+
+J: failed weekly numbers recover to a delivered email, without a duplicate
+weekly: {"looked":1,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    recovery sends once
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    next run does not send again
+weekly: {"looked":1,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    recovery sends once
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    next run does not send again
+
+J: channel read failure recovers before a single email: weekly
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    channel recovery sends once
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    channel recovery is not duplicated
+
+J: channel read failure recovers before a single email: monthly
+monthly: {"looked":0,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+monthly: {"looked":1,"sent":1,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    channel recovery sends once
+monthly: {"looked":0,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    channel recovery is not duplicated
+
+25 checks, all passing.
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 163
+J_CHILD_EXIT 0
+
+## recovery-old
+J_3084_FOCAL old-modules j-3084-recovery.proof.ts TARGET e4afa5e4847ecf85db62006f3bfcdf58e226b22d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Weekly: a week with no visitors, read exactly, is quiet and stays claimed (control)
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  ok    quiet, nothing failed, nothing sent
+  ok    the week stays claimed, so nobody gets two
+
+Weekly: numbers that could not be read (unknown) let the week go, never 'quiet'
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  counted as failed, not as a quiet week
+        expected [true,0,1,0]
+        got      [true,1,0,0]
+  FAIL  the week's claim is let go, so a later run tries again
+        expected {"tried":true,"held":false}
+        got      {"tried":true,"held":true}
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  the next run reads the numbers and claims the week
+        expected [1,{"tried":true,"held":true}]
+        got      [0,{"tried":true,"held":true}]
+
+Weekly: numbers that could not be read (throws) let the week go, never 'quiet'
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  counted as failed, not as a quiet week
+        expected [true,0,1,0]
+        got      [true,1,0,0]
+  FAIL  the week's claim is let go, so a later run tries again
+        expected {"tried":true,"held":false}
+        got      {"tried":true,"held":true}
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  the next run reads the numbers and claims the week
+        expected [1,{"tried":true,"held":true}]
+        got      [0,{"tried":true,"held":true}]
+
+Weekly: a week with visitors is emailed once and stays claimed (control)
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    one email, nothing failed
+  ok    claimed for the week
+
+Weekly: an unreadable channel address takes no claim and sends nothing this run
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  counted as failed; no email went without the channel post
+        expected [true,1,0,0]
+        got      [true,0,1,1]
+  FAIL  the week is not claimed, so a later run sends both
+        expected false
+        got      true
+
+Monthly: unread numbers still let the month go (control)
+monthly: {"looked":1,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":1}
+  ok    failed, claim let go
+
+Monthly: a month with visitors is emailed once and stays claimed (control)
+monthly: {"looked":1,"sent":1,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    one email, nothing failed
+  ok    claimed for the month
+
+Monthly: an unreadable channel address takes no claim and sends nothing this run
+monthly: {"looked":1,"sent":1,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  counted as failed; no email went without the channel post
+        expected [true,1,0,0]
+        got      [true,0,1,1]
+  FAIL  the month is not claimed, so a later run sends both
+        expected false
+        got      true
+
+J: failed weekly numbers recover to a delivered email, without a duplicate
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  recovery sends once
+        expected [1,1]
+        got      [0,0]
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  next run does not send again
+        expected [0,1]
+        got      [0,0]
+weekly: {"looked":1,"sent":0,"quiet":1,"stopped":0,"unpaid":0,"failed":0}
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  recovery sends once
+        expected [1,1]
+        got      [0,0]
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  next run does not send again
+        expected [0,1]
+        got      [0,0]
+
+J: channel read failure recovers before a single email: weekly
+weekly: {"looked":1,"sent":1,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  channel recovery sends once
+        expected [1,1]
+        got      [0,1]
+weekly: {"looked":0,"sent":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    channel recovery is not duplicated
+
+J: channel read failure recovers before a single email: monthly
+monthly: {"looked":1,"sent":1,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+monthly: {"looked":0,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  FAIL  channel recovery sends once
+        expected [1,1]
+        got      [0,1]
+monthly: {"looked":0,"sent":0,"posted":0,"quiet":0,"stopped":0,"unpaid":0,"failed":0}
+  ok    channel recovery is not duplicated
+
+25 checks, 16 failing.
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 163
+J_CHILD_EXIT 1
+
+## stats
+J_3084_FOCAL head stats-report.test.ts TARGET e4afa5e4847ecf85db62006f3bfcdf58e226b22d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+What a browser and the host say
+  ok    devices
+  ok    countries
+
+Counted, and read back
+  ok    countries
+  ok    devices
+  ok    checkouts by channel, untagged as direct
+  ok    free addresses by channel
+  ok    the all-time record keeps no countries
+
+A channel from visit to sale
+  ok    one row a channel, money first
+
+The API's summary
+  ok    visits are there, money is null without Stripe
+  ok    its channels
+  ok    its countries and devices
+
+The weekly email
+  ok    it says the week
+  ok    with where it came from and how to stop it
+  ok    a week with nobody is not written about
+  ok    a week starts on its Monday
+  ok    claimed once a week
+  ok    the stop link is the store's own
+  ok    stopped, and started again
+
+18 checks, all passing.
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 319
+J_CHILD_EXIT 0
+
+## summary
+J_3084_FOCAL head report-summary-coverage.test.ts TARGET e4afa5e4847ecf85db62006f3bfcdf58e226b22d
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+Public stats API distinguishes provider success from paid coverage
+  ok    provider state remains distinct from coverage
+  ok    last_7_days paid current and prior amounts unknown
+  ok    last_7_days measured traffic retained
+  ok    last_7_days channel paid values unknown
+  ok    last_7_days detail and refund coverage explicit
+  ok    last_30_days paid current and prior amounts unknown
+  ok    last_30_days measured traffic retained
+  ok    last_30_days channel paid values unknown
+  ok    last_30_days detail and refund coverage explicit
+  ok    last_90_days paid current and prior amounts unknown
+  ok    last_90_days measured traffic retained
+  ok    last_90_days channel paid values unknown
+  ok    last_90_days detail and refund coverage explicit
+
+API preceding traffic distinguishes unavailable history from zero
+  ok    known previous period remains available
+  ok    missing preceding history stays fully unknown
+  ok    missing individual window stays unavailable
+  ok    confirmed zero history stays zero
+  ok    partial purchases preserve known prior traffic
+  ok    missing history preserves current traffic
+  ok    provider failure leaves known prior visits available
+
+API windows expose UTC boundaries and calendar coverage
+  ok    seven day boundaries explicit
+  ok    thirty day dates match the request
+  ok    ninety day dates match the request
+  ok    partial payment coverage doesn't change date coverage
+  ok    short history remains explicit
+  ok    missing days leave boundaries unknown
+  ok    date gap blocks calendar completeness
+  ok    duplicate date blocks calendar completeness
+  ok    invalid date cannot create reported boundaries
+  ok    reversed dates block calendar completeness
+
+API attribution preserves unknown first visits and independent reading coverage
+  ok    attribution coverage and configured window explicit
+  ok    unidentified first visit amounts retained
+  ok    same purchases represented in alternative models
+  ok    unidentified last visits retain survey aggregates
+  ok    legacy missing first visits remain unavailable
+  ok    confirmed empty first history stays zero
+  ok    partial readings cannot expose attribution amounts
+  ok    missing attribution reading unavailable
+  ok    refund failure preserves purchase attribution
+  ok    no identities exposed in attribution
+
+API capped detail lists expose totals and truncation independently of reading coverage
+  ok    ad detail cap explicit despite complete reading
+  ok    country detail cap explicit
+  ok    short complete ad list is not truncated
+  ok    complete empty details have real zero counts
+  ok    missing detail counts stay unknown
+  ok    partial detail counts withheld
+  ok    partial lists stay empty
+  ok    refund failure preserves complete detail metadata
+
+API all-details option preserves coverage and returns all records
+  ok    all ad variants returned with matching metadata
+  ok    all buyer countries returned
+  ok    default details retain twenty-item limit
+  ok    all-details preserves zero readings
+  ok    all-details cannot expose partial paid records
+  ok    all-details preserves missing reports
+  ok    variant identity includes channel and campaign
+  ok    source lists remain unchanged
+
+API campaign results retain traffic independently of paid coverage
+  ok    campaign report dates and coverage
+  ok    shared campaign preserves all payment channels
+  ok    confirmed campaign without payments has empty channels
+  ok    partial purchases preserve measured campaign traffic
+  ok    partial campaign amounts and channels unknown
+  ok    missing campaign records unavailable
+  ok    confirmed empty campaign list available
+  ok    refund failure preserves purchase campaign results
+  ok    missing legacy payment channel detail remains unknown
+  ok    provider error preserves traffic without money
+
+API daily receipts retain independent refund coverage
+  ok    daily coverage confirmed
+  ok    complete report contains all seven UTC days
+  ok    channels sum into daily receipts
+  ok    older refunds preserve negative daily result
+  ok    confirmed quiet day is zero
+  ok    daily receipts reconcile with period total
+  ok    refund failure preserves receipt coverage
+  ok    refund failure leaves day amounts unknown
+  ok    missing daily refunds never become zero
+  ok    partial payment history produces no daily rows
+  ok    missing ledger produces no daily rows
+  ok    ninety day report includes all days
+
+API buyer cohorts preserve eligibility and history coverage
+  ok    cohort values mapped with eligible denominator
+  ok    confirmed empty cohort stays available
+  ok    history cap blocks cohort values
+  ok    purchase cap blocks cohort values
+  ok    missing cohort is unavailable
+  ok    refund failure leaves cohort available
+  ok    no eligible buyers has no false zero rate
+  ok    cohort output contains no identities
+  ok    provider failure blocks cohorts
+
+API weekly cohorts retain all observation windows
+  ok    weekly coverage and observation date explicit
+  ok    all ages use their own eligible denominators
+  ok    missing weekly report unavailable
+  ok    complete empty weekly report available
+  ok    partial history blocks weekly cohorts
+  ok    partial purchase reading blocks weekly cohorts
+  ok    refund failure preserves weekly cohorts
+  ok    weekly output contains no identities
+
+API refund activity distinguishes refunded money from buyer refund rates
+  ok    complete activity dates and totals
+  ok    refund ratios can exceed receipts
+  ok    refund-only channel remains visible without a ratio
+  ok    refund rows reconcile with refund total
+  ok    failed refund reading unavailable
+  ok    missing refund window stays unavailable
+  ok    incomplete purchases block ratios
+  ok    confirmed empty activity has zero records
+  ok    refund failure preserves gross totals
+  ok    refund output has no buyer identity
+
+API payment channels include renewals and unknown origins
+  ok    channel amounts and shares include all origins
+  ok    receipt dates explicit
+  ok    rows reconcile to the gross total
+  ok    refund failure preserves channel distribution
+  ok    partial history has no apparent zero channel report
+  ok    missing ledger remains unavailable
+  ok    confirmed empty ledger has an available empty list
+  ok    older receipts belong to longer period
+  ok    all receipt channels remain visible beyond twenty
+  ok    channel output contains no buyer identities
+
+API compares adjacent gross receipt periods
+  ok    adjacent comparison totals and dates
+  ok    shared channel growth and share change
+  ok    new channel retained with unknown growth
+  ok    lost channel retained
+  ok    refund failure preserves gross comparison
+  ok    ninety day prior period unavailable
+  ok    partial purchases block comparison
+  ok    short history never invents prior zero
+  ok    short history preserves current receipts
+  ok    zero prior receipts have no growth percentage
+  ok    confirmed empty periods compare as zero
+  ok    thirty day comparison has equal preceding dates
+
+API exposes gross receipts and renewals independently of refunds
+  ok    gross receipts use recorded payment ledger
+  ok    renewal counts and amounts exposed
+  ok    purchase revenue keeps its original meaning
+  ok    partial purchase ledger withholds gross receipts
+  ok    partial purchase reading withholds renewals
+  ok    refund failure preserves gross receipts
+  ok    missing refund records withhold amount after refunds
+  ok    missing payment ledger remains unavailable
+  ok    explicit payment failure wins over stale combined flag
+  ok    unread renewals never turn into zero
+  ok    capped renewal reading remains unavailable
+  ok    capped renewal reading blocks gross ledger
+  ok    confirmed empty payment ledger is zero
+  ok    negative result after older purchase refunds retained
+  ok    invalid ledger amount withheld
+  ok    each period uses its own dates
+  ok    complete purchase totals retained
+  ok    complete refund amount retained
+  ok    complete empty detail lists are measured
+  ok    missing legacy details aren't zero lists
+  ok    refund failure leaves purchase summary available
+  ok    missing refund window is unknown despite stale combined flag
+
+Weekly subjects and body never present partial sales as complete
+  ok    partial weekly subject contains only traffic
+  ok    weekly partial reading explained
+  ok    weekly traffic and channel visits retained
+  ok    partial money cannot select a channel without measured traffic
+  ok    partial weekly channels rank by visits
+  ok    channel selection doesn't mutate the source report
+  ok    complete paid-only channel remains useful
+  ok    no partial monetary figures or paid changes
+  ok    partial goal never declares pace or achievement
+  ok    complete purchase weekly subject retains money
+  ok    complete renewal weekly total retained
+  ok    partial renewals aren't shown as money
+  ok    partial renewals block only receipt-based goal
+  ok    missing ledger never invents zero goal progress
+
+Monthly receipts, channel ranking, best day and goals share coverage
+  ok    monthly subject doesn't claim partial income
+  ok    monthly measured traffic retained
+  ok    monthly unknown amounts explained
+  ok    monthly partial income cannot rank channels or days
+  ok    complete monthly receipt statement retained
+  ok    complete receipts do not depend on refunds
+  ok    failed renewal reading still preserves complete purchase counts
+  ok    failed renewal reading blocks monthly goal
+  ok    partial renewal summary blocks combined monthly money
+  ok    observed activity retains monthly report even with no visits
+  ok    active incomplete month has no monetary subject
+  ok    active incomplete month explains unavailable income
+  ok    none API has no paid coverage
+  ok    none weekly has no monetary subject
+  ok    none monthly has no monetary subject
+  ok    error API has no paid coverage
+  ok    error weekly has no monetary subject
+  ok    error monthly has no monetary subject
+  ok    provider error explicitly explained
+  ok    stop link remains available
+  ok    reports contain no buyer identities
+
+184 checks, all passing.
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0
+
+## types
+{
+  "scope": "direct roots plus imported types; imported dependency bodies not separately checked",
+  "roots": [
+    "app/api/cron/weekly/route.ts",
+    "app/api/cron/monthly/route.ts",
+    "lib/stats-report.ts",
+    "tests/numbers-email-claim.test.ts",
+    "tests/numbers-email-claim-world.ts",
+    "tests/j-3084-recovery.proof.ts"
+  ],
+  "sources": 813,
+  "options": {
+    "target": "ES2017",
+    "strict": true,
+    "moduleResolution": "Bundler"
+  },
+  "diagnostics": []
+}
+
+## lint
+
+## scanner
+Public data check: 4305 tracked files; 0 file(s) require correction.
+
+## diff

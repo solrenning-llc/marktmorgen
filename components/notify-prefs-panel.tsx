@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ALWAYS_ON_ROWS, OPTIONAL_ROWS, type OptionalEvent } from "@/lib/notify-prefs-rules";
 
 const UNCONFIRMED = "We could not confirm the save. Reload this page to see what is saved, then try again.";
@@ -33,17 +33,31 @@ function refusal(data: Answer): string {
 }
 
 /**
+ * What a successful save says, for each reading of the weekly email's stop
+ * link: off, on, or unknown (null, the read failed). Only "off" may say the
+ * emails now follow the choices.
+ */
+export function savedText(stopped: boolean | null): string {
+  if (stopped === false) return "Saved. Your alert emails follow these choices from now on.";
+  if (stopped) return "Saved. These emails stay stopped by the weekly email's link until you start them again above.";
+  return "Saved. If the stop link in a weekly email was used, these emails stay stopped until you start them again above.";
+}
+
+/**
  * The studio's alert email choices (app/studio/notifications; alertEmailsOff
  * in the store record, lib/notify-prefs-rules.ts): one labeled box per
  * optional alert and one Save; the notices that cannot be switched off are
  * listed as text with their reason, not as boxes that do nothing. While the
- * weekly email's stop link holds, that is said first, with a way to undo it.
- * Nothing is disabled while saving, so focus stays where the person left it.
+ * weekly email's stop link holds, or could not be checked (stopped is null),
+ * that is said first, with a way to undo it. Nothing is disabled while
+ * saving, so focus stays where the person left it; a successful restart
+ * removes its own button, so focus moves to the "Alerts you choose" heading.
  */
-export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { off: OptionalEvent[]; stopped: boolean }) {
+export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { off: OptionalEvent[]; stopped: boolean | null }) {
   const [saved, setSaved] = useState<OptionalEvent[]>(initial);
   const [off, setOff] = useState<OptionalEvent[]>(initial);
-  const [stopped, setStopped] = useState(initiallyStopped);
+  const [stopped, setStopped] = useState<boolean | null>(initiallyStopped);
+  const heading = useRef<HTMLHeadingElement>(null);
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
   const changed = off.length !== saved.length || off.some((event) => !saved.includes(event));
@@ -70,12 +84,7 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
     if (data?.ok && Array.isArray(data.off)) {
       setSaved(data.off);
       setOff(data.off);
-      setSaid({
-        ok: true,
-        text: stopped
-          ? "Saved. These emails stay stopped by the weekly email's link until you start them again above."
-          : "Saved. Your alert emails follow these choices from now on.",
-      });
+      setSaid({ ok: true, text: savedText(stopped) });
     } else setSaid({ ok: false, text: data ? refusal(data) : UNCONFIRMED });
   }
 
@@ -87,18 +96,27 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
     setBusy(false);
     if (data?.ok && data.restarted) {
       setStopped(false);
+      // The focused button goes with the stop block: move focus to the heading that stays.
+      heading.current?.focus();
       setSaid({ ok: true, text: "Started again. The alerts you chose, and the weekly, monthly and busy-day emails, come again." });
     } else setSaid({ ok: false, text: data ? refusal(data) : UNCONFIRMED });
   }
 
   return (
     <div className="mt-8 max-w-2xl">
-      {stopped ? (
+      {stopped !== false ? (
         <div className="notice mb-8">
-          <p>
-            All of these alert emails are stopped, because the stop link in a weekly email was used. The weekly, monthly and busy-day emails are
-            stopped too. Your choices below apply once they start again.
-          </p>
+          {stopped ? (
+            <p>
+              All of these alert emails are stopped, because the stop link in a weekly email was used. The weekly, monthly and busy-day emails are
+              stopped too. Your choices below apply once they start again.
+            </p>
+          ) : (
+            <p>
+              We could not check whether the stop link in a weekly email was used. If it was, all of these alert emails are stopped, along with
+              the weekly, monthly and busy-day emails. Reload this page to see, or start them again here.
+            </p>
+          )}
           <button type="button" className="btn btn-secondary mt-3 min-h-11" aria-busy={busy} onClick={() => void restart()}>
             Start these emails again
           </button>
@@ -106,7 +124,7 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
       ) : null}
 
       <section aria-labelledby="notify-choose">
-        <h2 id="notify-choose" className="t-h3">
+        <h2 id="notify-choose" ref={heading} tabIndex={-1} className="t-h3">
           Alerts you choose
         </h2>
         <p className="mt-2 text-ink-soft">
@@ -133,13 +151,12 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
                       onChange={(event) => setOff((now) => (event.target.checked ? now.filter((e) => e !== row.id) : [...now, row.id]))}
                       aria-describedby={`notify-${row.id}-text`}
                     />
-                    <span>
-                      <span className="font-semibold text-ink">{row.title}</span>
-                      <span id={`notify-${row.id}-text`} className="block text-sm text-ink-soft">
-                        {row.text}
-                      </span>
-                    </span>
+                    <span className="font-semibold text-ink">{row.title}</span>
                   </label>
+                  {/* Outside the label: given once, by aria-describedby, not also in the box's name. */}
+                  <p id={`notify-${row.id}-text`} className="ml-8 text-sm text-ink-soft">
+                    {row.text}
+                  </p>
                 </li>
               ))}
             </ul>

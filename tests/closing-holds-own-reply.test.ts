@@ -250,6 +250,22 @@ async function main() {
     is(`a search answered with ${label}: the hold is not done, and nothing is written`, [result?.done === true, writes], [false, []]);
   }
 
+  // Claude 6's money review of #3108 (rule 24): a page that does not say, exactly, whether there is more is not the
+  // last one; done there would leave the members of the next pages never held, and their records forgotten.
+  part("A search page that does not say exactly whether there is more is never the last one");
+  const notSaid = [
+    ["no has_more", { object: "search_result", data: [member], next_page: null }],
+    ["has_more true and no next_page", { object: "search_result", data: [member], has_more: true, next_page: null }],
+    ["has_more as a string", { object: "search_result", data: [member], has_more: "false", next_page: null }],
+  ] as const;
+  for (const [label, body] of notSaid) {
+    const { store, folder } = await setup();
+    await redis.pipeline([["HDEL", workKey(folder), `f:${MEMBER}`, `m:${MEMBER}`]]);
+    asIs.set("search", body);
+    const result = await holdCharges(store, ENDED_AT, Date.now() + 10_000).catch(() => null);
+    is(`a search page with ${label}: the hold is not done`, result?.done === true, false);
+  }
+
   part("A subscription the store's search found that is not of the handle searched is never held");
   {
     const { store, folder } = await setup();

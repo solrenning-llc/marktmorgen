@@ -102,6 +102,30 @@ async function main(): Promise<void> {
   payoutReply = undefined;
   is("the batch does not count a line whose write is not known", batch, "unknown");
   is("(the book holds only the one written)", await payouts(), 1);
+
+  part("A retry is a new payout under a new id, never HSET's 0 and never a 503");
+  // Each payout's id is drawn fresh (randomBytes) on every call, so a double click on "Mark as paid" or a payout
+  // file confirmed again never writes over an id already there: HSET answers 1, and 0 stays an overwrite.
+  const press = async () => {
+    const r = await affiliatesRoute(
+      new NextRequest("https://marktmorgen.com/api/store/affiliates", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ action: "payout", id: A, amount: "12", date: "2026-11-04", reference: "Double click" }),
+      }),
+    );
+    return [r.status, ((await r.json()) as { ok?: boolean }).ok];
+  };
+  is("a double click on Mark as paid: the first press is recorded", await press(), [200, true]);
+  is("and the second press too, never a 503", await press(), [200, true]);
+  is("(each under its own id)", await payouts(), 3);
+  const first = await addPayout(store, input);
+  const second = await addPayout(store, input);
+  is("the same payout written twice draws two ids", Boolean(first && second && first.id !== second.id && /^[0-9a-f]{12}$/.test(first.id)), true);
+  const again = async () => (await recordBatch(store, book, { date: "2026-11-05", reference: "Batch" })).written;
+  is("a payout file confirmed is written", await again(), 1);
+  is("and confirmed again, written under a new id, never thrown", await again(), 1);
+  is("(every one in the book)", await payouts(), 7);
   done();
 }
 

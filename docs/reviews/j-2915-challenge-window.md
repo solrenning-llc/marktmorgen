@@ -104,3 +104,54 @@ No product graph or test child loaded, and no provider or network call was made 
 The author's claimed final 91/91, linked29/29+23/23, types, lint, scanner and diff results remain **author-reported**, not fresh independent execution results. No global suite, browser or CI was run or modified.
 
 Factual disposition: the source of the previous LOW has been repaired in the exact author delta, with unchanged configuration, helper and remaining assertions. This return is **incomplete for executable confirmation** and does not certify an all-green exact-head review. A runnable same-environment replay of the listed focused checks is required to close that qualification. Only this existing review report is appended on the existing own evidence branch; author product files, author refs and CI remain untouched.
+
+
+## Executed independent return after executor recovery — exact 32abdc784041d2982568d61467f8778c04aa46af
+
+This addendum supersedes only the execution-blocked qualification above. The previous failures, old outputs, proof and runner remain history and are not rewritten. C4-3050/C4-3070 remain active: this evidence is **local only**, with no push, author-ref change, main integration, CI rerun/cancellation, or merge.
+
+### Exact source and causal type RED
+
+A private detached worktree was created from exact author commit 32abdc784041d2982568d61467f8778c04aa46af using the existing Git object store. Git confirmed that the entire author delta from 149a6fdf0c2808f525601cb5588674ebcf1a1abd remains the single fixture substitution from `1000n` to `BigInt(1000)`. The helper, real tsconfig and remaining permanent assertions are unchanged.
+
+The original permanent test was extracted without modification from 149a6fdf0c2808f525601cb5588674ebcf1a1abd to an external temporary file. Git hash-object confirmed **554ed8d950dfb26278f1744201d5f0be87c2a706**, identical to the original whole permanent. With the real repository config inherited at target ES2017, the unchanged actual helper and correct Node declaration roots, the compiler returned exactly one diagnostic and exit 2:
+
+```text
+j-2915-original-permanent.test.ts(82,18): error TS2737: BigInt literals are not available when targeting lower than ES2020.
+```
+
+The final permanent and actual helper under the same config returned exit 0. A further directed program including the exact independent proof and its real imports also returned exit 0. The directed configuration changed only the root-file list, declaration-root resolution and nonpersistent tooling options (incremental false, plugins empty, no emit); target, strictness, module mode, resolution, libraries and JSX settings remained inherited. No target override, source shim, error suppression, provider or build was used.
+
+The earlier unavailable ref/path was also resolved precisely. Commit 96a043693216f7e7e3e5c66a73ef07330dc4e05a exists in the recovered local Git store; it adds **docs/reviews/t-e2-e7-es2017-red.md** and **scripts/t-e2-e7-es2017-types.mjs**, not tests/community-challenge-rules.test.ts. The historical 404 for that test path therefore did not establish a missing commit. I read the complete evidence document, which explicitly distinguishes its original CompilerHost RED experiment from a packaged script not replayed then. This return independently reproduced the relevant E2 diagnostic as above; it did not execute the unrelated E7 unit or substitute the author's account for execution.
+
+### Actual focused executions
+
+The existing independent proof and runner were copied into the exact author worktree, and Git hash-object confirmed byte identity with the durable own evidence:
+
+| Artifact | Blob |
+| --- | --- |
+| tests/j-2915-challenge-window.proof.ts | dd89ec2d5580ee425cf549133115c7ed4e90c517 |
+| scripts/j-review-2915-challenge-window.mjs | 566224df5214d9bfe4a428efde7004c7f04e51dd |
+
+The first copy operation briefly added a terminal blank line; that copy was corrected with no executable-content or assertion change before the hash confirmation. The completed execution used the same proof assertions; the normalized copies are byte-identical to the preserved evidence. No weakened expected value was introduced.
+
+The existing runner used the canonical testAliases and testEnvironment. Its negative controls blocked TCP/TLS/UDP/DNS, global fetch and the same undici dispatcher before each product graph, and passed in all four children. The processes were bounded by a 120-second outer limit. The classifier is pure; no storage, provider or browser call was attempted.
+
+| Check on exact author source | Observed result |
+| --- | --- |
+| Permanent community-challenge-rules.test.ts | 91/91 PASS |
+| Unchanged independent proof | 18/18 PASS; 1,331 ordered triples, 75 invalid-position vectors, 15 translations |
+| Linked community-points.test.ts | 29/29 PASS |
+| Linked course-templates.test.ts | 23/23 PASS |
+| Four groups together | 161 passing checks; no failed group |
+| Actual ES2017 strict directed types, final helper/test/proof and real imports | Exit 0 |
+| ESLint for helper/test/proof/runner | Exit 0; no errors or warnings |
+| scripts/check_public_data.py on author tracked snapshot | 4,133 files; 0 corrections |
+| Complete author-delta and local diff whitespace | Exit 0 |
+| Canonical discovery | permanent remains a *.test.ts file; manual proof is not claimed as automatically discovered |
+
+The ordinary whole feature RED at 04fa7ab06967c0637ca817abf73d7ef9e8bd61f6 was not rerun in this return: its historical 91 missing-export failures remain preserved. The new causal RED here is the exact old permanent's actual-target TS2737 diagnostic. No global suite, Next build, hosted CI, browser, accessibility conformance, or productive community feature is certified.
+
+### Disposition
+
+The previous ES2017 fixture LOW is **closed on exact 32abdc784041d2982568d61467f8778c04aa46af**. No new grave, medium or light finding was established in this focused return. This pure unwired helper is suitable for the author's normal merge only after the coordinator's MAIN VERDE order, all nine final successful checks of the exact final head, fresh raw/native clean merge state and the author's expected-head normal merge. Any future productive caller, daily calendar, points, storage or public promise requires its own review. The root owns the formal PR disposition.

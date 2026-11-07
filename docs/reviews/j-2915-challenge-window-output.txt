@@ -2483,3 +2483,242 @@ Public data check: 4133 tracked files; 0 file(s) require correction.
 
 ## Discovery
 Canonical .test.ts inventory includes community-challenge-rules.test.ts. Manual .proof.ts is not auto-discovered.
+
+
+## Executed independent return after recovery — exact 32abdc784041d2982568d61467f8778c04aa46af
+
+### Causal ES2017 type RED — original test blob 554ed8d950dfb26278f1744201d5f0be87c2a706
+../../../../tmp/j-2915-original-permanent.test.ts(82,18): error TS2737: BigInt literals are not available when targeting lower than ES2020.
+Exit: 2; exactly one diagnostic.
+
+### Final actual target types / scoped lint / scanner / whitespace
+Actual inherited target ES2017, strict=true, real imports: exit 0.
+Scoped lint helper, test, proof, runner: exit 0; no output/errors/warnings.
+Public data check: 4133 tracked files; 0 file(s) require correction.
+Author delta git diff --check: exit 0.
+Proof blob: dd89ec2d5580ee425cf549133115c7ed4e90c517; runner blob: 566224df5214d9bfe4a428efde7004c7f04e51dd.
+
+### Four canonical/offline groups
+TEST community-challenge-rules.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+(node:23) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/scratch/72485b6ecfa0/j-review-2915-freeze-local/lib/community-challenge-rules.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /workspace/scratch/72485b6ecfa0/j-review-2915-freeze-local/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ the new pure window rule is exported (4.252823ms)
+✔ before the start is scheduled (4.886197ms)
+✔ the exact start is active (0.594622ms)
+✔ inside the window is active (0.129643ms)
+✔ the last millisecond before the end is active (0.298479ms)
+✔ the exact end is ended (0.15386ms)
+✔ after the end remains ended (0.316664ms)
+✔ equal boundaries are invalid (0.434158ms)
+✔ reversed boundaries are invalid (0.671232ms)
+✔ a one-millisecond window has an active start (0.722097ms)
+✔ a one-millisecond window ends at its end (0.2995ms)
+✔ the epoch is a valid start (0.313454ms)
+✔ negative zero does not invent a date restriction (0.085902ms)
+✔ a window before the epoch is valid (0.062581ms)
+✔ a window can cross the epoch (0.05083ms)
+✔ the earliest representable date is a valid start (0.229855ms)
+✔ the latest representable date is a valid end (0.185266ms)
+✔ the latest representable date can be the current ended instant (0.073994ms)
+✔ a representable current instant before a far-future start is scheduled (0.148354ms)
+✔ the full representable window stays active without duration overflow (0.061906ms)
+✔ reject undefined as the start without coercion (0.197976ms)
+✔ reject undefined as the end without coercion (0.166693ms)
+✔ reject undefined as the current instant without coercion (0.08311ms)
+✔ reject null as the start without coercion (0.092885ms)
+✔ reject null as the end without coercion (0.172384ms)
+✔ reject null as the current instant without coercion (0.051214ms)
+✔ reject a numeric string as the start without coercion (0.05665ms)
+✔ reject a numeric string as the end without coercion (0.063713ms)
+✔ reject a numeric string as the current instant without coercion (0.192784ms)
+✔ reject an ISO date string as the start without coercion (0.10101ms)
+✔ reject an ISO date string as the end without coercion (0.132185ms)
+✔ reject an ISO date string as the current instant without coercion (0.135511ms)
+✔ reject an empty string as the start without coercion (0.107096ms)
+✔ reject an empty string as the end without coercion (0.266133ms)
+✔ reject an empty string as the current instant without coercion (0.088009ms)
+✔ reject true as the start without coercion (0.267153ms)
+✔ reject true as the end without coercion (0.075371ms)
+✔ reject true as the current instant without coercion (0.109674ms)
+✔ reject false as the start without coercion (0.162597ms)
+✔ reject false as the end without coercion (0.060338ms)
+✔ reject false as the current instant without coercion (0.053167ms)
+✔ reject an empty array as the start without coercion (0.117214ms)
+✔ reject an empty array as the end without coercion (0.061264ms)
+✔ reject an empty array as the current instant without coercion (0.08418ms)
+✔ reject a singleton array as the start without coercion (0.101743ms)
+✔ reject a singleton array as the end without coercion (3.432219ms)
+✔ reject a singleton array as the current instant without coercion (0.14897ms)
+✔ reject a plain object as the start without coercion (0.060401ms)
+✔ reject a plain object as the end without coercion (0.043434ms)
+✔ reject a plain object as the current instant without coercion (0.043199ms)
+✔ reject a Date object as the start without coercion (0.039279ms)
+✔ reject a Date object as the end without coercion (0.045913ms)
+✔ reject a Date object as the current instant without coercion (0.044406ms)
+✔ reject a boxed number as the start without coercion (0.050255ms)
+✔ reject a boxed number as the end without coercion (0.144048ms)
+✔ reject a boxed number as the current instant without coercion (0.069949ms)
+✔ reject a bigint as the start without coercion (0.06124ms)
+✔ reject a bigint as the end without coercion (0.067193ms)
+✔ reject a bigint as the current instant without coercion (0.044813ms)
+✔ reject a symbol as the start without coercion (0.038393ms)
+✔ reject a symbol as the end without coercion (0.034675ms)
+✔ reject a symbol as the current instant without coercion (0.036827ms)
+✔ reject a positive fraction as the start without coercion (0.038458ms)
+✔ reject a positive fraction as the end without coercion (0.118538ms)
+✔ reject a positive fraction as the current instant without coercion (0.962671ms)
+✔ reject a negative fraction as the start without coercion (0.410946ms)
+✔ reject a negative fraction as the end without coercion (0.056729ms)
+✔ reject a negative fraction as the current instant without coercion (0.068839ms)
+✔ reject NaN as the start without coercion (0.09435ms)
+✔ reject NaN as the end without coercion (0.180035ms)
+✔ reject NaN as the current instant without coercion (0.04638ms)
+✔ reject positive infinity as the start without coercion (0.048789ms)
+✔ reject positive infinity as the end without coercion (0.216085ms)
+✔ reject positive infinity as the current instant without coercion (0.067798ms)
+✔ reject negative infinity as the start without coercion (0.109197ms)
+✔ reject negative infinity as the end without coercion (0.418271ms)
+✔ reject negative infinity as the current instant without coercion (0.110287ms)
+✔ reject one millisecond above the Date range as the start without coercion (0.092669ms)
+✔ reject one millisecond above the Date range as the end without coercion (0.074707ms)
+✔ reject one millisecond above the Date range as the current instant without coercion (0.050493ms)
+✔ reject one millisecond below the Date range as the start without coercion (0.143011ms)
+✔ reject one millisecond below the Date range as the end without coercion (0.083215ms)
+✔ reject one millisecond below the Date range as the current instant without coercion (0.165082ms)
+✔ reject an unsafe positive integer as the start without coercion (0.10902ms)
+✔ reject an unsafe positive integer as the end without coercion (0.073548ms)
+✔ reject an unsafe positive integer as the current instant without coercion (13.459007ms)
+✔ reject an unsafe negative integer as the start without coercion (0.365367ms)
+✔ reject an unsafe negative integer as the end without coercion (0.171047ms)
+✔ reject an unsafe negative integer as the current instant without coercion (0.228015ms)
+✔ objects are rejected without invoking conversion hooks (2.467461ms)
+✔ the supplied instant alone determines state, with no clock mutation (13.431001ms)
+ℹ tests 91
+ℹ suites 0
+ℹ pass 91
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 145.720926
+GROUP_EXIT community-challenge-rules.test.ts 0
+TEST j-2915-challenge-window.proof.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+Exhaustive independent ordering matrix
+  ok    all 1331 ordered triples match the BigInt membership oracle
+  ok    earliest inclusive start
+  ok    earliest exclusive end
+  ok    latest inclusive start
+  ok    latest exclusive end
+  ok    negative and positive zero
+
+Malformed primitives remain invalid at every argument position
+  ok    all 25 malformed inputs at position 0 are rejected
+  ok    all 25 malformed inputs at position 1 are rejected
+  ok    all 25 malformed inputs at position 2 are rejected
+
+No coercion, reflection or ambient-clock dependency
+  ok    conversion hooks are never used
+  ok    zero conversion/property hooks ran
+  ok    revoked proxies are rejected without reflection
+  ok    safe integers outside the Date range remain invalid
+  ok    omitted supplied now never invents an ambient instant
+  ok    the explicit instants determine state even with a forbidden clock
+  ok    no ambient clock was consulted
+
+Translation invariance without additive clock arithmetic
+  ok    three widely separated epochs have the same supplied-time states
+  ok    a duration wider than MAX_SAFE_INTEGER does not overflow classification
+MATRIX {"orderedTriples":1331,"invalidVectors":75,"translationVectors":15}
+
+18 checks, all passing.
+GROUP_EXIT j-2915-challenge-window.proof.ts 0
+TEST community-points.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+Levels are where the page says
+  ok    0 points is Level 1
+  ok    4 points is still Level 1
+  ok    5 points is Level 2
+  ok    the top is Level 9
+  ok    far past the top is still Level 9
+  ok    from 3 points, 2 more reach Level 2
+  ok    at the top there is no next level
+
+What a level can hand over
+  ok    one course per level, lowest level first
+  ok    Level 1 hands nothing over: everybody is at it
+  ok    two courses on one level: the first stands
+  ok    past the top level: refused
+
+Points
+  ok    six likes and one taken back is five points
+  ok    taking back a point nobody had leaves zero, never less
+  ok    the creator collects no points
+
+The boards
+  ok    all time: Ben first with 9, Ana with 5
+  ok    and Ben is told he is first
+  ok    7 days: only Ana, whose points are from today
+  ok    Ben has no place on this week's board
+  ok    30 days: both
+
+A course handed over at a level
+  ok    Ana, at Level 2, has it
+  ok    from the day she reached it
+  ok    and the course opens for her
+  ok    her points fall under Level 2
+  ok    and the course stays hers
+  ok    Carl, at Level 1, does not have it
+  ok    somebody the creator removed never gets it, whatever their points
+  ok    nor does an address that never came in
+  ok    a community switched off hands nothing new over
+  ok    and what it already handed over stays
+
+29 checks, all passing.
+GROUP_EXIT community-points.test.ts 0
+TEST course-templates.test.ts
+OFFLINE_CONTROLS socket=blocked dispatcher=blocked; product graph starts now
+
+The five structures
+  ok    as the item names them
+  ok    each says what it is in a sentence
+
+Applied through the course's own edits, all at once
+  ok    Mini course: exactly its modules, lessons, opening days and certificate, the new course's empty module gone
+  ok    Weekly course: exactly its modules, lessons, opening days and certificate, the new course's empty module gone
+  ok    5-day challenge: exactly its modules, lessons, opening days and certificate, the new course's empty module gone
+  ok    Course with quizzes and a certificate: exactly its modules, lessons, opening days and certificate, the new course's empty module gone
+  ok    the challenge opens one lesson a day
+  ok    the weekly course opens a module each week
+  ok    start from scratch leaves the new course as it is
+  ok    each structure fits through the writing help's own caps (8 modules, 8 lessons each)
+
+Never over a course the creator touched
+  ok    a module renamed: refused, nothing changed
+  ok    an opening day set: refused, nothing changed
+  ok    a second module added: refused, nothing changed
+  ok    a lesson: refused, nothing changed
+  ok    the certificate on: refused, nothing changed
+  ok    a start date: refused, nothing changed
+  ok    said plainly
+
+Example titles left before publishing
+  ok    a new structure: every title is still an example
+  ok    a course with its own titles: none
+
+Example titles, neutral and marked
+  ok    every title says it is an example to replace
+  ok    no result, promise, money, percent or testimonial
+
+Never pointed at a funnel it cannot fill
+  ok    the challenge funnel wants a free course
+  ok    and a course is sold, so the challenge names no funnel until a course can be free
+
+23 checks, all passing.
+GROUP_EXIT course-templates.test.ts 0
+FAILED_GROUPS 0

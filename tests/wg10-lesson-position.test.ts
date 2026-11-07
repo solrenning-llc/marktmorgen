@@ -115,7 +115,8 @@ if (stripeKey !== undefined) process.env.STRIPE_SECRET_KEY = stripeKey;
 
 part("Said in the privacy policy, and in the person-data registry");
 const privacy = readFileSync("app/privacy/page.tsx", "utf8");
-is("the policy names both keys, the 90 days, and that nothing is sent to us", [privacy.includes('<p id="lesson-places">'), privacy.includes("<code>mm:lp:</code>"), privacy.includes("<code>mm:lp-speed</code>"), /older than\s+90 days is never used, and is removed the next time that lesson is\s+opened/.test(privacy) && /the next time they open the course in\s+that browser/.test(privacy), /never sent to\s+us/.test(privacy)], [true, true, true, true, true]);
+is("the policy says places go also when access could not be checked, not only when it ended (Claude 5, LEVE on #2728)", [/because it ended,\s+or\s+because it could not be checked at that moment/.test(privacy), /Once their access to the course ends/.test(privacy)], [true, false]);
+is("the policy names both keys, the 90 days, and that nothing is sent to us", [privacy.includes('<p id="lesson-places">'), privacy.includes("<code>mm:lp:</code>"), privacy.includes("<code>mm:lp-speed</code>"), /older than\s+90 days is never used, and is removed the next time that lesson is\s+opened/.test(privacy) && /course page opens in\s+that\s+browser without confirming their access/.test(privacy), /never sent to\s+us/.test(privacy)], [true, true, true, true, true]);
 is("the registry line", readFileSync("lib/person-data.ts", "utf8").includes('{ file: "lib/lesson-position.ts", how: "none"'), true);
 
 part("The words, in every language");

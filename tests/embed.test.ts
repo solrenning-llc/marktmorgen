@@ -29,10 +29,10 @@ async function main(): Promise<void> {
   is("and has a size, a name and no border", [/width="400" height="260"/.test(card), /height:260px/.test(card), /title="Buy Meal Planner"/.test(card), /border:0/.test(card)], [true, true, true, true]);
   const tall = (height: number) => cardCode({ handle: "k", productId: "p", title: "T", place: "", height }).match(/height="(\d+)"/)?.[1];
   is("taller for a product with a picture, and never a height that makes no sense", [tall(420), tall(5), tall(5000), tall(300.5)], ["420", "260", "260", "260"]);
-  const button = buttonCode({ handle: "kitchen", productId: "abc123", text: "Get the planner", place: "", fill: "#5a36ee", onFill: "#ffffff" });
+  const button = buttonCode({ handle: "kitchen", productId: "abc123", text: "Get the planner", place: "", fill: "#4f2acc", onFill: "#ffffff" });
   is("the button is a link to the product's page, in the store's color", [
     button.startsWith('<a href="https://marktmorgen.com/@kitchen/p/abc123?utm_source=website&amp;utm_medium=buy-button"'),
-    /background:#5a36ee;color:#ffffff/.test(button),
+    /background:#4f2acc;color:#ffffff/.test(button),
     button.endsWith(">Get the planner</a>"),
   ], [true, true, true]);
   const nasty = 'Tips "for" <you> & me';
@@ -66,7 +66,9 @@ async function main(): Promise<void> {
   // as a visit by lib/embed-open.ts; pasted as a frame, it still counts nothing.
   is("only an open by the checkout script is counted, and elsewhere", /const open: ScriptOpen \| null = mode && store \? await readScriptOpen\(store, mode, query\) : null;/.test(page), true);
   const links = page.match(/<a\s[^>]*>/g) ?? [];
-  is("every link opens a new tab in a frame, and stays in the tab only as a page", links.length > 0 && links.every((tag) => /\{\.\.\.aside\}/.test(tag)), true);
+  // A call's own calendar in the frame (637 [GL5] unit 6) is the one exception: its links go to this same card's address (here()), which the frame may show.
+  is("every link opens a new tab in a frame, and stays in the tab only as a page", links.length > 0 && links.every((tag) => /\{\.\.\.aside\}/.test(tag) || /href=\{here\(/.test(tag)), true);
+  is("and the ones that stay in the frame stay on this card's own address", links.filter((tag) => !/\{\.\.\.aside\}/.test(tag)).every((tag) => /^<a\s+href=\{here\(/.test(tag.replace(/\s+/g, " "))), true);
   is("which is the one way out of each", /const aside = open\?\.mode === "page" \? \{ target: "_top" \} : \{ target: "_blank", rel: "noopener" \};/.test(page), true);
   is("and so does its checkout", /<form action="\/api\/store\/checkout" method="post" target="_blank" rel="noopener"/.test(page), true);
   is(

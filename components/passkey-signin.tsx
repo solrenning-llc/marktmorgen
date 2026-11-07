@@ -11,6 +11,7 @@ const MESSAGES: Record<string, string> = {
   rate_limited: "That is a lot of tries from one place. Wait a few minutes and try again.",
   unavailable: "Logging in is not switched on yet.",
   cancelled: "Nothing happened: the passkey prompt was closed. Try again when you are ready.",
+  busy: "Your account's passkeys are being changed right now. Try again in a moment.",
   server_error: "Something went wrong on our side. Try again in a moment, or use the emailed link.",
 };
 

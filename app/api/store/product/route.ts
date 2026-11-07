@@ -1,4 +1,4 @@
-import { dropCourseTasks } from "@/lib/assignment";
+import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -27,16 +27,18 @@ import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { jsonAccess } from "@/lib/studio-route";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { dropPage } from "@/lib/sales-page-store";
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { dropCourse, filesInCourse, readCourse } from "@/lib/course";
+import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
+import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
-import { idsOfKind, readAllListings, readListing, readProducts } from "@/lib/catalog";
+import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
@@ -99,6 +101,7 @@ async function silenced(email: string, changedId: string): Promise<string[]> {
 const STATUS: Record<string, number> = {
   too_many: 409,
   unknown: 404,
+  unavailable: 503,
 };
 
 /**
@@ -278,19 +281,53 @@ export async function POST(request: NextRequest) {
       // The product comes back as it was, so the storage its files used can
       // be released once the removal is safely written. A product with price
       // options holds one file per option as well as its own.
-      const removed = await removeProduct(ref, id);
+      // A course's handed-in work is read before the product goes (Revisor 1 on #2810): a read that fails answers 503
+      // and removes nothing, so the work, its files and the room they take stay findable for the next try.
+      let before: Awaited<ReturnType<typeof readListing>>;
+      let preparedCourse: Awaited<ReturnType<typeof readCourseExact>> = null;
+      let taskDrops: Awaited<ReturnType<typeof readCourseTaskDrops>> = [];
+      try {
+        before = await readListing(guarded.store, id);
+        if (before?.course) {
+          preparedCourse = await readCourseExact(before.course.id);
+          if (preparedCourse) taskDrops = await readCourseTaskDrops(preparedCourse);
+        }
+      } catch (error) {
+        console.error("could not read a product or its course before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      let course: Awaited<ReturnType<typeof readCourseExact>> = null;
+      const removed = await removeProduct(ref, id, async (going, store) => {
+        if (!going.course) return true;
+        try {
+          const found = await readCourseExact(going.course.id);
+          if (found) {
+            if (!preparedCourse || JSON.stringify(found) !== JSON.stringify(preparedCourse)) return false;
+            course = found;
+            await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
+          } else {
+            if (preparedCourse) return false;
+            await dropCommentsAfterCourseGone(going.course.id, store);
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      });
       result = removed.ok ? { ok: true, product: null } : removed;
       if (removed.ok) {
         const going = removed.product;
+        const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
         had.push(...imagePaths(going.image).map((pathname) => ({ pathname })));
         // A course takes its lessons with it: their records, and their files.
-        const course = going.course ? await readCourse(going.course.id).catch(() => null) : null;
-        if (course) had.push(...filesInCourse(course));
+        if (removedCourse) had.push(...filesInCourse(removedCourse));
         // And the work its students handed in for its assignments (lib/assignment.ts).
-        if (course) {
-          const handed = await dropCourseTasks(course, storeKey(removed.store), removed.store).catch(() => [] as string[]);
+        if (removedCourse) {
+          // Prepared from the same exact course snapshot that removal accepted,
+          // before that course identity can be detached.
+          const handed = await applyCourseTaskDrops(removedCourse, taskDrops, storeKey(removed.store), removed.store);
           had.push(...handed.map((pathname) => ({ pathname })));
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
@@ -302,9 +339,16 @@ export async function POST(request: NextRequest) {
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).
-        const reviewPhotos = await dropReviews(removed.store.statsId, id).catch(() => [] as string[]);
+        // The deletion tried again up to three times when Redis fails, so the reviews and their AI summary go at
+        // once; said in the log if they cannot (the product is already gone, so nothing shows them).
+        const reviewPhotos = await dropReviews(removed.store.statsId, id, 3).catch((error: unknown) => {
+          console.error("could not drop a removed product's reviews", error);
+          return [] as string[];
+        });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
-        if (course) await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        if (removedCourse) {
+          await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).
           if (await dropStream(file.pathname, removed.store).catch(() => false)) continue;
@@ -317,6 +361,10 @@ export async function POST(request: NextRequest) {
     } else if (action === "link") {
       // The link is checked before anything is written, so a product is never
       // left pointing at something a buyer could not open.
+      // A link over the file deletes the file and the buyers' stamped copies: a session let in
+      // without its second step waits (lib/two-step.ts). The id may name a price option, whose file
+      // is its own, so the file is read where the id points (readDelivery), not on a product only.
+      if ((await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
       const read = readLink(link);
       if (!read.ok) {
         return Response.json(

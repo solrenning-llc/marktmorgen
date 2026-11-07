@@ -49,7 +49,7 @@ export const en = {
   // ---- Sales and fair prices ----------------------------------------------
   fairHead: (country: string, percent: number) => `A fair price for ${country}: ${percent}% off`,
   fairNote: (store: string, plan: boolean) =>
-    `${store} lowers prices where money buys less. Taken off on the payment page, no code needed${plan ? "; the lower price is for paying in full" : ""}.`,
+    `${store} lowers prices where money buys less. This price was set automatically for you, from the country of your internet connection. Taken off on the payment page, no code needed${plan ? "; the lower price is for paying in full" : ""}.`,
   saleHead: (name: string, percent: number, ends: string) => `${name ? `${name}: ` : ""}${percent}% off · ${ends}`,
   saleNote: (until: string, plan: boolean) =>
     `Until ${until}. Taken off on the payment page, no code needed${plan ? "; the sale price is for paying in full" : ""}.`,
@@ -62,10 +62,13 @@ export const en = {
   callLive: (dates: number) => `Live session, online, ${dates} ${plural(dates, "date", "dates")} scheduled`,
   callGroup: (minutes: number, seats: number) => `Group call, ${minutes} minutes, up to ${seats} people, online`,
   callOne: (minutes: number) => `${minutes}-minute call, online`,
+  /** A call with several lengths (lib/call-lengths.ts): "30 or 60", as the store's language lists them. */
+  callLengths: (list: string) => `Call of ${list} minutes, online`,
   /** An in-person booking (lib/call-place.ts): no call, at the creator's address. */
   inPersonLive: (dates: number) => `Live session, in person, ${dates} ${plural(dates, "date", "dates")} scheduled`,
   inPersonGroup: (minutes: number, seats: number) => `${minutes} minutes, up to ${seats} people, in person`,
   inPersonOne: (minutes: number) => `${minutes} minutes, in person`,
+  inPersonLengths: (list: string) => `${list} minutes, in person`,
   inPersonLiveNone: "Live session, in person, no dates scheduled",
   bundleOf: (count: number, worth: string | null) => `Bundle of ${count} products${worth ? ` · ${worth}` : ""}`,
   /** "$120 of products for $49". */
@@ -98,7 +101,7 @@ export const en = {
   buyAsGift: "Buy as a gift",
   buyAsGiftFor: (price: string) => `Buy as a gift — ${price}`,
   giftNote: (store: string) =>
-    `You pay on Stripe's page. Right after, they get one email from ${store} with your name, your message and a link to open it on their own address. You get the receipt, not a copy.`,
+    `You pay on Stripe's page. After payment, the gift belongs to their address. If the one email from ${store} reaches them, it has your name, your message and a link to open it. You get the receipt, not a copy.`,
   giftProblems: {
     email: "That does not look like an email address. Check the recipient's address and try again.",
     option: "Choose which one to give, then try again. Nothing was charged.",
@@ -150,7 +153,8 @@ export const en = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store: string) => `The ${store} blog`,
-  blogEmpty: "Nothing here yet.",
+  blogPastEnd: "No posts on this page",
+  blogPastEndBody: "This page is past the last post.",
   blogMinutes: (n: number) => `${n} min read`,
   blogNewer: "Newer posts",
   blogOlder: "Older posts",
@@ -163,6 +167,7 @@ export const en = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent: number) => `save ${percent}%`,
   chooseOptionFor: (title: string) => `Choose an option for ${title}`,
+  chooseOne: "Choose one",
   recommended: "Recommended",
   recommendedAfter: " (recommended)",
   howToPayFor: (title: string) => `How to pay for ${title}`,
@@ -324,6 +329,7 @@ export const en = {
   newer: "Newer",
   older: "Older",
   askUnknown: (store: string) => `This page does not say. Ask ${store} before you buy.`,
+  askTermsCut: () => "I don't have the full terms here. Please ask the creator before you buy.",
 
   // ---- The card on the creator's own website ---------------------------------------------
   noLongerOnSale: "This product is no longer on sale.",
@@ -331,4 +337,9 @@ export const en = {
   cardTestMode: "Test mode: no real card is charged.",
   cardCheckout: "Secure checkout by Stripe, in a new tab.",
   cardOpens: (store: string) => `Opens on ${store}'s store, in a new tab.`,
+
+  // ---- Email cards (lib/mail-product-price.ts) -------------------------------------------
+  orMore: (price: string) => `${price} or more`,
+  plusTax: "+ tax where it applies",
+  salePriceUntil: (price: string, when: string) => `Sale price: ${price}, until ${when}`,
 };

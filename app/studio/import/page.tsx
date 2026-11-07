@@ -107,7 +107,8 @@ export default async function StudioImportPage({ searchParams }: Params) {
       : "contacts";
   const canFunnel = can(access.role, "page") && can(access.role, "products");
   const [jobs, counts, moved, listings] = await Promise.all([
-    storeImports(store).catch(() => []),
+    // A list that cannot be read is unknown (rule 24), never "None yet".
+    storeImports(store).catch(() => null),
     listCounts(store.listId).catch(() => null),
     kind === "members" ? moveCounts(store).catch(() => null) : Promise.resolve(null),
     // One read of every product's name and price; what kind each is, from the store's own index.
@@ -131,8 +132,8 @@ export default async function StudioImportPage({ searchParams }: Params) {
         ];
       })
     : [];
-  const running = jobs.find((job) => job.state === "receiving" || job.state === "queued" || job.state === "running" || job.state === "mailing") ?? null;
-  const past = jobs.filter((job) => job.id !== running?.id);
+  const running = (jobs ?? []).find((job) => job.state === "receiving" || job.state === "queued" || job.state === "running" || job.state === "mailing") ?? null;
+  const past = jobs === null ? null : jobs.filter((job) => job.id !== running?.id);
   const tab = TABS.find((t) => t.kind === kind)!;
   const facts: Record<ImportKind, string> = {
     contacts: counts ? `Your list has ${counts.mailable.toLocaleString("en-US")} people you may email now.` : "",
@@ -227,7 +228,12 @@ export default async function StudioImportPage({ searchParams }: Params) {
                   </h3>
                   {cfStep === "funnel" ? (
                     <div className="mt-5">
-                      {canFunnel ? (
+                      {canFunnel && listings === null ? (
+                        // Products that cannot be read are unknown (rule 24), never "No product of yours fits yet".
+                        <p className="text-sm text-ink-soft" role="status">
+                          Your products could not be read just now. Nothing was changed. Reload the page in a moment.
+                        </p>
+                      ) : canFunnel ? (
                         <ClickFunnelsFunnel
                           products={funnelProducts}
                           pagesLeft={Math.max(0, MAX_SITE_PAGES - store.sitePages.length)}
@@ -291,6 +297,14 @@ export default async function StudioImportPage({ searchParams }: Params) {
                 {tab.title}
               </h2>
               {facts[kind] ? <p className="mt-1 text-sm text-ink-soft">{facts[kind]}</p> : null}
+              {kind === "contacts" && can(access.role, "send") ? (
+                <p className="mt-1 text-sm text-ink-soft">
+                  {"Already on your list and want to group them? "}
+                  <Link href={studioPath(store, "", "labels")} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                    Label several contacts at once
+                  </Link>
+                </p>
+              ) : null}
               <div className="mt-5">
                 <ImportTool
                   key={kind}
@@ -313,13 +327,15 @@ export default async function StudioImportPage({ searchParams }: Params) {
 }
 
 /** The store's last imports, each with its counts and report. */
-function PastImports({ past }: { past: ImportJob[] }) {
+function PastImports({ past }: { past: ImportJob[] | null }) {
   return (
     <aside className="card min-w-0 p-5 sm:p-6" aria-labelledby="past-title">
       <h2 id="past-title" className="text-base font-semibold text-ink">
         Your last imports
       </h2>
-      {past.length === 0 ? (
+      {past === null ? (
+        <p className="mt-2 text-sm text-ink-soft" role="status">Your last imports could not be read just now. Nothing was changed. Reload the page in a moment.</p>
+      ) : past.length === 0 ? (
         <p className="mt-2 text-sm text-ink-soft">None yet. Each one is listed here for two weeks, with its report.</p>
       ) : (
         <ul className="mt-3 space-y-4">

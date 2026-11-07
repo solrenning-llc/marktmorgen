@@ -27,12 +27,13 @@ import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
 import { canMove, confirmBooking, moveLink, paidCall } from "@/lib/calls";
 import { type DueInPerson, dueLines } from "@/lib/call-deposit";
+import type { CancelPromise } from "@/lib/call-setup";
 import { readableTime, zoneName } from "@/lib/call-setup";
 import { isVideoRoom, roomLabel, roomOf, videoRoomNote } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
 import { StoreTracking } from "@/components/store-tracking";
 import { ClearCart } from "@/components/store-cart";
-import { confirmStock } from "@/lib/stock";
+import { confirmCartStock, confirmStock } from "@/lib/stock";
 import { finishPlan } from "@/lib/plans";
 import { cookies, headers } from "next/headers";
 import { clientAddress } from "@/lib/request-guard";
@@ -45,7 +46,7 @@ import { cartOfferFrom } from "@/lib/cart-offers";
 import { imageUrl } from "@/lib/product-image";
 import { buyersJoin, noteSession } from "@/lib/affiliates";
 import { recordEnrollment } from "@/lib/learn";
-import { upsertContact } from "@/lib/contacts";
+import { orderRoom, upsertContact } from "@/lib/contacts";
 import { listOrder } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
@@ -223,7 +224,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
-      }, { order: store }).catch((error) => console.error("adding a buyer to a list failed", error));
+      }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {
       after(() => confirmPurchase(store, sessionId).catch((error) => console.error("confirming a pre-order failed", error)));
@@ -244,7 +245,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             <p className="st-muted mt-4 text-sm">{p.refund(store.name)}</p>
             {order.email ? <p className="st-muted mt-4 text-sm">{t.receiptTo(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
@@ -286,7 +287,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
-      }, { order: store }).catch((error) => console.error("adding a buyer to a list failed", error));
+      }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {
       after(() => confirmPurchase(store, sessionId).catch((error) => console.error("delivering a gift failed", error)));
@@ -311,7 +312,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             </p>
             {order.email ? <p className="st-muted mt-4 text-sm">{t.receiptTo(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
@@ -350,7 +351,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
-      }, { order: store }).catch((error) => console.error("adding a buyer to a list failed", error));
+      }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {
       await confirmPurchase(store, sessionId).catch((error) => console.error("opening the places of a purchase failed", error));
@@ -387,7 +388,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             )}
             {order.email && !isHouseStore(store) ? <p className="st-muted mt-5 text-sm">{t.groupReceipt(order.email)}</p> : null}
             <div className="mt-8">
-              <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+              <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
                 {t.backTo(store.name)}
               </a>
               <StoreTracking
@@ -414,10 +415,14 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // it (lib/meet-links.ts), and this page shows that meeting's link.
   // In person: what is left to pay there and a code taken off the whole price, read from the sale
   // (lib/call-deposit.ts); undefined when it could not be read, so the confirmation tries again.
-  const due: DueInPerson | null | undefined =
-    sessionId && order.state === "paid" && order.call && order.product.call?.place
-      ? await paidCall(store, sessionId).then((call) => call?.due ?? null, () => undefined)
+  // The cancellation deadline promised when paying is read with it, from the same sale, for every paid call: a
+  // deadline the creator turned off after the sale is still the promise the buyer paid under.
+  const sale =
+    sessionId && order.state === "paid" && order.call
+      ? await paidCall(store, sessionId).then((call) => call, () => undefined)
       : null;
+  const due: DueInPerson | null | undefined = sale === undefined ? undefined : sale?.due ?? null;
+  const cancel: CancelPromise | null | undefined = sale === undefined ? undefined : sale?.cancel ?? null;
   if (sessionId && order.state === "paid" && order.call && order.product.call) {
     await confirmBooking({
       store,
@@ -434,6 +439,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       lead: order.call.lead,
       pi: order.call.pi,
       due,
+      cancel,
       origin: SITE_URL,
     }).catch((error) => console.error("confirming a booking failed", error));
   }
@@ -529,6 +535,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // A limited product's unit becomes a sale the moment its buyer is back.
   if (order.state === "paid" && sessionId && order.product.stock !== null) {
     await confirmStock(store, order.product, sessionId).catch((error) => console.error("confirming stock failed", error));
+  }
+  // So does each limited product of a cart after its first (lib/stock.ts; 513 [PF1], unit 3). A box at checkout never offers a limited one.
+  if (order.state === "paid" && sessionId && order.bumps.some((added) => added.product.stock !== null)) {
+    await confirmCartStock(store, order.bumps.map((added) => added.product), sessionId).catch((error) => console.error("confirming a cart's stock failed", error));
   }
 
   // A sale through an affiliate's link is written down for them, once,
@@ -909,6 +919,12 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   {dueLines(bookingWords(store.language), due ?? null, { currency: order.currency || store.currency, locale, storeName: store.name }).map((line) => (
                     <p key={line} className="mt-2 text-sm" data-call-due="">{line}</p>
                   ))}
+                  {/* The cancellation deadline promised when paying (lib/call-setup.ts, readCancelPromise). */}
+                  {cancel ? (
+                    <p className="mt-2 text-sm" data-call-cancel="">
+                      {cancel.late ? bookingWords(store.language).cancelTooLate(cancel.hours, store.name) : bookingWords(store.language).cancelPolicy(cancel.hours, store.name)}
+                    </p>
+                  ) : null}
                   {isHouseStore(store) && booked.room ? (
                     // The demo writes to nobody, so it promises no email (lib/house-store.ts).
                     <p className="st-muted mt-5 text-sm">{DEMO_BOOKED_NOTE}</p>
@@ -1292,7 +1308,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             {order.state === "paid" && (order.record.metadata as Record<string, string> | null)?.cart === "yes" ? <ClearCart handle={store.handle} /> : null}
             <a
               href={`/@${store.handle}`}
-              className="st-footer-link text-sm font-semibold"
+              className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold"
             >
               {t.backTo(store.name)}
             </a>
@@ -1439,7 +1455,7 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
             </>
           )}
           <div className="mt-8">
-            <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+            <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
               {t.backTo(store.name)}
             </a>
           </div>

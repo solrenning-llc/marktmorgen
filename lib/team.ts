@@ -31,13 +31,16 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
+import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
-import { listPasskeys } from "@/lib/passkeys";
+import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
@@ -64,6 +67,16 @@ const teamLockKey = (sid: string) => `nl:team:lock:${sid}`;
 /** Runs one change to a store's team with its lock held: five seconds at most, waiting up to four. */
 function withTeam<T>(sid: string, work: () => Promise<T>): Promise<T> {
   return withLock(teamLockKey(sid), 5, 4_000, work);
+}
+
+/**
+ * Runs work with the team's lock held, for what must see the team as no
+ * change half done leaves it (lib/api-key-pause.ts leftTeam: a move between
+ * rewriting its keys and saving the team). Never from inside another change
+ * to the same team, which already holds the lock.
+ */
+export function withTeamLock<T>(sid: string, work: () => Promise<T>): Promise<T> {
+  return withTeam(sid, work);
 }
 
 export type Member = {
@@ -106,7 +119,8 @@ export type LogLine = {
 
 const EMPTY: Team = { members: [], invites: [] };
 
-function parseTeam(raw: unknown): Team {
+/** A team record as read, keeping only members and invitations the studio accepts (a valid address and role, MAX_TEAM at most); lib/api-keys.ts reads the team with it too. */
+export function parseTeam(raw: unknown): Team {
   if (typeof raw !== "string" || !raw) return { members: [], invites: [] };
   try {
     const value = JSON.parse(raw) as { members?: unknown; invites?: unknown };
@@ -165,16 +179,66 @@ async function saveTeam(sid: string, team: Team): Promise<void> {
 /**
  * Whether the team must use two-step sign-in, and, for one person, whether
  * they may open the studio under it: the owner always may (the requirement is
- * theirs to set); anybody else only with an authenticator app turned on or a
- * passkey (lib/two-step.ts, lib/passkeys.ts). Read only when it is on.
+ * theirs to set); anybody else only in a session that was opened with a
+ * second step (lib/second-step-gate.ts liveSecondStep): the app's code, a recovery
+ * code, or a passkey used to log in. Owning a passkey or an app is not enough:
+ * an emailed link opens a session without either, so a member who has only a
+ * passkey and logs in by the link is asked for the second step here. A
+ * session read without its id, or opened before this was written down, has
+ * none: the answer is to ask for the step, never to let it through.
+ * Read only when the requirement is on.
  */
-export async function teamTwoStepBlocks(store: Store, email: string, role: Role): Promise<boolean> {
+export async function teamTwoStepBlocks(store: Store, email: string, role: Role, session?: string): Promise<boolean> {
   if (role === "owner" || !store.sid) return false;
   const team = await readTeam(store.sid);
   if (!team.requireTwoStep) return false;
-  const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
-  return !app && keys.length === 0;
+  return (await liveSecondStep(email, session)) === null;
 }
+
+/**
+ * What a member held at the team's door does next (teamTwoStepBlocks):
+ * "passkey", log in again with the passkey they have; "app", log in again
+ * with the emailed link and the app's code; "set_up", add a passkey or turn
+ * on an app first. A passkey comes first when they have both, as it asks for
+ * nothing to be typed.
+ */
+export type SecondStepWay = "passkey" | "app" | "set_up";
+
+export async function secondStepWay(email: string, now = Date.now()): Promise<SecondStepWay> {
+  // A passkey whose wait to be removed has run out goes first, so it is never offered (lib/passkeys.ts);
+  // one still waiting to go is not offered either, as it opens no second step (lib/second-step-gate.ts).
+  const waiting = (await pendingRemoval(email, now))?.ids ?? [];
+  const [app, all] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
+  const keys = all.filter((p) => !waiting.includes(p.id));
+  return keys.length > 0 ? "passkey" : app ? "app" : "set_up";
+}
+
+/**
+ * The words for each way, in plain US English, for the page that holds a
+ * member at the door. Logging in again opens a new session in place of this
+ * one; nothing typed in another tab is lost, and a save refused there works
+ * when it is pressed again.
+ */
+export const SECOND_STEP_WORDS: Readonly<Record<SecondStepWay, { title: string; body: string; action: string; href: string }>> = {
+  passkey: {
+    title: "Log in again with your passkey",
+    body: "You logged in without your passkey or app code. This store's owner asks everyone on the team to log in with a second step, and your passkey is one. Log in again with it to open the store. Anything you typed in another tab stays there: press Save again once you are back.",
+    action: "Log in with your passkey",
+    href: "/signin",
+  },
+  app: {
+    title: "Log in again with your app's code",
+    body: "You logged in without your second step. This store's owner asks everyone on the team to use one. Log in again: after the emailed link, type the code from your authenticator app. Anything you typed in another tab stays there: press Save again once you are back.",
+    action: "Log in again",
+    href: "/signin",
+  },
+  set_up: {
+    title: "Set up a second step",
+    body: "This store's owner asks everyone on the team to log in with a second step. Add a passkey or turn on an authenticator app below, then log in again with it to open the store. Anything you typed in another tab stays there: press Save again once you are back.",
+    action: "Set up a second step",
+    href: "#two-step",
+  },
+};
 
 /** The owner turns the requirement on or off; written into the team's activity log. */
 export async function setRequireTwoStep(store: Store, on: boolean, by: string): Promise<boolean> {
@@ -285,11 +349,13 @@ export async function inviteMember(
     if (team.members.length + team.invites.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const counter = `nl:rl:team-invite:${store.sid}`;
-    const [, sent] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["SET", counter, "0", "EX", 24 * 60 * 60, "NX"],
       ["INCR", counter],
-    ]);
-    if (Number(sent) > INVITES_PER_DAY) return { ok: false, reason: "limited" };
+    ]), 2);
+    // A count in any other shape is unknown (CX-123 rule 24): no invitation is emailed on it.
+    const sent = countOf(replies?.[1]);
+    if (sent === null || sent > INVITES_PER_DAY) return { ok: false, reason: "limited" };
 
     const token = randomBytes(32).toString("hex");
     const invite: Invite = {
@@ -352,16 +418,32 @@ export async function setMemberRole(store: Store, email: string, rawRole: unknow
   const role = parseTeamRole(rawRole);
   if (!role) return { ok: false, reason: "role" };
   const address = normaliseEmail(email);
+  // Loaded here, as lib/api-key-pause.ts reads the team through this file.
+  const { roleChanged, tellOwnerOfRole, undoPause } = await import("@/lib/api-key-pause");
   return withTeam(store.sid, async () => {
     const team = await readTeam(store.sid);
     const member = team.members.find((m) => m.email === address);
     if (!member) return { ok: false as const, reason: "unknown" as const };
     if (member.role === role) return { ok: false as const, reason: "same" as const };
-    await saveTeam(store.sid, {
-      members: team.members.map((m) => (m.email === address ? { ...m, role } : m)),
-      invites: team.invites,
-    });
-    return { ok: true as const, before: member.role, role };
+    // API keys the new role may not hand out wait for the owner (owner C3-100), paused before the role is
+    // saved, under the same lock: if this fails, the role is not changed; if the save fails, the pause is undone.
+    const paused = await roleChanged(store, address, role);
+    try {
+      await saveTeam(store.sid, {
+        members: team.members.map((m) => (m.email === address ? { ...m, role } : m)),
+        invites: team.invites,
+      });
+    } catch (error) {
+      await undoPause(store, paused).catch((undo: unknown) => console.error("undoing the API keys paused for a role change failed", undo));
+      throw error;
+    }
+    return { ok: true as const, before: member.role, role, unrecorded: paused.filter((p) => p.kind === "unrecorded").map((p) => p.name), unmatched: paused.filter((p) => p.kind === "unmatched").map((p) => p.name) };
+  }).then(async (result) => {
+    // Keys nobody is recorded as making, paused as they may be this teammate's, may be the owner's own: told.
+    if (!result.ok) return result;
+    const { unrecorded, unmatched, ...done } = result;
+    if (unrecorded.length || unmatched.length) await tellOwnerOfRole(store, address, unrecorded, unmatched).catch((error: unknown) => console.error("telling the owner which API keys a role change paused failed", error));
+    return done;
   });
 }
 
@@ -397,16 +479,62 @@ export async function putMember(store: Store, email: string, role: TeamRole): Pr
   return added;
 }
 
-/** Takes someone off the team, whether the owner does it or they leave. */
-export async function removeMember(store: Store, email: string): Promise<boolean> {
+/** A teammate was taken off the team but their API keys could not all be paused after: the removal is to be repeated. */
+export class KeysNotSwept extends Error {
+  constructor() {
+    super("The API keys of a teammate taken off the team could not all be paused; repeat the removal.");
+    this.name = "KeysNotSwept";
+  }
+}
+
+/**
+ * Takes someone off the team, whether the owner does it or they leave. Every
+ * API key they made is paused, whatever the team's two-step rule (owner
+ * C3-100, lib/api-key-pause.ts leftTeam): a key outlives the person who made
+ * it, and only the owner may revoke it now. Done before the team is written,
+ * and again after, so a key they made in between is caught too (one written
+ * after that is checked by the route that made it, lib/api-key-pause.ts
+ * afterMake). If the first cannot be done, nobody is taken off. If the
+ * second cannot, they are off the team but the sweep is not finished: this
+ * throws KeysNotSwept, and the route asks for the removal to be repeated,
+ * which runs the sweep again even for an address no longer on the team (it
+ * then answers false). The owner is emailed which keys were paused and why.
+ */
+export async function removeMember(store: Store, email: string, options: { repeat?: boolean } = {}): Promise<boolean> {
   const address = normaliseEmail(email);
-  const removed = await withTeam(store.sid, async () => {
-    const team = await readTeam(store.sid);
-    if (!team.members.some((m) => m.email === address)) return false;
-    await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
-    return true;
-  });
+  // Somebody not on the team is swept only for a removal being repeated (the route reads that from the log):
+  // a mistyped address pauses nothing and emails nobody.
+  if (!options.repeat && !(await readTeam(store.sid)).members.some((m) => m.email === address)) return false;
+  // Loaded here, as lib/api-key-pause.ts reads the team through this file.
+  const { leftTeam, tellOwnerOfExit, undoExit } = await import("@/lib/api-key-pause");
+  const first = await leftTeam(store, address);
+  let removed: boolean;
+  try {
+    removed = await withTeam(store.sid, async () => {
+      const team = await readTeam(store.sid);
+      if (!team.members.some((m) => m.email === address)) return false;
+      await saveTeam(store.sid, { members: team.members.filter((m) => m.email !== address), invites: team.invites });
+      return true;
+    });
+  } catch (error) {
+    // The team was not written: if they are still on it (read again, under the lock), the first sweep is undone,
+    // so nobody stays on the team with keys held for good (owner C3-121). Unreadable, nothing is assumed.
+    await undoExit(store, address, first.attempt).catch((undo: unknown) => console.error("undoing the sweep of a removal that did not happen failed", undo));
+    throw error;
+  }
+  let second: Awaited<ReturnType<typeof leftTeam>>;
+  try {
+    second = await leftTeam(store, address);
+  } catch (error) {
+    console.error("pausing a former teammate's API keys after taking them off failed; the removal is to be repeated", error);
+    throw new KeysNotSwept();
+  }
+  await tellOwnerOfExit(store, address, { left: [...first.left, ...second.left], unmatched: [...first.unmatched, ...second.unmatched], unrecorded: [...first.unrecorded, ...second.unrecorded] }).catch((error: unknown) =>
+    console.error("telling the owner which API keys a teammate leaving paused failed", error),
+  );
   if (removed) await redisPipeline([["SREM", indexKey(address), store.sid]]).catch(() => {});
+  // What they could do with each pipeline (639 [GL7](7)) goes with them.
+  if (removed) await forgetPipelineAccess(store, address).catch(() => {});
   return removed;
 }
 
@@ -512,18 +640,49 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
   const after = normaliseEmail(to);
   const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
   const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  // Stores whose membership stayed on the old address: their index entry is kept.
+  const stayed: string[] = [];
   for (const sid of list) {
     const store = await storeForId(sid);
     if (!store || normaliseEmail(store.email) === after) continue;
     const role = await withTeam(sid, async () => {
       const team = await readTeam(sid);
       if (!team.members.some((m) => m.email === before) || team.members.some((m) => m.email === after)) return null;
-      await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
+      // What they may do with each pipeline (639 [GL7](7)) is copied to the new address first. If that cannot
+      // be confirmed, this store's membership stays on the old address: the new one never has the store without
+      // its restrictions.
+      try {
+        await copyPipelineAccess(store, before, after);
+        // The API keys they made follow them (owner C3-100); left behind, they would read as a former teammate's.
+        // Cut short, the keys already moved are moved back, so they and the membership stay on the old address together.
+        const { movedMaker } = await import("@/lib/api-key-pause");
+        await movedMaker(sid, before, after).catch(async (error: unknown) => {
+          await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
+          throw error;
+        });
+      } catch (error) {
+        console.error("copying pipeline access or the maker of their API keys failed; the membership stays on the old address", error);
+        stayed.push(sid);
+        return null;
+      }
+      try {
+        await saveTeam(sid, { members: team.members.map((m) => (m.email === before ? { ...m, email: after } : m)), invites: team.invites });
+      } catch (error) {
+        // Not saved: the keys go back to the old address with the membership.
+        const { movedMaker } = await import("@/lib/api-key-pause");
+        await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
+        throw error;
+      }
       return team.members.find((m) => m.email === before)?.role ?? "support";
     });
     if (!role) continue;
+    // The old address's restrictions go only once the team names the new one.
+    await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
     await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
   }
-  await redisPipeline([["DEL", indexKey(before)]]);
+  // The old address keeps only the stores that stayed on it; SREM with no member is an error in Redis, so it is sent only with some.
+  const moved = list.filter((sid) => !stayed.includes(sid));
+  if (!stayed.length) await redisPipeline([["DEL", indexKey(before)]]);
+  else if (moved.length) await redisPipeline([["SREM", indexKey(before), ...moved]]);
 }

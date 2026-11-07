@@ -17,6 +17,7 @@
  */
 import { holdsProductsOrThrow } from "@/lib/community-access";
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { emailKey, storeKey } from "@/lib/learn";
 import { type Store, storeForId } from "@/lib/store";
 import { giveRole, putMember, removeMember, takeRole } from "@/lib/discord";
@@ -204,8 +205,10 @@ export async function forgetDiscordPerson(store: Store, email: string, productId
     records += 1;
   }
   if (productIds.length) {
-    const [gone] = await redisPipeline([["DEL", ...productIds.map((id) => cacheKey(store, email, id))]]);
-    records += Number(gone) || 0;
+    const gone = countOf(repliesFor(await redisPipeline([["DEL", ...productIds.map((id) => cacheKey(store, email, id))]]), 1)?.[0]);
+    // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
+    if (gone === null) throw new UnknownReplyError("the deletion of a person's Discord access checks");
+    records += gone;
   }
   return { records, rolesLeft };
 }

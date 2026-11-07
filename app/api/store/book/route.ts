@@ -1,3 +1,4 @@
+import { bookingLength } from "@/lib/call-lengths";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { adsCheckout } from "@/lib/ad-events";
 import { holdSession, prepareSession } from "@/lib/call-packages";
@@ -7,6 +8,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSellProduct } from "@/lib/store-checkout";
 import { holdAndCheckout, isCallProduct, releaseOwnHold } from "@/lib/calls";
+import { listedReturn, listedSite } from "@/lib/embed-sites";
 import { countHit } from "@/lib/visit";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
@@ -19,7 +21,9 @@ import { type DepositFigures, depositWithCode, readDepositCode } from "@/lib/dep
 /** The checkout this browser last opened for a call, so going back frees it. */
 const HOLD_COOKIE = "nl_call_hold";
 
-const MAX_BODY_BYTES = 1_200;
+// The form's fields at their longest (the listed site and the way back from the embedded calendar among them, up to 300 and
+// 700 characters, form-encoded), with room: still a small form, read whole only up to this.
+const MAX_BODY_BYTES = 4_000;
 
 /**
  * A buyer picked a time. It is checked again, held, and the buyer is sent to
@@ -49,6 +53,13 @@ export async function POST(request: NextRequest) {
   // On a team that lets buyers choose: the host's position and name as the page showed them (lib/team-scheduling-rules.ts).
   let hostKey = "";
   let hostLabel = "";
+  // On a call with several lengths: the one chosen, in minutes (lib/call-lengths.ts); its price is read from the creator's record, never from the form.
+  let minutes = "";
+  // Booked from the calendar on the creator's own site (app/embed): which listed site, and where to send the buyer back to.
+  let siteAsked = "";
+  let returnAsked = "";
+  // The price the page showed for that length, only compared with the record (price-changed), never charged.
+  let shown = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string) => {
@@ -64,6 +75,10 @@ export async function POST(request: NextRequest) {
     typed = read("code").slice(0, 60);
     hostKey = /^[0-5]$/.test(read("host")) ? read("host") : "";
     hostLabel = read("host_label").slice(0, 60);
+    minutes = read("minutes").slice(0, 4);
+    siteAsked = read("site").slice(0, 300);
+    returnAsked = read("return").slice(0, 700);
+    shown = read("shown").slice(0, 10);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -77,16 +92,31 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}` } });
   }
 
+  // The length the buyer chose stays chosen when they come back too, so a retry never books the call's own length
+  // unnoticed (3.3.7): only a whole number of minutes is carried, and the page reads it against the creator's list again.
+  const keptLength = /^\d{1,4}$/.test(minutes) && Number(minutes) !== product.call.minutes ? `&length=${minutes}` : "";
+  // From the calendar on a listed site (app/embed): the site and the way back go back with the buyer, only as listed.
+  const keptSite = listedSite(store.embedSites, siteAsked);
+  const keptBack = keptSite ? listedReturn(store.embedSites, returnAsked) : null;
+  const keptEmbed = keptSite && !pkg ? `&site=${encodeURIComponent(keptSite)}${keptBack ? `&return=${encodeURIComponent(keptBack)}` : ""}` : "";
   const back = (status: string) =>
     new Response(null, {
       status: 303,
       // The host the buyer chose stays chosen when they come back, so their next try is never booked with anyone else.
-      headers: { Location: `${origin}/@${store.handle}/book/${product.id}?status=${status}${pkg ? `&pkg=${encodeURIComponent(pkg)}` : ""}${hostKey && status !== "host-changed" ? `&with=${hostKey}` : ""}`, "Cache-Control": "no-store" },
+      headers: { Location: `${origin}/@${store.handle}/book/${product.id}?status=${status}${pkg ? `&pkg=${encodeURIComponent(pkg)}` : ""}${hostKey && status !== "host-changed" ? `&with=${hostKey}` : ""}${keptLength}${keptEmbed}`, "Cache-Control": "no-store" },
     });
 
   if (!canSellProduct(store, product)) return back("unavailable");
   if (await isSoon(store, product.id).catch(() => false)) return back("unavailable");
   if (!Number.isFinite(start)) return back("invalid");
+  // A length chosen comes with the price the page showed for it. One the creator took off meanwhile, or one sent with
+  // no shown price (only ever a request the page did not make): said, never booked. A price changed meanwhile: said,
+  // never charged at a price the page did not show.
+  if (minutes) {
+    const now = bookingLength(product.call, product.priceCents, minutes);
+    if (!now) return back("length-gone");
+    if (!/^\d{1,9}$/.test(shown) || now.cents !== Number(shown)) return back("price-changed");
+  }
   // Each try holds a time for half an hour while Stripe's page is open, so
   // one connection gets fifteen in ten minutes per store: enough to change
   // one's mind many times, not enough to hold a creator's whole week.
@@ -135,6 +165,9 @@ export async function POST(request: NextRequest) {
     fromPackage: prepared && prepared.ok ? prepared.fromPackage : null,
     code,
     host: hostKey ? { key: hostKey, label: hostLabel } : null,
+    minutes,
+    // Checked against the creator's list again here, as the card's checkout checks it (app/api/store/checkout).
+    embedSite: listedReturn(store.embedSites, returnAsked) ?? listedSite(store.embedSites, siteAsked) ?? null,
     channel: { ...channelOfRequest(request, store.handle, new URL(origin).hostname, Date.now() / 1000, store.attributionDays), ...(await adsCheckout(request, store)) },
   });
   if (!result.ok) return back(result.reason);

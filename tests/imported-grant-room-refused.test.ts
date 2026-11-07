@@ -7,7 +7,7 @@
  * exactly 0 or 1 keeps what was taken, as the room must never be counted
  * below what is held. Synthetic store; no outside request.
  */
-import { grantImported } from "@/lib/imported-purchases";
+import { grantImported, grantImportedOutcomes } from "@/lib/imported-purchases";
 import { dataUsed } from "@/lib/store-data";
 import { addProduct, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
@@ -48,7 +48,22 @@ async function main(): Promise<void> {
   const unknown = await grantImported(store.statsId!, "api:key1", grant, 1_800_000_000, "", store);
   redis.pipeline = pipe;
   is("an unknown answer is not new", unknown, [false]);
-  is("and keeps what it took", (await used()) > once, true);
+  const kept = await used();
+  is("and keeps what it took", kept > once, true);
+
+  part("Each grant's outcome, read exactly");
+  const other = [{ email: "hal@example.com", productId: grant[0].productId, items: null }];
+  is("written", await grantImportedOutcomes(store.statsId!, "api:key1", other, 1_800_000_000, "", store), ["taken"]);
+  const taken = await used();
+  is("already held", await grantImportedOutcomes(store.statsId!, "api:key1", other, 1_800_000_000, "", store), ["exists"]);
+  is("already held gives its room back", await used(), taken);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await pipe(commands);
+    return commands.every((c) => c[0] === "HSETNX") ? replies.map(() => "1") : replies;
+  }) as typeof redis.pipeline;
+  const odd = await grantImportedOutcomes(store.statsId!, "api:key1", other, 1_800_000_000, "", store);
+  redis.pipeline = pipe;
+  is("an answer in another shape is unknown, never taken", odd, ["unknown"]);
   done();
 }
 

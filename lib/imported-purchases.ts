@@ -157,9 +157,29 @@ const fromRoom = (job: string) => IMPORT_JOB.test(job) || job.startsWith("api:")
 
 /**
  * Gives many addresses their products in one round trip. Returns, for each
- * grant, whether it was new (false: that address already had that product).
+ * grant, whether it was new (false: that address already had that product,
+ * or the answer was not known; grantImportedOutcomes tells the two apart).
  */
 export async function grantImported(
+  statsId: string,
+  job: string,
+  grants: { email: string; productId: string; items: string[] | null; option?: string | null }[],
+  atSeconds = Math.floor(Date.now() / 1000),
+  sid = "",
+  room: DataStore | null = null,
+): Promise<boolean[]> {
+  return (await grantImportedOutcomes(statsId, job, grants, atSeconds, sid, room)).map((outcome) => outcome === "taken");
+}
+
+/**
+ * What became of each grant, read exactly (Claude 5 on #2576): "taken" when
+ * it was written (HSETNX answered 1), "exists" when that address already
+ * held that product (0, its room given back), "unknown" for any other answer
+ * (its room kept), so a caller can say "not confirmed" instead of either.
+ */
+export type GrantOutcome = "taken" | "exists" | "unknown";
+
+export async function grantImportedOutcomes(
   statsId: string,
   job: string,
   grants: { email: string; productId: string; items: string[] | null; option?: string | null }[],
@@ -173,8 +193,8 @@ export async function grantImported(
    * really adds (lib/order-data.ts).
    */
   room: DataStore | null = null,
-): Promise<boolean[]> {
-  if (!grants.length || !isRedisConfigured()) return grants.map(() => false);
+): Promise<GrantOutcome[]> {
+  if (!grants.length || !isRedisConfigured()) return grants.map(() => "unknown");
   // Each grant at the most it weighs: its field, the address's key and place among those brought over, its library.
   if (room) await needData(room, [{ slot: IMPORTED_SLOT, bytes: grants.reduce((sum, g) => sum + grantBytes(g.productId, { at: atSeconds, job, items: g.items, option: g.option }, g.email), 0) }]);
   // Only what was bought on Marktmorgen puts a store in a buyer's library: a gift, a place, a pre-order,
@@ -198,7 +218,7 @@ export async function grantImported(
     const back = grants.reduce((sum, g, i) => (list[i] === 0 ? sum + grantBytes(g.productId, { at: atSeconds, job, items: g.items, option: g.option }, g.email) : sum), 0);
     if (back > 0) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: back }]);
   }
-  return grants.map((_, i) => list?.[i] === 1);
+  return grants.map((_, i) => (list?.[i] === 1 ? "taken" : list?.[i] === 0 ? "exists" : "unknown"));
 }
 
 /**

@@ -37,6 +37,18 @@ async function failing<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Runs `work` with the pipeline that GETs a key starting with `prefix` answered by `reply`. */
+async function answering<T>(prefix: string, reply: unknown[], work: () => Promise<T>): Promise<T> {
+  const original: Pipeline = redis.pipeline;
+  redis.pipeline = (async (commands: Commands) =>
+    commands.some((command) => command[0] === "GET" && String(command[1] ?? "").startsWith(prefix)) ? [...reply] : original.call(redis, commands)) as Pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
 async function main(): Promise<void> {
   redis.clear();
   if (!(await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "")).ok) throw new Error("no store");
@@ -55,6 +67,24 @@ async function main(): Promise<void> {
   const failed = await failing(() => page({ store: "harbor" }));
   is("said as not read just now", failed.includes(UNREAD), true);
   is("never told to use the link they just used", failed.includes(FOOT), false);
+
+  part("A store answered in an unknown shape is said so too, never 'no such store' (review of #2970, MEDIUM)");
+  for (const [name, prefix, reply] of [
+    ["the handle: no reply", "nl:store:handle:", []],
+    ["the handle: a hole where the reply should be", "nl:store:handle:", [undefined]],
+    ["the handle: a number", "nl:store:handle:", [42]],
+    ["the handle: a list", "nl:store:handle:", [["owner@example.com"]]],
+    ["the store's record: no reply", "nl:store:owner:", []],
+    ["the store's record: a number", "nl:store:owner:", [7]],
+    ["the store's record: not a store", "nl:store:owner:", ["{not json"]],
+  ] as const) {
+    const html = await answering(prefix, [...reply], () => page({ store: "harbor" }));
+    is(`${name}: [said as not read just now, told to use the foot link, that store alone offered]`, [html.includes(UNREAD), html.includes(FOOT), html.includes("Harbor Kitchen only")], [true, false, false]);
+  }
+  const back = await page({ store: "harbor" });
+  is("control: read again, that store alone is offered", [back.includes("Harbor Kitchen only"), back.includes(UNREAD)], [true, false]);
+  const released = await answering("nl:store:handle:", ["released:1"], () => page({ store: "harbor" }));
+  is("control: a handle that was let go is a store not there, as before", [released.includes(ALL), released.includes(FOOT), released.includes(UNREAD)], [true, true, false]);
   done();
 }
 

@@ -240,7 +240,7 @@ async function main() {
   is("the agenda says what a person's page lets you do: mark done or remove, not change", page.includes("Open a person to mark one done or remove it.") && !page.includes("mark one done or change it"), true);
   // A task may be about a list subscriber, not only a buyer (C3-112 (2), light).
   is("its count is of tasks across the people in the store, not only its buyers", page.includes("open ${open === 1 ? \"task\" : \"tasks\"} across the people in your store. Open a person") && !page.includes("across your buyers"), true);
-  is("when the tasks or Stripe cannot be read, it says so", page.includes("tasks could not be read just now. Nothing was changed.") && page.includes("Stripe could not be read just now, so who each task is about is not shown."), true);
+  is("when the tasks or the sales records cannot be read, it says so, never blaming Stripe for the store's own records (Claude 5 on #2270)", page.includes("tasks could not be read just now. Nothing was changed.") && page.includes("Your sales records could not be read just now, so who each task is about is not shown."), true);
   is("only the shown rows' people are looked up, on any of the days", readFileSync("lib/person-agenda-read.ts", "utf8").includes("const persons = new Set(agenda.rows.map((row) => row.person));"), true);
   is("the groups made for each day the creator's may be", readFileSync("lib/person-agenda-read.ts", "utf8").includes("agendaForDays(all, daysAround(today))") && page.includes("<TasksAgendaList rows={data.rows} days={data.days} serverDay={today}"), true);
 

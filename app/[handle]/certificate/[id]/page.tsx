@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
@@ -12,6 +13,8 @@ import { CertificateActions } from "@/components/certificate-actions";
 import { readCourseListing } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 
 type Params = {
   params: Promise<{ handle: string; id: string }>;
@@ -29,6 +32,9 @@ async function load(rawHandle: string, id: string, product: string | undefined) 
     const found = await readCourseListing(store, product);
     const course = found?.course ? await readCourse(found.course.id) : null;
     if (!found || !course?.certificate) return null;
+    // A draft's sample is for the store's owner and team, signed in: its
+    // title is never shown to whoever only knows its id (MM-SA-30).
+    if (found.hidden && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) return null;
     const sample: Certificate = {
       id: "sample",
       store: storeKey(store),

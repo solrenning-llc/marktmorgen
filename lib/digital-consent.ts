@@ -47,6 +47,13 @@
  *     changed (another version) or a missing box opens nothing;
  *   - each one-click offer after paying is its own contract, so it asks again
  *     on its own button (lib/upsell.ts);
+ *   - a member's switch to another tier or to yearly charges at once under
+ *     new terms, so it asks again before charging, and keeps the yes on the
+ *     subscription in the request that charges (lib/tier-switch.ts,
+ *     lib/yearly-switch.ts; 91 [D2-EU-WITHDRAWAL], the owner's decision
+ *     C1-20261106-0100-TODOS-1). The automatic move back to monthly after a
+ *     failed yearly renewal (lib/yearly-fallback.ts) asks nothing: the
+ *     member is not there, and it opens nothing new;
  *   - what is kept is "yes", the version, the kind and the time, under
  *     CONSENT_META: on the order in the creator's own Stripe account, or, for
  *     a PayPal order, in Marktmorgen's own record of that order, which is

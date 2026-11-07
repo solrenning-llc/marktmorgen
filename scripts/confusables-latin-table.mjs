@@ -79,6 +79,8 @@ export const EXTRA = [
   [0x025b, "e", "LATIN SMALL LETTER OPEN E"], [0x025c, "e", "LATIN SMALL LETTER REVERSED OPEN E"], [0x029a, "e", "LATIN SMALL LETTER CLOSED OPEN E"],
   [0x018e, "e", "LATIN CAPITAL LETTER REVERSED E"], [0x018f, "e", "LATIN CAPITAL LETTER SCHWA"], [0x0190, "e", "LATIN CAPITAL LETTER OPEN E"],
   [0x0254, "o", "LATIN SMALL LETTER OPEN O"], [0x0186, "o", "LATIN CAPITAL LETTER OPEN O"],
+  // The turned a, turned alpha and turned i, the same class (Claude 2's focal return on #2579).
+  [0x0250, "a", "LATIN SMALL LETTER TURNED A"], [0x0252, "a", "LATIN SMALL LETTER TURNED ALPHA"], [0x1d09, "i", "LATIN SMALL LETTER TURNED I"],
 ];
 
 /** Below this code point a look-alike is listed one by one in the store assistant's gate; from it on, the gate takes every sign. */

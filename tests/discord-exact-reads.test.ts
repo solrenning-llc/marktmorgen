@@ -12,6 +12,11 @@
  *      a stored [7] became "this product gives no role" and checkMember ended a paying buyer's access.
  *   3. forgetMember never read its delete replies, so an empty, short or QUEUED pipeline answer still counted as
  *      one record erased while the member record (holding the buyer's address) and the link were both kept.
+ *   4. forgetMember read its delete replies with countOf, which takes any whole number, so [2, 1, 1] for one HDEL
+ *      field, one ZREM member and one DEL key confirmed erasure while nothing was deleted (Codex Z focal return,
+ *      review 5808484150; proof codex/z-review-2932-delete-count-return@23be2d17). Rule 30 sibling: the DEL of the
+ *      person's access checks in forgetDiscordPerson took any count, so a count above the keys sent was added to
+ *      the records erased.
  */
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { emailKey, storeKey } from "@/lib/learn";
@@ -141,6 +146,38 @@ async function main(): Promise<void> {
   const ended = await outcome(() => checkMember(store.sid, USER));
   rule = null;
   is("the periodic check does not report ended on unread deletes", ended, "rejected: UnknownReplyError");
+
+  part("4. A delete count impossible for one field, member or key cannot confirm erasure (Codex Z focal return)");
+  for (const reply of [[2, 1, 1], [1, 2, 1], [1, 1, 2], [1, 1, 7]] as unknown[][]) {
+    await seed();
+    rule = { match: on("HDEL", "nl:dc:mem:"), reply };
+    const erased = await outcome(() => forgetDiscordPerson(store, EMAIL, []));
+    rule = null;
+    is(`deletes answered ${JSON.stringify(reply)}: rejected, member and link still there`, [erased, await kept()], ["rejected: UnknownReplyError", { member: true, link: USER }]);
+  }
+  for (const reply of [[0, 0, 0], [1, 0, 1]] as unknown[][]) {
+    await seed();
+    rule = { match: on("HDEL", "nl:dc:mem:"), reply };
+    is(`control: deletes answered ${JSON.stringify(reply)} (each 0 or 1) are read as done`, await outcome(() => forgetDiscordPerson(store, EMAIL, [])), { records: 1, rolesLeft: false });
+    rule = null;
+  }
+
+  part("4b. Sibling: the access checks' DEL cannot count more keys than it sent (rule 30)");
+  for (const [label, ids, reply] of [
+    ["one key, count 2", [productId], [2]],
+    ["one key twice, count 2", [productId, productId], [2]],
+    ["two keys, count 3", [productId, "other-product"], [3]],
+  ] as [string, string[], unknown][]) {
+    await seed();
+    rule = { match: on("DEL", "nl:dc:ok:"), reply };
+    const erased = await outcome(() => forgetDiscordPerson(store, EMAIL, ids));
+    rule = null;
+    is(`${label}: rejected, never counted as records erased`, erased, "rejected: UnknownReplyError");
+  }
+  await seed();
+  is("control: the one access check kept is counted once", await forgetDiscordPerson(store, EMAIL, [productId]), { records: 2, rolesLeft: false });
+  await seed();
+  is("control: the same product twice deletes one key and counts it once", await forgetDiscordPerson(store, EMAIL, [productId, productId]), { records: 2, rolesLeft: false });
 
   done();
 }

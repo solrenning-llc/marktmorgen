@@ -157,15 +157,18 @@ async function runningMemberships(store: Store, statsId: string, nowSeconds: num
         const email = plainObject(customer) && typeof ownField(customer, "email") === "string" ? normaliseEmail(String(ownField(customer, "email"))) : "";
         const startRaw = ownField(row, "start_date");
         const anchorRaw = ownField(row, "billing_cycle_anchor");
+        const trialRaw = ownField(row, "trial_end");
         const start = typeof startRaw === "number" && Number.isSafeInteger(startRaw) ? startRaw : 0;
         const anchor = typeof anchorRaw === "number" && Number.isSafeInteger(anchorRaw) ? anchorRaw : start;
+        // No trial is null on Stripe; anything else that is not a whole second is not read as "no trial".
+        const trialEnd = trialRaw === null || trialRaw === undefined ? 0 : typeof trialRaw === "number" && Number.isSafeInteger(trialRaw) && trialRaw > 0 ? trialRaw : -1;
         const product = productOfSub(row);
         // A running membership of this store that cannot be placed proves nothing: counted, so the list says it is not whole.
-        if (!email || !start || !anchor || !product) {
+        if (!email || !start || !anchor || !product || trialEnd < 0) {
           unreadable += 1;
           continue;
         }
-        members.push({ sub: row.id, status, product, anchor, start, paused: pausedNow(row as PauseSub, nowSeconds), email, person: personKey(statsId, email) });
+        members.push({ sub: row.id, status, product, anchor, start, trialEnd, paused: pausedNow(row as PauseSub, nowSeconds), email, person: personKey(statsId, email) });
       }
       if (!read.hasMore) return { members, complete: true, unreadable };
       // The last row unreadable: the next page cannot be found from it.
@@ -215,6 +218,8 @@ function parseGiven(raw: string): Given | null {
 
 const givenJson = (g: Given) => JSON.stringify({ at: g.at, by: g.by });
 const markBytes = (f: string, g: Given) => dataBytes([f, givenJson(g)], 1);
+/** A person's place in nl:tben:who, as the room counts it. */
+const whoBytes = (person: string) => dataBytes([person], 1);
 
 export type DueRow = {
   benefit: string;
@@ -318,8 +323,8 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
   }
   if (!writes.length) return result;
   const people = [...new Set(writes.map((w) => w.row.person))];
-  // Each person's place in the list is counted again even when it is already there: the room errs fuller, never short.
-  const bytes = writes.reduce((sum, w) => sum + w.bytes, 0) + people.reduce((sum, p) => sum + dataBytes([p], 1), 0);
+  // Each person's place in the list is counted before it is known whether it is already there; given back below when it was.
+  const bytes = writes.reduce((sum, w) => sum + w.bytes, 0) + people.reduce((sum, p) => sum + whoBytes(p), 0);
   // Its room first; nothing is written when it does not fit or cannot be counted.
   const taken = await takeData(store, [{ slot: SLOT, bytes }], now);
   if (!taken.ok) return taken.reason === "full" ? { ok: false, reason: "full", message: taken.message } : { ok: false, reason: "room" };
@@ -335,6 +340,10 @@ export async function giveBenefit(store: Store, by: string, benefit: unknown, it
       result.already += 1;
       giveBack += w.bytes;
     } else result.unknown += 1;
+  });
+  // Already in the list: its place was counted when it was added. An unknown reply keeps its room (errs fuller, never short).
+  people.forEach((p, i) => {
+    if (replies && countOf(replies[writes.length + i]) === 0) giveBack += whoBytes(p);
   });
   if (giveBack) await giveData(store, [{ slot: SLOT, bytes: giveBack }], now);
   return result;
@@ -369,6 +378,8 @@ export async function forgetBenefitPerson(store: Store, person: string): Promise
   if (gone === null || !replies || countOf(replies[1]) === null) throw new UnknownReplyError("deleting a person's benefit marks");
   let bytes = 0;
   if (flat) for (let i = 0; i + 1 < flat.length; i += 2) bytes += dataBytes([flat[i], flat[i + 1]], 1);
+  // Their place in the list goes with them, and its room.
+  if (countOf(replies[1]) === 1) bytes += whoBytes(person);
   if (bytes) await giveData(store, [{ slot: SLOT, bytes }]);
   return gone;
 }

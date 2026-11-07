@@ -91,7 +91,7 @@ async function main(): Promise<void> {
   is("before the anchor there is no month yet", monthWindow(NOW + DAY, NOW), null);
   const once = { id: "b000000000001", product: "p1", text: "A signed print", cadence: "once" as const, since: ANCHOR - DAY, retired: 0 };
   const monthly = { ...once, id: "b000000000002", text: "A monthly call", cadence: "monthly" as const };
-  const member = { sub: "sub_x", status: "active", product: "p1", anchor: ANCHOR, start: ANCHOR, paused: false };
+  const member = { sub: "sub_x", status: "active", product: "p1", anchor: ANCHOR, start: ANCHOR, trialEnd: 0, paused: false };
   is("once, paid: owed, with no date promised", owedNow(once, member, NOW), { owed: true, period: "once", from: ANCHOR, until: null });
   is("monthly, paid: owed for this month, until it ends", owedNow(monthly, member, NOW), { owed: true, period: `m${win?.from}`, from: win?.from, until: win?.until });
   is("in a free trial: not owed yet", [owedNow(once, { ...member, status: "trialing" }, NOW), owedNow(monthly, { ...member, status: "trialing" }, NOW)], [{ owed: false, why: "trial" }, { owed: false, why: "trial" }]);

@@ -14,9 +14,12 @@
  *   - Only on the membership it was set on (the product the subscription is
  *     on today, lib/tier-rules.ts productOfSub), and never before it existed.
  *   - Never in a free trial: nothing has been paid for yet.
- *   - "once": owed to a member whose membership has been paid for (running,
- *     or with a renewal Stripe is retrying: the first payment went through).
- *     A pause does not take it away. No date is promised, so none is shown.
+ *   - "once": owed to a member whose membership has been paid for: running,
+ *     or with a renewal Stripe is retrying when it never had a free trial
+ *     (its first payment was taken when it began). After a free trial a
+ *     failed charge may be the first one, and nothing is known to be paid:
+ *     not owed until the membership is running again. A pause does not take
+ *     it away. No date is promised, so none is shown.
  *   - "monthly": owed for the month running now, counted in calendar months
  *     from the membership's billing anchor, only while the membership is
  *     paid up (active) and not paused. It belongs to that month: the month's
@@ -120,6 +123,8 @@ export type MemberLike = {
   anchor: number;
   /** When it started, in seconds. */
   start: number;
+  /** When its free trial ended (Stripe's trial_end), in seconds; 0 when it never had one. */
+  trialEnd: number;
   /** Inside a pause the member chose (lib/membership-pause-rules.ts pausedNow). */
   paused: boolean;
 };
@@ -127,7 +132,8 @@ export type MemberLike = {
 export type NotOwed = "none" | "before" | "retired" | "trial" | "unpaid" | "paused";
 export type Owed = { owed: true; period: string; from: number; until: number | null } | { owed: false; why: NotOwed };
 
-const PAID_ONCE = new Set(["active", "past_due", "unpaid"]);
+/** A renewal being retried: paid for once only when there was no free trial (see owedNow). */
+const RETRIED = new Set(["past_due", "unpaid"]);
 
 /** Whether this member is owed this benefit right now, and for which period. */
 export function owedNow(benefit: Benefit, member: MemberLike, now: number): Owed {
@@ -136,7 +142,8 @@ export function owedNow(benefit: Benefit, member: MemberLike, now: number): Owed
   if (benefit.cadence === "once") {
     if (benefit.retired && member.start >= benefit.retired) return { owed: false, why: "retired" };
     if (member.status === "trialing") return { owed: false, why: "trial" };
-    if (!PAID_ONCE.has(member.status)) return { owed: false, why: "unpaid" };
+    // After a free trial the failed charge may be the first: nothing is known to be paid until it runs again.
+    if (member.status !== "active" && !(RETRIED.has(member.status) && !member.trialEnd)) return { owed: false, why: "unpaid" };
     return { owed: true, period: "once", from: member.start, until: null };
   }
   const window = monthWindow(member.anchor, now);

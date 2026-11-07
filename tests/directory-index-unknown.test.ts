@@ -15,6 +15,8 @@
  */
 import { DIRECTORY_CACHE, listedCount, listedStores } from "@/lib/directory-index";
 import { readDirectory } from "@/lib/affiliate-directory";
+import * as directory from "@/lib/affiliate-directory";
+import { NOT_A_COST } from "./plan-cost-registry";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription } from "@/lib/store";
@@ -183,6 +185,45 @@ async function main(): Promise<void> {
     redis.pipeline = original;
   }
   is("a cursor of digits is still a page", (await listedStores("0")).next, "0");
+
+  // R2/C4 on #2921 (MÉDIO, comment 6707351435; Claude 6's LEVE, comment 6697867933; Codex T, review 5808328273): the
+  // SSCAN walk had no page ceiling of its own. It stopped only at cursor "0" or at MAX_ROWS distinct stores, and a
+  // page that brings no new store (a repeated member, an empty page, or a set whose past peak left a sparse table)
+  // does not move either, so one visit could send SSCAN after SSCAN until the function timed out. Past the ceiling
+  // the read is unknown: it throws, nothing is kept, and the page shows its "unavailable" notice.
+  part("A walk whose cursor never comes back to \"0\" stops at its page ceiling and keeps nothing (RED)");
+  const CEILING = 64; // DIRECTORY_SCAN_PAGES in lib/affiliate-directory.ts
+  const HARNESS_STOP = 1_000; // the test's own guard: a walk with no ceiling ends here instead of looping forever
+  redis.clear();
+  await selling("baker@example.com", "breadhouse", "Bread House");
+  await selling("yoga@example.com", "yogaroom", "Yoga Room");
+  const [both] = (await original([["SMEMBERS", "nl:dir:listed"]])) as [string[]];
+  const [one, other] = [...both].sort();
+  for (const [label, members] of [["one listed program repeated", [one]], ["empty pages", []]] as const) {
+    await original([["DEL", DIRECTORY_CACHE]]);
+    let scans = 0;
+    redis.pipeline = (async (commands: Commands) => {
+      if (commands[0]?.[0] === "SSCAN") return ++scans >= HARNESS_STOP ? [["0", []]] : [["5", [...members]]];
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const outcome = await failure(() => readDirectory());
+    redis.pipeline = original;
+    is(`${label}: the read is unknown`, outcome, "UnknownReplyError");
+    is(`${label}: after exactly ${CEILING} SSCAN pages`, scans, CEILING);
+    is(`${label}: and nothing is kept`, await kept(), null);
+  }
+  await original([["DEL", DIRECTORY_CACHE]]);
+  let edge = 0;
+  redis.pipeline = (async (commands: Commands) => {
+    if (commands[0]?.[0] === "SSCAN") return ++edge < CEILING ? [["5", [one]]] : [["0", [other]]];
+    return original(commands);
+  }) as typeof redis.pipeline;
+  const atCeiling = await readDirectory();
+  redis.pipeline = original;
+  is("a walk that ends on the last page allowed is still read whole", [atCeiling.map((row) => row.handle).sort(), edge], [["breadhouse", "yogaroom"], CEILING]);
+  is("and that page is kept", typeof (await kept()), "string");
+  is("the ceiling is named in the code", Reflect.get(directory, "DIRECTORY_SCAN_PAGES"), CEILING);
+  is("and the walk is in the cost registry", typeof NOT_A_COST.DIRECTORY_SCAN_PAGES, "string");
 
   done();
 }

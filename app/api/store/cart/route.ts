@@ -7,6 +7,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
+import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { MAX_CART, cartable, dealOff, readCartIds } from "@/lib/cart-rules";
 import { bestBundleSwap } from "@/lib/cart-bundle";
 import { cartPicks } from "@/lib/store-collections";
@@ -318,6 +319,9 @@ export async function POST(request: NextRequest) {
     const holding = await withCartStockHolds(store, products, async (held) => createCartCheckout(store, products, linkOrigin(request, store), {
       held,
       remind: reminding,
+      // A code that came in a link to this store (lib/code-link.ts), applied
+      // by Stripe only if it is one of the creator's live codes.
+      code: readLinkCode(request.cookies.get(codeCookieName(store.handle))?.value) || undefined,
       country: readCountry(request.headers.get("x-vercel-ip-country")),
       cameFrom: cameFrom(request.headers.get("referer"), new URL(origin).hostname),
         // The channel this sale is credited to: the page's own tags, else the

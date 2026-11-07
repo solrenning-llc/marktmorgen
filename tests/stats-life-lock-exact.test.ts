@@ -8,6 +8,7 @@
  * Before: any reply but nil was the lock won, so a malformed reply filled the record a second time beside the run
  * holding the lock, and every count it copied was doubled.
  */
+import { readFileSync } from "node:fs";
 import { readStats } from "@/lib/stats";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -17,6 +18,11 @@ import { done, is, part } from "./check";
 let lockReply: unknown = "real";
 let readBack: unknown = "real";
 let target = "";
+/** How a lone HGETALL of `recordTarget` is answered, from its `recordAt`-th read on (0: the first): "real" or as above. */
+let recordReply: unknown = "real";
+let recordTarget = "";
+let recordAt = 0;
+let recordSeen = 0;
 const pipeline = redis.pipeline.bind(redis);
 const shaped = (real: unknown[], at: number, how: unknown): unknown[] => {
   if (how === "throw") throw new Error("synthetic: connection reset");
@@ -25,6 +31,10 @@ const shaped = (real: unknown[], at: number, how: unknown): unknown[] => {
 };
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const real = await pipeline(commands);
+  if (commands.length === 1 && commands[0][0] === "HGETALL" && commands[0][1] === recordTarget && recordReply !== "real") {
+    recordSeen += 1;
+    if (recordSeen > recordAt) return shaped(real, 0, recordReply);
+  }
   const nx = commands.findIndex((c) => c[0] === "SET" && c[1] === target && c.includes("NX"));
   if (nx >= 0 && lockReply !== "real") return shaped(real, nx, lockReply);
   const get = commands.length === 1 ? commands.findIndex((c) => c[0] === "GET" && c[1] === target) : -1;
@@ -35,6 +45,10 @@ const reset = () => {
   lockReply = "real";
   readBack = "real";
   target = "";
+  recordReply = "real";
+  recordTarget = "";
+  recordAt = 0;
+  recordSeen = 0;
 };
 
 const NOW = Date.UTC(2026, 10, 6, 12);
@@ -110,6 +124,59 @@ async function main(): Promise<void> {
     await readStats(storeOf(id), NOW);
     is(`${label}: the next read fills it once`, await life(id), { filled: true, direct: 5 });
   }
+
+  // Review of #2905 (Claude 5): the record itself was read loosely, so any answer but a list read as an empty record,
+  // "filled" was not seen, the lock (let go by the first fill) was free, and every kept day was added a second time.
+  const RECORD_ODD: [string, unknown][] = [
+    ["no reply", "drop"],
+    ["a number", 7],
+    ["a string", "filled"],
+    ["an object", { filled: "x" }],
+    ["an odd-length list", ["filled"]],
+    ["a list holding a number", ["filled", 1]],
+    ["the request failed", "throw"],
+  ];
+  part("a record already filled, answered oddly, is never filled again: not given this time, counted once");
+  for (const [label, odd] of RECORD_ODD) {
+    const id = `liferecord${RECORD_ODD.findIndex(([l]) => l === label)}`;
+    await seed(id);
+    await readStats(storeOf(id), NOW);
+    is(`${label}: filled once by the first read`, await life(id), { filled: true, direct: 5 });
+    recordTarget = lifeKey(id);
+    recordReply = odd;
+    const got = await readStats(storeOf(id), NOW);
+    reset();
+    is(`${label}: a second read never fills it again`, (await life(id)).direct, 5);
+    is(`${label}: and gives no all-time record this time`, got?.life ?? null, null);
+    is(`${label}: no lock left taken`, (await pipeline([["GET", lockKey(id)]]))[0], null);
+    is(`${label}: the next read gives it, counted once`, (await readStats(storeOf(id), NOW))?.life?.views, 5);
+  }
+
+  part("the record read again after filling, answered oddly: filled once, not given this time");
+  for (const [label, odd] of RECORD_ODD) {
+    const id = `lifereread${RECORD_ODD.findIndex(([l]) => l === label)}`;
+    await seed(id);
+    recordTarget = lifeKey(id);
+    recordReply = odd;
+    recordAt = 1;
+    const got = await readStats(storeOf(id), NOW);
+    reset();
+    is(`${label}: filled once`, await life(id), { filled: true, direct: 5 });
+    is(`${label}: not given from a guess`, got?.life ?? null, null);
+    is(`${label}: the next read gives it, counted once`, (await readStats(storeOf(id), NOW))?.life?.views, 5);
+  }
+
+  part("confirmed absence: a store with no record yet is filled once, and its lock let go by its own value");
+  await pipeline([["HINCRBY", `nl:stats:lifenone:${day(1)}`, "r:direct", 3]]);
+  const none = await readStats(storeOf("lifenone"), NOW);
+  is("no record at all: filled from the kept days", [await life("lifenone"), none?.life?.views], [{ filled: true, direct: 3 }, 3]);
+  is("read again: still counted once", (await readStats(storeOf("lifenone"), NOW))?.life?.views, 3);
+
+  part("the fill lets go only its own lock (LEVE of the review of #2905)");
+  const stats = readFileSync("lib/stats.ts", "utf8");
+  const fill = stats.slice(stats.indexOf('if (claimed === "ours")'), stats.indexOf("// All-time views are the sum"));
+  is("no unconditional DEL of the lock in the fill", fill.includes('["DEL", lifeLockKey(statsId)]'), false);
+  is("the lock is let go with this read's value", fill.includes("await releaseMark(lifeLockKey(statsId), mine);"), true);
   done();
 }
 

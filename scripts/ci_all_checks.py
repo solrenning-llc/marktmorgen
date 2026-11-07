@@ -7,8 +7,11 @@ workflow therefore ends with this one job, which always runs and reads the resul
 every other job of the same workflow:
 
 - every job succeeded: pass;
-- documentation-scope succeeded and said the change is documentation only
-  (outputs.full == "false"), and every other job succeeded or was skipped: pass;
+- documentation-scope succeeded and said full coverage is not needed
+  (outputs.full == "false": a documentation-only pull request, a pull request that
+  scripts/ci_ui_scope.py proves cannot reach a browser-only suite, or a push whose
+  identical tree already passed in full), and every other job succeeded or was
+  skipped: pass;
 - anything else (a failure, a cancellation, a skip without that proof, a missing
   result or a failed documentation-scope): fail.
 

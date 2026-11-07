@@ -1,6 +1,14 @@
-"""PV8(a): conservatively classify documentation-only PRs; all uncertainty runs full CI."""
+"""PV8(a): conservatively classify documentation-only PRs; all uncertainty runs full CI.
+
+A workflow that sets CI_SUITE=ui (the browser-only suites) may also skip a pull request
+that changes no file able to reach them (scripts/ci_ui_scope.py). Only a pull_request
+event can skip this way; merge_group, push, schedule and workflow_dispatch never do. (A push
+to main may still reuse a complete, fully passing run of the identical tree: PV8(b), below;
+a pull request run whose suites were skipped is never such a run.)
+"""
 import os
 from ci_full_tree_proof import can_reuse_main
+from ci_ui_scope import changed_paths, unaffected_between
 import re
 import subprocess
 from pathlib import PurePosixPath
@@ -44,6 +52,21 @@ def requires_full(event, base, head, diff):
     except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
         return True
 
+def requires_suite(suite, event, base, head, diff, unaffected):
+    """Full coverage unless a documentation-only change, or, for CI_SUITE=ui on a
+    pull_request, a change that the import graph proves cannot reach the suites."""
+    if not requires_full(event, base, head, diff):
+        return False
+    if suite == "":
+        return True
+    if suite != "ui" or event != "pull_request" or not SHA.fullmatch(base) or not SHA.fullmatch(head):
+        return True
+    try:
+        return unaffected(changed_paths(diff(base, head))) is not True
+    except Exception:
+        # Missing history, a malformed diff or an uncertain graph never permits skipping.
+        return True
+
 def git_diff(base, head):
     # No rename detection: moving code to .md retains the code deletion in the diff.
     return subprocess.check_output(
@@ -51,8 +74,14 @@ def git_diff(base, head):
         timeout=60)
 
 if __name__ == "__main__":
-    full = requires_full(os.environ.get("CI_EVENT", ""), os.environ.get("CI_BASE", ""),
-                         os.environ.get("CI_HEAD", ""), git_diff)
+    event, suite = os.environ.get("CI_EVENT", ""), os.environ.get("CI_SUITE", "")
+    base, head = os.environ.get("CI_BASE", ""), os.environ.get("CI_HEAD", "")
+    documentation_only = not requires_full(event, base, head, git_diff)
+    # The graph is read at the base, the head and the merge commit this checkout tests.
+    full = requires_suite(suite, event, base, head, git_diff,
+                          lambda changed: unaffected_between(changed, [base, head, "HEAD"]))
+    if not full and not documentation_only:
+        print("No changed file can reach the browser-only suites")
     if full and can_reuse_main():
         full = False
         print("Reused complete PR coverage for identical Git tree")

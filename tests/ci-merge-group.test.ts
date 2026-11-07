@@ -36,7 +36,7 @@ function jobs(text: string): Record<string, string> {
   }
   return found;
 }
-const triggers = (text: string) => text.split("\njobs:\n")[0];
+const triggers = (text: string) => text.split("\njobs:\n")[0] + "\n";
 
 part("every workflow runs in the merge queue");
 is("there are exactly the nine workflows", WORKFLOWS.length, 9);

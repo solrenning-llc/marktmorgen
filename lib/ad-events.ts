@@ -708,8 +708,8 @@ type InvoicesRead = { rows: InvoiceRow[]; commit: () => Promise<void> };
  * A page that is not a list, a has_more that is not true or false, a row that
  * is not an object, or more said to follow a page with no invoice id to go on
  * from, is not "no renewals" (CX-123 rule 24): it throws, and the next pass
- * tries again. So does a kept place that is not an invoice's id. Nothing is
- * written here: `commit` keeps the place for the next pass (the last invoice
+ * tries again. So does a reading of the kept place that failed; a place it
+ * cannot follow is only let go (below). Nothing is written here: `commit` keeps the place for the next pass (the last invoice
  * read, when more were left) or lets it go (the end was reached), and
  * sendRenewals calls it only once every renewal read was handled.
  */
@@ -717,15 +717,19 @@ async function paidInvoices(account: string, statsId: string, since: number, dea
   const key = renewKey(statsId);
   const replies = await redisPipeline([["GET", key]]);
   const kept = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
+  // A reading that failed is not a place (CX-123 rule 24): the pass throws before Stripe is asked.
+  if (kept !== null && typeof kept !== "string") throw new Error("the place a pass of renewals stopped at was not read");
   const cut = typeof kept === "string" ? kept.lastIndexOf(":") : -1;
-  const keptAccount = typeof kept === "string" ? kept.slice(0, cut) : "";
-  const keptInvoice = typeof kept === "string" ? kept.slice(cut + 1) : "";
-  if (kept !== null && !(cut > 0 && STRIPE_ACCOUNT_PATTERN.test(keptAccount) && INVOICE.test(keptInvoice))) {
-    throw new Error("the place a pass of renewals stopped at is in an unknown shape");
-  }
+  const keptAccount = cut > 0 ? (kept as string).slice(0, cut) : "";
+  const keptInvoice = cut > 0 ? (kept as string).slice(cut + 1) : "";
+  // A place in a shape it cannot follow, or read in another account (the
+  // creator connected a new one), is let go, and the day is read from the
+  // newest in this same pass: every renewal's sent mark is a SET NX, so a
+  // renewal read again is never sent twice. It is replaced or deleted by the
+  // same SET or DEL that moves a place (commit below), no command more.
+  const followable = STRIPE_ACCOUNT_PATTERN.test(keptAccount) && INVOICE.test(keptInvoice) && keptAccount === account;
   const rows: InvoiceRow[] = [];
-  // A place read in another account (the creator connected a new one) is not followed: the new account is read from the newest.
-  const from = kept !== null && keptAccount === account ? keptInvoice : null;
+  const from = followable ? keptInvoice : null;
   let after = from;
   let more = false;
   for (let page = 0; page < RENEWAL_PAGES_PER_RUN; page += 1) {

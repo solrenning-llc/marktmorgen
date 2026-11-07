@@ -557,6 +557,15 @@ export class MemoryRedis {
           if (present === "0" ? raw !== null : raw !== expected) return -1;
           return this.run(["DEL", ...gone]);
         }
+        // lib/mail-clicks.ts, STOP_CLICKS_IF_SAME: the counted keys deleted, the row written only while it is what was read.
+        if (key.startsWith("-- marktmorgen:mail-clicks-stop:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, leads, used, linkKey, field, expected, next] = args;
+          this.run(["DEL", used, linkKey]);
+          if (next === "") return 1;
+          if (this.run(["HGET", leads, field]) !== expected) return -1;
+          this.run(["HSET", leads, field, next]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
           const target = args[1];
           this.live(target);

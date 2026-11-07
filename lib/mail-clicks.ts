@@ -96,29 +96,48 @@ export async function countingFor(token: string): Promise<{ email: string; handl
   return found ? { email: found.email, handle: found.handle, listId: found.listId, on: Boolean(found.contact.clicks) && mailable(found.contact) } : null;
 }
 
+/** How many times the stop and the erasure read a row that keeps changing before they give up. */
+const FORGET_TRIES = 3;
+
+/**
+ * Deletes what was counted (KEYS[2]) and the key their links carry (KEYS[3]),
+ * and writes the person's row (KEYS[1], field ARGV[1]) as ARGV[3], the same row
+ * without the permission, only while it is still exactly ARGV[2], the row that
+ * was read; ARGV[3] "" writes no row. Answers 1, or -1 when the row changed and
+ * nothing of it was written.
+ */
+export const STOP_CLICKS_IF_SAME = `-- marktmorgen:mail-clicks-stop:v1
+redis.call("DEL", KEYS[2], KEYS[3])
+if ARGV[3] == "" then return 1 end
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return -1 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
+return 1`;
+
 /**
  * Takes the permission back: nothing more is counted, what was counted is
  * deleted, and their links stop carrying the key. Says whether it was found.
+ * The row is written only as it was read: an unsubscribe or an erasure made
+ * meanwhile is never written over with the old copy; it is read again.
  */
 export async function stopCounting(token: string): Promise<boolean> {
-  const found = await readUnsubToken(token);
-  if (!found) return false;
-  const { listId, email, contact } = found;
-  const commands: (string | number)[][] = [
-    ["DEL", usedKey(listId, email)],
-    ["DEL", keyIndex(linkKeyOf(token))],
-  ];
-  if (contact.clicks) {
-    const { clicks: _was, ...kept } = contact;
-    void _was;
-    commands.push(["HSET", leadsKey(listId), email, JSON.stringify(kept satisfies Contact)]);
+  for (let attempt = 0; attempt < FORGET_TRIES; attempt += 1) {
+    const found = await readUnsubToken(token);
+    // Gone or no longer theirs since the first read: what was counted is already deleted.
+    if (!found) return attempt > 0;
+    const { listId, email, contact, raw } = found;
+    let next = "";
+    if (contact.clicks) {
+      const { clicks: _was, ...kept } = contact;
+      void _was;
+      next = JSON.stringify(kept satisfies Contact);
+    }
+    const command = ["EVAL", STOP_CLICKS_IF_SAME, 3, leadsKey(listId), usedKey(listId, email), keyIndex(linkKeyOf(token)), email, raw, next];
+    const reply = repliesFor(await redisPipeline([command]), 1)?.[0];
+    if (reply === 1) return true;
+    if (reply !== -1) throw new UnknownReplyError("taking back the count of a person's link use");
   }
-  await redisPipeline(commands);
-  return true;
+  throw new Error(`a contact's row changed ${FORGET_TRIES} times while their link use was taken back`);
 }
-
-/** How many times the erasure reads a row that keeps changing before it gives up. */
-const FORGET_TRIES = 3;
 
 /**
  * Deletes the keys (KEYS[2..]) only while the person's list row (KEYS[1],

@@ -773,7 +773,7 @@ export async function tokensFor(
 /** Who an unsubscribe link belongs to, without acting on it. */
 export async function readUnsubToken(
   token: string,
-): Promise<{ listId: string; email: string; handle: string; contact: Contact } | null> {
+): Promise<{ listId: string; email: string; handle: string; contact: Contact; raw: string } | null> {
   if (!UNSUB_TOKEN.test(token) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", tokenKey(token)]]);
   if (typeof raw !== "string") return null;
@@ -787,7 +787,8 @@ export async function readUnsubToken(
   if (!email) return null;
   const [row] = await redisPipeline([["HGET", leadsKey(listId), email]]);
   const contact = parseContact(row);
-  return contact && contact.t === token ? { listId, email, handle, contact } : null;
+  // The row as it was read, for a write that must find it unchanged (lib/mail-clicks.ts, stopCounting).
+  return contact && contact.t === token && typeof row === "string" ? { listId, email, handle, contact, raw: row } : null;
 }
 
 /** Takes an address off the list for good. Safe to press twice. */

@@ -1259,9 +1259,11 @@ export default async function StudioPage({
   // a promise React renders beside the other sections, so they wait together and not one after another. Each sits
   // where it did, under the same condition, and reads and writes what it did; a refusal still fails the page.
   // tests/studio-today-trips.test.ts renders the tree whole.
-  // The two store writes in the parts below keep the order they had: a token's platforms are written (ServerEvents)
-  // before the add-on's month is read again from Stripe and written (the assistant), so they never wait on each
-  // other's store lock in one visit. Set while the page's JSX is built, before either part awaits anything.
+  // The store writes in the parts below keep the order they had: the ready cart link's count, which writes the billing
+  // month when the store's snapshot has none (lib/billing-sync.ts refreshPeriod), then a token's platforms
+  // (ServerEvents), then the add-on's month read again from Stripe (the assistant), so they never wait on each other's
+  // store lock in one visit. Each part takes the one before from here and puts its own, while the page's JSX is built,
+  // before it awaits anything (tests/studio-today-removal-order.test.ts).
   const serverWrite: { done: Promise<unknown> } = { done: Promise.resolve() };
   // The store's cards, read once for the parts that show them (the short links' titles, the product editor's pairs,
   // the cards and the welcome offer), when the first of them asks: read side by side, each would repair a cold cache again (Codex M on
@@ -2013,7 +2015,11 @@ export default async function StudioPage({
 
                 <CartDealEditor initial={store.cartDeal} currency={store.currency} offered={offersCart(store)} />
 
-                {offersCart(store) ? (async () => <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await cartLinkProducts(store)} more={cartLinkCandidates(store).length > CART_LINK_CHOICES ? CART_LINK_CHOICES : 0} />)() : null}
+                {offersCart(store) ? (async () => {
+                  const products = cartLinkProducts(store);
+                  serverWrite.done = products;
+                  return <CartLinkBuilder address={`${SITE_URL}/@${store.handle}`} products={await products} more={cartLinkCandidates(store).length > CART_LINK_CHOICES ? CART_LINK_CHOICES : 0} />;
+                })() : null}
 
                 {(async () => {
                   const tiers = await tierCandidates(store);
@@ -2022,11 +2028,13 @@ export default async function StudioPage({
 
                 <PixelEditor pixels={store.pixels} canViewAttribution={may("stats")} />
                 {hasPixels(store.pixels) ? (async () => {
+                  const before = serverWrite.done;
                   const setupRead = (async () => {
                     const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
-                    // A token saved before the store kept its own list of platforms is written there now, once.
+                    // A token saved before the store kept its own list of platforms is written there now, once, after
+                    // the cart link's write.
                     const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
-                    if (on.join() !== store.adsServer.join()) await setAdsServer(storeRef(store), on).catch(() => null);
+                    if (on.join() !== store.adsServer.join()) await before.catch(() => null).then(() => setAdsServer(storeRef(store), on)).catch(() => null);
                     return setup;
                   })();
                   serverWrite.done = setupRead;

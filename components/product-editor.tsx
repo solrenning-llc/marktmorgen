@@ -1457,10 +1457,12 @@ function OptionsBlock({
                               refocusSale.current = option.id;
                               setRestoringId(null);
                             },
-                            // The server says whether the plan did stop: another tab may have covered this price since.
+                            // The server says whether the plan did stop: another tab may have covered this price since. Not
+                            // stopped also means no plan at all, or one paused already (Claude 1's LEVE on #2690), so nothing
+                            // is said of a plan then.
                             (data) =>
                               (data as { planStopped?: unknown }).planStopped === false
-                                ? `${option.label} is back on sale. The payment plan goes on.`
+                                ? `${option.label} is back on sale.`
                                 : `${option.label} is back on sale. The payment plan has stopped.`,
                           )
                         }

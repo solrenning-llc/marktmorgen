@@ -113,6 +113,10 @@ const uncheckedSome = (n: number, w: unknown = c) => {
   const say = wordsOf(w).uncheckedSome;
   return typeof say === "function" ? (say as (n: number) => string)(n) : "<no uncheckedSome>";
 };
+const closedWord = (w: unknown = c) => {
+  const say = wordsOf(w).storeClosed;
+  return typeof say === "string" ? say : "<no storeClosed>";
+};
 const retryWord = (w: unknown = c) => {
   const say = wordsOf(w).retry;
   return typeof say === "string" ? say : "<no retry>";
@@ -168,6 +172,13 @@ async function openCart(start: string[], answers: Answer[]) {
       await cart.settle();
     },
     settle: () => cart.settle(),
+    /** Closes the panel and opens it again with the cart's own button. */
+    reopen: async () => {
+      for (let i = 0; i < 2; i += 1) {
+        (find(cart.tree(), (n) => n.type === "button" && n.props?.["aria-expanded"] !== undefined)[0].props!.onClick as () => void)();
+        await cart.settle();
+      }
+    },
     unmount: () => cart.unmount(),
     /** Gives the panel a stand-in element and counts how often the cart puts the focus on it. */
     watchFocus: () => {
@@ -456,6 +467,77 @@ async function main() {
     cart.unmount();
   }
 
+  // ---- Claude 6's review of #2978 (two LEVES she found reading the code, and an optional target size) ----
+  part("Claude 6 L1: reopening the cart while it reads again does not show the old failure");
+  {
+    const cart = await openCart(["a"], [failures[2][1], hang()]);
+    is("the first failure is said", cart.view().alerts, [uncheckedSome(1)]);
+    await cart.reopen();
+    const v = cart.view();
+    is("the cart reads again when it is opened again", cart.reads(), 2);
+    is("while that read runs, no alert from the old failure", v.alerts, []);
+    is("and the panel says the prices are being checked", v.statuses.includes(c.loading), true);
+    await cart.waitOut();
+    is("when that read fails too, the alert is said again", cart.view().alerts, [uncheckedSome(1)]);
+    cart.unmount();
+  }
+  {
+    const cart = await openCart(["a", "b"], [answer(both), failures[2][1], hang()]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === c.remove("Product b"));
+    is("under the form, the failure is said", cart.view().alerts, [c.unchecked]);
+    await cart.reopen();
+    const v = cart.view();
+    is("under the form, reopening shows no old alert while the read runs", v.alerts, []);
+    is("and says the prices are being checked", v.statuses.includes(c.loading), true);
+    is("and the button carries no amount", v.button, [c.checkoutUnpriced]);
+    cart.unmount();
+  }
+
+  const unknownStore: Answer = async () => new Response(JSON.stringify({ ok: false, error: "unknown" }), { status: 404 });
+  part("Claude 6 L2: a store that is gone (404) says so, with no \"Try again\" and nothing to pay");
+  {
+    const cart = await openCart(["a"], [unknownStore]);
+    const v = cart.view();
+    is("the alert says the store is not taking orders", v.alerts, [closedWord()]);
+    is("no \"Try again\" that can only fail again", v.retry.length, 0);
+    is("no checkout form", v.posted, null);
+    is("no \"could not check\" sentence", v.text.includes(uncheckedSome(1)), false);
+    cart.unmount();
+  }
+  {
+    const cart = await openCart(["a", "b"], [answer(both), unknownStore]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === c.remove("Product b"));
+    const v = cart.view();
+    is("after a change, the alert says the store is not taking orders", v.alerts, [closedWord()]);
+    is("no \"Try again\"", v.retry.length, 0);
+    is("no checkout button that would post to a store that is gone", v.button, []);
+    is("no old $27.00", v.text.includes("$27.00"), false);
+    cart.unmount();
+  }
+  part("Claude 6 L2 control: a 404 that is not the cart's own answer is an ordinary failure");
+  {
+    const cart = await openCart(["a"], [async () => new Response("<html>not found</html>", { status: 404 })]);
+    is("it says the product could not be checked", cart.view().alerts, [uncheckedSome(1)]);
+    is("with \"Try again\"", cart.view().retry.length, 1);
+    cart.unmount();
+  }
+  part("Claude 6 L2 control: a store that answers again after a 404 is shown normally");
+  {
+    const cart = await openCart(["a"], [unknownStore, answer(onlyA)]);
+    is("first, it is gone", cart.view().alerts, [closedWord()]);
+    await cart.reopen();
+    is("opened again, the store answers and the button says $10.00", cart.view().button, [c.checkout("$10.00")]);
+    is("and no alert is left", cart.view().alerts, []);
+    cart.unmount();
+  }
+  part("Claude 6 (optional): \"Try again\" is at least 44 px wide as well as tall");
+  {
+    const cart = await openCart(["a"], [failures[2][1]]);
+    const cls = String(cart.view().retry[0]?.props?.className ?? "");
+    is("min-h-11 and min-w-11", [cls.includes("min-h-11"), cls.includes("min-w-11")], [true, true]);
+    cart.unmount();
+  }
+
   part("The words exist in every language a store sells in");
   for (const [code, words] of Object.entries(CART_WORDS)) {
     is(`${code}: "Check out" with no amount is set`, words.checkoutUnpriced.trim().length > 0 && !words.checkoutUnpriced.includes("·"), true);
@@ -468,6 +550,10 @@ async function main() {
     is(`${code}: 1 and 2 unchecked products are full sentences that differ`, uncheckedSome(1, words).length > 20 && !uncheckedSome(1, words).startsWith("<") && uncheckedSome(1, words) !== uncheckedSome(2, words), true);
     is(`${code}: the count is in the sentence`, uncheckedSome(1, words).includes("1") && uncheckedSome(2, words).includes("2"), true);
   }
+  for (const [code, words] of Object.entries(CART_WORDS)) {
+    is(`${code}: the store-gone sentence is set`, closedWord(words).length > 20 && !closedWord(words).startsWith("<"), true);
+  }
+  is("the seven store-gone sentences differ", new Set(Object.values(CART_WORDS).map((w) => closedWord(w))).size, 7);
   is("the seven \"Try again\" differ", new Set(Object.values(CART_WORDS).map((w) => retryWord(w))).size, 7);
   is("the seven unchecked-products sentences differ", new Set(Object.values(CART_WORDS).map((w) => uncheckedSome(2, w))).size, 7);
   done();

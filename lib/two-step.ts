@@ -68,7 +68,7 @@
  */
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, endSession, isMoving, normaliseEmail, openSession, sessionKeyOf } from "@/lib/auth";
-import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
@@ -487,13 +487,31 @@ If it was not you, somebody can read your email: log in with your app's code or 
 export async function openLockedSession(email: string, until: number, now = Date.now()): Promise<string> {
   const session = await openSession(email);
   const seconds = Math.max(60, Math.ceil((until - now) / 1000));
-  await redisPipeline([
-    // Kept as long as the session can last, with when it opened: past its day it says whether the session
-    // was opened before its account's locked sessions could not be logged out (lockedUntil).
-    ["SET", lockedKey(session), `${until}|${now}`, "EX", Math.max(seconds, SESSION_TTL_SECONDS)],
-    ["SADD", lockedSetKey(email), session],
-    ["EXPIRE", lockedSetKey(email), seconds + 86_400],
-  ]);
+  // Without its lock it is a full session: one whose lock is not confirmed is taken back, never handed out.
+  const takeBack = async () => {
+    if (!(await endSession(session))) console.error("taking back a locked session whose lock was not confirmed failed");
+  };
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([
+      // Kept as long as the session can last, with when it opened: past its day it says whether the session
+      // was opened before its account's locked sessions could not be logged out (lockedUntil).
+      ["SET", lockedKey(session), `${until}|${now}`, "EX", Math.max(seconds, SESSION_TTL_SECONDS)],
+      ["SADD", lockedSetKey(email), session],
+      ["EXPIRE", lockedSetKey(email), seconds + 86_400],
+    ]), 3);
+  } catch (error) {
+    await takeBack();
+    throw error;
+  }
+  // The lock's SET answered "OK" and the account's locked set its 0 or 1 twice (CX-123 rule 24), as openSession
+  // reads its own writes; anything else fails the login, said by the callers as a failed login, and the session's
+  // id is never given out (review of #2948 at 929dec4d; tests/auth-sessions-exact.test.ts).
+  const counted = (reply: unknown) => countOf(reply) === 0 || countOf(reply) === 1;
+  if (!replies || replies[0] !== "OK" || !counted(replies[1]) || !counted(replies[2])) {
+    await takeBack();
+    throw new UnknownReplyError("a locked session's lock");
+  }
   return session;
 }
 

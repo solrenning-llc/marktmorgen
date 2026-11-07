@@ -674,6 +674,19 @@ export class MemoryRedis {
           }
           return changed;
         }
+        // lib/contacts.ts CONTACT_FORGET: the row and its counts in one step, only over the row read.
+        if (key.startsWith("-- marktmorgen:contact-forget:v1\n") && args[0] === "3" && args.length === 8) {
+          const [, leads, agreed, unsub, email, raw, wasAgreed, wasUnsub] = args;
+          if (this.run(["HGET", leads, email]) !== raw) return 0;
+          this.run(["HDEL", leads, email]);
+          const down = (counter: string) => {
+            const n = Number(this.run(["GET", counter]) ?? "0") || 0;
+            if (n > 0) this.run(["DECR", counter]);
+          };
+          if (wasAgreed === "1") down(agreed);
+          if (wasUnsub === "1") down(unsub);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
           const n = Number(this.data.get(args[1]) ?? "0") || 0;

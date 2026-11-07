@@ -53,6 +53,7 @@ import { countOf, holdsAll } from "@/lib/community-search";
 import { CREATOR } from "@/lib/community";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { SET_TAKE_COUNT } from "@/lib/redis-take";
 
 /**
  * Where messages are counted in the store's data room (lib/store-data.ts):
@@ -422,17 +423,29 @@ export async function searchMessages(id: string, who: string, used: string[]): P
  * requests and people they declined. Somebody else's choice to decline them
  * stays with that person.
  */
-export async function forgetDmPerson(id: string, who: string): Promise<number> {
+export async function forgetDmPerson(id: string, who: string, room?: DataStore): Promise<number> {
   const [mine, asked] = await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]);
   const pairs = [...new Set([...(Array.isArray(mine) ? mine : []), ...(Array.isArray(asked) ? asked : [])].map(String))].filter((p) => p.split(".").includes(who));
   const commands: (string | number)[][] = [];
+  const at: number[] = [];
   for (const pair of pairs) {
     const other = pair.split(".").find((k) => k !== who) ?? "";
+    at.push(commands.length);
     commands.push(["DEL", chatKey(id, pair), readKey(id, pair)]);
     if (other) commands.push(["ZREM", inboxKey(id, other), pair], ["ZREM", askedKey(id, other), pair]);
   }
-  commands.push(["DEL", ...dmKeys(id, who)]);
-  await redisPipeline(commands);
+  // The people they declined: counted and deleted in one step, so they are given back once.
+  const declinedAt = commands.length;
+  commands.push(["EVAL", SET_TAKE_COUNT, 1, shutKey(id, who)]);
+  commands.push(["DEL", inboxKey(id, who), askedKey(id, who)]);
+  const replies = await redisPipeline(commands);
+  if (room) {
+    // A conversation this deletion removed gives its whole slot back, as declining one does.
+    const gone = pairs.filter((_, i) => Number(replies[at[i]]) > 0);
+    const declined = Number(replies[declinedAt]) || 0;
+    const back = [...gone.map((pair) => ({ slot: PAIR_SLOT(pair), bytes: 0, set: true })), ...(declined > 0 ? [{ slot: DECLINED_SLOT, bytes: declined * DECLINED_BYTES }] : [])];
+    if (back.length) await giveData(room, back);
+  }
   return pairs.length;
 }
 

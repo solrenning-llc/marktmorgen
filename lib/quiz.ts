@@ -32,6 +32,8 @@ import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rule
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { SET_AND_VALUES_TAKE } from "@/lib/redis-take";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
 
@@ -548,6 +550,10 @@ export async function submitQuiz(
   // What the try leaves takes room first, at the most it can weigh: its
   // answers and marks rewritten over the last, its count the first time, and
   // its pass. Nothing is counted against the store's quizzes without it.
+  // What it really left is all that resetTries or a deletion gives back: the
+  // rest of this reservation (the draft's worst case, a pass not made) stays
+  // counted, the room erring fuller. Settling it here would need the try's
+  // write and its room in one script, and is not done.
   const last = await redisPipeline([["GET", resultKey(courseId, lessonId, who)]]);
   const draft = JSON.stringify({ used: 9_999, last: { answers: mine, grade: gradeQuiz(asked, mine), at: Math.floor(Date.now() / 1000) }, best: 100, passed: true });
   const grown = dataBytes([draft], 1) - kept(last[0]) + (before.used ? 0 : dataBytes(["9999"], 1)) + dataBytes([lessonId], 1);
@@ -610,22 +616,67 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
   const passed = await passedQuizzes(course.id, who);
   const lessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz && !passed.has(lesson.id));
   if (lessons.length === 0) return;
-  // What the tries weighed comes back to the store's data room.
-  const held = await redisPipeline(lessons.flatMap(({ lesson }) => [["GET", resultKey(course.id, lesson.id, who)], ["GET", triesKey(course.id, lesson.id, who)]]));
+  // Each read and deleted in one step (GETDEL), so what the tries weighed comes
+  // back to the store's data room once, even beside a deletion of the student.
+  const held = await redisPipeline(lessons.flatMap(({ lesson }) => [["GETDEL", resultKey(course.id, lesson.id, who)], ["GETDEL", triesKey(course.id, lesson.id, who)]]));
   const freed = held.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
   if (freed) await giveData(room, [{ slot: TRIES_SLOT(course.id), bytes: freed }]);
-  await redisPipeline(
-    lessons.flatMap(({ lesson }) => [
-      ["DEL", triesKey(course.id, lesson.id, who)],
-      ["DEL", resultKey(course.id, lesson.id, who)],
-    ]),
-  );
 }
 
-/** Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is lib/learn.ts emailKey. */
-export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string): Promise<number> {
+/**
+ * Deletes one student's tries, results and passes in these courses' quizzes
+ * (lib/person-erasure.ts). `who` is lib/learn.ts emailKey. Each course's are
+ * read and deleted in one step, and what they weighed (each try's count and
+ * result as resetTries gives them back, each lesson passed as markPassed
+ * counts it) goes back to `room`, when it is given, once.
+ */
+export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string, room?: DataStore): Promise<number> {
   if (!courses.length || !isRedisConfigured()) return 0;
-  const keys = courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])]);
-  const [gone] = await redisPipeline([["DEL", ...keys]]);
-  return Number(gone) || 0;
+  const what = "the deletion of a student's quiz tries";
+  const replies = exactReplies(
+    await redisPipeline(
+      courses.map((c) => {
+        const keys = [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])];
+        return ["EVAL", SET_AND_VALUES_TAKE, keys.length, ...keys];
+      }),
+    ),
+    courses.length,
+    what,
+  );
+  let records = 0;
+  let unknown = false;
+  const freed: { slot: string; bytes: number }[] = [];
+  courses.forEach((c, i) => {
+    // Exactly {the passes, one value per lesson key, how many keys went}; any
+    // other shape leaves this course's deletion unknown, and its room kept.
+    // Every level read as a plain list (lib/redis-exact.ts plainList): no hole, no getter, read once (Codex G on #2576).
+    const outer = plainList(replies[i]);
+    const [passedRaw, valuesRaw, gone] = outer && outer.length === 3 ? outer : [];
+    const passed = plainList(passedRaw);
+    const values = plainList(valuesRaw);
+    if (
+      !passed ||
+      !passed.every((lessonId) => typeof lessonId === "string") ||
+      !values ||
+      values.length !== c.lessonIds.length * 2 ||
+      !values.every((raw) => raw === null || typeof raw === "string" || typeof raw === "number") ||
+      typeof gone !== "number" ||
+      !Number.isSafeInteger(gone) ||
+      // The same DEL took exactly the keys this reply says were there (Codex G on #2576): the passes' set when it held
+      // any, and each value that was not none. Any other count is a reply that contradicts itself: unknown.
+      gone !== (passed.length > 0 ? 1 : 0) + values.filter((raw) => raw !== null).length
+    ) {
+      unknown = true;
+      return;
+    }
+    records += gone;
+    const bytes =
+      passed.reduce((sum: number, lessonId) => sum + dataBytes([lessonId as string], 1), 0) +
+      values.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
+    if (bytes > 0) freed.push({ slot: TRIES_SLOT(c.courseId), bytes });
+  });
+  // What was confirmed taken comes back; a course whose reply is unknown keeps its room.
+  if (room && freed.length) await giveData(room, freed);
+  if (unknown) throw new UnknownReply(what);
+  return records;
 }

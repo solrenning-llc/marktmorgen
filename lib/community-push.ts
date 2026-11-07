@@ -38,6 +38,8 @@
 import { redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
+import { exactReplies } from "@/lib/redis-exact";
 
 /** Where members' devices are counted in the store's data room (lib/store-data.ts). */
 const DEVICES_SLOT = "cm:ps";
@@ -213,13 +215,18 @@ export async function pushMembers(id: string, to: string[], alert: MemberAlert):
   return sent;
 }
 
-/** Deletes the devices one member let us notify (lib/community-erasure.ts). */
-export async function forgetPushPerson(id: string, who: string): Promise<number> {
-  const reply = await redisPipeline([["DEL", pushKey(id, who)]]);
-  const length = Array.isArray(reply) ? Object.getOwnPropertyDescriptor(reply, "length") : undefined;
-  const gone = Array.isArray(reply) ? Object.getOwnPropertyDescriptor(reply, "0") : undefined;
-  if (length?.value !== 1 || !gone || !("value" in gone) || (gone.value !== 0 && gone.value !== 1)) {
-    throw new Error("Community push erasure was not confirmed");
-  }
-  return gone.value;
+/**
+ * Deletes the devices one member let us notify (lib/community-erasure.ts),
+ * read and deleted in one step, and gives back to `room`, when it is given,
+ * what each took, once. A reply that is not exactly the one asked for (read
+ * without running a getter, as main's exact acknowledgement asked) throws
+ * (UnknownReply), and nothing is given back or replayed.
+ */
+export async function forgetPushPerson(id: string, who: string, room?: DataStore): Promise<number> {
+  const what = "the deletion of a member's devices";
+  const [taken] = exactReplies(await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, pushKey(id, who)]]), 1, what);
+  const devices = takenPairs(taken, what);
+  const freed = devices.reduce((sum, [endpoint, held]) => sum + dataBytes([endpoint, held], 1), 0);
+  if (room && freed > 0) await giveData(room, [{ slot: DEVICES_SLOT, bytes: freed }]);
+  return devices.length ? 1 : 0;
 }

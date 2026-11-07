@@ -254,7 +254,7 @@ export async function takeAccess(store: Store, body: Record<string, unknown>): P
   const found = await productFor(store, body.product);
   if ("error" in found) return fail(found.error ?? "unknown_product");
   if (!store.statsId) return fail("not_given_here");
-  const taken = await takeGiven(store.statsId, email, found.product.id, "api:");
+  const taken = await takeGiven(store.statsId, email, found.product.id, "api:", store);
   return taken ? { ok: true, value: { email, product: found.product.id } } : fail("not_given_here");
 }
 

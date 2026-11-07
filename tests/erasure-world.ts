@@ -206,7 +206,8 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await award(id, learner, 1, store);
   await tell(id, [learner], { kind: "reply", post: "p00001", comment: "", by: "creator", words: "Welcome in" } as never, ROOM);
   await redisPipeline([
-    ["SET", `nl:cm:${id}:ps:${learner}`, JSON.stringify([{ endpoint: "https://push.example.com/1", keys: { p256dh: "x", auth: "y" }, kid: "k1", live: false }])],
+    // A device as rememberDevice (lib/community-push.ts) has always kept it: a hash from endpoint to device.
+    ["HSET", `nl:cm:${id}:ps:${learner}`, "https://push.example.com/1", JSON.stringify({ endpoint: "https://push.example.com/1", keys: { p256dh: "x", auth: "y" }, kid: "k1", addedAt: now })],
     ["ZADD", `nl:cm:${id}:ch`, 1, JSON.stringify({ i: Date.now(), a: learner, text: "hello room", at: now, n: "Tess" })],
     ["SET", `nl:cm:${id}:chs:${learner}`, "1", "EX", 60],
     ["SET", `nl:cm:${id}:rg:${learner}`, JSON.stringify({ u: Date.now() + 60_000, w: 1 }), "EX", 600],

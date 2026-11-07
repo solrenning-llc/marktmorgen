@@ -549,7 +549,13 @@ export async function takePlace(input: {
   // stays and the link says "pending" with nothing more handed out; never another run's record deleted.
   const letGo = () => redisPipeline([dropOwn]).catch(() => null);
   const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, hold]]), 1)?.[0];
-  if (fresh === 0) return { outcome: "already", email, group };
+  if (fresh === 0) {
+    // Another run of the same link holds the place (a double click) and may still end "full", "resting" or "has":
+    // "already" only once the product is on the address, read exactly; before that, "pending" (#2872 review).
+    const onIt = repliesFor(await redisPipeline([["HEXISTS", importedKey(group.s, email), group.p]]), 1)?.[0];
+    if (onIt !== 0 && onIt !== 1) throw new UnknownReplyError("a place's holder");
+    return { outcome: onIt === 1 ? "already" : "pending", email, group };
+  }
   if (fresh !== 1) {
     await letGo();
     throw new UnknownReplyError("a place's hold");

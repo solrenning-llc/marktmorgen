@@ -197,6 +197,60 @@ async function main(): Promise<void> {
     Object.values(GIVING_WORDS).every((w) => Boolean(w.groupNotices.unconfirmed?.title && w.groupNotices.unconfirmed?.body) && w.groupNotices.unconfirmed.title !== w.groupNotices.expired.title),
     true,
   );
+
+  /**
+   * The same link opened twice at once (a double click): both runs look first and find nothing; A's HSETNX lands (1),
+   * B's really answers 0, and B's reply is held until A's run has ended, so B decides only after A's outcome.
+   */
+  const doubleClick = async (id: string, token: string) => {
+    let looks = 0;
+    let holds = 0;
+    let bothLooked: () => void = () => {};
+    const looked = new Promise<void>((resolve) => {
+      bothLooked = resolve;
+    });
+    let firstHeld: () => void = () => {};
+    const aHeld = new Promise<void>((resolve) => {
+      firstHeld = resolve;
+    });
+    let aEnded: () => void = () => {};
+    const aDone = new Promise<void>((resolve) => {
+      aEnded = resolve;
+    });
+    redis.pipeline = (async (commands: Command[]) => {
+      if (commands.some(isHold(id))) {
+        await looked;
+        const mine = ++holds;
+        if (mine === 2) await aHeld;
+        const replies = await real(commands);
+        if (mine === 1) firstHeld();
+        if (mine === 2) await aDone;
+        return replies;
+      }
+      const replies = await real(commands);
+      if (commands.some(isLook(id)) && ++looks === 2) bothLooked();
+      return replies;
+    }) as typeof redis.pipeline;
+    const a = take(token).finally(() => aEnded());
+    const b = take(token);
+    const both = await Promise.all([a, b]);
+    restore();
+    return both;
+  };
+
+  part("Double click on a full purchase: A holds the place and is told full; B's HSETNX answers 0");
+  const late = await paidGroup(2);
+  is("two places, taken", [await take(await late.link("ned@example.com")), await take(await late.link("ola@example.com"))], ["taken", "taken"]);
+  const lateLink = await late.link("pia@example.com");
+  is("A is told full; B is told 'pending', never 'already' on a place A never got", await doubleClick(late.id, lateLink), ["full", "pending"]);
+  is("nothing handed over, two places counted", [await owns("pia@example.com"), await placesTaken(late.id)], [[], 2]);
+  is("opened again it is full, never 'already'", await take(lateLink), "full");
+
+  part("Double click where A is handed the place: B's HSETNX answers 0 and B says 'already'");
+  const pair = await paidGroup(2);
+  const pairLink = await pair.link("quin@example.com");
+  is("A takes the place; B, deciding after it, says 'already'", await doubleClick(pair.id, pairLink), ["taken", "already"]);
+  is("one place counted, the product on the address", [await placesTaken(pair.id), await owns("quin@example.com")], [1, [product.id]]);
   done();
 }
 

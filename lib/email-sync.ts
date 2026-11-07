@@ -48,7 +48,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
@@ -405,8 +405,14 @@ async function attempt(job: Job, now: number, budget: number): Promise<Job> {
 
 /** Tries a job this caller has claimed, writes down how it went, and queues its next try. */
 async function runClaimed(statsId: string, id: string, budget: number, now = Date.now()): Promise<Job | null> {
-  const [raw] = await redisPipeline([["GET", jobKey(id)]]);
-  const job = parseJob(raw);
+  // Read exactly (CX-123 rule 24): only a record that is gone (it expired) is no job. A reply in another shape or a
+  // record that does not read is unknown, and the job stays on the queue under its lease, to come back when it ends,
+  // rather than being taken off it untried (Claude 5 sweep A2).
+  const replies = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a queued email platform job");
+  const [raw] = replies;
+  const job = raw === null ? null : parseJob(raw);
+  if (raw !== null && !job) throw new UnknownReplyError("a queued email platform job");
   if (!job || job.state === "added" || job.state === "failed" || job.state === "skipped") {
     await redisPipeline([["ZREM", QUEUE_KEY, `${statsId}|${id}`]]);
     return job;
@@ -693,15 +699,22 @@ export async function testConnection(store: Store): Promise<{ ok: boolean; messa
  */
 export async function forgetStoreSync(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
-  const ids = new Set(Array.isArray(logged) ? (logged as unknown[]).map(String).filter((id) => JOB_ID.test(id)) : []);
+  // Every reply read exactly (CX-123 rule 24): a log or a queue page in another shape is unknown, never "no job".
+  // What was read is still deleted (the sealed key with the settings), the log is kept when it did not read, so
+  // the next try finds its jobs, and the forgetting throws rather than being taken as finished (Claude 5 sweep A2).
+  const logged = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
+  let unread = !logged;
+  const ids = new Set((logged ?? []).filter((id) => JOB_ID.test(id)));
   // The queue holds the jobs of every store waiting for a try, each as
   // "<statsId>|<job>"; this store's are found by that prefix, a page at a time.
   const queued: string[] = [];
   const prefix = `${statsId}|`;
   for (let offset = 0; offset < 200_000; offset += 500) {
-    const [page] = await redisPipeline([["ZRANGEBYSCORE", QUEUE_KEY, "-inf", "+inf", "LIMIT", offset, 500]]);
-    const members = Array.isArray(page) ? (page as unknown[]).map(String) : [];
+    const members = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", QUEUE_KEY, "-inf", "+inf", "LIMIT", offset, 500]]), 1)?.[0]);
+    if (!members) {
+      unread = true;
+      break;
+    }
     for (const member of members) {
       if (!member.startsWith(prefix)) continue;
       queued.push(member);
@@ -710,11 +723,48 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
     }
     if (members.length < 500) break;
   }
-  await redisPipeline([
+  const commands: (string | number)[][] = [
     ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
     ...[...ids].map((id) => ["DEL", jobKey(id)]),
-    ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), logKey(statsId)],
-  ]);
+    ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), ...(logged ? [logKey(statsId)] : [])],
+  ];
+  if (!countsFor(await redisPipeline(commands), commands.length)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");
+  if (unread) throw new UnknownReplyError("a deleted store's email platform jobs");
+}
+
+/** Whether a pipeline of deletions answered exactly one count for each command. */
+function countsFor(replies: unknown, commands: number): boolean {
+  const exact = repliesFor(replies, commands);
+  return !!exact && exact.every((reply) => countOf(reply) !== null);
+}
+
+/**
+ * A store's logged jobs, for one person's erasure and copy, read exactly
+ * (CX-123 rules 24 and 30, as lib/erasure-index.ts forgetNoted): a log or a
+ * record in another shape is UnknownReplyError, never "no job of theirs". A
+ * record that is gone (it expired) is null: known absence.
+ */
+async function loggedJobs(statsId: string): Promise<{ id: string; job: Job | null }[]> {
+  const ids = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a store's email platform job log");
+  const logged = ids.slice(0, LOG_SIZE * 2);
+  if (!logged.length) return [];
+  const raws = repliesFor(await redisPipeline(logged.map((id) => ["GET", jobKey(id)])), logged.length);
+  if (!raws) throw new UnknownReplyError("a store's email platform jobs");
+  return logged.map((id, i) => {
+    const raw = raws[i];
+    if (raw === null) return { id, job: null };
+    let value: unknown = null;
+    try {
+      value = typeof raw === "string" ? JSON.parse(raw) : null;
+    } catch {
+      value = null;
+    }
+    if (!value || typeof value !== "object" || typeof (value as Partial<Job>).email !== "string") {
+      throw new UnknownReplyError("a store's email platform job");
+    }
+    return { id, job: value as Job };
+  });
 }
 
 /** Forgets the platform and its key. Anything still waiting to be sent fails at its next try. */
@@ -731,20 +781,10 @@ export async function disconnect(store: Store): Promise<SyncView> {
 export async function forgetSyncPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
-  const ids = (Array.isArray(logged) ? logged : []).map(String).slice(0, LOG_SIZE * 2);
-  if (!ids.length) return 0;
-  const raws = await redisPipeline(ids.map((id) => ["GET", jobKey(id)]));
-  const theirs = ids.filter((_, i) => {
-    try {
-      const job = JSON.parse(String(raws[i])) as Partial<Job>;
-      return typeof job.email === "string" && normaliseEmail(job.email) === address;
-    } catch {
-      return false;
-    }
-  });
+  const theirs = (await loggedJobs(statsId)).filter(({ job }) => job && normaliseEmail(job.email) === address).map(({ id }) => id);
   if (!theirs.length) return 0;
-  await redisPipeline([["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]]);
+  const commands: (string | number)[][] = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]];
+  if (!countsFor(await redisPipeline(commands), commands.length)) throw new UnknownReplyError("the deletion of a person's email platform jobs");
   return theirs.length;
 }
 
@@ -756,18 +796,9 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
 export async function syncJobsOf(statsId: string | null, email: string): Promise<JobView[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
-  const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
-  const ids = (Array.isArray(logged) ? logged : []).map(String).slice(0, LOG_SIZE * 2);
-  if (!ids.length) return [];
-  const raws = await redisPipeline(ids.map((id) => ["GET", jobKey(id)]));
-  return raws.flatMap((raw) => {
-    try {
-      const job = JSON.parse(String(raw)) as Job;
-      if (typeof job.email !== "string" || normaliseEmail(job.email) !== address) return [];
-      const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
-      return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
-    } catch {
-      return [];
-    }
+  return (await loggedJobs(statsId)).flatMap(({ job }) => {
+    if (!job || normaliseEmail(job.email) !== address) return [];
+    const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
+    return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];
   });
 }

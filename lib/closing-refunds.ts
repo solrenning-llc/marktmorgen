@@ -319,7 +319,11 @@ export async function giveBackUnused(
         // What was already given back is read exactly (Codex G's second money review of #3097): a charge not expanded,
         // or an amount_refunded that is not a whole, non-negative number, would read as 0 and give it back again.
         if (!(pi.latest_charge && typeof pi.latest_charge === "object")) throw new Error("this payment's charge could not be read");
-        if (!Number.isSafeInteger(charge.amount_refunded) || (charge.amount_refunded as number) < 0) throw new Error("what this payment's charge gave back could not be read");
+        if (!Number.isSafeInteger(charge.amount) || (charge.amount as number) <= 0) throw new Error("what this payment's charge took could not be read");
+        if (!Number.isSafeInteger(charge.amount_refunded) || (charge.amount_refunded as number) < 0 || (charge.amount_refunded as number) > (charge.amount as number)) {
+          // More given back than the charge took (Codex G's focal on #3097) is not a reading of this charge.
+          throw new Error("what this payment's charge gave back could not be read");
+        }
         if (charge.disputed === true) {
           await settle("disputed");
           out.disputed += 1;

@@ -20,16 +20,20 @@ process.env.STRIPE_SECRET_KEY = "sk_test_currency_null";
 
 const ACCOUNT = "acct_1TestCurNull001";
 let account: "ok" | "down" | "no_country" = "ok";
-let spec: "ok" | "empty" | "down" = "ok";
+let spec: "ok" | "empty" | "down" | "malformed" = "ok";
+let accountReads = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const path = new URL(String(input)).pathname.replace(/^\/v1/, "");
   if (path === "/account") {
+    accountReads += 1;
     if (account === "down") return new Response(JSON.stringify({ error: { message: "synthetic outage" } }), { status: 503 });
     return new Response(JSON.stringify(account === "no_country" ? { id: ACCOUNT } : { id: ACCOUNT, country: "US" }));
   }
   if (path === "/country_specs/US") {
     if (spec === "down") return new Response(JSON.stringify({ error: { message: "synthetic outage" } }), { status: 503 });
-    return new Response(JSON.stringify({ id: "US", supported_payment_currencies: spec === "empty" ? [] : ["usd", "cad"] }));
+    // "malformed": an entry that is not text, beside one that is (review rv36 on #2993).
+    const list = spec === "empty" ? [] : spec === "malformed" ? ["cad", null] : ["usd", "cad"];
+    return new Response(JSON.stringify({ id: "US", supported_payment_currencies: list }));
   }
   if (path === "/subscriptions") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
@@ -82,6 +86,36 @@ async function main(): Promise<void> {
   const eur = await post({ currency: "eur" });
   is("eur from the kept list: still unsupported", [eur.status, eur.body.error], [400, "unsupported"]);
   is("the store stays in cad", await currency(), "cad");
+
+  part("Stripe's list holds an entry that is not text (review rv36 on #2993)");
+  await forgetKept();
+  spec = "malformed";
+  const partial = await post({ currency: "usd" });
+  spec = "ok";
+  is("usd, with Stripe's list [cad, null]: refused as not known (503 unavailable), never 400 unsupported", [partial.status, partial.body.error], [503, "unavailable"]);
+  is("the store stays in cad", await currency(), "cad");
+  is("the shortened list is not kept", (await redis.pipeline([["GET", `nl:pay:currencies:${ACCOUNT}`]]))[0], null);
+  const whole = await post({ currency: "usd" });
+  is("once Stripe answers the whole list, usd is saved (nothing shortened was kept for 12 hours)", [whole.status, whole.body.ok], [200, true]);
+  is("the store now charges in usd", await currency(), "usd");
+
+  // Each case asks for the currency the store is not in, both of which the account charges:
+  // "OK" would read as no currency at all, and "<current>,zzz" as the current one alone.
+  for (const [label, keptOf] of [
+    ["a reply that is not a list of currencies (\"OK\")", () => "OK"],
+    ["a list with a code that is not a store currency", (current: string) => `${current},zzz`],
+  ] as const) {
+    part(`The kept list reads back in an unknown shape: ${label} (Claude 3's review on #2993)`);
+    const current = await currency();
+    const wanted = current === "cad" ? "usd" : "cad";
+    await forgetKept();
+    await redis.pipeline([["SET", `nl:pay:currencies:${ACCOUNT}`, keptOf(current)]]);
+    const reads = accountReads;
+    const asked = await post({ currency: wanted });
+    is(`${label}: ${wanted}, which the account charges, is saved, never 400 unsupported`, [asked.status, asked.body.ok, asked.body.error], [200, true, undefined]);
+    is(`${label}: Stripe was asked again`, accountReads > reads, true);
+    is(`${label}: the store now charges in ${wanted}`, await currency(), wanted);
+  }
   done();
 }
 main();

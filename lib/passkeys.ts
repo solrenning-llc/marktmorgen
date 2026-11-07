@@ -401,27 +401,68 @@ export class RemovalBusyError extends Error {
 /** How long a request asked again waits before it is emailed again. */
 const RETELL_MS = 60 * 60 * 1000;
 
+/**
+ * What waits to be removed, read exactly (CX-123 rules 24 and 30, as listPasskeys beside it; sweep A5, finding 1): no
+ * key is a known "nothing waits"; a record as writeDrop writes it, or an old one (one moment for every passkey), is the
+ * record. Anything else (no reply, a reply of another shape, text that is not JSON or not such a record, a moment
+ * that is not a number, no passkey at all or more than an account holds) throws UnknownReplyError, so no caller
+ * takes "nothing waits" from what it could not read: a passkey set to go never logs in as one that is not (signInWith
+ * refuses it), and no removal is applied, kept or called off on it; the record stays as it is for the next read.
+ */
 async function readDrop(email: string): Promise<DropRecord | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", dropKey(email)]]);
+  const unknown = () => new UnknownReplyError("a passkey removal record");
+  const reply = repliesFor(await redisPipeline([["GET", dropKey(email)]]), 1);
+  if (!reply) throw unknown();
+  const raw = reply[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string" || !raw) throw unknown();
+  let parsed: unknown;
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { atOf?: unknown; ids?: unknown; at?: unknown; told?: unknown; telling?: unknown; untold?: unknown }) : null;
-    if (!value) return null;
-    const atOf: Record<string, number> = {};
-    if (value.atOf && typeof value.atOf === "object" && !Array.isArray(value.atOf)) {
-      for (const [id, at] of Object.entries(value.atOf as Record<string, unknown>)) if (typeof at === "number" && Number.isFinite(at)) atOf[id] = at;
-    } else if (Array.isArray(value.ids) && typeof value.at === "number") {
-      // A record written before each passkey had its own moment: each takes the one moment it had.
-      for (const id of value.ids) if (typeof id === "string") atOf[id] = value.at;
-    }
-    const ids = Object.keys(atOf).slice(0, MAX_PASSKEYS);
-    const t = value.telling as { token?: unknown; since?: unknown } | undefined;
-    const telling = t && typeof t === "object" && typeof t.token === "string" && /^[0-9a-f]{32}$/.test(t.token) && typeof t.since === "number" && Number.isFinite(t.since) ? { token: t.token, since: t.since } : undefined;
-    const untold = Array.isArray(value.untold) ? value.untold.filter((id): id is string => typeof id === "string") : [];
-    return ids.length ? dropOf(Object.fromEntries(ids.map((id) => [id, atOf[id]])), typeof value.told === "number" ? value.told : 0, { telling, untold }) : null;
+    parsed = JSON.parse(raw);
   } catch {
-    return null;
+    throw unknown();
   }
+  const plain = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x);
+  const moment = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
+  if (!plain(parsed)) throw unknown();
+  const value = parsed;
+  // Built as entries, never by assigning keys, so an id such as "__proto__" stays an id.
+  const moments: [string, number][] = [];
+  if (value.atOf !== undefined) {
+    if (!plain(value.atOf)) throw unknown();
+    for (const [id, at] of Object.entries(value.atOf)) {
+      if (!moment(at)) throw unknown();
+      moments.push([id, at]);
+    }
+  } else if (Array.isArray(value.ids) && moment(value.at)) {
+    // A record written before each passkey had its own moment: each takes the one moment it had.
+    const at = value.at;
+    for (const id of value.ids) {
+      if (typeof id !== "string") throw unknown();
+      if (!moments.some(([seen]) => seen === id)) moments.push([id, at]);
+    }
+  } else {
+    throw unknown();
+  }
+  // Never more than an account may hold: a record past it is not one this code wrote, and is never cut down to fit.
+  // Never fewer than one either (Codex D2 on #2874): writeDrop deletes a record left with no passkey and never stores
+  // it, so only no key (null above) means nothing waits; a record with none in it ({atOf:{}}, an old {ids:[]}) is
+  // not one this code wrote, and taking it as "nothing waits" would let a passkey whose removal is due log in.
+  if (!moments.length || moments.length > MAX_PASSKEYS) throw unknown();
+  if (value.told !== undefined && !moment(value.told)) throw unknown();
+  let telling: Telling | undefined;
+  if (value.telling !== undefined) {
+    const t = value.telling;
+    if (!plain(t) || typeof t.token !== "string" || !/^[0-9a-f]{32}$/.test(t.token) || !moment(t.since)) throw unknown();
+    telling = { token: t.token, since: t.since };
+  }
+  let untold: string[] = [];
+  if (value.untold !== undefined) {
+    if (!Array.isArray(value.untold) || !value.untold.every((id): id is string => typeof id === "string")) throw unknown();
+    untold = value.untold;
+  }
+  return dropOf(Object.fromEntries(moments), moment(value.told) ? value.told : 0, { telling, untold });
 }
 
 /**

@@ -7,7 +7,7 @@
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import OutreachStopPage from "@/app/outreach/stop/[token]/page";
-import { linkKey } from "@/lib/outreach";
+import { linkKey, readStopLink } from "@/lib/outreach";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -115,6 +115,8 @@ async function main(): Promise<void> {
     const odd = await linkAnswering(reply, () => page());
     is(`${label}: not 'not one we know', said as not read, both buttons`, [odd.includes(UNKNOWN), odd.includes(UNREAD), scopes(odd)], [false, true, ["all", "store"]]);
   }
+  const why = await linkAnswering([7], () => readStopLink(TOKEN).then(() => "read", (error: unknown) => (error instanceof Error ? error.name : "thrown")));
+  is("the read itself says it is unknown (UnknownReplyError), not some other failure", why, "UnknownReplyError");
   const gone = await linkAnswering([null], () => page());
   is("control: a confirmed nil is still not one we know", [gone.includes(UNKNOWN), scopes(gone)], [true, []]);
   done();

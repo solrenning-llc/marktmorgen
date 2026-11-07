@@ -394,6 +394,13 @@ export async function lockedFor(
   return lockedOut(need, action) && (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0;
 }
 
+/** A time in ms as this code writes it: digits only, no sign, space, exponent or leading zero, and safe; else null. */
+function timeOf(text: unknown): number | null {
+  if (typeof text !== "string" || !/^(0|[1-9][0-9]*)$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
 /**
  * Until when a session is locked, in ms, or 0 for a session that is not.
  *
@@ -423,19 +430,23 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
     return keptListed(session, owner, now);
   }
   // "<until>|<opened>"; a value written before 5 November 2026 is "<until>" alone, opened at an unknown time.
-  const [untilText, openedText] = raw.split("|");
+  const parts = raw.split("|");
+  const [untilText, openedText] = parts;
   // A lock this code did not write is unknown too: locked, never set free.
-  if (!/^(0|[1-9][0-9]*)$/.test(untilText ?? "")) return unknown();
-  const until = Number(untilText);
-  if (!Number.isSafeInteger(until)) return unknown();
+  const until = timeOf(untilText);
+  if (parts.length > 2 || until === null) return unknown();
   if (until > now) return until;
   if (!owner) return 0;
-  const [kept, left] = await redisPipeline([["GET", keptLockedKey(owner)], ["PTTL", lockedKey(session)]]);
+  const second = repliesFor(await redisPipeline([["GET", keptLockedKey(owner)], ["PTTL", lockedKey(session)]]), 2);
+  if (!second) return unknown();
+  const [kept, left] = second;
   if (kept === null) return 0;
-  const since = Number(kept);
-  const opened = openedText === undefined ? 0 : Number(openedText);
-  // A mark in another shape counts as kept (CX-123 rule 24): locked, never set free.
-  if (typeof kept === "string" && Number.isFinite(since) && Number.isFinite(opened) && opened > since) return 0;
+  // The mark and the opening time are read in the grammar this code writes them in (Codex J at f0399d65, Claude 5
+  // at 24ea9aa1): "", " ", "1e2" or "0x10" are no time, and a mark or an opening in another shape counts as kept
+  // (CX-123 rule 24): locked, never set free. An old lock with no opening time was not opened after any mark.
+  const since = timeOf(kept);
+  const opened = openedText === undefined ? null : timeOf(openedText);
+  if (since !== null && opened !== null && opened > since) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);
 }

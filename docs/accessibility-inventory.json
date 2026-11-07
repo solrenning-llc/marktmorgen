@@ -1620,6 +1620,7 @@
     "components/welcome-countdown.tsx",
     "components/welcome-offer-editor.tsx",
     "components/winback-editor.tsx",
+    "components/withdrawal-where.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
   ],

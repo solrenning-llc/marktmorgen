@@ -175,7 +175,12 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
  * try failed (counted), and whether who it would name was left out for lack of a list to look them up in (keptReading;
  * the studio says so, never inferring it from an empty list).
  */
-export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; unnamed?: boolean };
+/**
+ * unkept: read now but larger than READING_COPY_MAX_BYTES, so no copy was
+ * kept; whatever is made from the copy (the earnings file) cannot be made
+ * from this one, and the page says so instead of offering it.
+ */
+export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; unnamed?: boolean; unkept?: true };
 
 /**
  * The copy kept only when nobody it names was deleted from the store, in one
@@ -243,7 +248,8 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     throw new ReadingFailed();
   }
   const text = JSON.stringify({ at: now, value });
-  if (value === null || value === undefined || Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false };
+  if (value === null || value === undefined) return { value, at: now, stale: false };
+  if (Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false, unkept: true };
   const names = guard ? [...new Set(guard.names(value))] : [];
   if (!guard || !names.length) {
     await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});

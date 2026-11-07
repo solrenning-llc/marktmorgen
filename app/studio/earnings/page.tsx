@@ -7,6 +7,7 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { UtcAndLocal } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
 import { readEarningsYear } from "@/lib/earnings-read";
+import { EARNINGS_FILE_NOTICES } from "@/lib/earnings-csv";
 import type { Earnings, EarningsMonth, MonthLine, SourceMonth } from "@/lib/earnings-by-month";
 import { readsSales } from "@/lib/stats";
 import type { Store } from "@/lib/store";
@@ -190,6 +191,13 @@ export default async function StudioEarningsPage({ searchParams }: Params) {
   const earnings = reading.state === "ok" ? reading.kept.value : null;
   const payPalLeftOut = Boolean(earnings?.months.some((m) => m.leftOut.some((l) => l.source === "paypal" && l.kinds.includes("dispute"))));
   const backAt = readingsBackAt();
+  // Sent back from the download with why no file was made (app/api/store/earnings/route.ts).
+  const fileNotice =
+    query.file === EARNINGS_FILE_NOTICES.none
+      ? "No file was made: none of your earnings were kept for your store to make it from. Nothing was read from Stripe or PayPal for it."
+      : query.file === EARNINGS_FILE_NOTICES.unread
+        ? "No file was made: your earnings could not be read from the copy kept here. Nothing was read from Stripe or PayPal for it. Try the download again."
+        : null;
 
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
@@ -207,6 +215,12 @@ export default async function StudioEarningsPage({ searchParams }: Params) {
             <p>Amounts in different currencies are never added together: each currency has its own line.</p>
             <p>Months start and end at midnight UTC (Coordinated Universal Time).</p>
           </div>
+
+          {fileNotice ? (
+            <p className="notice notice-info mt-6 max-w-2xl" role="alert">
+              {fileNotice}
+            </p>
+          ) : null}
 
           {reading.state === "none" ? (
             <p className="notice notice-info mt-6 max-w-2xl" role="status">
@@ -261,17 +275,26 @@ export default async function StudioEarningsPage({ searchParams }: Params) {
                     </p>
                     {payPalLeftOut ? <p>PayPal disputes are not read, so PayPal amounts do not take them out.</p> : null}
                   </div>
-                  {/* A plain GET form rather than a link, so nothing prefetches it (lib/earnings-csv.ts, 426 [BX2] unit 4). */}
-                  <form action="/api/store/earnings" method="get" className="mt-6 max-w-2xl">
-                    <input type="hidden" name="store" value={store.sid} />
-                    <button type="submit" className="btn btn-secondary btn-sm" aria-describedby="earnings-file-help">
-                      Download these 12 months (CSV)
-                    </button>
-                    <p id="earnings-file-help" className="mt-2 text-sm text-ink-soft">
-                      A spreadsheet file of the amounts below, one row for each month, source and currency. It has no buyer&apos;s name or email. It is made
-                      from this reading, so it does not read Stripe or PayPal again. Downloading it counts as one studio page.
+                  {reading.state === "ok" && reading.kept.unkept ? (
+                    // Too large to keep (READING_COPY_MAX_BYTES): the file is made from the kept copy only, so it is not offered.
+                    <p className="mt-6 max-w-2xl text-sm text-ink-soft" data-earnings-file="unkept">
+                      This reading is too large to keep a copy of, usually because your store sells in many currencies, so it cannot be downloaded as a
+                      file. Every amount is still shown below.
                     </p>
-                  </form>
+                  ) : (
+                    /* A plain GET form rather than a link, so nothing prefetches it (lib/earnings-csv.ts, 426 [BX2] unit 4). */
+                    <form action="/api/store/earnings" method="get" className="mt-6 max-w-2xl">
+                      <input type="hidden" name="store" value={store.sid} />
+                      <button type="submit" className="btn btn-secondary btn-sm" aria-describedby="earnings-file-help">
+                        Download these 12 months (CSV)
+                      </button>
+                      <p id="earnings-file-help" className="mt-2 text-sm text-ink-soft">
+                        A spreadsheet file of the amounts below, one row for each month, source and currency. It has no buyer&apos;s name or email. It is
+                        made from this reading, so it does not read Stripe or PayPal again. Downloading it counts as one studio page. If your spreadsheet
+                        shows each row in one column, import the file and choose comma as the separator.
+                      </p>
+                    </form>
+                  )}
                   {earnings.months.map((month) => (
                     <Month key={month.month} month={month} />
                   ))}

@@ -173,8 +173,16 @@ a kept copy of up to READING_COPY_MAX_BYTES is what the store-readings line pric
    kept copy (`keptCopy` in lib/store-readings.ts, one GET read through lib/redis-reply.ts) and
    reads it back only in the rule's exact shape (`earningsFromCopy`: every sum added again,
    the months of the reading's time, the totals of the sources); anything else is no file. It
-   never reads Stripe or PayPal and never takes a reading; with no copy kept it says to open
-   the page first. A download costs STUDIO_PAGE_UNITS. The file is never larger than the page
+   never reads Stripe or PayPal and never takes a reading. A refusal sends the creator back
+   (303) to the earnings page with its own notice (`?file=none` with no copy kept,
+   `?file=unread` with a copy it cannot read), or to the studio's paused page when the studio
+   figure is used, never a bare text page. A reading larger than READING_COPY_MAX_BYTES is
+   shown but not kept (`Kept.unkept`), so the page offers no download for it and says why
+   (many currencies). Each month is written in words with its time zone ("June 2031 (UTC)"),
+   never "2031-06", which a spreadsheet turns into a date; the page says to import the file
+   with comma as the separator when a spreadsheet shows each row in one column (no "sep=,"
+   line: Excel then drops the byte-order mark and other readers take it for a row). A
+   download costs STUDIO_PAGE_UNITS. The file is never larger than the page
    that shows the same months (held by the test), so it sends no more than a page view does.
    Cost: +US$ 0 on every line (no new reading, key, field or retention). "Entered by you" stays
    out of the file until unit 3 of this list exists, as on the page.

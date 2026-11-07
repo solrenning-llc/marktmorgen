@@ -240,6 +240,18 @@ const numberCell = (text: string) => {
 
 type Shared = { month: string; soFar: string; timeZone: string; readAt: string };
 
+/**
+ * A month's cell: "June 2031 (UTC)", the month in words as the page names it,
+ * with its time zone. Never "2031-06", which a spreadsheet turns into a date
+ * (and shows as "Jun-31"); the words and the time zone in brackets keep it a
+ * month a person reads.
+ */
+export function earningsCsvMonth(month: string, timeZone: string): string {
+  const [year, number] = month.split("-").map(Number);
+  const name = new Date(Date.UTC(year, number - 1, 1)).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  return `${name} (${timeZone})`;
+}
+
 function row(shared: Shared, source: string, state: string, line: MonthLine | null, notIncluded: string): string {
   const amounts = line
     ? [line.salesCents, line.renewalCents, line.refundCents, line.disputeCents, line.netCents].map((cents) => numberCell(exactAmount(cents, line.currency)))
@@ -268,7 +280,7 @@ export function earningsCsv(earnings: Earnings): string {
   const readAt = new Date(earnings.at).toISOString();
   const lines = [EARNINGS_CSV_HEADER.map(csvCell).join(",")];
   for (const month of earnings.months) {
-    const shared: Shared = { month: month.month, soFar: month.current ? "yes" : "no", timeZone: earnings.timeZone, readAt };
+    const shared: Shared = { month: earningsCsvMonth(month.month, earnings.timeZone), soFar: month.current ? "yes" : "no", timeZone: earnings.timeZone, readAt };
     // "Entered by you" is not built yet (design unit 3): never in the file until it works, as on the page (VR).
     const sources = month.sources.filter((s) => s.source !== "manual");
     for (const source of sources) {
@@ -291,6 +303,13 @@ export function earningsCsv(earnings: Earnings): string {
   }
   return `${lines.join("\r\n")}\r\n`;
 }
+
+/**
+ * Why no file was made, as the earnings page's ?file= key
+ * (app/api/store/earnings/route.ts sends the creator back with one; the page
+ * says it): none kept to make it from, or the kept copy could not be read.
+ */
+export const EARNINGS_FILE_NOTICES = { none: "none", unread: "unread" } as const;
 
 /** The file's name: the store's handle, "earnings" and the UTC day the months were read. */
 export function earningsFileName(handle: string, earnings: Pick<Earnings, "at">): string {

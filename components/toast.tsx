@@ -15,10 +15,11 @@ import { Icon } from "@/components/icons";
  *
  * It never covers the control that has focus (WCAG 2.4.11 and 2.4.12): before
  * it is painted, and again whenever focus moves, the person types, the page
- * scrolls or the window is resized, it takes the first corner that leaves the
- * focused control and its focus ring fully visible. If no corner is clear
- * (a full-window editor has focus, say), the box is hidden; the live region
- * still announces the message.
+ * scrolls, the window is resized or the page's content changes, it takes the
+ * first corner that leaves the focused control and its focus ring fully
+ * visible. If no corner is clear (a full-window editor has focus, say), the box
+ * is hidden and its 5 seconds wait until it shows again; the live region still
+ * announces the message.
  */
 
 const EVENT = "nimbus:toast";
@@ -114,6 +115,59 @@ export function keepToastClear(region: HTMLElement, active: Element | null, pref
   return place;
 }
 
+/**
+ * While a toast shows, it moves out of the way whenever the focused control
+ * could end up under it: focus moving (also from script), typing that grows a
+ * field, scrolling (any scroller), resizing, and the page's content changing
+ * with no event at all (a refresh that grows the content above a focused
+ * button). The toast's own changes are not watched. `onHidden` hears when the
+ * box becomes hidden or shows again, so its countdown can wait. Returns the
+ * cleanup.
+ */
+export function followToastFocus(
+  region: HTMLElement,
+  onHidden: (hidden: boolean) => void,
+  win: Window & typeof globalThis = window,
+): () => void {
+  const doc = win.document;
+  let hidden = region.dataset.place === "hidden";
+  let frame = 0;
+  const now = () => {
+    win.cancelAnimationFrame(frame);
+    frame = 0;
+    const place = keepToastClear(region, doc.activeElement);
+    if ((place === "hidden") !== hidden) {
+      hidden = place === "hidden";
+      onHidden(hidden);
+    }
+  };
+  const soon = () => {
+    if (!frame) frame = win.requestAnimationFrame(now);
+  };
+  doc.addEventListener("focusin", now);
+  doc.addEventListener("input", now, true);
+  win.addEventListener("scroll", soon, { capture: true, passive: true });
+  win.addEventListener("resize", soon);
+  const changed =
+    typeof win.MutationObserver === "function"
+      ? new win.MutationObserver((records) => {
+          if (records.some((record) => !region.contains(record.target))) soon();
+        })
+      : null;
+  changed?.observe(doc.body, { childList: true, subtree: true, characterData: true, attributes: true });
+  const resized = typeof win.ResizeObserver === "function" ? new win.ResizeObserver(soon) : null;
+  resized?.observe(doc.body);
+  return () => {
+    win.cancelAnimationFrame(frame);
+    doc.removeEventListener("focusin", now);
+    doc.removeEventListener("input", now, true);
+    win.removeEventListener("scroll", soon, { capture: true });
+    win.removeEventListener("resize", soon);
+    changed?.disconnect();
+    resized?.disconnect();
+  };
+}
+
 /** Mounted once, in the root layout. */
 export function Toaster() {
   const [current, setCurrent] = useState<Current | null>(null);
@@ -126,6 +180,8 @@ export function Toaster() {
   const hovered = useRef(false);
   const focused = useRef(false);
   const leaving = useRef(false);
+  // The box is hidden (no corner leaves the focused control clear): its time waits.
+  const hidden = useRef(false);
   // Where focus was before it moved into the toast, so closing it from the
   // keyboard puts the person back where they were rather than on <body>.
   const returnTo = useRef<HTMLElement | null>(null);
@@ -162,7 +218,7 @@ export function Toaster() {
 
   const startTimer = useCallback(() => {
     stopTimer();
-    if (hovered.current || focused.current || leaving.current) return;
+    if (hovered.current || focused.current || leaving.current || hidden.current) return;
     deadline.current = Date.now() + remaining.current;
     timer.current = window.setTimeout(dismiss, remaining.current);
   }, [dismiss, stopTimer]);
@@ -200,7 +256,7 @@ export function Toaster() {
     focused.current = false;
     remaining.current = SHOWN_FOR;
     // Placed before it is painted, so it never covers the focused control even for a frame.
-    if (region.current) keepToastClear(region.current, document.activeElement, "bottom-end");
+    hidden.current = region.current ? keepToastClear(region.current, document.activeElement, "bottom-end") === "hidden" : false;
     box.current?.animate(
       reducedMotion()
         ? [{ opacity: 0 }, { opacity: 1 }]
@@ -214,32 +270,15 @@ export function Toaster() {
     return stopTimer;
   }, [current, startTimer, stopTimer]);
 
-  // While a toast shows, it moves out of the way whenever the focused control
-  // could end up under it: focus moving (also from script), typing that grows a
-  // field, scrolling (any scroller) and resizing.
+  // While a toast shows, it keeps clear of the focused control (followToastFocus);
+  // a hidden box's time waits, and goes on once it shows again.
   useEffect(() => {
-    if (!current) return;
-    let frame = 0;
-    const now = () => {
-      window.cancelAnimationFrame(frame);
-      frame = 0;
-      if (region.current) keepToastClear(region.current, document.activeElement);
-    };
-    const soon = () => {
-      if (!frame) frame = window.requestAnimationFrame(now);
-    };
-    document.addEventListener("focusin", now);
-    document.addEventListener("input", now, true);
-    window.addEventListener("scroll", soon, { capture: true, passive: true });
-    window.addEventListener("resize", soon);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener("focusin", now);
-      document.removeEventListener("input", now, true);
-      window.removeEventListener("scroll", soon, { capture: true });
-      window.removeEventListener("resize", soon);
-    };
-  }, [current]);
+    if (!current || !region.current) return;
+    return followToastFocus(region.current, (isHidden) => {
+      hidden.current = isHidden;
+      return isHidden ? pauseTimer() : startTimer();
+    });
+  }, [current, pauseTimer, startTimer]);
 
   return (
     <div ref={region} className="nb-toast-region">

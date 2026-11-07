@@ -1,12 +1,12 @@
 import type { NextRequest } from "next/server";
+import { lockedFor } from "@/lib/two-step";
+import { refusedJson } from "@/lib/studio-route";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setPodcastEpisodes, setProductPodcast, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath } from "@/lib/product-file";
 import { readListing } from "@/lib/catalog";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
-import { lockedFor } from "@/lib/two-step";
-import { refusedJson } from "@/lib/studio-route";
 import { dropPodcast, editPodcast, newPodcastId, readPodcast, savePodcast, type PodcastEdit } from "@/lib/podcast";
 
 /**
@@ -47,9 +47,6 @@ export async function POST(request: NextRequest) {
 
     return await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
       const podcast = (await readPodcast(podcastId)) ?? { id: podcastId, episodes: [] };
-      // A file the product or an episode already names, as its audio or its transcript, is never taken as a new one.
-      const named = (pathname: string, episodes = podcast.episodes) =>
-        product.file?.pathname === pathname || episodes.some((episode) => episode.pathname === pathname || episode.transcript?.pathname === pathname);
       if (action === "disable") {
         if (podcast.episodes.length > 0) return fail("not_empty");
         const result = await setProductPodcast(ref, id, null);
@@ -57,6 +54,9 @@ export async function POST(request: NextRequest) {
         await dropPodcast(podcastId);
         return Response.json({ ok: true });
       }
+      // A file the product or an episode already names, as its audio or its transcript, is never taken as a new one.
+      const named = (pathname: string, episodes = podcast.episodes) =>
+        product.file?.pathname === pathname || episodes.some((episode) => episode.pathname === pathname || episode.transcript?.pathname === pathname);
       let edit: PodcastEdit;
       if (action === "add") {
         const pathname = text(body.pathname, 400);

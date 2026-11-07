@@ -47,8 +47,22 @@ globalThis.fetch = (async () => new Response(JSON.stringify(listed), { status: 2
 let reply: unknown = undefined;
 let where: "all" | "setup" | "last" = "all";
 let configKey = "";
+/**
+ * A transport failure instead of a reply (a Redis 5xx, an error entry, a
+ * timeout: redisPipeline throws a plain Error). "setup" throws on
+ * serverSetup's read; "after" lets that read through and throws on the
+ * next call, the store's write of its list. "before" throws on the setter's
+ * own read, before anything is written.
+ */
+let fail: "before" | "setup" | "after" | null = null;
+let setupRead = false;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
+  const isSetupRead = commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === configKey;
+  if (fail === "setup" && isSetupRead) throw new Error("Redis answered 500");
+  if (fail === "before" && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === configKey) throw new Error("Redis answered 500");
+  if (fail === "after" && setupRead) throw new Error("Redis answered 500");
+  if (fail === "after" && isSetupRead) setupRead = true;
   const real = await pipeline(commands);
   if (reply === undefined) return real;
   const at = where === "last" ? (commands.length === 2 ? 1 : -1) : commands.findIndex((c) => c[0] === "GET" && c[1] === configKey);
@@ -159,6 +173,21 @@ async function main(): Promise<void> {
   reply = undefined;
   is("and the change is kept", JSON.parse(String(await kept())).testCode, "TEST333");
   is("and the store's list is not written empty", await adsServer(), ["meta", "tiktok", "google", "pinterest"]);
+  // The read back or the store's list fails at the transport after the change was written (C6-2845, finding 2).
+  fail = "setup";
+  is("the read back throws after a change: 503 saved_unread", await post({ testCode: "TEST336" }), [503, "saved_unread"]);
+  fail = null;
+  is("and that change is kept", JSON.parse(String(await kept())).testCode, "TEST336");
+  fail = "after";
+  setupRead = false;
+  is("the store's list throws after a change: 503 saved_unread", await post({ testCode: "TEST337" }), [503, "saved_unread"]);
+  fail = null;
+  is("and that change is kept too", JSON.parse(String(await kept())).testCode, "TEST337");
+  is("the store's list is still as it was", await adsServer(), ["meta", "tiktok", "google", "pinterest"]);
+  fail = "before";
+  is("a read before the change that throws is still not said saved", (await post({ testCode: "" }))[1] === "saved_unread", false);
+  fail = null;
+  is("and nothing was written then", JSON.parse(String(await kept())).testCode, "TEST337");
   is("healthy: the route answers ok and keeps the tokens", [await post({ testCode: "TEST444" }), (await serverSetup(statsId)).on], [[200, "ok"], { meta: true, tiktok: true, google: true, pinterest: true }]);
 
   part("confirmed absence: nothing kept yet is an empty setup");

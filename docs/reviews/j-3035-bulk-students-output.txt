@@ -1,0 +1,621 @@
+PRIMARY
+FILE h3-4-bulk-students.test.ts
+J3035 network guard active; negative control passed
+
+The rules
+  ok    progress: not started, started, finished
+  ok    filters read from the address, the label as it will be kept
+  ok    anything else is no filter
+  ok    by progress
+  ok    by access
+  ok    by label, in any case; a student whose labels could not be read is left out and counted, never guessed
+  ok    no label filter: nobody is left out for labels
+  ok    the undo is the opposite change
+  ok    studio requests taken before the work, by how much there is
+  ok    one page of students is a bounded read
+  ok    who is asked, read safely: each address once, in lower case; nothing else
+  ok    refused: no change named, nobody, too many
+  ok    every refusal says what to do
+  ok    the answer says how many changed and, for the rest, why
+  ok    all done, said short
+  ok    a change that did not land says so
+  ok    the file: a header, one line a student, every cell quoted and never a formula
+
+A store with a course and four students
+  ok    dee was taken off the course, one at a time, as before
+  ok    each person's access, read exactly from the same records the course reads
+
+The list, read exactly and paid for before it is read
+  ok    every student, with progress and access
+  ok    labels: a contact's own, none for one not on the list, unknown for one that cannot be read
+  ok    the reading is paid for first, by how many rows and labels it reads
+  ok    refused: nothing more is read than the page's size
+
+Through the studio's route
+  ok    the review says exactly what it would do
+  ok    and writes nothing
+  ok    a count that is not the one reviewed is refused, with what it would do now, nothing written
+  ok    a confirmation always carries the count it confirms
+  ok    applied: each person's own result
+  ok    the course's own list reads them as taken off
+  ok    no email, sequence or refund is started: nothing is written but the access and the counts
+  ok    undone, exactly: those it changed have access again
+  ok    giving access to one who has it changes nothing
+  ok    not a course: refused
+  ok    more people than one change takes: refused, saying what to do
+  ok    an action that is not one
+  ok    no session: refused, and nothing changed
+
+Unknown is never read as done, nor changed by guess
+  ok    access that cannot be read is counted as unread, never as a change
+  ok    and is not changed by guess
+  ok    a change whose result cannot be read back is said as unconfirmed, never as done
+  ok    one write that failed: that person is said as not changed, the other as done
+  ok    studio requests refused: nothing is written
+  ok    taken before writing, by how many it changes
+
+The screen
+  ok    a box for every student, named by who it selects
+  ok    one to select every student on this page, saying how many
+  ok    how many are selected, said where a screen reader hears it
+  ok    every action named; refunds are not one of them
+  ok    refunds are said to stay one at a time
+  ok    targets of at least 44 pixels
+  ok    labels and the file only for a role that may use them
+  ok    the page is the products role's, and reads one bounded page
+  ok    the course's own page leads to it
+
+51 checks, all passing.
+changing a student's access failed Error: injected: the write failed
+    at store.pipeline (/tmp/j-3035-IvPXQ0/h3-4-bulk-students.test.ts.cjs:79725:154)
+    at redisPipeline (/tmp/j-3035-IvPXQ0/h3-4-bulk-students.test.ts.cjs:35520:41)
+    at setBlocked (/tmp/j-3035-IvPXQ0/h3-4-bulk-students.test.ts.cjs:78804:9)
+    at /tmp/j-3035-IvPXQ0/h3-4-bulk-students.test.ts.cjs:79133:20
+    at Array.map (<anonymous>)
+    at applyAccess (/tmp/j-3035-IvPXQ0/h3-4-bulk-students.test.ts.cjs:79132:64)
+    at async POST (/tmp/j-3035-IvPXQ0/h3-4-bulk-students.test.ts.cjs:79163:21)
+    at async post (/tmp/j-3035-IvPXQ0/h3-4-bulk-students.test.ts.cjs:79688:22)
+    at async main (/tmp/j-3035-IvPXQ0/h3-4-bulk-students.test.ts.cjs:79745:18)
+EXIT 0 SIGNAL none ERROR none
+FILE p-review-3035-access-admission.test.ts
+J3035 network guard active; negative control passed
+
+Every bounded access read and write is admitted before it is spent
+  FAIL  admission happens before the first HMGET/SMISMEMBER access read
+        expected ["pay","HMGET","SMISMEMBER"]
+        got      ["HMGET","SMISMEMBER","pay"]
+  FAIL  the admitted studio units cover every Redis command in the operation
+        expected ["done",true,10,204]
+        got      ["done",false,10,204]
+
+2 checks, 2 failing.
+EXIT 1 SIGNAL none ERROR none
+FILE j-review-3035-bulk-students.proof.ts
+J3035 network guard active; negative control passed
+
+An applied write with unreadable read-back remains uncertain in every summary
+  ok    the actual course blocked set was changed
+  ok    the caller correctly keeps this result unknown
+  FAIL  the visible/full summary does not claim that nothing changed
+        expected false
+        got      true
+  FAIL  the short live-region summary also preserves uncertainty
+        expected false
+        got      true
+  ok    the detailed reason still says that the applied write is unconfirmed
+  ok    healthy confirmed grant remains a confirmed success
+  ok    the command ceiling stayed bounded
+
+7 checks, 2 failing.
+EXIT 1 SIGNAL none ERROR none
+
+LINKED
+FILE plan-cost-registry.test.ts
+J3035 network guard active; negative control passed
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (78.547751ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (131.010476ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (42.170916ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.728454ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.299105ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.234588ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.911862ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (106.829841ms)
+✔ every store figure taken in the code is a kind a line prices (52.071952ms)
+✔ every email sent names a meter, and each file only the meters it may use (147.120379ms)
+✔ the units a figure is taken in cost at least what they stand for (18.147703ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (3.238503ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.850059ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.36385ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.238295ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.155651ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.58991ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.408407ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.163011ms)
+✔ Path push fits its reserved studio requests (0.108654ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.049571ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.054392ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.094413ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (53.41409ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 652.487298
+EXIT 0 SIGNAL none ERROR none
+FILE access-revocation.test.ts
+J3035 network guard active; negative control passed
+
+The one rule: refunded in full, as Stripe says on the charge
+  ok    the charge's own flag
+  ok    every cent given back, flag or not
+  ok    a partial refund keeps access
+  ok    a payment read with its latest charge
+  ok    a charge Stripe did not expand is not refunded
+  ok    nothing at all is not refunded
+
+A payment plan, by its first invoice's payment
+  ok    older API versions: the invoice names its payment
+  ok    newer ones: the invoice's payments are listed
+  ok    partly refunded: kept
+  ok    a membership is not judged by this rule
+  ok    no account to ask: not refunded
+
+A course bought once
+  ok    opens
+  ok    refunded in full: shut, though the thanks page wrote it down
+  ok    refunded in part: still open
+  ok    bought again after the refund: open again
+  ok    taken off the course by the creator: shut
+
+A course sold as a membership
+  ok    active: open
+  ok    trialing: open
+  ok    past_due: open
+  ok    canceled: shut
+  ok    unpaid: shut
+  ok    incomplete_expired: shut
+
+A community
+  ok    a paid purchase lets in
+  ok    refunded in full: not let in
+  ok    a membership canceled: not let in
+  ok    a membership running: let in
+  ok    bought in one click after paying for something else: let in
+  ok    and not once that payment is refunded
+  ok    a purchase from another store opens nothing here
+  ok    Stripe cannot be asked: nobody is let in on a guess
+  ok    and that answer was not kept: the next request asks again
+
+31 checks, all passing.
+checking community access failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/tmp/j-3035-w8pIEu/access-revocation.test.ts.cjs:5686:11)
+    at async paidForAny (/tmp/j-3035-w8pIEu/access-revocation.test.ts.cjs:48134:27)
+    at async ticketFor (/tmp/j-3035-w8pIEu/access-revocation.test.ts.cjs:48203:120)
+    at async main (/tmp/j-3035-w8pIEu/access-revocation.test.ts.cjs:48363:62) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+EXIT 0 SIGNAL none ERROR none
+FILE buyer-profile.test.ts
+J3035 network guard active; negative control passed
+
+What they paid
+  ok    the address, as one
+  ok    the name Stripe has
+  ok    this store's sales and payments only, newest first
+  ok    paid in dollars, each payment once
+  ok    and given back
+  ok    euros kept apart
+  ok    purchases and later payments
+
+Where they came from
+  ok    first and latest purchase
+  ok    a channel is known for some of their sales
+  ok    the course sale's channel and campaign
+  ok    where they found the store, from the earliest sale that says, not the older one that does not
+  ok    the latest purchase that says: direct, which is not the same as not recorded
+
+Membership, course, list
+  ok    the membership, paying
+  ok    the course, two of four lessons
+  ok    on the list, agreed, with its labels
+  ok    Stripe was read in full
+
+Notes
+  ok    the key is the same whatever the capitals, and is not the address
+  ok    empty words are not a note
+  ok    a note, with who wrote it and its line breaks kept
+  ok    at most MAX_PERSON_NOTES, the newest kept
+  ok    one taken away
+  ok    no key holds the address
+  ok    a deleted store's notes all go
+
+Opening a buyer's page
+  ok    an address is read as one; anything else is not
+  ok    a search's token opens it on its own store
+  ok    and on no other
+  ok    a made-up token opens nothing
+  ok    a sale of this store opens its buyer
+  ok    another store's sale opens nobody
+  ok    something that is not a sale's reference is not looked up
+
+When Stripe cannot be read
+  ok    the page says so, and the rest is still there
+
+31 checks, all passing.
+reading a buyer's payments failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount (/tmp/j-3035-w8pIEu/buyer-profile.test.ts.cjs:9279:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async buyerProfile (/tmp/j-3035-w8pIEu/buyer-profile.test.ts.cjs:56756:24)
+    at async main (/tmp/j-3035-w8pIEu/buyer-profile.test.ts.cjs:57323:16) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+EXIT 0 SIGNAL none ERROR none
+FILE store-data-registry.test.ts
+J3035 network guard active; negative control passed
+creator: room 18 MB; outside it 121.4 MB on average, 294.6 MB at once
+pro: room 135 MB; outside it 288.2 MB on average, 804.3 MB at once
+scale: room 250 MB; outside it 704.6 MB on average, 2473.6 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (161.009493ms)
+✔ each family is bounded one way at least, and what it says can be checked (144.460387ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (9.946218ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.642098ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.551258ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (10.684804ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.296655ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 367.425115
+EXIT 0 SIGNAL none ERROR none
+FILE bulk-labels.test.ts
+J3035 network guard active; negative control passed
+
+The rules
+  ok    added once, never twice, in any case
+  ok    taken off in any case, or left
+  ok    never past the most labels a contact holds
+  ok    the undo is the opposite change
+  ok    a removal keeps the label as that contact had it, and where
+  ok    its undo puts that very label back in its place, or at the end
+  ok    never a label other than the one named
+  ok    an undo that took everything back says so
+  ok    one that did not says how many, and why
+  ok    addresses read from what was pasted, each once
+  ok    a label too long is refused, not cut
+  ok    no address, no change chosen, too many: refused
+  ok    every refusal says what to do
+
+Through the studio's route
+  ok    ignorable and unassigned characters, hieroglyph format controls and the null notehead are taken out
+  ok    an emoji with or without its presentation selector is one label
+  ok    a label composed again after a hidden character goes
+  ok    an automation waits on the label
+  ok    the review says what it would do
+  ok    and writes nothing
+  ok    applied: the contacts it changed, by address
+  ok    each contact has the label once
+  ok    no one is added who was not on the list
+  ok    its automation is not started: no run is written
+  ok    undone, exactly: those it changed lose it
+  ok    and the one that had it before keeps it
+  ok    every contact as it was
+  ok    (the way that does start it writes a run, so the check above would see one)
+  ok    a refusal says what to do
+  ok    an action that is not one
+  ok    no session: refused, and nothing changed
+
+Undoing a removal, and an undo that cannot take everything back
+  ok    a removal answers with what each contact lost, as written there
+  ok    its undo puts each one's own label back, in its place
+  ok    an undo never puts on another label, nor touches an address not sent
+  ok    taken off three contacts
+  ok    the undo answers what went back, and why the rest did not
+  ok    and the creator is told so, not that every contact is as it was
+
+Edge cases (review of 4 Nov 2026)
+  ok    text past the limit is refused, not cut
+  ok    through the route: a sentence tied to the text, and no contact changed
+  ok    the body the route reads holds the longest text the limit allows
+  ok    1,000 of the longest addresses fit in the text
+  ok    1,000 of the longest addresses of any script fit in the text
+  ok    an address JSON would write as \u (a control character) is skipped, never sent
+  ok    removed from all 1,000 (a label of 40 characters of 3 bytes), written 200 at a time
+  ok    its undo sends each contact once, with what it lost, and fits (881,188 bytes)
+  ok    and every one gets its own label back (40 characters of 3 bytes)
+  ok    removed from all 1,000 (a label of 20 emoji), written 200 at a time
+  ok    its undo sends each contact once, with what it lost, and fits (841,148 bytes)
+  ok    and every one gets its own label back (20 emoji)
+  ok    each label back as it was written, in its place
+  ok    (the first undo is larger than the 450,000 bytes the route used to read)
+  ok    the route's cap is worked out from the limits: the worst undo and the longest text fit, and no more than that
+  ok    deleted between the read and the write: not on the list, not changed somewhere else
+  ok    and said so
+  ok    the same in an undo
+  ok    a label of nothing that shows is refused
+  ok    what shows nothing is taken out; letters are composed; fullwidth Latin is made plain
+  ok    joiners and flag tags that make one emoji or one word are kept
+  ok    any other run of tags after a black flag is taken out: it could spell hidden letters
+  ok    England and Scotland stay two flags, not one black flag
+  ok    format characters that show or shape text are kept, and compatibility ideographs as typed
+  ok    a selector or shorthand control that changes nothing is taken out
+  ok    so each is the same label, already there to add
+  ok    and taking off "VIP" reaches a contact holding such a form
+  ok    an emoji keeps its presentation selector, a keycap and a Mongolian letter theirs
+  ok    compared whatever the case, width, composition or hidden characters
+  ok    only width is folded: superscripts, circled and Roman numerals, subscripts stay apart
+  ok    a look-alike is not added beside the label
+  ok    the review says the look-alike will be written as the label
+  ok    adding replaces the look-alike with the label, where it stood, and answers what it replaced
+  ok    and says so
+  ok    its undo puts the look-alike back exactly
+  ok    a form with a hidden character is replaced too, and found by the send filter's comparison
+  ok    through the route, taking off "VIP" reaches a contact showing "VIP" with a hidden selector
+  ok    taking it off takes every form of it, and says how many it held
+  ok    its undo puts the first form back, where it stood
+  ok    and says so, not that every contact is as it was
+  ok    what an undo sends back is cleaned before it is written
+  ok    a form with control characters is answered cleaned, and marked so
+  ok    its undo puts back the form as it was shown, and says so
+  ok    an undo of an add says its earlier forms went back
+  ok    a wide or decomposed form is answered as written, not marked cleaned
+  ok    and goes back exactly
+  ok    the look-alike that appeared is replaced by the form taken, where it stood
+  ok    counted after collapsing spaces
+  ok    some emoji count as 2 or more, as the screen says
+  ok    the screen shows how much of the 40 is used, counted the same way
+  ok    the field no longer cuts what is pasted into it
+  ok    the screen shows the label as it will be written
+  ok    what applying did, with every reason
+  ok    the screen shows it, and says only the short sentence
+  ok    an error on the third write answers the two batches written, with the rest counted as failed
+  ok    and says so honestly
+  ok    its undo takes back what was written
+  ok    a first write that failed, and may have landed, is answered as not known, never as nothing changed
+  ok    an error before anything could be written is refused, as before
+  ok    a removal whose answer was lost is still answered, with the form it took
+  ok    so its undo puts the label back
+  ok    the other writers share it: a bounce whose answer was lost is counted once
+  ok    a write that may have landed, its answer and the read after it lost, is said as not known
+  ok    the first batch is written and answered; the rest is counted as not written
+  ok    one that can write nothing is refused as a full store, as before
+  ok    adding a label to 1,000 contacts and undoing it leaves the store's room as it was
+  ok    a write that lost the race and was made on the next try is charged once
+  ok    a write that failed with nothing landed gives back what it took
+
+The screen
+  ok    every field labeled, with an example read with it
+  ok    what to do, as a group of choices
+  ok    says before confirming that no automation starts
+  ok    a review first, its result in a status, refusals in an alert
+
+The screen: accessibility (AAA audit, 4 Nov 2026)
+  ok    no control is disabled while busy, so focus stays on it (2.4.3)
+  ok    a press while busy, or with nothing to change, does nothing
+  ok    the live region holds one short sentence, not the review
+  ok    the review's title takes focus when it arrives
+  ok    after Apply, focus goes to Undo (or the done line); after Undo, to the form's title
+  ok    focus is moved by refs, after the screen changed
+  ok    Undo says what it undoes
+  ok    a refusal of Apply or Undo is shown in an alert next to that button, and only there (3.3.1, 4.1.3)
+  ok    a refusal is tied to its field: text, label or the choice (3.3.1)
+  ok    shown next to the field, the end of the form keeps only the others
+  ok    a refusal goes once its field is changed (3.3.1)
+  ok    the live line gets only a short sentence after applying and undoing; every reason stays on the screen
+  ok    nothing is said twice: no toast beside the live line (4.1.3)
+  ok    a full store is said in plain words (3.1.5)
+  ok    the review lists how many, and that nothing is sent
+  ok    anything typed after a review asks for a new one
+  ok    the undo sends back exactly what changed, with each label as it was
+  ok    and says what the route answered, kept on the screen
+  ok    the server code never reaches the browser
+  ok    the route may run as long as the contacts import does
+  ok    nothing here starts a workflow
+  ok    reached from the contacts import, for those who may use it
+
+130 checks, all passing.
+changing labels in bulk stopped part way Error: injected: the database went away
+    at store.pipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80568:88)
+    at redisPipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:35423:41)
+    at casWrite (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45578:26)
+    at async changeLabels (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45628:17)
+    at async applyBulk (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:79942:15)
+    at async POST (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80226:19)
+    at async post (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80485:22)
+    at async main (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80732:17)
+changing labels in bulk stopped part way Error: injected: the database went away
+    at store.pipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80568:88)
+    at redisPipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:35423:41)
+    at casWrite (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45578:26)
+    at async changeLabels (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45628:17)
+    at async applyBulk (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:79942:15)
+    at async POST (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80226:19)
+    at async post (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80485:22)
+    at async main (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80745:20)
+changing labels in bulk failed Error: injected: the read failed
+    at store.pipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80552:13)
+    at redisPipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:35423:41)
+    at changeLabels (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45601:28)
+    at applyBulk (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:79942:21)
+    at POST (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80226:25)
+    at async post (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80485:22)
+    at async main (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80750:21)
+changing labels in bulk stopped part way Error: injected: the database went away
+    at store.pipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80568:88)
+    at redisPipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:35423:41)
+    at casWrite (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45578:26)
+    at async changeLabels (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45628:17)
+    at async applyBulk (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:79942:15)
+    at async POST (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80226:19)
+    at async post (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80485:22)
+    at async main (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80765:18)
+changing labels in bulk stopped part way DataRoomError: Your store's data room is full (0 KB of 135 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts.
+    at needData (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:43081:38)
+    at async needContacts (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45469:18)
+    at async changeLabels (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45617:7)
+    at async applyBulk (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:79942:15)
+    at async main (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80781:19) {
+  taken: {
+    ok: false,
+    reason: 'full',
+    used: 0,
+    room: 135000000,
+    message: "Your store's data room is full (0 KB of 135 MB). Delete something you no longer need, such as old posts, drafts, pages or contacts."
+  }
+}
+changing labels in bulk stopped part way Error: injected: the read failed
+    at store.pipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80552:13)
+    at redisPipeline (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:35423:41)
+    at casWrite (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45578:26)
+    at async changeLabels (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:45628:17)
+    at async applyBulk (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:79942:15)
+    at async POST (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80226:19)
+    at async post (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80485:22)
+    at async main (/tmp/j-3035-w8pIEu/bulk-labels.test.ts.cjs:80813:25)
+EXIT 0 SIGNAL none ERROR none
+FILE team-roles.test.ts
+J3035 network guard active; negative control passed
+
+The table
+  ok    admin: none of the owner's four
+  ok    editor: none of the owner's four
+  ok    support: none of the owner's four
+  ok    the owner has every permission
+  ok    support edits nothing
+  ok    an editor cannot send, export, import, delete a person or touch settings
+  ok    deleting a person is the owner's and an admin's (lib/person-erasure.ts)
+  ok    whatever two-step login locks after a recovery is beyond an editor and support
+  ok    a word that is not a permission is not one, even on an object's prototype
+
+The door, store by store
+  ok    the team member is added
+  ok    the owner cannot be added as a member of their own store
+  ok    an editor edits products
+  ok    but cannot send to the list
+  ok    nor download buyers' data
+  ok    support reads orders
+  ok    but changes no product
+  ok    an admin changes settings
+  ok    but not the plan, the Stripe connection, the team or deleting
+  ok    the owner may do all four
+  ok    a store they are not on is gone, never another store
+  ok    not even for its owner's neighbour
+  ok    an id that is not one is gone
+  ok    no store named: their own store only
+  ok    the switcher's cookie naming a store they are not on is only a preference
+
+Taken off the team
+  ok    removed
+  ok    refused at once
+
+The routes say what they need
+  ok    store/team/route.ts needs member and team
+  ok    store/export/route.ts needs export and stats
+  ok    store/import/route.ts needs import
+  ok    store/leads/route.ts needs export
+  ok    store/audience/route.ts needs export
+  ok    store/api-keys/route.ts needs export
+  ok    store/webhooks/route.ts needs settings
+  ok    store/affiliates/export/route.ts needs export
+  ok    store/paypal/connect/route.ts needs payments
+  ok    store/paypal/disconnect/route.ts needs payments
+  ok    stripe/connect/route.ts needs payments
+  ok    stripe/disconnect/route.ts needs payments
+  ok    billing/checkout/route.ts needs billing
+  ok    billing/cancel/route.ts needs billing
+  ok    billing/switch/route.ts needs billing
+  ok    every permission a route's guard names is in the table
+  ok    and there are routes to check
+
+43 checks, all passing.
+EXIT 0 SIGNAL none ERROR none
+
+AUTHOR RED (BUILD)
+✘ [ERROR] Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/app/api/store/students/route" (originally "@/app/api/store/students/route")
+
+    tests/h3-4-bulk-students.test.ts:22:21:
+      22 │ import { POST } from "@/app/api/store/students/route";
+         ╵                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/app/api/store/students/route" was remapped to "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/app/api/store/students/route" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/components/students-bulk" (originally "@/components/students-bulk")
+
+    tests/h3-4-bulk-students.test.ts:23:29:
+      23 │ import { StudentsBulk } from "@/components/students-bulk";
+         ╵                              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/students-bulk" was remapped to "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/components/students-bulk" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/lib/student-bulk-rules" (originally "@/lib/student-bulk-rules")
+
+    tests/h3-4-bulk-students.test.ts:39:7:
+      39 │ } from "@/lib/student-bulk-rules";
+         ╵        ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/lib/student-bulk-rules" was remapped to "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/lib/student-bulk-rules" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+✘ [ERROR] Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/lib/student-bulk" (originally "@/lib/student-bulk")
+
+    tests/h3-4-bulk-students.test.ts:40:70:
+      40 │ ...plyAccess, readAccessAsk, studentList } from "@/lib/student-bulk";
+         ╵                                                 ~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/lib/student-bulk" was remapped to "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/lib/student-bulk" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 4 errors:
+tests/h3-4-bulk-students.test.ts:22:21: ERROR: Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/app/api/store/students/route" (originally "@/app/api/store/students/route")
+tests/h3-4-bulk-students.test.ts:23:29: ERROR: Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/components/students-bulk" (originally "@/components/students-bulk")
+tests/h3-4-bulk-students.test.ts:39:7: ERROR: Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/lib/student-bulk-rules" (originally "@/lib/student-bulk-rules")
+tests/h3-4-bulk-students.test.ts:40:70: ERROR: Could not resolve "/workspace/scratch/72485b6ecfa0/j-review-3035-author-red-local/lib/student-bulk" (originally "@/lib/student-bulk")
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+TYPES
+
+LINT
+
+SCANNER
+Public data check: 4156 tracked files; 0 file(s) require correction.

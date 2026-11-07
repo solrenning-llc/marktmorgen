@@ -236,9 +236,12 @@ test("the code page: no wait left after an unknown reply says the login could no
 // writes (0, or a whole millisecond at least RESET_DAYS after `since`). Any other number turned it off at once and
 // opened a full session on the emailed link alone.
 const RESET_ON = "r24-reset@example.com";
-const resetRecord = (reset: unknown, since = 1) => JSON.stringify({ s: "synthetic-sealed-secret", since, codes: [codeHash("abcd-efgh")], last: -1, reset, backup: "" });
+// Turned on eight days ago, a moment this code can write (finishSetup writes `since: now`, never before
+// lib/two-step.ts TURNED_ON_FROM), so each vector below is refused for its turn-off day alone.
+const RESET_SINCE = Date.now() - 8 * 86_400_000;
+const resetRecord = (reset: unknown, since = RESET_SINCE) => JSON.stringify({ s: "synthetic-sealed-secret", since, codes: [codeHash("abcd-efgh")], last: -1, reset, backup: "" });
 const resetSignIn = () => finishProvenSignIn(new NextRequest("https://marktmorgen.com/api/auth/callback", { method: "POST" }), RESET_ON, "link", "/studio");
-for (const [label, reset, since] of [["0.5", 0.5, 1], ["1e2 (100 ms after 1970)", 100, 1], ["1.5", 1.5, 1], ["a negative day", -5, 1], ["text", "9", 1], ["null", null, 1], ["a day less than a week after it was turned on", Date.now() - 3_600_000, Date.now() - 86_400_000]] as [string, unknown, number][]) {
+for (const [label, reset, since] of [["0.5", 0.5, RESET_SINCE], ["1e2 (100 ms after 1970)", 100, RESET_SINCE], ["1.5", 1.5, RESET_SINCE], ["a negative day", -5, RESET_SINCE], ["text", "9", RESET_SINCE], ["null", null, RESET_SINCE], ["a day less than a week after it was turned on", Date.now() - 3_600_000, Date.now() - 86_400_000]] as [string, unknown, number][]) {
   test(`a link login opens no session when the turn-off day reads as ${label}`, async () => {
     await ready;
     await original([["SET", recordKey(RESET_ON), resetRecord(reset, since)]]);

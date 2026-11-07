@@ -221,16 +221,24 @@ function parse(raw: unknown): TwoStep | null {
 }
 
 /**
+ * The earliest moment a record of this code can say it was turned on: the repository was created on 15 August 2026
+ * and two-step login shipped on 13 October 2026 (#318), and finishSetup writes `since: now`. A turn-on time before it
+ * was never written here, so it is no floor for a turn-off day (Claude 1 on #2896).
+ */
+const TURNED_ON_FROM = Date.UTC(2026, 7, 15);
+
+/**
  * The day two-step login turns off by itself, read only in a shape this code writes (Claude 5 on #2896): 0 (none
  * asked; an older record with no day reads so too), or a whole millisecond at least RESET_DAYS after it was turned
  * on (enterLocked writes the moment of the first request plus RESET_DAYS). Any other value is unknown and throws,
  * never a day already past that turns the second step off and opens a session on the emailed link alone. Once a
  * day is set, `since` is its floor, so it too must be the whole millisecond finishSetup writes (Claude 1 on #2896):
- * missing, text, null, zero, a fraction or below zero is unknown and throws, never a floor at 1970.
+ * missing, text, null, a fraction, or a moment before this code existed (TURNED_ON_FROM; 1970 and zero included) is
+ * unknown and throws, never a floor at 1970.
  */
 function resetOf(reset: unknown, since: unknown): number {
   if (reset === undefined || reset === 0) return 0;
-  if (typeof since !== "number" || !Number.isSafeInteger(since) || since <= 0) throw new UnknownReplyError("the two-step record's turn-on time");
+  if (typeof since !== "number" || !Number.isSafeInteger(since) || since < TURNED_ON_FROM) throw new UnknownReplyError("the two-step record's turn-on time");
   // An hour of room for one server's clock behind another's between turning it on and the first request.
   if (typeof reset === "number" && Number.isSafeInteger(reset) && reset > 0 && reset >= since + RESET_DAYS * 86_400_000 - 3_600_000) return reset;
   throw new UnknownReplyError("the two-step record's turn-off day");

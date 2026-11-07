@@ -230,30 +230,40 @@ return 1`;
 export type TakenMany = { readonly key: string; readonly ends: number; readonly n: number };
 
 /**
+ * A take's answer: taken, or not and why. "full" only when the counter said
+ * so (TAKE_MANY answered exactly 0: all `n` do not fit in what is left of the
+ * window); "unknown" for everything else, so a caller never says a limit was
+ * reached when the count was not known.
+ */
+export type TakeManyAnswer = (TakenMany & { readonly ok: true }) | { readonly ok: false; readonly why: "full" | "unknown" };
+
+/**
  * Takes `n` at once from a counter of `limit` a window (the same key as
  * withinLimit for the same scope, so both count together): the take when all
- * `n` fit, null otherwise, never a part. Closed when the count is not known
- * (Redis not configured or not answering, a reply of another shape, a count
- * that is not a number): a bound on what is given away is never opened by a
- * counter out of reach. A reply of another shape may have taken: it is kept,
- * never given back on a guess.
+ * `n` fit, never a part; "full" when they do not. Closed when the count is
+ * not known (Redis not configured or not answering, a reply of another shape,
+ * a count that is not a number): "unknown", never a take, so a bound on what
+ * is given away is never opened by a counter out of reach. A reply of another
+ * shape may have taken: it is kept, never given back on a guess.
  */
-export async function takeMany(scope: string, who: string, limit: number, windowSeconds: number, n: number): Promise<TakenMany | null> {
+export async function takeMany(scope: string, who: string, limit: number, windowSeconds: number, n: number): Promise<TakeManyAnswer> {
+  const unknown = { ok: false, why: "unknown" } as const;
   if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(limit) || limit <= 0 ||
-      !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0 || !isRedisConfigured()) return null;
+      !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0 || !isRedisConfigured()) return unknown;
   try {
     const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
     const ends = onlyReply(await redisPipeline([["EVAL", TAKE_MANY, 1, key, n, limit, windowSeconds]]));
-    return Number.isSafeInteger(ends) && (ends as number) > 0 ? { key, ends: ends as number, n } : null;
+    if (ends === 0) return { ok: false, why: "full" };
+    return Number.isSafeInteger(ends) && (ends as number) > 0 ? { ok: true, key, ends: ends as number, n } : unknown;
   } catch {
-    return null;
+    return unknown;
   }
 }
 
-/** takeMany as a yes or no: yes only when all `n` fit (`n` of 0 always fits, taking nothing). */
+/** takeMany as a yes or no: yes only when all `n` fit (`n` of 0 always fits, taking nothing); no when full or not known. */
 export async function takeManyWithin(scope: string, who: string, limit: number, windowSeconds: number, n: number): Promise<boolean> {
   if (n === 0 && Number.isSafeInteger(limit) && limit > 0) return true;
-  return (await takeMany(scope, who, limit, windowSeconds, n)) !== null;
+  return (await takeMany(scope, who, limit, windowSeconds, n)).ok;
 }
 
 /**

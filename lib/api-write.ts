@@ -259,10 +259,10 @@ export async function takeAccess(store: Store, body: Record<string, unknown>): P
   return taken ? { ok: true, value: { email, product: found.product.id } } : fail("not_given_here");
 }
 
-/** What each refusal says, and its status, as the API answers it. */
 /** A gift past the day's count: said as gifts, and as the studio's count too (its list of students gives from the same day). */
 export const GIFTS_USED_WORDS = `That is as many products as a store may give in a day, through the API and the studio's list of students together (${GIVES_PER_DAY.toLocaleString("en-US")}). Try again tomorrow.`;
 
+/** What each refusal says, and its status, as the API answers it. */
 export const WRITE_ERRORS: Record<WriteError, [number, string]> = {
   unavailable: [503, "The store could not make this change just now. Try again in a moment."],
   email: [400, "Send email: an address."],

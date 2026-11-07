@@ -560,7 +560,8 @@ export async function applyGive(store: Store, find: FindGive, ask: GiveAsk, pay:
     if (!statsId || !store.sid) return refusedAs("unavailable");
     // The store's gifts of the day, the API's count too (GIVES_PER_DAY): all of them or none, never a part.
     const day = await takeMany("api-give", store.sid, GIVES_PER_DAY, 86_400, sorted.targets.length);
-    if (!day) return refusedAs("daily_limit");
+    // The day used only when the count said so; a count not known is unavailable (closed, nothing given), never "the day is used".
+    if (!day.ok) return refusedAs(day.why === "full" ? "daily_limit" : "unavailable");
     // Marked first, so what is given is read as soon as it is written (lib/learn.ts reads gifts only of a store so marked).
     if (!store.pastBuyers && !(await setPastBuyers(storeRef(store)))?.pastBuyers) {
       await giveBackMany(day, day.n);

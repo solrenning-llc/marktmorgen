@@ -483,7 +483,7 @@ async function main(): Promise<void> {
   is("within the day, it says what it took", taken.ok ? [taken.n, taken.ends > 0] : taken.why, [2, true]);
   for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
   const counter = redis.pipeline.bind(redis);
-  const unknownCount: [string, () => Promise<unknown>][] = [
+  const unknownCount: [string, () => Promise<unknown[]>][] = [
     ["Redis failing", async () => { throw new Error("connection reset"); }],
     ["an answer of no known shape", async () => ["soon"]],
     ["an answer below zero", async () => [-2]],

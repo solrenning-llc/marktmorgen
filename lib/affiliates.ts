@@ -2217,18 +2217,18 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     const wait = stripeWait(deadline);
     if (wait === null) break;
     const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, wait)) as { data?: unknown; has_more?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as InvoiceLike[];
-    for (const invoice of rows) {
+    // An unreadable page is not "no membership payments" (stripePage): it throws, and the book says invoicesChecked false.
+    const { rows, next } = stripePage(listed, "a page of paid invoices");
+    for (const invoice of rows as InvoiceLike[]) {
       const meta = invoice.parent?.subscription_details?.metadata ?? {};
       if (!meta.via || !AFFILIATE_ID_PATTERN.test(meta.via) || !handles.has(meta.store ?? "")) continue;
       found.push({ invoice, meta });
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    if (next === null) {
       complete = true;
       break;
     }
-    after = last.id;
+    after = next;
   }
   const ids = [...new Set(found.map((f) => f.meta.product).filter((id): id is string => Boolean(id)))];
   const titles = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p.title]));

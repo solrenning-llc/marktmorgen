@@ -1268,3 +1268,166 @@ Public data check: 3974 tracked files; 0 file(s) require correction.
 #3083 **M5814417922 COMMENT/body FULL readbackEXATO** publicadoemhead1babf986bb0c76c5dcbd1b88d609c4f5e75d0a3f. Revisãocondicional/MÉDIOherdadoeraseslotsnull/R2C1classe, nãoaprovaçãoincondicional. Canal tentativa **CXM-20261107-1554-C1-1** combinedresultado3083+RES3084 recebeu **409CONFLICT/NÃOAPLICADA**, nenhumclaim3084entregue e **ZEROdiff/fonte/teste/runnercódigo3084lidoouescrito**. Metadata/body/timelinevazia3084exatoe4afa5e4847ecf85db62006f3bfcdf58e226b22d lidossópreflight. NãoéPRreview3084/nenhumveredito. Esperar>=120s após409, freshFULLpin+conferirnovosclaims/IDausente antesretry;reconciliarseoutropegou,nãoentrarconcorrente. Clock18:54:41Zpósfalha, retrydecanaldepois18:56:41Zassegura>=120s. ÚltimocanalENTREGUE051961d9/blobc92d9021/CXM1548preservado. Localpointerm-continuity/last-channel-state.json contémestadohonesto/semvigiainfundo.
 
 ÚltimoFULLcanalf59fd3d8/blob7dcc8802novidadeC1-1550TODOS-10INTEGRAL: tetosNÃOsobem/semcortedevisível, custoapartirdeotimizaçõesC2calendário/C4arquivo/C6imagens;nenhumgrantM. Gsegunda3076entregue5814399955eGprimeira3080claim;C3segunda2517claim;C6pediuC1enqueue3081apósM5814399028;#3082C6focal6711581974/segundafinanceiraain dapendente;C6legalNtakeDowncedidoC2nãoM. Nãoexecutar/push/ref/CI/filaalheios. Preserve#1924C1disposição/#3051Gidentityabertos. #3077M5814354925closureoriginal+Ppending;#3081M5814399028semachadosource+memória(typedgraphlimited/Redisrealnãoexecutado);#3083M5814417922conditionalcomprova7/3REDbaseehead+221ordináriosPASS. Próximaaçãoagora: reconciliaçãocanal;3084sóaposRESpublicadaefreshFULLconfirmada. Continuidadeagenda/estadoenabledintactos.
+
+
+## Retomada 07/11/2026 16h03 Fortaleza — #3082 reserva retirada ao preflightfinal; NÃO terceira revisão
+
+Canalretrydepois>=120s comFULLfresh/ID1554ausente revelou **J1555claim3084**; Mretirouintençãosemcode/diff/fonte/teste3084 (ZERO) eanuncioualternativa3082. **CXM-20261107-1557-C1-1 entregue c2553cbdff2d84cfef0807bf9d16187fa22cabd2/blob2ffc098cfc8d6d7d017a7b6a52ca16b8610f7c48 FULL4019173charsEXATO**: #3083M5814417922resultado+pedidoR2C1classe, #3084retiradaeclaimsegunda3082. C6-1555járeconheceu4MEDherdadosM/P/N/G epreparafixlocalsemPUSHaguardaC1;NÃOautoreclassificar/aprovarincondicional. C1-1550tetosnãoaumentam/semcortevisívelLIDA; C3-1557segunda2517+unidadefinishPlan;G1558segunda3078;J3084jáformal5814443815;C4arquivoHOLDcustoenvio;C2Z3079fixprecisafocal/decisãocusto. Nada dissoégrantprodutivoM.
+
+### #3082 exato7429eeff5308d54a8a84b8a6631f71b26ac564e7 — **NÃO PUBLICAR TERCEIRO PARECER**
+Mpreflightantesreserva tinhapenasC66711581974. PreflightFINAL19:01:47Zrevelou **C4segundafinanceira6711654757,created18:57:38Z**; Mclaimpublicadonocanal18:57:39Z(1sdepois) comsnapshotanteriordotimeline. CorridareconhecidanoFINALantesveredito: **Mretirareserva,nãoformalCOMMENT/APPROVE/thirdfinanceira,nãocontarvalidaçãocomoopiniãopedidaaberta**. CréditoC6primeira+C4segunda;nãoapagar/diminuirparecerdeles. Relaçãocom#2963notasC6/C4permanece; Mnãoexecutouprova13doC6nemcomposiçãocom2963,nãocertificaGETtodasformas/POSTglobal/depmerged/novechecks.
+
+FontesautoraisSOMENTELEITURA3files route077745a7e6f94f9d6bd037ceb08f4d375bb1c523/test3daf9ceb22a3dd1f9a2090ffb3188a6e4a42c432e/configdc14b1b48dae3ddf612d2f34e0469119e5b364d8. Basef001e8c0b7c9fce928a816b6a56af5263beb6210/oldroutec4be7c28b7b44b20f7a646ea321e5dc53c764092 (#2927). AntesreadcodeclaimFULLreciboacima. SAMEfinal3/1FAILsóoldrouteemgrafofinal→head3PASS;ligadoscart-soon-unknown4PASS/cart-stock38PASS/cart-bundle24PASS/cart-physical28PASS=>97atuaisPASS. Pretest20kpipe+20kMemoryRedis.runinclnested/500mockHTTP/120s512MiB256KiBporfilho. Old/new3=138/210/0cada;4=139/211/1;38=464/603/11;24=220/310/0;28=203/275/7;nenhumguardexceeded. Configcanonicalaliasesofnewnext/serveraplicada.Todosinputs441/442/438/436/438Gitblobheadchecados,sóoldrouteexatooverride. Runnergeralprocessnãoévereditochild. NãoexecutarnenhumaHTTP/providerreal.
+
+Preparação2imports faltantesANTES3testexecuçõesresolvidosSÓheadblobs. Ligadosstock/physicalprimeiratentativaENCERRADOSsemconcluirporENOENTsourceapphome/product/thanks; nãoverdes/nãoREDproduto. Recuperadas3páginasGitblobsheadexatos eREPETIDOSAPENASdoisafetados;healthy4+24+permanente3nãoforamrepetidos. CallerUIreadsource:payform sóok;linepricehide/gonetext;POSTthrowsrefuse(#2927)source/4fixture. NenhumaUI/browser/screenreaderapprealmedição. NãoalterouTSX.
+
+Types2roots512MiBOOMexit134 INCOMPLETO,preservado,nãopass. UMAchecagemestáticapréadmitidanovaemstatic-budget.txt1024MiB120s256KiB(continua0IOprovedor,nãoépreço/limite/tetodeproduto):mesmos2roots1014sourcesstrictES2017Bundler0diagnósticos. Logsebudgetabaixo. LintTODOS3changedexit0/scannerfinaloficial4005tracked0,4005Gitblobsheadexatos. Scannerpreliminar4002/0preservado,rerun4005somente3novaspáginasrecuperadasnecessárias. Productwhitespacediffsemoutput(code1conteúdomuda). SemfullCI/Actions/Redisreal/Lua/browser/MRglobal/merge/queue/refautorproduto. Validaçãoreutilizável durável, mas NÃO terceiraopiniãoM.
+
+### Ponto exato de parada/reconciliação
+PublicarretiradaM3082edispodoM3083nocanalcomFULLCAS/readback, incluindoC4segundaevitar3ª, eúltimoCP. Mownretornos#1924disposiçãoC1+Gidentity#3051pendentes; próprioM3083MEDclassificationC1/R2aguardada,nãoforçarreparo/head/refalheio. OutrasrevisõesatuaisresponsáveisG3078/Z3079/J3084/C4second3082;3080primeiraGtemMEDpendenteC1(nãoassumirglobalmentequeumasegundaélimpa). Nenhumaperdadopróprioescoporeaberturaold2388etc. Retomadasrepetidassobrepostasnãoabremnovaexecução;estárodadaencerra apósrecibofinal, semvigiainfundo/semalterarautomaçãoexistente. BloqueiodeclassificaçãoéTEMPORÁRIO,nãoconclusãodoprojeto/nãodesabilitarcontinuidade. Novoheadouclassificação/pedidonominalrealmentelivre próximaação, compreflight/RESANTESfonte,nãoreraprerunsiguais.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>500)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/app/api/store/cart/route']=join(root,'before-route.ts');const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-route.ts')){if(hash!=='c4be7c28b7b44b20f7a646ea321e5dc53c764092')throw Error('Old rule mismatch');}else if(input!=='tests/m-3051-payout-values.proof.ts'&&hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['app/api/store/cart/route.ts','tests/cart-soon-get.test.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### verify-1024.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['app/api/store/cart/route.ts','tests/cart-soon-get.test.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### static-budget.txt
+```
+Before dispatch: one directed static TypeScript attempt, 1024MiB heap, 120 seconds, 256KiB output; previous 512MiB OOM is preserved as incomplete. No business ceiling/configuration or source/assertion changed. No provider IO.
+
+```
+
+### run.log
+```
+{"mode":"before","test":"cart-soon-get.test.ts","checked":441}
+{"mode":"before","test":"cart-soon-get.test.ts","exit":1,"signal":null,"tail":"\nControls: what is known decides as before\n  ok    a product that is out can be paid for\n  ok    a product known to be coming soon cannot\n\nUnknown is never \"not coming soon\"\n  FAIL  when the pre-order reading fails, the line is not payable right now\n        expected false\n        got      true\n\n3 checks, 1 failing.\nM_BUDGET {\"pipelineCommands\":138,\"memoryRun\":210,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"cart-soon-get.test.ts","checked":441}
+{"mode":"head","test":"cart-soon-get.test.ts","exit":0,"signal":null,"tail":"\nControls: what is known decides as before\n  ok    a product that is out can be paid for\n  ok    a product known to be coming soon cannot\n\nUnknown is never \"not coming soon\"\n  ok    when the pre-order reading fails, the line is not payable right now\n\n3 checks, all passing.\nM_BUDGET {\"pipelineCommands\":138,\"memoryRun\":210,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+✘ [ERROR] Could not resolve "./tests/cart-soon-unknown.test.ts"
+
+    m-bootstrap.ts:1:829:
+      1 │ ...d)process.exitCode=1});import('./tests/cart-soon-unknown.test.ts');
+        ╵                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+m-bootstrap.ts:1:829: ERROR: Could not resolve "./tests/cart-soon-unknown.test.ts"
+    at failureErrorWithLog (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+```
+
+### linked.log
+```
+{"mode":"head","test":"cart-soon-unknown.test.ts","checked":442}
+{"mode":"head","test":"cart-soon-unknown.test.ts","exit":0,"signal":null,"tail":"\nControls: what is known decides as before\n  ok    a product that is out opens its checkout\n  ok    a product known to be coming soon is refused, nothing opened\n\nUnknown is never \"not coming soon\"\n  ok    no checkout is opened when the pre-order reading fails\n  ok    the buyer goes back to the cart to try again\n\n4 checks, all passing.\nM_BUDGET {\"pipelineCommands\":139,\"memoryRun\":211,\"httpMockDispatch\":1,\"exceeded\":false}\n"}
+{"mode":"head","test":"cart-stock.test.ts","checked":438}
+{"mode":"head","test":"cart-stock.test.ts","exit":1,"signal":null,"tail":" its unit stays held\n  ok    a checkout opened after its provisional hold was let go is closed at Stripe, nobody sent to it\n  ok    a checkout paid but not yet marked sold, which Stripe will not close, keeps its unit\n\nThe checkout closes before the hold\n  ok    a held unit's time, shorter than a reminder's hour\n\nThe open cart, and paying for it\n  ok    paying holds a unit of each, and sets the cookie that hands them back\n  ok    the same cart from another browser: its print is sold out, back to the cart\n  ok    the browser that went back from Stripe: its old checkout closed, its units held again\n  ok    the open cart: the held print sold out, left out of the total\n  ok    a count that cannot be read is not paid for, and never said to be sold out\n\nA key count that cannot be read never sells (SG2, finding 12)\n  ok    a pool with no keys left: back to the cart\n  ok    a key count answered []: nothing opened, try again\n  ok    a key count answered [\"3\"]: nothing opened, try again\n  ok    a key count answered [null]: nothing opened, try again\n  ok    a key count answered [-1]: nothing opened, try again\n  ok    a key count answered [{\"error\":\"lost\"}]: nothing opened, try again\n  ok    no checkout was made on an unknown key count\n\nWhere else a sold out one is not offered\nnode:fs:483\n    return binding.readFileUtf8(path, stringToFlags(options.flag));\n                   ^\n\nError: ENOENT: no such file or directory, open 'app/[handle]/page.tsx'\n    at readFileSync (node:fs:483:20)\n    at main (/workspace/scratch/d1ece80b1417/m-review-3082/logs/head-cart-stock.test.ts.cjs:61303:5) {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: 'app/[handle]/page.tsx'\n}\n\nNode.js v24.22.1\n"}
+{"mode":"head","test":"cart-bundle.test.ts","checked":436}
+{"mode":"head","test":"cart-bundle.test.ts","exit":0,"signal":null,"tail":"t it does not hold stays in the cart and is counted\n  ok    the deal for buying more is counted both ways: 20% off two lines can beat one bundle\n  ok    and a deal that still applies after the swap is counted on the bundle's line too\n  ok    a bundle already in the cart, or one that holds none of it, is never offered\n  ok    the one that saves the most\n  ok    the swap replaces, never adds a second copy\n  ok    the words name what it holds and the saving, and promise nothing more (en)\n  ok    the words name what it holds and the saving, and promise nothing more (es)\n  ok    the words name what it holds and the saving, and promise nothing more (fr)\n  ok    the words name what it holds and the saving, and promise nothing more (de)\n  ok    the words name what it holds and the saving, and promise nothing more (it)\n  ok    the words name what it holds and the saving, and promise nothing more (nl)\n  ok    the words name what it holds and the saving, and promise nothing more (pt)\n\nIn the store's cart\n  ok    the creator's bundle holds three of them\n  ok    offered at its own price, with what it holds from the cart and the exact saving\n  ok    the cart read nothing of the bundle's own record for it\n  ok    a cart it would make dearer is offered nothing\n  ok    nor one where what it does not hold makes the swap dearer\n  ok    swapped, the cart is the bundle alone, at its price, and offers nothing more\n  ok    with 20% off two or more, the two cost less than the bundle: nothing offered\n  ok    a draft bundle is never offered\n  ok    the store record still has its bundle\n\n24 checks, all passing.\nM_BUDGET {\"pipelineCommands\":220,\"memoryRun\":310,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"cart-physical.test.ts","checked":438}
+{"mode":"head","test":"cart-physical.test.ts","exit":1,"signal":null,"tail":"ch shipped line as goods\n  ok    free when they all are, and no line about when when they differ\n  ok    tax included in the price: the shipping included the same way\n  ok    the deal for buying more takes off the lines, never the shipping\n  ok    sharing no country: refused, nothing opened\n  ok    shipped with online products: refused, nothing opened, until the confirmation email names both\n  ok    shipped products only: no box to start at once needed\n  ok    a digital cart asks for no address, as before\n\nThe open cart, before paying\n  ok    each product in it with its own shipping and line about when\n  ok    shipping and where it can go, the total Stripe will charge before tax, no box to start at once\n  ok    shipped with online products: said, and nothing to pay for until one kind is taken out\n  ok    with the deal: the saving without the shipping, the total with it\n  ok    the visitor's country, when it is not one of them\n  ok    sharing no country: which to take out, by name\n\nPaying for a cart that cannot ship together\n  ok    two that share a country open Stripe's page, with no box to start at once\n  ok    two that share none go back to the cart, which says why, and open nothing\n  ok    nor a shipped product with an online one\n\nAfter paying\nnode:fs:483\n    return binding.readFileUtf8(path, stringToFlags(options.flag));\n                   ^\n\nError: ENOENT: no such file or directory, open 'app/[handle]/thanks/page.tsx'\n    at readFileSync (node:fs:483:20)\n    at main (/workspace/scratch/d1ece80b1417/m-review-3082/logs/head-cart-physical.test.ts.cjs:60655:50) {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: 'app/[handle]/thanks/page.tsx'\n}\n\nNode.js v24.22.1\n"}
+
+```
+
+### linked-recovered.log
+```
+{"mode":"head","test":"cart-stock.test.ts","checked":438}
+{"mode":"head","test":"cart-stock.test.ts","exit":0,"signal":null,"tail":"answer is unknown: closed at Stripe, nobody sent to it, the unit back only once Stripe says expired\n  ok    and while Stripe will not close it, its unit stays held\n  ok    a checkout opened after its provisional hold was let go is closed at Stripe, nobody sent to it\n  ok    a checkout paid but not yet marked sold, which Stripe will not close, keeps its unit\n\nThe checkout closes before the hold\n  ok    a held unit's time, shorter than a reminder's hour\n\nThe open cart, and paying for it\n  ok    paying holds a unit of each, and sets the cookie that hands them back\n  ok    the same cart from another browser: its print is sold out, back to the cart\n  ok    the browser that went back from Stripe: its old checkout closed, its units held again\n  ok    the open cart: the held print sold out, left out of the total\n  ok    a count that cannot be read is not paid for, and never said to be sold out\n\nA key count that cannot be read never sells (SG2, finding 12)\n  ok    a pool with no keys left: back to the cart\n  ok    a key count answered []: nothing opened, try again\n  ok    a key count answered [\"3\"]: nothing opened, try again\n  ok    a key count answered [null]: nothing opened, try again\n  ok    a key count answered [-1]: nothing opened, try again\n  ok    a key count answered [{\"error\":\"lost\"}]: nothing opened, try again\n  ok    no checkout was made on an unknown key count\n\nWhere else a sold out one is not offered\n  ok    the store page, the product page and Goes well with\n  ok    the thanks page marks the cart's limited products sold\n  ok    nor in the cart's reminder\n\n38 checks, all passing.\nM_BUDGET {\"pipelineCommands\":464,\"memoryRun\":603,\"httpMockDispatch\":11,\"exceeded\":false}\n"}
+{"mode":"head","test":"cart-physical.test.ts","checked":438}
+{"mode":"head","test":"cart-physical.test.ts","exit":0,"signal":null,"tail":"s shipping added on one line, with the line they share\n  ok    the order marked as shipped, on the checkout and the payment\n  ok    no tax codes while Stripe Tax is off\n  ok    with tax on: the shipping as shipping, each shipped line as goods\n  ok    free when they all are, and no line about when when they differ\n  ok    tax included in the price: the shipping included the same way\n  ok    the deal for buying more takes off the lines, never the shipping\n  ok    sharing no country: refused, nothing opened\n  ok    shipped with online products: refused, nothing opened, until the confirmation email names both\n  ok    shipped products only: no box to start at once needed\n  ok    a digital cart asks for no address, as before\n\nThe open cart, before paying\n  ok    each product in it with its own shipping and line about when\n  ok    shipping and where it can go, the total Stripe will charge before tax, no box to start at once\n  ok    shipped with online products: said, and nothing to pay for until one kind is taken out\n  ok    with the deal: the saving without the shipping, the total with it\n  ok    the visitor's country, when it is not one of them\n  ok    sharing no country: which to take out, by name\n\nPaying for a cart that cannot ship together\n  ok    two that share a country open Stripe's page, with no box to start at once\n  ok    two that share none go back to the cart, which says why, and open nothing\n  ok    nor a shipped product with an online one\n\nAfter paying\n  ok    a second shipped product's box says it goes to the same address, on an order that was shipped\n\n28 checks, all passing.\nM_BUDGET {\"pipelineCommands\":203,\"memoryRun\":275,\"httpMockDispatch\":7,\"exceeded\":false}\n"}
+
+```
+
+### types-incomplete.log
+```
+
+<--- Last few GCs --->
+
+[7:0x42aea000]    29949 ms: Scavenge 508.5 (514.0) -> 506.5 (514.3) MB, pooled: 0 MB, 0.48 / 0.00 ms  (average mu = 0.293, current mu = 0.385) allocation failure; 
+[7:0x42aea000]    30174 ms: Mark-Compact 508.5 (514.3) -> 506.2 (514.0) MB, pooled: 0 MB, 218.54 / 0.00 ms  (average mu = 0.282, current mu = 0.270) allocation failure; scavenge might not succeed
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x91d810  [node]
+ 2: 0x75bb1b node::OOMErrorHandler(char const*, v8::OOMDetails const&) [node]
+ 3: 0xc755c0  [node]
+ 4: 0xc756bf  [node]
+ 5: 0xf24835  [node]
+ 6: 0xf24862  [node]
+ 7: 0xf24be4  [node]
+ 8: 0xf3694a  [node]
+ 9: 0xf3ae00  [node]
+10: 0x1a3ed81  [node]
+
+```
+
+### verify-1024.log
+```
+types 0
+lint 0 null undefined
+
+```
+
+### types.log
+```
+{"roots":2,"sources":1014,"diagnostics":0}
+```
+
+### lint-all-changed.log
+```
+
+```
+
+### scanner-complete.log
+```
+Public data check: 4005 tracked files; 0 file(s) require correction.
+
+```
+
+### verified-complete.json
+```
+{"verified": 4005, "unmatched": [], "scanner_exit": 0}
+```

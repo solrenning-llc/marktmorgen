@@ -239,9 +239,9 @@ function main() {
   is("hidden takes the box out of sight and out of reach", /visibility:\s*hidden/.test(rule('.nb-toast-region[data-place="hidden"] .nb-toast')), true);
   is("the move is never animated (reduced motion is respected by not moving smoothly at all)", /transition/.test(css.slice(css.indexOf(".nb-toast-region {"), css.indexOf(".nb-toast {"))), false);
 
-  // Targets and forced colours.
+  // Targets and forced colors.
   is("the Dismiss button is a 44 x 44 px target (2.5.5)", /width:\s*44px;\s*height:\s*44px;/.test(rule(".nb-toast-close {")), true);
-  is("in forced colours the toast keeps a visible edge", /@media \(forced-colors: active\)\s*\{\s*\.nb-toast\s*\{\s*border:[^}]*CanvasText/.test(css), true);
+  is("in forced colors the toast keeps a visible edge", /@media \(forced-colors: active\)\s*\{\s*\.nb-toast\s*\{\s*border:[^}]*CanvasText/.test(css), true);
 
   console.log(`Toast focus not obscured: ${passed} checks passed`);
 }

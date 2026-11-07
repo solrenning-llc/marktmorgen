@@ -59,7 +59,12 @@ async function main(): Promise<void> {
   const words = [type.label, type.hint, ...type.slots.map((slot) => (slot.kind === "page" ? slot.title : slot.label))].join(" ");
   is("its words carry no figure, price or currency", /[0-9$€£%]/.test(words), false);
   is("nor a deadline or a pressure word", /\b(now|today|hurry|limited|only|last|save|saving|deal|discount|ends?|left|free)\b/i.test(words), false);
-  is("it says the buyer gets each product in it", /each product/i.test(type.hint), true);
+  // Claude 1 review of #2933: a bundle whose buyers choose some of its products
+  // (lib/bundle-rules.ts picks) fills this step too, and hands over only the
+  // chosen ones (lib/answers.ts deliveryWords), so the card and the AI prompt
+  // must not promise every product in it.
+  is("it does not promise every product in the bundle", /each product in it/i.test(type.hint), false);
+  is("it says the buyer gets what the bundle hands over, each as if bought on its own", [/what the bundle hands over/i.test(type.hint), /as if they bought it on its own/i.test(type.hint)], [true, true]);
 
   part("Only a bundle fills its step");
   const step = choicesOf(type)[0];
@@ -124,6 +129,19 @@ async function main(): Promise<void> {
   is("the bundle is read as the step's product", facts.ok ? facts.facts.products.map((p) => p.id) : facts.error, [kit.product.id]);
   const refused = await readFunnelFacts(store, type, { bundle: workbook.product.id });
   is("a product that is not a bundle is refused before any model call", refused.ok ? "ok" : refused.error, "slot_bundle");
+
+  // From Claude 1's proof (review of #2933): the type also takes a bundle whose
+  // buyers choose, so its words above are checked against that case.
+  part("A bundle whose buyers choose fills it too");
+  const checklist = await addProduct(OWNER, "Checklist", "", "9", null);
+  const pickTwo = await addProduct(OWNER, "Choose two", "", "39", null);
+  if (!checklist.ok || !pickTwo.ok) throw new Error("no products");
+  const checklistLinked = await setProductLink(OWNER, checklist.product.id, `https://example.com/${checklist.product.id}`);
+  if (!checklistLinked.ok) throw new Error("no link");
+  const picked = await setProductBundle(OWNER, pickTwo.product.id, [guide.product.id, workbook.product.id, checklist.product.id], 2);
+  is("the fixture is a real bundle of three where buyers choose two", picked.ok, true);
+  const pickMade = await (await send({ action: "from-type", type: "bundle", name: "Choose two funnel", products: { bundle: pickTwo.product.id } })).json();
+  is("the route builds the funnel with it", pickMade.ok, true);
   done();
 }
 

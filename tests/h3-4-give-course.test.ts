@@ -11,8 +11,8 @@
  * the studio's, so the course opens for that address exactly as one brought
  * over does and the buyer sees it as given by the store, never as a sale. The
  * review says, before anything is written, who would get it, who has it
- * given already, who already studies it, who was taken off it and whose
- * record could not be read; the confirmation acts only on the count reviewed
+ * given already, who was taken off it and whose record could not be read
+ * (a student's row in the course is not access, so it decides nothing); the confirmation acts only on the count reviewed
  * (otherwise 409, nothing written); the studio requests it reads and writes
  * are taken before it reads and before it writes; the answer is person by
  * person; the undo takes back only what the studio gave, never an import, a
@@ -53,7 +53,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
 
-type Review = { changes: number; already: number; student: number; removed: number; otherWay: number; unread: number };
+type Review = { changes: number; already: number; removed: number; otherWay: number; unread: number };
 type Reply = {
   ok?: boolean;
   error?: string;
@@ -102,13 +102,14 @@ async function main(): Promise<void> {
     ["change", "to", "none"],
   );
   is("every refusal says what to do", Object.values(GIVE_REFUSALS).every((words) => /^(Choose|Select|Review|Open|Nothing) /.test(words)), true);
+  // Changed assertion (rule 23, pre-review of unit 2, MEDIO 3): the review had a "student" count and the line "1 person
+  // already studies it: left as they are.", read from the student's row in the course, which is no access at all.
   is(
     "the review, before anything is written",
-    giveReviewLines({ changes: 2, already: 1, student: 1, removed: 1, otherWay: 0, unread: 1 }, "give", "Cake Course"),
+    giveReviewLines({ changes: 2, already: 1, removed: 1, otherWay: 0, unread: 1 }, "give", "Cake Course"),
     [
       "2 people will get Cake Course, with no payment.",
       "1 person already has it given: left as they are.",
-      "1 person already studies it: left as they are.",
       "1 person was taken off it: left as they are. Give their access back from that course's students.",
       "1 person's record could not be read just now: left as they are.",
       "No email is sent. They see it the next time they sign in with this address. You can undo this right after.",
@@ -116,7 +117,7 @@ async function main(): Promise<void> {
   );
   is(
     "the answer: how many, and for the rest, why",
-    giveSummary({ asked: 4, changed: ["a@x.co"], already: [], student: [], removed: [], otherWay: ["b@x.co"], unread: [], unknown: ["c@x.co"], failed: ["d@x.co"] }, "takeback", "Cake Course").words,
+    giveSummary({ asked: 4, changed: ["a@x.co"], already: [], removed: [], otherWay: ["b@x.co"], unread: [], unknown: ["c@x.co"], failed: ["d@x.co"] }, "takeback", "Cake Course").words,
     "Cake Course taken back from 1 person. 3 were left out: 1 person has it another way (a sale, an import or a gift), which is not taken back here; 1 person's change could not be confirmed, so it may or may not be done. Review again to see; 1 person's change did not land, because something went wrong; try again.",
   );
   is("a gift from the studio is shown as given by the store; an import, a sale or a gift from a buyer is not", [isGivenByStore(STUDIO_GIVE_JOB), isGivenByStore("api:key1"), isGivenByStore("gift:abc"), isGivenByStore("0123456789abcdef01234567")], [true, true, false, false]);
@@ -151,7 +152,7 @@ async function main(): Promise<void> {
   let store = (await storeForEmail(owner))!;
   const now = Math.floor(Date.now() / 1000);
   for (const email of ["ana@example.com", "ben@example.com", "cy@example.com", "dee@example.com"]) await touchStudent(breadCourse.id, email, now, ROOM);
-  // cy already studies Cake; dee was taken off Cake; ben was brought over with Cake by an import.
+  // cy opened Cake once (a row, which is no access: no sale, no gift); dee was taken off Cake; ben was brought over with Cake by an import.
   await touchStudent(cakeCourse.id, "cy@example.com", now, ROOM);
   await touchStudent(cakeCourse.id, "dee@example.com", now, ROOM);
   await setBlocked(store, cakeCourse.id, "dee@example.com", true);
@@ -169,18 +170,23 @@ async function main(): Promise<void> {
   const asked = ["ana@example.com", "ben@example.com", "cy@example.com", "dee@example.com", "zed@example.com"];
   const keysBefore = new Set(await redis.keys());
   const review = await post({ action: "review", change: "give", to, emails: asked });
-  is("the review says exactly what it would do", [review.status, review.body.review], [200, { changes: 2, already: 1, student: 1, removed: 1, otherWay: 0, unread: 0 }]);
+  // Changed assertions (rule 23, pre-review of unit 2, MEDIO 3): cy was counted as "already studies it" (student: 1,
+  // changes: 2) from the row alone, so the creator could not give the course to someone who had no access to it.
+  is("the review says exactly what it would do", [review.status, review.body.review], [200, { changes: 3, already: 1, removed: 1, otherWay: 0, unread: 0 }]);
   is("and writes nothing", [await given("ana@example.com"), await given("zed@example.com")], [[], []]);
-  const stale = await post({ action: "apply", change: "give", to, emails: asked, expect: 3 });
-  is("a count that is not the one reviewed is refused, with what it would do now, nothing written", [stale.status, stale.body.error, stale.body.review?.changes, await given("ana@example.com")], [409, "changed", 2, []]);
+  // Changed (rule 23, MEDIO 3): expect 3 and changes 2, now 2 and 3.
+  const stale = await post({ action: "apply", change: "give", to, emails: asked, expect: 2 });
+  is("a count that is not the one reviewed is refused, with what it would do now, nothing written", [stale.status, stale.body.error, stale.body.review?.changes, await given("ana@example.com")], [409, "changed", 3, []]);
   const noCount = await post({ action: "apply", change: "give", to, emails: asked });
   is("a confirmation always carries the count it confirms", [noCount.status, noCount.body.error], [400, "expect"]);
-  const applied = await post({ action: "apply", change: "give", to, emails: asked, expect: 2 });
+  // Changed (rule 23, MEDIO 3): expect 2, changed [ana, zed] and student [cy]; cy is given it now, and no "student" is said.
+  const applied = await post({ action: "apply", change: "give", to, emails: asked, expect: 3 });
   is(
     "given: each person's own result",
     [applied.status, applied.body.changed?.sort(), applied.body.already, applied.body.student, applied.body.removed, applied.body.unread, applied.body.unknown, applied.body.failed],
-    [200, ["ana@example.com", "zed@example.com"], ["ben@example.com"], ["cy@example.com"], ["dee@example.com"], [], [], []],
+    [200, ["ana@example.com", "cy@example.com", "zed@example.com"], ["ben@example.com"], undefined, ["dee@example.com"], [], [], []],
   );
+  is("cy, whose row gave no access, now opens it", (await paidCourses(store, "cy@example.com")).has(cake.product.id), true);
   store = (await storeForEmail(owner))!;
   is("written as the studio's gift, and the store reads its given courses", [await given("ana@example.com"), store.pastBuyers], [[STUDIO_GIVE_JOB], true]);
   is("the course opens for them, as one brought over does", [(await paidCourses(store, "ana@example.com")).has(cake.product.id), (await paidCourses(store, "zed@example.com")).has(cake.product.id)], [true, true]);
@@ -189,11 +195,21 @@ async function main(): Promise<void> {
   is("no email, sequence or refund is started", created.filter((key: string) => /^nl:(mail|wf|ses|refund|outbox)/.test(key)), []);
 
   const backReview = await post({ action: "review", change: "takeback", to, emails: ["ana@example.com", "ben@example.com", "cy@example.com", "zed@example.com"] });
-  is("taking back: only what the studio gave; an import is not the studio's to take", backReview.body.review, { changes: 2, already: 1, student: 0, removed: 0, otherWay: 1, unread: 0 });
+  // Changed (rule 23, MEDIO 3): changes 2 and student 0; cy was given it above.
+  is("taking back: only what the studio gave; an import is not the studio's to take", backReview.body.review, { changes: 3, already: 0, removed: 0, otherWay: 1, unread: 0 });
   const undone = await post({ action: "apply", change: "takeback", to, emails: applied.body.changed, expect: applied.body.changed!.length });
-  is("undone, exactly: those it gave no longer have it", [undone.status, undone.body.changed?.sort(), await given("ana@example.com"), await given("zed@example.com")], [200, ["ana@example.com", "zed@example.com"], [], []]);
+  // Changed (rule 23, MEDIO 3): cy is among those given, so among those taken back.
+  is("undone, exactly: those it gave no longer have it", [undone.status, undone.body.changed?.sort(), await given("ana@example.com"), await given("zed@example.com")], [200, ["ana@example.com", "cy@example.com", "zed@example.com"], [], []]);
   is("and the course no longer opens for them", (await paidCourses(store, "ana@example.com")).has(cake.product.id), false);
   is("ben's import is still there", await given("ben@example.com"), ["0123456789abcdef01234567"]);
+  // "You can give it again right after": true even for who opened it while it was given (a row is left behind).
+  await touchStudent(cakeCourse.id, "ana@example.com", now, ROOM);
+  const againReview = await post({ action: "review", change: "give", to, emails: ["ana@example.com"] });
+  is("taken back, it can be given again right after, even to who opened it meanwhile", againReview.body.review, { changes: 1, already: 0, removed: 0, otherWay: 0, unread: 0 });
+  // Taken off the course with no row of theirs: giving it would not open it, so it is said, not given.
+  await setBlocked(store, cakeCourse.id, "flo@example.com", true);
+  const blockedReview = await post({ action: "review", change: "give", to, emails: ["flo@example.com"] });
+  is("someone taken off it is left as they are, row or none", blockedReview.body.review, { changes: 0, already: 0, removed: 1, otherWay: 0, unread: 0 });
 
   is("not a course: refused", (await post({ action: "review", change: "give", to: plain.product.id, emails: ["ana@example.com"] })).body.error, "product");
   const stranger = await post({ action: "apply", change: "give", to, emails: ["ana@example.com"], expect: 1 }, {});
@@ -213,7 +229,8 @@ async function main(): Promise<void> {
   };
   garble = 1;
   const unread = await post({ action: "review", change: "give", to, emails: ["ana@example.com"] });
-  is("a record that cannot be read is counted as unread, never as a change", unread.body.review, { changes: 0, already: 0, student: 0, removed: 0, otherWay: 0, unread: 1 });
+  // Changed (rule 23, MEDIO 3): no "student" count any more.
+  is("a record that cannot be read is counted as unread, never as a change", unread.body.review, { changes: 0, already: 0, removed: 0, otherWay: 0, unread: 1 });
   garble = 1;
   const notGuessed = await post({ action: "apply", change: "give", to, emails: ["ana@example.com"], expect: 0 });
   is("and nothing is given by guess", [notGuessed.body.changed, notGuessed.body.unread, await given("ana@example.com")], [[], ["ana@example.com"], []]);

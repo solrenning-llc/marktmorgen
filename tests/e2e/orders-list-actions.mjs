@@ -92,6 +92,8 @@ try {
   await settled();
   check("after the final batch focus is its FIRST new purchase, not an earlier purchase or body", await page.evaluate(() => document.activeElement?.textContent), "First of final batch");
   check("the final button has left the page", await button.count(), 0);
+  // WCAG 2.4.10: each purchase the batches added is a heading at the list's purchase level, h2.
+  check("each purchase the batches added is an h2, before the bundle's h3 the harness also draws", await page.evaluate(() => [...document.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((node) => `${node.tagName}:${node.textContent}`)), ["H2:First batch", "H2:First of final batch", "H2:Second of final batch", "H3:Inside this bundle"]);
 
   await page.evaluate(() => window.mount([{ ok: true, cards: [], older: null, left: "", said: "No purchases in this batch" }]));
   await button.click();

@@ -31,6 +31,9 @@ import { readSetup } from "@/lib/call-setup";
 import { readDraft as readAgreementDraft } from "@/lib/agreement-rules";
 import { createAgreement, saveAgreement } from "@/lib/agreement-store";
 import { agreementWords } from "@/lib/buyer-words/agreements";
+import { requestWords } from "@/lib/buyer-words/requests";
+import { createRequest, changeRequest } from "@/lib/payment-request-store";
+import { readDraft as readRequestDraft } from "@/lib/payment-request-rules";
 import { type Store, addDraftProducts, addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductBundle, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { bundleMeta } from "@/lib/bundle-rules";
 import { saveServer, setProductRoles } from "@/lib/discord-store";
@@ -164,6 +167,11 @@ test("2.4.10: each purchase is a section heading under the page's h1, and each b
   const made = await createAgreement((await storeForEmail(OWNER))!, draft.draft);
   assert.ok(made.ok);
   await saveAgreement({ ...made.agreement, sent: [Date.now()] });
+  const request = readRequestDraft({ email: BUYER, name: "Synthetic Buyer", consent: true, lines: [{ text: "A private session", quantity: 1, amount: "10" }], note: "", dueDate: "", autoReminders: 0 }, "usd");
+  assert.ok(request.ok);
+  const asked = await createRequest((await storeForEmail(OWNER))!, request.draft);
+  assert.ok(asked.ok);
+  await changeRequest((await storeForEmail(OWNER))!, asked.request.id, (current) => ({ next: { ...current, sent: [Date.now()] }, answer: true }));
   const start = (NOW + 3 * 86_400) * 1000;
   checkouts = [
     ...drafts.ids.map((id, i) => paid(i, 60 * (i + 1), { product: id })),
@@ -176,6 +184,7 @@ test("2.4.10: each purchase is a section heading under the page's h1, and each b
   assert.ok(headings.includes(`h2:${words.bookedCalls(1)}`), `the calls have their heading: ${headings.join(" | ")}`);
   assert.ok(headings.includes(`h2:${words.waiting}`), `what waits on the buyer has its heading: ${headings.join(" | ")}`);
   assert.ok(headings.includes(`h3:${agreementWords("en").pageTitle("agreement")}: Coaching terms`), `the agreement waiting is a heading under "${words.waiting}": ${headings.join(" | ")}`);
+  assert.ok(headings.includes(`h3:${requestWords("en").pageTitle}: $10`), `the payment request waiting is a heading under "${words.waiting}": ${headings.join(" | ")}`);
   assert.ok(headings.includes("h3:Coaching call"), `the booked call is a heading under "Booked calls": ${headings.join(" | ")}`);
   for (const title of ["Weeknight Dinners", "Meal Planner"]) assert.ok(headings.includes(`h2:${title}`), `"${title}" is a section heading: ${headings.join(" | ")}`);
   // No level skipped: every heading is at most one level under the one before it.

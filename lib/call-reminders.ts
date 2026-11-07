@@ -62,6 +62,29 @@ function when(mark: "24" | "1"): string {
   return mark === "24" ? "Tomorrow" : "In 1 hour";
 }
 
+/** Confirm the whole bounded WITHSCORES reply before processing any member. */
+function dueQueue(reply: unknown, now: number): string[] {
+  const unreadable = () => new Error("The call reminder queue could not be read.");
+  if (!Array.isArray(reply) || reply.length !== 1) throw unreadable();
+  const entry = Object.getOwnPropertyDescriptor(reply, "0");
+  if (!entry || !("value" in entry)) throw unreadable();
+  const raw: unknown = entry.value;
+  if (!Array.isArray(raw) || raw.length % 2 !== 0 || raw.length > BATCH * 2) throw unreadable();
+  const flat: string[] = [];
+  for (let i = 0; i < raw.length; i += 2) {
+    const member = Object.getOwnPropertyDescriptor(raw, String(i));
+    const score = Object.getOwnPropertyDescriptor(raw, String(i + 1));
+    if (!member || !("value" in member) || typeof member.value !== "string" ||
+      !score || !("value" in score)) throw unreadable();
+    const value: unknown = score.value;
+    if (typeof value !== "number" && (typeof value !== "string" || !/^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value))) throw unreadable();
+    const at = Number(value);
+    if (!Number.isFinite(at) || at < 0 || at > now) throw unreadable();
+    flat.push(member.value, String(at));
+  }
+  return flat;
+}
+
 async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark: "24" | "1", origin: string): Promise<boolean> {
   if (!product || !isCallProduct(product) || !call.email) return false;
   const setup = product.call;
@@ -145,8 +168,7 @@ export async function sendCallReminders(
   const counts = { reminded: 0, confirmed: 0, dropped: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
   const now = Date.now();
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", REMINDER_QUEUE, 0, now, "WITHSCORES", "LIMIT", 0, BATCH]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = dueQueue(await redisPipeline([["ZRANGEBYSCORE", REMINDER_QUEUE, 0, now, "WITHSCORES", "LIMIT", 0, BATCH]]), now);
 
   // One read of Stripe per store, however many of its bookings are due.
   const groups = new Map<string, { member: string; score: number }[]>();

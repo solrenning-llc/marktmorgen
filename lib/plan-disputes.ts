@@ -26,7 +26,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isAddOn, isBillingConfigured, onPlatformAt } from "@/lib/billing";
 import { type PlanDisputeStatus, coveredUntil, disputeStatusOf } from "@/lib/plan-dispute-rules";
-import { recordPlanDispute, storeForHandle, storeForId, storeIdKeyOf, storeRef } from "@/lib/store";
+import { recordPlanDispute, storeForHandle, storeForId, storeRef } from "@/lib/store";
 import { type StripePage, readStripePage } from "@/lib/stripe-list";
 
 /** The version whose charge still names its invoice and whose invoice names its subscription. */
@@ -65,7 +65,10 @@ async function remember(id: string, what: string): Promise<void> {
  * throws UnknownReplyError.
  */
 async function storeIdGone(sid: string): Promise<boolean> {
-  const n = countOf(repliesFor(await redisPipeline([["EXISTS", storeIdKeyOf(sid)]]), 1)?.[0]);
+  // The same key lib/store.ts keeps a store's id under (`storeIdKey`, "nl:store:id:<id>"); written here because lib/store.ts
+  // is reserved by another unit. tests/plan-disputes-open-mark.test.ts reads a real store through it: a different key
+  // would answer 0 and give a live store's open mark up, which that test fails on.
+  const n = countOf(repliesFor(await redisPipeline([["EXISTS", `nl:store:id:${sid}`]]), 1)?.[0]);
   if (n === null || n > 1) throw new UnknownReplyError("a store's id");
   return n === 0;
 }

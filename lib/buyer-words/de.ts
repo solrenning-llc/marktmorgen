@@ -40,7 +40,7 @@ export const de: BuyerWords = {
 
   fairHead: (country, percent) => `Fairer Preis für Ihr Land (${country}): ${percent}${S}% Rabatt`,
   fairNote: (store, plan) =>
-    `${store} senkt die Preise dort, wo Geld weniger wert ist. Der Rabatt wird auf der Zahlungsseite abgezogen, ohne Code${plan ? "; der reduzierte Preis gilt bei Zahlung des vollen Betrags" : ""}.`,
+    `${store} senkt die Preise dort, wo Geld weniger wert ist. Dieser Preis wurde automatisch für Sie festgelegt, anhand des Landes Ihrer Internetverbindung. Der Rabatt wird auf der Zahlungsseite abgezogen, ohne Code${plan ? "; der reduzierte Preis gilt bei Zahlung des vollen Betrags" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% Rabatt · ${ends}`,
   saleNote: (until, plan) =>
     `Bis ${until}. Der Rabatt wird auf der Zahlungsseite abgezogen, ohne Code${plan ? "; der Aktionspreis gilt bei Zahlung des vollen Betrags" : ""}.`,
@@ -136,7 +136,8 @@ export const de: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog von ${store}`,
-  blogEmpty: "Hier gibt es noch nichts.",
+  blogPastEnd: "Keine Beiträge auf dieser Seite",
+  blogPastEndBody: "Diese Seite liegt hinter dem letzten Beitrag.",
   blogMinutes: (n) => `${n} Min. Lesezeit`,
   blogNewer: "Neuere Beiträge",
   blogOlder: "Ältere Beiträge",
@@ -149,6 +150,7 @@ export const de: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `Sie sparen ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Wählen Sie eine Option für ${title}`,
+  chooseOne: "Bitte wählen",
   recommended: "Empfohlen",
   recommendedAfter: " (empfohlen)",
   howToPayFor: (title) => `Zahlungsweise für ${title}`,
@@ -300,6 +302,7 @@ export const de: BuyerWords = {
   newer: "Neuere",
   older: "Ältere",
   askUnknown: (store) => `Das steht nicht auf dieser Seite. Fragen Sie ${store} vor dem Kauf.`,
+  askTermsCut: () => "Die vollständigen Bedingungen liegen mir hier nicht vor. Fragen Sie vor dem Kauf beim Ersteller nach.",
 
   noLongerOnSale: "Dieses Produkt ist nicht mehr im Verkauf.",
   seeStore: (store) => `${store} ansehen`,

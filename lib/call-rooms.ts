@@ -40,7 +40,7 @@
  */
 import { whereOf } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { mgetWhole } from "@/lib/redis-mget";
+import { MGET_REPLY_BYTES, REPLY_ESCAPE_FACTOR, UnreadableMget, getsWhole, mgetWhole } from "@/lib/redis-mget";
 import { type CallSetup, isGroup, roomFor } from "@/lib/call-setup";
 import { callScope, givenLink, parseRecord, recordKey } from "@/lib/meet-records";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -101,20 +101,38 @@ export async function roomsFor(callsId: string | null, asks: RoomAsk[]): Promise
 }
 
 /**
- * Booking room keys read at one MGET by roomsForMany: 100 bookings' four
- * keys. At the 1,024 bytes a key the booking calendar's making is priced at
- * (lib/read-ceilings.ts, CALENDAR_BUILD_SHAPE) a reply is 409,600 bytes.
+ * The most a room key (a booking's or a time's) holds: its only writer is the
+ * SET NX of roomsReadWith, of a newVideoRoom() address, 44 bytes of letters,
+ * digits and ":/.", which no JSON answer escapes.
  */
-export const ROOM_KEYS_PER_MGET = 400;
+export const ROOM_VALUE_BYTES = VIDEO_ROOM_BASE.length + ROOM_NAME_LENGTH;
+
+/**
+ * Room keys read at one MGET by roomsForMany: 400, 200 bookings' two keys.
+ * Sized from the most a room key can be written at (ROOM_VALUE_BYTES), doubled
+ * for the REST answer's escaping (REPLY_ESCAPE_FACTOR): 35,200 bytes a reply
+ * at most, within MGET_REPLY_BYTES (1 MiB), which alone would allow 11,915;
+ * 400 keeps the request's keys (a checkout session's id each, under 255
+ * characters) near 130 KB. The meeting records are not read here: they have
+ * no byte cap where they are written (lib/meet-records.ts, writeRecord: up
+ * to MAX_GUESTS guests' and added addresses, whose length the code does not
+ * bound), so no chunk could bound their reply, and roomsForMany reads them
+ * with a GET each (getsWhole), as roomsFor does.
+ */
+export const ROOM_KEYS_PER_MGET = Math.min(400, Math.floor(MGET_REPLY_BYTES / (REPLY_ESCAPE_FACTOR * ROOM_VALUE_BYTES)));
 
 /**
  * roomsFor, for a reader that may ask about every booking of a store at once
  * (the booking calendar's making, lib/calendar-sync.ts, slotRoomsBatched):
- * the four keys of each booking read ROOM_KEYS_PER_MGET at one MGET
- * (lib/redis-mget.ts), not one GET each. A reply not whole, or holding
- * anything but text or nothing, throws UnreadableMget: the reading fails,
- * never a room taken for absent (and so never a new one made in its place).
- * The rooms still to make are made as roomsFor makes them (SET NX and GET).
+ * each booking's two room keys read ROOM_KEYS_PER_MGET at one MGET
+ * (lib/redis-mget.ts), not one GET each; its two meeting records with a GET
+ * each, in one trip (getsWhole), since no chunk could bound their reply. A
+ * reply not whole, or holding anything but text or nothing, throws
+ * UnreadableMget; so does a value that is there but is not what its key
+ * holds (a room key without a room made here, a meeting record that does not
+ * parse or is another call's, review of #3079): the reading fails, never a
+ * room taken for absent (and so never a new one made in its place). The
+ * rooms still to make are made as roomsFor makes them (SET NX and GET).
  */
 export async function roomsForMany(callsId: string | null, asks: RoomAsk[]): Promise<(string | null)[]> {
   return roomsReadWith(callsId, asks, readByMgets);
@@ -122,8 +140,34 @@ export async function roomsForMany(callsId: string | null, asks: RoomAsk[]): Pro
 
 /** How the keys of the rooms asked about are read: each with its own GET, in one trip (roomsFor). */
 const readByGets = (keys: string[]): Promise<unknown[]> => redisPipeline(keys.map((key) => ["GET", key]));
-/** Or ROOM_KEYS_PER_MGET at one MGET, read only when whole (roomsForMany). */
-const readByMgets = (keys: string[]): Promise<unknown[]> => mgetWhole(keys, ROOM_KEYS_PER_MGET);
+/** The prefix of a meeting record's key: the rest is its scope (lib/meet-records.ts, recordKey). */
+const RECORD_PREFIX = recordKey("");
+/**
+ * Or, for roomsForMany, the room keys ROOM_KEYS_PER_MGET at one MGET and the
+ * meeting records with a GET each, all read only when whole, and each value
+ * there only when it is what its key holds: a room made here under a room
+ * key, a meeting record of the key's own scope under a record's key.
+ */
+const readByMgets = async (keys: string[]): Promise<unknown[]> => {
+  const isRecord = (key: string) => key.startsWith(RECORD_PREFIX);
+  const roomKeys = keys.filter((key) => !isRecord(key));
+  const recordKeys = keys.filter(isRecord);
+  const [rooms, records] = await Promise.all([mgetWhole(roomKeys, ROOM_KEYS_PER_MGET), getsWhole(recordKeys)]);
+  let r = 0;
+  let m = 0;
+  return keys.map((key) => {
+    if (isRecord(key)) {
+      const value = records[m++];
+      if (value !== null && parseRecord(value)?.scope !== key.slice(RECORD_PREFIX.length)) {
+        throw new UnreadableMget("a meeting record's key held something other than its own record");
+      }
+      return value;
+    }
+    const value = rooms[r++];
+    if (value !== null && !isVideoRoom(value)) throw new UnreadableMget("a room key held something other than a room made here");
+    return value;
+  });
+};
 
 async function roomsReadWith(callsId: string | null, asks: RoomAsk[], readKeys: (keys: string[]) => Promise<unknown[]>): Promise<(string | null)[]> {
   // In person (lib/call-place.ts): no room, not even one kept from when it was online; the others are asked as before.

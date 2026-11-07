@@ -103,11 +103,13 @@ async function main(): Promise<void> {
     const mgets = made.sent.filter((c) => c[0] === "MGET");
     const listingMgets = mgets.filter((c) => LISTING_KEY.test(String(c[1])));
     const roomMgets = mgets.filter((c) => ROOM_KEY.test(String(c[1])));
-    is("the listings in 40 MGETs of at most 50, the rooms in 5 of at most 400 keys", [listingMgets.length, Math.max(...listingMgets.map((c) => c.length - 1)), roomMgets.length, Math.max(...roomMgets.map((c) => c.length - 1))], [40, 50, 5, 400]);
+    is("the listings in 1,000 MGETs of at most 2, the rooms in 3 of at most 400 keys", [listingMgets.length, Math.max(...listingMgets.map((c) => c.length - 1)), roomMgets.length, Math.max(...roomMgets.map((c) => c.length - 1))], [1_000, 2, 3, 400]);
+    const recordGets = made.sent.filter((c) => c[0] === "GET" && /^nl:meet:r:/.test(String(c[1]))).length;
+    is("each booking's two meeting records read with a GET each (no byte cap where they are written)", recordGets, 2 * CALENDAR_CALLS);
     const commands = made.sent.length;
     is(`measured (${commands}) within the answer and the making as priced (${CALENDAR_POLL_SHAPE.commands} + ${calendarBuildCommands(MAX_PRODUCTS, CALENDAR_CALLS)})`, commands <= CALENDAR_POLL_SHAPE.commands + calendarBuildCommands(MAX_PRODUCTS, CALENDAR_CALLS), true);
-    is("the making's shape at its worst: 1,081 commands (5,531 when every listing and every room read was a GET)", CALENDAR_BUILD_SHAPE.commands, 1_081);
-    is(`and the measured making is within that figure (${commands} <= ${CALENDAR_POLL_SHAPE.commands} + 1,081)`, commands <= CALENDAR_POLL_SHAPE.commands + 1_081, true);
+    is("the making's shape at its worst: 3,039 commands (5,531 when every listing and every room read was a GET)", CALENDAR_BUILD_SHAPE.commands, 3_039);
+    is(`and the measured making is within that figure (${commands} <= ${CALENDAR_POLL_SHAPE.commands} + 3,039)`, commands <= CALENDAR_POLL_SHAPE.commands + 3_039, true);
   }
 
   /** A making whose listing or room reads are answered wrong: refused, nothing kept, never a file without them. */
@@ -202,8 +204,23 @@ async function main(): Promise<void> {
   const otherScope = { provider: "google", scope: `c:${CALLS_ID}:b:cs_test_someone_else`, link: "https://meet.google.com/abc-defg-hij" };
   is("meeting records: another booking's record under this key fails the making, nothing kept", await planted(/^nl:meet:r:/, JSON.stringify(otherScope)), [true, 503, false, true]);
 
+  {
+    // And the record that is its key's own is read, its link given: the check refuses only what is not.
+    fresh();
+    let placed = false;
+    const own = await counted(ask, (batch, replies) =>
+      batch.map((command, i) => {
+        if (placed || command[0] !== "GET" || !/^nl:meet:r:c:/.test(String(command[1])) || batch.some((c) => c[0] === "SET")) return replies[i];
+        placed = true;
+        return JSON.stringify({ provider: "google", scope: String(command[1]).slice("nl:meet:r:".length), link: "https://meet.google.com/abc-defg-hij" });
+      }),
+    );
+    const text = await own.value.text();
+    is("meeting records: a booking's own record is read and its link given", [placed, own.value.status, text.includes("meet.google.com/abc-defg-hij")], [true, 200, true]);
+  }
+
   part("Each reply stays within 1 MiB at the bytes it is priced at; the other readers keep their GETs");
-  is("50 listings at LISTING_READ_BYTES, 400 room keys at 1,024 bytes: each MGET's reply within 1 MiB", [LISTINGS_PER_MGET * LISTING_READ_BYTES <= 1_048_576, ROOM_KEYS_PER_MGET * 1_024 <= 1_048_576], [true, true]);
+  is(`${LISTINGS_PER_MGET} listings at LISTING_READ_BYTES, ${ROOM_KEYS_PER_MGET} room keys at 1,024 bytes: each MGET's reply within 1 MiB`, [LISTINGS_PER_MGET * LISTING_READ_BYTES <= 1_048_576, ROOM_KEYS_PER_MGET * 1_024 <= 1_048_576], [true, true]);
   {
     const ids = [productId(0), productId(1), productId(2)];
     const plain = await counted(() => readListings(store, ids));

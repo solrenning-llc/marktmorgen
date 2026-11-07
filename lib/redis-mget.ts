@@ -12,6 +12,20 @@
  */
 import { redisPipeline } from "@/lib/redis";
 
+/**
+ * The most one MGET's reply may weigh, as the REST answer's JSON: 1 MiB. A
+ * caller sizes its chunk from the most a value under its keys can be written
+ * at, never from the bytes a reading is priced at.
+ */
+export const MGET_REPLY_BYTES = 1_048_576;
+/**
+ * How much a stored value can grow in the REST answer: a string of quote
+ * characters (or backslashes) is escaped to twice its bytes. A JSON text
+ * written with JSON.stringify holds no raw control character, which would
+ * escape to six.
+ */
+export const REPLY_ESCAPE_FACTOR = 2;
+
 /** An MGET reply that was not one text-or-nothing for each key asked. */
 export class UnreadableMget extends Error {
   constructor(message: string) {
@@ -46,4 +60,20 @@ export async function mgetWhole(keys: string[], perMget: number): Promise<(strin
     }
   });
   return out;
+}
+
+/**
+ * The values of `keys`, in order, each read with its own GET, all in one trip:
+ * for keys whose values have no byte cap where they are written, so no MGET
+ * chunk could bound its reply. Read only when whole, as mgetWhole: a reply
+ * that is not one text-or-nothing for each key throws UnreadableMget.
+ */
+export async function getsWhole(keys: string[]): Promise<(string | null)[]> {
+  if (keys.length === 0) return [];
+  const replies: unknown = await redisPipeline(keys.map((key) => ["GET", key]));
+  if (!Array.isArray(replies) || replies.length !== keys.length) throw new UnreadableMget(`${keys.length} GETs were not answered whole`);
+  return replies.map((value: unknown) => {
+    if (value !== null && typeof value !== "string") throw new UnreadableMget("a GET answered something other than text or nothing");
+    return value;
+  });
 }

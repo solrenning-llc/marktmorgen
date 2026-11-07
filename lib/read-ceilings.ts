@@ -103,9 +103,11 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * MAX_PRODUCTS, the catalog's head aside, read LISTINGS_PER_MGET at one MGET:
  * lib/catalog.ts, readListingsBatched); the bookings' moves (lib/call-records.ts,
  * readMoves: MOVES_PER_MGET at one MGET, lib/call-moves-read.ts, moveReads);
- * the four keys of each booking's room (ROOM_KEYS_PER_MGET at one MGET:
- * lib/call-rooms.ts, roomsForMany) and, for a video room not made yet, its
- * making (SET NX and GET, a booking each); the copy kept (lib/calendar-sync.ts,
+ * the two room keys of each booking (ROOM_KEYS_PER_MGET at one MGET:
+ * lib/call-rooms.ts, roomsForMany), its two meeting records (a GET each,
+ * since a record has no byte cap where it is written, so no MGET chunk could
+ * bound its reply) and, for a video room not made yet, its making (SET NX
+ * and GET, a booking each); the copy kept (lib/calendar-sync.ts,
  * KEEP_COPY: the EVAL and the EXISTS, the HMGET of the bookers' prints among
  * the store's deleted people and the SET or DEL it runs, billed one by one: 4);
  * and the store kept in the list whose refunds are read (ZSCORE and ZADD: 2,
@@ -114,12 +116,13 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
 /** A store with no list, before anyone is named: the day's try mark (SET NX), whether or not the try is its own (listForNaming). */
 export const LIST_TRY_COMMANDS = 1;
 /**
- * Commands one booking adds to a making on its own: its room's making (SET NX and GET). Its moves and its room's four
- * keys are read in MGETs shared with other bookings (calendarBuildCommands counts those by the chunk).
+ * Commands one booking adds to a making on its own: its two meeting records (a GET each) and its room's making (SET NX
+ * and GET). Its moves and its two room keys are read in MGETs shared with other bookings (calendarBuildCommands
+ * counts those by the chunk).
  */
-export const CALENDAR_BUILD_PER_BOOKING = 2;
-/** The four keys of a booking's room read by the making (lib/call-rooms.ts, roomsForMany). */
-export const ROOM_KEYS_PER_BOOKING = 4;
+export const CALENDAR_BUILD_PER_BOOKING = 2 + 2;
+/** The two room keys of a booking read by the making in MGETs (lib/call-rooms.ts, roomsForMany): its own and its time's. */
+export const ROOM_KEYS_PER_BOOKING = 2;
 /**
  * Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts and
  * tests/calendar-batch-reads.test.ts measure it). A count that is not a number is never priced low.

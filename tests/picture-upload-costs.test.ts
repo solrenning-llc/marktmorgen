@@ -3,9 +3,10 @@
  * C4-20261106-1120-TODOS-63): a picture, a link's picture or a page's picture is put through its own upload request,
  * and attaching it is one more; each is a studio request (studioAccess, countStudio), so at most the plan's studio
  * figure of them a month, a hard ceiling. Each request is counted at its dearest, from the official prices read on
- * 6 November 2026 (vercel.com/docs/vercel-blob/usage-and-pricing): one put (an Advanced Operation), five Simple
- * Operations (the head that checks a name is free; a head and a read of the picture and of its smaller copy) and the
- * read of both copies' whole bytes. The read is counted whole because no official page says the Blob honors a byte
+ * 6 November 2026 (vercel.com/docs/vercel-blob/usage-and-pricing): its put and its signing request (Advanced
+ * Operations) with every try the SDK may send, three heads with every try and two reads (Simple Operations: the head
+ * that checks a name is free; a head and a read of the picture and of its smaller copy), each read a CDN request, and
+ * both copies' whole bytes at Blob and Fast Origin Transfer. The read is counted whole because no official page says the Blob honors a byte
  * range with 206 or bills only the bytes sent (lib/uploaded-image.ts, firstBytes reads a stream it cancels): unknown is
  * never zero.
  *
@@ -72,5 +73,5 @@ for (const tier of ["creator", "pro", "scale"] as const) {
   const perRequest = (put + sign) * BLOB_ADVANCED_OP + (3 * heads + 2) * BLOB_SIMPLE_OP + 2 * CDN_PER_REQUEST + 2 * MAX_IMAGE_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE);
   is(`${tier}: the studio figure, each request at its dearest`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
-is("its source and date are said, and why the read is counted whole", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
+is("its source and date are said, and why the read is counted whole", (line?.basis ?? "").includes("vercel.com/docs/vercel-blob/usage-and-pricing") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
 done();

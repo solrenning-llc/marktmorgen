@@ -58,17 +58,11 @@ test("every link that opens a new tab carries the note", () => {
  */
 
 /**
- * Left out, each with its reason:
- *   - app/embed/[handle]/[product]/page.tsx: the same defect is there (the
- *     card's links and its checkout in a frame open a new tab without saying
- *     so, and the team button says "new tab" also as a page, where it stays in
- *     the tab), but the file is reserved by Claude 6 (claude6/stock-unknown,
- *     6 November 2026, 18:16 Fortaleza); it follows once that is merged;
- *   - the full-size picture of a sales page (data-picture-group): with script
- *     it opens on the page itself (components/picture-viewer.tsx), so its
- *     aria-label rightly says nothing of a new tab.
+ * Left out, with its reason: the full-size picture of a sales page
+ * (data-picture-group). With script it opens on the page itself
+ * (components/picture-viewer.tsx), so its aria-label rightly says nothing
+ * of a new tab.
  */
-const PENDING = new Set(["app/embed/[handle]/[product]/page.tsx"]);
 const ON_THE_PAGE = /data-picture-group=/;
 
 type Source = { path: string; text: string; spreads: Set<string>; notes: Set<string> };
@@ -79,7 +73,6 @@ function sources(): Source[] {
     for (const path of files(join(root, dir))) {
       const text = readFileSync(path, "utf8");
       const name = path.slice(root.length + 1);
-      if (PENDING.has(name)) continue;
       // A name that holds a new tab (const aside = ... { target: "_blank" ... }) and a name that holds the note (const away = ... <NewTab ...).
       const spreads = new Set([...text.matchAll(/const (\w+) = [^\n]*target: "_blank"/g)].map((m) => m[1]));
       const notes = new Set([...text.matchAll(/const (\w+) = [^\n]*<NewTab\b/g)].map((m) => m[1]));
@@ -148,4 +141,12 @@ test("a form that opens a new tab says so in its button", () => {
     }
   }
   assert.deepEqual(missing, []);
+});
+
+test("the embed card says nothing of a new tab where it stays in the tab", () => {
+  // As a page of its own (?mm=page) every way out stays in the tab (aside is
+  // target: "_top"), so no note may be written there unconditionally.
+  const card = readFileSync(join(root, "app/embed/[handle]/[product]/page.tsx"), "utf8");
+  assert.equal((card.match(/<NewTab\b/g) ?? []).length, 1, "one note, made once for the frame");
+  assert.match(card, /const away = open\?\.mode === "page" \? null : <NewTab language=\{store\.language\} \/>;/);
 });

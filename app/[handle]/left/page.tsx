@@ -14,6 +14,8 @@ import { askable } from "@/lib/checkout-ask";
 import { productPath } from "@/components/store-product";
 import { speech } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
+import { StoreResting } from "@/components/store-resting";
+import { blockWords } from "@/lib/buyer-words/blocks";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -24,7 +26,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const decoded = decodeURIComponent((await params).handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
   return {
-    title: `${membershipWords(store?.language).nothingCharged} — Marktmorgen`,
+    title: `${store?.suspended ? blockWords(store.language).unavailableTitle : membershipWords(store?.language).nothingCharged} — Marktmorgen`,
     robots: { index: false, follow: false },
   };
 }
@@ -41,6 +43,8 @@ export default async function LeftPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page: nothing else is read.
+  if (store.suspended) return <StoreResting store={store} suspended />;
 
   const query = await searchParams;
   const read = (name: string) => (typeof query[name] === "string" ? (query[name] as string) : "");

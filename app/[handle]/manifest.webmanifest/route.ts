@@ -17,7 +17,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const store = await storeForHandle(normaliseHandle(decoded));
-    if (!store) return missing();
+    // Switched off after notices about its content (lib/takedown.ts): no app to install, as no page to open.
+    if (!store || store.suspended) return missing();
     const host = (request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "")
       .split(",")[0]
       .trim()

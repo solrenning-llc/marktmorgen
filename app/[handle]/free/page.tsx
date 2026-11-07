@@ -18,6 +18,8 @@ import { imageUrl } from "@/lib/product-image";
 import { pricePill, productPath } from "@/components/store-product";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
+import { StoreResting } from "@/components/store-resting";
+import { blockWords } from "@/lib/buyer-words/blocks";
 import { pageShown } from "@/lib/sales-page";
 import { funnelMark } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
@@ -34,7 +36,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
   return {
-    title: `${givingWords(store?.language).freeMetaTitle} — Marktmorgen`,
+    title: `${store?.suspended ? blockWords(store.language).unavailableTitle : givingWords(store?.language).freeMetaTitle} — Marktmorgen`,
     robots: { index: false, follow: false },
   };
 }
@@ -91,6 +93,8 @@ export default async function FreePage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page: nothing else is read.
+  if (store.suspended) return <StoreResting store={store} suspended />;
 
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token : "";

@@ -63,6 +63,10 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers: { Location: `${origin}${path}`, "Cache-Control": "no-store" } });
   };
 
+  // Switched off after notices about its content (lib/takedown.ts): nothing is saved and Stripe is not asked;
+  // the review page it goes back to says the store is not available.
+  if (store.suspended) return answer("error");
+
   // A field no person can see: whatever filled it in is told it worked.
   if (read("website").trim()) return answer("saved");
 

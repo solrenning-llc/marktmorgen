@@ -12,6 +12,8 @@ import { productPath } from "@/components/store-product";
 import { ReviewsSection } from "@/components/review-list";
 import { speech } from "@/lib/buyer-words";
 import { productSegment } from "@/lib/product-slug";
+import { StoreResting } from "@/components/store-resting";
+import { blockWords } from "@/lib/buyer-words/blocks";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -22,6 +24,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
+  // A store switched off after a report: the tab names neither it nor a product (lib/takedown.ts).
+  if (store?.suspended) return { title: `${blockWords(store.language).unavailableTitle} — Marktmorgen`, robots: { index: false, follow: false } };
   const product = store ? await readListing(store, productIdFromAddress(store, id) ?? id) : null;
   // A draft has no page of its own, so no list of its reviews either (MM-SA-30), as p/[product]/page.tsx.
   if (!store || !product || product.hidden) return { title: "Not found — Marktmorgen" };
@@ -43,6 +47,8 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page: nothing else is read.
+  if (store.suspended) return <StoreResting store={store} suspended />;
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
   if (!product || product.hidden) redirect(`/@${store.handle}`);
   const reachedOn = (await headers()).get("x-nimbus-domain");

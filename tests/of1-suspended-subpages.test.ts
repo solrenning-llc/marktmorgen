@@ -156,11 +156,13 @@ async function main(): Promise<void> {
     is("the list's title names the product again", (await titles())[0].includes("Kiln Secrets Course"), true);
 
     part("Each check is made where the store is read, before anything else");
+    // The code between the two, comments set aside.
+    const between = (text: string) => text.split("\n").map((line) => line.trim()).filter((line) => line && !line.startsWith("//")).join("\n");
     for (const file of ["app/[handle]/p/[product]/reviews/page.tsx", "app/[handle]/review/page.tsx", "app/[handle]/free/page.tsx", "app/[handle]/left/page.tsx"]) {
       const source = readFileSync(file, "utf8");
       const read = source.indexOf("if (!store) notFound();");
       const check = source.indexOf("if (store.suspended) return <StoreResting store={store} suspended />;");
-      is(`${file}: StoreResting suspended right after the store is read`, check > read && read > 0 && source.slice(read, check).trim() === "if (!store) notFound();", true);
+      is(`${file}: StoreResting suspended right after the store is read`, check > read && read > 0 && between(source.slice(read, check)) === "if (!store) notFound();", true);
     }
   } finally {
     redis.pipeline = base;

@@ -36,9 +36,8 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isSenderConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
-  // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
-  // own value, so a run never deletes another run's lock.
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an unknown
+  // answer runs nothing this time, and the lock is let go at the end only while it still holds this run's own value.
   const lock = claimValue();
   const got = await claimMark("nl:aff:payday:lock", 300, lock);
   if (got === "taken") return Response.json({ ok: true, busy: true });

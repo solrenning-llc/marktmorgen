@@ -1393,6 +1393,7 @@
     "components/kit-editor.tsx",
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
+    "components/lesson-chapters.tsx",
     "components/lesson-comments.tsx",
     "components/lesson-quiz.tsx",
     "components/lesson-task.tsx",

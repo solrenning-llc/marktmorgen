@@ -1052,6 +1052,14 @@ function LessonEditor({
                 <p className="mt-1 text-sm text-ink-mute">
                   {`Blank lines make paragraphs, lines starting with "- " make a list, and web addresses become links. Put code between two lines of three backticks (\`\`\`) to show it as typed. Add html-preview after the opening backticks for a sanitized, sandboxed HTML preview. ${MAX_BODY_LENGTH - text.length} characters left.`}
                 </p>
+                {/* 382 [TB8] unit 1: chapters work only under a video uploaded as a file
+                    (lib/lesson-chapters.ts); the video service's player gets them in unit 2,
+                    so the studio says nothing about them for that one. */}
+                {lesson.video && !isStreamPath(lesson.video.pathname) ? (
+                  <p className="mt-1 text-sm text-ink-mute">
+                    {`Chapters: write lines like "0:00 Welcome" and "2:15 Setup", one under the other and starting at 0:00. Students see them under the video and can jump to each one.`}
+                  </p>
+                ) : null}
               </div>
               {look ? (
                 <>

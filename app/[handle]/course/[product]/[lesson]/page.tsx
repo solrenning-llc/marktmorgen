@@ -31,6 +31,8 @@ import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { videoStampText } from "@/lib/video-stamp";
+import { LessonChapters } from "@/components/lesson-chapters";
+import { LESSON_VIDEO_ID, lessonChapters } from "@/lib/lesson-chapters";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -150,6 +152,11 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // for the creator, a visitor on a free preview, or anybody else's email.
   const stamp = course.stampVideo === true && student && start !== null ? videoStampText(student.email, "", new Date(start * 1000)) : null;
 
+  // Chapters the creator wrote in the lesson's text (382 [TB8], unit 1), for a
+  // video uploaded as a file, which the page's own buttons can move. The video
+  // service's player is another site's frame: no list for it yet (unit 2).
+  const chapters = video !== null && video.kind === "file" ? lessonChapters(body) : [];
+
   const order = lessonsInOrder(course);
   const at = order.findIndex((entry) => entry.lesson.id === lesson.id);
   const reachable = (entry: (typeof order)[number]) =>
@@ -239,6 +246,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                         and the button under it puts the video and the mark
                         in full screen together. */}
                     <video
+                      id={LESSON_VIDEO_ID}
                       src={video.src}
                       controls
                       playsInline
@@ -253,6 +261,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                     {/* Vertical videos stay vertical: the player takes the
                         shape of the video instead of forcing it wide. */}
                     <video
+                      id={LESSON_VIDEO_ID}
                       src={video.src}
                       controls
                       playsInline
@@ -275,6 +284,15 @@ export default async function LessonPage({ params, searchParams }: Params) {
               ) : (
                 <p className="st-note mt-6">{w.videoNotLoaded}</p>
               )
+            ) : null}
+
+            {chapters.length ? (
+              <LessonChapters
+                chapters={chapters}
+                videoId={LESSON_VIDEO_ID}
+                heading={w.chapters}
+                announce={chapters.map((chapter) => w.nowAt(chapter.time, chapter.title))}
+              />
             ) : null}
 
             {body ? (

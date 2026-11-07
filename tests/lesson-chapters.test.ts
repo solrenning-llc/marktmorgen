@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
   is("both players of an uploaded file carry the id the list moves", (page.match(/<video\s[^>]*id=\{LESSON_VIDEO_ID\}/g) ?? []).length, 2);
   is("no frame of the video service carries it", (page.match(/<iframe\s[^>]*LESSON_VIDEO_ID/g) ?? []).length, 0);
-  is("chapters only for an uploaded file, from the text already read", /const chapters = video\?\.kind === "file" \? lessonChapters\(body\) : \[\];/.test(page), true);
+  is("chapters only for an uploaded file, from the text already read", /const chapters = video !== null && video.kind === "file" \? lessonChapters\(body\) : \[\];/.test(page), true);
   is("shown once, under the video", (page.match(/<LessonChapters\b/g) ?? []).length, 1);
 
   part("In every language of a store");

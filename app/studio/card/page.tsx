@@ -73,13 +73,6 @@ export default async function StudioCardPage({ searchParams }: Params) {
             // turning it on again would change nothing, so that is not offered (independent review of #1965).
             <p className="mt-3 max-w-2xl text-sm text-ink-soft">{contactUnavailableWords(store)}</p>
           )}
-          {card?.on ? (
-            <p className="mt-3">
-              <Link href={`/@${store.handle}/contact`} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4 [overflow-wrap:anywhere]">
-                {`Open your card at ${address}`}
-              </Link>
-            </p>
-          ) : null}
           {card ? (
             <div className="mt-8">
               <CreatorCardEditor

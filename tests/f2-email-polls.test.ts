@@ -24,7 +24,7 @@ import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscript
 import { upsertContact } from "@/lib/contacts";
 import { advanceBroadcast, createBroadcast } from "@/lib/broadcasts";
 import { MAX_POLL_ANSWER, MAX_POLL_ANSWERS, MAX_POLL_QUESTION, POLL_STARTER, hasPoll, pollOnWeb, pollPreviewBody, pollProblem, readPoll } from "@/lib/mail-poll";
-import { forgetPollPerson, pollAnswersOf, pollResults, voterOf } from "@/lib/mail-poll-votes";
+import { forgetPollPerson, pollAnswersOf, voterOf } from "@/lib/mail-poll-votes";
 import { flowConfigurationIssues } from "@/lib/flow-review";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { PERSON_DATA } from "@/lib/person-data";
@@ -97,6 +97,12 @@ async function main(): Promise<void> {
   const created = await createBroadcast(store, { subject: "Help me choose", body: BODY, productId: "", notProductId: "", sendAt: undefined });
   if (!created.ok) throw new Error(`no broadcast: ${created.reason}`);
   delivery.clearCaptured();
+  // What the poll keeps, read straight from the store: the studio shows totals only from POLL_MIN_SHOWN answers (tests/f2-email-polls-review.test.ts).
+  const tally = async (): Promise<number[]> => {
+    const [values] = (await redis.pipeline([["HVALS", `nl:mpoll:v:${listId}:${created.broadcast.id}`]])) as [string[]];
+    return [0, 1, 2].map((answer) => (values ?? []).filter((v) => Number(v) === answer).length);
+  };
+  const total = async () => (await tally()).reduce((a, b) => a + b, 0);
   const sent = (await advanceBroadcast(created.broadcast.id, storeForHandle, Date.now() + 60_000))!;
   is("it went to both", [sent.status, delivery.sent.flatMap((m) => m.to).sort()], ["sent", ["ana@example.com", "ben@example.com"]]);
   const anaMail = delivery.sent.find((m) => m.to.includes("ana@example.com"))!;
@@ -110,18 +116,18 @@ async function main(): Promise<void> {
   is("the answers are links with their own words", ["A video course", "A printable guide", "A template pack"].every((answer) => new RegExp(`<a href="[^"]*/poll\\?[^"]*"[^>]*>${answer}</a>`).test(anaMail.html)), true);
   is("as buttons at least 44 px tall (12 px padding around a 25.6 px line)", /<a href="[^"]*\/poll\?[^"]*" style="display:inline-block;padding:12px 22px/.test(anaMail.html), true);
   is("the question is a heading", anaMail.html.includes(">What should I make next?</h2>"), true);
-  is("the email says who sees what", anaMail.html.includes("never who picked what"), true);
+  is("the email says who sees what, truly", anaMail.html.includes("only once at least 5 people have answered, never who picked what"), true);
   is("no pixel and no raw poll line", [/<img/i.test(anaMail.html), anaMail.html.includes("@poll"), anaMail.text.includes("@poll")], [false, false, false]);
   is("the text version lists each answer with its link", anaLinks.every((link, i) => anaMail.text.includes(`${["A video course", "A printable guide", "A template pack"][i]}: ${link}`)), true);
-  is("sending recorded no answer", (await pollResults(listId))?.[0]?.total, 0);
+  is("sending recorded no answer", (await total()), 0);
 
   part("Opening the page records nothing; the button does, once");
   const opened = await page(queryOf(anaLinks[1]));
   is("the page shows the answer and a button that posts", [opened.includes("Your answer: A printable guide"), /<form[^>]* action="\/api\/mail\/poll\?[^"]*" method="post"/.test(opened), opened.includes("Send my answer")], [true, true, true]);
   is("the page offers the other answers as links", ["A video course", "A template pack"].every((answer) => opened.includes(`>${answer}</a>`)), true);
-  is("opening it recorded nothing", (await pollResults(listId))?.[0]?.total, 0);
+  is("opening it recorded nothing", (await total()), 0);
   const tampered = anaLinks[1].replace(/s=([0-9a-f])/, (_, c) => `s=${c === "0" ? "1" : "0"}`);
-  is("a changed signature is not a link", [(await press(tampered)).status, (await pollResults(listId))?.[0]?.total], [404, 0]);
+  is("a changed signature is not a link", [(await press(tampered)).status, (await total())], [404, 0]);
   const swapped = anaLinks[1].replace(/v=[0-9a-f]{32}/, `v=${new URL(benLinks[1]).searchParams.get("v")}`);
   is("another reader's key with this signature is not a link", (await press(swapped)).status, 404);
   is("an unknown link records nothing and says so", (await page(queryOf(tampered))).includes("This link does not work"), true);
@@ -131,12 +137,12 @@ async function main(): Promise<void> {
   const second = await press(anaLinks[2]);
   is("a second answer is not kept", second.done, "already");
   is("and the page says the first one", (await page(queryOf(anaLinks[2], { done: "recorded" }))).includes("You already answered this poll"), true);
-  is("the totals count one answer", (await pollResults(listId))?.[0]?.answers.map((a) => a.count), [0, 1, 0]);
+  is("the totals count one answer", (await tally()), [0, 1, 0]);
   is("an address saying recorded for an answer not kept does not thank", (await page(queryOf(anaLinks[0], { done: "recorded" }))).includes("Thank you"), false);
 
   part("Taken back, and given again");
   is("taking it back", (await press(anaLinks[1], "withdraw")).done, "withdrawn");
-  is("it is gone", (await pollResults(listId))?.[0]?.total, 0);
+  is("it is gone", (await total()), 0);
   is("the page says so", (await page(queryOf(anaLinks[1], { done: "withdrawn" }))).includes("Your answer was taken back"), true);
   is("given again", (await press(anaLinks[0])).done, "recorded");
   is("ben answers too", (await press(benLinks[0])).done, "recorded");
@@ -162,14 +168,14 @@ async function main(): Promise<void> {
 
   part("The studio shows totals only");
   const html = renderToStaticMarkup(await MailPollResults({ listId, subjects: new Map([[created.broadcast.id, "Help me choose"]]) }));
-  is("the question, the subject and each total", [html.includes("What should I make next?"), html.includes("Help me choose"), html.includes("A video course: 2 (100%)"), html.includes("2 answers")], [true, true, true, true]);
+  is("the question and the subject; two answers are too few to show", [html.includes("What should I make next?"), html.includes("Help me choose"), html.includes("A video course: 2"), html.includes("Totals show once 5 people have answered")], [true, true, false, true]);
   is("never who answered", [html.includes("ana"), html.includes("ben@"), html.includes(voterOf(listId, "ana@example.com") as string)], [false, false, false]);
 
   part("Privacy: copied, erased with the person and with the store");
   is("registered", [PERSON_DATA.some((d) => d.file === "lib/mail-poll-votes.ts" && d.how === "erased"), ERASERS.some((e) => e.module === "lib/mail-poll-votes.ts"), COPY_PLAN["lib/mail-poll-votes.ts"]?.how, typeof COPIERS["lib/mail-poll-votes.ts"]], [true, true, "copied", "function"]);
   is("in the person's copy", await pollAnswersOf(listId, "ana@example.com"), [{ question: "What should I make next?", answer: "A video course" }]);
   is("erased with the person", await forgetPollPerson(listId, "ana@example.com"), 1);
-  is("gone from the totals and the copy", [(await pollResults(listId))?.[0]?.total, (await pollAnswersOf(listId, "ana@example.com")).length], [1, 0]);
+  is("gone from the totals and the copy", [(await total()), (await pollAnswersOf(listId, "ana@example.com")).length], [1, 0]);
   is("every key is erased when the store closes", ["nl:mpoll:", "nl:mpoll:ix:", "nl:mpoll:v:"].map((family) => CLOSING[family]?.how), ["erase", "erase", "erase"]);
 
   delivery.restore();

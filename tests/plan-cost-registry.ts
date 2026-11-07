@@ -46,7 +46,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
-import { MAX_IMAGE_BYTES, MAX_THUMB_BYTES } from "@/lib/product-image";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -70,6 +70,7 @@ import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
 import { MAX_PAGE_BYTES, MAX_PAGE_PICTURES } from "@/lib/sales-page";
+import { PICTURE_DOOR_MAX } from "@/lib/picture-door";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
@@ -372,27 +373,34 @@ export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
 export const BLOB_TOKEN_TRIES = BLOB_PUT_TRIES;
 /** One studio picture door (app/api/store/image/upload): its put and its token, every try, and the head that checks the name is free. */
 export const STUDIO_DOOR_BLOB = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
-/** One check of a stored picture (lib/uploaded-image.ts, lib/picture-check.ts): a head with every try, one read, its bytes counted whole. */
+/**
+ * One check of a stored picture (lib/uploaded-image.ts, lib/picture-check.ts, app/api/store/image): a head with every
+ * try, and one read, a private-blob fetch, so its whole bytes cross at Blob transfer and at Fast Origin Transfer on a
+ * miss and the fetch is one CDN request, as PICTURE_READ counts a private picture read (Claude 1 on #2803 and #2801,
+ * Claude 4 on #2848, 6711058709). A request whose picture fails then asks the Blob once more about each file it took
+ * (dropTakenPictures, a head with every try): counted with the check, since a file is checked at most once.
+ */
 export function pictureCheckBlob(bytes: number): number {
-  return BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + bytes * BLOB_TRANSFER_PER_BYTE;
+  return BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + bytes * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_PER_REQUEST + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
 }
 /**
- * The dearest a studio request can make Vercel Blob work in a month, per request of the plan's studio figure (MR audit
- * gap 1 and the single studio-blob line, C4-20261106-2790-C56-167). Every request is one of:
- *   - a door: STUDIO_DOOR_BLOB;
- *   - a product's picture attached (app/api/store/image/route.ts): up to three copies checked (the picture and its
- *     smaller copy at MAX_IMAGE_BYTES, the thumbnail at MAX_THUMB_BYTES). A product's own picture sent again is checked
- *     again, so this needs no door of its own;
- *   - a page saved (product page, store page): it checks only the pictures it takes from the door, each once
- *     (lib/picture-check.ts checkedPictures), up to MAX_PAGE_PICTURES a save; so, past what was let in before, 24 doors
- *     and one save are 25 requests for 24 doors and 24 checks.
- * A door note lives a day (PICTURE_DOOR_SECONDS), so a month may also check up to a whole figure of pictures let in on
- * the last day of the month before: counted on top, at a full picture's check each.
+ * The dearest a month of studio requests can make Vercel Blob work, for a plan's studio figure (MR audit gap 1, the
+ * single studio-blob line, C4-20261106-2790-C56-167; C1-20261107-1550-TODOS-10). A request reads only a file it took
+ * from the picture door (lib/picture-door.ts takePictureDoor), each once: a name a product's or a link's record already
+ * shows, sent again and not fresh, is answered from the record (lib/product-image.ts checkedSizes), and a name that is
+ * neither is refused before any read. So every read spends a note a door wrote, and:
+ *   - a door: STUDIO_DOOR_BLOB, one note;
+ *   - a page saved (product page, store page) checks at most MAX_PAGE_PICTURES notes: 24 doors and the save are 25
+ *     requests for 24 doors and 24 checks, the dearest kind a request; an attach (at most three doors and itself) and a
+ *     link (one door and itself) are cheaper a request;
+ *   - a note lives a day (PICTURE_DOOR_SECONDS), so a month may also read the notes alive when it began, never more
+ *     than PICTURE_DOOR_MAX a store (the door keeps only the newest): counted on top, at the dearest check each.
+ * Every check is counted at MAX_IMAGE_BYTES, the most the door lets any file be (a thumbnail's is smaller).
  */
-export function studioBlobPerRequest(): number {
-  const reattach = 2 * pictureCheckBlob(MAX_IMAGE_BYTES) + pictureCheckBlob(MAX_THUMB_BYTES);
-  const page = (MAX_PAGE_PICTURES * (STUDIO_DOOR_BLOB + pictureCheckBlob(MAX_IMAGE_BYTES))) / (MAX_PAGE_PICTURES + 1);
-  return pictureCheckBlob(MAX_IMAGE_BYTES) + Math.max(STUDIO_DOOR_BLOB, reattach, page);
+export function studioBlobMonthly(studio: number): number {
+  const check = pictureCheckBlob(MAX_IMAGE_BYTES);
+  const page = (MAX_PAGE_PICTURES * (STUDIO_DOOR_BLOB + check)) / (MAX_PAGE_PICTURES + 1);
+  return studio * Math.max(STUDIO_DOOR_BLOB, page) + Math.min(studio, PICTURE_DOOR_MAX) * check;
 }
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
@@ -920,7 +928,7 @@ export const COST_LINES: CostLine[] = [
   {
     id: "studio-blob",
     feature: "Vercel Blob for studio pictures (a product's, a link's and a page's): doors, their signed tokens, and the checks of each picture, every try counted (6 November 2026; one line for the whole studio figure since MR audit gap 1)",
-    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].studio * studioBlobPerRequest(),
+    monthlyUsd: (tier) => studioBlobMonthly(STORE_ALLOWANCES[tier].studio),
     sources: [
       { file: "app/api/store/image/upload/route.ts", names: ["studioAccess", "notePictureDoor", "issueSignedToken"] },
       { file: "lib/studio-route.ts", names: ["countStudio"] },
@@ -929,9 +937,10 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/image/route.ts", names: ["head(thumbPath)", "firstBytes(thumbPath)"] },
       { file: "lib/picture-check.ts", names: ["checkedPictures", "isStoredPicture"] },
       { file: "lib/sales-page.ts", names: ["MAX_PAGE_PICTURES"] },
-      { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS"] },
+      { file: "lib/picture-door.ts", names: ["PICTURE_DOOR_SECONDS", "PICTURE_DOOR_MAX", "takePictureDoor", "dropTakenPictures"] },
+      { file: "app/api/store/link-image/route.ts", names: ["checkedSizes", "checkUploadedImage"] },
     ],
-    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (the two lines before counted the whole figure twice). Each request is counted at the dearest kind it may be (studioBlobPerRequest): a door (its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try); a product's picture attached, its three copies checked (a head with every try, a plain read, the bytes read counted whole: firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206); or a page saved, which checks each picture it takes from the door once, before it is the page's (checkedPictures). A month may also check a whole figure of pictures let in on the last day before, the door note's day: counted on top. Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), and the storage of images/ (item 3).",
+    basis: "Every studio picture operation goes through a studio request (studioAccess, countStudio), at most the plan's studio figure a month, a hard ceiling; the doors, attaches and page saves share it, so they are one line (studioBlobMonthly). A door is its put, its signed token counted as an Advanced Operation since no official page prices it, and the head that checks the name is free, every try. A request reads only a file it took from the picture door, each once: a name a product's or a link's record already shows, sent again and not fresh, is answered from the record, written only after that file passed the checks (checkedSizes; a size the record cannot vouch for is read again), and any other name is refused before a read (C1-20261107-1550-TODOS-10). So every check spends a note a door wrote: the dearest kind a request is a page save of MAX_PAGE_PICTURES pictures with their 24 doors, 25 requests for 24 doors and 24 checks; and a month may also read the notes alive when it began, at most PICTURE_DOOR_MAX a store, counted on top. A check is a head with every try and a plain read at the most the door lets a file be (MAX_IMAGE_BYTES), its bytes counted whole (firstBytes cancels a stream after sixteen bytes and no official page says the Blob honors a byte range with 206), crossing at Blob transfer and Fast Origin Transfer, with one CDN request, as PICTURE_READ counts a private picture read (Claude 4 on #2848, 6711058709), and the clean-up head a failed request sends (dropTakenPictures). Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026 (delete operations free). No new store call: the record read is the one the route already makes. Not in this line: a buyer's review photo (lib/review-photo.ts), an email's picture (lib/mail-pictures.ts), community pictures and students' files, the public picture route and the link preview (MR audit items 2, 4, 7, 8), the storage of images/ (item 3), and the pictures' own bucket copy (lib/picture-r2-copy.ts, off).",
   },
   {
     id: "free-delivery",

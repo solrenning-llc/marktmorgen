@@ -17,7 +17,6 @@ import { readFileSync } from "node:fs";
 import { MAX_THUMB_BYTES, THUMB_LONG_SIDE, SMALL_LONG_SIDE, imagePaths, imageSrcSet, parseProductImage } from "@/lib/product-image";
 import { servedSrcSet } from "@/lib/picture-served";
 import { COST_LINES } from "./plan-cost-registry";
-import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { done, is, part } from "./check";
 
 const folder = "images/aaaaaaaaaaaaaaaaaaaaaaaa";
@@ -57,7 +56,8 @@ is("and checks its size, type and width as the smaller copy's", /copy\.size <= M
 part("Its cost, in the studio's one Blob line, from the official price");
 // Rule 23 (MR audit gap 1, C4-20261106-2790-C56-167): the thumbnail's own line multiplied the whole studio figure
 // again; its door and its check are now kinds of studio request in the single studio-blob line
-// (tests/picture-upload-costs.test.ts checks its formula), which counts the thumbnail's check at MAX_THUMB_BYTES.
+// (tests/picture-upload-costs.test.ts checks its formula), which counts every check, the thumbnail's too, at the dearer
+// MAX_IMAGE_BYTES.
 const line = COST_LINES.find((each) => each.id === "studio-blob");
 is("the studio's Blob line counts the thumbnail copy", Boolean(line) && (line?.sources ?? []).some((source) => source.names.includes("MAX_THUMB_BYTES")), true);
 is("and the thumbnail's own line is gone", COST_LINES.some((each) => each.id === "picture-thumbnails"), false);

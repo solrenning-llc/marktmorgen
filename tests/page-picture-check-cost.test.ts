@@ -138,11 +138,12 @@ async function main(): Promise<void> {
     const answer = await result(await productImage(post("/api/store/image", session, { ...attachBody, thumb: { path: thumbnail, width: 1300 } })));
     return [answer, (await shown())?.thumb ?? null];
   })(), [[200, "ok"], null]);
-  // Rule 24: a record whose size cannot be read is not taken as checked; its file is read again.
+  // Rule 24: a record whose size cannot be read is not taken as checked, and not read on the browser's say-so either
+  // (a read the door did not pay for, repeatable on every send): refused, the record left as it was, nothing deleted.
   if (kept) await setProductImage(OWNER, id, { ...kept, bytes: Number.NaN });
   calls.head = 0;
   calls.get = 0;
-  is("a record with no readable size: its picture is read again before it is kept", [await result(await productImage(post("/api/store/image", session, { ...attachBody, small: undefined, thumb: undefined }))), calls.get, (await shown())?.bytes], [[200, "ok"], 1, JPEG.length]);
+  is("a record with no readable size: not taken as checked, refused without a read, the record and its files kept", [await result(await productImage(post("/api/store/image", session, { ...attachBody, small: undefined, thumb: undefined }))), calls.head + calls.get, (await shown())?.path, (await shown())?.bytes, files.has(main)], [[400, "invalid"], 0, main, 0, true]);
 
   part("A link's picture: its own, sent again, not read again; one neither fresh nor its own refused before any read");
   const linked = await addStoreLink(OWNER, "My podcast", "https://example.com/pod");

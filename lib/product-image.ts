@@ -264,6 +264,32 @@ function parseThumb(raw: unknown, path: string, width: number, small: SmallCopy 
   return { path: value.path, width: w, bytes };
 }
 
+/**
+ * The checked size of each file a record shows, by name. A product's or a link's record is written only after every
+ * file in it passed the checks of app/api/store/image or app/api/store/link-image (the file store's own size and type,
+ * and its first bytes), so a name it shows, sent again and not fresh from the picture door, needs no new read
+ * (C1-20261107-1550-TODOS-10). A size that is not a whole number from 1 to MAX_IMAGE_BYTES, or a name the record gives
+ * two sizes, is left out, and that file is checked again: unknown is never taken as checked (rule 24).
+ */
+export function checkedSizes(
+  image: { path: string; bytes: number; small?: SmallCopy | null; thumb?: SmallCopy | null } | null | undefined,
+): Map<string, number> {
+  const sizes = new Map<string, number>();
+  const doubtful = new Set<string>();
+  const note = (file: { path: unknown; bytes: unknown } | null | undefined) => {
+    if (!file || typeof file.path !== "string" || !file.path) return;
+    const bytes = file.bytes;
+    const good = typeof bytes === "number" && Number.isInteger(bytes) && bytes > 0 && bytes <= MAX_IMAGE_BYTES;
+    if (!good || (sizes.has(file.path) && sizes.get(file.path) !== bytes)) doubtful.add(file.path);
+    else sizes.set(file.path, bytes);
+  };
+  note(image);
+  note(image?.small);
+  note(image?.thumb);
+  for (const path of doubtful) sizes.delete(path);
+  return sizes;
+}
+
 /** Every file a picture is kept in: itself, its smaller copy and its thumbnail copy. For deleting them together. */
 export function imagePaths(image: (Pick<ProductImage, "path" | "small"> & { thumb?: SmallCopy | null }) | null | undefined): string[] {
   if (!image) return [];

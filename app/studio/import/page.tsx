@@ -228,7 +228,12 @@ export default async function StudioImportPage({ searchParams }: Params) {
                   </h3>
                   {cfStep === "funnel" ? (
                     <div className="mt-5">
-                      {canFunnel ? (
+                      {canFunnel && listings === null ? (
+                        // Products that cannot be read are unknown (rule 24), never "No product of yours fits yet".
+                        <p className="text-sm text-ink-soft" role="status">
+                          Your products could not be read just now. Nothing was changed. Reload the page in a moment.
+                        </p>
+                      ) : canFunnel ? (
                         <ClickFunnelsFunnel
                           products={funnelProducts}
                           pagesLeft={Math.max(0, MAX_SITE_PAGES - store.sitePages.length)}

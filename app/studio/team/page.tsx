@@ -105,7 +105,15 @@ export default async function StudioTeamPage({
                     pending={team.requireTwoStep ? preview.total + preview.untold : 0}
                   />
                 ) : (
-                  <p className="text-sm text-ink-soft">This cannot be changed right now. Reload the page in a moment.</p>
+                  <>
+                    {/* The rule's state is the team record's own, known even when the switch has to wait. */}
+                    <p className="text-sm font-semibold text-ink">
+                      {team.requireTwoStep === true
+                        ? "On: everyone on the team logs in with a second step."
+                        : "Off: team members may log in with the emailed link alone."}
+                    </p>
+                    <p className="mt-2 text-sm text-ink-soft">This cannot be changed right now. Reload the page in a moment.</p>
+                  </>
                 )}
               </div>
             </section>

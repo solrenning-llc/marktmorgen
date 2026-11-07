@@ -115,6 +115,37 @@ export async function spendsForReport(statsId: string | null): Promise<AdSpend[]
   return read && !read.metaUnread ? read.spends : [];
 }
 
+/**
+ * Writes one new line under its fresh id and answers whether it is saved, from the write's exact receipt only
+ * (Codex Z on #2924): HSET adding the one field and EXPIRE setting the time, [1, 1]. A receipt lost (the pipeline
+ * threw after Redis may have applied it) or in any other shape is never "saved": the line is deleted by its own id,
+ * which no other line has, and false is answered only once that HDEL's reply is a count, so nothing of this add is
+ * kept and trying again records the expense once. When that reply is unknown too, whether the line is kept is
+ * unknown, and it throws (UnknownReplyError: reload to see where it stands), never "saved" nor "nothing saved".
+ */
+async function written(statsId: string, id: string, value: string): Promise<boolean> {
+  const receipt = await redisPipeline([
+    ["HSET", key(statsId), id, value],
+    ["EXPIRE", key(statsId), KEEP_SECONDS],
+  ]).then(
+    (replies) => repliesFor(replies, 2),
+    (error: unknown) => {
+      console.error("writing an ad spend line answered no receipt", error);
+      return null;
+    },
+  );
+  if (receipt && receipt[0] === 1 && receipt[1] === 1) return true;
+  const undone = await redisPipeline([["HDEL", key(statsId), id]]).then(
+    (replies) => repliesFor(replies, 1),
+    () => null,
+  );
+  const count = undone?.[0];
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > 1) {
+    throw new UnknownReplyError("writing an ad spend line");
+  }
+  return false;
+}
+
 export async function addSpend(
   statsId: string,
   input: { channel: unknown; campaign?: unknown; cents: unknown; from: unknown; to: unknown },
@@ -126,11 +157,10 @@ export async function addSpend(
   // What is kept is read exactly before anything is written (Claude 5 on #2924): a list that cannot be read refuses
   // the add, so a refusal always means nothing was saved and the creator is never led to save the same line again.
   const before = await keptSpends(statsId);
-  const id = randomBytes(4).toString("hex");
-  await redisPipeline([
-    ["HSET", key(statsId), id, JSON.stringify(read.spend)],
-    ["EXPIRE", key(statsId), KEEP_SECONDS],
-  ]);
+  // A fresh id no kept line has, so this add's write and its undoing below touch only this add's own line.
+  let id = randomBytes(4).toString("hex");
+  while (before.some((s) => s.id === id)) id = randomBytes(4).toString("hex");
+  if (!(await written(statsId, id, JSON.stringify(read.spend)))) return { ok: false, reason: "unavailable" };
   const known = [...before, { id, ...read.spend }].sort(byDay);
   const keep = known.slice(-MAX_SPEND_ENTRIES);
   const drop = known.slice(0, known.length - keep.length).map((s) => s.id);

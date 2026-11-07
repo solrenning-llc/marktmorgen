@@ -14,6 +14,7 @@ import { PAYPAL_NOT_YET, PAYPAL_WAITS, STAN_AFFILIATES_AHEAD, checkoutQuestionWo
 import type { IconName } from "@/components/icons";
 import type { VisualKey } from "@/components/feature-visuals";
 import { CREATOR_PAGES, FEATURE_PAGES } from "@/lib/feature-pages";
+import { rowsAMonthShort } from "@/lib/migration-guides";
 import { INVITE_PROGRAM_OPEN, INVITE_PAUSE_NOTICE, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { PLAN_AT, feeWords, monthlyRow, planPriceWords, yearlyRow } from "@/lib/fee-words";
 
@@ -543,7 +544,7 @@ export const PAGES: TopicPage[] = [
           ["Reviews", "Added by the creator. Their help center says customers cannot write one", "Written only by buyers whose payment your Stripe account confirms. You can answer or hide one, never edit or delete it; hidden reviews still count in the average, and a full refund takes the stars out"],
           ["Live events in the community", "Webinars added to the community as a product members sign up for, with Zoom or Google Meet links made automatically", "Live events members RSVP to, with a cap of 1 to 5,000, reminders, a private Jitsi Meet room shown on the page, your own link or a Google Meet made on your connected Google Calendar, and replays. No Zoom link made for you yet — they are ahead there"],
           ["Bundles", "Their Digital Downloads help section lists bundles among the files you can sell as one download. No product type that hands over other products in their help center", "2 to 20 of your one-off products at one price, each delivered as itself: its download or link, its course and its license key. Not with memberships or calls"],
-          ["Moving from another platform", "A list of up to 5,000 imported contacts per store in all, each sent an email to opt in again. Buyers given access one at a time", "Up to 50,000 contacts a file, only people you confirm agreed; up to 500 products a file, as drafts; and up to 20,000 past buyers a file, who keep what they bought, with one email to them if you choose"],
+          ["Moving from another platform", "A list of up to 5,000 imported contacts per store in all, each sent an email to opt in again. Buyers given access one at a time", `Up to 50,000 contacts a file, only people you confirm agreed; up to 500 products a file, as drafts; and up to 20,000 past buyers a file, who keep what they bought, with one email to them if you choose; ${rowsAMonthShort()}`],
         ],
       },
       {
@@ -908,9 +909,9 @@ export const PAGES: TopicPage[] = [
           ["Recurring revenue and churn", "Not in their help center, read September 30, 2026", `Yes, on the ${PLAN_AT.creator} plan: monthly recurring revenue, paying members and trials, churn over 30 days and the share of trials that became paying, overall and by membership, read from your own Stripe account`],
           ["Visits, sources and conversion", "Yes", "Yes \u2014 7, 30 and 90 days and all time, with UTM tags, counted without cookies, sales read from your own Stripe account, and CSV files of sales, visits and sources"],
           ["Public API and webhooks", "None published", `Both, on the ${PLAN_AT.creator} plan. Webhooks: up to five addresses, eight events, signed, for Zapier's Catch Hook, Make or your own server. An API that reads your list, members, a course's students, your affiliates and your bookings, with up to five keys; a key made to write also adds people who agreed to your list, changes their labels, and gives or takes back products`],
-          ["Importing your list", "A CSV, up to 5,000 imported contacts per store in all, each sent an email to opt in again", "A CSV, up to 50,000 rows a file on a list of up to 100,000, only people you confirm agreed, never anyone who unsubscribed here. Nobody is emailed because of it"],
-          ["Importing products", "Not in their help center", "A CSV, up to 500 a file, as drafts: title, price, description and link. Files, pictures and lessons are added afterward"],
-          ["Past buyers from another platform", "Access granted one customer at a time, to downloads, courses and the community, with no bulk undo", "A CSV, up to 20,000 a file: files, links, courses, bundles and the community, and one email to them if you choose. Not calls, and no undo in one step. Members are emailed a link of their own to keep their membership here, first paying on the day it would have renewed"],
+          ["Importing your list", "A CSV, up to 5,000 imported contacts per store in all, each sent an email to opt in again", `A CSV, up to 50,000 rows a file, within ${rowsAMonthShort()}, on a list of up to 100,000, only people you confirm agreed, never anyone who unsubscribed here. Nobody is emailed because of it`],
+          ["Importing products", "Not in their help center", `A CSV, up to 500 a file, within ${rowsAMonthShort()}, as drafts: title, price, description and link. Files, pictures and lessons are added afterward`],
+          ["Past buyers from another platform", "Access granted one customer at a time, to downloads, courses and the community, with no bulk undo", `A CSV, up to 20,000 a file, within ${rowsAMonthShort()}: files, links, courses, bundles and the community, and one email to them if you choose. Not calls, and no undo in one step. Members are emailed a link of their own to keep their membership here, first paying on the day it would have renewed`],
         ],
       },
       {

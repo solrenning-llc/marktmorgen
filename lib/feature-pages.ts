@@ -37,7 +37,7 @@ import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { switchingBeginnerQuestions } from "@/lib/switching-faq";
-import { MIGRATION_GUIDES, MIGRATION_GUIDE_PAGES } from "@/lib/migration-guides";
+import { MIGRATION_GUIDES, MIGRATION_GUIDE_PAGES, rowsAMonth, rowsAMonthShort } from "@/lib/migration-guides";
 import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
 import { crmBeginnerQuestions } from "@/lib/crm-faq";
 import { aiWritingBeginnerQuestions } from "@/lib/ai-writing-faq";
@@ -357,7 +357,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "cap", title: "Quizzes and certificates", body: "Up to 20 questions after any lesson, a pass mark, and a certificate with a page anyone can open to check it.", href: "/platform/quizzes-and-certificates" },
           { icon: "chat", title: "A community for students", body: "Your store's community can open to the buyers of a course, for questions and work shared where everyone can learn from it.", href: "/platform/community" },
           { icon: "video", title: "Live Q&As for a course", body: "A live event in your community can be kept for the buyers of the course, with a replay afterward.", href: "/platform/live-events" },
-          { icon: "door", title: "Students from another platform", body: "Import the people who bought the course elsewhere, up to 20,000 a file, and they open it here with the email they bought with.", href: "/platform/switching-to-marktmorgen" },
+          { icon: "door", title: "Students from another platform", body: `Import the people who bought the course elsewhere, up to 20,000 a file, within ${rowsAMonthShort()}. They open it here with the email they bought with.`, href: "/platform/switching-to-marktmorgen" },
         ],
       },
       {
@@ -817,7 +817,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "shield", title: "Delete a person from your whole store", body: "From their page under Buyers, you or an Admin delete someone from every part of your store at once, after reading what goes and what stays; people can do it themselves from the link at the foot of your store's page, and you are emailed when they do. A one-way fingerprint of the address keeps your store from ever writing to them again, and no import or API call puts them back. Their payments stay on your Stripe account, and their posts in your community stay without their name." },
           { icon: "pin", title: "Your postal address", body: "In every email, as US law (CAN-SPAM) requires of commercial email, with a line on why the reader is getting it." },
           { icon: "shield", title: "Dead addresses taken off for you", body: "An address that cannot be delivered to, or whose owner reports an email as spam, is taken off your list by itself and never written to again. Mail apps judge a sender by exactly those two things." },
-          { icon: "download", title: "Your list is yours", body: "Download it as a CSV any time, from any plan. Bring one in from a spreadsheet, up to 50,000 addresses a file, confirming each time that those people agreed.", href: "/platform/switching-to-marktmorgen" },
+          { icon: "download", title: "Your list is yours", body: `Download it as a CSV any time, from any plan. Bring one in from a spreadsheet, up to 50,000 addresses a file, within ${rowsAMonthShort()}. You confirm each time that those people agreed.`, href: "/platform/switching-to-marktmorgen" },
           { icon: "download", title: "Your store's main data as one file", body: "Your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and a summary of your orders, downloaded as one file from your studio: from your studio's requests by its size while a plan runs, and up to five times once it has ended, before your store closes 30 days later. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio." },
           { icon: "target", title: "Sequences that stop selling to buyers", body: "End a sequence for anyone who buys, or gets one product, checked before each email, so a launch sequence never pitches the course to somebody who already owns it. And send any email of it only to those who have a product or do not, who have bought or not yet, or who carry a label, from your import or from a sequence; everyone else skips it or leaves the sequence there. Or only to those who used a link in the email before, or did not: counted only for readers who allowed it with a box of their own when they joined, and never from opens." },
           { icon: "ladder", title: "Steps that act, not only emails", body: "A step can give someone a label, take one off, start them on another sequence or tell your webhooks, with the same conditions an email has, and a sequence can split its people into halves A and B to try two versions on one list. “If they used the link and have not bought, label them interested”, and a sequence that starts with that label takes it from there: automations, in the sequences you already have." },
@@ -865,7 +865,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           // 534 [FQ1], unit 30: what someone starting out asks, answered by the code (lib/email-faq.ts).
           ...emailBeginnerQuestions(),
           { q: `Why is email on Studio and not on the ${PLAN_AT.creator} plan?`, a: `Because every email sent costs us money, and the ${PLAN_AT.creator} plan is priced to cover a store, not a mailing list. Stan puts email on its $99 plan as well — read on its pricing page on September 20, 2026.` },
-          { q: "Can I import the list I already have?", a: "Yes, on every plan, from a CSV file of up to 50,000 rows, as long as those people agreed to hear from you. You confirm that each time, a consent column in the file narrows it further, and anyone who unsubscribed here stays unsubscribed. Nobody is emailed because of the import." },
+          { q: "Can I import the list I already have?", a: `Yes, on every plan, from a CSV file of up to 50,000 rows, within ${rowsAMonthShort()}, as long as those people agreed to hear from you. You confirm that each time, a consent column in the file narrows it further, and anyone who unsubscribed here stays unsubscribed. Nobody is emailed because of the import.` },
           { q: `What if my list needs more than ${PRO_EMAILS} emails a month?`, a: PLANS_ON_SALE ? `Move up to Scale from your studio: the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year. You are charged the difference for the rest of the period you already paid for, and you can go back to Studio whenever you like. Without it, an email that passes the month's number waits and goes out by itself when the month turns.` : `Scale is the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year, but plans are not on sale yet, so no store can move to it today. An email that passes the month's number waits and goes out by itself when the month turns.` },
           { q: `Can I email people on the ${PLAN_AT.creator} plan at all?`, a: `Your list downloads as a CSV on every plan, and on the ${PLAN_AT.creator} plan your store can send the people who agree straight to your own Mailchimp, Kit, beehiiv or MailerLite. Writing to them from Marktmorgen is what Studio adds.` },
         ],
@@ -2429,6 +2429,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       {
         kind: "features",
         title: "Four imports",
+        intro: rowsAMonth(),
         items: [
           { icon: "mail", title: "Your list, up to 50,000 a file", body: "Only people who agreed to hear from you: you confirm it each time, and a consent column in the file narrows it further. Nobody who unsubscribed here is added back, and nobody is emailed because of the import.", href: "/platform/email" },
           { icon: "tag", title: "Labels that come along", body: "The labels in your file, and one you add to everyone in it, go with each contact, next to their name." },
@@ -2446,7 +2447,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         intro: "Said here so nobody signs up expecting it.",
         items: [
           "Files, pictures and course lessons are not imported from the other platform. Add a product's file from its row in the studio, and a course's videos as lessons, up to 50 at once, then import the buyers who should have it.",
-          "Memberships are never given: a member keeps theirs by paying here, from its renewal date, with the link they are emailed, and somebody who does nothing is never charged. Calls and products with several prices cannot be given to past buyers.",
+          "Memberships are never given: a member keeps theirs by paying here, from its renewal date, with the link they are emailed, and somebody who does nothing is never charged. Calls cannot be given to past buyers. Neither can a product with several prices, unless it is a course or a podcast.",
           "A membership that ends after a set number of payments cannot be moved, because how many each member has left is not known.",
           "Buyers brought over get no license key here; the key they had on the old platform is still theirs.",
           "Buyers brought over are not sales: they are not in your numbers, not sent to webhooks, not credited to affiliates, and cannot write a review.",
@@ -2502,6 +2503,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       {
         kind: "features",
         title: "What comes across, and as what",
+        intro: rowsAMonth(),
         items: [
           { icon: "mail", title: "Contacts, up to 50,000 a file", body: "With their names and tags. Only those ClickFunnels marks Subscribed, after you confirm they agreed, can be emailed here. Everyone else comes in as a contact you cannot email, and those marked Unsubscribed or Undeliverable stay unsubscribed here: no later import can make them people you email.", href: "/platform/email" },
           { icon: "tag", title: "Products, up to 500 a file", body: "Each one a draft in your studio with its name, price in your store's currency and description, until you publish it. A product already in your store by the same name is not made again." },

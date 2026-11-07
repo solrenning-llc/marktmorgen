@@ -11,6 +11,12 @@
  * isPaidUp, canSell), so they are never promised; each guide says they wait.
  * tests/cf2-move-pages.test.ts holds all of this against the code.
  *
+ * A file's own limit is not what moves: a store brings in its plan's rows a
+ * month, all imports together (lib/import-limits.ts IMPORT_ALLOWANCES, each
+ * upload counting at least IMPORT_MIN_ROWS_PER_UPLOAD), and the section says
+ * that month's figure, per plan only while plans are on sale (review of #3012;
+ * tests/cf2-move-pages-claims.test.ts holds it against the real import route).
+ *
  * The other platform's export steps come from its own help center, read on
  * 6 November 2026 through a web search index: the pages themselves could not
  * be opened from the session that wrote this (the network refused them), so
@@ -21,6 +27,8 @@
 import type { TopicPage } from "@/lib/site-pages";
 import type { IconName } from "@/components/icons";
 import { PLANS_ON_SALE } from "@/lib/opening";
+import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD } from "@/lib/import-limits";
+import { PLAN_TITLES } from "@/lib/plan";
 
 /** The imports a guide may say move on their own, as the studio names them. */
 export const MOVE_CAPABILITIES = {
@@ -39,6 +47,8 @@ export type MigrationGuide = {
   /** The first of the three steps: how to export there. */
   export: string;
   moves: { capability: MoveCapability; icon: IconName; title: string; body: string }[];
+  /** How many rows move in a month, all imports together: said above the lines that move. */
+  month: string;
   byHand: string[];
   notMoved: string[];
   terms: { term: string; meaning: string }[];
@@ -49,6 +59,24 @@ export type MigrationGuide = {
 const CHECKED = "November 6, 2026";
 const n = (capability: MoveCapability) => MOVE_CAPABILITIES[capability].limit.toLocaleString("en-US");
 const tabs = { list: MOVE_CAPABILITIES.list.tab, products: MOVE_CAPABILITIES.products.tab, pastBuyers: MOVE_CAPABILITIES.pastBuyers.tab };
+
+/**
+ * The rows a store brings in a month, all imports together (lib/import-limits.ts), said the same way on every guide
+ * and above every other public list of imports (lib/feature-pages.ts).
+ */
+export function rowsAMonth(onSale = PLANS_ON_SALE): string {
+  const rows = (tier: keyof typeof IMPORT_ALLOWANCES) => IMPORT_ALLOWANCES[tier].rows.toLocaleString("en-US");
+  const first = onSale
+    ? `How much moves in a month, all imports together: ${rows("creator")} rows a month on ${PLAN_TITLES.creator} or with no plan, on ${PLAN_TITLES.pro}, ${rows("pro")}, and on ${PLAN_TITLES.scale}, ${rows("scale")}.`
+    : `Your store can bring in ${rows("creator")} rows a month in all, all imports together.`;
+  return `${first} Each upload counts as at least ${IMPORT_MIN_ROWS_PER_UPLOAD} rows. The rest can come in when the next month starts (UTC).`;
+}
+
+/** The same month's figure, short, for a sentence that names a file's import figure (lib/feature-pages.ts, lib/site-pages.ts). */
+export function rowsAMonthShort(onSale = PLANS_ON_SALE): string {
+  const rows = (tier: keyof typeof IMPORT_ALLOWANCES) => IMPORT_ALLOWANCES[tier].rows.toLocaleString("en-US");
+  return onSale ? `${rows("creator")} to ${rows("scale")} rows a month in all imports, by plan` : `${rows("creator")} rows a month in all imports`;
+}
 
 /** What waits for a paid plan, said the same way on every guide. */
 function waitsForPlan(onSale: boolean): string {
@@ -72,10 +100,11 @@ export function migrationGuides(onSale = PLANS_ON_SALE): MigrationGuide[] {
       ],
       export: "Gumroad's help center describes a CSV file of your customers and what they bought, for dates you pick. Its dates are in UTC, so add a day at each end of your dates.",
       moves: [
-        { capability: "list", icon: "mail", title: `Your list, up to ${n("list")} a file`, body: `Your buyers' emails, and names where the file has them, under “${tabs.list}”. Bring in only people who agreed to hear from you. You confirm that with a box each time. Nobody is emailed because of the import.` },
-        { capability: "pastBuyers", icon: "users", title: `Past buyers, up to ${n("pastBuyers")} a file`, body: `Under “${tabs.pastBuyers}”, each buyer is given what they bought, matched to your product here by its name. No payment is taken and no receipt is sent.` },
-        { capability: "products", icon: "tag", title: `Products, up to ${n("products")} a file`, body: `Under “${tabs.products}”, from a spreadsheet with one product on each row: its title, price and description. Each one waits as a draft until you publish it.` },
+        { capability: "list", icon: "mail", title: "Your list", body: `A file can hold up to ${n("list")} rows. Your buyers' emails, and names where the file has them, under “${tabs.list}”. Bring in only people who agreed to hear from you. You confirm that with a box each time. Nobody is emailed because of the import.` },
+        { capability: "pastBuyers", icon: "users", title: "Past buyers", body: `A file can hold up to ${n("pastBuyers")} rows. Under “${tabs.pastBuyers}”, each buyer is given what they bought, matched to your product here by its name. No payment is taken and no receipt is sent.` },
+        { capability: "products", icon: "tag", title: "Products", body: `A file can hold up to ${n("products")} rows. Under “${tabs.products}”, from a spreadsheet with one product on each row: its title, price and description. Each one waits as a draft until you publish it.` },
       ],
+      month: rowsAMonth(onSale),
       byHand: [
         "Make your products here first. Past buyers are matched to them by their name or ID here.",
         "Add each product's file from its row in the studio. Files are not copied from Gumroad.",
@@ -84,7 +113,7 @@ export function migrationGuides(onSale = PLANS_ON_SALE): MigrationGuide[] {
       notMoved: [
         waitsForPlan(onSale),
         "Reviews, discount codes, affiliates and license keys do not come across. Buyers brought over get no license key here.",
-        "Calls and products with several prices cannot be given to past buyers.",
+        "Calls cannot be given to past buyers. Neither can a product with several prices, unless it is a course or a podcast.",
         "Buyers brought over are not sales here. They are not in your numbers, and an import cannot be undone in one step.",
       ],
       terms: [CSV, { term: "UTC", meaning: "Coordinated Universal Time: one clock used for dates around the world." }, DRAFT],
@@ -101,10 +130,11 @@ export function migrationGuides(onSale = PLANS_ON_SALE): MigrationGuide[] {
       ],
       export: "Teachable's help center describes two CSV files from your school's admin: your users and your transactions. It emails the users file to the school owner, so check your inbox.",
       moves: [
-        { capability: "list", icon: "mail", title: `Your list, up to ${n("list")} a file`, body: `From the users file, under “${tabs.list}”: each person's email and name. Bring in only people who agreed to hear from you. You confirm that with a box each time. Nobody is emailed because of the import.` },
-        { capability: "pastBuyers", icon: "users", title: `Past students, up to ${n("pastBuyers")} a file`, body: `From the transactions file, under “${tabs.pastBuyers}”: each buyer is given the course they bought, matched to your course here by its name. No payment is taken and no receipt is sent.` },
-        { capability: "products", icon: "tag", title: `Products, up to ${n("products")} a file`, body: `Under “${tabs.products}”, from a spreadsheet with one product on each row: its title, price and description. Each one waits as a draft until you publish it.` },
+        { capability: "list", icon: "mail", title: "Your list", body: `A file can hold up to ${n("list")} rows. From the users file, under “${tabs.list}”: each person's email and name. Bring in only people who agreed to hear from you. You confirm that with a box each time. Nobody is emailed because of the import.` },
+        { capability: "pastBuyers", icon: "users", title: "Past students", body: `A file can hold up to ${n("pastBuyers")} rows. From the transactions file, under “${tabs.pastBuyers}”: each buyer is given the course they bought, matched to your course here by its name. No payment is taken and no receipt is sent.` },
+        { capability: "products", icon: "tag", title: "Products", body: `A file can hold up to ${n("products")} rows. Under “${tabs.products}”, from a spreadsheet with one product on each row: its title, price and description. Each one waits as a draft until you publish it.` },
       ],
+      month: rowsAMonth(onSale),
       byHand: [
         "Make each course here first. Past students are matched to it by its name or ID here.",
         "Rebuild each course's lessons. Teachable's help center says there is no export of a whole course, so you download videos and files one by one. Here, you add a course's videos as lessons.",
@@ -113,7 +143,7 @@ export function migrationGuides(onSale = PLANS_ON_SALE): MigrationGuide[] {
       notMoved: [
         waitsForPlan(onSale),
         "Quizzes, certificates, comments and each student's progress do not come across.",
-        "Calls and products with several prices cannot be given to past students.",
+        "Calls cannot be given to past students. Neither can a product with several prices, unless it is a course or a podcast.",
         "Students brought over are not sales here. They are not in your numbers, and an import cannot be undone in one step.",
       ],
       terms: [CSV, DRAFT],
@@ -149,7 +179,7 @@ export function migrationGuidePage(guide: MigrationGuide): TopicPage {
           { title: "Import", body: "Look over “The first rows, as they will be read”, then press Import. Each row left out is listed with its row number and the reason." },
         ],
       },
-      { kind: "features", title: "What comes across on its own", items: guide.moves.map(({ icon, title, body }) => ({ icon, title, body })) },
+      { kind: "features", title: "What comes across on its own", intro: guide.month, items: guide.moves.map(({ icon, title, body }) => ({ icon, title, body })) },
       { kind: "limits", title: "What you redo by hand", items: guide.byHand },
       { kind: "limits", title: "What does not come across", items: guide.notMoved },
       { kind: "terms", title: "Words on this page", items: guide.terms },

@@ -338,7 +338,11 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
       <section aria-labelledby="orders-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="orders-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">What they bought and paid</h2>
         {!bought ? (
-          <p className="mt-2 text-sm text-ink-soft">Nothing bought from this store under this address.</p>
+          <p className="mt-2 text-sm text-ink-soft">
+            {profile.partial || profile.stripeError
+              ? "Their purchases could not all be read just now, so this list may be missing some. Try again in a moment."
+              : "Nothing bought from this store under this address."}
+          </p>
         ) : (
           <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="orders-title">
             <table className="w-full text-left text-sm">
@@ -357,7 +361,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
                     <td className="py-2.5 pr-4 align-top">
                       <span className="font-semibold text-ink">{o.title}</span>
                       <span className="block text-xs text-ink-soft">
-                        {[KIND_WORDS[o.kind], NOTE_WORDS[o.note]].filter(Boolean).join(" · ")}
+                        {[o.kind === "brought" && o.note === "paypal" ? "" : KIND_WORDS[o.kind], NOTE_WORDS[o.note]].filter(Boolean).join(" · ")}
                         {o.refunded > 0 ? ` · ${o.refunded >= o.cents ? "Refunded" : `${money(o.refunded, o.currency)} refunded`}` : ""}
                       </span>
                     </td>
@@ -376,7 +380,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
         )}
         <p className="mt-3 text-xs text-ink-soft">
           Amounts are what they paid, after any discount code and before Stripe&apos;s fee.
-          {profile.partial ? " Stripe holds more of their payments than one reading takes, so the oldest are not shown or counted." : ""}
+          {profile.partial ? " Not all of their payments could be read, so some amounts are not shown or counted." : ""}
           {bought && !profile.channelKnown ? " Sales from before October 11, 2026 have no channel written on them." : ""}
         </p>
       </section>

@@ -21,6 +21,7 @@ import {
   LESSON_VIDEO_ID,
   MAX_CHAPTERS,
   MAX_CHAPTER_TITLE,
+  MIN_CHAPTERS,
   chapterTime,
   chaptersWithin,
   currentChapter,
@@ -141,10 +142,25 @@ async function main(): Promise<void> {
   const hint = editor.indexOf('"0:00 Welcome"');
   is("the lesson text says how to write chapters", hint > 0, true);
   is("only under a video uploaded as a file, where they work", editor.slice(Math.max(0, hint - 400), hint).includes("lesson.video && !isStreamPath(lesson.video.pathname)"), true);
+  const hintLine = editor.slice(editor.lastIndexOf("{`", hint), editor.indexOf("`}", hint));
+  is(
+    "it says the three rules a list must keep: the first line is 0:00, each time later than the line above, at least two lines",
+    [/first line at 0:00/.test(hintLine), /each next line a later time/.test(hintLine), /at least two lines/.test(hintLine), MIN_CHAPTERS],
+    [true, true, true, 2],
+  );
 
   part("Nothing stored, read or sent");
   const lib = readFileSync("lib/lesson-chapters.ts", "utf8");
   const parts = readFileSync("components/lesson-chapters.tsx", "utf8");
+  part("The same chapter twice is said twice");
+  const click = parts.slice(parts.indexOf("onClick={() => {"), parts.indexOf("className={`flex min-h-11"));
+  const cleared = click.indexOf('setSaid("")');
+  const written = click.indexOf("setTimeout(");
+  is(
+    "a click empties the quiet line first and writes it a moment later, so a screen reader hears it even when the words are the same",
+    [cleared >= 0, written > cleared, /setTimeout\(\(\) => setSaid\(line\), SAY_AFTER_MS\)/.test(click), parts.includes("clearTimeout(")],
+    [true, true, true, true],
+  );
   is("no storage and no network in either", [/redis|store-data|fetch\(/.test(lib), /redis|store-data|fetch\(/.test(parts)], [false, false]);
 }
 

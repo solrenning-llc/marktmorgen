@@ -47,6 +47,17 @@ const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
 const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
 const lockKey = (folder: string) => `nl:closing:refund:${folder}`;
 const LOCK_SECONDS = 120;
+type Row = Record<string, unknown>;
+const objectOf = (value: unknown): Row | null => (value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : null);
+/**
+ * Whether Stripe's reply is the object asked for, by its own id (rule 30, as on #3097): another's, one with no id, or
+ * no object at all decides nothing. Null-safe, so a reply of no object is a refusal, never a throw of its own.
+ */
+const isOwnReply = (reply: unknown, id: string): boolean => {
+  const row = objectOf(reply);
+  return row !== null && Object.hasOwn(row, "id") && row.id === id;
+};
+const idOf = (value: unknown): string => (typeof value === "string" ? value : typeof objectOf(value)?.id === "string" ? String(objectOf(value)!.id) : "");
 
 export type UnusedRow = { sub: string; paid: PaidPeriod; unused: number };
 /**
@@ -140,20 +151,31 @@ export type Settled = {
   left: number;
 };
 
-/** The payment intent an invoice was paid by, whichever way this account's API version names it. */
+/**
+ * The payment intent an invoice was paid by, whichever way this account's API version names it; "" only when this
+ * invoice's own whole list of payments holds none paid. A reply for another invoice, a list that is not one, a row of
+ * another invoice or a list that is not whole is unknown and throws, so the member is tried again, never refunded on
+ * another payment and never settled as owed nothing.
+ */
 async function intentOf(account: string, invoice: string, count: () => void): Promise<string> {
   count();
   const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
+  if (!isOwnReply(read, invoice)) throw new Error("Stripe answered for another invoice");
   const direct = typeof read.payment_intent === "string" ? read.payment_intent : (read.payment_intent as { id?: unknown } | null)?.id;
   if (typeof direct === "string" && INTENT_ID.test(direct)) return direct;
   count();
   const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
-  for (const row of Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : []) {
+  const rows = objectOf(listed)?.data;
+  if (!Array.isArray(rows)) throw new Error("an invoice's payments did not come as a list");
+  for (const item of rows) {
+    const row = objectOf(item);
+    if (!row || idOf(row.invoice) !== invoice) throw new Error("a payment listed is not this invoice's");
     if (row.status !== "paid") continue;
     const pi = (row.payment as { payment_intent?: unknown } | null)?.payment_intent;
     const id = typeof pi === "string" ? pi : (pi as { id?: unknown } | null)?.id;
     if (typeof id === "string" && INTENT_ID.test(id)) return id;
   }
+  if (objectOf(listed)?.has_more !== false) throw new Error("an invoice's payments could not be read whole");
   return "";
 }
 
@@ -290,8 +312,14 @@ export async function giveBackUnused(
         }
         count();
         const pi = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge.balance_transaction`);
-        const charge = pi.latest_charge && typeof pi.latest_charge === "object" ? (pi.latest_charge as Record<string, unknown>) : {};
-        if (charge.disputed === true) {
+        // Read exactly (rules 24 and 30): another payment's reply, one with no id, or a charge whose dispute or refunds
+        // do not read decides nothing; the member is tried again, never settled as disputed, refunded or owed nothing.
+        if (!isOwnReply(pi, intent)) throw new Error("Stripe answered for another payment");
+        const charge = objectOf(pi.latest_charge);
+        if (!charge || typeof charge.disputed !== "boolean" || !Number.isSafeInteger(charge.amount_refunded) || (charge.amount_refunded as number) < 0) {
+          throw new Error("this payment's charge did not read");
+        }
+        if (charge.disputed) {
           await settle("disputed");
           out.disputed += 1;
           continue;
@@ -310,7 +338,7 @@ export async function giveBackUnused(
           else out.done.push({ sub: row.sub, amount: prior.amount, cur: row.paid.cur });
           continue;
         }
-        const refunded = typeof charge.amount_refunded === "number" ? charge.amount_refunded : 0;
+        const refunded = charge.amount_refunded as number;
         const give = Math.min(stillToGive(row.unused, refunded), Math.max(0, (row.paid.tot ?? row.paid.amt) - refunded));
         if (give <= 0) {
           await settle("none");

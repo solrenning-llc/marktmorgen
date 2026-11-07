@@ -65,7 +65,7 @@ import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
-import { readListing, sellsAny } from "@/lib/catalog";
+import { hasProduct, readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
@@ -679,6 +679,10 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         for (const sale of sales) {
           for (const productId of sale.products) {
             const product = await readListing(store, productId);
+            // Only a product the store no longer lists is gone, with no key to revoke. One it still lists whose listing
+            // came back empty (outside the catalog head, its GET answered in an unknown shape) is unknown: the refund
+            // stays unread for the next run (review of #2868, CX-123 rule 24).
+            if (!product && hasProduct(store, productId)) throw new UnknownReplyError("a refunded product's listing");
             if (!product) continue;
             const key = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1)?.[0];
             if (key !== null && typeof key !== "string") throw new UnknownReplyError("HGET of a sale's license key");

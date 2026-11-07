@@ -199,8 +199,12 @@ type Info = { r: string; e: string; at: number; v?: number; w?: "refund" };
 
 /**
  * A key's record read in its exact shape. Text that is not JSON, or JSON of another shape, is unknown and throws
- * UnknownReplyError, never "no such key" (review of #2868, CX-123 rule 24).
+ * UnknownReplyError, never "no such key" (review of #2868, CX-123 rule 24). The times are read only as the writers
+ * write them: `settle` writes `at` as whole seconds, `setRevoked` adds `v` as whole seconds, and `w` only with it.
+ * A revocation time of -1, 0, 0.5 or Infinity is unknown, never "already revoked" (review of #2868, Claude 4).
  */
+const wholeSeconds = (value: unknown, least: number): boolean => typeof value === "number" && Number.isSafeInteger(value) && value >= least;
+
 function readInfo(raw: string): Info {
   let value: unknown;
   try {
@@ -215,31 +219,33 @@ function readInfo(raw: string): Info {
     Array.isArray(info) ||
     typeof info.r !== "string" ||
     typeof info.e !== "string" ||
-    typeof info.at !== "number" ||
-    (info.v !== undefined && typeof info.v !== "number") ||
-    (info.w !== undefined && info.w !== "refund")
+    !wholeSeconds(info.at, 0) ||
+    (info.v !== undefined && !wholeSeconds(info.v, 1)) ||
+    (info.w !== undefined && (info.w !== "refund" || info.v === undefined))
   ) {
     throw new UnknownReplyError("a license key's record");
   }
   return info as Info;
 }
 
+/** A record as a listed key; null when absent or of a shape no writer writes, never read as valid or revoked. */
 function parseInfo(key: string, raw: unknown): IssuedKey | null {
   if (typeof raw !== "string") return null;
+  let value: Info;
   try {
-    const value = JSON.parse(raw) as Info;
-    const revokedAt = Number(value.v) || 0;
-    return {
-      key,
-      reference: String(value.r ?? ""),
-      email: String(value.e ?? ""),
-      at: Number(value.at) || 0,
-      revokedAt,
-      revokedBy: revokedAt ? (value.w === "refund" ? "refund" : "creator") : "",
-    };
+    value = readInfo(raw);
   } catch {
     return null;
   }
+  const revokedAt = value.v ?? 0;
+  return {
+    key,
+    reference: value.r,
+    email: value.e,
+    at: value.at,
+    revokedAt,
+    revokedBy: revokedAt ? (value.w === "refund" ? "refund" : "creator") : "",
+  };
 }
 
 export type SaleKey =
@@ -264,8 +270,11 @@ export async function keyOfSale(store: Store, product: Listing, reference: strin
   ]);
   if (typeof key === "string" && key) {
     const [raw] = await redisPipeline([["HGET", infoKey(store, product), key]]);
-    const info = parseInfo(key, raw);
-    return { state: "issued", key, revoked: Boolean(info?.revokedAt) };
+    // No record yet (the moment between the sale's key and its record in settle) is not revoked; a reply of another
+    // shape, or a record no writer writes, is unknown, never shown good or revoked (CX-123 rule 24).
+    if (raw === null) return { state: "issued", key, revoked: false };
+    if (typeof raw !== "string") throw new UnknownReplyError("HGET of a license key's record");
+    return { state: "issued", key, revoked: Boolean(readInfo(raw).v) };
   }
   // Still waiting only while the product hands out keys: one switched off gives none.
   return Number(waiting) === 1 && activeKeys(product) ? { state: "waiting" } : null;

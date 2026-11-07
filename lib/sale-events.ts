@@ -30,6 +30,7 @@
  */
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
 import { isSettled } from "@/lib/instant-pay";
 import { alertCreator } from "@/lib/phone-alerts";
 import { queuePerson } from "@/lib/email-sync";
@@ -181,8 +182,9 @@ export async function noteOfferSale(store: Store, product: Listing, payment: Rec
   const amount = typeof payment.amount === "number" ? payment.amount : 0;
   if (store.chatSales && isRedisConfigured()) {
     // Once, like the phone's: the payment's own mark.
-    const [fresh] = await redisPipeline([["SET", toldKey(id), "1", "NX", "EX", TOLD_SECONDS]]);
-    const url = fresh === null ? null : await chatAddress(store.statsId).catch(() => null);
+    // Ours only on an exact claim (lib/claim-mark.ts): an unknown answer posts nothing.
+    const fresh = await claimMark(toldKey(id), TOLD_SECONDS);
+    const url = fresh === "ours" ? await chatAddress(store.statsId).catch(() => null) : null;
     if (url) await postToChat(url, `New sale on ${store.name}: ${money(amount, payment.currency, store)}, ${product.title} (one-click offer)`).catch(() => false);
   }
   if (!store.phoneSales) return;

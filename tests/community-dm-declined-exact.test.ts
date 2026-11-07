@@ -21,7 +21,6 @@ import { CREATOR, freshConfig, readMember, saveConfig } from "@/lib/community";
 import { communityViewer } from "@/lib/community-access";
 import { communityWords } from "@/lib/buyer-words/community";
 import { emailKey, mintPass, passCookieName } from "@/lib/learn";
-import { UnknownReplyError } from "@/lib/redis-reply";
 import { POST as messagesRoute } from "@/app/api/store/community/messages/route";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setCommunity, setLanguage, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
@@ -110,7 +109,8 @@ async function main(): Promise<void> {
   part("The same pipeline's other two replies are read exactly too (rule 30)");
   {
     for (const [verb, keyPart] of [["EXISTS", ":dm:"], ["ZCARD", ":dm:i:"]] as const) {
-      for (const [label, bad] of UNKNOWN) {
+      // ZCARD is a count: two is a known size there, so only the shapes that are not a whole number from zero are unknown.
+      for (const [label, bad] of UNKNOWN.filter(([, bad]) => verb === "EXISTS" || bad !== 2)) {
         swap = { match: verbIs(verb, keyPart), bad };
         const from = seen.length;
         const got = await outcome(() => send(ID, open, CARLA, BIA, `hello (${verb} ${label})`, ROOM));

@@ -233,6 +233,9 @@ async function main() {
       before = mailWorld.calls.ses;
       const otherShopTry = await notice.tellActivationFailed(otherShop as never, lostEntry, start + 900);
       is("the same code id at another store still goes, once", [mailWorld.calls.ses - before, otherShopTry], [1, true]);
+      before = mailWorld.calls.ses;
+      const noStats = await notice.tellActivationFailed({ ...shop, statsId: null } as never, { ...lostEntry, id: "promo_NOSTATS" }, start + 900);
+      is("a store with no stats id has no stable key: nothing is sent", [mailWorld.calls.ses - before, mailWorld.calls.resend, noStats], [0, 0, false]);
     } finally {
       mailWorld.restore();
     }

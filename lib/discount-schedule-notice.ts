@@ -86,12 +86,17 @@ export function failureNotice(
 }
 
 /**
- * Sends the email for one failed code. Never throws; false when nothing was
- * sent (no sender, the store's email figure spent, or the send refused), so
- * the job may try again, up to NOTICE_TRIES times in all.
+ * Sends the email for one failed code. Never throws; false when it is not
+ * known to have gone (no sender, the store's email figure spent, the send
+ * refused, or a reply lost), so the job may try again, up to NOTICE_TRIES
+ * times in all. One stable key per store and code: a retry after a lost
+ * reply is answered without sending the email again (Resend keeps the key a
+ * day, lib/email.ts keeps the same promise on Amazon), and NOTICE_TRIES tries
+ * NOTICE_RETRY_SECONDS apart all fall inside that day.
  */
 export async function tellActivationFailed(store: Store, entry: ScheduleEntry, nowSeconds: number): Promise<boolean> {
-  if (!isSenderConfigured() || !store.email) return false;
+  // No stats id, no stable key: never sent on a key that could repeat.
+  if (!isSenderConfigured() || !store.email || !store.statsId) return false;
   const { subject, text } = failureNotice(store, entry, nowSeconds);
   try {
     return await sendEmail({
@@ -101,6 +106,7 @@ export async function tellActivationFailed(store: Store, entry: ScheduleEntry, n
       replyTo: SUPPORT,
       subject: subject.slice(0, 180),
       text,
+      idempotencyKey: `dsched-notice:${store.statsId}:${entry.id}`,
     });
   } catch (error) {
     console.error("emailing that a scheduled discount code failed did not work", error);

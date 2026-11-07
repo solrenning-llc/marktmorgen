@@ -208,6 +208,7 @@ const mv = agents.split("\n## MV — ")[1]?.split("\n## ")[0] ?? "";
 is("AGENTS.md has the MV section, right after AV9", /\n## AV9 — [^\n]*\n\n[^\n]*\n\n## MV — Main vermelho, limite de PRs abertos e junção do main \(dono, 06\/11\/2026, por volta das 23h Fortaleza\)\n/.test(agents), true);
 is("it quotes the owner's authorization", mv.includes("\"se não faz a construção andar mais devagar, se melhora a qualidade, se reduz erros, autorizo\""), true);
 is("it names the label and the limit of 15 open PRs per agent", [mv.includes("`main-vermelho`"), /\b15 PRs abertos\b/.test(mv)], [true, true]);
+is("the limit counts only the PRs that wait on their own author", /contam no limite só os PRs que dependem do próprio autor/.test(mv), true);
 is("it says it changes no price, limit, commission, flag, gate or prohibition", /não muda nenhum preço, limite, comissão, (trava|gate), flag (ou|nem) proibição/.test(mv), true);
 
 

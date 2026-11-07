@@ -23,7 +23,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
   const product = store ? await readListing(store, productIdFromAddress(store, id) ?? id) : null;
-  if (!store || !product) return { title: "Not found — Marktmorgen" };
+  // A draft has no page of its own, so no list of its reviews either (MM-SA-30), as p/[product]/page.tsx.
+  if (!store || !product || product.hidden) return { title: "Not found — Marktmorgen" };
   return {
     title: `${speech(store).w.reviewsOf(product.title)} — ${store.name}`,
     // The product's own page carries the rating for search engines; this
@@ -43,7 +44,7 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
-  if (!product) redirect(`/@${store.handle}`);
+  if (!product || product.hidden) redirect(`/@${store.handle}`);
   const reachedOn = (await headers()).get("x-nimbus-domain");
   if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) {
     redirect(`${SITE_URL}${productPath(store, product)}/reviews`);

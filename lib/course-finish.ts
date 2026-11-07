@@ -22,6 +22,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { doneLessons, emailKey } from "@/lib/learn";
 import { lessonsInOrder, readCourse } from "@/lib/course";
 import { enroll } from "@/lib/flows";
+import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
 
 const finishedKey = (courseId: string, email: string) => `nl:course:${courseId}:fin:${emailKey(email)}`;
@@ -78,6 +79,13 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
 /** Forgets the marks that one person opened and finished these courses (lib/person-erasure.ts). */
 export async function forgetFinishPerson(courseIds: string[], email: string): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", ...courseIds.flatMap((c) => [finishedKey(c, email), openedKey(c, email)])]]);
-  return Number(gone) || 0;
+  const what = "the deletion of a person's course opening and finishing marks";
+  const keys = [...new Set(courseIds.flatMap((courseId) => [finishedKey(courseId, email), openedKey(courseId, email)]))];
+  const [gone] = exactReplies(
+    await redisPipeline([["DEL", ...keys]]),
+    1,
+    what,
+  );
+  if (typeof gone !== "number" || !Number.isSafeInteger(gone) || gone < 0 || gone > keys.length) throw new UnknownReply(what);
+  return gone;
 }

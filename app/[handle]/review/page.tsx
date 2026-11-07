@@ -150,7 +150,7 @@ export default async function ReviewPage({ params, searchParams }: Params) {
                       existing={existing.get(product.id) ?? null}
                       storeName={store.name}
                       back="review"
-                      notice={statusProduct === product.id && REVIEW_NOTICES[status] ? status : null}
+                      notice={statusProduct === product.id && Object.hasOwn(REVIEW_NOTICES, status) ? status : null}
                       lang={said.lang.code}
                     />
                   </section>

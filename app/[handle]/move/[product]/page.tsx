@@ -58,7 +58,7 @@ export default async function MovePage({ params, searchParams }: Params) {
   const blocking = !invite ? m.notices.expired : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
   // With the price gone there is no button, so never "try again" or "press the button again": only that it is gone.
   // "price" in the address says nothing by itself: only the product does.
-  const said = status === "price" ? undefined : m.notices[status as keyof typeof m.notices];
+  const said = status === "price" || !Object.hasOwn(m.notices, status) ? undefined : m.notices[status as keyof typeof m.notices];
   const notice = priceGone ? m.notices.price : (said ?? blocking);
   // Where the prices offered today are, when the one named is gone: the product's own page, while buyers can see it.
   const pricesLink = priceGone && product && !product.hidden ? product : null;

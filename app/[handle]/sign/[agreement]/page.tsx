@@ -60,7 +60,7 @@ export default async function AgreementPage({ params, searchParams }: Params) {
   const status = statusOf(agreement, now);
   const said = speechFor(store.language, version.currency);
   const w = agreementWords(store.language);
-  const notice = typeof query.notice === "string" && query.notice !== "signed" ? w.notices[query.notice] : undefined;
+  const notice = typeof query.notice === "string" && query.notice !== "signed" && Object.hasOwn(w.notices, query.notice) ? w.notices[query.notice] : undefined;
   const signature = latest.signature;
   const earlier = [...agreement.versions].reverse().find((m) => m.n < latest.n && m.signature);
   const reportUrl = `/report?url=${encodeURIComponent(`${SITE_URL}/@${store.handle}`)}`;

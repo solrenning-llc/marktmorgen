@@ -7,9 +7,13 @@
  *     deleted to make room for a round. A new round waits (the step is tried
  *     again later, never ended); a round already written down still goes.
  *   - The same fewest answers before totals show holds for a round.
+ *   - Second pre-review (7 November 2026): a store renamed in the middle of a
+ *     round still takes its readers' answers, from links sent before and
+ *     after; and a step waiting on a full list says the polls are why.
  */
 import { renderToStaticMarkup } from "react-dom/server";
-import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
+import { personOf, readRun } from "@/lib/flow-runs";
+import { claimHandle, renameHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
 import { enroll, saveFlow, sendDueSteps, setFlowActive } from "@/lib/flows";
 import { readPoll } from "@/lib/mail-poll";
@@ -82,6 +86,8 @@ async function main(): Promise<void> {
   const after = (await redis.pipeline(Array.from({ length: MAX_POLLS_KEPT }, (_, i) => ["EXISTS", `nl:mpoll:${list}:${hex24(i + 1)}`]))) as number[];
   is("cy got nothing yet, and the step waits rather than ending", [Boolean(sentTo("cy@example.com")), counted.sent, counted.dropped], [false, 0, 0]);
   is("no kept poll was deleted for the round", after.every((n) => Number(n) === 1), true);
+  const waiting = await readRun(flowId, personOf("cy@example.com"));
+  is("its note says the list keeps the most polls", [waiting?.run.status, /polls/.test(waiting?.run.note ?? "")], ["waiting", true]);
 
   part("A round's totals show only from the fewest answers");
   redis.clear();
@@ -108,6 +114,19 @@ async function main(): Promise<void> {
   is("dee answered", new URL(response.headers.get("location") ?? "https://x/").searchParams.get("done"), "recorded");
   const html = renderToStaticMarkup(await MailPollResults({ listId: list2, subjects: new Map([[stepCampaign(flow2, step), "Lesson poll"]]) }));
   is("one answer: the round under its step, no count, no share", [html.includes("Lesson poll"), html.includes("Totals show once 5 people have answered."), /\(\d+%\)/.test(html)], [true, true, false]);
+
+  part("Renamed in the middle of a round: answers still count");
+  await upsertContact(list2, "eve@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  const renamed = await renameHandle(OWNER, "seq-poll-renamed");
+  is("renamed", renamed.ok, true);
+  store = (await storeForEmail(OWNER))!;
+  await enroll(store, "eve@example.com", { joined: false, tag: "poll" });
+  await run();
+  const eve = linksIn(sentTo("eve@example.com")?.html ?? "")[1] ?? "https://x/";
+  is("eve got the same round", new URL(eve).searchParams.get("p"), new URL(link).searchParams.get("p"));
+  const pressed = async (url: string, ip: string) => new URL((await pollPost(new NextRequest(`https://marktmorgen.com/api/mail/poll${new URL(url).search}`, { method: "POST", body: new URLSearchParams({ do: "vote" }), headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": ip } }))).headers.get("location") ?? "https://x/").searchParams.get("done");
+  is("eve's answer, sent after the rename, counts", await pressed(eve, "198.51.100.41"), "recorded");
+  is("dee's link, sent before, still answers", await pressed(link, "198.51.100.42"), "already");
 
   mail.restore();
   done();

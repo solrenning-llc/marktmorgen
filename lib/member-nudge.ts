@@ -17,7 +17,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { platformKey } from "@/lib/stripe-account";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { type Store, storesAfter } from "@/lib/store";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { fromLine, render } from "@/lib/mail";
@@ -72,6 +72,8 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
     const key = sentKey(statsId, member.sub, member.periodEnd);
     const [claimed] = await redisPipeline([["SET", key, String(now), "NX", "EX", KEEP_SECONDS]]);
     if (claimed === null) continue;
+    let withAddress: Store;
+    let rendered: ReturnType<typeof render>;
     try {
       const mail = nudgeEmail({
         storeName: store.name,
@@ -80,9 +82,18 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
         communityUrl: away.has("community-never") || away.has("community-30") ? `${base}/community` : "",
         language: store.language as LanguageCode,
       });
-      const withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.nudge.address } };
-      const rendered = render(withAddress, mail.subject, mail.body, unsub);
-      const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+      withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.nudge.address } };
+      rendered = render(withAddress, mail.subject, mail.body, unsub);
+    } catch (error) {
+      // Nothing was asked of the sender yet: the mark is let go, so the next run tries again.
+      await redisPipeline([["DEL", key]]).catch(() => {});
+      console.error("sending a come-back email failed", store.handle, error);
+      continue;
+    }
+    // The email is taken from the store's figure inside sendEmailOutcome, before the request (unchanged).
+    let outcome: SendOutcome;
+    try {
+      outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
         from: fromLine(withAddress),
         to: member.email,
         subject: rendered.subject,
@@ -91,19 +102,25 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
         headers: rendered.headers,
         idempotencyKey: `nimbus-nudge:${statsId}:${member.sub}:${member.periodEnd}`,
       });
-      if (ok) {
-        sent += 1;
-        const count = countKey(statsId, monthOf(now));
-        await redisPipeline([
-          ["INCR", count],
-          ["EXPIRE", count, KEEP_SECONDS],
-        ]);
-      } else {
-        await redisPipeline([["DEL", key]]);
-      }
     } catch (error) {
-      await redisPipeline([["DEL", key]]).catch(() => {});
-      console.error("sending a come-back email failed", store.handle, error);
+      // Thrown on the way: it may have gone (rule 30, as 283 [HG2]).
+      outcome = "uncertain";
+      console.error("sending a come-back email failed; its mark is kept", store.handle, error);
+    }
+    if (outcome === "sent") {
+      sent += 1;
+      const count = countKey(statsId, monthOf(now));
+      // A count not written never lets the mark go: the email went.
+      await redisPipeline([
+        ["INCR", count],
+        ["EXPIRE", count, KEEP_SECONDS],
+      ]).catch((error) => console.error("counting a come-back email failed", store.handle, error));
+    } else if (outcome === "refused") {
+      // Refused for certain: the mark is let go, so the next run tries again.
+      await redisPipeline([["DEL", key]]).catch((error) => console.error("letting a come-back email's mark go failed", store.handle, error));
+    } else {
+      // Not known whether it went (a timeout, a server error, a network error): the mark is kept, never twice.
+      console.error("a come-back email's answer is not known; its mark is kept, so it is not sent again", store.handle);
     }
   }
   return sent;

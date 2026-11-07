@@ -80,7 +80,7 @@ function outcome(job: JobView, local: boolean): { text: string; tone: "ok" | "wa
   return { text: `Failed after ${job.attempts} ${job.attempts === 1 ? "try" : "tries"}`, tone: "bad" };
 }
 
-/** Said when the account's lists were not read: never drawn as an account with none, or as still reading. */
+/** Said under the list box when the account's lists were not read: never drawn as an account with none, or as still reading. */
 const LISTS_UNREAD = "Your account's lists could not be read just now. Press Refresh list to try again.";
 
 /**
@@ -92,6 +92,8 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
   const local = useHydrated();
   const [view, setView] = useState(initial);
   const [targets, setTargets] = useState<Target[] | null>(null);
+  // Where the lists read stands, set by the lists reads alone, so another action's error never makes the box say it is reading.
+  const [listsRead, setListsRead] = useState<"reading" | "ready" | "unread">("reading");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
@@ -154,11 +156,16 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
       .then((response) => response.json() as Promise<{ ok?: boolean; targets?: Target[]; message?: string }>)
       .then((data) => {
         if (cancelled) return;
-        if (data.ok && Array.isArray(data.targets)) setTargets(data.targets);
-        else setError(data.message ?? LISTS_UNREAD);
+        if (data.ok && Array.isArray(data.targets)) {
+          setTargets(data.targets);
+          setListsRead("ready");
+        } else {
+          if (data.message) setError(data.message);
+          setListsRead("unread");
+        }
       })
       .catch(() => {
-        if (!cancelled) setError(LISTS_UNREAD);
+        if (!cancelled) setListsRead("unread");
       });
     return () => {
       cancelled = true;
@@ -171,10 +178,12 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
     if (!data?.view?.connected) return;
     setKey("");
     setReplacing(false);
-    if (Array.isArray(data.targets)) setTargets(data.targets);
-    else {
+    if (Array.isArray(data.targets)) {
+      setTargets(data.targets);
+      setListsRead("ready");
+    } else {
       setTargets(null);
-      setError(LISTS_UNREAD);
+      setListsRead("unread");
     }
     setTarget(data.view.connected.target?.id ?? "");
     toast(`${byKey(data.view.connected.provider).name} connected.`);
@@ -182,10 +191,11 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
 
   async function refresh() {
     const data = await post({ action: "targets" }, "targets");
-    if (data?.targets) {
+    if (data && Array.isArray(data.targets)) {
       setTargets(data.targets);
+      setListsRead("ready");
       toast("List read again.");
-    }
+    } else setListsRead("unread");
   }
 
   async function save(event: React.FormEvent) {
@@ -211,6 +221,7 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
     const data = await post({ action: "disconnect" }, "disconnect");
     if (data) {
       setTargets(null);
+      setListsRead("reading");
       setTarget("");
       toast(`${name} disconnected. Its key was deleted.`);
     }
@@ -218,6 +229,7 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
 
   const info = connected ? byKey(connected.provider) : byKey(provider);
   const options = targets ?? (connected?.target ? [connected.target] : []);
+  const listsNote = listsRead === "unread" ? LISTS_UNREAD : null;
   const paid = products.filter((p) => !p.free);
   const toggleSome = (id: string) => setSome(some.includes(id) ? some.filter((x) => x !== id) : [...some, id]);
 
@@ -292,7 +304,7 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
                   className="field min-w-0 flex-1"
                 >
                   <option value="" disabled>
-                    {targets === null && !connected.target && error !== LISTS_UNREAD ? "Reading your account…" : `Choose ${info.target === "audience" ? "an" : "a"} ${info.target}`}
+                    {listsRead === "reading" && !connected.target ? "Reading your account…" : `Choose ${info.target === "audience" ? "an" : "a"} ${info.target}`}
                   </option>
                   {options.map((t) => (
                     <option key={t.id} value={t.id}>
@@ -305,6 +317,11 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
                   {busy === "targets" ? "Reading…" : "Refresh list"}
                 </button>
               </div>
+              {listsNote ? (
+                <p className="field-hint mt-2" role="status">
+                  {listsNote}
+                </p>
+              ) : null}
               {targets !== null && targets.length === 0 ? (
                 <p className="field-hint mt-2">{`Your ${info.name} account has no ${info.target} yet. Make one there, then refresh the list.`}</p>
               ) : null}

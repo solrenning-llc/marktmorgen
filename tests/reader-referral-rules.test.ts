@@ -10,11 +10,14 @@
  *   - a program has 1 to 5 milestones, counts that go up, and rewards that
  *     are only the creator's own products or coupons, never money;
  *   - the personal code is the same for one person however the address is
- *     typed, differs between people and stores, and never shows the address;
+ *     typed (a provider's equivalent domains included), differs between
+ *     people and stores, never shows the address, and needs a strong secret;
+ *   - an address with a character outside printable ASCII is refused;
  *   - only a confirmed, consenting, still subscribed sign-up by someone new,
  *     not disposable and past the bot check, counts; anything unknown waits
- *     and never counts; signing up yourself never counts;
- *   - each milestone is given once;
+ *     and never counts; signing up yourself never counts; on a domain that is
+ *     not a public provider only a few friends count, the rest wait;
+ *   - each step is given once, also after the creator changes the program;
  *   - what the person who shared sees has numbers only, never an address.
  */
 import {
@@ -47,10 +50,21 @@ const good = (email: string, over: Partial<ReferredSignup> = {}): ReferredSignup
   human: true,
   ...over,
 });
-const SECRET = "s".repeat(32);
+// Changed (pre-review of 118 [F2-READER-REFERRALS]): was "s".repeat(32); a
+// secret of one repeated letter is now refused as weak, so the fixture is a
+// secret with many distinct characters (test only, never a real one).
+const SECRET = "test-only-referral-secret-0123456789";
 // Built here, so no provider address is written out whole in a tracked file (scripts/check_public_data.py).
 const GMAIL = ["gmail", "com"].join(".");
 const GOOGLE_MAIL = ["GoogleMail", "com"].join(".");
+/** Friends counted on one domain that is not a public provider; the rest wait. */
+const MAX_FRIENDS_PER_OWN_DOMAIN = 2;
+/** Distinct characters a referral secret needs. */
+const MIN_SECRET_DISTINCT = 8;
+const dom = (...labels: string[]) => labels.join(".");
+const ICLOUD = dom("icloud", "com");
+const PROTON = dom("proton", "me");
+const FASTMAIL = dom("fastmail", "com");
 
 function main(): void {
   part("A program: 1 to 5 milestones, counts that go up, the creator's own rewards");
@@ -93,15 +107,75 @@ function main(): void {
     is(`"${bad.slice(0, 24)}" is not an address`, referralAddress(bad), null);
   }
 
+  part("One person on a provider's equivalent domains");
+  is("me.com is iCloud", referralAddress(`Ana@${dom("me", "com")}`), `ana@${ICLOUD}`);
+  is("mac.com is iCloud", referralAddress(`ana@${dom("mac", "com")}`), `ana@${ICLOUD}`);
+  is("protonmail.com is Proton", referralAddress(`ana@${dom("protonmail", "com")}`), `ana@${PROTON}`);
+  is("protonmail.ch is Proton", referralAddress(`ana@${dom("protonmail", "ch")}`), `ana@${PROTON}`);
+  is("pm.me is Proton", referralAddress(`ana@${dom("pm", "me")}`), `ana@${PROTON}`);
+  is("a Fastmail subdomain address is that user", referralAddress(`anything@ana.${FASTMAIL}`), `ana@${FASTMAIL}`);
+  is("a Fastmail subdomain address with a +tag is that user", referralAddress(`x+y@Ana.${FASTMAIL}`), `ana@${FASTMAIL}`);
+  is("another domain's subdomain is kept", referralAddress("x@ana.example.com"), "x@ana.example.com");
+  const self = (referrerEmail: string, friend: string) => {
+    const t = tallyReferrals(referrerEmail, [good(friend)]);
+    return t.ok ? [t.tally.counted, t.tally.pending, t.tally.refused] : "refused";
+  };
+  is("signing yourself up on me.com when you shared from iCloud does not count", self(`ana@${ICLOUD}`, `ana@${dom("me", "com")}`), [0, 0, 1]);
+  is("signing yourself up on mac.com when you shared from iCloud does not count", self(`ana@${ICLOUD}`, `ana@${dom("mac", "com")}`), [0, 0, 1]);
+  is("signing yourself up on protonmail.com when you shared from Proton does not count", self(`ana@${PROTON}`, `ana@${dom("protonmail", "com")}`), [0, 0, 1]);
+  is("signing yourself up on pm.me when you shared from Proton does not count", self(`ana@${PROTON}`, `ana@${dom("pm", "me")}`), [0, 0, 1]);
+  is("signing yourself up through your Fastmail subdomain does not count", self(`ana@${FASTMAIL}`, `x@ana.${FASTMAIL}`), [0, 0, 1]);
+  is("the same friend on two iCloud domains counts once", self("zed@example.com", `bo@${ICLOUD}`), [1, 0, 0]);
+
+  part("An address with characters a person cannot see or tell apart is refused");
+  for (const [what, typed] of [
+    ["a zero-width space", "an\u200Ba@example.com"],
+    ["a soft hyphen", "an\u00ADa@example.com"],
+    ["a full-width letter", "\uFF41na@example.com"],
+    ["the Kelvin sign for a k", "\u212Aay@example.com"],
+    ["an accented letter", "jos\u00E9@example.com"],
+    ["a control character", "an\u0007a@example.com"],
+  ] as const) {
+    is(`${what} in the name is not an address`, referralAddress(typed), null);
+  }
+  const hidden = tallyReferrals("ana@example.com", [good("an\u200Ba@example.com"), good("b\uFF4F@example.com")]);
+  is("a sign-up with a hidden or look-alike character never counts", hidden.ok ? [hidden.tally.counted, hidden.tally.pending, hidden.tally.refused] : "refused", [0, 0, 2]);
+  is("no code for an address with a hidden character", referralCode(SECRET, "store_1", "an\u200Ba@example.com"), null);
+
+  part("Friends on a domain anyone can make many addresses on count only a few");
+  const tallyOf = (referrerEmail: string, emails: string[]) => {
+    const t = tallyReferrals(referrerEmail, emails.map((e) => good(e)));
+    return t.ok ? [t.tally.counted, t.tally.pending, t.tally.refused] : "refused";
+  };
+  is(`on the referrer's own domain, ${MAX_FRIENDS_PER_OWN_DOMAIN} count and the rest wait`, tallyOf("ana@mine.example", Array.from({ length: 1000 }, (_, i) => `f${i}@mine.example`)), [MAX_FRIENDS_PER_OWN_DOMAIN, 1000 - MAX_FRIENDS_PER_OWN_DOMAIN, 0]);
+  is("on another own domain, the same", tallyOf("ana@example.com", ["a@catchall.example", "b@catchall.example", "c@catchall.example", "d@catchall.example"]), [MAX_FRIENDS_PER_OWN_DOMAIN, 4 - MAX_FRIENDS_PER_OWN_DOMAIN, 0]);
+  is("subdomains of one own domain are one domain", tallyOf("ana@example.com", ["a@x.catchall.example", "b@y.catchall.example", "c@z.catchall.example", "d@catchall.example"]), [MAX_FRIENDS_PER_OWN_DOMAIN, 4 - MAX_FRIENDS_PER_OWN_DOMAIN, 0]);
+  is("each own domain has its own few", tallyOf("ana@example.com", ["a@one.example", "b@one.example", "c@one.example", "a@two.test", "b@two.test", "c@two.test"]), [2 * MAX_FRIENDS_PER_OWN_DOMAIN, 6 - 2 * MAX_FRIENDS_PER_OWN_DOMAIN, 0]);
+  is("friends on a public provider all count", tallyOf("ana@example.com", Array.from({ length: 6 }, (_, i) => `friend${i}@${GMAIL}`)), [6, 0, 0]);
+  is("friends on another public provider all count", tallyOf("ana@example.com", Array.from({ length: 6 }, (_, i) => `friend${i}@${dom("outlook", "com")}`)), [6, 0, 0]);
+  is("friends across providers' equivalent domains count as one provider", tallyOf("ana@example.com", [`a@${dom("me", "com")}`, `b@${dom("mac", "com")}`, `c@${ICLOUD}`]), [3, 0, 0]);
+  is("a refused friend on an own domain does not use one of its few", (() => {
+    const t = tallyReferrals("ana@example.com", [good("a@own.example", { wasOnList: true }), good("b@own.example"), good("c@own.example")]);
+    return t.ok ? [t.tally.counted, t.tally.pending, t.tally.refused] : "refused";
+  })(), [2, 0, 1]);
+  is("the few on an own domain is small", MAX_FRIENDS_PER_OWN_DOMAIN <= 3, true);
+
   part("The personal code");
   const ana = referralCode(SECRET, "store_1", "ana@example.com");
   is("the code has the code shape", typeof ana === "string" && REFERRAL_CODE.test(ana), true);
   is("the same person typed differently gets the same code", referralCode(SECRET, "store_1", " ANA+promo@Example.com"), ana);
   is("another person gets another code", referralCode(SECRET, "store_1", "bo@example.com") === ana, false);
   is("the same person at another store gets another code", referralCode(SECRET, "store_2", "ana@example.com") === ana, false);
-  is("another secret gives another code", referralCode("t".repeat(32), "store_1", "ana@example.com") === ana, false);
+  // Changed (pre-review): was "t".repeat(32), now refused as weak; another
+  // secret with many distinct characters still gives another code.
+  is("another secret gives another code", referralCode("another-test-only-secret-abcdefghij", "store_1", "ana@example.com") === ana, false);
   is("the code never shows the address", typeof ana === "string" && !ana.toLowerCase().includes("ana") && !ana.includes("@"), true);
   is("a short secret gives no code", referralCode("short", "store_1", "ana@example.com"), null);
+  is("a long secret of one repeated letter gives no code", referralCode("a".repeat(64), "store_1", "ana@example.com"), null);
+  is(`a long secret of fewer than ${MIN_SECRET_DISTINCT} distinct characters gives no code`, referralCode("abcdefg".repeat(10), "store_1", "ana@example.com"), null);
+  is(`a long secret of ${MIN_SECRET_DISTINCT} distinct characters gives a code`, typeof referralCode("abcdefgh".repeat(5), "store_1", "ana@example.com"), "string");
+  is("a store and an address never run into each other's code", referralCode(SECRET, "s:a", "b@example.com") === referralCode(SECRET, "s", "a:b@example.com"), false);
+  is("nor with the separator moved the other way", referralCode(SECRET, "s", "a:b@example.com") === referralCode(SECRET, "s:a", "b@example.com"), false);
   is("no store gives no code", referralCode(SECRET, "", "ana@example.com"), null);
   is("an address that is not one gives no code", referralCode(SECRET, "store_1", "nobody"), null);
 
@@ -142,8 +216,36 @@ function main(): void {
   is("the first milestone is not given twice", due(3, [3]), []);
   is("10 friends reach the second, the first already given", due(10, [3]), [10]);
   is("12 friends with nothing given reach both", due(12, []), [3, 10]);
-  is("a milestone the creator has since removed is ignored", due(10, [5]), [3, 10]);
+  // Changed (pre-review): was [3, 10]. A reward given at 5 friends under an
+  // older program covers every step up to 5, so the step at 3 is not paid
+  // again; only the step at 10 is due.
+  is("a reward given under an older program is never paid again at a lower step", due(10, [5]), [10]);
   for (const bad of [-1, Number.NaN, 2.5, Number.POSITIVE_INFINITY]) is(`a count of ${bad} reaches nothing`, due(bad, []), []);
+
+  part("Each step once, also after the creator changes the program");
+  const after = (milestones: unknown) => {
+    const r = readReferralProgram({ milestones }, own);
+    if (!r.ok) throw new Error(`expected a program, got ${r.reason}`);
+    return r.program;
+  };
+  const dueIn = (prog: ReturnType<typeof after>, counted: number, given: number[]) => dueMilestones(prog, counted, given).map((m) => m.count);
+  const movedDown = after([{ count: 2, reward: guide }, { count: 10, reward: coupon }]);
+  is("given at 3, the step moved to 2: nothing new at 3 friends", dueIn(movedDown, 3, [3]), []);
+  is("given at 3, the step moved to 2: the next step still comes at 10", dueIn(movedDown, 10, [3]), [10]);
+  const movedUp = after([{ count: 5, reward: guide }, { count: 10, reward: coupon }]);
+  is("given at 3, the step moved to 5: nothing new at 5 friends", dueIn(movedUp, 5, [3]), []);
+  is("given at 3, the step moved to 5: the next step still comes at 10", dueIn(movedUp, 10, [3]), [10]);
+  const stepAdded = after([{ count: 1, reward: guide }, { count: 3, reward: guide }, { count: 10, reward: coupon }]);
+  is("given at 3, a step added before it: nothing new at 3 friends", dueIn(stepAdded, 3, [3]), []);
+  is("given at 3, a step added before it: only the step at 10 at 10 friends", dueIn(stepAdded, 10, [3]), [10]);
+  is("every step of the program given: nothing more, whatever the count", dueIn(movedDown, 50, [2, 10]), []);
+  for (const bad of [[0], [-1], [2.5], [Number.NaN], ["3"]] as unknown[][]) {
+    is(`a record of what was given that is not whole counts (${String(bad[0])}) gives nothing`, dueIn(movedDown, 10, bad as number[]), []);
+  }
+  is("no record list at all gives nothing", dueMilestones(movedDown, 10, null as unknown as number[]), []);
+  const tallyThree = { counted: 3, pending: 0, refused: 0 };
+  is("after a step moved down, the next one shown is the one still to come", referrerView(movedDown, tallyThree, [3]).next, { count: 10, left: 7, reward: coupon });
+  is("after a step moved up, the moved step is not shown as next", referrerView(movedUp, tallyThree, [3]).next, { count: 10, left: 7, reward: coupon });
 
   part("What the person who shared sees");
   const tally = tallyReferrals(referrer, [good("bo@example.com"), good("cy@example.com"), good("di@example.com"), good("eve@example.com", { confirmed: null })]);

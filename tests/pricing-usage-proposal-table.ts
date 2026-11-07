@@ -13,7 +13,7 @@ import { HISTORICAL_MARGIN_NOTICE } from "./historical-margin-model";
  * (usageCents, figures, tidy), which reads tests/plan-cost-registry.ts; the
  * lowest price that keeps 60% is tests/margin-alignment-table.ts
  * (floorPriceCents, roomKept); a pack's unit costs are the registry's own
- * (visitCost, ORDER_COST, PER_EMAIL, UNIT_COST, hourCost, STORAGE_PER_GB)
+ * (visitCost, ORDER_COST, LIST_EMAIL_USD, UNIT_COST, hourCost, STORAGE_PER_GB)
  * and the AI cost table's (WRITING_JOB_MICRO_USD, ANSWER_MICRO_USD). This
  * file only chooses: which prices to look at, which sizes a pack comes in,
  * and the rule for the recommended point, all stated in the document.
@@ -40,7 +40,7 @@ import {
 } from "./historical-margin-model";
 import { ORDER as PRINTED, figures, tidy, usageCents, type Printed } from "./limits-proposal-table";
 import { floorPriceCents } from "./historical-margin-model";
-import { COMMAND, GB, NOT_A_COST, ORDER_COST, PER_EMAIL, REQUEST_COMMANDS, STORAGE_PER_GB, UNIT_COST, hourCost } from "./plan-cost-registry";
+import { COMMAND, GB, NOT_A_COST, ORDER_COST, LIST_EMAIL_USD, REQUEST_COMMANDS, STORAGE_PER_GB, UNIT_COST, hourCost } from "./plan-cost-registry";
 import { visitCost } from "./traffic-cost";
 
 /** The day the competitors below were read, and this proposal made. */
@@ -202,8 +202,8 @@ export const PACKS: Pack[] = [
   },
   {
     id: "list-email", what: "2,500 list emails", raises: ["list-email"], units: 2_500, per: 1_000, perName: "1,000 emails",
-    costUsd: 2_500 * PER_EMAIL,
-    basis: "PER_EMAIL (line list-email)",
+    costUsd: 2_500 * LIST_EMAIL_USD,
+    basis: "LIST_EMAIL_USD (line list-email): PER_EMAIL and the most an email's poll adds",
   },
   {
     id: "ai", what: "20 AI writing jobs and 100 answers", raises: ["ai"], units: 20, per: 1, perName: "writing job with 5 answers",

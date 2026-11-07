@@ -45,6 +45,15 @@ export const MAX_POLLS_KEPT = 20;
 /** What one poll's record weighs at the most: its key, the store's handle, its question, its answers and two times, as JSON. */
 export const POLL_RECORD_BYTES = 64 + 64 + MAX_POLL_QUESTION * 4 + MAX_POLL_ANSWERS * (MAX_POLL_ANSWER * 4 + 8) + 64;
 const POLL_SECONDS = (POLL_OPEN_DAYS + POLL_KEEP_DAYS) * 86_400;
+/**
+ * The most an email with a poll adds to sending it, counted in the list-email
+ * line (tests/plan-cost-registry.ts): openPoll's eight commands (SET, GET,
+ * ZADD, EXPIRE, ZCARD and, past MAX_POLLS_KEPT, ZRANGEBYSCORE, DEL, ZREM) and
+ * one read a sequence's round takes first (125 unit 2); its record sent and
+ * read back. Taken as if every email had to write its poll down.
+ */
+export const POLL_SEND_COMMANDS = 9;
+export const POLL_SEND_BYTES = 2 * POLL_RECORD_BYTES;
 
 export const POLL_ID = /^[0-9a-f]{24}$/;
 export const POLL_LIST = /^[0-9a-f]{32}$/;

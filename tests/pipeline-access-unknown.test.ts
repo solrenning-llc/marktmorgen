@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   await claimHandle(owner, "paccushop", "Pacc U Shop", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1TestPaccUnknown1", true);
+  await setStripeAccount(owner, "acct_1TestPaccUnk1", true);
   await setSubscription(owner, { customerId: "cus_PaccUnknown01", subscriptionId: "sub_PaccUnknown01", active: true, tier: "pro", period: paidPeriod() });
   const store = (await storeForEmail(owner))!;
   const statsId = store.statsId!;

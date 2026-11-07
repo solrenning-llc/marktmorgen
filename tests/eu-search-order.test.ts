@@ -16,7 +16,8 @@ import { renderToReadableStream } from "react-dom/server";
 import StorePage from "@/app/[handle]/page";
 import { BLOCK_WORDS } from "@/lib/buyer-words/blocks";
 import { STORE_PAGE_SIZE, searchStore } from "@/lib/catalog";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setLanguage, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, moveProduct, setLanguage, setProductHidden, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { productSegment } from "@/lib/product-slug";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -84,6 +85,31 @@ async function main(): Promise<void> {
     is(`${language}: the order line is shown with them`, line !== null && page.includes(line), true);
     if (line !== null) is(`${language}: it comes right after the results count`, page.indexOf(line) > page.indexOf(found), true);
   }
+
+  // Claude 5's LOW 2 on #2850: the line is held by the page itself, not only by searchStore: after the creator moves
+  // a product to the top and turns another back into a draft, the results are drawn in that new order, without it.
+  part("The page draws the creator's order, as it stands after a move and a draft");
+  await setLanguage(OWNER, "en");
+  const last = store.catalog.items[store.catalog.items.length - 1].id;
+  const drafted = store.catalog.items[1].id;
+  const moved = await moveProduct(OWNER, last, "top");
+  is("control: the move is saved", moved.ok, true);
+  is("control: the draft is saved", (await setProductHidden(OWNER, drafted, true)).ok, true);
+  const after = (await storeForEmail(OWNER)) as Store;
+  const expected = after.catalog.items.map((item) => item.id).filter((id) => id !== drafted);
+  const drawn = text(await searchPage("glaze"));
+  // A product's address on the page (components/store-product.tsx): /@handle/p/<title slug and id>.
+  const allTitles = new Map(store.catalog.items.map((item, n) => [item.id, titles[n]]));
+  const hrefOf = (id: string) => `/@kilnworks/p/${productSegment({ id, title: allTitles.get(id) ?? "" })}"`;
+  const shown = expected.filter((id) => drawn.includes(hrefOf(id)));
+  is("the moved product is drawn first", shown[0], last);
+  is("the draft is not drawn", drawn.includes(hrefOf(drafted)), false);
+  is("the drawn products follow the creator's order", shown.map((id) => drawn.indexOf(hrefOf(id))).every((at, i, all) => i === 0 || at > all[i - 1]), true);
+  is("every match but the draft is drawn", shown.length, expected.length);
+
+  // Claude 5's LOW 1 on #2850: many stores carry the creator's own name, so the English line names no pronoun for it.
+  part("The English line reads right for a store named after a person");
+  is("no \"its\" for the store", / its /.test(String(orderLine("en"))), false);
 
   part("No match, no order to tell");
   await setLanguage(OWNER, "en");

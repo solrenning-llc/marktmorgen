@@ -252,7 +252,16 @@ async function main(): Promise<void> {
   const productRoute = source("app/api/store/product/route.ts");
   const courseRoute = source("app/api/store/course/route.ts");
   is("removing a product with a course drops its ratings before the product goes, with its comments", (productRoute.match(/await dropCourseRatings\((?:found\.id|going\.course\.id), store\);/g) ?? []).length, 2);
-  is("turning a course off drops its ratings, or says it could not", /try \{\s*await dropComments\(course\.id, \[\], store\);\s*(?:\/\/[^\n]*\n\s*)?await dropCourseRatings\(course\.id, store\);\s*\} catch/.test(courseRoute), true);
+  // Regra 23: was an exact-text pattern of the whole try (dropComments, a comment, dropCourseRatings, catch) that broke as
+  // soon as another drop (285 [SX1], the course's survey) joined the disable branch; it now says only what matters: the
+  // ratings are dropped inside a try whose catch answers 503, after the comments, before the course is turned off.
+  const disable = courseRoute.slice(courseRoute.indexOf('if (action === "disable")'), courseRoute.indexOf("await setProductCourse(ref, id, null)"));
+  const disableTries = [...disable.matchAll(/try \{([\s\S]*?)\} catch \{\s*return Response\.json\(\{ ok: false, error: "unavailable" \}, \{ status: 503 \}\);/g)].map((m) => m[1]);
+  is(
+    "turning a course off drops its ratings, or says it could not",
+    disableTries.some((body) => body.includes("await dropCourseRatings(course.id, store);")) && disable.indexOf("await dropCourseRatings(course.id, store);") > disable.indexOf("await dropComments(course.id, [], store);"),
+    true,
+  );
   is("removing a lesson or a module drops their ratings beside their comments", /dropLessonComments\(course\.id, gone, store\)[^\n]*\n\s*await dropLessonRatings\(course\.id, gone, store\)/.test(courseRoute), true);
 
   part("Deleting a person is priced at every lesson its ratings are kept under, a removed one too");

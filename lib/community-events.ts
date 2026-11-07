@@ -57,7 +57,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -832,11 +832,19 @@ export function announcementText(store: Pick<Store, "handle">, event: CommunityE
  */
 export async function forgetRsvpsPerson(id: string, who: string, email: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]);
-  const events = (Array.isArray(raw) ? raw : []).map(String).slice(0, MAX_KEPT_EVENTS);
+  // Each reply in its own exact shape (CX-123 rule 24): an unknown event list
+  // is not "no events", and an unknown HDEL or DEL is not "nothing removed",
+  // so the member's deletion is never reported done on it.
+  const what = "a member's RSVPs forgotten";
+  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]), 1)?.[0]);
+  if (!listed) throw new UnknownReplyError(what);
+  const events = listed.slice(0, MAX_KEPT_EVENTS);
   if (!events.length) return 0;
-  const replies = await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]);
-  return replies.slice(0, events.length).reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const replies = repliesFor(await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]), events.length + 1);
+  if (!replies) throw new UnknownReplyError(what);
+  const counts = replies.map(countOf);
+  if (counts.some((n) => n === null)) throw new UnknownReplyError(what);
+  return (counts.slice(0, events.length) as number[]).reduce((sum, n) => sum + n, 0);
 }
 
 /** The live events one member said they are coming to, and when they said it, for the copy of their data (619 [SZ3]). Only reads. */
@@ -852,6 +860,8 @@ export async function rsvpsOf(id: string, who: string): Promise<{ event: string;
 /** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts), and what the walk of its archive reads (lib/community-walk.ts). */
 export async function eventCount(id: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["ZCARD", indexKey(id)]]);
-  return Math.min(Number(n) || 0, MAX_KEPT_EVENTS);
+  // ZCARD's own count only (CX-123 rule 24): a person's erasure is never sized as 0 on an unknown answer.
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the community's events count");
+  return Math.min(n, MAX_KEPT_EVENTS);
 }

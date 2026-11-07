@@ -42,7 +42,7 @@ import { tokensFor } from "@/lib/contacts";
 import { suppressedAmong } from "@/lib/suppression";
 import { storeBase } from "@/lib/purchase-email";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
-import { anniversaryEmail, anniversaryOn, anniversaryWindow } from "@/lib/anniversary-rules";
+import { anniversaryCovers, anniversaryEmail, anniversaryOn, anniversaryWindow } from "@/lib/anniversary-rules";
 
 const CURSOR_KEY = "nl:hg:cursor";
 /** A person written to is not written to again for this long: once per date, and never twice in a month. */
@@ -129,6 +129,8 @@ export async function anniversaryStore(store: Store, deadline: number, now = Dat
     .reverse()
     .map((row) => candidateOf(row, handles, window))
     .filter((c): c is Candidate => c !== null)
+    // Only a product the creator's choice covers (283 [HG2] unit 3); the person is written about the first of those.
+    .filter((c) => anniversaryCovers(store.anniversary, c.product))
     .sort((a, b) => a.created - b.created);
   const byPerson = new Map<string, Candidate>();
   for (const candidate of found) if (!byPerson.has(candidate.email)) byPerson.set(candidate.email, candidate);

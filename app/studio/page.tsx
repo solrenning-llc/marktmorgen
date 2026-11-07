@@ -125,6 +125,7 @@ import { NudgeEditor } from "@/components/nudge-editor";
 import { nudgesThisMonth } from "@/lib/member-nudge";
 import { AnniversaryEditor } from "@/components/anniversary-editor";
 import { anniversariesThisMonth } from "@/lib/anniversary-send";
+import { anniversaryChoices } from "@/lib/anniversary-choices";
 import { StoreDatesEditor } from "@/components/store-dates-editor";
 import { type DateResult, readStoreDateResults } from "@/lib/store-dates-send";
 import { monthlyAllowance } from "@/lib/mail";
@@ -2041,6 +2042,7 @@ export default async function StudioPage({
                     storeName={store.name}
                     suggestedAddress={store.mail?.address || store.nudge.address || store.winback.address || store.recovery.address || ""}
                     sent={await anniversariesThisMonth(store).catch(() => 0)}
+                    choices={await anniversaryChoices(store).catch(() => null)}
                     connected={Boolean(current?.stripeAccountId)}
                   />
                 ) : null}

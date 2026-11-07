@@ -27,6 +27,7 @@ import { upsertContact } from "@/lib/contacts";
 import { redisPipeline } from "@/lib/redis";
 import * as rules from "@/lib/anniversary-rules";
 import * as send from "@/lib/anniversary-send";
+import * as studio from "@/lib/anniversary-choices";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -141,7 +142,7 @@ async function main(): Promise<void> {
   const agreed = (email: string) => upsertContact(listId, email, { agreed: true, explicit: true, source: "buyer" }, ROOM);
 
   part("The studio lists what a buyer pays for once");
-  const choices = (send as Record<string, unknown>).anniversaryChoices as ((store: unknown) => Promise<{ id: string; title: string }[]>) | undefined;
+  const choices = (studio as Record<string, unknown>).anniversaryChoices as ((store: unknown) => Promise<{ id: string; title: string }[]>) | undefined;
   is(
     "paid products in the creator's order: no free product, no membership",
     choices ? (await choices(await storeForEmail(OWNER))).map((p) => p.title) : "missing",

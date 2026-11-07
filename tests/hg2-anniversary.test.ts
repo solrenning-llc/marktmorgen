@@ -111,7 +111,7 @@ async function main(): Promise<void> {
   const long = parseAnniversary({ on: true, message: `  ${"a".repeat(MAX_ANNIVERSARY_MESSAGE + 50)}  `, address: "1 Main St" });
   is("the creator's words are cut to their bound", long.message.length, MAX_ANNIVERSARY_MESSAGE);
   is("control characters are taken out of them, line breaks kept", parseAnniversary({ on: true, message: "New\u0000 edition\r\nis out", address: "1 Main St" }).message, "New edition\nis out");
-  is("nothing else is kept: no birth date, no other date", Object.keys(parseAnniversary({ on: true, message: "x", address: "1 Main St", birthday: "2000-01-01", dates: ["12-25"] })).sort(), ["address", "message", "on"]);
+  is("nothing else is kept: no birth date, no other date", Object.keys(parseAnniversary({ on: true, message: "x", address: "1 Main St", birthday: "2000-01-01", dates: ["12-25"] })).sort(), ["address", "message", "on", "products"]);
   is("on reads the saved setting", anniversaryOn({ anniversary: parseAnniversary({ on: true, message: "", address: "1 Main St" }) }), true);
 
   part("The window: the same calendar day a year before, two days wide");

@@ -70,7 +70,7 @@ import { parsePauseMonths } from "@/lib/membership-pause-rules";
 import { type Dunning, DEFAULT_DUNNING, parseDunning } from "@/lib/dunning-rules";
 import { type LeaveSetting, NO_LEAVE, parseLeave } from "@/lib/leave-rules";
 import { NO_NUDGE, type Nudge, parseNudge } from "@/lib/member-health-rules";
-import { type Anniversary, NO_ANNIVERSARY, parseAnniversary } from "@/lib/anniversary-rules";
+import { type Anniversary, NO_ANNIVERSARY, anniversaryWithout, parseAnniversary, parseAnniversaryProducts } from "@/lib/anniversary-rules";
 import { NO_STORE_DATES, type StoreDates, parseStoreDates } from "@/lib/store-dates-rules";
 import { NO_YEARLY_ASK, type YearlyAsk, parseYearlyAsk } from "@/lib/yearly-switch-rules";
 import { type WinBack, NO_WINBACK, parseWinBack } from "@/lib/winback";
@@ -2720,13 +2720,28 @@ export async function setNudge(email: string, raw: unknown): Promise<{ ok: true;
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 
-/** Saves the email on the anniversary of a purchase (lib/anniversary-rules.ts, 283 [HG2]). */
-export async function setAnniversary(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "address" }> {
-  const anniversary = parseAnniversary(raw);
+/**
+ * Saves the email on the anniversary of a purchase (lib/anniversary-rules.ts, 283 [HG2]).
+ * Which products it is sent for is saved only when read exactly: "all", or
+ * products this store has, at least one while it is on (unit 3). A save that
+ * does not name the choice keeps the one saved, so it is never widened by
+ * leaving it out.
+ */
+export async function setAnniversary(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "address" | "products" }> {
   const asked = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  if (asked.on === true && !anniversary.on) return { ok: false, reason: "address" };
-  const next = await patchStore(email, () => ({ anniversary }));
-  return next ? { ok: true, store: next } : { ok: false, reason: "none" };
+  const named = asked.products !== undefined;
+  const products = parseAnniversaryProducts(asked.products);
+  if (named && products === "unknown") return { ok: false, reason: "products" };
+  const result = await withStore(email, async (store, save) => {
+    const anniversary = { ...parseAnniversary(raw), products: named ? products : store.anniversary.products };
+    if (asked.on === true && !anniversary.on) return { ok: false as const, reason: "address" as const };
+    // Only products this store has; while on, at least one, and a saved choice that could not be read is chosen again.
+    const has = new Set(productIds(store));
+    const { products: kept } = anniversary;
+    if ((kept === "unknown" && anniversary.on) || (Array.isArray(kept) && (!kept.every((id) => has.has(id)) || (anniversary.on && kept.length === 0)))) return { ok: false as const, reason: "products" as const };
+    return { ok: true as const, store: await save({ ...store, anniversary }) };
+  });
+  return result ?? { ok: false, reason: "none" };
 }
 
 /**
@@ -3243,6 +3258,8 @@ export async function removeProduct(
       announcement: store.announcement?.product === id ? { ...store.announcement, product: null } : store.announcement,
       // A page of the store's own whose buttons led to it leads to the store now (lib/site-page-rules.ts).
       sitePages: store.sitePages.map((page) => (page.target === id ? { ...page, target: "" } : page)),
+      // The anniversary email's choice no longer names it; none left sends nothing (lib/anniversary-rules.ts).
+      anniversary: anniversaryWithout(store.anniversary, id),
     };
     const next = await save(tidied, { drop: [id], put });
     return { ok: true as const, store: next, product };

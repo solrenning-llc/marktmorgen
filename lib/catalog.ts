@@ -817,19 +817,21 @@ export async function readListingsExact(store: Store, ids?: Iterable<string>): P
     });
     missing.forEach((id, i) => {
       const raw = raws[i];
+      // Redis's own null: the listing is confirmed not there, so the product is left out, as getMany does. Only that
+      // exact null; any other reply that is not this product's listing is unknown and throws.
+      if (raw === null) return;
       const listing = typeof raw === "string" ? parseListing(parseJson(raw)) : null;
       if (!listing || listing.id !== id) throw new UnknownReplyError("a catalog's listing of a product it lists");
       found.set(id, listing);
     });
   }
-  return asked.map((id) => {
+  return asked.flatMap((id) => {
     const listing = found.get(id);
-    if (!listing) throw new UnknownReplyError("a catalog's listing of a product it lists");
-    return listing;
+    return listing ? [listing] : [];
   });
 }
 
-/** readKind, read exactly (readListingsExact): a product of that kind that could not be read throws, never drops out. */
+/** readKind, read exactly (readListingsExact): a product of that kind that could not be read throws, never drops out; one Redis confirms is not there is left out. */
 export async function readKindExact(store: Store, kind: Kind): Promise<Listing[]> {
   return readListingsExact(store, idsOfKind(store, kind));
 }

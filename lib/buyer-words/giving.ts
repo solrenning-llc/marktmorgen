@@ -254,7 +254,7 @@ const en = {
   orderRefundedTitle: "This order was refunded",
   orderRefundedBody: (store: string) =>
     `An order ${store} refunded in full cannot be reviewed. If you wrote a review from it, its stars no longer count.`,
-  expiredRecover: "Ask for your purchases again: a new link usually arrives by email within a minute, and you can review from there.",
+  expiredRecover: "Ask for your purchases again: a new link is emailed to you, and you can review from there.",
   expiredReply: (store: string) => `Reply to the order confirmation ${store} emailed you, and it reaches them.`,
   wrongTitle: "Something went wrong on our side",
   nothingChanged: "Nothing was changed. Try again in a moment.",
@@ -590,7 +590,7 @@ const es: GivingWords = {
   orderRefundedTitle: "Este pedido se reembolsó",
   orderRefundedBody: (store) =>
     `Un pedido que ${store} reembolsó por completo no se puede reseñar. Si escribiste una reseña desde él, sus estrellas ya no cuentan.`,
-  expiredRecover: "Vuelve a pedir tus compras: suele llegar un enlace nuevo por email en menos de un minuto, y desde ahí puedes dejar tu reseña.",
+  expiredRecover: "Vuelve a pedir tus compras: te enviamos un enlace nuevo por email, y desde ahí puedes dejar tu reseña.",
   expiredReply: (store) => `Responde a la confirmación de pedido que ${store} te envió por email, y le llegará.`,
   wrongTitle: "Algo ha fallado por nuestra parte",
   nothingChanged: "No se ha cambiado nada. Vuelve a intentarlo en un momento.",
@@ -911,7 +911,7 @@ const fr: GivingWords = {
   orderRefundedTitle: "Cette commande a été remboursée",
   orderRefundedBody: (store) =>
     `Une commande que ${store} a entièrement remboursée ne peut pas être évaluée. Si vous aviez laissé un avis depuis celle-ci, ses étoiles ne comptent plus.`,
-  expiredRecover: `Redemandez vos achats${S}: un nouveau lien arrive généralement par e-mail en moins d'une minute, et vous pourrez laisser votre avis depuis celui-ci.`,
+  expiredRecover: `Redemandez vos achats${S}: un nouveau lien vous est envoyé par e-mail, et vous pourrez laisser votre avis depuis celui-ci.`,
   expiredReply: (store) => `Répondez à la confirmation de commande que ${store} vous a envoyée par e-mail, votre message lui parviendra.`,
   wrongTitle: "Un problème est survenu de notre côté",
   nothingChanged: "Rien n'a été modifié. Réessayez dans un instant.",
@@ -1231,7 +1231,7 @@ const de: GivingWords = {
   orderRefundedTitle: "Diese Bestellung wurde erstattet",
   orderRefundedBody: (store) =>
     `Eine Bestellung, die ${store} vollständig erstattet hat, kann nicht bewertet werden. Falls Sie dazu eine Bewertung geschrieben haben, zählen ihre Sterne nicht mehr.`,
-  expiredRecover: "Fordern Sie Ihre Käufe erneut an: Ein neuer Link kommt meist innerhalb einer Minute per E-Mail, und von dort aus können Sie bewerten.",
+  expiredRecover: "Fordern Sie Ihre Käufe erneut an: Ein neuer Link wird Ihnen per E-Mail geschickt, und von dort aus können Sie bewerten.",
   expiredReply: (store) => `Antworten Sie auf die Bestellbestätigung, die ${store} Ihnen per E-Mail geschickt hat; Ihre Antwort erreicht ${store}.`,
   wrongTitle: "Bei uns ist etwas schiefgelaufen",
   nothingChanged: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal.",
@@ -1554,7 +1554,7 @@ const it: GivingWords = {
   orderRefundedTitle: "Questo ordine è stato rimborsato",
   orderRefundedBody: (store) =>
     `Un ordine che ${store} ha rimborsato per intero non può essere recensito. Se ne avevi scritto una recensione, le sue stelle non contano più.`,
-  expiredRecover: "Richiedi di nuovo i tuoi acquisti: di solito un nuovo link arriva via email entro un minuto, e da lì puoi lasciare la recensione.",
+  expiredRecover: "Richiedi di nuovo i tuoi acquisti: ti inviamo un nuovo link via email, e da lì puoi lasciare la recensione.",
   expiredReply: (store) => `Rispondi alla conferma d'ordine che ${store} ti ha inviato via email, e il messaggio gli arriverà.`,
   wrongTitle: "Qualcosa è andato storto da parte nostra",
   nothingChanged: "Non è stato modificato nulla. Riprova tra un momento.",
@@ -1872,7 +1872,7 @@ const nl: GivingWords = {
   orderRefundedTitle: "Deze bestelling is terugbetaald",
   orderRefundedBody: (store) =>
     `Een bestelling die ${store} volledig heeft terugbetaald, kan niet worden beoordeeld. Als je er een beoordeling over hebt geschreven, tellen de sterren daarvan niet meer mee.`,
-  expiredRecover: "Vraag je aankopen opnieuw op: meestal komt er binnen een minuut een nieuwe link per e-mail, en van daaruit kun je een beoordeling schrijven.",
+  expiredRecover: "Vraag je aankopen opnieuw op: we sturen je een nieuwe link per e-mail, en van daaruit kun je een beoordeling schrijven.",
   expiredReply: (store) => `Antwoord op de orderbevestiging die ${store} je heeft gemaild, dan komt het bij hen aan.`,
   wrongTitle: "Er ging iets mis aan onze kant",
   nothingChanged: "Er is niets gewijzigd. Probeer het zo opnieuw.",
@@ -2195,7 +2195,7 @@ const pt: GivingWords = {
   orderRefundedTitle: "Esta encomenda foi reembolsada",
   orderRefundedBody: (store) =>
     `Uma encomenda que ${store} reembolsou na totalidade não pode ser avaliada. Se escreveu uma avaliação a partir dela, as estrelas já não contam.`,
-  expiredRecover: "Peça novamente as suas compras: normalmente chega uma nova ligação por email em menos de um minuto, e pode avaliar a partir daí.",
+  expiredRecover: "Peça novamente as suas compras: é-lhe enviada uma nova ligação por email, e pode avaliar a partir daí.",
   expiredReply: (store) => `Responda à confirmação da encomenda que ${store} lhe enviou por email, e a mensagem chega-lhe.`,
   wrongTitle: "Algo correu mal do nosso lado",
   nothingChanged: "Nada foi alterado. Tente novamente daqui a pouco.",

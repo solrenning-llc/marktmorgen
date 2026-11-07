@@ -142,7 +142,7 @@ export function SignInForm({ handle = "" }: { handle?: string } = {}) {
           If <span className="font-medium text-ink [overflow-wrap:anywhere]">{sentTo || email}</span> can log in, a link and a 6-digit code are on their way from Marktmorgen.
           They work once, together, and stop working in 15 minutes.
         </p>
-        <p className="mt-3 text-sm text-ink-soft">Not there within a minute? Look in spam or promotions.</p>
+        <p className="mt-3 text-sm text-ink-soft">Not there? Look in spam or promotions.</p>
         {state.request ? <EmailCodeForm request={state.request} /> : null}
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           <button type="button" onClick={() => void send()} disabled={wait > 0} className="btn btn-secondary btn-sm">

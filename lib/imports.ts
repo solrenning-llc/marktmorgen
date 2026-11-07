@@ -1136,7 +1136,7 @@ export async function movedEmail(store: Store, job: ImportJob, email: string): P
     products.length === 1 ? "Yours there:" : "Yours there:",
     ...lines,
     "",
-    `To open ${products.length === 1 ? "it" : "any of it"}, go to ${base}/orders and type ${email}. A link to everything you have there arrives within a minute. There is no password to make.`,
+    `To open ${products.length === 1 ? "it" : "any of it"}, go to ${base}/orders and type ${email}. A link to everything you have there is emailed to you. There is no password to make.`,
     "",
     `You are getting this one email because ${store.name} moved your purchases. Nothing more is sent because of it.`,
     `Sent by Marktmorgen on behalf of ${store.name}.`,

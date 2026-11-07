@@ -68,6 +68,7 @@ export function CommunityPushToggle({
   }, [publicKey, scope]);
 
   async function turnOn() {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -115,23 +116,40 @@ export function CommunityPushToggle({
     }
   }
 
+  /**
+   * Off only when both ends are done: the server forgot this device and the
+   * browser dropped its subscription. The server goes first and the browser
+   * is unsubscribed only once it answered { ok: true }, so a failed request
+   * never leaves a device row behind (counted toward the member's devices)
+   * for a browser that no longer listens. Anything else keeps the switch on,
+   * says so, and Turn off can be pressed again (forgetting is idempotent).
+   */
   async function turnOff() {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
       const registration = await navigator.serviceWorker.getRegistration(scope);
       const subscription = await registration?.pushManager.getSubscription();
       if (subscription) {
-        await fetch("/api/store/community/push", {
+        const response = await fetch("/api/store/community/push", {
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ handle, action: "off", endpoint: subscription.endpoint }),
-        }).catch(() => {});
-        await subscription.unsubscribe().catch(() => {});
+        });
+        const data = (await response.json().catch(() => null)) as { ok?: unknown; devices?: unknown } | null;
+        if (!response.ok || data?.ok !== true) throw new Error("the device was not forgotten");
+        const gone = await subscription.unsubscribe();
+        if (gone !== true) throw new Error("the browser kept the subscription");
+        setCount(typeof data?.devices === "number" ? data.devices : Math.max(0, count - 1));
+      } else {
+        setCount(Math.max(0, count - 1));
       }
-      setCount(Math.max(0, count - 1));
       setState("off");
+    } catch {
+      setError(t.offFailed);
+      setState("on");
     } finally {
       setBusy(false);
     }
@@ -158,7 +176,7 @@ export function CommunityPushToggle({
         </p>
       ) : state === "on" ? (
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button type="button" className="cm-pill" disabled={busy} onClick={turnOff}>
+          <button type="button" className="cm-pill" aria-disabled={busy} onClick={turnOff}>
             {t.turnOff}
           </button>
           <span className="st-muted text-xs font-semibold">
@@ -167,13 +185,13 @@ export function CommunityPushToggle({
         </div>
       ) : (
         <div className="mt-3">
-          <button type="button" className="btn st-btn" disabled={busy} onClick={turnOn}>
+          <button type="button" className="btn st-btn" aria-disabled={busy} onClick={turnOn}>
             {busy ? t.wait : t.turnOn}
           </button>
         </div>
       )}
 
-      {error ? <p className="mt-2 font-semibold" style={{ color: "var(--st-text)" }}>{error}</p> : null}
+      {error ? <p className="mt-2 font-semibold" style={{ color: "var(--st-text)" }} role="alert">{error}</p> : null}
     </div>
   );
 }

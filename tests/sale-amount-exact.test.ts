@@ -79,11 +79,74 @@ const UNKNOWN: [string, { amount?: unknown; currency?: unknown }][] = [
   ["no currency named", { amount: 2900 }],
   ["an empty currency", { amount: 2900, currency: "" }],
   ["a currency that is not text", { amount: 2900, currency: 840 }],
+  // Claude 6 on #3058: Stripe names a currency by three lowercase letters, nothing else.
+  ["a currency that is not a code", { amount: 2900, currency: "not-a-code" }],
+  ["a currency of four letters", { amount: 2900, currency: "usdx" }],
 ];
+
+/**
+ * Replies swapped for the told mark's commands (nl:sale:told:): `exists` answers every EXISTS, `claim` every SET … NX
+ * (after running it when `landed`), `readBack` every GET. Undefined leaves the real reply.
+ */
+const swap: { exists?: unknown; claim?: unknown; landed?: boolean; readBack?: unknown } = {};
+const realPipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  const told = (c: (string | number)[]) => String(c[1] ?? "").startsWith("nl:sale:told:");
+  if (!commands.some(told)) return realPipeline(commands);
+  const isClaim = (c: (string | number)[]) => c[0] === "SET" && c.includes("NX");
+  const run = commands.filter((c) => !(told(c) && isClaim(c) && swap.claim !== undefined && !swap.landed));
+  const real = run.length ? await realPipeline(run) : [];
+  let at = 0;
+  return commands.map((c) => {
+    const skipped = told(c) && isClaim(c) && swap.claim !== undefined && !swap.landed;
+    const reply = skipped ? undefined : real[at++];
+    if (!told(c)) return reply;
+    if (c[0] === "EXISTS" && swap.exists !== undefined) return swap.exists;
+    if (isClaim(c) && swap.claim !== undefined) return swap.claim;
+    if (c[0] === "GET" && swap.readBack !== undefined) return swap.readBack;
+    return reply;
+  });
+}) as typeof redis.pipeline;
+const unswap = () => { for (const k of Object.keys(swap)) delete (swap as Record<string, unknown>)[k]; };
 
 beforeEach(() => {
   redis.clear();
   posted.length = 0;
+  unswap();
+});
+
+test("a paid checkout is told once: an exact claim of its mark, never EXISTS then SET (Claude 6 on #3058)", async () => {
+  const store = await chatStore();
+  const once = checkout({ amount_total: 2900, currency: "usd" });
+  await Promise.all([noteSales(store, [once]), noteSales(store, [once])]);
+  assert.equal(posted.length, 1, "the thanks page and the five-minute job at once: one line, not two");
+
+  posted.length = 0;
+  const again = checkout({ amount_total: 2900, currency: "usd" });
+  await noteSales(store, [again]);
+  swap.exists = "?";
+  await noteSales(store, [again]);
+  unswap();
+  assert.equal(posted.length, 1, "a sale already told is not told again on an answer in another shape");
+
+  posted.length = 0;
+  const unknown = checkout({ amount_total: 2900, currency: "usd" });
+  swap.claim = "?";
+  swap.readBack = 7;
+  assert.equal(await noteSales(store, [unknown]), 0, "a claim answered in no known shape, its read-back too: not told this run");
+  unswap();
+  assert.equal(posted.length, 0, "and nothing is posted on it");
+  assert.equal(await noteSales(store, [unknown]), 1, "a later healthy run tells it");
+  assert.equal(posted.length, 1, "once");
+
+  posted.length = 0;
+  const lost = checkout({ amount_total: 2900, currency: "usd" });
+  swap.claim = "?";
+  swap.landed = true;
+  assert.equal(await noteSales(store, [lost]), 1, "a claim that landed with its answer lost is read back as ours: told");
+  unswap();
+  assert.equal(await noteSales(store, [lost]), 0, "and not told again");
+  assert.equal(posted.length, 1, "one line in all");
 });
 
 test("a paid checkout: the amount Stripe charged, read exactly, or no figure at all", async () => {

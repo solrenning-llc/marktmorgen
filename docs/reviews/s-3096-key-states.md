@@ -21,7 +21,7 @@ Existing LOWs remain: webhooksView may throw and the studio hide the entire sect
 | webhooks-held-unknown-cap21 | only webhooksc5461c664b:21/10FAIL |21PASS |
 | webhooks-counted-marker26 | only webhooks540057cbf3:26/15FAIL |26PASS |
 
-These are SAME **final** test bytes on each old/new pair, with explicit module overlays. Not original RED20/17 or an old full checkout. Final states test includes the later unknown-hold expectation, hence observed18, not the initial17 failures. No assertions changed. Hashes:
+These are SAME **final** test bytes on each old/new pair, with explicit module overlays. Not original RED20/17 or an old full checkout. The final states test includes later unknown-hold expectations; this explicit five-module overlay produced18 failures. The precise reason for the difference from the initial17 is not separately established here. Do not attribute this count to the initial RED commit. No assertions changed. Hashes:
 - states633205cc4dd9c0568b02ab3097a03cb6bd1f5af489903a7d83e2b8e92eb22554
 - hold6d1b89ea5bc68bce1c11e92f534cffd8ebb74ae30dd44bfd8fd861b45d914099
 - held4dde95c114c972adfc227626f4b7237daaebfa96c280e04ab870b07a68bdcfd7

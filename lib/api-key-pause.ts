@@ -504,16 +504,16 @@ export async function turnKeyOn(store: Store, email: string, role: Role, id: str
   return (await swapHolds(store.sid, [id], "vouched", [key.hold])).length ? "ok" : "not_paused";
 }
 
-export type Revoke = "ok" | "unknown" | "owner_only";
+export type Revoke = "ok" | "unknown" | "owner_only" | "revoke_unconfirmed";
 
 /** Revokes a key; the endpoints it added stop with it (read at every send). A key whose maker left the team is the owner's alone to revoke. */
 export async function revokeChecked(store: Store, role: Role, id: string): Promise<Revoke> {
   if (!store.sid) return "unknown";
-  const [keys, team] = await Promise.all([keyRecords(store.sid), teamNow(store)]);
+  const [keys, team] = await Promise.all([keyRecords(store.sid, true), teamNow(store)]);
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
   if (pauseWhy(store.sid, key.maker, key.hold, team.members, key.write, team.rule) === "left" && role !== "owner") return "owner_only";
-  return (await revokeKey(store.sid, id)) ? "ok" : "unknown";
+  return (await revokeKey(store.sid, id)) ? "ok" : "revoke_unconfirmed";
 }
 
 /**

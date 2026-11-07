@@ -19,6 +19,7 @@ import { BodyTooLarge, limited, withinLimit } from "@/lib/request-guard";
 import { giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { API_READ_PAUSED_WORDS, API_WRITE_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /** Requests one key may make in a minute. Generous for a sync, a wall for a runaway loop. */
 export const API_RATE = 120;
@@ -137,7 +138,11 @@ async function apiKeyed(
       "WWW-Authenticate": 'Bearer realm="Marktmorgen API"',
     });
   if (!presented) return unauthorized();
-  const found = await resolveKey(presented);
+  let found: Awaited<ReturnType<typeof resolveKey>>;
+  try { found = await resolveKey(presented); } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    return apiError(503, "unavailable", "The key could not be checked just now. Try again in a moment.");
+  }
   // Missing, malformed, unknown and revoked all get the same answer, so the
   // API cannot be used to learn which keys ever existed.
   if (!found) return unauthorized();

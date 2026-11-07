@@ -105,7 +105,7 @@ const ref = (v: unknown, what: string): string => {
   if (typeof id !== "string" || !id) throw new UnreadInvoiceError(what);
   return id;
 };
-/** An object Stripe nests a reference in (`parent` and its details): the object, or undefined when it gave none (absent or null). Anything else throws. */
+/** An object Stripe nests what a line is read by in (`parent` and its details, a price, its recurring terms, decimal pricing, a period): the object, or undefined when it gave none (absent or null). Anything else throws. */
 const obj = <T,>(v: T, what: string): NonNullable<T> | undefined => {
   if (v === undefined || v === null) return undefined;
   if (typeof v !== "object" || Array.isArray(v)) throw new UnreadInvoiceError(what);
@@ -134,16 +134,17 @@ export function pricesFrom(invoices: Invoice[], subs: Map<string, Sub>): Map<str
       const amount = num(line.amount, "an invoice line's amount");
       if (amount === null) throw new UnreadInvoiceError("an invoice line with no amount");
       if (amount < 0) continue;
-      const unit = num(line.price?.unit_amount, "an invoice line's price") || num(line.pricing?.unit_amount_decimal, "an invoice line's decimal price") || 0;
+      const price = obj(line.price, "an invoice line's price");
+      const unit = num(price?.unit_amount, "an invoice line's price") || num(obj(line.pricing, "an invoice line's decimal pricing")?.unit_amount_decimal, "an invoice line's decimal price") || 0;
       const proration = line.proration === true || details(line)?.proration === true;
       // A line without its price says only what a part of a period cost; that is not a month's worth.
       if (!unit && proration) continue;
       const quantity = num(line.quantity, "an invoice line's quantity") || 1;
-      const recurring = line.price?.recurring;
+      const recurring = obj(price?.recurring, "an invoice line's recurring terms");
       const interval = typeof recurring?.interval === "string" ? recurring.interval : sub.interval;
       const count = num(recurring?.interval_count, "an invoice line's interval count") || (typeof recurring?.interval === "string" ? 1 : sub.count);
       const value = unit ? perMonth(unit * quantity, interval, count) : perMonth(amount, sub.interval, sub.count);
-      const at = num(line.period?.start, "an invoice line's period") || num(invoice.created, "an invoice's date");
+      const at = num(obj(line.period, "an invoice line's period")?.start, "an invoice line's period") || num(invoice.created, "an invoice's date");
       if (!at) throw new UnreadInvoiceError("an invoice line with no time");
       out.set(id, [...(out.get(id) ?? []), { at, value }]);
     }

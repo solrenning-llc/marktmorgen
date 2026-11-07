@@ -140,8 +140,11 @@ async function main(): Promise<void> {
     const before = room();
     swap = { on: "SREM", value };
     is(`${name}: said as unknown`, await press(), "unknown");
-    // The stub did take it out: its room stays counted (more, never less), and the next press likes it again.
-    is(`${name}: no room given back on a guess`, room(), before);
+    // The stub did take it out: the like's room stays counted (more, never less), and the next press likes it again.
+    // Its trace entry's SREM answered its own exact 1 (except when the whole pipeline came back short), so that room
+    // is given back: it was taken out, and somebody paid for it.
+    const trace = name === "missing from the pipeline" ? before[1] : before[1] - TRACE_ENTRY.bytes;
+    is(`${name}: no room given back on a guess`, room(), [before[0], trace]);
   }
 
   done();

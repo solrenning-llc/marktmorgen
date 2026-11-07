@@ -848,16 +848,43 @@ export async function toggleLike(id: string, post: string, who: string, room: Da
   return toggleIn(id, likesKey(id, post), `l:${post}`, post, who, room);
 }
 
-/** Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after. */
+/** A set command's answer: exactly 0 or 1, anything else unknown (CX-123 rule 24). */
+function setReply(reply: unknown): 0 | 1 | null {
+  const n = countOf(reply);
+  return n === 0 || n === 1 ? n : null;
+}
+
+/**
+ * Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after.
+ * Each answer is read in its exact shape: an unknown "liked already?" takes nothing, writes nothing and throws
+ * UnknownReplyError; an unknown write keeps what may be written and the room it took (never deleted or given back on a
+ * guess) and throws, and the next press reads the like as it is. Room is given back only for what this press took
+ * and did not use, and for an entry its SREM took out (exactly 1) that somebody paid for.
+ */
 async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean> {
-  const [held] = await redisPipeline([["SISMEMBER", key, who]]);
+  const held = setReply(repliesFor(await redisPipeline([["SISMEMBER", key, who]]), 1)?.[0]);
+  if (held === null) throw new UnknownReplyError("whether a member liked something");
   // The like and its entry in the member's trace (traceKey) take their room first.
-  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
-  const [added] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
-  if (Number(added) === 1) return true;
-  await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
-  const times = Number(held) === 1 ? 1 : 2;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
+  if (held === 0) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
+  const wrote = repliesFor(await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]), 2);
+  const added = setReply(wrote?.[0]);
+  if (added === null) throw new UnknownReplyError("a like");
+  if (held === 0 && added === 1) return true;
+  // Taken back: a like that was there, or one another press wrote first (held 0, added 0), or one this press put back
+  // after another press took it out (held 1, added 1), which nobody paid for and is taken out with nothing given.
+  const removed = repliesFor(await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]), 2);
+  const like = setReply(removed?.[0]);
+  const trace = setReply(removed?.[1]);
+  const paid = !(held === 1 && added === 1);
+  const unused = held === 0 ? 1 : 0;
+  const likeBack = unused + (like === 1 && paid ? 1 : 0);
+  const traceBack = unused + (trace === 1 && paid ? 1 : 0);
+  const back = [
+    ...(likeBack ? [{ slot: POST_SLOT(post), bytes: likeBack * SET_ENTRY_BYTES }] : []),
+    ...(traceBack ? [{ ...TRACE_ENTRY, bytes: traceBack * TRACE_ENTRY.bytes }] : []),
+  ];
+  if (back.length) await giveData(room, back);
+  if (like === null || trace === null) throw new UnknownReplyError("a like taken back");
   return false;
 }
 

@@ -17,7 +17,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, storeForEmail } from "@/lib/store";
 import { setSoon } from "@/lib/waitlist";
-import { preorderViews, preordersOf } from "@/lib/preorders";
+import { preorderViews, preordersOf, setExpectedDay } from "@/lib/preorders";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { COPIERS } from "@/lib/person-copy";
 import type { ErasureScope } from "@/lib/person-erasure";
@@ -46,6 +46,22 @@ async function withBent<T>(command: string, key: string, reply: unknown, work: (
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await original(commands);
     return replies.map((r, i) => (commands[i][0] === command && commands[i][1] === key ? reply : r));
+  }) as typeof redis.pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+/** Each `[command, key]` given is never run and answers `reply` while `work` runs (lost in transit); everything else is real. */
+async function withLost<T>(gone: [string, string][], reply: unknown, work: () => Promise<T>): Promise<T> {
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const lost = (c: (string | number)[]) => gone.some(([command, key]) => c[0] === command && c[1] === key);
+    const kept = commands.filter((c) => !lost(c));
+    const replies = kept.length ? await original(kept) : [];
+    let next = 0;
+    return commands.map((c) => (lost(c) ? reply : replies[next++]));
   }) as typeof redis.pipeline;
   try {
     return await work();
@@ -84,6 +100,14 @@ const DAY_SHAPES: [string, unknown][] = [
   ["text", "OK"],
   ["an odd list", ["p"]],
   ["a list with a number in it", ["p", 7]],
+];
+
+const WRITE_SHAPES: [string, unknown][] = [
+  ["no reply", undefined],
+  ["text", "OK"],
+  ["a number that is not one write", 2],
+  ["a negative number", -1],
+  ["a list", [1]],
 ];
 
 async function main(): Promise<void> {
@@ -142,6 +166,45 @@ async function main(): Promise<void> {
     is(`(${label}) preordersOf says it does not know, never "no pre-orders"`, await withBent("HGETALL", aKey, reply, () => rejection(() => preordersOf(shop, [a, b], BUYER))), "UnknownReplyError");
     const scope = await scopeOf([a, b]);
     is(`(${label}) so the copy is not made without them`, await withBent("HGETALL", aKey, reply, () => rejection(() => COPIERS["lib/preorders.ts"](scope))), "UnknownReplyError");
+  }
+
+  // The independent review of #3005 (LEVE): "Saved." rested on an HSET/HDEL whose reply was never checked.
+  const { pid: c, key: cKey } = await setUp("Course C");
+  const dayOf = async (pid: string) => (await redis.pipeline([["HGET", dayKey, pid]]))[0];
+  const stopDay = (pid: string) =>
+    preorderRoute(new NextRequest(`${ORIGIN}/api/store/preorder`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ id: pid, day: null }) }));
+  const failure = async (work: () => Promise<unknown>) => {
+    try {
+      await work();
+      return "resolved";
+    } catch (error) {
+      return error instanceof Error ? error.name : String(error);
+    }
+  };
+  for (const [label, reply] of WRITE_SHAPES) {
+    part(`Unconfirmed (${label}): the HSET of the expected day answers in another shape`);
+    const shop = await store();
+    is(`(${label}) setExpectedDay says the day is not confirmed, never "saved"`, await withLost([["HSET", dayKey]], reply, () => failure(() => setExpectedDay(shop, c, DAY))), "PreorderDayUnconfirmed");
+    const switched = await withLost([["HSET", dayKey]], reply, () => switchDay(c));
+    is(`(${label}) the switch answers 502 "day_unconfirmed", never ok`, await answer(switched), [502, "day_unconfirmed"]);
+    const both = await withLost([["HSET", dayKey], ["HVALS", cKey]], reply, () => switchDay(c));
+    is(`(${label}) with its pre-orders unread too, still 502 "day_unconfirmed", never "Saved."`, await answer(both), [502, "day_unconfirmed"]);
+    is(`(${label}) and the day was indeed not saved`, await dayOf(c), null);
+  }
+  part("Healthy control: the day is saved, moved and stopped with a confirmed write");
+  is("taking pre-orders saves the day", [await answer(await switchDay(c)), await dayOf(c)], [[200, "ok"], DAY]);
+  is("moving to the same day again (HSET answers 0) is still saved", await answer(await switchDay(c)), [200, "ok"]);
+  for (const [label, reply] of WRITE_SHAPES) {
+    part(`Unconfirmed (${label}): the HDEL that stops pre-orders answers in another shape`);
+    const stopped = await withLost([["HDEL", dayKey]], reply, () => stopDay(c));
+    is(`(${label}) the switch answers 502 "day_unconfirmed", never ok`, await answer(stopped), [502, "day_unconfirmed"]);
+    is(`(${label}) and the day still stands`, await dayOf(c), DAY);
+  }
+  is("control: stopping with a confirmed HDEL answers ok and lets the day go", [await answer(await stopDay(c)), await dayOf(c)], [[200, "ok"], null]);
+  {
+    const panel = readFileSync("components/waitlist-panel.tsx", "utf8");
+    is("the panel has its own words for an unconfirmed day, not \"Saved.\"", /day_unconfirmed: "(?!Saved)/.test(panel), true);
+    is("and shows nothing it cannot vouch for after one", /answer\.error === "preorders_unread" \|\| answer\.error === "day_unconfirmed"/.test(panel), true);
   }
 
   part("The studio says the pre-orders could not be read");

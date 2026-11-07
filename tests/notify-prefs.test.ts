@@ -16,9 +16,12 @@
  *   - the route saves only for the signed-in owner (the emails are the
  *     owner's, and some are how an owner would notice a teammate), refuses an
  *     always-on or unknown event with its own error and changes nothing then,
- *     and can undo the weekly email's stop link, which stops all of these;
+ *     and can undo the weekly email's stop link, which stops all of these,
+ *     said as done only when Redis's answers, read exactly, show it (an
+ *     unknown answer is "not_changed", 503);
  *   - the studio page names what is always on and why, says when the stop
- *     link or a store not taking payments makes the choices do nothing yet,
+ *     link or a store not taking payments makes the choices do nothing yet
+ *     (a stop link it could not read is said as not read, never hidden),
  *     and never disables the focused button.
  *
  * Rule 23: this replaces the red test of 2b5cd9642, written for a separate
@@ -29,6 +32,9 @@
  * look, unconfirmed write) went with it.
  */
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NotifyPrefsPanel } from "@/components/notify-prefs-panel";
 import { NextRequest } from "next/server";
 import { ALWAYS_ON_ROWS, OPTIONAL_EVENTS, OPTIONAL_ROWS, keptOff, notifyPrefsPath, parseOff, wantsAlertEmail } from "@/lib/notify-prefs-rules";
 import { checkAlerts } from "@/lib/store-alerts";
@@ -38,6 +44,7 @@ import { setSalesGoal } from "@/lib/sales-goal";
 import { claimHandle, ensureStatsId, ensureStoreId, setAlertEmailsOff, setChatSales, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { setWeeklyOff, weeklyOff } from "@/lib/stats-report";
+import * as statsReport from "@/lib/stats-report";
 import { POST as prefsRoute } from "@/app/api/store/notify-prefs/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -192,6 +199,62 @@ async function main(): Promise<void> {
   await setWeeklyOff("notifyharbor", true);
   const restarted = await post({ restart: true });
   is("the weekly stop link undone from the page", [restarted.body, await weeklyOff("notifyharbor")], [{ ok: true, restarted: true }, false]);
+
+  part("Start these emails again: said only when Redis's answers show it happened (review of #3013)");
+  // The SREM's reply was not read: an answer of [] or ["x"] left the stop link in place while the page said "Started again".
+  const original = redis.pipeline.bind(redis);
+  const withReply = async (reply: (commands: (string | number)[][]) => unknown[] | null) => {
+    redis.pipeline = (async (commands: (string | number)[][]) => reply(commands) ?? original(commands)) as typeof redis.pipeline;
+    try {
+      return await post({ restart: true });
+    } finally {
+      redis.pipeline = original;
+    }
+  };
+  const onOff = (commands: (string | number)[][], command: string) => commands.length === 1 && commands[0][0] === command && commands[0][1] === "nl:weekly:off";
+  for (const reply of [[], ["x"]]) {
+    await setWeeklyOff("notifyharbor", true);
+    const lost = await withReply((commands) => (onOff(commands, "SREM") ? reply : null));
+    is(`the SREM answered ${JSON.stringify(reply)}: not changed yet, and the stop link still holds`, [lost.status, lost.body.ok, lost.body.error, lost.cache, await weeklyOff("notifyharbor")], [503, false, "not_changed", "no-store", true]);
+  }
+  await setWeeklyOff("notifyharbor", true);
+  const unread = await withReply((commands) => (onOff(commands, "SISMEMBER") ? ["1"] : null));
+  is("the stop link's state read back in an unknown shape: not said as started", [unread.status, unread.body.ok, unread.body.error], [503, false, "not_changed"]);
+  await setWeeklyOff("notifyharbor", true);
+  const again = await post({ restart: true });
+  is("control: a plain SREM is said as started, and is", [again.body, await weeklyOff("notifyharbor")], [{ ok: true, restarted: true }, false]);
+  const panelSource = readFileSync("components/notify-prefs-panel.tsx", "utf8");
+  is("the panel says not changed yet in its own words", panelSource.includes('case "not_changed":') && panelSource.includes("Not changed yet"), true);
+
+  part("The studio page never hides the stop link when it could not be read");
+  const pageSource = readFileSync("app/studio/notifications/page.tsx", "utf8");
+  is("no failed read taken as not stopped", pageSource.includes(".catch(() => false)"), false);
+  const stopState = (statsReport as Record<string, unknown>).weeklyStopState as undefined | ((handle: string) => Promise<boolean | "unknown">);
+  is("lib/stats-report.ts reads the stop link exactly (weeklyStopState)", typeof stopState, "function");
+  if (stopState) {
+    await setWeeklyOff("notifyharbor", true);
+    is("stopped, read exactly", await stopState("notifyharbor"), true);
+    for (const reply of [[], ["1"], [2], null]) {
+      redis.pipeline = (async (commands: (string | number)[][]) => (onOff(commands, "SISMEMBER") ? reply : original(commands))) as typeof redis.pipeline;
+      try {
+        is(`a SISMEMBER answer of ${JSON.stringify(reply)} is unknown, never not stopped`, await stopState("notifyharbor"), "unknown");
+      } finally {
+        redis.pipeline = original;
+      }
+    }
+    redis.pipeline = (async () => {
+      throw new Error("synthetic lost reply");
+    }) as typeof redis.pipeline;
+    try {
+      is("a failed read is unknown, never not stopped", await stopState("notifyharbor"), "unknown");
+    } finally {
+      redis.pipeline = original;
+    }
+    await setWeeklyOff("notifyharbor", false);
+    is("not stopped, read exactly", await stopState("notifyharbor"), false);
+  }
+  const unknownPanel = renderToStaticMarkup(createElement(NotifyPrefsPanel, { off: [], stopped: "unknown" as never }));
+  is("not read: the panel says so, with the way to start them again", [unknownPanel.includes("We could not read whether"), unknownPanel.includes("Start these emails again")], [true, true]);
 
   part("The studio page");
   const page = readFileSync("app/studio/notifications/page.tsx", "utf8");

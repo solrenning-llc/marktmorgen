@@ -580,6 +580,35 @@ export async function readCourses(ids: string[]): Promise<Map<string, Course>> {
 }
 
 /**
+ * readCourses, read exactly (rule 24), for a person's deletion
+ * (lib/person-erasure.ts erasureScope): a course is left out only when Redis
+ * answers the exact null for it. A reply that is not a whole list of the ids
+ * asked, or an outline kept but unreadable, throws UnknownReply, so the
+ * deletion never takes an unknown read for "no such course" and answers done
+ * while the person's records in that course are still kept.
+ */
+export async function readCoursesExact(ids: string[]): Promise<Map<string, Course>> {
+  const what = "the course outlines a person's deletion goes through";
+  const found = new Map<string, Course>();
+  const valid = [...new Set(ids.filter((id) => COURSE_ID_PATTERN.test(id)))];
+  if (valid.length === 0) return found;
+  if (!isRedisConfigured()) throw new UnknownReply(what);
+  // A hundred at a command, as readCourses: the same commands, so the deletion's counted cost does not move.
+  for (let i = 0; i < valid.length; i += 100) {
+    const some = valid.slice(i, i + 100);
+    const [rows] = exactReplies(await redisPipeline([["MGET", ...some.map(courseKey)]]), 1, what);
+    const each = exactReplies(rows, some.length, what);
+    some.forEach((id, n) => {
+      if (each[n] === null) return;
+      const course = parseCourse(each[n]);
+      if (!course || course.id !== id) throw new UnknownReply(what);
+      found.set(id, course);
+    });
+  }
+  return found;
+}
+
+/**
  * Where a course is counted in the store's data room (lib/store-data.ts):
  * its outline in one slot, its lessons' text in another, each lesson's words
  * as the community's search may index them (lib/community-index.ts) included.

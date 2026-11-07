@@ -18,6 +18,7 @@
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import { classifySource, sourceAlias } from "@/lib/source-rules";
 import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest, touchFrom } from "@/lib/visit-channel";
@@ -288,6 +289,14 @@ for (const tag of TAGS) {
 test("the studio's short links: ordinary campaigns add up as before", () => {
   assert.deepEqual(resultsByCampaign([{ campaign: "a", visits: 1, sales: 0, cents: 0 }, { campaign: "a", visits: 2, sales: 1, cents: 500 }]), { a: { visits: 3, sales: 1, cents: 500 } });
   assert.deepEqual(resultsByCampaign([]), {});
+});
+
+// The studio page itself adds the short links' results up with resultsByCampaign (review of #2905, LEVE): a merge
+// that kept a reduce into a plain {} would bring the "__proto__" campaign back on the page with no other test red.
+test("the studio page adds the short links' results up with resultsByCampaign, never into a plain {}", () => {
+  const page = readFileSync("app/studio/page.tsx", "utf8");
+  assert.ok(page.includes("resultsByCampaign(numbers.posts?.d90 ?? [])"));
+  assert.equal(page.includes("all[row.campaign]"), false);
 });
 
 test("the weekly email names a channel \"__proto__\" or \"constructor\" by its own word", async () => {

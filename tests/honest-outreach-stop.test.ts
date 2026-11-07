@@ -18,8 +18,20 @@ const UNKNOWN = "This link is not one we know";
 const UNREAD = "could not be read just now";
 const TOKEN = "a".repeat(32);
 
-async function page(token = TOKEN): Promise<string> {
-  return renderToStaticMarkup(await OutreachStopPage({ params: Promise.resolve({ token }), searchParams: Promise.resolve({}) }));
+async function page(token = TOKEN, query: Record<string, string> = {}): Promise<string> {
+  return renderToStaticMarkup(await OutreachStopPage({ params: Promise.resolve({ token }), searchParams: Promise.resolve(query) }));
+}
+
+/** Runs `work` with the link's GET answered `reply`, as a reply in an unknown shape would be. */
+async function linkAnswering<T>(reply: unknown[], work: () => Promise<T>): Promise<T> {
+  const original: Pipeline = redis.pipeline;
+  redis.pipeline = (async (commands: Commands) =>
+    commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === linkKey(TOKEN) ? [...reply] : original.call(redis, commands)) as Pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
 }
 
 async function failing<T>(work: () => Promise<T>): Promise<T> {
@@ -82,6 +94,29 @@ async function main(): Promise<void> {
   is("the stop state's read failing: no stop is said to hold", STOPPED_CLAIMS.some((claim) => state.includes(claim)), false);
   is("control: healthy, both stop buttons", scopes(healthy), ["all", "store"]);
   is("control: a link that is not there offers no button", scopes(unknown), []);
+
+  part("A stop just saved is never followed by 'Nothing was changed' (Claude 5 on #2968, MEDIUM 1)");
+  const savedUnread = await stateFailing(() => page(TOKEN, { done: "1" }));
+  is("saved, then the state unread: never 'Nothing was changed'", savedUnread.includes("Nothing was changed"), false);
+  is("saved, then the state unread: said as saved", savedUnread.includes("Your request to stop these emails was saved"), true);
+  const savedHealthy = await page(TOKEN, { done: "1" });
+  is("control: saved and read, the store cannot write again", savedHealthy.includes("cannot write to you again"), true);
+
+  part("A press that did not go through is said so (Claude 5 on #2968, MEDIUM 2)");
+  const notSaved = await page(TOKEN, { done: "0" });
+  is("not saved: said so, as an alert", [notSaved.includes("did not go through"), notSaved.includes('role="alert"')], [true, true]);
+  is("not saved: both stop buttons to press again", scopes(notSaved), ["all", "store"]);
+  is("not saved: never the same page as a first visit", notSaved === healthy, false);
+  const notSavedUnread = await stateFailing(() => page(TOKEN, { done: "0" }));
+  is("not saved, then the state unread: said so, with both buttons", [notSavedUnread.includes("did not go through"), scopes(notSavedUnread)], [true, ["all", "store"]]);
+
+  part("The link read in an unknown shape is never 'not one we know' (Claude 5 on #2968, MEDIUM 3)");
+  for (const [label, reply] of [["no reply", []], ["a number", [7]], ["an object", [{ x: 1 }]], ["text that is not a link", ["{"]]] as [string, unknown[]][]) {
+    const odd = await linkAnswering(reply, () => page());
+    is(`${label}: not 'not one we know', said as not read, both buttons`, [odd.includes(UNKNOWN), odd.includes(UNREAD), scopes(odd)], [false, true, ["all", "store"]]);
+  }
+  const gone = await linkAnswering([null], () => page());
+  is("control: a confirmed nil is still not one we know", [gone.includes(UNKNOWN), scopes(gone)], [true, []]);
   done();
 }
 

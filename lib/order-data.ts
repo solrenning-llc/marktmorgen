@@ -256,7 +256,8 @@ function replyFits(command: Command, reply: unknown): boolean {
 /**
  * What one script answered: what it charged, and each command's reply. Throws for a malformed call, a refused
  * command, or a reply not in its exact shape (Codex G on #2719: a charge that is not a whole count, or a command
- * answered null, is not a write that landed, so no caller may take it as done).
+ * answered null, is not a write that landed, so no caller may take it as done). An HSETNX answers exactly 0 or 1 (Codex G on #2809;
+ * CX-123 rule 24), which replyFits holds with every other command.
  */
 function readScript(reply: unknown, commands: Command[]): { charged: number; replies: unknown[] } {
   // What was charged is the script's Lua integer, which Redis and Upstash's REST API answer as a number: a whole
@@ -287,6 +288,7 @@ export async function orderWriteCharged(owner: DataOwner, commands: Command[]): 
   const replies: unknown[] = [];
   for (let at = 0; at < commands.length; at += ORDER_WRITE_MAX) {
     const some = commands.slice(at, at + ORDER_WRITE_MAX);
+    // Exactly one reply for the one script sent (Codex G on #2809): an answer of another length is unknown, never its first item.
     const reply = repliesFor(await redisPipeline([scriptOf(room, some)]), 1)?.[0];
     const read = readScript(reply, some);
     charged += read.charged;

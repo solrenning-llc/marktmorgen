@@ -122,9 +122,11 @@ export async function openReport(token: string): Promise<{ report: Report; store
  * The takedowns of this notice whose notice to the creator has not been confirmed as sent (the press that took it
  * down could not send it), with what was taken down and the action that sends it (sendOwedNotice). The statement of
  * reasons is owed once the content was restricted, even if it is up again since (EU DSA Art. 17(1)), so content that
- * is up again (a store switched back on, a product published again) stays listed, marked `up`. Every reply is read in
- * its exact shape (rule 24; Claude 6 on #3087): a read that fails or answers in another shape throws, so an unknown is
- * never "nothing owed".
+ * is up again (a store switched back on, a product published again) stays listed, marked `up`. A takedown whose
+ * steps do not say it landed (`applied`) is listed only when the content is down now; while it is up it was never
+ * confirmed as taken down, so it is not listed as such (Claude 6, focal 6713440905). Every reply is read in its exact
+ * shape (rule 24; Claude 6 on #3087): a read that fails or answers in another shape throws, so an unknown is never
+ * "nothing owed".
  */
 export async function unsentNotices(report: Pick<Report, "id">, store: Store): Promise<{ action: TakedownAction; what: string; up?: true }[]> {
   const replies = repliesFor(await redisPipeline([["SMEMBERS", owedKey(report.id)]]), 1);
@@ -136,8 +138,10 @@ export async function unsentNotices(report: Pick<Report, "id">, store: Store): P
     if (!action || (action.type === "store" && !action.on)) continue;
     const steps = await readSteps(noticeKey(report.id, part));
     if (!steps || steps.sent) continue;
+    // Not confirmed as taken down: whether it is down now decides, read exactly (an unknown throws).
+    if (!steps.applied && (await stillUp(store, action, ""))) continue;
     // Only a note for the operator: when whether it is up cannot be read, the page claims nothing about it.
-    const up = await stillUp(store, action, "").then(Boolean, () => false);
+    const up = steps.applied && (await stillUp(store, action, "").then(Boolean, () => false));
     owed.push(up ? { action, what: steps.what, up: true } : { action, what: steps.what });
   }
   return owed;
@@ -191,7 +195,11 @@ const noticeKey = (report: string, part: string) => reportKey(`${report}:n:${par
 const owedKey = (report: string) => reportKey(`${report}:n`);
 /** The most takedowns of one notice a page lists as owed: one notice names one address, so a handful at most. */
 const MAX_OWED = 50;
-type Steps = { what: string; howLong: string; at: string; noted: boolean; counted: boolean; sent: boolean };
+/**
+ * `applied`: the content was confirmed taken down (apply returned true and this mark was confirmed). Steps written
+ * before this field existed have none, and are read as not confirmed.
+ */
+type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean };
 
 /**
  * A takedown's steps, or null only when Redis itself answers null (no steps). A pipeline that answers nothing, or a
@@ -206,10 +214,10 @@ async function readSteps(key: string): Promise<Steps | null> {
   const value: unknown = JSON.parse(raw);
   const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   if (!v || typeof v.what !== "string" || !v.what || typeof v.howLong !== "string" || typeof v.at !== "string" || !/^\d+$/.test(v.at) ||
-      typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean") {
+      (v.applied !== undefined && typeof v.applied !== "boolean") || typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean") {
     throw new Error("a takedown's steps could not be read");
   }
-  return { what: v.what, howLong: v.howLong, at: v.at, noted: v.noted, counted: v.counted, sent: v.sent };
+  return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent };
 }
 
 /**
@@ -320,17 +328,33 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
 
 /**
  * The email still owed for a takedown of this notice, from the page's "Send the email to the creator" (Claude 6 on
- * #3087, MEDIUM 3): it only finishes the kept steps (the strike if not yet written, the count, the statement of
- * reasons in the kept words, under the same idempotency key) and never takes anything down, so content the operator
- * switched back on, or the creator published again, stays up. The statement is still sent then: it is owed once the
- * restriction was imposed, even if it was lifted since (EU DSA Art. 17(1)). Nothing kept, or a notice already sent,
- * is null.
+ * #3087, MEDIUM 3): it only finishes the kept steps and never takes anything down, so content the operator switched
+ * back on, or the creator published again, stays up. Finishing writes the original takedown's strike (dated from its
+ * `at`) when it was not written yet, the count, and the statement of reasons in the kept words, under the same
+ * idempotency key. The statement is still sent after a restore: it is owed once the restriction was imposed, even if
+ * it was lifted since (EU DSA Art. 17(1)). Nothing kept, or a notice already sent, is null.
+ *
+ * Steps not confirmed as applied (Claude 6, focal 6713440905): they are written before the content is touched, so they
+ * say a takedown started, not that it is down. The content's state now decides, read exactly (an unknown throws):
+ * down, the write landed, so it is marked applied and finished; up, it is "unconfirmed": no strike, no email, and the
+ * takedown is no longer owed. That includes the case nobody can tell apart from it, a write that landed without being
+ * confirmed and content that went back up before this press: we could not confirm it was taken down, so we say so and
+ * tell the creator nothing that may be false.
  */
-export async function sendOwedNotice(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string): Promise<string | null> {
+export async function sendOwedNotice(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string): Promise<{ done: string } | "unconfirmed" | null> {
   return underLock(report, store, action, async (now, part, key) => {
-    const kept = await readSteps(key);
+    let kept = await readSteps(key);
     if (!kept || kept.sent) return null;
-    return complete(report, now, action, origin, part, key, kept);
+    if (!kept.applied) {
+      if (await stillUp(now, action, origin)) {
+        const replies = repliesFor(await redisPipeline([["SREM", owedKey(report.id), part]]), 1);
+        if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a notice's owed takedowns write");
+        return "unconfirmed" as const;
+      }
+      kept = { ...kept, applied: true };
+      await writeSteps(key, kept);
+    }
+    return { done: await complete(report, now, action, origin, part, key, kept) };
   });
 }
 
@@ -359,7 +383,7 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
   const up = await stillUp(store, action, origin);
   let steps: Steps;
   if (up) {
-    steps = { ...up, at: String(Date.now()), noted: false, counted: false, sent: false };
+    steps = { ...up, at: String(Date.now()), applied: false, noted: false, counted: false, sent: false };
     // The recovery record first, each write confirmed, so nothing is taken down without it (Codex P on #3087).
     await writeSteps(key, steps);
     // Owed from here until its notice goes out, so a page opened again can still send it (unsentNotices).
@@ -368,11 +392,19 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
       await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
       return null;
     }
+    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905).
+    steps = { ...steps, applied: true };
+    await writeSteps(key, steps);
   } else {
-    // Down already: only a takedown of this notice whose steps are not all done is left to finish.
+    // Down already: only a takedown of this notice whose steps are not all done is left to finish. Steps not marked
+    // applied, with the content down now, mean the write landed without its mark being confirmed.
     const kept = await readSteps(key);
     if (!kept || kept.sent) return null;
     steps = kept;
+    if (!steps.applied) {
+      steps = { ...steps, applied: true };
+      await writeSteps(key, steps);
+    }
   }
   return complete(report, store, action, origin, part, key, steps);
 }

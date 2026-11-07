@@ -10,12 +10,14 @@
  * PDF with a guessed number: the route answers 503.
  * Synthetic data only: Stripe and the database are stand-ins.
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { PDFDocument } from "pdf-lib";
 import {
   RECEIPT_NUMBER,
   RECEIPT_NUMBER_BYTES,
   RECEIPT_NUMBER_COMMANDS,
+  RECEIPT_NUMBER_MAX,
   RECEIPT_SLOT,
   assignReceiptNumber,
   receiptCounterKey,
@@ -25,7 +27,8 @@ import {
 } from "@/lib/receipt-number";
 import { RECEIPT_PDF_MAX_BYTES, RECEIPT_PDF_UNITS, receiptFrom, receiptTexts, receiptTitle } from "@/lib/receipt-pdf";
 import { claimHandle, ensureStatsId, setMailSettings, setStripeAccount, storeForEmail } from "@/lib/store";
-import { dataKey } from "@/lib/store-data";
+import { TAKE_DATA, dataKey } from "@/lib/store-data";
+import * as storeData from "@/lib/store-data";
 import { CLOSING, COUNTED_FAMILIES } from "@/lib/data-families";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { GET as receiptFile } from "@/app/api/store/receipt-pdf/route";
@@ -195,6 +198,67 @@ async function main(): Promise<void> {
     is(`${family} is erased with the store`, CLOSING[family], { how: "erase" });
   }
   is("the script reads first and writes only a sale not yet numbered", RECEIPT_NUMBER.indexOf("HGET', KEYS[2]") < RECEIPT_NUMBER.indexOf("INCR"), true);
+
+  part("A store idle for years: one numbering clears every expired month, in two commands");
+  // Review of #3001 (M1): the data room's script cleared every expired month in one call, two commands each, and a
+  // workflow's run is kept well past 400 days (lib/flows.ts, runGoneBy), so a store idle long enough lists dozens of
+  // expired months: 13 measured 37 commands on a real Redis, past RECEIPT_NUMBER_COMMANDS. Forty listed here.
+  // Changed (rule 23): b518e114f bounded it by clearing at most two months a call, which kept the rest counted, so the
+  // room looked fuller than it was and refused writes that fitted (scripts/test_order_admission_redis.py: +1,690 bytes
+  // after three passes). Now one HMGET reads every expired month and one HDEL removes them: exact at once, and still
+  // two commands however many (at most DATA_MONTHS_CLEARED_MOST a call, so the arguments stay bounded too).
+  const idleRoom = dataKey(other)!;
+  const expired = Array.from({ length: 40 }, (_, i) => `${2020 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`);
+  const hget = async (key: string, field: string) => (await redis.pipeline([["HGET", key, field]]))[0];
+  const slotBefore = Number((await hget(idleRoom, RECEIPT_SLOT)) ?? 0);
+  await redis.pipeline([["HSET", idleRoom, "#", String(expired.length * 164), "~", expired.join(","), ...expired.flatMap((m) => [`~${m}`, "100"])]]);
+  const fields = async (months: string[]) => Promise.all(months.map(async (m) => (await redis.pipeline([["HEXISTS", idleRoom, `~${m}`]]))[0]));
+  is("the idle store's next sale is numbered", await assignReceiptNumber(other, "cs_test_idlestore000000001"), { ok: true, number: "R-000002" });
+  is("every expired month came off the list in that one call", await hget(idleRoom, "~"), null);
+  is("and their own fields with them", (await fields(expired)).every((n) => n === 0), true);
+  const slotAfter = Number(await hget(idleRoom, RECEIPT_SLOT));
+  // Exact: the expired months' 40 × 164 bytes are all gone; only the number's own growth is left.
+  is("the room's total is exactly what is left, never fuller", Number(await hget(idleRoom, "#")), slotAfter - slotBefore + (slotBefore === 0 ? 64 : 0));
+  await assignReceiptNumber(other, "cs_test_idlestore000000002");
+  is("the next number finds nothing left to clear", [await hget(idleRoom, "~"), Number(await hget(idleRoom, "#"))], [null, Number(await hget(idleRoom, RECEIPT_SLOT)) - slotBefore + (slotBefore === 0 ? 64 : 0)]);
+  const cleared = (storeData as Record<string, unknown>).DATA_MONTHS_CLEARED_MOST;
+  is("the data room names how many expired months a call clears at the most", cleared, 512);
+  is("and its script clears no more than that", TAKE_DATA.includes(`#over < ${String(cleared)}`), true);
+  is("reading them with one HMGET and removing them with one HDEL, never a command a month", [TAKE_DATA.includes("'HMGET'"), TAKE_DATA.includes("HGET', KEYS[1], '~' .. m")], [true, false]);
+  // Measured with INFO commandstats on a real Redis (review of #3001): 10 commands with no expired month, 13 with any number
+  // (their read, their removal and the list written back). scripts/test_store_data_redis.py measures the script itself
+  // against RECEIPT_NUMBER_COMMANDS in CI (first number, again, next, full; 0 to 520 expired months), so the ceiling is
+  // held by a count and not only by this figure.
+  is("RECEIPT_NUMBER_COMMANDS covers the most the script can bill", RECEIPT_NUMBER_COMMANDS >= 13, true);
+
+  part("A count that is not a whole number takes no room and gives no number");
+  // Review of #3001 (Claude 2, L1, comment 6704251804): the room was taken before the INCR, so a count Redis cannot
+  // add to failed the script after its room was spent, and every try took one more number's room. The in-memory
+  // model read such a count as 0 and gave R-000001 again. The count is read before anything is taken.
+  const THIRD = "third-numbers@example.com";
+  await claimHandle(THIRD, "thirdnumbers", "Third Kitchen", "");
+  await ensureStatsId(THIRD);
+  const third = (await storeForEmail(THIRD))!;
+  const thirdRoom = dataKey(third)!;
+  const counter = receiptCounterKey(third.sid);
+  const roomNow = async () => (await redis.pipeline([["HGET", thirdRoom, "#"], ["HGET", thirdRoom, RECEIPT_SLOT]])).map((v) => Number(v ?? 0));
+  is("the store's first sale is numbered", await assignReceiptNumber(third, "cs_test_thirdstore00000001"), { ok: true, number: "R-000001" });
+  for (const bad of ["abc", "1.5", "007", "-3", String(RECEIPT_NUMBER_MAX), "9999999999999"]) {
+    await redis.pipeline([["SET", counter, bad]]);
+    const held = await roomNow();
+    const tries = [await assignReceiptNumber(third, "cs_test_thirdstore00000002"), await assignReceiptNumber(third, "cs_test_thirdstore00000002")];
+    is(`a count of "${bad}": no number, twice`, tries, [{ ok: false, reason: "unknown" }, { ok: false, reason: "unknown" }]);
+    is(`a count of "${bad}": the room untouched by either try`, await roomNow(), held);
+    is(`a count of "${bad}": nothing written for the sale, the count left as it was`, await redis.pipeline([["HEXISTS", receiptNumbersKey(third.sid), "cs_test_thirdstore00000002"], ["GET", counter]]), [0, bad]);
+  }
+  await redis.pipeline([["DEL", counter], ["HSET", counter, "n", "1"]]);
+  const heldTyped = await roomNow();
+  is("a count of another type: no number", await assignReceiptNumber(third, "cs_test_thirdstore00000002"), { ok: false, reason: "unknown" });
+  is("and the room untouched", await roomNow(), heldTyped);
+  await redis.pipeline([["DEL", counter], ["SET", counter, "7"]]);
+  is("a whole count still gives the next number", await assignReceiptNumber(third, "cs_test_thirdstore00000002"), { ok: true, number: "R-000008" });
+  is("its bound on the count is RECEIPT_NUMBER_MAX's", [RECEIPT_NUMBER.includes(`#count <= ${String(RECEIPT_NUMBER_MAX).length} and tonumber(count) < ${RECEIPT_NUMBER_MAX}`), readFileSync("lib/redis-memory.ts", "utf8").includes(`\\d{0,${String(RECEIPT_NUMBER_MAX).length - 1}}$/.test(count) && Number(count) < ${RECEIPT_NUMBER_MAX.toLocaleString("en-US").replaceAll(",", "_")})`)], [true, true]);
+  is("the script reads the count before it takes any room", RECEIPT_NUMBER.indexOf("'GET', KEYS[3]") > 0 && RECEIPT_NUMBER.indexOf("'GET', KEYS[3]") < RECEIPT_NUMBER.indexOf("receiptRoom(ARGV[1]"), true);
 
   part("Its cost: inside the receipt's studio requests");
   const worst = request("step", 40 + RECEIPT_NUMBER_COMMANDS, 200_000 + 2 * RECEIPT_NUMBER_BYTES) + RECEIPT_PDF_MAX_BYTES * ORIGIN_PER_BYTE;

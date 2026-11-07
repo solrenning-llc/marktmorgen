@@ -892,7 +892,11 @@ export class MemoryRedis {
             return Number.isSafeInteger(n) && n >= 1 ? [2, n] : [-1, 0];
           }
           if (!Number.isFinite(Number(entry)) || !Number.isFinite(Number(keys))) return [-1, 0];
-          const size = Number(entry) + (this.run(["EXISTS", counter]) === 0 ? Number(keys) : 0);
+          // The count read before any room is taken (GET refuses another type, as Redis does); one INCR cannot add to, or
+          // that would pass RECEIPT_NUMBER_MAX (999,999,999,999), takes nothing.
+          const count = this.run(["GET", counter]);
+          if (count !== null && count !== "0" && !(typeof count === "string" && /^[1-9]\d{0,11}$/.test(count) && Number(count) < 999_999_999_999)) return [-1, 0];
+          const size = Number(entry) + (count === null ? Number(keys) : 0);
           const taken = this.storeData([room, limit, "0", month, "a", "rcpt", String(size)]);
           if (!Array.isArray(taken) || taken[0] !== 1) return taken;
           const n = Number(this.run(["INCR", counter]));
@@ -971,6 +975,41 @@ export class MemoryRedis {
             }
           }
           return taken;
+        }
+        // lib/stock.ts STOCK_ADMIT and STOCK_BIND (513 [PF1], Codex G2's review of #1730, 5 November 2026), step for step.
+        if (key.startsWith("-- marktmorgen:stock-admit:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          const n = Number(argv[0]);
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== 2 * n || argv.length !== n + 2) return -1;
+          const pending = argv[n + 1];
+          for (const k of keys) this.live(k);
+          let ours = true;
+          for (let i = 0; i < n; i += 1) {
+            if (this.data.get(keys[i]) !== argv[1 + i]) ours = false;
+            const hold = this.data.get(keys[n + i]);
+            if (hold !== undefined && !(hold instanceof Map)) return -1;
+            if (!(hold instanceof Map) || !hold.has(pending)) ours = false;
+          }
+          if (ours) return 1;
+          for (let i = 0; i < n; i += 1) {
+            const hold = this.data.get(keys[n + i]);
+            if (hold instanceof Map) this.run(["HDEL", keys[n + i], pending]);
+          }
+          return 0;
+        }
+        if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          const n = Number(argv[0]);
+          if (!Number.isInteger(n) || n < 1 || n > 8 || count !== n || argv.length !== 3) return -1;
+          for (const k of keys) this.live(k);
+          for (const k of keys) {
+            const hold = this.data.get(k);
+            if (!(hold instanceof Map) || !hold.has(argv[1]) || !hold.has(argv[2])) return 0;
+          }
+          for (const k of keys) this.run(["HDEL", k, argv[1]]);
+          return 1;
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
@@ -1647,14 +1686,20 @@ export class MemoryRedis {
     }
     const months = new Set<string>();
     let relist = false;
+    // Every month that is over, up to DATA_MONTHS_CLEARED_MOST (lib/store-data.ts) a call, read together and
+    // removed together; a month listed twice comes off once.
+    const over: string[] = [];
     for (const m of (room.get("~") ?? "").split(",").filter(Boolean)) {
-      if (m < month) {
-        const held = Number(room.get(`~${m}`) ?? "0") || 0;
-        if (held > 0) total -= held + 64;
-        room.delete(`~${m}`);
+      if (m < month && (over.includes(m) || over.length < 512)) {
+        if (!over.includes(m)) over.push(m);
         relist = true;
       } else months.add(m);
     }
+    for (const m of over) {
+      const held = Number(room.get(`~${m}`) ?? "0") || 0;
+      if (held > 0) total -= held + 64;
+    }
+    for (const m of over) room.delete(`~${m}`);
     if (total < 0) total = 0;
     const keep = () => {
       if (relist) {

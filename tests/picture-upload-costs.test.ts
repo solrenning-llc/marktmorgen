@@ -3,9 +3,10 @@
  * C4-20261106-1120-TODOS-63): a picture, a link's picture or a page's picture is put through its own upload request,
  * and attaching it is one more; each is a studio request (studioAccess, countStudio), so at most the plan's studio
  * figure of them a month, a hard ceiling. Each request is counted at its dearest, from the official prices read on
- * 6 November 2026 (vercel.com/docs/vercel-blob/usage-and-pricing): one put (an Advanced Operation), five Simple
- * Operations (the head that checks a name is free; a head and a read of the picture and of its smaller copy) and the
- * read of both copies' whole bytes. The read is counted whole because no official page says the Blob honors a byte
+ * 6 November 2026 (vercel.com/docs/vercel-blob/usage-and-pricing): its put and its signing request (Advanced
+ * Operations) with every try the SDK may send, three heads with every try and two reads (Simple Operations: the head
+ * that checks a name is free; a head and a read of the picture and of its smaller copy), each read a CDN request, and
+ * both copies' whole bytes at Blob and Fast Origin Transfer. The read is counted whole because no official page says the Blob honors a byte
  * range with 206 or bills only the bytes sent (lib/uploaded-image.ts, firstBytes reads a stream it cancels): unknown is
  * never zero.
  *
@@ -15,7 +16,8 @@
  */
 import { readFileSync } from "node:fs";
 import * as registry from "./plan-cost-registry";
-import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE } from "./plan-cost-registry";
+import { COST_LINES, BLOB_ADVANCED_OP, BLOB_SIMPLE_OP, BLOB_TRANSFER_PER_BYTE, ORIGIN_PER_BYTE } from "./plan-cost-registry";
+import { CDN_PER_REQUEST } from "./traffic-cost";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { MAX_IMAGE_BYTES, MAX_THUMB_BYTES } from "@/lib/product-image";
 import { MAX_PAGE_PICTURES } from "@/lib/sales-page";
@@ -43,6 +45,17 @@ is("the SDK's get is one plain fetch, never tried again", /await fetch\(/.test(b
 const headTries = (registry as Record<string, unknown>).BLOB_HEAD_TRIES;
 is("a head counted with every try, as a put is", headTries, tries);
 
+part("The signing request is tried as a put is (Claude 1 on #2803, 6708192310)");
+// Every upload request asks the Blob for a signed token (issueSignedToken); in the installed SDK that is
+// requestApi("/signed-token", POST), the same request a put or a head goes through, so it is tried again as often.
+// No official page says a signed-token request is free: unknown is never zero, so it is counted as a put, at the
+// dearer Advanced Operation, with every try (BLOB_TOKEN_TRIES, below).
+const route = readFileSync("app/api/store/image/upload/route.ts", "utf8");
+const signBody = sdk.slice(sdk.indexOf("async function issueSignedToken("), sdk.indexOf("\n}", sdk.indexOf("async function issueSignedToken(")));
+is("the upload route asks for a signed token on every request", /await issueSignedToken\(/.test(route), true);
+is("the SDK's signing goes through requestApi, so it is tried again", /requestApi\(\s*"\/signed-token"/.test(signBody), true);
+is("the line names the signing call among its sources", Boolean(COST_LINES.find((each) => each.id === "studio-blob")?.sources.some((source) => source.file === "app/api/store/image/upload/route.ts" && source.names.includes("issueSignedToken"))), true);
+
 part("Every studio picture's Blob operations, one line for the whole studio figure (MR audit gap 1, C4-20261106-2790-C56-167)");
 // Rule 23: picture-uploads and picture-thumbnails each multiplied the whole studio figure; doors, attaches and page
 // saves share it, so they are one line, studio-blob, each request at the dearest kind it may be.
@@ -63,5 +76,5 @@ for (const tier of ["creator", "pro", "scale"] as const) {
   const perRequest = check(MAX_IMAGE_BYTES) + Math.max(door, reattach, page);
   is(`${tier}: the studio figure, each request at its dearest kind, and a day of doors from the month before checked on top`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
-is("its source and date are said, and why the read is counted whole", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
+is("its source and date are said, and why the read is counted whole", (line?.basis ?? "").includes("vercel.com/docs/vercel-blob/usage-and-pricing") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
 done();

@@ -17,7 +17,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (init?.method === "GET" && url.pathname === `/v1/checkout/sessions/${session}`)
     return new Response(JSON.stringify({ id: session, status: "complete", subscription: sub, metadata: { kind: "plan", plan_payments: "3", plan_interval: "month" } }));
   if (init?.method === "GET" && url.pathname === `/v1/subscriptions/${sub}`) return new Response(JSON.stringify(subBody));
-  if (init?.method === "POST" && url.pathname === `/v1/subscriptions/${sub}`) { posts.push(String(init.body)); return new Response(JSON.stringify({ id: sub })); }
+  // Stripe answers an update with the whole subscription, the end just set included (Codex S on #3086: the id alone
+  // does not prove the end was written, so this stand-in echoes it as Stripe does).
+  if (init?.method === "POST" && url.pathname === `/v1/subscriptions/${sub}`) { posts.push(String(init.body)); return new Response(JSON.stringify({ id: sub, cancel_at: Number(new URLSearchParams(String(init.body)).get("cancel_at")) })); }
   throw new Error(`unexpected ${init?.method} ${url.pathname}`);
 }) as typeof fetch;
 async function main() {

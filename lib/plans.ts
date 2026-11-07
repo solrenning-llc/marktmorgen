@@ -96,15 +96,16 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   const anchor = Math.max(cycle, trialEnd);
   if (!Number.isInteger(payments) || payments < 2 || !anchor) return "gone";
 
+  const cancelAt = addPeriods(anchor, interval, payments);
   const updated = await onAccount(
     "POST",
     account,
     `/subscriptions/${encodeURIComponent(view.subscription)}`,
-    new URLSearchParams({ cancel_at: String(addPeriods(anchor, interval, payments)), proration_behavior: "none" }),
+    new URLSearchParams({ cancel_at: String(cancelAt), proration_behavior: "none" }),
   );
-  // Settled only on the subscription's own answer; otherwise the next pass
-  // reads it again and finds the end in place, or sets it (same value).
-  return isOwnReply(updated, view.subscription) ? "done" : "unread";
+  // Settled only on the subscription's own answer carrying the end just set (Codex S on #3086: the id alone does
+  // not prove the end was written); otherwise the next pass reads it again and finds the end in place, or sets it.
+  return isOwnReply(updated, view.subscription) && updated.cancel_at === cancelAt ? "done" : "unread";
 }
 
 /**

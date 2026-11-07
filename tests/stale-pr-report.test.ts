@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { is, part, done } from "./check";
 import {
-  LABEL, TITLE, REQUIRED_CHECKS, STALE_DAYS, WARN_DAYS, CLOSE_DAYS, MAX_PAGES,
+  LABEL, TITLE, REQUIRED_CHECKS, STALE_DAYS, WARN_DAYS, CLOSE_DAYS, MAX_PAGES, MAX_CALLS,
   verdictOf, latestVerdict, checksOf, classify, reportBody, report, type Api,
 } from "../scripts/stale_pr_report.mjs";
 
@@ -72,6 +72,12 @@ is("a request for change that names no severity is still a finding", verdictOf("
 is("may go in is clean, even when it mentions closed findings", verdictOf("**Veredito: pode entrar.** O MÉDIO e os dois LEVES estão fechados."), { kind: "clean", severity: null });
 is("an unclear verdict is never guessed", verdictOf("**Veredito sobre o ALTO: fechado.** O LEVE da recomendação segue."), { kind: "unclear", severity: null });
 is("a fix report without a verdict is not a verdict", verdictOf("**Correções da revisão: head `8f1d5ebf`.** MÉDIO: corrigido."), null);
+// Claude 6 on #3059: phrasings this repository's reviews use.
+is("\"não incorporar como está\" is a finding", verdictOf("**Veredito: não incorporar como está.** Há um MÉDIO.")?.kind, "finding");
+is("\"NOT YET\" is a finding", verdictOf("Verdict: **NOT YET**. One LEVE remains.")?.kind, "finding");
+is("\"não pode entrar (ALTO)\" is an ALTO finding", verdictOf("**Veredito: não pode entrar (ALTO).**"), { kind: "finding", severity: "ALTO" });
+is("\"not ready\" is a finding", verdictOf("Verdict: not ready, one MÉDIO.")?.kind, "finding");
+is("\"READY\" is clean", verdictOf("Verdict: **READY**."), { kind: "clean", severity: null });
 is("lowercase words are not severities", verdictOf("**Veredito: pedir mudança.** O custo é alto e leve."), { kind: "finding", severity: null });
 const t = (iso: string) => iso;
 is("the latest verdict wins, whatever its source",
@@ -170,12 +176,13 @@ is("the oldest comes first", body.split("## 1.")[1].split("## 2.")[0].indexOf("`
 
 part("a whole run against a synthetic GitHub");
 type Call = { method: string; path: string; body?: unknown };
-function github(options: { issues?: unknown[]; label?: boolean; breakPath?: string; prs?: number } = {}) {
+function github(options: { issues?: unknown[]; label?: boolean; breakPath?: string; prs?: number; allStale?: boolean;
+  comments?: unknown[]; reviews?: unknown[] } = {}) {
   const calls: Call[] = [];
   const count = options.prs ?? 3;
   const listed = Array.from({ length: count }, (_, i) => ({
     number: 100 + i, draft: i === 1, head: { sha: String(i).repeat(40).slice(0, 40).replace(/[^0-9a-f]/g, "a"), ref: `claude${i}/work` },
-    base: { ref: "main" }, user: { login: "someone" },
+    base: { ref: "main" }, user: { login: "someone" }, updated_at: daysAgo(count - i),
   }));
   const api: Api = async (method, path, payload, absentIsNull) => {
     calls.push({ method, path, body: payload });
@@ -188,10 +195,10 @@ function github(options: { issues?: unknown[]; label?: boolean; breakPath?: stri
       return { ...p, mergeable_state: p.number === 102 ? "dirty" : "clean" };
     }
     const commit = /^commits\/([0-9a-f]{40})$/.exec(path);
-    if (commit) return { sha: commit[1], commit: { committer: { date: commit[1] === listed[0].head.sha ? daysAgo(11) : daysAgo(1) } } };
+    if (commit) return { sha: commit[1], commit: { committer: { date: options.allStale || commit[1] === listed[0].head.sha ? daysAgo(11) : daysAgo(1) } } };
     if (/^commits\/[0-9a-f]{40}\/check-runs\?/.test(path)) return { total_count: 9, check_runs: nine() };
-    if (/^issues\/\d+\/comments\?/.test(path)) return [{ body: "**Veredito: pedir mudança.** Um MÉDIO.", created_at: daysAgo(10.5) }];
-    if (/^pulls\/\d+\/reviews\?/.test(path)) return [];
+    if (/^issues\/\d+\/comments\?/.test(path)) return options.comments ?? [{ body: "**Veredito: pedir mudança.** Um MÉDIO.", created_at: daysAgo(10.5) }];
+    if (/^pulls\/\d+\/reviews\?/.test(path)) return options.reviews ?? [];
     if (path.startsWith("issues?labels=")) return options.issues ?? [];
     if (path === `labels/${LABEL}`) return options.label ? { name: LABEL } : absentIsNull ? null : undefined;
     if (method === "POST" && path === "labels") return { name: LABEL };
@@ -228,6 +235,45 @@ async function endToEnd() {
     threw = false;
     try { await report({ api: gh.api, now: NOW, log: quiet }); } catch { threw = true; }
     is(`an unreadable reply (${broken}) fails the run and writes nothing`, [threw, writesOf(gh.calls).length], [true, 0]);
+  }
+  {
+    // Claude 6 on #3059: once many PRs age, the call budget runs out; a partial report says so, never silence.
+    const gh = github({ prs: 300, allStale: true });
+    threw = false;
+    try { await report({ api: gh.api, now: NOW, log: quiet }); } catch { threw = true; }
+    const written = writesOf(gh.calls).find((c) => c.path === "issues")?.body as { body?: string } | undefined;
+    const text = written?.body ?? "";
+    is("a run whose budget runs out still writes the report", [threw, writesOf(gh.calls).map((c) => c.path)], [false, ["labels", "issues"]]);
+    is("and never spends more than its budget", gh.calls.length <= MAX_CALLS, true);
+    const unread = /\*\*Relatório parcial:\*\* (\d+) de (\d+) PRs lidos/.exec(text);
+    is("it says plainly that it is partial, and how many were read", [Boolean(unread), unread?.[2]], [true, "299"]);
+    is("the PRs not read are named, never counted as clean", text.includes("Não lidos nesta execução"), true);
+    is("the least recently updated are read first: the oldest is read, the newest is not",
+      [gh.calls.some((c) => c.path === "pulls/100"), gh.calls.some((c) => c.path === "pulls/399")], [true, false]);
+  }
+  {
+    const gh = github({ comments: [{ created_at: daysAgo(10.5) }] });
+    threw = false;
+    try { await report({ api: gh.api, now: NOW, log: quiet }); } catch { threw = true; }
+    is("a comment with no body field is unreadable, never an empty comment", [threw, writesOf(gh.calls).length], [true, 0]);
+  }
+  {
+    const gh = github({ comments: [{ body: null, created_at: daysAgo(10.5) }] });
+    threw = false;
+    try { await report({ api: gh.api, now: NOW, log: quiet }); } catch { threw = true; }
+    is("a comment whose body is null is an empty comment", threw, false);
+  }
+  {
+    const gh = github({ comments: [], reviews: [{ state: "CHANGES_REQUESTED", body: "Please bound the cap.", submitted_at: daysAgo(10.5) }] });
+    await report({ api: gh.api, now: NOW, log: quiet });
+    const created = writesOf(gh.calls).find((c) => c.path === "issues")?.body as { body: string };
+    is("a review that requests changes is a finding, even with no verdict line", created.body.split("## 4.")[1].includes("`#100`"), true);
+  }
+  {
+    const gh = github({ comments: [], reviews: [{ body: "**Veredito: pode entrar.**", submitted_at: daysAgo(10.5) }] });
+    threw = false;
+    try { await report({ api: gh.api, now: NOW, log: quiet }); } catch { threw = true; }
+    is("a review with no state is unreadable", [threw, writesOf(gh.calls).length], [true, 0]);
   }
   {
     const gh = github({ prs: MAX_PAGES * 100 });

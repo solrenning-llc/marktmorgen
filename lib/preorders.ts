@@ -205,7 +205,7 @@ type Session = {
 };
 
 /** What a paid pre-order checkout says: its product, buyer and payment. Null for anything else. */
-function readSession(store: Store, session: Session): { id: string; productId: string; email: string; at: number; pi: string } | null {
+function readSession(store: Store, session: Session): { id: string; productId: string; email: string; at: number; pi: string; ship: boolean } | null {
   const meta = session.metadata ?? {};
   if (meta.preorder !== "yes" || !saleHandles(store).has(meta.store ?? "")) return null;
   if (!isSettled(session)) return null;
@@ -213,13 +213,13 @@ function readSession(store: Store, session: Session): { id: string; productId: s
   const email = typeof session.customer_details?.email === "string" ? session.customer_details.email.trim() : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent as { id?: unknown } | null)?.id;
   if (!SESSION_ID.test(id) || !email || !meta.product) return null;
-  return { id, productId: meta.product, email, at: typeof session.created === "number" ? session.created : now(), pi: typeof pi === "string" && INTENT_ID.test(pi) ? pi : "" };
+  return { id, productId: meta.product, email, at: typeof session.created === "number" ? session.created : now(), pi: typeof pi === "string" && INTENT_ID.test(pi) ? pi : "", ship: meta.ship === "yes" };
 }
 
 /** Writes a paid pre-order down, once. Returns it as it is kept. */
 async function recordPreorder(store: Store, read: NonNullable<ReturnType<typeof readSession>>): Promise<Preorder> {
   const sid = store.statsId as string;
-  const entry: Preorder = { to: read.email, at: read.at, pi: read.pi };
+  const entry: Preorder = { to: read.email, at: read.at, pi: read.pi, ship: read.ship };
   const [, kept] = await redisPipeline([
     ["HSETNX", entriesKey(sid, read.productId), read.id, JSON.stringify(entry)],
     ["HGET", entriesKey(sid, read.productId), read.id],

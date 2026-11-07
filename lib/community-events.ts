@@ -702,19 +702,25 @@ const RSVP_PAGES = 200;
  * or cancellation is then not sent to a short list as if it were everyone (lib/community-event-mail.ts, startJob).
  */
 export async function rsvpList(id: string, eventId: string, limit = 100_000): Promise<{ key: string; at: number }[]> {
-  const out: { key: string; at: number }[] = [];
+  // By member: HSCAN may hand the same field back twice during a walk, and a person coming is one person, counted
+  // once and emailed once (a send's readers must not repeat, lib/community-event-mail.ts recipientBatch). The latest
+  // reading of the field is kept.
+  const seen = new Map<string, number>();
   let cursor = "0";
   for (let page = 0; ; page += 1) {
-    if (page === RSVP_PAGES) throw new UnknownReplyError(`an event's HSCAN, not at its end after ${RSVP_PAGES} pages,`);
+    if (page >= RSVP_PAGES) throw new UnknownReplyError(`an event's HSCAN, not at its end after ${RSVP_PAGES} pages,`);
     const read = scanPage(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]));
     // A hash answers field and value: an odd page is not one.
     if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("an event's HSCAN");
     const flat = read.items;
-    for (let i = 0; i + 1 < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
+    for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], Number(flat[i + 1]) || 0);
     cursor = read.next;
-    if (cursor === "0" || out.length >= limit) break;
+    if (cursor === "0" || seen.size >= limit) break;
   }
-  return out.slice(0, limit).sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
+  return [...seen]
+    .slice(0, limit)
+    .map(([key, at]) => ({ key, at }))
+    .sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
 }
 
 /** Which of these members are still coming, asked when an email to them goes out. */

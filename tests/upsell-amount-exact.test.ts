@@ -22,7 +22,7 @@ process.env.RESEND_API_KEY = "re_test_upsell_journey_only";
 
 const OWNER = "baker@example.com";
 const BUYER = "buyer@example.com";
-const ACCOUNT = "acct_1TestUpsellAmt01";
+const ACCOUNT = "acct_1TestUpsellAm01";
 const NOW = Math.floor(Date.now() / 1000);
 
 /** How the next charged payment carries its amount and currency, as Stripe's answer gives them. */

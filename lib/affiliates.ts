@@ -1659,7 +1659,10 @@ export async function noteSession(
 export async function noteCharge(store: Store, pi: Record<string, unknown>): Promise<void> {
   const meta = (pi.metadata ?? {}) as Record<string, string>;
   if (pi.status !== "succeeded" || typeof pi.id !== "string") return;
-  const amount = typeof pi.amount === "number" ? pi.amount : 0;
+  // The amount Stripe charged, read exactly: whole cents from zero up. Anything else is unknown (rule 24): nothing is
+  // booked, neither the partners' share nor the affiliate's line, rather than a real sale at 0 (Claude 6 on #3053).
+  if (!Number.isSafeInteger(pi.amount) || (pi.amount as number) < 0) throw new Error(`the amount of ${pi.id} could not be read`);
+  const amount = pi.amount as number;
   const buyer = typeof pi.receipt_email === "string" ? pi.receipt_email : "";
   const at = typeof pi.created === "number" ? pi.created : Math.floor(Date.now() / 1000);
 

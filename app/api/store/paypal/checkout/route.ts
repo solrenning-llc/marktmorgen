@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
   if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) return away(`/@${store.handle}?status=slow`);
   if (!paypalReady(store, product)) return away(`/@${store.handle}/p/${product.id}`);
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
-  if (comingSoon === null) return new Response("Unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  if (comingSoon === null) return away(`/@${store.handle}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
   if (product.bundle && deliverableItems(product, await readListings(store, product.bundle)).length < MIN_BUNDLE_ITEMS) {
     return away(`/@${store.handle}`);

@@ -66,7 +66,7 @@ async function shop(handle: string): Promise<{ store: Store; product: string }> 
   const claimed = await claimHandle(owner, handle, "Boundary shop", "");
   if (!claimed.ok) throw new Error("fixture could not claim store");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_PreorderBoundary01", true);
+  await setStripeAccount(owner, "acct_TestPreorder1", true);
   await setSubscription(owner, {
     customerId: `cus_${handle}00001`,
     subscriptionId: `sub_${handle}00001`,
@@ -103,7 +103,7 @@ async function callShop(handle: string): Promise<{ store: Store; product: string
   const claimed = await claimHandle(owner, handle, "Boundary calls", "");
   if (!claimed.ok) throw new Error("fixture could not claim call store");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_PreorderBoundary01", true);
+  await setStripeAccount(owner, "acct_TestPreorder1", true);
   await setSubscription(owner, {
     customerId: `cus_${handle}00001`,
     subscriptionId: `sub_${handle}00001`,
@@ -199,7 +199,7 @@ async function booking(mode: Mode) {
       headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },
       body: form.toString(),
     }));
-    return { status: response.status, opened: stripeBodies.length };
+    return { status: response.status, opened: stripeBodies.length, location: response.headers.get("location") };
   } finally {
     restore();
   }
@@ -220,9 +220,9 @@ async function callPackage(mode: Mode) {
         headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },
         body: form.toString(),
       }));
-      return { status: response.status, opened: stripeBodies.length };
+      return { status: response.status, opened: stripeBodies.length, location: response.headers.get("location") };
     } catch {
-      return { status: -1, opened: stripeBodies.length };
+      return { status: -1, opened: stripeBodies.length, location: null };
     }
   } finally {
     restore();
@@ -235,7 +235,7 @@ async function main() {
   is("confirmed coming-soon opens no Stripe checkout", [stripeComing.status, stripeComing.opened, stripeComing.location?.includes("#waitlist")], [303, 0, true]);
   for (const mode of ["throw", "null", "short", "invalid"] as const) {
     const result = await stripe(mode);
-    is(`Stripe ${mode}: unknown pre-sale evidence returns unavailable before checkout`, [result.status, result.opened], [503, 0]);
+    is(`Stripe ${mode}: unknown pre-sale evidence returns to the explained error before checkout`, [result.status, result.opened, result.location?.includes("status=error")], [303, 0, true]);
   }
 
   part("PayPal checkout");
@@ -243,7 +243,7 @@ async function main() {
   is("confirmed coming-soon opens no PayPal order", [paypalComing.status, paypalComing.opened, paypalComing.location?.includes("#waitlist")], [303, 0, true]);
   for (const mode of ["throw", "null", "short", "invalid"] as const) {
     const result = await paypal(mode);
-    is(`PayPal ${mode}: unknown pre-sale evidence returns unavailable before order`, [result.status, result.opened], [503, 0]);
+    is(`PayPal ${mode}: unknown pre-sale evidence returns to the explained error before order`, [result.status, result.opened, result.location?.includes("status=error")], [303, 0, true]);
   }
 
   part("Call booking");
@@ -251,7 +251,7 @@ async function main() {
   is("confirmed coming-soon call stays unavailable", [bookingComing.status, bookingComing.opened], [303, 0]);
   for (const mode of ["throw", "null", "short", "invalid"] as const) {
     const result = await booking(mode);
-    is(`booking ${mode}: unknown pre-sale evidence is unavailable`, [result.status, result.opened], [503, 0]);
+    is(`booking ${mode}: unknown pre-sale evidence returns to the booking error`, [result.status, result.opened, result.location?.includes("/book/") && result.location.includes("status=error")], [303, 0, true]);
   }
 
   part("Call package");
@@ -259,7 +259,7 @@ async function main() {
   is("confirmed coming-soon package stays unavailable", [packageComing.status, packageComing.opened], [303, 0]);
   for (const mode of ["throw", "null", "short", "invalid"] as const) {
     const result = await callPackage(mode);
-    is(`package ${mode}: unknown pre-sale evidence returns unavailable before checkout`, [result.status, result.opened], [503, 0]);
+    is(`package ${mode}: unknown pre-sale evidence returns to the booking error before checkout`, [result.status, result.opened, result.location?.includes("/book/") && result.location.includes("status=error")], [303, 0, true]);
   }
 }
 

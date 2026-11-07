@@ -66,25 +66,11 @@ function knownSoonMember(raw: unknown): boolean {
   throw new UnknownReplyError("coming-soon membership");
 }
 
-function exactDays(raw: unknown): Map<string, string> {
-  const fields = stringList(raw);
-  if (!fields || fields.length % 2 !== 0) throw new UnknownReplyError("coming-soon days");
-  const out = new Map<string, string>();
-  for (let i = 0; i < fields.length; i += 2) {
-    const day = keptDay(fields[i + 1]);
-    if (day) out.set(fields[i], day);
-  }
-  return out;
-}
-
 /** The products coming soon, and the day each pre-ordered one is expected: one request, for the store page. */
 export async function soonState(store: Store): Promise<SoonState> {
   if (!store.statsId || !isRedisConfigured()) return { soon: new Set(), days: new Map() };
-  const replies = repliesFor(await redisPipeline([["SMEMBERS", soonKey(store.statsId)], ["HGETALL", dayKey(store.statsId)]]), 2);
-  if (!replies) throw new UnknownReplyError("coming-soon state");
-  const members = stringList(replies[0]);
-  if (!members) throw new UnknownReplyError("coming-soon products");
-  return { soon: new Set(members), days: exactDays(replies[1]) };
+  const [members, raw] = await redisPipeline([["SMEMBERS", soonKey(store.statsId)], ["HGETALL", dayKey(store.statsId)]]);
+  return { soon: new Set(Array.isArray(members) ? (members as string[]) : []), days: daysOf(raw) };
 }
 
 /** One product: coming soon or not, and the day it is expected when it takes pre-orders. One request. */

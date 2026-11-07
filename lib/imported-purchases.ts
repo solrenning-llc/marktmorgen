@@ -38,6 +38,7 @@ import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { HASH_DEL_IF, HASH_TAKE_ALL, takenPairs } from "@/lib/redis-take";
 import { exactReplies, replyCount } from "@/lib/redis-exact";
+import { repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -213,7 +214,9 @@ export async function grantImportedOutcomes(
   const answers = room ? await redisPipeline(writes) : await orderWrite({ sid, statsId }, writes);
   // A grant refused for certain (HSETNX answered exactly 0: the address already holds the product) gives back
   // what it took from the room; any other answer keeps it, so the room is never below what is held (Claude 5 on #2576).
-  const list = Array.isArray(answers) && answers.length === grants.length ? answers : null;
+  // The replies are read once, from their own data slots, into a fresh list that both decisions use: a getter, a
+  // Proxy or an inherited slot is not a reply, so every grant stays unknown and keeps its room (Codex G on #2576).
+  const list = repliesFor(answers, grants.length);
   if (room && list) {
     const back = grants.reduce((sum, g, i) => (list[i] === 0 ? sum + grantBytes(g.productId, { at: atSeconds, job, items: g.items, option: g.option }, g.email) : sum), 0);
     if (back > 0) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: back }]);

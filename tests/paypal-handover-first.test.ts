@@ -18,7 +18,7 @@ import { NextRequest } from "next/server";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
-import { addProduct, claimHandle, ensureStatsId, setPayPalSeller, setProductLink, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, removeProduct, setPayPalSeller, setProductLink, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { plainAmount } from "@/lib/money";
 import { addressHash, importedFor } from "@/lib/imported-purchases";
@@ -311,3 +311,64 @@ for (const written of [false, true]) {
     ]);
   });
 }
+
+// ------------------------------------------------------------------ 4. a paid order whose product the creator removed (review of #2895)
+
+// Codex Z's proof (codex/z-review-2895-product-gone-proof@53f424a5, tests/z-2895-product-gone.proof.ts) and Claude 5's
+// sweep cases (second review of #2895, comment 6701809547), kept with credit: the buyer pays, the creator removes the
+// product before the return or the sweep. handOverPayPal hands nothing over and answers false; that false must keep the
+// order pending (asked again, counted as stuck), never let it leave pending as if handed over.
+/** Puts an opened order on the store's pending list, as a return that heard "pending" or lost its answer does. */
+const waitPending = (store: Store, order: string) => redis.pipeline([["ZADD", `nl:ppsell:pending:${store.statsId}`, String(now()), order]]);
+async function paidThenRemoved(written: boolean | "return"): Promise<{ store: Store; order: string }> {
+  const { store, productId } = await shopWithGuide();
+  const order = await opened(store, productId);
+  if (written === false) await waitPending(store, order);
+  if (written === true) {
+    // The record written and its hand-over failed: the order is left pending for the sweep.
+    const result = await captureOrder(store, order, async () => {
+      throw new Error("this hand-over failed");
+    });
+    assert.equal(result.ok, false, "precondition: the hand-over failed");
+    assert.notEqual(await pendingOf(store.statsId!, order), null, "precondition: kept pending");
+  }
+  const removed = await removeProduct("owner@example.com", productId);
+  assert.equal(removed.ok, true, "precondition: the creator removed the paid product");
+  const current = (await storeForEmail("owner@example.com"))!;
+  assert.equal(await readListing(current, productId), null, "precondition: the product is gone");
+  return { store: current, order };
+}
+
+test("the return: a paid order whose product was removed stays pending, nothing is handed over", async () => {
+  const { store, order } = await paidThenRemoved("return");
+  const answer = await returned(order);
+  assert.equal(answer.status, 303);
+  assert.match(answer.headers.get("Location") ?? "", /\/@harbor\/thanks\?paypal=/);
+  assert.deepEqual(await handedOver(store), { grants: 0, orders: 0 });
+  assert.notEqual(await pendingOf(store.statsId!, order), null, "kept pending, not cleared as handed over");
+});
+
+for (const written of [false, true]) {
+  test(`the sweep: a paid order whose product was removed (${written ? "its record written" : "not yet written"}) stays pending and is counted as stuck, never cleared`, async () => {
+    const { store, order } = await paidThenRemoved(written);
+    const first = await sweepPayPal(store, Date.now() + 60_000);
+    const second = await sweepPayPal(store, Date.now() + 60_000);
+    assert.deepEqual(await handedOver(store), { grants: 0, orders: 0 });
+    assert.notEqual(await pendingOf(store.statsId!, order), null, "kept pending, asked again next pass");
+    assert.deepEqual([first, second], [
+      { cleared: 0, revoked: 0, stuck: 1 },
+      { cleared: 0, revoked: 0, stuck: 1 },
+    ]);
+  });
+}
+
+test("control: the sweep hands a paid order over once while its product is there", async () => {
+  const { store, productId } = await shopWithGuide();
+  const order = await opened(store, productId);
+  await waitPending(store, order);
+  const first = await sweepPayPal(store, Date.now() + 60_000);
+  await sweepPayPal(store, Date.now() + 60_000);
+  assert.deepEqual(await handedOver(store), { grants: 1, orders: 1 });
+  assert.equal(await pendingOf(store.statsId!, order), null);
+  assert.deepEqual(first, { cleared: 1, revoked: 0, stuck: 0 });
+});

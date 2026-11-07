@@ -51,8 +51,8 @@ function main(): void {
   is("nothing remembered: only the page paid on", channelForSale(noTags, null).campaign, "");
 
   part("Where visits are not remembered");
-  is("the law asks first, or the country is unknown", [needsConsent("FR"), needsConsent("GB"), needsConsent("CH"), needsConsent("BR"), needsConsent(null), needsConsent("US")], [true, true, true, true, true, false]);
-  for (const words of ["the EU", "the UK", "Switzerland", "Brazil", "country is not known", "Global Privacy Control", "only if the buyer pays on the page that link opened"]) {
+  is("the law asks first, or the country is unknown", [needsConsent("FR"), needsConsent("NO"), needsConsent("GB"), needsConsent("CH"), needsConsent("BR"), needsConsent(null), needsConsent("US")], [true, true, true, true, true, true, false]);
+  for (const words of ["the EU", "Norway", "the UK", "Switzerland", "Brazil", "country is not known", "Global Privacy Control", "only if the buyer pays on the page that link opened"]) {
     is(`the note names ${words}`, POST_LINK_UNREMEMBERED.includes(words), true);
   }
   const proxy = source("proxy.ts");

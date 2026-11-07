@@ -235,6 +235,7 @@ import { productSegment } from "@/lib/product-slug";
 import { SharePanel } from "@/components/share-panel";
 import { ShortLinks } from "@/components/short-links";
 import { readLinks } from "@/lib/short-links";
+import { POST_LINK_UNREMEMBERED, postLinkCredit } from "@/lib/post-link-credit";
 import { storeBase } from "@/lib/purchase-email";
 import { feeWords } from "@/lib/fee-words";
 import { NewTab } from "@/components/new-tab";
@@ -1491,6 +1492,12 @@ export default async function StudioPage({
                       }
                       currency={store.currency}
                     />
+                  ) : null}
+                  {may("page") && store.statsId ? (
+                    <div className="mt-3 max-w-[80ch] space-y-1 text-xs text-ink-soft" data-post-link-credit>
+                      <p>{postLinkCredit(store.attributionDays)}</p>
+                      <p>{POST_LINK_UNREMEMBERED}</p>
+                    </div>
                   ) : null}
                   {may("page") ? (
                     <AiOn value={ai}>

@@ -56,8 +56,10 @@ export type Gift = {
 
 const giftKey = (id: string) => `nl:gift:${id}`;
 const piKey = (pi: string) => `nl:gift:pi:${pi}`;
+/** Written once the friend and the payer were emailed about a given gift (M1, Claude 4 on #2872): kept as the gift is. */
+const toldKey = (id: string) => `nl:gift:${id}:told`;
 /** What one gift keeps, by its id and its payment: for a closed store (lib/closed-store-data.ts). */
-export const giftKeys = (id: string, pi: string): string[] => [...(id ? [giftKey(id), `${giftKey(id)}:giving`] : []), ...(pi ? [piKey(pi)] : [])];
+export const giftKeys = (id: string, pi: string): string[] => [...(id ? [giftKey(id), `${giftKey(id)}:giving`, toldKey(id)] : []), ...(pi ? [piKey(pi)] : [])];
 const anyKey = (sid: string) => `nl:gift:${sid}:any`;
 const anchorKey = (sid: string) => `nl:gift:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:gift:${sid}:seen`;
@@ -100,25 +102,15 @@ function parseKeptGift(raw: string, id: string): Gift | null {
 }
 
 /**
- * Whether a gift is given, read exactly, for a run that found another run's
- * giving mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the record as
- * text, JSON of this gift, and `given` a positive whole number of seconds
- * (true) or absent (false). Anything else is unknown and throws, so nothing
- * is said as given that is not.
+ * Whether a given gift's emails went out, read exactly (M1, Claude 4 on #2872; CX-123 rules 24 and 30): the mark
+ * written after the friend and the payer were emailed reads "1" (true) or nothing (false). Anything else is unknown
+ * and throws, so a gift is never said "already" with nobody told, and no "sent" mark is kept.
  */
-async function givenExactly(id: string): Promise<boolean> {
-  const raw = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
-  let record: unknown = null;
-  try {
-    record = typeof raw === "string" ? JSON.parse(raw) : null;
-  } catch {
-    record = null;
-  }
-  if (!record || typeof record !== "object" || Array.isArray(record) || (record as { id?: unknown }).id !== id) throw new UnknownReplyError("a gift's record");
-  const given = (record as { given?: unknown }).given;
-  if (given === undefined) return false;
-  if (typeof given === "number" && Number.isSafeInteger(given) && given > 0) return true;
-  throw new UnknownReplyError("a gift's record");
+async function toldExactly(id: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["GET", toldKey(id)]]), 1);
+  if (replies && replies[0] === "1") return true;
+  if (replies && replies[0] === null) return false;
+  throw new UnknownReplyError("a gift's told mark");
 }
 
 /** Writes a gift down; true only when Redis answered the write in its exact shape ("OK"). */
@@ -195,48 +187,55 @@ export async function deliverGift(input: {
   const id = session.metadata?.gift ?? "";
   const gift = await readGiftExactly(id);
   if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
-  if (gift.given) return "already";
+  // "already" only once its emails went out (M1, Claude 4 on #2872): the write marking it given can land while its
+  // reply comes back in another shape, and that run throws before emailing. A gift given but never told is told by
+  // the run that holds the giving mark, and that run answers "given", so the order is confirmed and counted once. One
+  // taken back by a refund meanwhile is never told.
+  if (gift.given && (gift.revoked || (await toldExactly(id)))) return "already";
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
   // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
   const mark = `${giftKey(id)}:giving`;
   const value = claimValue();
   const claimed = await claimMark(mark, 300, value);
   if (claimed === "taken") {
-    // Another run holds the mark. "already" only once the gift is given (Claude 4 on #2726): confirmGift
-    // (lib/purchase-email.ts) keeps its "sent" mark on "already", so said while the other run may still fail, the
-    // paid gift would never be given. Thrown, no "sent" mark is kept and the next run tries again.
-    if (await givenExactly(id)) return "already";
+    // Another run holds the mark. "already" only once the gift is given and told (Claude 4 on #2726 and on #2872):
+    // confirmGift (lib/purchase-email.ts) keeps its "sent" mark on "already", so said while the other run may still
+    // fail, the paid gift would never be given, or its emails never sent. Thrown, no "sent" mark is kept and the next
+    // run tries again.
+    if (await toldExactly(id)) return "already";
     throw new Error("another run is giving this gift right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
 
   const sessionId = typeof session.id === "string" ? session.id : "";
-  const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
-  const created = typeof session.created === "number" ? session.created : now();
-  const grant = grantsOf(session, gift);
-  await grantImported(gift.s, `gift:${gift.id}`, [grant], created, store.sid);
-  // The doors that read what an address was given are opened for this store.
-  if (!store.pastBuyers) await setPastBuyers(storeRef(store));
-  // A course, or a course inside a bundle, is dated from the day it was paid.
-  for (const id of [gift.p, ...(grant.items ?? [])]) await input.recordStart(gift.to, id, created);
+  // Handed over only when the record does not say given yet. Given by an earlier run whose last write came back in
+  // another shape, it is not handed over again: this run only tells.
+  if (!gift.given) {
+    const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
+    const created = typeof session.created === "number" ? session.created : now();
+    const grant = grantsOf(session, gift);
+    await grantImported(gift.s, `gift:${gift.id}`, [grant], created, store.sid);
+    // The doors that read what an address was given are opened for this store.
+    if (!store.pastBuyers) await setPastBuyers(storeRef(store));
+    // A course, or a course inside a bundle, is dated from the day it was paid.
+    for (const id of [gift.p, ...(grant.items ?? [])]) await input.recordStart(gift.to, id, created);
 
-  // What a refund looks up (the payment's gift, and that this store sold one) is written first and the gift marked
-  // given last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of the
-  // mark and throws, so confirmGift keeps no "sent" mark and the next run does it again, never "already" on a gift
-  // whose payment a refund could not find.
-  const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS]] : []), ["SET", anyKey(gift.s), "1"]];
-  const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
-  if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
-    await releaseMark(mark, value);
-    throw new UnknownReplyError("a given gift's payment record");
+    // What a refund looks up (the payment's gift, and that this store sold one) is written first and the gift marked
+    // given last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of the
+    // mark and throws, so confirmGift keeps no "sent" mark and the next run does it again, never "already" on a gift
+    // whose payment a refund could not find.
+    const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS]] : []), ["SET", anyKey(gift.s), "1"]];
+    const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
+    if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
+      await releaseMark(mark, value);
+      throw new UnknownReplyError("a given gift's payment record");
+    }
+    const given: Gift = { ...gift, session: sessionId, pi, given: now() };
+    if (!(await saveGift(given, GIFT_KEPT_SECONDS))) {
+      await releaseMark(mark, value);
+      throw new UnknownReplyError("a given gift's record");
+    }
   }
-  const given: Gift = { ...gift, session: sessionId, pi, given: now() };
-  if (!(await saveGift(given, GIFT_KEPT_SECONDS))) {
-    await releaseMark(mark, value);
-    throw new UnknownReplyError("a given gift's record");
-  }
-  // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
-  await releaseMark(mark, value);
 
   const g = givingWords(store.language);
   const who = gift.from || g.someone;
@@ -287,6 +286,11 @@ export async function deliverGift(input: {
       idempotencyKey: `nimbus-gift-receipt:${gift.id}`,
     }).catch((error) => console.error("a gift receipt failed", error));
   }
+  // Told: a later run answers "already". The mark's own reply is not decisive (the emails are gone and the order is
+  // confirmed now): a mark that did not land lets a later run tell again, and both emails carry their idempotency keys.
+  await redisPipeline([["SET", toldKey(gift.id), "1", "EX", GIFT_KEPT_SECONDS]]).catch((error) => console.error("a gift's told mark failed", error));
+  // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
+  await releaseMark(mark, value);
   return "given";
 }
 

@@ -137,13 +137,15 @@ async function main(): Promise<void> {
   is("its own record let go, so the list is empty", await members(own.id), { length: 0, held: [] });
   is("the same link takes its place on a later try", [await take(ownLink), await owns("cy@example.com")], ["taken", [product.id]]);
 
-  part("The places counter answers in an unknown shape: the run lets go of its own record");
+  part("The places counter answers in an unknown shape on every try, never run: the run lets go of its own record");
   const counted = await paidGroup(2);
   const countedLink = await counted.link("dee@example.com");
+  // The command that moves the count: the INCR, or the script that moves it once for a run (L1, Claude 4 on #2872).
+  const movesCount = (c: Command) => (c[0] === "INCR" && c[1] === `nl:grp:${counted.id}:n`) || (c[0] === "EVAL" && c[3] === `nl:grp:${counted.id}:n`);
   redis.pipeline = (async (commands: Command[]) => {
-    const replies = await real(commands.filter((c) => !(c[0] === "INCR" && c[1] === `nl:grp:${counted.id}:n`)));
+    const replies = await real(commands.filter((c) => !movesCount(c)));
     let k = 0;
-    return commands.map((c) => (c[0] === "INCR" && c[1] === `nl:grp:${counted.id}:n` ? UNKNOWN : replies[k++]));
+    return commands.map((c) => (movesCount(c) ? UNKNOWN : replies[k++]));
   }) as typeof redis.pipeline;
   const countedFirst = await take(countedLink);
   restore();

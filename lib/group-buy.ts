@@ -94,8 +94,10 @@ const takenKey = (id: string) => `nl:grp:${id}:n`;
 const mailKey = (id: string) => `nl:grp:${id}:mail`;
 const tokenKey = (token: string) => `nl:grp:take:${token}`;
 const piKey = (pi: string) => `nl:grp:pi:${pi}`;
+/** Written once the payer was sent the receipt with the places link (M1, Claude 4 on #2872): kept as the purchase is. */
+const toldKey = (id: string) => `nl:grp:${id}:told`;
 /** What one purchase for several people keeps, by its id and its payment: for a closed store (lib/closed-store-data.ts). */
-export const groupKeys = (id: string, pi: string): string[] => [...(id ? [groupKey(id), membersKey(id), takenKey(id), mailKey(id)] : []), ...(pi ? [piKey(pi)] : [])];
+export const groupKeys = (id: string, pi: string): string[] => [...(id ? [groupKey(id), membersKey(id), takenKey(id), mailKey(id), toldKey(id)] : []), ...(pi ? [piKey(pi)] : [])];
 const anyKey = (sid: string) => `nl:grp:${sid}:any`;
 const anchorKey = (sid: string) => `nl:grp:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:grp:${sid}:seen`;
@@ -225,6 +227,19 @@ export function groupLink(base: string, id: string): string {
 export type SettleOutcome = "settled" | "already" | "skip";
 
 /**
+ * Whether a paid purchase's receipt went out, read exactly (M1, Claude 4 on #2872; CX-123 rules 24 and 30): the mark
+ * written after the payer was sent the receipt with the places link reads "1" (true) or nothing (false). Anything else
+ * is unknown and throws, so a purchase is never said "already" with its payer never sent the link, and no "sent" mark
+ * is kept.
+ */
+async function toldExactly(id: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["GET", toldKey(id)]]), 1);
+  if (replies && replies[0] === "1") return true;
+  if (replies && replies[0] === null) return false;
+  throw new UnknownReplyError("a purchase for several's told mark");
+}
+
+/**
  * Marks a purchase for several as paid, once, and emails the buyer their
  * receipt with the link that hands out its places. The caller has checked
  * the checkout is settled and this store's.
@@ -241,7 +256,11 @@ export async function settleGroup(input: {
   const id = session.metadata?.group ?? "";
   const group = await readGroupExactly(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
-  if (group.paid) return "already";
+  // "already" only once its receipt went out (M1, Claude 4 on #2872): the write marking it paid can land while its
+  // reply comes back in another shape, and that run throws before the receipt. A purchase paid but never told is told
+  // by the run that holds the settling mark, and that run answers "settled", so the order is confirmed once. One taken
+  // back by a refund meanwhile is never told.
+  if (group.paid && (group.revoked || (await toldExactly(id)))) return "already";
   const settling = `${groupKey(id)}:settling`;
   // Claimed with this run's own value and read exactly (C4-3000): an answer in another shape is read back, never taken
   // as ours, and the mark is let go only while it still holds this run's value (lib/claim-mark.ts).
@@ -249,41 +268,50 @@ export async function settleGroup(input: {
   const claimed = await claimMark(settling, 300, mark);
   if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
   if (claimed === "taken") {
-    // Another run is settling it. "already" only once it is paid: confirmGroup (lib/purchase-email.ts) keeps its
-    // "sent" mark on "already", so said while the other run may still fail, the paid purchase would never be settled
-    // (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and the next run tries again.
-    if ((await readGroupExactly(id))?.paid) return "already";
+    // Another run is settling it. "already" only once it is paid and told: confirmGroup (lib/purchase-email.ts) keeps
+    // its "sent" mark on "already", so said while the other run may still fail, the paid purchase would never be
+    // settled, or its receipt never sent (as deliverGift does since Claude 4 on #2726 and #2872). Thrown, no "sent"
+    // mark is kept and the next run tries again.
+    if (await toldExactly(id)) return "already";
     throw new Error("another run is settling this purchase for several right now");
   }
 
-  const sessionId = typeof session.id === "string" ? session.id : "";
-  // Stripe gives the payment as its id, or whole when the caller asked for it.
-  const intent = session.payment_intent as { id?: unknown } | string | null | undefined;
-  const pi = typeof intent === "string" ? intent : typeof intent?.id === "string" ? intent.id : "";
-  // A bundle hands over what it held when it was paid for, to every place.
-  const items = bundleFromMeta(session.metadata ?? null, "bundle");
-  // The hour its checkout was admitted in, which held room for every place for a day (takePlace).
-  const admittedHour = Number(session.metadata?.[ADMITTED_FIELD] ?? "");
-  const paid: Group = { ...group, session: sessionId, pi, paid: now(), items: items.length ? items : null, ...(Number.isSafeInteger(admittedHour) && admittedHour > 0 ? { h: admittedHour } : {}) };
-  // What a refund looks up (the payment's purchase, and that this store sold one) is written first and the purchase
-  // marked paid last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of
-  // the settling mark and throws, so confirmGroup keeps no "sent" mark and the next run does it again, never
-  // "already" on a purchase whose payment a refund could not find.
-  const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS]] : []), ["SET", anyKey(group.s), "1"]];
-  const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
-  if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
-    await releaseMark(settling, mark);
-    throw new UnknownReplyError("a paid purchase for several's payment record");
+  // Marked paid only when the record does not say paid yet. Paid by an earlier run whose last write came back in
+  // another shape, it is not written again: this run only sends the receipt.
+  let paid: Group = group;
+  if (!group.paid) {
+    const sessionId = typeof session.id === "string" ? session.id : "";
+    // Stripe gives the payment as its id, or whole when the caller asked for it.
+    const intent = session.payment_intent as { id?: unknown } | string | null | undefined;
+    const pi = typeof intent === "string" ? intent : typeof intent?.id === "string" ? intent.id : "";
+    // A bundle hands over what it held when it was paid for, to every place.
+    const items = bundleFromMeta(session.metadata ?? null, "bundle");
+    // The hour its checkout was admitted in, which held room for every place for a day (takePlace).
+    const admittedHour = Number(session.metadata?.[ADMITTED_FIELD] ?? "");
+    paid = { ...group, session: sessionId, pi, paid: now(), items: items.length ? items : null, ...(Number.isSafeInteger(admittedHour) && admittedHour > 0 ? { h: admittedHour } : {}) };
+    // What a refund looks up (the payment's purchase, and that this store sold one) is written first and the purchase
+    // marked paid last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of
+    // the settling mark and throws, so confirmGroup keeps no "sent" mark and the next run does it again, never
+    // "already" on a purchase whose payment a refund could not find.
+    const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS]] : []), ["SET", anyKey(group.s), "1"]];
+    const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
+    if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
+      await releaseMark(settling, mark);
+      throw new UnknownReplyError("a paid purchase for several's payment record");
+    }
+    if (!(await saveGroup(paid, GROUP_KEPT_SECONDS))) {
+      await releaseMark(settling, mark);
+      throw new UnknownReplyError("a paid purchase for several's record");
+    }
   }
-  if (!(await saveGroup(paid, GROUP_KEPT_SECONDS))) {
-    await releaseMark(settling, mark);
-    throw new UnknownReplyError("a paid purchase for several's record");
-  }
-  await releaseMark(settling, mark);
 
   await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),
   );
+  // Told: a later run answers "already". The mark's own reply is not decisive (the receipt is gone and the order is
+  // confirmed now): a mark that did not land lets a later run send it again, under the same idempotency key.
+  await redisPipeline([["SET", toldKey(group.id), "1", "EX", GROUP_KEPT_SECONDS]]).catch((error) => console.error("a purchase for several's told mark failed", error));
+  await releaseMark(settling, mark);
   return "settled";
 }
 
@@ -357,6 +385,17 @@ type Member = { e: string; at: number; k?: string };
  * another run of the same link holds. The first line names it for the local stand-in (lib/redis-memory.ts).
  */
 const HDEL_OWN = '-- marktmorgen:hdel-own:v1\nif redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) else return 0 end';
+
+/**
+ * Moves a purchase's count of places once for one run (L1, Claude 4 on #2872; CX-123 rules 24 and 30): the count this
+ * run's INCR gave is kept under the run's own value for a few minutes, so the same script run again by the same run
+ * answers that count instead of moving it twice. A first try answered in another shape is tried once more, and its
+ * answer says whether the count moved and to what, never a place let go while the count it took stays. The first line
+ * names it for the local stand-in (lib/redis-memory.ts).
+ */
+const INCR_ONCE = '-- marktmorgen:incr-once:v1\nlocal done = redis.call("GET", KEYS[2])\nif done then return tonumber(done) end\nlocal n = redis.call("INCR", KEYS[1])\nredis.call("SET", KEYS[2], n, "EX", ARGV[1])\nreturn n';
+/** How long a run's own count is kept for its retry: well past one run. */
+const INCR_ONCE_SECONDS = 300;
 
 function parseMember(raw: unknown): Member | null {
   if (typeof raw !== "string") return null;
@@ -534,7 +573,8 @@ export async function takePlace(input: {
 
   const at = now();
   // The hold carries a value only this run writes, so only this run's own hold is ever let go (Claude 6 on #2872).
-  const hold = JSON.stringify({ e: email, at, k: claimValue() } satisfies Member);
+  const runValue = claimValue();
+  const hold = JSON.stringify({ e: email, at, k: runValue } satisfies Member);
   const dropOwn: (string | number)[] = ["EVAL", HDEL_OWN, 1, membersKey(group.id), who, hold];
   // Let go of this address's hold on a place it was not given, so its link works again on a later try, and only while
   // the record is still this run's own: a hold whose write came back unknown may be another run's of the same link (a
@@ -563,8 +603,15 @@ export async function takePlace(input: {
     const replies = repliesFor(await redisPipeline([dropOwn, ["DECR", takenKey(group.id)]]).catch(() => null), 2);
     if (!replies || (replies[0] !== 0 && replies[0] !== 1)) await letGo();
   };
-  const count = repliesFor(await redisPipeline([["INCR", takenKey(group.id)]]), 1)?.[0];
-  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) {
+  // The count moved once for this run (INCR_ONCE): a first answer in another shape is asked once more, and the same
+  // script answers the count this run's own INCR gave, or moves it now when the first never ran, so a place whose
+  // count moved is never let go with the count kept (L1, Claude 4 on #2872). Unknown both times, the run lets go of
+  // its own hold and throws; at worst a place stays counted, never one handed out past the number paid for.
+  const countOnce: (string | number)[] = ["EVAL", INCR_ONCE, 2, takenKey(group.id), `${takenKey(group.id)}:run:${runValue}`, INCR_ONCE_SECONDS];
+  const counted = (reply: unknown): number | null => (typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 1 ? reply : null);
+  const askCount = async () => counted(repliesFor(await redisPipeline([countOnce]).catch(() => null), 1)?.[0]);
+  const count = (await askCount()) ?? (await askCount());
+  if (count === null) {
     await letGo();
     throw new UnknownReplyError("the count of places taken");
   }

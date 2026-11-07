@@ -248,6 +248,15 @@ export class MemoryRedis {
           const [, hash, field, value] = args;
           return this.run(["HGET", hash, field]) === value ? this.run(["HDEL", hash, field]) : 0;
         }
+        // lib/group-buy.ts takePlace: a purchase's count of places moved once for one run, its count kept for the retry.
+        if (key.startsWith("-- marktmorgen:incr-once:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, counter, own, seconds] = args;
+          const done = this.run(["GET", own]);
+          if (done !== null) return Number(done);
+          const n = this.run(["INCR", counter]);
+          this.run(["SET", own, String(n), "EX", seconds]);
+          return n;
+        }
         if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;

@@ -205,15 +205,18 @@ async function main(): Promise<void> {
   is("exactly two taken, the third told full", [await take("ana@example.com"), await take("ben@example.com"), await take("cy@example.com"), await placesTaken(id)], ["taken", "taken", "full", 2]);
   is("both places hold the product; nothing for the third", [await owns("ana@example.com"), await owns("ben@example.com"), await owns("cy@example.com")], [[product.id], [product.id], []]);
 
-  part("3. takePlace: the places counter answers in an unknown shape (the count still moves)");
-  unknownFor((c) => c[0] === "INCR" && String(c[1]).endsWith(":n"), true);
+  // The command that moves a purchase's count: the INCR, or the script that moves it once for a run (L1, Claude 4 on
+  // #2872), whose first key is the count.
+  const movesCount = (c: Command) => (c[0] === "INCR" && String(c[1]).endsWith(":n")) || (c[0] === "EVAL" && String(c[3]).endsWith(":n"));
+  part("3. takePlace: the places counter answers in an unknown shape on every try (the count still moves)");
+  unknownFor(movesCount, true);
   const third = await take("dee@example.com");
   restore();
   is("refused (a temporary error), never 'taken' past the two paid for", third === "taken", false);
   is("nothing handed to that address", await owns("dee@example.com"), []);
   is("the same link opened again is told full, never 'already' with nothing given", await take("dee@example.com"), "full");
 
-  part("3. takePlace: a fresh purchase for two, its first place's counter unknown");
+  part("3. takePlace: a fresh purchase for two, its first place's counter unknown on every try, never run");
   const two = await startGroup(store, product, "2");
   if (!two.ok) throw new Error("no group");
   if ((await settleGroup({ ...deps, session: paidSession({ group: two.group.id, people: "2" }) })) !== "settled") throw new Error("not settled");
@@ -222,7 +225,7 @@ async function main(): Promise<void> {
     await real([["SET", `nl:grp:take:${t}`, JSON.stringify({ g: two.group.id, e: email }), "EX", 3600]]);
     return t;
   };
-  unknownFor((c) => c[0] === "INCR" && String(c[1]).endsWith(":n"), false);
+  unknownFor(movesCount, false);
   const firstUnknown = await outcome(takePlace({ store, token: await tokenFor("gus@example.com"), recordStart: async () => {} }));
   restore();
   is("refused, nothing handed over", [firstUnknown === "threw" || (firstUnknown as { outcome: string }).outcome !== "taken", await owns("gus@example.com")], [true, []]);

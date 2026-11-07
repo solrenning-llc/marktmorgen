@@ -1125,7 +1125,11 @@ export async function acceptPartnership(store: Store, email: string, share: Part
   if (!affiliatesOn(store)) return { ok: false, reason: "unavailable" };
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { s: store.statsId as string, e: normaliseEmail(email), n: "Accepted a partnership", k: 1, p: share };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", 600]]);
+  // Opened only once Redis said it stored the grant (rule 24): any other answer is unknown, never an "expired" grant
+  // (which the studio would take for an offer that is gone). Thrown before anything is read, charged or written: the
+  // route answers 503, the offer is kept to accept again, and a grant that did land ends with its ten minutes.
+  const saved = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", 600]]), 1);
+  if (saved?.[0] !== "OK") throw new UnknownReplyError("the grant of an accepted partnership");
   return openAffiliateLink(store, token, charge);
 }
 

@@ -76,7 +76,7 @@ export function slug(name: string): string {
 export async function claimHandle(id: string, who: string, name: string, had: string): Promise<string> {
   const wanted = slug(name);
   if (!wanted) {
-    if (had) await redisPipeline([["HDEL", handlesKey(id), had]]);
+    if (had) await giveUpIfTheirs(id, had, who);
     return "";
   }
   if (wanted === had) return had;
@@ -84,17 +84,27 @@ export async function claimHandle(id: string, who: string, name: string, had: st
     const tryThis = n === 0 ? wanted : `${wanted.slice(0, MAX_HANDLE - String(n + 1).length)}${n + 1}`;
     const [got] = await redisPipeline([["HSETNX", handlesKey(id), tryThis, who]]);
     if (Number(got) === 1) {
-      if (had && had !== tryThis) await redisPipeline([["HDEL", handlesKey(id), had]]);
+      if (had && had !== tryThis) await giveUpIfTheirs(id, had, who);
       return tryThis;
     }
     // Already ours: nothing to claim, nothing to release.
     const [owner] = await redisPipeline([["HGET", handlesKey(id), tryThis]]);
     if (owner === who) {
-      if (had && had !== tryThis) await redisPipeline([["HDEL", handlesKey(id), had]]);
+      if (had && had !== tryThis) await giveUpIfTheirs(id, had, who);
       return tryThis;
     }
   }
   return had;
+}
+
+/**
+ * Gives up the handle a member had, read from their record earlier: only while
+ * it still names them, in the same step, because another save of theirs may
+ * have given it back and another member taken it since (FORGET_HANDLE_IF_THEIRS).
+ */
+async function giveUpIfTheirs(id: string, had: string, who: string): Promise<void> {
+  const gone = countOf(repliesFor(await redisPipeline([["EVAL", FORGET_HANDLE_IF_THEIRS, 1, handlesKey(id), had, who]]), 1)?.[0]);
+  if (gone === null || gone > 1) throw new UnknownReplyError("a community handle's release");
 }
 
 /** Gives a handle back, for a member who is removed. */

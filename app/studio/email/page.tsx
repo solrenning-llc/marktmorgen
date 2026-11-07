@@ -23,7 +23,8 @@ import { letterIdFor, publishedLetters } from "@/lib/letters";
 import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";
 import { sellsSomething } from "@/lib/mail-starters";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
-import { readFlowListStrict } from "@/lib/flow-list";
+import { readFlowsForPage } from "@/lib/flows";
+import { NOT_COUNTED, countUnits } from "@/lib/person-agenda-read";
 import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
 import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
@@ -62,11 +63,14 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
-  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
+  // The workflows are measured before they are read, and what reading them and sending them on comes to past the
+  // page's own studio requests is taken first (lib/flows.ts, readFlowsForPage), as every studio action on them is.
+  const payStudio = (units: number) => countUnits(store, units);
+  const [counts, used, loadedBroadcasts, readFlowsResult, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     usedThisMonth(store.listId, windowId(store)),
     listBroadcastsStrict(store.listId).catch(() => null),
-    readFlowListStrict(store.listId).catch(() => null),
+    readFlowsForPage(store.listId, payStudio).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
     // command, where reading every card was one per product (lib/catalog.ts).
     readTitles(store),
@@ -82,6 +86,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   ]);
   const levels = health ? healthLevels(health) : null;
   const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;
+  const loadedFlows = readFlowsResult?.ok ? readFlowsResult.flows : null;
+  // Not read because the studio requests reading them comes to are not left, or could not be counted: said in words, with why.
+  const flowsRefused = readFlowsResult && !readFlowsResult.ok ? readFlowsResult.refused || NOT_COUNTED : null;
   const broadcasts = loadedBroadcasts ?? [];
   const flows = loadedFlows ?? [];
   const drafts = loadedDrafts ?? [];
@@ -229,6 +236,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm">{advice.text}</p>
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
             </section>
+          ) : null}
+          {flowsRefused !== null ? (
+            <p role="status" className="mt-6 max-w-2xl">
+              {`Your sequences could not be shown, because reading them takes studio requests. ${flowsRefused}`}
+            </p>
           ) : null}
           {(emailTemplate || query.sequenceTemplate) ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{emailTemplate ? "Library email opened as an unsaved draft. Replace every placeholder and review consent before saving or sending." : initialSequence ? "Library sequence opened as an unsaved paused draft. Review every step before saving; activation is a separate action." : "A new sequence could not be opened: its trigger may already be in use, your role may not allow it, or its records or products could not be confirmed. Existing sequences were preserved."}</p> : null}
           <EmailStudio

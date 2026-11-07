@@ -320,7 +320,7 @@ export async function POST(request: NextRequest) {
       }
       const choice = RESOLVE_CHOICES.find((c) => c === body.choice) as ResolveChoice | undefined;
       if (!choice) return fail("invalid");
-      const resolved = await resolveHeldRun(store, id, run, choice);
+      const resolved = await resolveHeldRun(store, id, run, choice, flows);
       if (resolved !== "ok") return fail(resolved === "unknown" ? "unknown" : resolved === "paused" ? "run_paused" : resolved === "retry_limit" ? "run_retry_limit" : "run_not_held", resolved === "unknown" ? 404 : 409);
       const found = await readRun(id, run);
       return Response.json({ ok: true, ...(found ?? {}) });

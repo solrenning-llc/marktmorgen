@@ -153,6 +153,16 @@ export async function aboutListed(store: Store): Promise<boolean> {
 
 type Kept = { at: number; joined: number; posts: number; more: boolean };
 
+/**
+ * What the posts read say, as the page may show it. None counted while the
+ * window read was full ("at least" none) says nothing about the recent posts
+ * past it, so it is unknown and left out, never shown as "no posts"
+ * (Codex K2 on #3016).
+ */
+function shownPosts(n: number, more: boolean): AboutCounts["posts"] {
+  return n === 0 && more ? null : { n, atLeast: more };
+}
+
 function readKept(raw: unknown): Kept | null {
   if (typeof raw !== "string") return null;
   try {
@@ -182,7 +192,7 @@ export async function aboutCounts(
   const at = Math.floor(now / 1000);
   const [stored] = repliesFor(await redisPipeline([["GET", aboutKey(id)]]), 1) ?? [undefined];
   const kept = readKept(stored);
-  if (kept && kept.at <= at && at - kept.at < ABOUT_FRESH_SECONDS) return { joined: kept.joined, posts: { n: kept.posts, atLeast: kept.more } };
+  if (kept && kept.at <= at && at - kept.at < ABOUT_FRESH_SECONDS) return { joined: kept.joined, posts: shownPosts(kept.posts, kept.more) };
 
   if (!(await takePublicRequest(store, "public", now, ABOUT_REFRESH_UNITS))) return null;
   const first = repliesFor(
@@ -193,9 +203,11 @@ export async function aboutCounts(
     2,
   );
   const joined = first ? countOf(first[0]) : null;
-  const ids = first ? stringList(first[1]) : null;
-  let posts: AboutCounts["posts"] = null;
-  if (ids && ids.length === 0) posts = { n: 0, atLeast: false };
+  const listed = first ? stringList(first[1]) : null;
+  // More ids than were asked for is not the feed's newest: unknown, and nothing past the window is read.
+  const ids = listed && listed.length <= ABOUT_POSTS_READ ? listed : null;
+  let read: { n: number; more: boolean } | null = null;
+  if (ids && ids.length === 0) read = { n: 0, more: false };
   else if (ids) {
     const [rows] = repliesFor(await redisPipeline([["MGET", ...ids.map((p) => `nl:cm:${id}:p:${p}`)]]), 1) ?? [null];
     const records = repliesFor(rows, ids.length);
@@ -214,7 +226,8 @@ export async function aboutCounts(
           unknown = true;
           break;
         }
-        if (typeof post.at !== "number") {
+        // A time that is not whole seconds from 1970 up to now is not a post's time: unknown, not a recent post.
+        if (typeof post.at !== "number" || !Number.isSafeInteger(post.at) || post.at < 0 || post.at > at) {
           unknown = true;
           break;
         }
@@ -222,14 +235,15 @@ export async function aboutCounts(
         else if (post.hid !== true) n += 1;
       }
       // The newest ABOUT_POSTS_READ all recent, and maybe more before them: "at least".
-      if (!unknown) posts = { n, atLeast: allRecent && ids.length === ABOUT_POSTS_READ };
+      if (!unknown) read = { n, more: allRecent && ids.length === ABOUT_POSTS_READ };
     }
   }
-  if (joined !== null && posts !== null) {
-    const value: Kept = { at, joined, posts: posts.n, more: posts.atLeast };
+  // A full window of hidden posts is kept as read (shown as unknown), so the next visits do not pay to read it again.
+  if (joined !== null && read !== null) {
+    const value: Kept = { at, joined, posts: read.n, more: read.more };
     await redisPipeline([["SET", aboutKey(id), JSON.stringify(value), "EX", ABOUT_FRESH_SECONDS]]);
   }
-  return { joined, posts };
+  return { joined, posts: read ? shownPosts(read.n, read.more) : null };
 }
 
 export type AboutWords = {
@@ -256,7 +270,7 @@ const en: AboutWords = {
   activity: "Members and activity",
   joined: (n, f = String) => (n === 0 ? "Nobody has joined yet" : n === 1 ? "1 person has joined" : `${f(n)} people have joined`),
   posts: (n, atLeast, f = String) =>
-    n === 0 ? "No posts in the last 30 days" : atLeast ? `At least ${f(n)} posts in the last 30 days` : n === 1 ? "1 post in the last 30 days" : `${f(n)} posts in the last 30 days`,
+    atLeast ? (n === 1 ? "At least 1 post in the last 30 days" : `At least ${f(n)} posts in the last 30 days`) : n === 0 ? "No posts in the last 30 days" : n === 1 ? "1 post in the last 30 days" : `${f(n)} posts in the last 30 days`,
   counted: "Counted at most six hours ago.",
   join: "How to join",
   opens: (k, m) => (k >= m ? "Opens every space" : `Opens ${k} of its ${m} spaces`),
@@ -273,7 +287,7 @@ const es: AboutWords = {
   activity: "Miembros y actividad",
   joined: (n, f = String) => (n === 0 ? "Todavía no se ha unido nadie" : n === 1 ? "Se ha unido 1 persona" : `Se han unido ${f(n)} personas`),
   posts: (n, atLeast, f = String) =>
-    n === 0 ? "Ninguna publicación en los últimos 30 días" : atLeast ? `Al menos ${f(n)} publicaciones en los últimos 30 días` : n === 1 ? "1 publicación en los últimos 30 días" : `${f(n)} publicaciones en los últimos 30 días`,
+    atLeast ? (n === 1 ? "Al menos 1 publicación en los últimos 30 días" : `Al menos ${f(n)} publicaciones en los últimos 30 días`) : n === 0 ? "Ninguna publicación en los últimos 30 días" : n === 1 ? "1 publicación en los últimos 30 días" : `${f(n)} publicaciones en los últimos 30 días`,
   counted: "Contado hace seis horas como máximo.",
   join: "Cómo unirse",
   opens: (k, m) => (k >= m ? "Abre todos los espacios" : `Abre ${k} de sus ${m} espacios`),
@@ -290,7 +304,7 @@ const fr: AboutWords = {
   activity: "Membres et activité",
   joined: (n, f = String) => (n === 0 ? "Personne ne l’a encore rejointe" : n === 1 ? "1 personne l’a rejointe" : `${f(n)} personnes l’ont rejointe`),
   posts: (n, atLeast, f = String) =>
-    n === 0 ? "Aucune publication ces 30 derniers jours" : atLeast ? `Au moins ${f(n)} publications ces 30 derniers jours` : n === 1 ? "1 publication ces 30 derniers jours" : `${f(n)} publications ces 30 derniers jours`,
+    atLeast ? (n === 1 ? "Au moins 1 publication ces 30 derniers jours" : `Au moins ${f(n)} publications ces 30 derniers jours`) : n === 0 ? "Aucune publication ces 30 derniers jours" : n === 1 ? "1 publication ces 30 derniers jours" : `${f(n)} publications ces 30 derniers jours`,
   counted: "Compté il y a six heures au plus.",
   join: "Comment la rejoindre",
   opens: (k, m) => (k >= m ? "Ouvre tous les espaces" : `Ouvre ${k} de ses ${m} espaces`),
@@ -307,7 +321,7 @@ const de: AboutWords = {
   activity: "Mitglieder und Aktivität",
   joined: (n, f = String) => (n === 0 ? "Noch ist niemand beigetreten" : n === 1 ? "1 Person ist beigetreten" : `${f(n)} Personen sind beigetreten`),
   posts: (n, atLeast, f = String) =>
-    n === 0 ? "Keine Beiträge in den letzten 30 Tagen" : atLeast ? `Mindestens ${f(n)} Beiträge in den letzten 30 Tagen` : n === 1 ? "1 Beitrag in den letzten 30 Tagen" : `${f(n)} Beiträge in den letzten 30 Tagen`,
+    atLeast ? (n === 1 ? "Mindestens 1 Beitrag in den letzten 30 Tagen" : `Mindestens ${f(n)} Beiträge in den letzten 30 Tagen`) : n === 0 ? "Keine Beiträge in den letzten 30 Tagen" : n === 1 ? "1 Beitrag in den letzten 30 Tagen" : `${f(n)} Beiträge in den letzten 30 Tagen`,
   counted: "Höchstens vor sechs Stunden gezählt.",
   join: "So trittst du bei",
   opens: (k, m) => (k >= m ? "Öffnet alle Bereiche" : `Öffnet ${k} ihrer ${m} Bereiche`),
@@ -324,7 +338,7 @@ const it: AboutWords = {
   activity: "Membri e attività",
   joined: (n, f = String) => (n === 0 ? "Non si è ancora unito nessuno" : n === 1 ? "Si è unita 1 persona" : `Si sono unite ${f(n)} persone`),
   posts: (n, atLeast, f = String) =>
-    n === 0 ? "Nessun post negli ultimi 30 giorni" : atLeast ? `Almeno ${f(n)} post negli ultimi 30 giorni` : `${f(n)} post negli ultimi 30 giorni`,
+    atLeast ? `Almeno ${f(n)} post negli ultimi 30 giorni` : n === 0 ? "Nessun post negli ultimi 30 giorni" : `${f(n)} post negli ultimi 30 giorni`,
   counted: "Contati al massimo sei ore fa.",
   join: "Come entrare",
   opens: (k, m) => (k >= m ? "Apre tutti gli spazi" : `Apre ${k} dei suoi ${m} spazi`),
@@ -341,7 +355,7 @@ const nl: AboutWords = {
   activity: "Leden en activiteit",
   joined: (n, f = String) => (n === 0 ? "Nog niemand is lid geworden" : n === 1 ? "1 persoon is lid geworden" : `${f(n)} mensen zijn lid geworden`),
   posts: (n, atLeast, f = String) =>
-    n === 0 ? "Geen berichten in de afgelopen 30 dagen" : atLeast ? `Minstens ${f(n)} berichten in de afgelopen 30 dagen` : n === 1 ? "1 bericht in de afgelopen 30 dagen" : `${f(n)} berichten in de afgelopen 30 dagen`,
+    atLeast ? (n === 1 ? "Minstens 1 bericht in de afgelopen 30 dagen" : `Minstens ${f(n)} berichten in de afgelopen 30 dagen`) : n === 0 ? "Geen berichten in de afgelopen 30 dagen" : n === 1 ? "1 bericht in de afgelopen 30 dagen" : `${f(n)} berichten in de afgelopen 30 dagen`,
   counted: "Hooguit zes uur geleden geteld.",
   join: "Zo word je lid",
   opens: (k, m) => (k >= m ? "Opent alle ruimtes" : `Opent ${k} van de ${m} ruimtes`),
@@ -358,7 +372,7 @@ const pt: AboutWords = {
   activity: "Membros e atividade",
   joined: (n, f = String) => (n === 0 ? "Ainda ninguém aderiu" : n === 1 ? "Aderiu 1 pessoa" : `Aderiram ${f(n)} pessoas`),
   posts: (n, atLeast, f = String) =>
-    n === 0 ? "Nenhuma publicação nos últimos 30 dias" : atLeast ? `Pelo menos ${f(n)} publicações nos últimos 30 dias` : n === 1 ? "1 publicação nos últimos 30 dias" : `${f(n)} publicações nos últimos 30 dias`,
+    atLeast ? (n === 1 ? "Pelo menos 1 publicação nos últimos 30 dias" : `Pelo menos ${f(n)} publicações nos últimos 30 dias`) : n === 0 ? "Nenhuma publicação nos últimos 30 dias" : n === 1 ? "1 publicação nos últimos 30 dias" : `${f(n)} publicações nos últimos 30 dias`,
   counted: "Contado há seis horas, no máximo.",
   join: "Como aderir",
   opens: (k, m) => (k >= m ? "Abre todos os espaços" : `Abre ${k} dos seus ${m} espaços`),

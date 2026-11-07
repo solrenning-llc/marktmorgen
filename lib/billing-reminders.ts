@@ -4,12 +4,13 @@
  * one after a charge that did not go through (failedPlanEmail, below).
  *
  * The card networks require the first (Visa: at least seven days before the
- * first charge after a trial, with a way to cancel), California requires the
- * second (15 to 45 days before a yearly plan renews), and both are simply how
+ * first charge after a trial, with a way to cancel), the renewal laws require the
+ * second (the 30th day before a yearly plan renews, see YEAR_NOTICE_DAYS), and both are simply how
  * a subscription should treat the person paying for it. Each is sent once per
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue } from "@/lib/claim-mark";
 import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
@@ -21,8 +22,61 @@ import { PLAN_NAMES, PLAN_PRICES, type Cycle, type Tier } from "@/lib/plan";
 const DAY = 86_400;
 /** Sent on the first daily run with at most this long left: seven to eight days. */
 const TRIAL_NOTICE_SECONDS = 8 * DAY;
-/** Sent on the first daily run with at most thirty days left, and never later than needed. */
-const YEAR_NOTICE_SECONDS = 30 * DAY;
+/**
+ * Below this, a trial notice is late: the card networks' seven days
+ * (California's floor for a trial over 31 days, three days, is inside it).
+ */
+export const TRIAL_FLOOR_SECONDS = 7 * DAY;
+/**
+ * Sent on the 30th calendar day before the charge's date, never earlier; if a
+ * run misses that day, it is sent on the next run and marked late.
+ * The official texts read on 30 Oct 2026 (queue 414 [KX1],
+ * docs/kx1-renewal-legal-matrix-2026-10-30.md, sections 6 to 9) allow only
+ * that day before an annual renewal in every jurisdiction read: Utah 30-60
+ * days (Utah Code §13-70-201), Illinois, Virginia and DC 30-60 before the
+ * cancellation deadline, Colorado 25-40, Massachusetts 5-30 (940 CMR
+ * 38.05(4)), New York 15-45, California 15-45 (secondary).
+ *
+ * Days are calendar days in UTC (the daily run's own date), compared with
+ * the charge's UTC date: counting elapsed seconds would let a charge late in
+ * the day be noticed on the 29th day and still look on time. A customer's own
+ * local date can differ from UTC near midnight; that limit is recorded in the
+ * matrix as gap G16.
+ */
+export const YEAR_NOTICE_DAYS = 30;
+
+/**
+ * The end of one full billing period that starts at `at` (calendar, UTC).
+ * A day the target month lacks is that month's last day, as Stripe ends the
+ * period: 31 January + a month is 28 (or 29) February, 29 February 2028 + a
+ * year is 28 February 2029, never a day of the month after.
+ *
+ * Stripe counts every period from the subscription's billing_cycle_anchor
+ * (API reference: it sets the day of the month), not from the last period's
+ * end: anchored on the 31st, the period ending 28 February is followed by
+ * one ending 31 March. So the day is the anchor's when the subscription
+ * gives one at or before `at`; without one, it is `at`'s own day.
+ */
+export function fullPeriodAfter(at: number, cycle: Cycle, anchor?: unknown): number {
+  const date = new Date(at * 1000);
+  const year = date.getUTCFullYear() + (cycle === "year" ? 1 : 0);
+  const month = date.getUTCMonth() + (cycle === "year" ? 0 : 1);
+  const anchored = typeof anchor === "number" && Number.isInteger(anchor) && anchor > 0 && anchor <= at;
+  const dayOfMonth = anchored ? new Date(anchor * 1000).getUTCDate() : date.getUTCDate();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const end = Date.UTC(year, month, Math.min(dayOfMonth, lastDay), date.getUTCHours(), date.getUTCMinutes(), date.getUTCSeconds());
+  return Math.floor(end / 1000);
+}
+
+/** Whole UTC calendar days from the day of `now` to the day of `at`. */
+export function calendarDaysBefore(at: number, now: number): number {
+  return Math.floor(at / DAY) - Math.floor(now / DAY);
+}
+
+function daysWords(at: number, now: number): string {
+  const days = calendarDaysBefore(at, now);
+  return `${days} calendar day${days === 1 ? "" : "s"} (UTC)`;
+}
 /** Too close to the charge to be of use: left alone. */
 const TOO_LATE_SECONDS = DAY;
 const MAX_PAGES = 50;
@@ -36,6 +90,12 @@ export type Reminder = {
   tier: Tier;
   cycle: Cycle;
   amountCents: number;
+  /**
+   * Sent after its window's floor had passed (a missed run, or a plan made
+   * inside it). Still sent, because the person is better told late than not
+   * at all, but counted apart and never reported as on time.
+   */
+  late: boolean;
 };
 
 function day(seconds: number): string {
@@ -103,12 +163,26 @@ export function reminderEmail(reminder: Reminder): { subject: string; text: stri
 
 /** Which reminder a subscription is due right now, if any. */
 export function dueReminder(subscription: Record<string, unknown>, nowSeconds: number): Reminder | null {
+  return noticeFor(subscription, nowSeconds, false);
+}
+
+/**
+ * A notice that was due but was never sent, found when the charge is a day
+ * or less away (too close to be of use, so it is not sent now): returned so
+ * the run can count it as missed instead of dropping it silently.
+ */
+export function missedReminder(subscription: Record<string, unknown>, nowSeconds: number): Reminder | null {
+  const at = periodEnd(subscription, subscription.status === "trialing");
+  if (!at || at - nowSeconds > TOO_LATE_SECONDS || at <= nowSeconds) return null;
+  return noticeFor(subscription, nowSeconds, true);
+}
+
+function noticeFor(subscription: Record<string, unknown>, nowSeconds: number, tooLate: boolean): Reminder | null {
   const id = typeof subscription.id === "string" ? subscription.id : "";
   // An add-on (the Store assistant) is not a plan: these words are about plans.
   if (!id || isAddOn(subscription)) return null;
   // Set to stop: nothing more will be charged, so there is nothing to warn of.
   if (subscription.cancel_at_period_end === true) return null;
-  if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) return null;
   const customer = subscription.customer as { email?: unknown; deleted?: unknown } | string | null;
   const email = customer && typeof customer === "object" && typeof customer.email === "string" ? customer.email : "";
   if (!email) return null;
@@ -116,17 +190,28 @@ export function dueReminder(subscription: Record<string, unknown>, nowSeconds: n
   const trialing = subscription.status === "trialing";
   const at = periodEnd(subscription, trialing);
   const left = at - nowSeconds;
-  if (!at || left <= TOO_LATE_SECONDS) return null;
+  if (!at || (!tooLate && left <= TOO_LATE_SECONDS)) return null;
   const plan = planOf(subscription);
   if (!plan.amountCents) return null;
+  // A cancellation already scheduled. On or before this charge: nothing will
+  // be charged, so there is nothing to warn of. At least a full period after
+  // it: this charge is the full price for a full period, which the email
+  // says. In between, Stripe prorates the last period (API reference,
+  // cancel_at), so the email's amount and "another year" would be untrue:
+  // nothing is sent, and the gap is recorded (queue 414 [KX1], G17).
+  if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) {
+    if (subscription.cancel_at < fullPeriodAfter(at, plan.cycle, subscription.billing_cycle_anchor)) return null;
+  }
 
   if (trialing) {
     return left <= TRIAL_NOTICE_SECONDS
-      ? { kind: "trial", subscription: id, email, at, ...plan }
+      ? { kind: "trial", subscription: id, email, at, ...plan, late: left < TRIAL_FLOOR_SECONDS }
       : null;
   }
-  if (subscription.status === "active" && plan.cycle === "year" && left <= YEAR_NOTICE_SECONDS) {
-    return { kind: "renewal", subscription: id, email, at, ...plan };
+  if (subscription.status === "active" && plan.cycle === "year") {
+    const days = calendarDaysBefore(at, nowSeconds);
+    if (days > YEAR_NOTICE_DAYS) return null;
+    return { kind: "renewal", subscription: id, email, at, ...plan, late: days < YEAR_NOTICE_DAYS };
   }
   return null;
 }
@@ -230,8 +315,17 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
 }
 
 /** Every plan whose payment failed and that has not been written to about it yet. */
-export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: number; seen: number }> {
-  const counts = { sent: 0, failed: 0, seen: 0 };
+export async function sendFailedPlanNotices(): Promise<{
+  sent: number;
+  /**
+   * A claim the store answered in a shape that proves nothing (CX-123 rule
+   * 24): nothing sent and no card touched; the next run tries again.
+   */
+  unknown: number;
+  failed: number;
+  seen: number;
+}> {
+  const counts = { sent: 0, unknown: 0, failed: 0, seen: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
   let after: string | undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -241,9 +335,15 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       const due = failedPlan(subscription);
       if (!due) continue;
       // Claimed before anything is done, so a second run never writes twice.
+      // Done only on an exact claim (lib/claim-mark.ts): taken is an email
+      // already sent; unknown does nothing, and the next run asks again.
       const key = `nl:remind:failed:${due.invoice}`;
-      const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 90 * DAY]]);
-      if (claimed === null) continue;
+      const claimed = await claimMark(key, 90 * DAY, claimValue());
+      if (claimed === "unknown") {
+        counts.unknown += 1;
+        console.warn("failed plan payment claim unknown: not sent; tried again on the next run");
+      }
+      if (claimed !== "ours") continue;
       try {
         // A renewal's email says what has stopped, so it is written down
         // first (lib/billing-sync.ts); a failure waits for the next run.
@@ -274,10 +374,19 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
  */
 export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)): Promise<{
   sent: number;
+  /** Of those sent, how many went after their window's floor. */
+  late: number;
+  /** Due but never sent, found a day or less before the charge: counted, not sent. */
+  missed: number;
+  /**
+   * A claim the store answered in a shape that proves nothing (CX-123 rule
+   * 24): nothing sent and nothing counted as missed; the next run tries again.
+   */
+  unknown: number;
   failed: number;
   seen: number;
 }> {
-  const counts = { sent: 0, failed: 0, seen: 0 };
+  const counts = { sent: 0, late: 0, missed: 0, unknown: 0, failed: 0, seen: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
 
   for (const status of ["trialing", "active"] as const) {
@@ -287,14 +396,43 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
       for (const subscription of data) {
         counts.seen += 1;
         const reminder = dueReminder(subscription, nowSeconds);
-        if (!reminder) continue;
+        if (!reminder) {
+          const missed = missedReminder(subscription, nowSeconds);
+          if (missed) {
+            // The same key a sent notice holds: claimed here only if no notice
+            // went for this charge, so a missed one is counted once. Ours only
+            // on an exact claim (lib/claim-mark.ts); somebody else's is a sent
+            // or counted notice; unknown is neither, and the next run asks again.
+            const missedKey = `nl:remind:${missed.kind}:${missed.subscription}:${missed.at}`;
+            const unsent = await claimMark(missedKey, 60 * DAY, claimValue());
+            if (unsent === "ours") {
+              counts.missed += 1;
+              console.warn(`billing reminder missed: ${missed.kind}, ${daysWords(missed.at, nowSeconds)} before the charge`);
+            } else if (unsent === "unknown") {
+              counts.unknown += 1;
+              console.warn(`billing reminder claim unknown: ${missed.kind}, not counted as missed; tried again on the next run`);
+            }
+          }
+          continue;
+        }
+        // Sent only on an exact claim (lib/claim-mark.ts): taken is a notice
+        // already sent; unknown sends nothing, and the next run asks again.
         const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-        const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 60 * DAY]]);
-        if (claimed === null) continue;
+        const claimed = await claimMark(key, 60 * DAY, claimValue());
+        if (claimed === "unknown") {
+          counts.unknown += 1;
+          console.warn(`billing reminder claim unknown: ${reminder.kind}, not sent; tried again on the next run`);
+        }
+        if (claimed !== "ours") continue;
         const { subject, text } = reminderEmail(reminder);
         const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
-        if (ok) counts.sent += 1;
-        else {
+        if (ok) {
+          counts.sent += 1;
+          if (reminder.late) {
+            counts.late += 1;
+            console.warn(`billing reminder sent late: ${reminder.kind}, ${daysWords(reminder.at, nowSeconds)} before the charge`);
+          }
+        } else {
           counts.failed += 1;
           // Tried again on the next run rather than never.
           await redisPipeline([["DEL", key]]).catch(() => {});

@@ -227,16 +227,20 @@ export async function listTargets(provider: EmailProvider, key: string, deadline
   const answer = await call(provider, key, "GET", path, undefined, deadline);
   if (!ok(answer)) throw failure(provider, answer, "key");
   const rows = answer.json[provider === "mailchimp" ? "lists" : provider === "kit" ? "forms" : "data"];
-  if (!Array.isArray(rows)) return [];
-  return rows
-    .map((row) => {
-      const value = (row ?? {}) as Record<string, unknown>;
-      const id = typeof value.id === "number" ? String(value.id) : typeof value.id === "string" ? value.id : "";
-      const name = typeof value.name === "string" ? value.name.replace(/\s+/g, " ").trim().slice(0, 100) : "";
-      return { id, name: name || id };
-    })
-    .filter((target) => TARGET_ID.test(target.id))
-    .slice(0, MAX_TARGETS);
+  const unconfirmed = () => new PlatformError("server", answer.status, `${PROVIDER_NAMES[provider]} returned a destination list we could not confirm. Try again in a moment.`);
+  // An unreadable page is not an empty list. Reconnecting uses this evidence
+  // to retain the chosen destination, so never return a partial page either.
+  if (!Array.isArray(rows)) throw unconfirmed();
+  const targets: Target[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) throw unconfirmed();
+    const value = row as Record<string, unknown>;
+    const id = typeof value.id === "number" && Number.isSafeInteger(value.id) ? String(value.id) : typeof value.id === "string" ? value.id : "";
+    if (!TARGET_ID.test(id)) throw unconfirmed();
+    const name = typeof value.name === "string" ? value.name.replace(/\s+/g, " ").trim().slice(0, 100) : "";
+    if (targets.length < MAX_TARGETS) targets.push({ id, name: name || id });
+  }
+  return targets;
 }
 
 export type Contact = {

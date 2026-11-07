@@ -21,6 +21,7 @@ import {
   wouldList,
 } from "@/lib/directory-index";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 
 function store(sid: string, over: Record<string, unknown> = {}): Store {
@@ -98,14 +99,44 @@ test("the list can be read back, or keeping it was pointless", async () => {
   await forgetListing("s5");
 });
 
-// ---- the page's copy is dropped with every save ----------------------
+// ---- the page's copy is dropped with every save that can change it ---
 
 test("a save drops the directory's kept rows, so taking a store out is immediate", async () => {
   const { redisPipeline } = await import("@/lib/redis");
+  await rememberListing(store("s6"));
   await redisPipeline([["SET", DIRECTORY_CACHE, "[]"]]);
   await rememberListing(store("s6", { directory: false }));
   const [kept] = await redisPipeline([["GET", DIRECTORY_CACHE]]);
   assert.equal(kept, null);
+});
+
+test("a save from a store that was not in the listed set and stays out keeps the kept rows (Claude 6 on #3062)", async () => {
+  // The state before the save is read from the listed set itself (the SREM reply), not passed in by lib/store.ts.
+  const { redisPipeline } = await import("@/lib/redis");
+  await redisPipeline([["SET", DIRECTORY_CACHE, "[]"]]);
+  await rememberListing(store("s7", { directory: false }));
+  await rememberListing(store("s7", { enabled: false }));
+  const [kept] = await redisPipeline([["GET", DIRECTORY_CACHE]]);
+  assert.equal(kept, "[]", "a store not listed before or after the save changes nothing the directory shows");
+});
+
+test("an SREM reply in an unknown shape counts as listed: the kept rows are dropped and the failure is said", async () => {
+  const { redisPipeline } = await import("@/lib/redis");
+  const { store: redis } = await import("./redis-stub");
+  const original = redis.pipeline.bind(redis);
+  await redisPipeline([["SET", DIRECTORY_CACHE, "[]"]]);
+  for (const reply of ["1", 2, -1, null, [1]]) {
+    await redisPipeline([["SET", DIRECTORY_CACHE, "[]"]]);
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands[0]?.[0] === "SREM" ? [reply] : original(commands)) as typeof redis.pipeline;
+    try {
+      await assert.rejects(rememberListing(store("s8", { directory: false })), UnknownReplyError, `SREM answered ${JSON.stringify(reply)}`);
+    } finally {
+      redis.pipeline = original;
+    }
+    const [kept] = await redisPipeline([["GET", DIRECTORY_CACHE]]);
+    assert.equal(kept, null, `the kept rows are dropped when SREM answered ${JSON.stringify(reply)}`);
+  }
 });
 
 test("search engines are asked to show it only once there is a catalog", () => {
@@ -114,7 +145,7 @@ test("search engines are asked to show it only once there is a catalog", () => {
 
 test("the index is written where the program is saved", () => {
   const source = readFileSync(join(process.cwd(), "lib/store.ts"), "utf8");
-  assert.match(source, /rememberListing\(next, before\)/, "the index has to be kept in step where the programme is saved");
+  assert.match(source, /rememberListing\(next\)/, "the index has to be kept in step where the programme is saved");
 });
 
 test("only the directory and the index read the consent", () => {

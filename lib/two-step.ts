@@ -464,9 +464,19 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   });
   if (!marked) return null;
   const { first, until } = marked;
-  const session = await openLockedSession(email, until, now);
-  // The same day for a later login through the recovery address, which then opens everything once it has passed.
-  await alignRecoveryLock(email, until, now);
+  // Nobody is let in and nobody told until the session opens and the recovery lock holds the same day. Short of that,
+  // the day this login set is taken back (Claude 5 on #2948): two-step login never turns off by itself on a login that
+  // never happened, of which the owner was never told. A day an earlier login set is left as it was.
+  let session = "";
+  try {
+    session = await openLockedSession(email, until, now);
+    // The same day for a later login through the recovery address, which then opens everything once it has passed.
+    await alignRecoveryLock(email, until, now);
+  } catch (error) {
+    if (session && !(await endSession(session).catch(() => false))) console.error("taking back a locked session whose recovery lock was not aligned failed");
+    if (first) await takeBackReset(email, until);
+    throw error;
+  }
   const opened = (to: "sign-in" | "recovery") => `Somebody who opened ${through(to)} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, ${LOCKED_LIST} are locked for them; after that, two-step login turns off.
 
 If that was you, keep working: everything else is open.
@@ -481,6 +491,23 @@ If it was not you, somebody can read your email: log in with your app's code or 
     opened("recovery"),
   );
   return { session, email, until };
+}
+
+/**
+ * Takes back the reset day a login without the second step set, when that login never opened: only while the record
+ * still holds that very day, under the record's lock. A failure here is logged, never thrown over the login's own.
+ */
+async function takeBackReset(email: string, until: number): Promise<void> {
+  try {
+    const undone = await withTwoStep(email, async (held) => {
+      const current = await read(email);
+      if (!current || current.reset !== until) return true;
+      return writeHeld(held, email, { ...current, reset: 0 });
+    });
+    if (!undone) console.error("taking back the reset day of a login without two-step that never opened failed");
+  } catch (error) {
+    console.error("taking back the reset day of a login without two-step that never opened failed", error);
+  }
 }
 
 /** Opens a session locked (LOCKED_NEEDS) until `until`, logged out by Cancel or a full login. */

@@ -116,7 +116,8 @@ async function main(): Promise<void> {
   const read = receiptFrom(seller, REF, paidSession(), linesPage());
   is("a paid sale is a receipt", read.ok, true);
   if (!read.ok) throw new Error("no receipt");
-  const r = read.receipt;
+  // Its number is the store's (lib/receipt-number.ts, U2: tests/kb22-receipt-number.test.ts); drawn with one here.
+  const r = { ...read.receipt, number: "R-000001" };
   is("every figure is Stripe's, unchanged", [r.subtotal, r.discount, r.shipping, r.tax, r.taxIncluded, r.total, r.refunded, r.currency, r.paidAt], [5400, 500, 0, 360, false, 5260, 0, "usd", 1_790_000_000]);
   is("the lines as Stripe lists them", r.lines, [{ description: "Sourdough Course", quantity: 1, amount: 4900 }, { description: "Starter jar label pack", quantity: 2, amount: 500 }]);
   is("the buyer's address as they paid with it", r.buyerEmail, "dana@example.com");
@@ -127,6 +128,7 @@ async function main(): Promise<void> {
     "H1:Receipt from Harbor Kitchen",
     "P:12 Pier Road, Portland, ME 04101, USA",
     "H2:Sale",
+    "P:Receipt number R-000001",
     "P:Paid on September 21, 2026, 2:13 PM UTC",
     "P:Paid by dana@example.com",
     `P:Stripe reference ${REF}`,
@@ -142,22 +144,22 @@ async function main(): Promise<void> {
     "P:Harbor Kitchen charged this payment on their own Stripe account. Marktmorgen made this file from Stripe's record of the sale and did not take or hold the payment.",
   ]);
   const noAddress = receiptFrom({ ...seller, address: null }, REF, paidSession(), linesPage());
-  is("no postal address kept: none is made up", noAddress.ok && receiptTexts(noAddress.receipt).some((t) => /Pier|address/i.test(t.text)), false);
+  is("no postal address kept: none is made up", noAddress.ok && receiptTexts({ ...noAddress.receipt, number: "R-000001" }).some((t) => /Pier|address/i.test(t.text)), false);
 
   part("Tax as Stripe reports it");
   const inclusive = receiptFrom(seller, REF, paidSession({ amount_subtotal: 5400, amount_total: 4900, total_details: { amount_discount: 500, amount_shipping: 0, amount_tax: 817 } }, { amount: 4900 }), linesPage());
-  is("tax inside the prices: said so, not added again", inclusive.ok && [inclusive.receipt.taxIncluded, receiptTexts(inclusive.receipt).find((t) => t.text.startsWith("Tax"))?.text], [true, "Tax included in the prices above: $8.17"]);
+  is("tax inside the prices: said so, not added again", inclusive.ok && [inclusive.receipt.taxIncluded, receiptTexts({ ...inclusive.receipt, number: "R-000001" }).find((t) => t.text.startsWith("Tax"))?.text], [true, "Tax included in the prices above: $8.17"]);
   const shipped = receiptFrom(seller, REF, paidSession({ amount_total: 5660, total_details: { amount_discount: 500, amount_shipping: 400, amount_tax: 360 } }, { amount: 5660 }), linesPage());
-  is("shipping shown when Stripe charged it", shipped.ok && receiptTexts(shipped.receipt).some((t) => t.text === "Shipping: $4"), true);
+  is("shipping shown when Stripe charged it", shipped.ok && receiptTexts({ ...shipped.receipt, number: "R-000001" }).some((t) => t.text === "Shipping: $4"), true);
   const untaxed = receiptFrom(seller, REF, paidSession({ amount_total: 4900, total_details: { amount_discount: 500, amount_shipping: 0, amount_tax: 0 } }, { amount: 4900 }), linesPage());
-  is("no tax charged: Stripe's zero is shown as Stripe's", untaxed.ok && receiptTexts(untaxed.receipt).find((t) => t.text.startsWith("Tax"))?.text, "Tax: $0");
+  is("no tax charged: Stripe's zero is shown as Stripe's", untaxed.ok && receiptTexts({ ...untaxed.receipt, number: "R-000001" }).find((t) => t.text.startsWith("Tax"))?.text, "Tax: $0");
   const yen = receiptFrom(seller, REF, paidSession({ currency: "jpy", amount_subtotal: 2700, amount_total: 2700, total_details: { amount_discount: 0, amount_shipping: 0, amount_tax: 0 } }, { amount: 2700, currency: "jpy" }), linesPage([{ id: "li_1TestLineYen01", description: "Kit", quantity: 1, amount_subtotal: 2700, amount_total: 2700, currency: "jpy" }]));
-  is("a currency without cents is written whole", yen.ok && receiptTexts(yen.receipt).find((t) => t.text.startsWith("Total paid"))?.text, "Total paid: ¥2,700");
+  is("a currency without cents is written whole", yen.ok && receiptTexts({ ...yen.receipt, number: "R-000001" }).find((t) => t.text.startsWith("Total paid"))?.text, "Total paid: ¥2,700");
   is("the payment's currency must be the sale's", receiptFrom(seller, REF, paidSession({}, { currency: "eur" }), linesPage()), { ok: false, why: "unreadable" });
 
   part("Refunds");
   const partly = receiptFrom(seller, REF, paidSession({}, { amount_refunded: 1000 }), linesPage());
-  is("part refunded: the refund and what is left, both from Stripe's figures", partly.ok && receiptTexts(partly.receipt).filter((t) => /Refunded|after refunds/.test(t.text)).map((t) => t.text), ["Refunded: $10", "Paid after refunds: $42.60"]);
+  is("part refunded: the refund and what is left, both from Stripe's figures", partly.ok && receiptTexts({ ...partly.receipt, number: "R-000001" }).filter((t) => /Refunded|after refunds/.test(t.text)).map((t) => t.text), ["Refunded: $10", "Paid after refunds: $42.60"]);
   is("refunded in full: no receipt", receiptFrom(seller, REF, paidSession({}, { amount_refunded: 5260, refunded: true }), linesPage()), { ok: false, why: "refunded" });
   is("a refund larger than the charge is not a figure to print", receiptFrom(seller, REF, paidSession({}, { amount_refunded: 9999 }), linesPage()), { ok: false, why: "unreadable" });
   is("a disputed payment: no receipt while Stripe holds it", receiptFrom(seller, REF, paidSession({}, { disputed: true }), linesPage()), { ok: false, why: "disputed" });
@@ -191,11 +193,11 @@ async function main(): Promise<void> {
   const one = await structure(await receiptPdf(r));
   is("one page, a heading first, every text an element, in order", [one.pages, one.roles.length, one.roles[0]], [1, receiptTexts(r).length, "/H1"]);
   is("the roles are the texts' roles, in reading order", one.roles, receiptTexts(r).map((t) => `/${t.role}`));
-  is("its title shown instead of the file name, and its language", [one.doc.getTitle(), one.doc.catalog.get(PDFName.of("Lang"))?.toString(), one.display], ["Receipt from Harbor Kitchen — September 21, 2026", "(en-US)", "true"]);
+  is("its title shown instead of the file name, and its language", [one.doc.getTitle(), one.doc.catalog.get(PDFName.of("Lang"))?.toString(), one.display], ["Receipt R-000001 from Harbor Kitchen — September 21, 2026", "(en-US)", "true"]);
   is("marked, with the PDF/UA part in its XMP", [one.marked, one.xmp.includes("<pdfuaid:part>1</pdfuaid:part>"), one.xmp.includes("<dc:language><rdf:Bag><rdf:li>en-US</rdf:li>")], ["true", true, true]);
   const lines = Array.from({ length: RECEIPT_MAX_LINES }, (_, i) => ({ description: `Line ${i + 1}: ${"A long product name with many words in it ".repeat(12)}`.slice(0, RECEIPT_MAX_DESCRIPTION), quantity: 99, amount: 999_999 }));
   const drawStart = performance.now();
-  const longest = await receiptPdf({ ...r, lines, subtotal: 99_999_900, total: 99_999_900, discount: 0, tax: 0, sellerAddress: "x".repeat(200) });
+  const longest = await receiptPdf({ ...r, number: "R-999999999999", lines, subtotal: 99_999_900, total: 99_999_900, discount: 0, tax: 0, sellerAddress: "x".repeat(200) });
   const many = await structure(longest);
   console.log(`  (the heaviest drawn in ${Math.round(performance.now() - drawStart)} ms, ${longest.byteLength} bytes, ${many.pages} pages)`);
   is("the most lines run over pages and stay in order", [many.pages > 1, many.roles.filter((role) => role === "/H2").length], [true, 4]);
@@ -230,9 +232,9 @@ async function main(): Promise<void> {
   is("which sale: asked, nothing read", [(await get("reference=nope")).status, stripeCalls.length], [400, 0]);
   const ok = await get(`store=${store.sid}&reference=${REF}`);
   const bytes = new Uint8Array(await ok.arrayBuffer());
-  is("the file, made on request, kept nowhere", [ok.status, ok.headers.get("content-type"), ok.headers.get("cache-control"), ok.headers.get("content-disposition")], [200, "application/pdf", "private, no-store", 'attachment; filename="receipt-2026-09-21.pdf"']);
+  is("the file, made on request, kept nowhere", [ok.status, ok.headers.get("content-type"), ok.headers.get("cache-control"), ok.headers.get("content-disposition")], [200, "application/pdf", "private, no-store", 'attachment; filename="receipt-R-000001.pdf"']);
   is("read on the creator's account: the sale and its lines, once each", stripeCalls.slice().sort(), [sessionPath, linesPath].sort());
-  is("the same receipt as its figures make", (await structure(bytes)).doc.getTitle(), "Receipt from Harbor Kitchen — September 21, 2026");
+  is("the same receipt as its figures make, with the store's number", (await structure(bytes)).doc.getTitle(), "Receipt R-000001 from Harbor Kitchen — September 21, 2026");
   answer(paidSession({ metadata: { store: "someoneelse" } }), linesPage());
   const other = await get(`reference=${REF}`);
   is("another store's sale: not found, no PDF", [other.status, other.headers.get("content-type")?.startsWith("application/pdf") ?? false], [404, false]);

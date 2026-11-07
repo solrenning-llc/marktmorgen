@@ -760,6 +760,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window", "order", 180, MARK, KIND("paypal")),
+  "nl:rcpt:n:@lib/receipt-number.ts": room("A store's receipt numbers, one field a sale given one: taken from the room in the same script that writes it (RECEIPT_NUMBER_BYTES), a re-download taking nothing", "lib/receipt-number.ts"),
+  "nl:rcpt:seq:@lib/receipt-number.ts": room("A store's last receipt number: its key taken with its first number (RECEIPT_KEYS_BYTES)", "lib/receipt-number.ts"),
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },

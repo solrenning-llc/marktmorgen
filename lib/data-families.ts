@@ -25,7 +25,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:payreq:due", "nl:payreq:o:", "nl:payreq:p:", "nl:payreq:r:", "nl:payreq:s:", "nl:person:",
   "nl:pfunnel:done:", "nl:pfunnel:seen:", "nl:pfunnels:", "nl:pkg:", "nl:pkg:s:", "nl:pkg:t:", "nl:pod:", "nl:pod:by:",
   "nl:pod:t:", "nl:preview:", "nl:product:about:", "nl:product:note:", "nl:product:page:",
-  "nl:product:pages:", "nl:product:pics:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
+  "nl:product:pages:", "nl:product:pics:", "nl:rcpt:n:", "nl:rcpt:seq:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
   "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:",
   "nl:taxobs:v1:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:vcard:", "nl:watch:last:",
@@ -377,6 +377,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:rl:licence:": X(1), "nl:rl:manage:addr:": X(1), "nl:rl:manage:ip:": X(1), "nl:rl:orders:addr:": X(1), "nl:rl:orders:ip:": X(1),
   "nl:rl:phone:quiet:": E, "nl:rl:phone:test:": E, "nl:rl:team-invite:": E,
   "nl:rlm:": er(62),
+  // A store's receipt numbers (601 [KB22] U2, lib/receipt-number.ts): by its id, gone with it.
+  "nl:rcpt:n:": E, "nl:rcpt:seq:": E,
   "nl:sale:told:": X(40),
   "nl:save:": E,
   "nl:sblock:uses:": E, "nl:sblocks:": E,

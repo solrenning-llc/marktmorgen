@@ -150,13 +150,15 @@ async function main(): Promise<void> {
   part("The studio and the route carry it");
   const studio = readFileSync("components/email-studio.tsx", "utf8");
   const route = readFileSync("app/api/store/mail/route.ts", "utf8");
-  is("a visible label, the field tied to its count and its problem", [/<span className="field-label">Preview text<\/span>/.test(studio), /id="mail-preview"[^>]*aria-describedby="mail-preview-count mail-preview-hint mail-preview-problem"/.test(studio)], [true, true]);
-  is("the count is the reader's count, announced politely", [/previewLength\(preview\b/.test(studio), /id="mail-preview-count"[^>]*aria-live="polite"/.test(studio), studio.includes("MAX_PREVIEW")], [true, true, true]);
+  is("a short visible label, the field tied to its hint, its count and its problem", [/<label className="block" htmlFor="mail-preview">\s*<span className="field-label">Preview text<\/span>\s*<\/label>/.test(studio), /id="mail-preview"[^>]*aria-describedby="mail-preview-hint mail-preview-count mail-preview-problem"/.test(studio)], [true, true]);
+  is("the hint is outside the label, so the field's name stays short and the hint is read once", /<\/label>\s*<p className="field-hint mt-1" id="mail-preview-hint">/.test(studio), true);
+  is("the count is the reader's count, not announced at every key; going past the limit is, by the problem line", [/previewLength\(preview\b/.test(studio), /id="mail-preview-count"[^>]*aria-live/.test(studio), /id="mail-preview-problem"[^>]*aria-live="polite"/.test(studio), studio.includes("MAX_PREVIEW")], [true, false, true, true]);
   is("its problem is said in words, beside it, and marks it invalid", [/aria-invalid=\{previewProblem \? true : undefined\}/.test(studio), studio.includes("PREVIEW_PROBLEMS[previewProblem]")], [true, true]);
   is("it goes with the send, the test and the draft", [/action: "broadcast",[\s\S]{0,700}preview,/.test(studio), /action: "test", subject, body, preview \}/.test(studio), /action: "draft-save"[^}]*preview[,\s]/.test(studio)], [true, true, true]);
   is("it is kept when the composer is set aside, and counts as unsaved work", [/type ComposerSnapshot = \{[\s\S]{0,200}preview: string;/.test(studio), /const snapshot = \(\): ComposerSnapshot => \(\{[^)]*preview,/.test(studio)], [true, true]);
   is("sending and saving wait while it has a problem", (studio.match(/Boolean\(previewProblem\)/g) ?? []).length >= 3, true);
-  is("each refusal has its words in the studio", ["preview_long", "preview_markup", "preview_link", "preview_subject", "preview_heavy"].every((r) => new RegExp(`${r}: PREVIEW_PROBLEMS\\.`).test(studio)), true);
+  is("the send's answer passes a blank preview's refusal on as it is", readFileSync("lib/broadcast-response.ts", "utf8").includes('"preview_blank"'), true);
+  is("each refusal has its words in the studio", ["preview_long", "preview_markup", "preview_link", "preview_subject", "preview_heavy", "preview_blank"].every((r) => new RegExp(`${r}: PREVIEW_PROBLEMS\\.`).test(studio)), true);
   is("the route passes it to the send, the test and the draft", [/createBroadcast\(store, \{[\s\S]{0,900}preview: previewOf\(body\.preview\)/.test(route), /action === "test"[\s\S]{0,900}cleanPreview\(/.test(route), /saveDraft\(store, email, \{[\s\S]{0,600}preview: /.test(route)], [true, true, true]);
 
   part("What it costs");

@@ -62,6 +62,7 @@ const MESSAGES: Record<string, string> = {
   preview_link: PREVIEW_PROBLEMS.link,
   preview_subject: PREVIEW_PROBLEMS.subject,
   preview_heavy: PREVIEW_PROBLEMS.heavy,
+  preview_blank: PREVIEW_PROBLEMS.blank,
   test_small: `Trying two subject lines needs at least ${MIN_TEST_REACH} people, or each line reaches too few for the result to mean anything. Send it without the test, or to a bigger group.`,
   test_links:
     "Two subject lines are compared by the visits and sales the email's links bring, and this email has no link to your store. Add a link to your store or to a product, or send it without the test.",
@@ -971,20 +972,21 @@ function Compose(props: {
         <div>
           <label className="block" htmlFor="mail-preview">
             <span className="field-label">Preview text</span>
-            <span className="field-hint mt-1 block" id="mail-preview-hint">
-              Optional. The short line your readers see after the subject, before they open the email. Say what is inside, for example: &ldquo;Three quick dinners and a shopping list.&rdquo;
-            </span>
           </label>
+          <p className="field-hint mt-1" id="mail-preview-hint">
+            Optional. The short line your readers see after the subject, before they open the email. Say what is inside, for example: &ldquo;Three quick dinners and a shopping list.&rdquo;
+          </p>
           <input
             id="mail-preview"
             className="field mt-2"
             value={preview}
             autoComplete="off"
             aria-invalid={previewProblem ? true : undefined}
-            aria-describedby="mail-preview-count mail-preview-hint mail-preview-problem"
+            aria-describedby="mail-preview-hint mail-preview-count mail-preview-problem"
             onChange={(e) => setPreview(e.target.value)}
           />
-          <span id="mail-preview-count" className="field-hint mt-1 block tabular-nums" aria-live="polite">
+          {/* Not a live region: read with the field, not at every key; going past the limit is said by the problem line below. */}
+          <span id="mail-preview-count" className="field-hint mt-1 block tabular-nums">
             {`${n(previewCount)} of ${MAX_PREVIEW} characters`}
           </span>
           {/* Always in the page, so a problem that appears is read out once (WCAG 3.3.1, 4.1.3); in the error ink, 7:1 and more. */}

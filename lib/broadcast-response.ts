@@ -3,7 +3,7 @@ import type { MailAnswer } from "@/lib/mail-response";
 import { readNarrow, sameNarrow } from "@/lib/segments-rules";
 import { readTags } from "@/lib/contact-rules";
 import { cleanPreview } from "@/lib/preheader";
-const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request", "studio_used", "store_full", "preview_long", "preview_markup", "preview_link", "preview_subject", "preview_heavy"]);
+const REFUSALS = new Set(["subject", "body", "when", "product", "empty", "allowance", "setup", "plan", "test_subject", "test_small", "test_links", "placeholder", "role", "locked", "store_gone", "none", "signed_out", "origin", "bad_request", "studio_used", "store_full", "preview_long", "preview_markup", "preview_link", "preview_subject", "preview_heavy", "preview_blank"]);
 const positive = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
 const association = (value: unknown) => typeof value === "string" && value ? value : null;
 /** Confirm creation, not delivery. Unknown write outcomes must not invite an immediate retry. */

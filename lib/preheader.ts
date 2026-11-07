@@ -10,7 +10,11 @@
  *   - Plain text, at most MAX_PREVIEW characters, said and refused when
  *     longer (never cut): no markup, no link and no address, since the app
  *     shows it as plain words and a reader cannot follow it there.
- *   - Not the subject again: the app shows both side by side.
+ *   - Not the subject again: the app shows both side by side. Compared as
+ *     a reader sees them: one way of writing each letter, without what
+ *     draws nothing, ignoring case and spaces.
+ *   - Something a reader sees: a preview of invisible characters only is
+ *     refused, and so is a letter under more marks than writing needs.
  *   - In the HTML it is the first text of the body, hidden from view and from
  *     screen readers (they read the email itself, which says what it says),
  *     followed by spacers so the app does not fill the rest of the preview
@@ -32,7 +36,17 @@ export const MAX_PREVIEW = 120;
  */
 export const MAX_PREVIEW_BYTES = 6_144;
 
-export type PreviewProblem = "long" | "markup" | "link" | "subject" | "heavy";
+/**
+ * The most marks one character may carry, and the most bytes it may take
+ * (unit 2, review of 7 November 2026): real writing stays well inside them
+ * (Vietnamese two marks on a letter, Hebrew with its points and cantillation
+ * four, a Hindi cluster five; the longest emoji, 41 bytes), while one letter
+ * under a pile of accents, which draws over the lines around it, does not.
+ */
+export const MAX_MARKS_PER_LETTER = 6;
+export const MAX_BYTES_PER_LETTER = 64;
+
+export type PreviewProblem = "long" | "markup" | "link" | "subject" | "heavy" | "blank";
 
 /** What the studio says for each problem, in plain words. */
 export const PREVIEW_PROBLEMS: Record<PreviewProblem, string> = {
@@ -41,6 +55,7 @@ export const PREVIEW_PROBLEMS: Record<PreviewProblem, string> = {
   link: "A mail app shows the preview text as plain words, so a link or address in it cannot be opened. Put it in the email instead.",
   subject: "The mail app shows the subject and the preview text side by side, so say something the subject does not.",
   heavy: "Some letters or emoji in the preview text carry too many marks to send. Take some of them out.",
+  blank: "The preview text has nothing a reader would see. Write a few words, or leave it empty.",
 };
 
 // An address written out: a scheme, "www.", an email address, or a name with a common or country ending.
@@ -70,25 +85,48 @@ function tidy(raw: string): string {
     .trim();
 }
 
+/**
+ * Characters that draw nothing, kept in the text where they build a word or
+ * an emoji but never counted as something a reader sees: the default-
+ * ignorable ones (joiners, soft hyphen, grapheme joiner, variation
+ * selectors, Hangul fillers, tag characters, direction marks), the blank
+ * Braille pattern, and spaces.
+ */
+const UNSEEN = /[\p{Default_Ignorable_Code_Point}\u2800\s]/gu;
+const SEEN = /[\p{L}\p{N}\p{P}\p{S}]/u;
+
+/** Words as a reader sees them, to compare: one way of writing each letter (NFC), without what draws nothing, in lower case. */
+const seenAs = (text: string) => text.normalize("NFC").replace(UNSEEN, "").toLowerCase();
+
+const letters = (text: string) => [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(text)].map((s) => s.segment);
+
+/** Whether a character as a reader counts it carries more marks or bytes than any real writing or emoji needs. */
+const overMarked = (letter: string) => (letter.match(/\p{M}/gu)?.length ?? 0) > MAX_MARKS_PER_LETTER || new TextEncoder().encode(letter).length > MAX_BYTES_PER_LETTER;
+
 /** A preview's length as a reader counts it: an emoji, even one built of several, is one. The studio's counter uses the same. */
 export function previewLength(text: string): number {
-  return [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(text)].length;
+  return letters(text).length;
 }
 
 /**
  * The preview text as kept (tidy, above). Empty means none. Refused, saying
- * why, when it is longer than MAX_PREVIEW, holds markup or a link or address,
- * or repeats the subject.
+ * why, when it has nothing a reader would see, is heavier than its bytes or
+ * a letter's marks allow, is longer than MAX_PREVIEW, holds markup or a link
+ * or address, or repeats the subject, compared as a reader sees both (seenAs).
  */
 export function cleanPreview(raw: unknown, subject = ""): { ok: true; text: string } | { ok: false; why: PreviewProblem } {
   if (typeof raw !== "string") return { ok: true, text: "" };
   const text = tidy(raw);
   if (!text) return { ok: true, text: "" };
   if (new TextEncoder().encode(text).length > MAX_PREVIEW_BYTES) return { ok: false, why: "heavy" };
-  if (previewLength(text) > MAX_PREVIEW) return { ok: false, why: "long" };
+  const seen = seenAs(text);
+  if (!SEEN.test(seen)) return { ok: false, why: "blank" };
+  const all = letters(text);
+  if (all.some(overMarked)) return { ok: false, why: "heavy" };
+  if (all.length > MAX_PREVIEW) return { ok: false, why: "long" };
   if (/[<>]/.test(text)) return { ok: false, why: "markup" };
   if (holdsLink(text)) return { ok: false, why: "link" };
-  if (subject && text.toLowerCase() === tidy(subject).toLowerCase()) return { ok: false, why: "subject" };
+  if (subject && seen === seenAs(tidy(subject))) return { ok: false, why: "subject" };
   return { ok: true, text };
 }
 

@@ -153,6 +153,8 @@ for (const bad of [
   "Learn Web3.py basics",
   // An emoji label is a real address on some endings.
   "Visit i\u2764.ws",
+  "Visit i\u2764\ufe0f.ws",
+  "Visit evil\ufe0f\u20e3.com",
   // An IPv4 address.
   "Server at 8.8.8.8",
   "Server at 8.8.8.8.",
@@ -180,6 +182,7 @@ for (const fine of [
   "Now on v1.2.3.4",
   // An emoji with its presentation selector is a picture, not a hidden mark.
   "Love this store \u2764\ufe0f",
+  "1\ufe0f\u20e3 Start here",
   "Clear guides to Node.js and React 19.",
 ]) {
   is(`words that only look like a domain are accepted: ${JSON.stringify(fine)}`, why(fine), null);

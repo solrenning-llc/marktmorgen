@@ -21,7 +21,8 @@ const LINK = /^(\d{1,2})([xab])$/;
  * Nothing about the reader or the click is written: no open, no click count.
  * One of the store's public requests is counted before the change is read
  * (one read). Whatever cannot be read (the store, its count, the change)
- * leads to the address the email was sent with.
+ * leads to the address the email was sent with. An address with letters
+ * outside ASCII goes out percent-encoded, as a Location header must be.
  */
 export async function GET(request: Request, { params }: Params) {
   const { handle, id, link } = await params;
@@ -32,8 +33,22 @@ export async function GET(request: Request, { params }: Params) {
     return new Response("This link could not be read. Open the address written in the email instead.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
   }
   const n = Number(parsed[1]);
-  const to = await whereItGoes(handle, id, n, parsed[2] as SentVariant, sent);
+  // A header is ASCII: an address with letters outside it is sent percent-encoded, as a browser would ask for it.
+  const to = inAscii(await whereItGoes(handle, id, n, parsed[2] as SentVariant, sent)) ?? inAscii(sent);
+  if (!to) {
+    return new Response("This link could not be read. Open the address written in the email instead.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  }
   return new Response(null, { status: 302, headers: { Location: to, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+}
+
+/** The address as a Location header can carry it (the URL standard's own form, in ASCII), or null when it cannot. */
+function inAscii(address: string): string | null {
+  try {
+    const href = new URL(address).href;
+    return /^[\x21-\x7e]+$/.test(href) ? href : null;
+  } catch {
+    return null;
+  }
 }
 
 async function whereItGoes(handle: string, id: string, n: number, variant: SentVariant, sent: string): Promise<string> {

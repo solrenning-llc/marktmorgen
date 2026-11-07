@@ -31,6 +31,22 @@ export const SENT_LINK_CHANGES_MAX = 20;
 export const SENT_LINK_MAX_LENGTH = 1_000;
 /** How long the changes are kept after the first one, in days; then the links go where the email first sent them. */
 export const SENT_LINK_KEEP_DAYS = 400;
+/**
+ * The longest change kept, in UTF-8 bytes, as written in the history with its
+ * comma: {"n":19,"to":"…","at":…}, the address at SENT_LINK_MAX_LENGTH
+ * characters of three bytes each (a well-formed character outside ASCII is
+ * two or three bytes; one of four bytes is two characters), its number and
+ * time with room.
+ */
+export const SENT_LINK_ENTRY_MAX_BYTES = 64 + SENT_LINK_MAX_LENGTH * 3;
+/**
+ * The longest history kept for one email, in UTF-8 bytes: its list and
+ * expiry, and SENT_LINK_CHANGES_MAX changes at their longest. The server
+ * never writes one past it (lib/sent-links.ts, changeLink), so what the
+ * redirect reads and what a change sends are bounded by it in bytes, not
+ * only in characters.
+ */
+export const SENT_LINK_RECORD_MAX_BYTES = 256 + SENT_LINK_CHANGES_MAX * SENT_LINK_ENTRY_MAX_BYTES;
 /** One redirect is this many of the store's public requests (lib/traffic.ts), counted before the change is read. */
 export const SENT_LINK_REQUEST_UNITS = 1;
 
@@ -70,6 +86,8 @@ export function destinationProblem(raw: string, original: string, store: Pick<St
   if (!to) return "Type the address the link should go to.";
   if (to.length > SENT_LINK_MAX_LENGTH) return `An address can be up to ${SENT_LINK_MAX_LENGTH.toLocaleString("en-US")} characters long.`;
   if (/[\s<>"'`\\\u0000-\u001f\u007f]/.test(to)) return "An address cannot have spaces, quotes or angle brackets in it.";
+  // Half of a character (a lone surrogate) is no text: kept, it would be written as six bytes.
+  if (/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(to)) return "The address has a character in it that cannot be used. Type it again, or copy it again from the page.";
   let url: URL;
   try {
     url = new URL(to);

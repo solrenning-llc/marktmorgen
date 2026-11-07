@@ -3,7 +3,8 @@ import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { readBroadcast } from "@/lib/broadcasts";
 import { SENT_LINKS_MAX, SENT_LINK_MAX_LENGTH } from "@/lib/sent-link-rules";
-import { CHANGE_REFUSALS, SentLinkWriteUnconfirmed, SentLinksUnreadable, changeLink } from "@/lib/sent-links";
+import { CHANGE_REFUSALS, SentLinkWriteUnconfirmed, SentLinksUnreadable, changeLink, sentEmailBytes, sentLinkChangeUnits } from "@/lib/sent-links";
+import { countStudio, refusedJson } from "@/lib/studio-route";
 
 const NO_STORE = { "Cache-Control": "private, no-store" };
 
@@ -20,6 +21,11 @@ const NO_STORE = { "Cache-Control": "private, no-store" };
  * list is for whoever may send ("send", lib/team-roles.ts). Only the store
  * settled by lib/studio-route.ts is ever touched: an email of another store
  * is refused as not this store's.
+ *
+ * Before the email or its changes are read, the change takes the studio
+ * requests what it reads and writes comes to at the most (lib/sent-links.ts,
+ * sentLinkChangeUnits), from the email's size, asked inside this request's
+ * own studio request; without them nothing is read.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "send", 4_000);
@@ -30,6 +36,11 @@ export async function POST(request: NextRequest) {
   const n = typeof body.n === "number" && Number.isSafeInteger(body.n) && body.n >= 0 && body.n < SENT_LINKS_MAX ? body.n : -1;
   const to = text(body.to, SENT_LINK_MAX_LENGTH + 1);
   try {
+    const size = await sentEmailBytes(id);
+    if (size === null) return Response.json({ ok: false, error: "unavailable", message: "The changes to this email could not be read just now, so nothing was changed. Try again in a moment." }, { status: 503, headers: NO_STORE });
+    if (size === 0) return Response.json({ ok: false, error: "none", message: CHANGE_REFUSALS.none }, { status: 404, headers: NO_STORE });
+    const paid = await countStudio(store, "send", sentLinkChangeUnits(size));
+    if (!paid.ok) return refusedJson("used", paid.message);
     const email = await readBroadcast(id);
     if (!email) return Response.json({ ok: false, error: "none", message: CHANGE_REFUSALS.none }, { status: 404, headers: NO_STORE });
     const done = await changeLink(store, email, n, to);

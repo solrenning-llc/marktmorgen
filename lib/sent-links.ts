@@ -25,7 +25,13 @@
  *                        with the store (lib/broadcasts.ts, broadcastKeys);
  *                        written only over exactly the record read before
  *                        (APPEND_SENT_LINK), so two changes made at the same
- *                        moment never write over each other
+ *                        moment never write over each other; never
+ *                        written past SENT_LINK_RECORD_MAX_BYTES (UTF-8)
+ *
+ * What a change costs is paid before the email or its history is read
+ * (sentLinkChangeUnits, taken by app/api/store/mail/links): the email's own
+ * size asked first, inside the request's own studio request, and the history
+ * at its longest, read and written as often as a change can, both ways.
  *
  * Old emails cannot be changed: their links point straight at the address,
  * and the studio says so. Sequence emails are written again for whoever
@@ -36,8 +42,8 @@ import { deriveKey, deriveLegacyKey } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
-import { needData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { TAKE_DATA, needData } from "@/lib/store-data";
+import { dataBytes, utf8Length } from "@/lib/store-data-rules";
 import { broadcastCampaign, variantCampaign } from "@/lib/mail-links";
 import type { Store } from "@/lib/store";
 import {
@@ -47,6 +53,7 @@ import {
   SENT_LINK_CHANGES_MAX,
   SENT_LINK_KEEP_DAYS,
   SENT_LINK_MAX_LENGTH,
+  SENT_LINK_RECORD_MAX_BYTES,
   currentOf,
   destinationProblem,
   linksOf,
@@ -193,6 +200,70 @@ export async function readSentLinksMany(ids: string[]): Promise<Map<string, Sent
   return out;
 }
 
+/** What one studio request pays for in the database (tests/plan-cost-registry.ts, UNIT_COST.studio). */
+const STUDIO_UNIT_COMMANDS = 20;
+const STUDIO_UNIT_BYTES = 50_000;
+/** Commands a further take of studio requests sends, at the most (lib/store-allowance.ts: its count, a place for a store that pays nothing, a refusal given back). */
+const TAKE_COMMANDS = 4;
+/**
+ * TAKE_DATA's calls inside, at the most, which Upstash bills one by one
+ * beside the EVAL: the total and the month list read, the slot read and
+ * written, the list and the total written, and a read and a drop for each
+ * month that ended since the store's room was last touched (any studio write
+ * touches it), taken at two years of them; only the first call of a request
+ * finds any.
+ */
+const DATA_INSIDE_FIRST = 6 + 2 * 24;
+const DATA_INSIDE_AGAIN = 6;
+/** How much an email's record may grow while it is read, after its size was asked: its count sent, its note and failures. */
+const EMAIL_GROWTH_BYTES = 4_096;
+/** A stored value as it crosses to the database and back as JSON: each byte escaped once more at the most, and its quotes. */
+const wireOf = (bytes: number) => 2 * bytes + 64;
+/**
+ * The history as it crosses: no address has a quote, a backslash, a control
+ * character or half a character in it (lib/sent-link-rules.ts) and the list
+ * is the store's own id, so only the history's own quotes are escaped again,
+ * eight a change and eight more.
+ */
+const HISTORY_WIRE_BYTES = SENT_LINK_RECORD_MAX_BYTES + 2 * (8 * SENT_LINK_CHANGES_MAX + 8) + 64;
+
+/**
+ * The studio requests one change takes beyond the request's own, before the
+ * email or its history is read: what changeLink and the route send and read
+ * at the most, both ways, for an email of `emailBytes` (as stored), with the
+ * history at SENT_LINK_RECORD_MAX_BYTES read and written over
+ * SENT_LINK_WRITE_TRIES times and read back once when a write's answer is
+ * lost. The larger of what its bytes and its commands come to, in studio
+ * requests of twenty commands and fifty kilobytes. Held over what is
+ * measured in tests/f2-sent-links-cost.test.ts.
+ */
+export function sentLinkChangeUnits(emailBytes: number): number {
+  const email = Number.isSafeInteger(emailBytes) && emailBytes > 0 ? emailBytes : 0;
+  // The scripts as they are sent, with their arguments besides the history.
+  const appendWire = utf8Length(JSON.stringify(APPEND_SENT_LINK)) + 256;
+  const dataWire = utf8Length(JSON.stringify(TAKE_DATA)) + 512;
+  const tryBytes = HISTORY_WIRE_BYTES + 64 + dataWire + appendWire + 2 * HISTORY_WIRE_BYTES;
+  const bytes = 512 + wireOf(email + EMAIL_GROWTH_BYTES) + SENT_LINK_WRITE_TRIES * tryBytes + HISTORY_WIRE_BYTES + 64;
+  const commands = TAKE_COMMANDS + 1 + (1 + 1 + DATA_INSIDE_FIRST + 3) + (SENT_LINK_WRITE_TRIES - 1) * (1 + 1 + DATA_INSIDE_AGAIN + 3) + 1;
+  return Math.max(Math.ceil(bytes / STUDIO_UNIT_BYTES), Math.ceil(commands / STUDIO_UNIT_COMMANDS));
+}
+
+/**
+ * The size of a sent email's record as stored, in bytes, asked before it is
+ * read (one STRLEN, inside the request's own studio request): 0 when there is
+ * none, null when the answer is not one.
+ */
+export async function sentEmailBytes(id: string): Promise<number | null> {
+  if (!ID.test(id)) return 0;
+  if (!isRedisConfigured()) return null;
+  try {
+    const reply = repliesFor(await redisPipeline([["STRLEN", `nl:mail:bc:${id}`]]), 1);
+    return reply && Number.isSafeInteger(reply[0]) && (reply[0] as number) >= 0 ? (reply[0] as number) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The email as the studio and the change need it (lib/broadcasts.ts, Broadcast). */
 export type SentEmail = { id: string; listId: string; handle: string; body: string; sent: number; links?: true };
 
@@ -209,6 +280,9 @@ export const CHANGE_REFUSALS: Record<Exclude<ChangeResult, { ok: true }>["reason
   full: `This email's links have been changed ${SENT_LINK_CHANGES_MAX} times, the most kept for one email. Each one keeps going where it goes now.`,
   busy: "This email's links were being changed somewhere else at the same moment, so this change was not saved. Reload the page to see where each link goes now, then try again.",
 };
+
+/** A history that has no room in bytes for another change (SENT_LINK_RECORD_MAX_BYTES). */
+const CHANGE_REFUSALS_SIZE = "This email's links have no room left for another change. Each one keeps going where it goes now.";
 
 /** Reads of the history and writes over it, in all, before a change made at the same moment as others says it was not saved. */
 export const SENT_LINK_WRITE_TRIES = 2;
@@ -295,6 +369,9 @@ export async function changeLink(store: Store, email: SentEmail, n: number, raw:
     if (exp <= at) return refuse("full");
     const entry: LinkChange = { n, to, at };
     const next: SentLinks = { l: store.listId, exp, changes: [...changes, entry] };
+    const written = JSON.stringify(next);
+    // Never past the ceiling in bytes, whatever was kept before it was checked: what is read and sent stays bounded by it.
+    if (utf8Length(written) > SENT_LINK_RECORD_MAX_BYTES) return refuse("full", CHANGE_REFUSALS_SIZE);
     // The change's bytes, and the record's own the first time, until the record goes.
     const bytes = dataBytes([kept ? "" : JSON.stringify({ l: next.l, exp, changes: [] }), `${JSON.stringify(entry)},`], kept ? 0 : 1);
     const until = exp * 1000;
@@ -305,7 +382,7 @@ export async function changeLink(store: Store, email: SentEmail, n: number, raw:
       await needData(store, [{ until: held.until, bytes: bytes - held.bytes }], now);
       held = { bytes, until: held.until };
     }
-    if ((await writeOver(email.id, before, JSON.stringify(next), Math.max(1, exp - at))) === "written") return { ok: true, changes: next.changes };
+    if ((await writeOver(email.id, before, written, Math.max(1, exp - at))) === "written") return { ok: true, changes: next.changes };
     // Another change landed first: read it, and check this one again against it.
   }
   return refuse("busy");

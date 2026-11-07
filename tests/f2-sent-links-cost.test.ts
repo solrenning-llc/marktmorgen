@@ -214,7 +214,7 @@ async function main(): Promise<void> {
   for (const [what, arrange, expected] of cases) {
     await pipeline([["SET", key, almost, "EX", 86_400]]);
     await arrange();
-    const pending = interlope;
+    const pending: ((batch: Command[]) => Promise<"lose" | void>) | null = interlope;
     watch();
     interlope = pending;
     const answer = await post({ action: "link-change", id: worst.id, n: 3, to });

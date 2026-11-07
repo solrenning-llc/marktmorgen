@@ -382,8 +382,9 @@ const HDEL_OWN = '-- marktmorgen:hdel-own:v1\nif redis.call("HGET", KEYS[1], ARG
 
 /**
  * The places counter brought back to the records of places, in one script, only ever down and never below them
- * (#2872 review L1): every count is a run's INCR taken while it held a record, and a record goes only with its DECR or
- * after an INCR whose reply came back unknown. So a count above the number of records is an INCR that landed for a
+ * (#2872 review L1): every count is a run's INCR taken while it held a record, and a record goes only after its DECR
+ * (the give-back sends the DECR first, so between its two commands the count is never above the records; Claude 1 N2
+ * on #2872) or after an INCR whose reply came back unknown. So a count above the number of records is an INCR that landed for a
  * record that went, a paid place nobody can take; brought down to the records, it is never below the places that
  * were counted and are held, so never a place more than paid. Answers the count after, or -1 when it is not a whole
  * number. The first line names it for the local stand-in (lib/redis-memory.ts).
@@ -622,14 +623,16 @@ export async function takePlace(input: {
     await letGo();
     throw new UnknownReplyError("a place's hold");
   }
-  // The place given back: this run's own record (the same script) and the count its own INCR moved. Upstash runs each
-  // command of a pipeline on its own, so the script can fail while the DECR lands and the call throws: the run keeps
-  // its answer ("full", "resting", "has") and tries the script once more alone, never the DECR again (whether it
-  // moved is unknown; at worst a place stays counted). A record the retry cannot remove reads "pending", never
-  // "already" (#2872 review).
+  // The place given back: the count its own INCR moved, then this run's own record (the same script). Upstash runs
+  // each command of a pipeline on its own, and another taker's heal (PLACES_HEAL) can run between the two: the DECR goes
+  // first, so the count is never above the records in between, and no heal takes this record's place as one lost
+  // before the DECR lands it a second time (Claude 1 N2 on #2872). The script can fail while the DECR lands and the
+  // call throws: the run keeps its answer ("full", "resting", "has") and tries the script once more alone, never the
+  // DECR again (whether it moved is unknown; at worst a place stays counted). A record the retry cannot remove reads
+  // "pending", never "already" (#2872 review).
   const giveBack = async () => {
-    const replies = repliesFor(await redisPipeline([dropOwn, ["DECR", takenKey(group.id)]]).catch(() => null), 2);
-    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) await letGo();
+    const replies = repliesFor(await redisPipeline([["DECR", takenKey(group.id)], dropOwn]).catch(() => null), 2);
+    if (!replies || (replies[1] !== 0 && replies[1] !== 1)) await letGo();
   };
   const count = repliesFor(await redisPipeline([["INCR", takenKey(group.id)]]), 1)?.[0];
   if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) {

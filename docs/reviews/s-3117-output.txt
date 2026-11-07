@@ -1,0 +1,557 @@
+## SAME payout20 old affiliate module
+
+
+addPayout: written only on HSET's exact 1
+  FAIL  an HSET answered no reply is not known, never "written"
+        expected "unknown"
+        got      "written"
+  FAIL  an HSET answered null is not known, never "written"
+        expected "unknown"
+        got      "written"
+  FAIL  an HSET answered a string is not known, never "written"
+        expected "unknown"
+        got      "written"
+  FAIL  an HSET answered 0 (an existing payout overwritten) is not known, never "written"
+        expected "unknown"
+        got      "written"
+  FAIL  an HSET answered a list is not known, never "written"
+        expected "unknown"
+        got      "written"
+  ok    (nothing was written by those)
+  ok    an HSET answered exactly 1 is written
+  ok    (and is in the book)
+
+"Mark as paid": an unknown write answers 503, never ok
+  FAIL  the route does not say it was recorded
+        expected false
+        got      true
+  FAIL  it answers 503 unavailable
+        expected [503,"unavailable"]
+        got      [200,null]
+  ok    (the book holds only the one written)
+
+A payout file confirmed: an unknown write is never counted as written
+  FAIL  the batch does not count a line whose write is not known
+        expected "unknown"
+        got      "written 1"
+  ok    (the book holds only the one written)
+
+A retry is a new payout under a new id, never HSET's 0 and never a 503
+  ok    a double click on Mark as paid: the first press is recorded
+  ok    and the second press too, never a 503
+  ok    (each under its own id)
+  ok    the same payout written twice draws two ids
+  ok    a payout file confirmed is written
+  ok    and confirmed again, written under a new id, never thrown
+  ok    (every one in the book)
+
+20 checks, 8 failing.
+S_VOLUME {"runs":97,"mocks":0}
+
+## SAME payout20 exact head
+
+
+addPayout: written only on HSET's exact 1
+  ok    an HSET answered no reply is not known, never "written"
+  ok    an HSET answered null is not known, never "written"
+  ok    an HSET answered a string is not known, never "written"
+  ok    an HSET answered 0 (an existing payout overwritten) is not known, never "written"
+  ok    an HSET answered a list is not known, never "written"
+  ok    (nothing was written by those)
+  ok    an HSET answered exactly 1 is written
+  ok    (and is in the book)
+
+"Mark as paid": an unknown write answers 503, never ok
+  ok    the route does not say it was recorded
+  ok    it answers 503 unavailable
+  ok    (the book holds only the one written)
+
+A payout file confirmed: an unknown write is never counted as written
+  ok    the batch does not count a line whose write is not known
+  ok    (the book holds only the one written)
+
+A retry is a new payout under a new id, never HSET's 0 and never a 503
+  ok    a double click on Mark as paid: the first press is recorded
+  ok    and the second press too, never a 503
+  ok    (each under its own id)
+  ok    the same payout written twice draws two ids
+  ok    a payout file confirmed is written
+  ok    and confirmed again, written under a new id, never thrown
+  ok    (every one in the book)
+
+20 checks, all passing.
+S_VOLUME {"runs":97,"mocks":0}
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered a payout written down in an unknown shape
+    at addPayout ([stdin]:51607:39)
+    at async POST ([stdin]:56203:22)
+    at async main ([stdin]:56381:20)
+
+## SAME cap23 old affiliate module
+
+  ok    (program on)
+  ok    (the program is full)
+
+An emailed link opened (recordFromLink)
+  ok    (a full program answers full on an exact count)
+  FAIL  an HLEN answered null never lets a person in past the cap
+        expected false
+        got      true
+  FAIL  (after null, the link is kept, to open again)
+        expected "string"
+        got      "object"
+  FAIL  an HLEN answered no reply never lets a person in past the cap
+        expected false
+        got      true
+  FAIL  (after no reply, the link is kept, to open again)
+        expected "string"
+        got      "object"
+  FAIL  an HLEN answered a string never lets a person in past the cap
+        expected false
+        got      true
+  FAIL  (after a string, the link is kept, to open again)
+        expected "string"
+        got      "object"
+  FAIL  an HLEN answered a list never lets a person in past the cap
+        expected false
+        got      true
+  FAIL  (after a list, the link is kept, to open again)
+        expected "string"
+        got      "object"
+  FAIL  the program holds at most MAX_AFFILIATES
+        expected 1000
+        got      1004
+
+A partner invited (invitePartner)
+  ok    (a full program answers full on an exact count)
+  FAIL  an HLEN answered null makes no invitation past the cap
+        expected [false,0,0]
+        got      [false,1,0]
+  FAIL  an HLEN answered no reply makes no invitation past the cap
+        expected [false,0,0]
+        got      [false,1,0]
+
+A buyer joining after an order (joinAsBuyer)
+  ok    (a full program answers full on an exact count)
+  FAIL  an HLEN answered null never lets a buyer in past the cap
+        expected false
+        got      true
+  FAIL  an HLEN answered no reply never lets a buyer in past the cap
+        expected false
+        got      true
+  FAIL  the program still holds at most MAX_AFFILIATES
+        expected 1000
+        got      1006
+
+The book's size, counted before it is read (bookSize), is never read as small
+  ok    (counted exactly, every person is in it)
+  FAIL  a count answered null is not counted: null, which reads nothing
+        expected null
+        got      {"fields":0,"rows":0}
+  ok    a count answered no reply is not counted: null, which reads nothing
+  FAIL  a count answered a list is not counted: null, which reads nothing
+        expected null
+        got      {"fields":3,"rows":0}
+
+23 checks, 16 failing.
+S_VOLUME {"runs":188,"mocks":3}
+
+## SAME cap23 exact head
+
+  ok    (program on)
+  ok    (the program is full)
+
+An emailed link opened (recordFromLink)
+  ok    (a full program answers full on an exact count)
+  ok    an HLEN answered null never lets a person in past the cap
+  ok    (after null, the link is kept, to open again)
+  ok    an HLEN answered no reply never lets a person in past the cap
+  ok    (after no reply, the link is kept, to open again)
+  ok    an HLEN answered a string never lets a person in past the cap
+  ok    (after a string, the link is kept, to open again)
+  ok    an HLEN answered a list never lets a person in past the cap
+  ok    (after a list, the link is kept, to open again)
+  ok    the program holds at most MAX_AFFILIATES
+
+A partner invited (invitePartner)
+  ok    (a full program answers full on an exact count)
+  ok    an HLEN answered null makes no invitation past the cap
+  ok    an HLEN answered no reply makes no invitation past the cap
+
+A buyer joining after an order (joinAsBuyer)
+  ok    (a full program answers full on an exact count)
+  ok    an HLEN answered null never lets a buyer in past the cap
+  ok    an HLEN answered no reply never lets a buyer in past the cap
+  ok    the program still holds at most MAX_AFFILIATES
+
+The book's size, counted before it is read (bookSize), is never read as small
+  ok    (counted exactly, every person is in it)
+  ok    a count answered null is not counted: null, which reads nothing
+  ok    a count answered no reply is not counted: null, which reads nothing
+  ok    a count answered a list is not counted: null, which reads nothing
+
+23 checks, all passing.
+S_VOLUME {"runs":132,"mocks":3}
+
+## Linked affiliate-payouts22
+
+
+What can be paid today
+  ok    nothing waiting, nothing paid
+  ok    some still clearing
+  ok    what cleared has been paid
+  ok    paid past what cleared
+  ok    all of it still clearing
+  ok    a refund after a payout is money back
+  ok    no wait behaves exactly as before
+
+When the creator said they pay
+  ok    the 1st, seen on the 15th, is next month
+  ok    the 1st, seen on the 1st, is today
+  ok    the 28th exists in February
+  ok    the day after it is next month
+  ok    no promised day gives no date
+  ok    nothing past the 28th is allowed
+  ok    the date reads in American English
+
+How the promise reads
+  ok    1st
+  ok    2nd
+  ok    3rd
+  ok    11th, not 11st
+  ok    21st
+  ok    23rd
+  ok    a day and a wait
+  ok    no day promised says so plainly
+
+22 checks, all passing.
+S_VOLUME {"runs":0,"mocks":0}
+
+## Linked affiliate-cap-unknown47
+
+  ok    (the program is on, 5% to affiliates)
+
+1. Healthy: the people are read in full, and the cap refuses a second 80%
+  ok    both partners are listed
+  ok    refused by the cap
+  ok    the second partner keeps 1%
+  ok    a share inside the cap is saved
+
+1. Unknown reply for the program's people: never 'nobody'
+  ok    people-queued: listAffiliates throws
+  ok    people-queued: listPartners throws
+  ok    people-queued: the share is refused as unavailable
+  ok    people-queued: the invitation is refused as unavailable
+  ok    people-queued: the second partner still has 1%
+  ok    people-queued: the product still promises partners 81%, never 160%
+  ok    people-queued: nobody new was invited
+  ok    people-odd: listAffiliates throws
+  ok    people-odd: listPartners throws
+  ok    people-odd: the share is refused as unavailable
+  ok    people-odd: the invitation is refused as unavailable
+  ok    people-odd: the second partner still has 1%
+  ok    people-odd: the product still promises partners 81%, never 160%
+  ok    people-odd: nobody new was invited
+  ok    people-object: listAffiliates throws
+  ok    people-object: listPartners throws
+  ok    people-object: the share is refused as unavailable
+  ok    people-object: the invitation is refused as unavailable
+  ok    people-object: the second partner still has 1%
+  ok    people-object: the product still promises partners 81%, never 160%
+  ok    people-object: nobody new was invited
+
+1. Rule 30: the other readers of the people fail closed
+  ok    releasing a hold is refused as unavailable, nothing cleared
+  ok    healthy: the export is a spreadsheet
+  ok    the export is refused, never a spreadsheet without the program's people
+  ok    healthy: with approval at once, a new applicant is approved
+  ok    the list could not be checked for the same inbox: the application waits for the creator
+
+2. Healthy: a cut saved with 30 days' notice waits
+  ok    (raised to 30%: nobody shares in the course any more)
+  ok    saved with notice
+  ok    today 30%, 10% pending
+
+2. The route's second read of the store is lost: nothing is saved
+  ok    (back to 30%, nothing pending)
+  ok    refused as unavailable
+  ok    the terms are as they were: 30% today, nothing pending, the notice not skipped
+
+3. Answering an invitation while the inviting store's id read is lost or fails
+  ok    healthy: a declined offer is answered and taken out
+  ok    storeid-lost: the creator is told it could not be done now, not "gone"
+  ok    storeid-lost: the offer is kept
+  ok    storeid-lost: answered again once the read works, the partnership is made
+  ok    storeid-lost: and the offer is taken out
+  ok    storeid-throws: the creator is told it could not be done now, not "gone"
+  ok    storeid-throws: the offer is kept
+  ok    storeid-throws: answered again once the read works, the partnership is made
+  ok    storeid-throws: and the offer is taken out
+  ok    healthy: an offer from a store that does not exist is gone and taken out
+
+47 checks, all passing.
+S_VOLUME {"runs":709,"mocks":0}
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's people in an unknown shape
+    at hashPairsExact ([stdin]:51154:45)
+    at peopleExact ([stdin]:51170:30)
+    at async paidPeople ([stdin]:51594:18)
+    at async partnerShareProblem ([stdin]:51022:45)
+    at async [stdin]:56985:25
+    at async withLock ([stdin]:10068:12)
+    at async POST ([stdin]:56984:14)
+    at async Object.post ([stdin]:57109:22)
+    at async main ([stdin]:57153:19)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's people in an unknown shape
+    at hashPairsExact ([stdin]:51154:45)
+    at peopleExact ([stdin]:51170:30)
+    at async paidPeople ([stdin]:51594:18)
+    at async partnerShareProblem ([stdin]:51022:45)
+    at async POST ([stdin]:56964:23)
+    at async Object.post ([stdin]:57109:22)
+    at async main ([stdin]:57154:20)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's people in an unknown shape
+    at hashPairsExact ([stdin]:51154:45)
+    at peopleExact ([stdin]:51170:30)
+    at async paidPeople ([stdin]:51594:18)
+    at async partnerShareProblem ([stdin]:51022:45)
+    at async [stdin]:56985:25
+    at async withLock ([stdin]:10068:12)
+    at async POST ([stdin]:56984:14)
+    at async Object.post ([stdin]:57109:22)
+    at async main ([stdin]:57153:19)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's people in an unknown shape
+    at hashPairsExact ([stdin]:51154:45)
+    at peopleExact ([stdin]:51170:30)
+    at async paidPeople ([stdin]:51594:18)
+    at async partnerShareProblem ([stdin]:51022:45)
+    at async POST ([stdin]:56964:23)
+    at async Object.post ([stdin]:57109:22)
+    at async main ([stdin]:57154:20)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's people in an unknown shape
+    at hashPairsExact ([stdin]:51154:45)
+    at peopleExact ([stdin]:51170:30)
+    at async paidPeople ([stdin]:51594:18)
+    at async partnerShareProblem ([stdin]:51022:45)
+    at async [stdin]:56985:25
+    at async withLock ([stdin]:10068:12)
+    at async POST ([stdin]:56984:14)
+    at async Object.post ([stdin]:57109:22)
+    at async main ([stdin]:57153:19)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's people in an unknown shape
+    at hashPairsExact ([stdin]:51154:45)
+    at peopleExact ([stdin]:51170:30)
+    at async paidPeople ([stdin]:51594:18)
+    at async partnerShareProblem ([stdin]:51022:45)
+    at async POST ([stdin]:56964:23)
+    at async Object.post ([stdin]:57109:22)
+    at async main ([stdin]:57154:20)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's people in an unknown shape
+    at hashPairsExact ([stdin]:51154:45)
+    at peopleExact ([stdin]:51170:30)
+    at async listAffiliates ([stdin]:51160:15)
+    at async releaseHold ([stdin]:52271:20)
+    at async POST ([stdin]:56859:21)
+    at async Object.post ([stdin]:57109:22)
+    at async main ([stdin]:57165:19)
+reading invoices for the affiliate book failed Error: Selling is not configured
+    at onAccount ([stdin]:11466:20)
+    at recurringReferrals ([stdin]:52147:26)
+    at readBook ([stdin]:52048:27)
+    at async Promise.all (index 0)
+    at async GET ([stdin]:57025:28)
+    at async Object.exported ([stdin]:57113:22)
+    at async main ([stdin]:57168:15)
+reading invoices for the affiliate book failed Error: Selling is not configured
+    at onAccount ([stdin]:11466:20)
+    at recurringReferrals ([stdin]:52147:26)
+    at readBook ([stdin]:52048:27)
+    at async Promise.all (index 0)
+    at async GET ([stdin]:57025:28)
+    at async Object.exported ([stdin]:57113:22)
+    at async main ([stdin]:57171:17)
+exporting the affiliate book failed UnknownReplyError: Redis answered an affiliate program's people in an unknown shape
+    at hashPairsExact ([stdin]:51154:45)
+    at peopleExact ([stdin]:51170:30)
+    at async listAffiliates ([stdin]:51160:15)
+    at async Promise.all (index 1)
+    at async GET ([stdin]:57025:28)
+    at async Object.exported ([stdin]:57113:22)
+    at async main ([stdin]:57171:17)
+
+## Linked buyer-affiliates25
+
+
+Off until the creator switches it on
+  ok    an order opens nothing while it is off
+  ok    the setting reads off by default
+
+The order is the proof
+  ok    a buyer joins at once, approved
+  ok    as the address that paid
+  ok    and this browser is signed in as them
+  ok    the same order twice is the same affiliate
+  ok    and nobody is made twice
+  ok    another store's order does not open this one
+  ok    an unpaid checkout opens nothing
+  ok    an order Stripe does not know opens nothing
+  ok    nor does something that is not an order id
+  ok    the creator is never their own affiliate
+
+The creator's decisions stand
+  ok    somebody waiting on an application is let in, as themselves
+  ok    somebody the creator declined stays out
+  ok    and so does somebody they removed
+
+The same inbox written another way waits for the creator (624 [SZ8](35))
+  ok    declined gus, buying as gus+shop: an application that waits, not a link
+  ok    removed hal, buying with a trailing dot on the domain: waits too
+  ok    and buying again does not approve the waiting one
+  ok    somebody waiting whose inbox the creator declined is not approved by buying
+  ok    the creator under a + tag is still the creator
+  ok    an unrelated buyer still joins at once
+  ok    the page then says the application is in, not that a link is ready
+  ok    and a buyer let in hears their link is ready
+
+The purchase email offers it only where it works
+  ok    on: the email carries the way in
+  ok    off: it says nothing about it
+
+25 checks, all passing.
+S_VOLUME {"runs":195,"mocks":19}
+
+## Linked paypal-payouts-reconcile43
+
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)
+  ok    the write of its id failed, the '?' evidence is kept
+  ok    both still on their way
+  ok    a press sends no new batch
+  ok    the next day's try gets the same batch back and settles it, paid once
+
+An affiliate changed their PayPal address before the retry: never sent to another recipient (review of Codex H2 on #2681, GRAVE)
+  ok    no request to PayPal, no batch
+  ok    nothing ever sent to the new address
+  ok    left for the creator's own check
+  ok    the address itself is never kept in the batch, only its fingerprint
+  ok    the fingerprint is keyed, never a plain hash of the address
+
+The same address: the retry sends the same recipients
+  ok    same recipients as the first request
+
+Before the retry, Stripe's refunds cannot be read: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    waiting for refunds that can be read, not a manual check
+
+Before the retry, Stripe's refunds took back every sale: nothing is sent (review of Codex G on #2681)
+  ok    no request to PayPal, no batch
+  ok    still on its way
+  ok    less owed now than was sent: a manual check
+
+Counted by month for the owner's report, with no store or person
+  ok    unknown and manual (settled is counted in the first part)
+  ok    only those three counts
+
+The month's counts are read only in their exact envelope (review of Codex G on #2681, LEVE)
+  ok    one answer of three counts is read
+  ok    two answers to one command: not known
+  ok    an inherited reply: not known
+  ok    a getter reply: not known
+  ok    a getter count: not known
+  ok    no getter was run
+  ok    a Proxy reply: not known
+  ok    a Proxy count list: not known
+  ok    no Proxy trap was run
+
+The studio says it, with the way to look in PayPal
+  ok    words for a batch being checked and one that needs a manual check, and PayPal's activity page
+  ok    the studio page passes both counts
+
+43 checks, all passing.
+S_VOLUME {"runs":594,"mocks":142}
+
+## Linked pending-payouts33 node:test cases
+
+✔ confirmed empty array and map remain empty (4.065222ms)
+✔ both hash shapes preserve legacy identifiers, amount and currency (1.968158ms)
+✔ empty recovery batches remain readable (0.220031ms)
+✔ missing envelope is unavailable (2.25049ms)
+✔ missing reply is unavailable (0.375308ms)
+✔ extra replies is unavailable (0.234389ms)
+✔ null hash is unavailable (0.195038ms)
+✔ string hash is unavailable (0.113938ms)
+✔ odd hash is unavailable (0.164805ms)
+✔ non-string key is unavailable (0.215881ms)
+✔ non-string value is unavailable (0.138371ms)
+✔ duplicate key is unavailable (0.123497ms)
+✔ empty key is unavailable (0.493825ms)
+✔ invalid JSON is unavailable (0.187625ms)
+✔ array record is unavailable (0.163575ms)
+✔ null record is unavailable (0.098085ms)
+✔ missing timestamp never releases a partially valid hash (2.483233ms)
+✔ negative timestamp never releases a partially valid hash (0.200169ms)
+✔ unsafe timestamp never releases a partially valid hash (0.225148ms)
+✔ timestamp string never releases a partially valid hash (0.162802ms)
+✔ missing currency never releases a partially valid hash (0.265807ms)
+✔ invalid currency never releases a partially valid hash (0.715ms)
+✔ missing lines never releases a partially valid hash (0.186351ms)
+✔ null line never releases a partially valid hash (0.091292ms)
+✔ missing affiliate never releases a partially valid hash (0.076461ms)
+✔ blank affiliate never releases a partially valid hash (0.218086ms)
+✔ duplicate affiliate never releases a partially valid hash (0.097618ms)
+✔ zero cents never releases a partially valid hash (0.303261ms)
+✔ negative cents never releases a partially valid hash (0.123372ms)
+✔ fractional cents never releases a partially valid hash (0.090971ms)
+✔ string cents never releases a partially valid hash (0.139634ms)
+✔ unsafe cents never releases a partially valid hash (0.103324ms)
+✔ input records are left intact when any entry is invalid (0.228527ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.749063
+S_VOLUME {"runs":0,"mocks":0}
+
+## Scoped types
+
+EXIT 0
+
+## Scoped lint
+
+EXIT 0
+
+## Staged diff
+
+EXIT 0
+
+## Final staged public-data scanner
+Public data check: 4327 tracked files; 0 file(s) require correction.
+EXIT 0

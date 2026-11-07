@@ -7,7 +7,7 @@
  * exactly 0 or 1 keeps what was taken, as the room must never be counted
  * below what is held. Synthetic store; no outside request.
  */
-import { grantImported, grantImportedOutcomes } from "@/lib/imported-purchases";
+import { grantImported, grantImportedOutcomes, importedKey } from "@/lib/imported-purchases";
 import { dataUsed } from "@/lib/store-data";
 import { addProduct, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
@@ -64,6 +64,53 @@ async function main(): Promise<void> {
   const odd = await grantImportedOutcomes(store.statsId!, "api:key1", other, 1_800_000_000, "", store);
   redis.pipeline = pipe;
   is("an answer in another shape is unknown, never taken", odd, ["unknown"]);
+
+  part("A reply whose slot runs code (Codex G on #2576)");
+  // The write really happens; only the reply's envelope is replaced. Each
+  // reply is read once, from its own data slots, before any room is given
+  // back: a getter, a Proxy or an inherited slot is unknown, so the grant
+  // that was written keeps its room and is never said to be new.
+  let runs = 0;
+  const envelopes: [string, () => unknown[]][] = [
+    ["a getter answering 0 then 1", () => {
+      const answer: unknown[] = Array(1);
+      Object.defineProperty(answer, "0", { get: () => (++runs === 1 ? 0 : 1) });
+      return answer;
+    }],
+    ["a Proxy answering 0 then 1", () => {
+      let seen = 0;
+      return new Proxy([0], {
+        get: (target, key, receiver) => {
+          if (key === "0") {
+            runs++;
+            return ++seen === 1 ? 0 : 1;
+          }
+          return Reflect.get(target, key, receiver);
+        },
+      });
+    }],
+    ["an inherited slot", () => {
+      const answer: unknown[] = Array(1);
+      Object.setPrototypeOf(answer, Object.assign(Object.create(Array.prototype), { 0: 0 }));
+      return answer;
+    }],
+  ];
+  for (const [i, [label, envelope]] of envelopes.entries()) {
+    runs = 0;
+    const email = `envelope${i}@example.com`;
+    const before = await used();
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = await pipe(commands);
+      return commands.length === 1 && commands[0][0] === "HSETNX" && commands[0][1] === importedKey(store.statsId!, email) ? envelope() : replies;
+    }) as typeof redis.pipeline;
+    const outcome = await grantImportedOutcomes(store.statsId!, "api:key1", [{ email, productId: grant[0].productId, items: null }], 1_800_000_000, "", store);
+    redis.pipeline = pipe;
+    const [held] = await pipe([["HEXISTS", importedKey(store.statsId!, email), grant[0].productId]]);
+    is(`${label}: the grant was written`, held, 1);
+    is(`${label}: its outcome is unknown`, outcome, ["unknown"]);
+    is(`${label}: and it keeps its room`, (await used()) > before, true);
+    is(`${label}: no code of the reply runs`, runs, 0);
+  }
   done();
 }
 

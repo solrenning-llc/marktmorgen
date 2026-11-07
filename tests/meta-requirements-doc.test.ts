@@ -32,7 +32,8 @@ is("the stricter page is the working assumption when two disagree", doc.includes
 is("the pricing paragraph and both table rows are found", [pricing !== "", sendRow !== "", gapRow !== ""], [true, true, true]);
 
 part("WhatsApp pricing: the official sources disagree (LOW1)");
-is("the official FAQ is a listed source", /whatsappbusiness\.com\/resources\/faq/.test(sourceRow("S29")), true);
+// The whole URL cell, not a host pattern: an unanchored host regex could match anywhere in the row (CodeQL js/regex/missing-regexp-anchor on #2916).
+is("the official FAQ is a listed source", sourceRow("S29").includes("| https://whatsappbusiness.com/resources/faq/ |"), true);
 is("the pricing paragraph cites the FAQ for the October 1, 2026 service change", pricing.includes("[S29]") && /October 1, 2026/.test(pricing), true);
 is("the 1,000 service messages a month are cited to the FAQ", /1,000 service messages[^.]*\[S29\]/.test(pricing), true);
 is("the conflict with the official pricing page (S19) is recorded", /\[S19\][^.]*not charged|not charged[^.]*\[S19\]/.test(pricing) && /conflict/i.test(pricing), true);

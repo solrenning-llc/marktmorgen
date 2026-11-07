@@ -180,6 +180,17 @@ export type ConnectionView = {
  */
 export type DisconnectedView = ConnectionView & { providerAccessRemoved?: false };
 
+/**
+ * What a disconnect request found, for the routes: the view (null when none
+ * read as one), and `providerAccessRemoved`, true only when the provider
+ * confirmed the give-back in this very request. False when it did not, when a
+ * damaged record held no access to give back, and when nothing was there: an
+ * earlier try may have stopped after forgetting it here with its answer lost,
+ * so whether the provider took it back can no longer be known, and is never
+ * said (G review 5815599962).
+ */
+export type DisconnectOutcome = { view: DisconnectedView | null; providerAccessRemoved: boolean };
+
 export type MeetProblem = { at: number; provider: MeetProvider; what: string; error: string };
 
 export type MeetView = {
@@ -436,12 +447,17 @@ function confirmCounts(replies: unknown, commands: number, what: string): void {
  * provider, never that it was removed (G review 5815300198, disposition A).
  */
 export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectedView | null> {
+  return (await disconnectFor(statsId, provider, host)).view;
+}
+
+/** Disconnects as `disconnect` does, and says whether the provider confirmed the give-back in this request. */
+export async function disconnectFor(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectOutcome> {
   // Under the renewal lock: a renewal under way finishes first, and none can
   // write the connection back after it is gone.
-  return withLock(refreshLockKey(statsId, provider, host), 20, 9_000, async () => {
+  return withLock(refreshLockKey(statsId, provider, host), 20, 9_000, async (): Promise<DisconnectOutcome> => {
     const read = repliesFor(await redisPipeline([["GET", connKey(statsId, provider, host)]]), 1);
     if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a meeting connection");
-    if (read[0] === null) return null;
+    if (read[0] === null) return { view: null, providerAccessRemoved: false };
     const c = parseConnection(read[0], provider);
     if (!c) {
       const left = salvage(read[0], statsId, provider, host);
@@ -461,7 +477,7 @@ export async function disconnect(statsId: string, provider: MeetProvider, host =
             ...(left.accountId ? [["SREM", userKey(provider, left.accountId), statsId]] : []),
           ];
       confirmCounts(await redisPipeline(gone), gone.length, "a meeting connection's deletion");
-      return null;
+      return { view: null, providerAccessRemoved: Boolean(left.token) };
     }
     // Forgotten here whatever the provider says: a revoke that fails must not
     // leave a connection the creator asked to end. One the provider did not
@@ -474,7 +490,7 @@ export async function disconnect(statsId: string, provider: MeetProvider, host =
     const view: DisconnectedView = removed ? viewOf(c) : { ...viewOf(c), providerAccessRemoved: false };
     if (host) {
       confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider, host)]]), 1, "a meeting connection's deletion");
-      return view;
+      return { view, providerAccessRemoved: removed };
     }
     confirmCounts(
       await redisPipeline([
@@ -485,7 +501,7 @@ export async function disconnect(statsId: string, provider: MeetProvider, host =
       3,
       "a meeting connection's deletion",
     );
-    return view;
+    return { view, providerAccessRemoved: removed };
   });
 }
 

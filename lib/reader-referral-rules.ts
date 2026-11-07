@@ -15,18 +15,31 @@
  *     the caller passes in. Never money: no cash, credit or payout of any kind,
  *     so Marktmorgen never holds or pays anything for a referral. Any field
  *     this file does not know is refused, never ignored.
- *   - The personal code is an HMAC of the store and the person's address, so
- *     it is the same however the address is typed and never shows it. The
+ *   - The personal code is an HMAC of the store and the person's address,
+ *     each field prefixed by its length so one can never run into the other,
+ *     so it is the same however the address is typed and never shows it. A
+ *     short secret, or one of few distinct characters, gives no code. The
  *     link carries only the code; the caller keeps which person a code is.
+ *   - One person is one address: lower case, no +tag, Gmail without dots,
+ *     and a provider's equivalent domains (iCloud, Proton, a Fastmail
+ *     subdomain) folded into one. An address with any character outside
+ *     printable ASCII (invisible, look-alike, accented) is refused, so an
+ *     address that looks the same can never be a new person.
  *   - A friend counts only when every check says yes: confirmed by the emailed
  *     link, consented to the creator's emails, still subscribed, not on the
  *     list before, not a disposable address, past the existing bot check, and
  *     not the person who shared it (a +tag or Gmail dots do not make a new
  *     person). A no on any check refuses. Anything else unknown waits and
  *     never counts. The same friend counts once; records about one friend that
- *     disagree count at their least favorable.
- *   - A milestone is given once per person, by its count. A milestone already
- *     given is never taken back, and editing a reward does not give it again.
+ *     disagree count at their least favorable. On a domain that is not a
+ *     public provider (COMMON_PROVIDERS), where whoever holds it can make any
+ *     number of addresses, at most MAX_FRIENDS_PER_OWN_DOMAIN friends count
+ *     per domain (its subdomains included) and the rest wait.
+ *   - What was given is kept as the friend counts at which each reward was
+ *     given. A step is due only past the highest count already rewarded and
+ *     only beyond the number of rewards already given, so moving, adding or
+ *     editing a milestone never pays a step again, and nobody gets more
+ *     rewards than the program has steps. Nothing given is ever taken back.
  *   - What the person who shared sees has numbers only, never an address.
  *
  * No read, write, email or model call happens here. Storing the program and
@@ -34,6 +47,7 @@
  * allowance) and the privacy and terms wording come with the next units.
  */
 import { createHmac } from "node:crypto";
+import { COMMON_PROVIDERS } from "@/lib/email-typo";
 
 export const MAX_MILESTONES = 5;
 export const MAX_MILESTONE_COUNT = 1000;
@@ -42,6 +56,10 @@ export const MAX_REFERRAL_EVENTS = 5000;
 export const REFERRAL_CODE = /^[A-Za-z0-9_-]{16}$/;
 const REWARD_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const MIN_SECRET = 32;
+/** Distinct characters a referral secret needs, besides its length. */
+export const MIN_SECRET_DISTINCT = 8;
+/** Friends counted on one domain that is not a public provider; the rest wait. */
+export const MAX_FRIENDS_PER_OWN_DOMAIN = 2;
 const MAX_ADDRESS = 254;
 
 export type ReferralReward = { kind: "product"; productId: string } | { kind: "coupon"; couponId: string };
@@ -96,32 +114,70 @@ export function readReferralProgram(raw: unknown, own: OwnRewards): { ok: true; 
   return { ok: true, program: { milestones } };
 }
 
+/** Domains one provider delivers to the same mailbox, folded into one. */
+const SAME_MAILBOX: Readonly<Record<string, string>> = {
+  "googlemail.com": "gmail.com",
+  "me.com": "icloud.com",
+  "mac.com": "icloud.com",
+  "protonmail.com": "proton.me",
+  "protonmail.ch": "proton.me",
+  "pm.me": "proton.me",
+};
+/** Fastmail delivers anything@user.fastmail.com to user@fastmail.com. */
+const FASTMAIL_SUBDOMAIN = /^([a-z0-9-]+)\.fastmail\.com$/;
+/** Printable ASCII only: no space, control, invisible, look-alike or accented character. */
+const PRINTABLE_ASCII = /^[\x21-\x7e]+$/;
+const PUBLIC_PROVIDERS = new Set(COMMON_PROVIDERS.map((domain) => SAME_MAILBOX[domain] ?? domain));
+
 /**
  * One person, however the address is typed: trimmed, lower case, without a
- * +tag, and for Gmail without dots. Null when it is not an address.
+ * +tag, for Gmail without dots, and on a provider's equivalent domains as
+ * one. Null when it is not an address or holds a character outside
+ * printable ASCII.
  */
 export function referralAddress(email: string): string | null {
   if (typeof email !== "string") return null;
-  const typed = email.trim().toLowerCase();
-  if (typed.length === 0 || typed.length > MAX_ADDRESS || /\s/.test(typed)) return null;
-  const parts = typed.split("@");
+  const trimmed = email.trim();
+  // Checked before lower case, which would turn some look-alikes (the Kelvin sign) into ASCII.
+  if (trimmed.length === 0 || trimmed.length > MAX_ADDRESS || !PRINTABLE_ASCII.test(trimmed)) return null;
+  const parts = trimmed.toLowerCase().split("@");
   if (parts.length !== 2) return null;
   let [local, domain] = parts;
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain)) return null;
   local = local.split("+")[0];
-  if (domain === "googlemail.com") domain = "gmail.com";
+  if (local.length === 0) return null;
+  const fastmailUser = FASTMAIL_SUBDOMAIN.exec(domain);
+  if (fastmailUser) {
+    local = fastmailUser[1];
+    domain = "fastmail.com";
+  }
+  domain = SAME_MAILBOX[domain] ?? domain;
   if (domain === "gmail.com") local = local.replace(/\./g, "");
   if (local.length === 0) return null;
   return `${local}@${domain}`;
 }
 
+/**
+ * The bucket a friend's address falls in for the own-domain ceiling: null on
+ * a public provider, otherwise the domain's last two labels, so every
+ * subdomain of one domain is one bucket (a shared ending such as co.uk is one
+ * bucket too, which only makes more friends wait, never fewer).
+ */
+function ownDomainBucket(address: string): string | null {
+  const domain = address.slice(address.lastIndexOf("@") + 1);
+  if (PUBLIC_PROVIDERS.has(domain)) return null;
+  return domain.split(".").slice(-2).join(".");
+}
+
 /** The person's code for this store: stable, private, 16 characters. Null when it cannot be made safely. */
 export function referralCode(secret: string, storeId: string, email: string): string | null {
-  if (typeof secret !== "string" || secret.length < MIN_SECRET) return null;
+  if (typeof secret !== "string" || secret.length < MIN_SECRET || new Set(secret).size < MIN_SECRET_DISTINCT) return null;
   if (typeof storeId !== "string" || storeId.length === 0) return null;
   const address = referralAddress(email);
   if (!address) return null;
-  return createHmac("sha256", secret).update(`reader-referral:v1:${storeId}:${address}`).digest("base64url").slice(0, 16);
+  // Each field carries its length, so "s:a" + "b@x" and "s" + "a:b@x" never meet.
+  const message = `reader-referral:v1:${storeId.length}:${storeId}:${address.length}:${address}`;
+  return createHmac("sha256", secret).update(message).digest("base64url").slice(0, 16);
 }
 
 /**
@@ -163,7 +219,12 @@ function verdict(signup: ReferredSignup, referrer: string): { address: string | 
   return { address, verdict: "counted" };
 }
 
-/** How many friends of this referrer count, wait or were refused. Refused whole when the list cannot be trusted. */
+/**
+ * How many friends of this referrer count, wait or were refused. Refused
+ * whole when the list cannot be trusted. On a domain that is not a public
+ * provider, the first MAX_FRIENDS_PER_OWN_DOMAIN friends that count, in the
+ * order given, count; the rest wait.
+ */
 export function tallyReferrals(referrerEmail: string, signups: readonly ReferredSignup[]): { ok: true; tally: ReferralTally } | { ok: false } {
   const referrer = referralAddress(referrerEmail);
   if (!referrer || !Array.isArray(signups) || signups.length > MAX_REFERRAL_EVENTS) return { ok: false };
@@ -180,17 +241,56 @@ export function tallyReferrals(referrerEmail: string, signups: readonly Referred
     byFriend.set(address, before === undefined || RANK[v] > RANK[before] ? v : before);
   }
   const tally: ReferralTally = { counted: 0, pending: 0, refused: invalid };
-  for (const v of byFriend.values()) tally[v] += 1;
+  const perOwnDomain = new Map<string, number>();
+  for (const [address, v] of byFriend) {
+    const bucket = v === "counted" ? ownDomainBucket(address) : null;
+    if (bucket !== null) {
+      const already = perOwnDomain.get(bucket) ?? 0;
+      if (already >= MAX_FRIENDS_PER_OWN_DOMAIN) {
+        tally.pending += 1;
+        continue;
+      }
+      perOwnDomain.set(bucket, already + 1);
+    }
+    tally[v] += 1;
+  }
   return { ok: true, tally };
 }
 
 const wholeCount = (counted: number) => typeof counted === "number" && Number.isInteger(counted) && counted >= 0;
 
-/** Milestones this person has reached and not been given yet, in order. Each count is given once. */
+/**
+ * What was given, read: how many rewards and the highest friend count
+ * rewarded. Null when the record is not a list of whole counts of at least
+ * one, so nothing more is given until it is.
+ */
+function readGiven(given: readonly number[]): { steps: number; highest: number } | null {
+  if (!Array.isArray(given) || given.length > MAX_MILESTONE_COUNT) return null;
+  let highest = 0;
+  for (const count of given) {
+    if (!wholeCount(count) || count < 1) return null;
+    highest = Math.max(highest, count);
+  }
+  return { steps: given.length, highest };
+}
+
+/** Whether a milestone, at its place in the program, can still be given to someone with this record. */
+const stillToGive = (record: { steps: number; highest: number }, index: number, m: Milestone) => index >= record.steps && m.count > record.highest;
+
+/**
+ * Milestones this person has reached and not been given yet, in order.
+ * `given` holds the friend count at which each reward was given, whatever
+ * the program was then. A step is due only past the highest count already
+ * rewarded and beyond the number of rewards already given, so no step is
+ * paid twice after the creator changes the program.
+ */
 export function dueMilestones(program: ReferralProgram, counted: number, given: readonly number[]): Milestone[] {
   if (!wholeCount(counted)) return [];
-  const done = new Set(given);
-  return program.milestones.filter((m) => m.count <= counted && !done.has(m.count)).map((m) => ({ count: m.count, reward: { ...m.reward } }));
+  const record = readGiven(given);
+  if (!record) return [];
+  return program.milestones
+    .filter((m, index) => m.count <= counted && stillToGive(record, index, m))
+    .map((m) => ({ count: m.count, reward: { ...m.reward } }));
 }
 
 export type ReferrerView = {
@@ -207,7 +307,9 @@ export function referrerView(program: ReferralProgram, tally: ReferralTally, giv
   const counted = wholeCount(tally.counted) ? tally.counted : 0;
   const pending = wholeCount(tally.pending) ? tally.pending : 0;
   const reached = program.milestones.filter((m) => done.has(m.count)).map((m) => m.count);
-  const upcoming = program.milestones.find((m) => !done.has(m.count) && m.count > counted);
+  // The next step is one dueMilestones could still give; none while the record cannot be read.
+  const record = readGiven(given);
+  const upcoming = record ? program.milestones.find((m, index) => stillToGive(record, index, m) && m.count > counted) : undefined;
   return {
     counted,
     pending,

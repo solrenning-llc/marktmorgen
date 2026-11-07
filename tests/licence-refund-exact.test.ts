@@ -15,6 +15,11 @@
  * Review MEDIUM on #2868 (Codex G): a key's record read back as text that is not JSON, or as JSON of another shape,
  * is not "this product never gave the key": the refund stays unread, the healthy record is not overwritten, and the
  * next run revokes the key. The data copy says such a record is unknown rather than leave the key out.
+ *
+ * Review MEDIUM on #2868 (Claude 4, after Codex G): a record whose times are of a shape the writers never write (a
+ * revocation time of -1, 0, 0.5 or Infinity, a given time below zero, a refund mark without a revocation time) is
+ * unknown too, never "already revoked": the refund stays unread. The public check and the buyer's key never read such
+ * a record as valid or revoked.
  */
 import { type Store, claimHandle, ensureStatsId, addProduct, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { MAX_POOL_KEYS, addKeys, checkKey, keyForSale, keysOf, revokeRefunded, setRevoked } from "@/lib/licence-keys";
@@ -242,9 +247,18 @@ async function main(): Promise<void> {
 
   part("6. MEDIUM (Codex G): a key's record read back unreadable keeps its refund unread and the record whole");
   const infoOf = `nl:keys:${store.statsId}:${app.id}:info`;
+  // The healthy record with one field changed to a shape no writer writes (settle writes {r, e, at}, setRevoked adds a
+  // positive whole v, and w only with it).
+  const changed = (fields: Record<string, unknown>) => (before: string) => JSON.stringify({ ...JSON.parse(before), ...fields });
   for (const [label, bad, n] of [
-    ["text that is not JSON", "{cut", "21"],
-    ["JSON of another shape", "{}", "22"],
+    ["text that is not JSON", () => "{cut", "21"],
+    ["JSON of another shape", () => "{}", "22"],
+    ["a revocation time of -1", changed({ v: -1 }), "24"],
+    ["a revocation time of 0.5", changed({ v: 0.5 }), "25"],
+    ["a revocation time read as Infinity", (before: string) => before.replace(/}$/, ',"v":1e999}'), "26"],
+    ["a revocation time of 0", changed({ v: 0 }), "27"],
+    ["a given time below zero", changed({ at: -1 }), "28"],
+    ["a refund mark without a revocation time", changed({ w: "refund" }), "29"],
   ] as const) {
     const key = await sale(`cs_test_licref0000${n}`, `pi_LicenceRef00${n}`);
     const id = `re_LicenceRef00${n}`;
@@ -254,7 +268,7 @@ async function main(): Promise<void> {
     redis.pipeline = (async (commands: Command[]) => {
       if (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === infoOf && commands[0][2] === key) {
         faults += 1;
-        return [bad];
+        return [bad(String(before))];
       }
       return real(commands);
     }) as typeof redis.pipeline;
@@ -295,6 +309,45 @@ async function main(): Promise<void> {
   }
   redis.pipeline = real;
   is("an unreadable record is said as unknown, never left out", unreadable, "UnknownReplyError");
+
+  part("6d. Same pattern: the public check never reads a record of another shape as valid or revoked");
+  const checked = await sale("cs_test_licref000030", "pi_LicenceRef0030");
+  const healthy = String((await real([["HGET", infoOf, checked]]))[0]);
+  is("control: the healthy record is valid", await checkKey(store, app, checked), "valid");
+  for (const [label, odd] of [
+    ["JSON of another shape", "{}"],
+    ["a revocation time of -1", changed({ v: -1 })(healthy)],
+    ["a revocation time that is text", changed({ v: "soon" })(healthy)],
+  ] as const) {
+    redis.pipeline = (async (commands: Command[]) => {
+      if (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === infoOf && commands[0][2] === checked) return [odd];
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const status = await checkKey(store, app, checked);
+    redis.pipeline = real;
+    is(`${label}: the check answers unknown`, status, "unknown");
+  }
+
+  part("6e. Same pattern: the buyer's key is never shown good or revoked from a record of another shape");
+  const shown = await sale("cs_test_licref000031", "pi_LicenceRef0031");
+  is("control: the buyer's key is shown good", await keyForSale(store, app, "cs_test_licref000031", "buyer@example.com"), { state: "issued", key: shown, revoked: false });
+  for (const [label, odd] of [
+    ["JSON of another shape", "{}"],
+    ["a revocation time of -1", changed({ v: -1 })(String((await real([["HGET", infoOf, shown]]))[0]))],
+  ] as const) {
+    redis.pipeline = (async (commands: Command[]) => {
+      if (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === infoOf && commands[0][2] === shown) return [odd];
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let given: unknown;
+    try {
+      given = await keyForSale(store, app, "cs_test_licref000031", "buyer@example.com");
+    } catch (error) {
+      given = error instanceof Error ? error.name : "threw";
+    }
+    redis.pipeline = real;
+    is(`${label}: the buyer's key is unknown`, given, "UnknownReplyError");
+  }
   done();
 }
 

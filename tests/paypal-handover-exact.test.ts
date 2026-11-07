@@ -239,6 +239,30 @@ test("the sweep never hands over again an order the buyer's return settled while
   assert.deepEqual(await settledMarks(order), SETTLED);
 });
 
+test("whether a written order is still pending, read in an unknown shape, hands nothing over and keeps it pending", async () => {
+  redis.clear();
+  paypal = "completed";
+  const order = nextOrder();
+  await putOpened(order);
+  await putPending(order);
+  await putWritten(order);
+  const handed: Paid[] = [];
+  const original = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands.length === 1 && commands[0][0] === "ZSCORE" && commands[0][1] === `nl:ppsell:pending:${sid}` && commands[0][2] === order
+      ? []
+      : original.call(redis, commands)) as typeof redis.pipeline;
+  try {
+    await sweeper(handed)();
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.equal(handed.length, 0, "nothing handed over on a guess");
+  assert.notEqual(await pending(order), null, "still pending");
+  await sweeper(handed)();
+  assert.deepEqual(handed.map((p) => p.order), [order], "handed over once when it can be read");
+});
+
 test("control: the return writes a payment down once; nothing is left pending for the sweep to hand over again", async () => {
   redis.clear();
   paypal = "completed";

@@ -32,7 +32,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, setSubscription, storeForEmail, storeFolder } from "@/lib/store";
 import { type Course, type Lesson, saveCourse } from "@/lib/course";
-import { emailKey, recordEnrollment, setBlocked } from "@/lib/learn";
+import { emailKey, paidCourses, recordEnrollment, setBlocked, storeKey } from "@/lib/learn";
 import { markPassed } from "@/lib/quiz";
 import { feedToken, tokenKey } from "@/lib/podcast-access";
 import { idsOfKind, listingSizes } from "@/lib/catalog";
@@ -67,11 +67,21 @@ const FOLDER = "f".repeat(32);
 
 /** Checkouts by the address they were paid from, as the creator's Stripe account lists them. */
 const sessions: Record<string, Record<string, unknown>[]> = {};
+/** Invoices, payment intents, a plan's invoice payments and disputes, by their id (or the invoice's or charge's). */
+const stripeObjects: Record<string, Record<string, unknown>> = {};
+/** Every call the creator's Stripe account was asked, counted as it is sent. */
+let stripeCalls = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
+  if (url.hostname !== "api.stripe.com") return new Response("{}", { status: 404 });
+  stripeCalls += 1;
   const path = url.pathname.replace(/^\/v1/, "");
-  const data = path === "/checkout/sessions" ? sessions[url.searchParams.get("customer_details[email]") ?? ""] ?? [] : [];
-  return new Response(JSON.stringify({ object: "list", data, has_more: false }));
+  const list = (data: unknown[]) => new Response(JSON.stringify({ object: "list", data, has_more: false }));
+  if (path === "/checkout/sessions") return list(sessions[url.searchParams.get("customer_details[email]") ?? ""] ?? []);
+  if (path === "/invoice_payments") return list((stripeObjects[`payments:${url.searchParams.get("invoice")}`]?.data as unknown[]) ?? []);
+  if (path === "/disputes") return list((stripeObjects[`disputes:${url.searchParams.get("charge")}`]?.data as unknown[]) ?? []);
+  const one = stripeObjects[decodeURIComponent(path.split("/").pop() ?? "")];
+  return one ? new Response(JSON.stringify(one)) : list([]);
 }) as typeof fetch;
 const charge = (amount: number, back: number) => ({ object: "charge", amount, amount_refunded: back, refunded: back >= amount });
 const checkout = (id: string, product: string, over: Record<string, unknown> = {}) => ({
@@ -289,6 +299,60 @@ async function main(): Promise<void> {
   await setBlocked(store, COURSE_ID, STUDENT, false);
   await setCourseAudio(COURSE_ID, false, store);
   is("the creator turns it off: the play door closes too", (await listen(token, "l1aaaaaaaaaa")).status, 404);
+
+  part("Stripe is never asked more than the access step paid for");
+  // accessWork pays 2 + 3 a course of Stripe calls. A buyer whose purchases need more to be read (a payment plan's
+  // first invoice paid in ten payments, each disputed; a plan bought twice whose first payment was disputed) must not
+  // get them asked past that: the walk stops at the paid count and the feed refuses, never guessing access.
+  await setCourseAudio(COURSE_ID, true, store);
+  const paidStripe = accessWork(courses.length, listingBytes).stripe;
+  is("this store pays for 2 + 3 a course", paidStripe, 2 + 3 * courses.length);
+  const disputedCharge = (id: string) => ({ object: "charge", id, amount: 490, amount_refunded: 0, refunded: false, disputed: true, dispute: { status: "needs_response" } });
+  const planCheckout = (id: string, invoice: string) =>
+    checkout(id, productId, { mode: "subscription", payment_intent: null, invoice, metadata: { store: "school", product: productId, kind: "plan" } });
+  const planPaidIn = (invoice: string, parts: number, tag: string) => {
+    stripeObjects[invoice] = { object: "invoice", id: invoice };
+    const intents = Array.from({ length: parts }, (_, i) => `pi_${tag}${String(i).padStart(8, "0")}`);
+    stripeObjects[`payments:${invoice}`] = { data: intents.map((pi) => ({ object: "invoice_payment", status: "paid", payment: { type: "payment_intent", payment_intent: pi } })) };
+    intents.forEach((pi, i) => {
+      const ch = `ch_${tag}${String(i).padStart(8, "0")}`;
+      stripeObjects[pi] = { object: "payment_intent", id: pi, latest_charge: disputedCharge(ch) };
+      stripeObjects[`disputes:${ch}`] = { data: [{ object: "dispute", status: "needs_response" }] };
+    });
+  };
+  const counted = async (run: () => Promise<Response>) => {
+    const before = stripeCalls;
+    const response = await run();
+    return { status: response.status, body: await response.text(), calls: stripeCalls - before };
+  };
+  const paidKey = (email: string) => `nl:learn:paid:${storeKey(store)}:${emailKey(email)}`;
+  // A plan's first invoice paid in ten payments, each with its own dispute: 1 + 1 + 1 + 10 + 10 = 23 calls to read.
+  planPaidIn("in_TenParts0000001", 10, "ten");
+  sessions["ten@example.com"] = [planCheckout("cs_test_ten000000001", "in_TenParts0000001")];
+  const ten = (await feedToken(store, productId, "ten@example.com"))!;
+  const tenAsk = await counted(() => ask(ten));
+  is("ten payments, each disputed: Stripe asked no more than paid for", tenAsk.calls <= paidStripe, true);
+  is("and the feed refuses rather than guess", [tenAsk.status, /<item>/.test(tenAsk.body)], [503, false]);
+  is("no answer is kept from a walk cut short, so the lesson page asks afresh", (await redis.pipeline([["EXISTS", paidKey("ten@example.com")]]))[0], 0);
+  const tenPlay = await counted(() => listen(ten, "l1aaaaaaaaaa"));
+  is("the play door is held to the same count", [tenPlay.calls <= paidStripe, tenPlay.status], [true, 503]);
+  // The same course bought twice on a plan, each first payment disputed: 1 + (1 + 1 + 1 + 1) * 2 = 9 calls.
+  planPaidIn("in_TwiceA00000001", 1, "twa");
+  planPaidIn("in_TwiceB00000001", 1, "twb");
+  sessions["twice@example.com"] = [planCheckout("cs_test_twa000000001", "in_TwiceA00000001"), planCheckout("cs_test_twb000000001", "in_TwiceB00000001")];
+  const twice = (await feedToken(store, productId, "twice@example.com"))!;
+  const twiceAsk = await counted(() => ask(twice));
+  is("bought twice, each first payment disputed: no more than paid for", [twiceAsk.calls <= paidStripe, twiceAsk.status], [true, 503]);
+  console.log(`      Stripe calls asked: ten payments ${tenAsk.calls}, its lesson ${tenPlay.calls}, bought twice ${twiceAsk.calls}; paid for ${paidStripe}`);
+  // A one-time purchase whose charge is disputed (one more call): within what was paid for, answered as before.
+  sessions["dee@example.com"] = [checkout("cs_test_dee000000001", productId, { payment_intent: { id: "pi_dee0000001", latest_charge: disputedCharge("ch_dee00000001") } })];
+  stripeObjects["disputes:ch_dee00000001"] = { data: [{ object: "dispute", status: "needs_response" }] };
+  const dee = (await feedToken(store, productId, "dee@example.com"))!;
+  const deeAsk = await counted(() => ask(dee));
+  is("a disputed one-time charge, within the count: answered with the lessons", [deeAsk.calls, deeAsk.status, /<item>/.test(deeAsk.body)], [2, 200, true]);
+  is("and Stripe's answer is kept, as the lesson page keeps it", (await redis.pipeline([["EXISTS", paidKey("dee@example.com")]]))[0], 1);
+  is("outside the feed, the same buyer is still read in full (the lesson page is not held)", (await paidCourses(store, "ten@example.com")).has(productId), true);
+  await setCourseAudio(COURSE_ID, false, store);
 
   part("What a student's day costs, in the store's public requests");
   const perBuild = 1 + outlineUnits + accessUnits;

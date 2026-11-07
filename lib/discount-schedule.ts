@@ -17,7 +17,10 @@
  * code); anything else is tried again at the next run, ACTIVATION_TRIES times
  * in all, then kept as failed for the studio to say so, the code still off.
  * Every Redis reply is read in its exact shape (lib/redis-reply.ts): an
- * unreadable one acts on nothing and leaves the entry for the next run.
+ * unreadable one acts on nothing and leaves the entry for the next run. A
+ * kept record that cannot be parsed reads the same at every run, so it
+ * leaves the due list at once (the code stays off, as made) and stays in the
+ * store's hash for the studio and for the creator's Cancel.
  */
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { activateCode, createCode, stopCode, type DiscountCode } from "@/lib/discount";
@@ -31,7 +34,7 @@ import {
 } from "@/lib/discount-schedule-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type Store, setHasDiscounts, storeForId, storeRef } from "@/lib/store";
+import { type Store, setHasDiscounts, storeForIdExactly, storeRef } from "@/lib/store";
 
 export const DUE_KEY = "nl:dsched:due";
 const scheduleKey = (statsId: string) => `nl:dsched:${statsId}`;
@@ -90,7 +93,8 @@ async function counted(commands: (string | number)[][]): Promise<boolean> {
 
 export type Scheduled =
   | { ok: true; code: DiscountCode }
-  | { ok: false; reason: "busy" | "full" | "taken" | "stripe" | "unknown" };
+  /** "live": Stripe made the code live at once and did not confirm it off; it is kept as failed for the studio to show. */
+  | { ok: false; reason: "busy" | "full" | "taken" | "stripe" | "unknown" | "live" };
 
 /**
  * Makes a code that starts and ends at set times: switched off on the
@@ -119,8 +123,15 @@ export async function scheduleCode(shop: Shop, asked: CodeAsked, window: Schedul
     if (!made.ok) return { ok: false, reason: made.reason };
     // Made live, or under an id this file cannot keep: never left live by mistake.
     if (made.code.active !== false || !PROMO_ID.test(made.code.id)) {
-      await stopCode(account, made.code.id);
-      return { ok: false, reason: "stripe" };
+      // Asked twice: a stop Stripe answers in an unclear way is tried once more at once.
+      if ((await stopCode(account, made.code.id)) || (await stopCode(account, made.code.id))) return { ok: false, reason: "stripe" };
+      // Live and not confirmed off: kept as failed and never due, so the studio lists it beside Stripe's own
+      // "Live" and the creator's Cancel or "Switch it off" stops it; the creator is told in words either way.
+      if (PROMO_ID.test(made.code.id)) {
+        const failed: ScheduleEntry = { id: made.code.id, code: asked.code, start: window.start, end: window.end, tries: 0, failed: true };
+        await counted([["HSET", scheduleKey(statsId), failed.id, writeRecord(failed)]]);
+      }
+      return { ok: false, reason: "live" };
     }
     const entry: ScheduleEntry = { id: made.code.id, code: asked.code, start: window.start, end: window.end, tries: 0, failed: false };
     const kept = await counted([
@@ -176,16 +187,21 @@ async function unkeep(shop: Shop, statsId: string, id: string): Promise<"done" |
 /**
  * The creator cancels a scheduled code: its schedule goes, so the job never
  * switches it on, then Stripe is told to keep it off (it already is, unless
- * a try the job could not confirm did switch it on).
+ * a try the job could not confirm did switch it on). With no schedule left
+ * (the job switched it on after the creator's page was read, or it was
+ * canceled already) the code is switched off on the creator's own Stripe
+ * account all the same: "stopped", so the studio never says "It stays off"
+ * of a code that was live. Either answer only once Stripe confirms it off.
  */
-export async function cancelSchedule(shop: Shop, id: string): Promise<"done" | "none" | "busy" | "unknown" | "stripe"> {
+export async function cancelSchedule(shop: Shop, id: string): Promise<"done" | "stopped" | "busy" | "unknown" | "stripe"> {
   const statsId = shop.statsId;
   if (!statsId || !HEX32.test(statsId) || !PROMO_ID.test(id) || !shop.stripeAccountId) return "unknown";
   const account = shop.stripeAccountId;
   const result = await holding(statsId, async () => {
     const taken = await unkeep(shop, statsId, id);
-    if (taken !== "done") return taken;
-    return (await stopCode(account, id)) ? "done" : "stripe";
+    if (taken === "unknown") return "unknown";
+    if (!(await stopCode(account, id))) return "stripe";
+    return taken === "done" ? "done" : "stopped";
   });
   return result;
 }
@@ -207,15 +223,23 @@ type Outcome = "activated" | "retried" | "failed" | "dropped" | "unknown";
 export type ActivationCounts = Record<Outcome, number>;
 
 type Deps<S extends Shop> = {
-  findStore: (sid: string) => Promise<S | null>;
-  /** The checkout's code box, switched on once a code is live (lib/store.ts, hasDiscounts). */
+  /** The store, read exactly: null or "none" only when it is confirmed gone; "unknown" keeps the code due. */
+  findStore: (sid: string) => Promise<S | null | "none" | "unknown">;
+  /**
+   * The checkout's code box, switched on once a code is live (lib/store.ts,
+   * hasDiscounts): confirmed only by the store it answers with the box on.
+   */
   markDiscounts: (store: S) => Promise<unknown>;
 };
 
 const DEFAULT_DEPS: Deps<Store> = {
-  findStore: storeForId,
+  findStore: storeForIdExactly,
   markDiscounts: (store) => setHasDiscounts(storeRef(store), true),
 };
+
+/** Whether the store's answer says the checkout's code box is on: nothing else (null, a throw, a partial record) does. */
+const boxOn = (answer: unknown): boolean =>
+  Boolean(answer && typeof answer === "object" && !Array.isArray(answer) && Object.hasOwn(answer, "hasDiscounts") && (answer as { hasDiscounts?: unknown }).hasDiscounts === true);
 
 async function drop(member: string): Promise<void> {
   await counted([["ZREM", DUE_KEY, member]]);
@@ -257,8 +281,13 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
     }
     if (typeof raw !== "string") return "unknown";
     const entry = readRecord(id, raw);
-    // Unreadable: never acted on, left for a later run and for the studio to say.
-    if (!entry) return "unknown";
+    // Unreadable: it reads the same at every run, so it leaves the due list now and never holds a healthy
+    // code behind it. Never acted on (the code stays off, as made); the record stays for the studio and for
+    // the creator's Cancel, which takes it away.
+    if (!entry) {
+      await drop(member);
+      return "failed";
+    }
     if (entry.failed) {
       await drop(member);
       return "dropped";
@@ -270,14 +299,22 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
     // One key a try: a repeat of the same try is answered, not done again; the next try is a new request.
     const live = await activateCode(shop.stripeAccountId, id, `dsched:${id}:${entry.start}:${entry.tries}`);
     if (!live) return missed(shop, statsId, entry, nowSeconds);
-    // Live on Stripe, which holds it from now: the schedule goes. If this write is not confirmed the
-    // entry stays, and the next run switches it on again, which Stripe answers the same way.
-    if (!(await counted([["HDEL", scheduleKey(statsId), id], ["ZREM", DUE_KEY, member]]))) return "unknown";
+    // Live on Stripe. The checkout's code box goes on first, confirmed by the store it answers with; a box
+    // not confirmed on is a missed try like any other (counted, tried again at the next run, which Stripe
+    // answers the same way, then kept as failed), so the code is never counted live while buyers cannot type it.
+    let box: unknown = null;
     try {
-      await deps.markDiscounts(shop);
+      box = await deps.markDiscounts(shop);
     } catch (error) {
       console.error("switching the checkout's code box on failed", error);
     }
+    if (!boxOn(box)) {
+      await missed(shop, statsId, entry, nowSeconds);
+      return "unknown";
+    }
+    // Only then the schedule goes: Stripe holds the rest. If this write is not confirmed the entry stays,
+    // and the next run switches it on again, which Stripe and the store answer the same way.
+    if (!(await counted([["HDEL", scheduleKey(statsId), id], ["ZREM", DUE_KEY, member]]))) return "unknown";
     return "activated";
   });
   return result === "busy" ? "unknown" : result;
@@ -315,15 +352,20 @@ export async function activateScheduledCodes<S extends Shop = Store>(
       continue;
     }
     const [sid, statsId, id] = parts;
-    let shop: S | null;
+    let shop: S | null | "none" | "unknown";
     try {
       shop = await deps.findStore(sid);
     } catch {
       counts.unknown += 1;
       continue;
     }
+    // Not read exactly: kept for the next run, never taken for a store that is gone.
+    if (shop === "unknown") {
+      counts.unknown += 1;
+      continue;
+    }
     // Gone, or not this store: its schedule is erased with the store (lib/data-families.ts).
-    if (!shop || shop.statsId !== statsId) {
+    if (!shop || shop === "none" || shop.statsId !== statsId) {
       await drop(member);
       counts.dropped += 1;
       continue;

@@ -48,6 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1231,6 +1232,26 @@ export async function storeForId(sid: string): Promise<Store | null> {
   if (typeof ref !== "string" || !ref) return null;
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : null;
+}
+
+/**
+ * The store with this id, read exactly, for work that is dropped for good
+ * when its store is gone (lib/discount-schedule.ts): "none" only when the
+ * id's own key is confirmed absent or leads to another store; "unknown" when
+ * either reply is not in its exact shape or the record cannot be read, so a
+ * partial answer is never taken for a store that is gone.
+ */
+export async function storeForIdExactly(sid: string): Promise<Store | "none" | "unknown"> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return "unknown";
+  const idReplies = repliesFor(await redisPipeline([["GET", storeIdKey(sid)]]), 1);
+  if (!idReplies) return "unknown";
+  const ref = idReplies[0];
+  if (ref === null) return "none";
+  if (typeof ref !== "string" || !ref) return "unknown";
+  const replies = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
+  const store = replies ? parseStore(replies[0]) : null;
+  if (!store || typeof store.email !== "string" || storeRef(store).toLowerCase() !== ref.toLowerCase()) return "unknown";
+  return store.sid === sid ? store : "none";
 }
 
 /**

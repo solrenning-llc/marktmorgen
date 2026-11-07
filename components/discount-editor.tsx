@@ -31,12 +31,31 @@ const MESSAGES: Record<string, string> = {
     "Codes come off a charge, so they need your Stripe account connected and your subscription running.",
   taken: "You already have a live code with that word. Pick another.",
   stripe: "Stripe did not answer just now. Try again in a moment.",
+  live: "Stripe made this code live right away, and we could not switch it off. Reload this page, then switch it off in your list of live codes.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
-type Answer = { codes?: DiscountCode[]; schedules?: ScheduleEntry[]; at?: number; problem?: string };
+/** What a cancel did, as the route says it: "done" (it never started) or "stopped" (it may have started; it is off now). */
+type Canceled = "done" | "stopped";
+
+type Answer = { codes?: DiscountCode[]; schedules?: ScheduleEntry[]; at?: number; canceled?: Canceled; problem?: string };
+
+/** The cancel's own answer, read exactly; anything else is no answer. */
+const canceledOf = (data: unknown): Canceled | undefined => {
+  if (!data || typeof data !== "object" || !Object.hasOwn(data, "canceled")) return undefined;
+  const value = (data as { canceled?: unknown }).canceled;
+  return value === "done" || value === "stopped" ? value : undefined;
+};
+
+/** The message after a cancel, from what the route says it did: never "It stays off" of a code that may have started. */
+const canceledMessage = (code: string, canceled: Canceled | undefined) =>
+  canceled === "done"
+    ? `${code} canceled. It stays off.`
+    : canceled === "stopped"
+      ? `${code} may have started before you canceled. It is off now.`
+      : `${code} is off now.`;
 
 const UNCONFIRMED = "We could not confirm the discount codes. Reload to check their status before trying again.";
 
@@ -53,7 +72,7 @@ async function send(payload: Record<string, unknown>, currency: Currency): Promi
       // The codes waiting for their start (511 [CK3]): read exactly, or the list is not confirmed.
       const schedules = readScheduleConfirmation(data);
       // The moment it was read, for the states it shows.
-      return schedules === null ? { problem: UNCONFIRMED } : { codes, schedules, at: Math.floor(Date.now() / 1000) };
+      return schedules === null ? { problem: UNCONFIRMED } : { codes, schedules, at: Math.floor(Date.now() / 1000), canceled: canceledOf(data) };
     }
     if (data && typeof data === "object" && Object.hasOwn(data,"ok") && (data as {ok?: unknown}).ok === false && Object.hasOwn(data,"error")) {
       const refusal = data as {error?: unknown;reason?: unknown};
@@ -165,7 +184,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
     } else setError(answer.problem ?? MESSAGES.server_error);
   }
 
-  async function run(payload: Record<string, unknown>, done: () => void, confirmation: string) {
+  async function run(payload: Record<string, unknown>, done: () => void, confirmation: string | ((answer: Answer) => string)) {
     setBusy(true);
     setError(null);
     const answer = await send(payload, currency);
@@ -178,7 +197,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
     setSchedules(answer.schedules ?? []);
     setNow(answer.at ?? 0);
     done();
-    toast(confirmation);
+    toast(typeof confirmation === "string" ? confirmation : confirmation(answer));
   }
 
   const scheduleOf = new Map(schedules.map((entry) => [entry.id, entry]));
@@ -309,7 +328,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                       <button
                         type="button"
                         aria-busy={busy} disabled={busy}
-                        onClick={() => run({ action: "unschedule", id: entry.id }, () => {}, `${entry.code} canceled. It stays off.`)}
+                        onClick={() => run({ action: "unschedule", id: entry.id }, () => {}, (answer) => canceledMessage(entry.code, answer.canceled))}
                         className="mt-2 min-h-11 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger disabled:no-underline disabled:opacity-40"
                       >
                         {`Cancel ${entry.code}`}

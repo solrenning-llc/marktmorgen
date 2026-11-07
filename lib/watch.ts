@@ -25,8 +25,9 @@
  * What this errs toward. A video that is deleted takes with it whatever was
  * watched since its last reading, at most an hour's worth: never counted,
  * never charged. A total that goes down, which the service does not do, adds
- * nothing. A reading that fails adds nothing and is made again. Every one of
- * those is in the creator's favor, which is the way round a figure that is
+ * nothing. A reading that fails adds nothing and is made again, and so
+ * does one whose window (below) is not known: nothing is written until it
+ * is. Every one of those is in the creator's favor, which is the way round a figure that is
  * billed from has to err.
  *
  * So does the player's own count, as it was seen on the live library on
@@ -40,7 +41,7 @@
  * A reading belongs to the month it is made in, so the last hour of a month
  * can land in the next. It is still counted once.
  */
-import { storeKeysOf } from "@/lib/delivery";
+import { folderOwnerKey } from "@/lib/delivery";
 import { WINDOW_ID, allowanceWindow, calendarWindow } from "@/lib/allowance-window";
 import { storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -128,25 +129,43 @@ export async function watchedFolders(month = calendarWindow().id): Promise<strin
 }
 
 /**
- * The window a folder's store counts its video in: its billing month when it
- * pays and the period is known, the calendar month otherwise (watching that
- * happened is counted somewhere, never nowhere).
+ * The window a folder's store counts its video in, which is the counter
+ * lib/learn.ts lessonVideo reads before it lets a video play: the store's own
+ * window (lib/allowance-window.ts) when whose folder it is and its store are
+ * known. Read exactly (audit SG2, CX-123 rule 24), before anything is written:
+ *
+ * - no owner kept (nil), or an owner whose store is gone: the calendar month.
+ *   No lesson page lets a video play for a store that is not there, so no
+ *   counter that pauses is missed, and watching that happened is still
+ *   counted somewhere.
+ * - an owner in another shape, a database that does not answer, a store
+ *   record that cannot be read, or a store that pays and whose period is not
+ *   known: null, unknown. Counting it in the calendar month would put it
+ *   where no admission reads, and the video would play past the plan's hours
+ *   with the video service's cost unbounded (Claude 5, reviews of #2914 and
+ *   #2876).
  */
-async function windowOfFolder(folder: string, now: number): Promise<string> {
+async function windowOfFolder(folder: string, now: number): Promise<string | null> {
   try {
-    const [key] = await storeKeysOf([folder]);
-    const store = key ? await storeForEmail(key) : null;
-    if (store && (await storeFolder(storeRef(store))) === folder) return (allowanceWindow(store, now) ?? calendarWindow(now)).id;
+    const owner = repliesFor(await redisPipeline([["GET", folderOwnerKey(folder)]]), 1)?.[0];
+    if (owner === null) return calendarWindow(now).id;
+    if (typeof owner !== "string" || !owner) return null;
+    const store = await storeForEmail(owner);
+    if (!store || (await storeFolder(storeRef(store))) !== folder) return calendarWindow(now).id;
+    return allowanceWindow(store, now)?.id ?? null;
   } catch (error) {
     console.error("could not read whose video was watched", error);
+    return null;
   }
-  return calendarWindow(now).id;
 }
 
 /**
  * Reads one store at the video service and adds what was watched since the
- * reading before. Answers the seconds added; null when the service, or the
- * last totals kept here, could not be read, and then nothing was changed.
+ * reading before. Answers the seconds added; null when the service, the last
+ * totals kept here, or the window the seconds belong in could not be read,
+ * and then nothing was changed: what was watched stays between the service's
+ * total and the last one kept here, and the next reading that knows the
+ * window counts it there, once.
  */
 export async function measure(folder: string, now = Date.now()): Promise<number | null> {
   if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder)) return 0;
@@ -196,8 +215,14 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
 
   if (added > 0) {
     // Added to the store's window (lib/allowance-window.ts), where its video
-    // stops; the line of stores is kept by the calendar month.
+    // stops; the line of stores is kept by the calendar month. The window is
+    // known before anything is written, the last totals included: moving
+    // them on without adding the seconds to that window would lose them.
     const window = await windowOfFolder(folder, now);
+    if (window === null) {
+      console.error(`the window a store's video is counted in is not known; nothing written, read again (watch ${folder})`);
+      return null;
+    }
     const month = calendarWindow(now).id;
     writes.push(
       ["INCRBY", secondsKey(folder, window), added],
@@ -223,17 +248,23 @@ export async function measureDue(deadline: number, now = Date.now()): Promise<{ 
     if (Date.now() > deadline) return counts;
     if (typeof folder !== "string") continue;
     const added = await measure(folder, now);
-    if (added === null) {
-      await redisPipeline([["ZADD", DUE, now + AGAIN_MS, folder]]);
-      continue;
-    }
-    counts.read += 1;
-    counts.seconds += added;
     // No key: no lesson of theirs opened for a week. A reply of any other
     // shape is unknown, and keeps the store in line rather than letting
     // its watching go unread (audit SG2, CX-123 rule 24).
     const openedAt = textCountOf(repliesFor(await redisPipeline([["GET", openedKey(folder)]]), 1)?.[0]);
     const still = openedAt === null || (openedAt !== "absent" && now - openedAt < WATCHING_FOR_MS);
+    if (added === null) {
+      // Nothing was written, so nothing watched is lost: it waits between the
+      // service's total and the last one kept here. Read again soon while its
+      // lessons are open; once none has been for a token's life and an hour,
+      // let go, so a reading that stays unknown is not made for ever. The
+      // next lesson opened puts the store back in line, and that reading
+      // counts what waited, in the window it is read in.
+      await redisPipeline([still ? ["ZADD", DUE, now + AGAIN_MS, folder] : ["ZREM", DUE, folder]]);
+      continue;
+    }
+    counts.read += 1;
+    counts.seconds += added;
     // Read once more after the last token has run out, and then left alone
     // until a lesson is opened again.
     await redisPipeline([still ? ["ZADD", DUE, now + MEASURE_EVERY_MS, folder] : ["ZREM", DUE, folder]]);

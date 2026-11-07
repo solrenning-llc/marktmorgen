@@ -100,6 +100,8 @@ const overKey = (month: string) => `nl:store:delivery:over:${month}`;
  * read only by the daily run that writes to them.
  */
 const ownerKey = (folder: string) => `nl:store:folder-owner:${folder}`;
+/** The same key, for a reader that must read it exactly (lib/watch.ts, the window its video is counted in). */
+export const folderOwnerKey = ownerKey;
 
 /** Remembers whose folder this is, so the allowance notice can reach them. */
 export async function rememberFolderOwner(folder: string, email: string): Promise<void> {

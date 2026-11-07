@@ -235,9 +235,11 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
  * taken with a value only this run writes (lib/claim-mark.ts, CX-123 rule 24): "ours" sends; "taken" (another run's value, or a "1" written before marks carried their own value) was sent
  * already or is being sent, and nothing goes. When the SET NX answers in another shape or not at all, the mark is
  * read back, so a write that landed while its answer was lost (a timeout, "QUEUED") is still this run's and the
- * email still goes, once. Read back as nothing known ("unknown"), nothing is sent, the mark is left as it is (if it
- * landed, it holds this run's value and runs out at its own expiry), the charge is said as failed and the rest of
- * that pass is given up: Redis is not answering, and each further claim would only wait out its own timeout.
+ * email still goes, once. Read back as nothing known ("unknown"), nothing is sent, the charge is said as failed, the
+ * mark is let go while it still holds this run's own value (releaseMark, best effort: nothing was sent on it, so the
+ * next run can send the notice, once; if the release cannot run either, the mark runs out at its own expiry and no
+ * run sends twice), and the rest of that pass is given up: Redis is not answering, and each further claim would only
+ * wait out its own timeout.
  * The mark is let go only after this run took it and its send failed, and only while it still holds this run's
  * value (releaseMark), never somebody else's.
  */
@@ -258,10 +260,12 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       const mine = claimValue();
       const claimed = await claimMark(key, 90 * DAY, mine);
       if (claimed === "unknown") {
-        // Not known whether it was sent (CX-123 rule 24): nothing is sent, the mark is left as it is, the invoice is
-        // said as failed, and this pass ends here (the route's other passes still run).
+        // Not known whether it was taken (CX-123 rule 24): nothing is sent, the invoice is said as failed, the mark is
+        // let go only while it holds this run's own value (nothing was sent on it; never throws), and this pass ends
+        // here (the route's other passes still run).
         counts.failed += 1;
         console.error("reading whether a failed payment was written about failed; this pass stops", due.invoice);
+        await releaseMark(key, mine);
         return counts;
       }
       if (claimed !== "ours") continue;
@@ -313,10 +317,12 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         const mine = claimValue();
         const claimed = await claimMark(key, 60 * DAY, mine);
         if (claimed === "unknown") {
-          // Not known whether it was sent (CX-123 rule 24): nothing is sent, the mark is left as it is, the charge is
-          // said as failed, and this pass ends here, trials and renewals both (the route's other passes still run).
+          // Not known whether it was taken (CX-123 rule 24): nothing is sent, the charge is said as failed, the mark is
+          // let go only while it holds this run's own value (nothing was sent on it; never throws), and this pass ends
+          // here, trials and renewals both (the route's other passes still run).
           counts.failed += 1;
           console.error("reading whether a billing reminder was sent failed; this pass stops", reminder.subscription);
+          await releaseMark(key, mine);
           return counts;
         }
         if (claimed !== "ours") continue;

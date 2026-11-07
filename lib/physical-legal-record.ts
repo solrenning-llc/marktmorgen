@@ -15,6 +15,7 @@ import {
   type NetQuantity,
   type SafetyGap,
   type SafetyInfo,
+  GPSR_AREA,
   MAX_ELECTRONIC,
   MAX_IDENTIFIER,
   MAX_NAME,
@@ -26,6 +27,7 @@ import {
   electronicAddress,
   readNetQuantity,
   readSafetyInfo,
+  safetyGaps,
 } from "./physical-legal";
 
 /** A net quantity on one price of the product: "" is the product's own price, otherwise an option's id. */
@@ -128,12 +130,27 @@ export const GAP_WORDS: Record<SafetyGap, string> = {
   warnings: "the warnings, or a check that it has none",
 };
 
-/** "" when nothing is missing; otherwise one sentence listing what is. */
+/**
+ * "" when nothing is missing; otherwise one sentence listing what is. It says
+ * what is needed, not what happens: no country is closed in this unit, so the
+ * cart still ships the product there (docs/sz2-physical-legal-fields.md,
+ * "Next units").
+ */
 export function gapSummary(gaps: readonly SafetyGap[]): string {
   if (gaps.length === 0) return "";
   const words = gaps.map((gap) => GAP_WORDS[gap]);
   const list = words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
-  return `Not shipped to the EU/EEA until these are filled: ${list}.`;
+  return `Needed before selling to buyers in the EU/EEA: ${list}.`;
+}
+
+/**
+ * The studio's one-sentence status of the EU/EEA product safety fields, from
+ * where the product ships: a product that ships to no EU/EEA country is not
+ * told about EU/EEA gaps.
+ */
+export function safetySummary(shipsTo: readonly string[], info: SafetyInfo | null, hasPicture: boolean): string {
+  if (!shipsTo.some((code) => GPSR_AREA.includes(code))) return "This product does not ship to the EU/EEA.";
+  return gapSummary(safetyGaps(info, hasPicture)) || "The EU/EEA product safety fields are filled.";
 }
 
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;

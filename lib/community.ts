@@ -82,7 +82,7 @@ import { indexMember } from "@/lib/community-index";
 import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
-import { claimHandle, forgetHandle } from "@/lib/community-mentions";
+import { claimHandle } from "@/lib/community-mentions";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
 export const CREATOR = "creator";
@@ -219,6 +219,7 @@ const likesKey = (id: string, post: string) => `${base(id)}:l:${post}`;
 const commentLikesKey = (id: string, post: string, comment: string) => `${base(id)}:lc:${post}:${comment}`;
 const membersKey = (id: string) => `${base(id)}:m`;
 const dirKey = (id: string) => `${base(id)}:dir`;
+const handlesKey = (id: string) => `${base(id)}:h`;
 const reportsKey = (id: string) => `${base(id)}:rep`;
 const reportersKey = (id: string, target: string) => `${base(id)}:rep:${target}`;
 const rateKey = (id: string, who: string, kind: string) => `nl:cm:rl:${id}:${who}:${kind}`;
@@ -555,28 +556,66 @@ export async function setProfile(
   // which may carry a number when somebody already held the plain one.
   const handle = await claimHandle(id, member.k, name, member.h);
   let replaced = "";
-  const saved = await patchMember(id, member.k, (now) => {
-    replaced = now.h;
-    return {
-      n: name,
-      h: handle,
-      dir: change.dir && Boolean(name),
-      mail: change.mail,
-      ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
-    };
-  });
+  let saved: Member | null;
+  try {
+    saved = await patchMember(id, member.k, (now) => {
+      replaced = now.h;
+      return {
+        n: name,
+        h: handle,
+        dir: change.dir && Boolean(name),
+        mail: change.mail,
+        ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
+      };
+    });
+  } catch (error) {
+    // The read or the write after the claim answered in no known shape, so
+    // whether the record took the handle is not known: a lost answer may hide
+    // a write that went in. It is given back only when the record, read in the
+    // same step, does not carry it (rule 30 on Codex G's review 5815559331 of
+    // #3123). When that answer is not known either, the original failure is
+    // what the caller sees.
+    if (handle) await giveBackHandle(id, handle, member.k).catch(() => 0);
+    throw error;
+  }
   // The erasure deletes only the handle the record holds (lib/community-erasure.ts),
   // so a handle the record does not carry is given back here, never left tied to
   // the member: the one this change claimed when the record went in between (an
   // erasure), and one a change made at the same time wrote and this one replaced
-  // (rule 30 on Codex G's review 5815472405 of #3123). forgetHandle deletes it
-  // only while it still points at this member.
+  // (rule 30 on Codex G's review 5815472405 of #3123).
   if (!saved) {
-    if (handle) await forgetHandle(id, handle, member.k);
+    if (handle) await giveBackHandle(id, handle, member.k);
     return member;
   }
-  if (replaced && replaced !== handle && replaced !== member.h) await forgetHandle(id, replaced, member.k);
+  if (replaced && replaced !== handle && replaced !== member.h) await giveBackHandle(id, replaced, member.k);
   return saved;
+}
+
+/**
+ * Gives a handle back only while it still points at this member and the
+ * member's record, read in the same step, does not carry it: a record that
+ * names it keeps it, and one gone or naming another lets it go. 1 deleted,
+ * 0 kept; -1 (a record that cannot be read) and any other answer are not
+ * known to be either.
+ */
+const GIVE_BACK_HANDLE = [
+  "-- marktmorgen:community-handle-give-back:v1",
+  'if redis.call("HGET", KEYS[2], ARGV[1]) ~= ARGV[2] then return 0 end',
+  'local raw = redis.call("HGET", KEYS[1], ARGV[2])',
+  "if raw then",
+  "  local ok, record = pcall(cjson.decode, raw)",
+  '  if not ok or type(record) ~= "table" then return -1 end',
+  "  if record.h == ARGV[1] then return 0 end",
+  "end",
+  'return redis.call("HDEL", KEYS[2], ARGV[1])',
+].join("\n");
+
+/** Runs GIVE_BACK_HANDLE; throws UnknownReplyError unless Redis answered 1 or 0 exactly. */
+async function giveBackHandle(id: string, handle: string, who: string): Promise<number> {
+  const replies = repliesFor(await redisPipeline([["EVAL", GIVE_BACK_HANDLE, 2, membersKey(id), handlesKey(id), handle, who]]), 1);
+  const gone = replies?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("giving back a community handle");
+  return gone;
 }
 
 /**

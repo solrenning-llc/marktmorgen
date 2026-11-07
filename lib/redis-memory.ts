@@ -125,6 +125,23 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
+        if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, members, handles, handle, who] = args;
+          if (this.run(["HGET", handles, handle]) !== who) return 0;
+          const raw = this.run(["HGET", members, who]);
+          if (typeof raw === "string") {
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return -1;
+            }
+            if (!record || typeof record !== "object") return -1;
+            if ((record as { h?: unknown }).h === handle) return 0;
+          }
+          return this.run(["HDEL", handles, handle]);
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

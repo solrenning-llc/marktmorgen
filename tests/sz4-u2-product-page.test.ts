@@ -141,6 +141,10 @@ async function main(): Promise<void> {
   is("the checkout's answer is read from the address", page.includes("readMemberBack(query.member)") && page.includes("<MemberPriceBack"), true);
   is("the price pills say the member price too", page.includes("<MemberPriceTag"), true);
   is("the page's other buttons lead a member to the buy box that carries it", /member\s*\?\s*\{\s*action:\s*\{\s*kind:\s*"link",\s*href:\s*"#buy"\s*\}/.test(page), true);
+  // Claude 4's LOW on #3021: the cart charges cartPrice (sale or fair price only, lib/cart-checkout.ts), never the
+  // member price, so a member shown "Member price $21.60 (regular $27)" is never offered a path that charges $27.
+  const cartLine = page.split("\n").find((line) => line.includes("<AddToCart")) ?? "";
+  is("a member shown their price is never offered Add to cart, which charges the regular price", [cartLine.length > 0, /!member\b/.test(cartLine)], [true, true]);
   done();
 }
 

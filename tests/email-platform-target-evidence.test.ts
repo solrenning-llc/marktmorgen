@@ -121,6 +121,21 @@ async function main(): Promise<void> {
     const changed = await saveSettings(store, { target: "other", free: true, buyers: "all", products: [], tags: {} });
     is(`${provider}: a complete page still allows a real destination change`, changed.ok ? changed.view.connected?.target : changed, { id: "other", name: "Other audience" });
   }
+  part("C5 LOW A: a confirmed larger account is our one-page limitation, not a provider fault");
+  for (const provider of EMAIL_PROVIDERS) {
+    const rows = Array.from({ length: MAX_TARGETS }, (_, n) => ({ id: `known_${n}`, name: `Destination ${n}` }));
+    const metadata: Record<string, unknown> = provider === "mailchimp" ? { total_items: 150 }
+      : provider === "kit" ? { pagination: { has_previous_page: false, has_next_page: true } }
+      : provider === "beehiiv" ? { page: 1, total_pages: 2, total_results: 150 }
+      : { links: { prev: null, next: "https://connect.mailerlite.com/api/groups?page=2" }, meta: { current_page: 1, last_page: 2, total: 150 } };
+    answerWith({ body: page(provider, rows, metadata) });
+    let refusal: PlatformError | undefined;
+    try { await listTargets(provider, keyFor(provider)); } catch (error) { if (error instanceof PlatformError) refusal = error; }
+    is(`${provider}: known additional destinations are explained as our one-page limitation`, /your .*account.*more.*one page/i.test(refusal?.message ?? ""), true);
+    is(`${provider}: the refusal explains an action and promises no change`, /fewer destinations/i.test(refusal?.message ?? "") && /Nothing was connected or changed/.test(refusal?.message ?? ""), true);
+    is(`${provider}: a permanent one-page limitation does not request an automatic retry`, refusal?.retry, false);
+    is(`${provider}: explaining the refusal adds no page or productive write`, requests.map(({ options }) => options.method), ["GET"]);
+  }
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

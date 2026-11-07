@@ -17,8 +17,9 @@
  *     owner's, and some are how an owner would notice a teammate), refuses an
  *     always-on or unknown event with its own error and changes nothing then,
  *     and can undo the weekly email's stop link, which stops all of these,
- *     said as done only when Redis's answers, read exactly, show it (an
- *     unknown answer is "not_changed", 503);
+ *     said as done only when Redis's answers, read exactly, show it (a stop
+ *     link read back in place is "not_changed", one not read back is
+ *     "unconfirmed", both 503);
  *   - the studio page names what is always on and why, says when the stop
  *     link or a store not taking payments makes the choices do nothing yet
  *     (a stop link it could not read is said as not read, never hidden),
@@ -35,6 +36,11 @@
  * weeklyOff(store.handle) on the page; the page now reads the stop link
  * exactly with weeklyStopState(store.handle), so a failed read is said as
  * not read instead of hidden, and the assertion names that read.
+ *
+ * Rule 23 (review of #3013, 7 November 2026): "the stop link's state read
+ * back in an unknown shape" expected "not_changed"; the SREM had been applied,
+ * so that answer was untrue. It now expects "unconfirmed", and a network error
+ * on the SREM is read back the same way instead of a bare 500.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -224,12 +230,38 @@ async function main(): Promise<void> {
   }
   await setWeeklyOff("notifyharbor", true);
   const unread = await withReply((commands) => (onOff(commands, "SISMEMBER") ? ["1"] : null));
-  is("the stop link's state read back in an unknown shape: not said as started", [unread.status, unread.body.ok, unread.body.error], [503, false, "not_changed"]);
+  // Review of #3013 (7 November 2026): the SREM was applied, so "not changed" was untrue; it is unconfirmed.
+  is("the SREM applied, its result read back in an unknown shape: unconfirmed, never not changed or started", [unread.status, unread.body.ok, unread.body.error, unread.cache], [503, false, "unconfirmed", "no-store"]);
+  // A network error on the SREM is read back the same way, never a bare 500: it may or may not have reached Redis.
+  const lostOnTheWay = async (landed: boolean, readBack: boolean) => {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (onOff(commands, "SREM")) {
+        if (landed) await original(commands);
+        throw new Error("synthetic network error");
+      }
+      if (!readBack && onOff(commands, "SISMEMBER")) throw new Error("synthetic network error");
+      return original(commands);
+    }) as typeof redis.pipeline;
+    try {
+      return await post({ restart: true });
+    } finally {
+      redis.pipeline = original;
+    }
+  };
+  await setWeeklyOff("notifyharbor", true);
+  const never = await lostOnTheWay(false, true);
+  is("the SREM lost before Redis: read back still stopped, so not changed yet", [never.status, never.body.error, await weeklyOff("notifyharbor")], [503, "not_changed", true]);
+  const landed = await lostOnTheWay(true, true);
+  is("the SREM applied, its reply lost: read back not stopped, so started again", [landed.status, landed.body, await weeklyOff("notifyharbor")], [200, { ok: true, restarted: true }, false]);
+  await setWeeklyOff("notifyharbor", true);
+  const blind = await lostOnTheWay(true, false);
+  is("the SREM's reply lost and the read back failed: unconfirmed, never a bare 500", [blind.status, blind.body.error], [503, "unconfirmed"]);
   await setWeeklyOff("notifyharbor", true);
   const again = await post({ restart: true });
   is("control: a plain SREM is said as started, and is", [again.body, await weeklyOff("notifyharbor")], [{ ok: true, restarted: true }, false]);
   const panelSource = readFileSync("components/notify-prefs-panel.tsx", "utf8");
   is("the panel says not changed yet in its own words", panelSource.includes('case "not_changed":') && panelSource.includes("Not changed yet"), true);
+  is("and unconfirmed in its own words, without saying not changed", panelSource.includes('case "unconfirmed":') && panelSource.includes("We could not confirm these emails started again"), true);
 
   part("The studio page never hides the stop link when it could not be read");
   const pageSource = readFileSync("app/studio/notifications/page.tsx", "utf8");

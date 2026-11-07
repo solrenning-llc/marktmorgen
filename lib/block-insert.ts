@@ -155,8 +155,9 @@ export type StepBlock = { id: string; label: string; draft: unknown };
 /**
  * What the status region says after a step of Undo ("back") or Redo
  * ("forward") from the blocks `before` to the blocks `after` (WCAG 4.1.3):
- * a block back on the page or off it, with its place, a block moved, a
- * change inside a block, or the page style; `left` steps remain that way.
+ * a block back on the page or off it, with its place, a block moved (the one
+ * that went the farthest), a change inside a block, or the page style; `left`
+ * steps remain that way.
  */
 export function stepSaying(direction: "back" | "forward", before: readonly StepBlock[], after: readonly StepBlock[], styleChanged: boolean, left: number): string {
   const was = new Set(before.map((b) => b.id));
@@ -175,8 +176,18 @@ export function stepSaying(direction: "back" | "forward", before: readonly StepB
   } else if (added.length > 0) {
     what = "a change to the blocks on the page";
   } else {
-    // The same blocks: in another order, or one of them changed.
-    const moved = after.findIndex((b, i) => before[i].id !== b.id);
+    // The same blocks: in another order, or one of them changed. The block moved is the one that went the farthest:
+    // a move of more than one place (a drag, or Move pressed again within one step) pushes each block it passes by
+    // one place only. A tie, as two neighbours swapped, names the first of them on the page.
+    let moved = -1;
+    let farthest = 0;
+    after.forEach((b, i) => {
+      const by = Math.abs(before.findIndex((x) => x.id === b.id) - i);
+      if (by > farthest) {
+        farthest = by;
+        moved = i;
+      }
+    });
     const changed = after.findIndex((b, i) => before[i].draft !== b.draft);
     if (moved >= 0) what = `${after[moved].label} moved to position ${moved + 1} of ${after.length}`;
     else if (changed >= 0) what = `a change in ${after[changed].label}, block ${changed + 1}`;

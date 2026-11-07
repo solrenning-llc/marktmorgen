@@ -26,6 +26,7 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -83,9 +84,11 @@ async function save(job: AnnouncementJob): Promise<void> {
   await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", 60 * 86_400]]);
 }
 
+/** An announcement's send: null when it is not there; a reply in another shape throws UnknownReplyError (CX-123 rule 24). */
 export async function readJob(id: string): Promise<AnnouncementJob | null> {
   if (!JOB_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", jobKey(id)]]);
+  const raw = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1)?.[0];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("an announcement's send");
   return parse(raw);
 }
 
@@ -201,7 +204,14 @@ export async function advanceAnnouncement(
   const lock = claimValue();
   if ((await claimMark(lockKey(id), 90, lock)) !== "ours") return null;
   try {
-    let job = await readJob(id);
+    // Its record not read (Claude 5 on #2954): nothing is done this time and it stays in line, never taken out of it.
+    let job: AnnouncementJob | null;
+    try {
+      job = await readJob(id);
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    }
     if (!job || job.status === "sent" || job.status === "failed") {
       await redisPipeline([["SREM", QUEUE, id]]);
       return job;

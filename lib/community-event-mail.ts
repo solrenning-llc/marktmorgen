@@ -45,7 +45,7 @@
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
 import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
@@ -130,10 +130,57 @@ export async function cancelNoticeSending(community: string, event: string): Pro
   });
 }
 
+/** A send: null when it is not there; a reply in another shape throws UnknownReplyError (CX-123 rule 24). */
 export async function readEventJob(id: string): Promise<EventMailJob | null> {
   if (!JOB_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", jobKey(id)]]);
+  const raw = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1)?.[0];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("an event email's send");
   return parseJob(raw);
+}
+
+/**
+ * A send asked for whose once-only mark is there but whose send is not (yet): the reminder stays due and is asked
+ * for again later, never dropped as made (Codex P on #2954).
+ */
+export class SendNotMadeYetError extends Error {
+  constructor() {
+    super("an event email's once-only mark is there but its send is not, yet");
+    this.name = "SendNotMadeYetError";
+  }
+}
+
+/**
+ * How long a once-only mark with no send under it is taken to belong to a run still writing the send down. Writing
+ * it down is three Redis calls of at most five seconds each (lib/fetch-timeout.ts) after the mark, so a mark this
+ * old with no send belongs to no run still going: one that could not let it go, or whose writing failed.
+ */
+const ORPHAN_MS = 10 * 60_000;
+
+/**
+ * The once-only mark was taken: made, only when the send itself is there (put back in line while it is still being
+ * sent, in case the run that made it could not); a mark with no send under it is not "made". Young, it belongs to a
+ * run still writing the send down, and the send stays due; old (ORPHAN_MS), that very mark is let go (a compare and
+ * delete, so a newer mark is never touched) and claimed again with this run's own value, so two runs cannot both
+ * take it over. Every reply exact; anything else throws.
+ */
+async function madeOrTakeOver(id: string, mark: string): Promise<"made" | "ours"> {
+  const held = repliesFor(await redisPipeline([["GET", madeKey(id)], ["GET", jobKey(id)]]), 2);
+  if (!held || !held.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("an event email's once-only mark and its send");
+  const [was, raw] = held as (string | null)[];
+  if (raw !== null) {
+    if (parseJob(raw)?.status === "sending") {
+      const added = repliesFor(await redisPipeline([["SADD", JOBS, id]]), 1)?.[0];
+      if (countOf(added) === null) throw new UnknownReplyError("an event email's send put in line");
+    }
+    return "made";
+  }
+  const at = was === null ? Number.NaN : Number(was);
+  if (was === null || !(at < Date.now() - ORPHAN_MS)) throw new SendNotMadeYetError();
+  await releaseMark(madeKey(id), was);
+  const again = await claimMark(madeKey(id), KEEP_SECONDS, mark);
+  if (again === "ours") return "ours";
+  if (again === "unknown") await releaseMark(madeKey(id), mark);
+  throw new SendNotMadeYetError();
 }
 
 /** Whether a reminder is still worth sending: the day-before one gives way to the hour-before one. */
@@ -158,17 +205,22 @@ async function startJob(
   if (!community) return null;
   const seq = kind === "moved" ? `m${event.moves}` : kind === "cancelled" ? "x" : `${event.start}`;
   const id = createHash("sha256").update(`${community}|${event.id}|${kind}|${seq}`).digest("hex").slice(0, 24);
-  // Made once, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): taken is made already; unknown makes nothing
-  // and lets go of the mark only while it holds our own value, so asking again (or the next run) makes it.
+  // Who is coming first, read exactly (it throws on a page it cannot read), so no mark is taken for a send that
+  // cannot be written down whole (Claude 5 on #2954).
+  const readers = (await rsvpList(community, event.id)).map((r) => r.key);
+  if (!readers.length) return null;
+  // Made once, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): taken is made only when the send is there
+  // (madeOrTakeOver); unknown makes nothing and lets go of the mark only while it holds our own value.
   const mark = claimValue();
-  const claimed = await claimMark(madeKey(id), KEEP_SECONDS, mark);
-  if (claimed === "taken") return null;
+  let claimed = await claimMark(madeKey(id), KEEP_SECONDS, mark);
+  if (claimed === "taken") {
+    if ((await madeOrTakeOver(id, mark)) === "made") return null;
+    claimed = "ours";
+  }
   if (claimed !== "ours") {
     await releaseMark(madeKey(id), mark);
     throw new UnknownReplyError("an event email's once-only mark");
   }
-  const readers = (await rsvpList(community, event.id)).map((r) => r.key);
-  if (!readers.length) return null;
   const job: EventMailJob = {
     id,
     community,
@@ -188,9 +240,32 @@ async function startJob(
   const commands: (string | number)[][] = [["DEL", toKey(id)]];
   for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(id), ...readers.slice(i, i + 500)]);
   commands.push(["EXPIRE", toKey(id), KEEP_SECONDS]);
-  await redisPipeline(commands);
-  await save(job);
-  await redisPipeline([["SADD", JOBS, id]]);
+  // Everything after the mark is ours, read exactly (Claude 5 on #2954). Before the send is written, a failure lets
+  // the mark go, so the next run makes it; once the send may be written, the mark goes only when the send is read
+  // back as not there (letting it go otherwise could make it twice), and the next run finds the send and puts it in
+  // line, or takes the mark over when no send is there.
+  try {
+    const listed = repliesFor(await redisPipeline(commands), commands.length);
+    if (!listed || !listed.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("an event email's list of people");
+  } catch (error) {
+    await releaseMark(madeKey(id), mark);
+    throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's list of people");
+  }
+  try {
+    const saved = repliesFor(await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS]]), 1)?.[0];
+    if (saved !== "OK") throw new UnknownReplyError("an event email's send");
+    const added = repliesFor(await redisPipeline([["SADD", JOBS, id]]), 1)?.[0];
+    if (countOf(added) === null) throw new UnknownReplyError("an event email's send put in line");
+  } catch (error) {
+    // Not known whether the send was written: read back. Not there, the mark is let go, so the next run makes it;
+    // there, or not known, the mark stays and the next run finds the send and puts it in line (madeOrTakeOver).
+    const back = await redisPipeline([["GET", jobKey(id)]]).then(
+      (replies) => repliesFor(replies, 1),
+      () => null,
+    );
+    if (back && back[0] === null) await releaseMark(madeKey(id), mark);
+    throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's send");
+  }
   return job;
 }
 
@@ -300,7 +375,14 @@ export async function advanceEventJob(
   const lock = claimValue();
   if ((await claimMark(lockKey(id), 90, lock)) !== "ours") return null;
   try {
-    let job = await readEventJob(id);
+    // Its record not read (Claude 5 on #2954): nothing is done this time and it stays in line, never taken out of it.
+    let job: EventMailJob | null;
+    try {
+      job = await readEventJob(id);
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    }
     if (!job || job.status !== "sending") {
       await redisPipeline([["SREM", JOBS, id]]);
       return job;
@@ -458,8 +540,13 @@ export async function runEventQueue(
       } else counts.dropped += 1;
     } catch (error) {
       console.error("a live event reminder failed", error);
-      // Not known whether its mark is ours: it stays due, and the next run makes it once.
-      if (error instanceof UnknownReplyError) continue;
+      // Not known whether it was made: it stays due, and a later run makes it once. Put behind the others due, so a
+      // few that keep failing never take the turn of the rest (Claude 5 on #2954, LIGHT 3); the order is all that
+      // write changes, so its answer is not needed.
+      if (error instanceof UnknownReplyError || error instanceof SendNotMadeYetError) {
+        await redisPipeline([["ZADD", EVENT_QUEUE, now, member]]).catch(() => {});
+        continue;
+      }
     }
     await redisPipeline([["ZREM", EVENT_QUEUE, member]]);
   }

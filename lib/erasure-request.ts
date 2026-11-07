@@ -48,6 +48,7 @@ import {
   ERASE_TOKEN,
   MAX_ERASE_STORES,
 } from "@/lib/erasure-rules";
+import { repliesFor as linkSetReplies } from "@/lib/redis-reply";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const linkKey = (token: string) => `nl:erase:link:${sha(`nimbus-erase-link:${token}`).slice(0, 40)}`;
@@ -181,7 +182,13 @@ function afterAnswer(task: () => Promise<void>): void {
 async function emailLink(stores: Store[], email: string, origin: string): Promise<EraseAnswer> {
   const token = randomBytes(32).toString("hex");
   const grant: Grant = { e: email, s: stores.map((s) => s.sid) };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]);
+  // A paid email only with a link Redis said it stored (rule 24): any other answer sends nothing, and the link, in
+  // case it landed with its answer lost, is deleted. The public answer was already "sent" for every address.
+  const saved = linkSetReplies(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", ERASE_LINK_SECONDS]]), 1);
+  if (saved?.[0] !== "OK") {
+    await redisPipeline([["DEL", linkKey(token)]]).catch(() => {});
+    return { status: "error" };
+  }
   const names = stores.map((s) => s.name).slice(0, 10);
   const more = stores.length - names.length;
   const text = [

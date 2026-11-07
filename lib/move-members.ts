@@ -296,7 +296,7 @@ export async function readMove(store: Store, productId: string, token: string): 
   }
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" | "checking" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" | "checking" | "unknown" };
 
 /** The open mark's value once a try's outcome is not known (a checkout may exist): later presses say so. */
 const OPEN_UNKNOWN = "unknown";
@@ -315,6 +315,8 @@ export async function openMove(
   if (!invite) return { ok: false, reason: "expired" };
   // Kept already, or its state cannot be read (KEPT_UNKNOWN): the link opens nothing more, at any price, so one
   // member never holds two memberships from it (Revisor 1 on #2685). The page says it was moved.
+  // Its state cannot be read: refused all the same, but never told as moved, which it may not be (Claude 4 on #2685, F1).
+  if (invite.kept === KEPT_UNKNOWN) return { ok: false, reason: "unknown" };
   if (invite.kept !== 0) return { ok: false, reason: "done" };
   const stored: Product | null = await readProduct(store, productId);
   // A price the creator has since taken off sale stays open to this member alone while the invitation is not yet

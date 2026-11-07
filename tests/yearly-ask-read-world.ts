@@ -36,6 +36,7 @@ export async function orderWrite(): Promise<unknown[]> {
 export const platformKey = () => "synthetic-only";
 export const isSenderConfigured = () => true;
 export async function sendEmail(): Promise<boolean> { fixture.mails++; return true; }
+export async function sendEmailOutcome(): Promise<"sent"> { fixture.mails++; return "sent"; }
 export async function storesAfter(cursor: string): Promise<{ stores: Store[]; next: string }> {
   fixture.scans.push(cursor);
   return { stores: [], next: "0" };

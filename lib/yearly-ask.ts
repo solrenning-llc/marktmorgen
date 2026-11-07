@@ -23,7 +23,7 @@ import { types } from "node:util";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { platformKey } from "@/lib/stripe-account";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { type Listing, type Store, storesAfter } from "@/lib/store";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { fromLine, render } from "@/lib/mail";
@@ -126,6 +126,8 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
     if (!claim || (claim[0] !== null && claim[0] !== "OK")) throw new UnknownReplyError("a yearly offer claim");
     const claimed = claim[0];
     if (claimed === null) continue;
+    let withAddress: Store;
+    let rendered: ReturnType<typeof render>;
     try {
       const token = await mintYearlyLink(store, row.customer, row.sub);
       const url = `${base}/manage/switch?token=${token}&sub=${encodeURIComponent(row.sub)}&to=${YEARLY_TARGET}&from=offer`;
@@ -138,9 +140,18 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
         url,
         language: store.language as LanguageCode,
       });
-      const withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.yearlyAsk.address } };
-      const rendered = render(withAddress, mail.subject, mail.body, unsub);
-      const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+      withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.yearlyAsk.address } };
+      rendered = render(withAddress, mail.subject, mail.body, unsub);
+    } catch (error) {
+      // Nothing was asked of the sender yet: the mark is let go, so the next run tries again.
+      await redisPipeline([["DEL", key]]).catch(() => {});
+      console.error("sending the yearly offer failed", store.handle, error);
+      continue;
+    }
+    // The email is taken from the store's figure inside sendEmailOutcome, before the request (unchanged).
+    let outcome: SendOutcome;
+    try {
+      outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
         from: fromLine(withAddress),
         to: row.email,
         subject: rendered.subject,
@@ -149,19 +160,26 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
         headers: rendered.headers,
         idempotencyKey: `nimbus-yearask:${statsId}:${row.sub}`,
       });
-      if (ok) {
-        sent += 1;
-        const count = countKey(statsId, monthOf(now));
-        await redisPipeline([
-          ["INCR", count],
-          ["EXPIRE", count, COUNT_SECONDS],
-        ]);
-      } else {
-        await redisPipeline([["DEL", key]]);
-      }
     } catch (error) {
-      await redisPipeline([["DEL", key]]).catch(() => {});
-      console.error("sending the yearly offer failed", store.handle, error);
+      // Thrown on the way: it may have gone (rule 30, as 283 [HG2]).
+      outcome = "uncertain";
+      console.error("sending the yearly offer failed; its mark is kept", store.handle, error);
+    }
+    if (outcome === "sent") {
+      sent += 1;
+      const count = countKey(statsId, monthOf(now));
+      // A count not written never lets the mark go: the email went.
+      await redisPipeline([
+        ["INCR", count],
+        ["EXPIRE", count, COUNT_SECONDS],
+      ]).catch((error) => console.error("counting a yearly offer failed", store.handle, error));
+    } else if (outcome === "refused") {
+      // Refused for certain: the mark is let go, so the next run tries again.
+      await redisPipeline([["DEL", key]]).catch((error) => console.error("letting a yearly offer's mark go failed", store.handle, error));
+    } else {
+      // Not known whether it went (a timeout, a server error, a network error): the mark and the link it may carry
+      // are kept, so the offer is never sent twice.
+      console.error("a yearly offer's answer is not known; its mark is kept, so it is not sent again", store.handle);
     }
   }
   return sent;

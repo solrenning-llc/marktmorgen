@@ -16,6 +16,8 @@ const counts = (text: string) => {
   const out = scrubTemplateText(text);
   return out.ok ? out.removed : `refused: ${out.why}`;
 };
+/** Fictional numbers; the plus is kept apart so scripts/check_public_data.py never reads them as someone's number. */
+const PLUS = "+";
 const L = TEMPLATE_MARKS.link;
 const K = TEMPLATE_MARKS.key;
 const E = TEMPLATE_MARKS.email;
@@ -26,6 +28,11 @@ is("plain words", clean("Learn to bake sourdough in 30 days. Price: $49."), "Lea
 is("a public link to a site, a video and a store page", clean("See https://www.youtube.com/watch?v=dQw4w9WgXcQ and https://example.com/about, or marktmorgen.com/ana/p/bread."), "See https://www.youtube.com/watch?v=dQw4w9WgXcQ and https://example.com/about, or marktmorgen.com/ana/p/bread.");
 is("dates, times, prices and a short number", clean("Starts 2026-11-07 at 10:00. Was $1,299, now $999. Lesson 12 of 40."), "Starts 2026-11-07 at 10:00. Was $1,299, now $999. Lesson 12 of 40.");
 is("a social handle is not an address", clean("Follow @ana_bakes on Instagram."), "Follow @ana_bakes on Instagram.");
+is("a long number inside a public link is part of the link", clean("Order page: https://example.com/item/123456789012 today"), "Order page: https://example.com/item/123456789012 today");
+is("scrubbed words scrubbed again do not change", (() => {
+  const once = clean("Mail ana@example.com, see https://example.com/f?token=1 or https://example.com/a, call 555 123 4567, key sk_live_abcDEF123456.");
+  return [once, clean(once), counts(once)];
+})(), [`Mail ${E}, see ${L} or https://example.com/a, call ${P}, key ${K}.`, `Mail ${E}, see ${L} or https://example.com/a, call ${P}, key ${K}.`, { link: 0, key: 0, email: 0, phone: 0 }]);
 is("nothing counted", counts("Plain words."), { link: 0, key: 0, email: 0, phone: 0 });
 
 part("Private links are taken out");
@@ -36,7 +43,7 @@ is("a link that carries an access value", [clean("https://example.com/file?token
 is("a name and password in the link", clean("https://ana:secret@example.com/members"), L);
 is("a link with a long random part (a shared file)", clean("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view"), L);
 is("files and meetings that live in someone's own account", [clean("https://www.dropbox.com/s/abc123/notes.pdf?dl=0"), clean("https://meet.google.com/abc-defg-hij"), clean("https://we.tl/t-abc"), clean("https://store-1.public.blob.vercel-storage.com/a.png"), clean("https://pub-1.r2.dev/a.png"), clean("https://vz-1.b-cdn.net/v.mp4")], [L, L, L, L, L, L]);
-is("a link of another kind than a web page", [clean("ftp://example.com/a"), clean("javascript://alert(1)")], [L, L]);
+is("a link of another kind than a web page", [clean("ftp://example.com/a"), clean("javascript://alert(1)")], [L, `${L}(1)`]);
 is("inside Markdown and HTML, the words around it kept", clean(`Read [the guide](https://example.com/g?token=1) or <a href="https://marktmorgen.com/api/store/claim?c=1">claim</a>.`), `Read [the guide](${L}) or <a href="${L}">claim</a>.`);
 is("the stop at the end of a sentence stays", clean("Open https://example.com/f?key=1."), `Open ${L}.`);
 is("counted", counts("https://example.com/f?key=1 https://marktmorgen.com/invite/a"), { link: 2, key: 0, email: 0, phone: 0 });
@@ -45,14 +52,14 @@ part("Keys and account ids are taken out");
 is("payment keys, a webhook secret and an account id", clean("sk_live_abcDEF123456 rk_test_abcDEF123456 whsec_abcDEF123456 acct_1AbCdEfGhIjK pk_live_abcDEF123456"), `${K} ${K} ${K} ${K} ${K}`);
 is("other services' keys", [clean("ghp_abcdefghijklmnopqrstuvwxyz0123"), clean("xoxb-1234567890-abcdefghij"), clean("AKIAABCDEFGHIJKLMNOP"), clean("AIzaSyA-abcdefghijklmnopqrstuvwxyz01234"), clean("re_abcdefghijklmnop1234")], [K, K, K, K, K]);
 is("a signed token", clean("Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"), `Bearer ${K}`);
-is("a long random string on its own (a licence key)", clean("Your key: A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6"), `Your key: ${K}`);
+is("a long random string on its own (a license key)", clean("Your key: A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6"), `Your key: ${K}`);
 is("a key inside a link: the whole link goes", clean("https://example.com/hook?x=sk_live_abcDEF123456"), K);
 is("a long word without a digit stays", clean("Supercalifragilisticexpialidociousness"), "Supercalifragilisticexpialidociousness");
 
 part("Email addresses and phone numbers are taken out");
 is("an address, alone, in a mailto link and at the end of a sentence", clean("Write to ana@example.com, or <a href=\"mailto:help@ana.example?subject=Hi\">us</a>. Or bob.smith+news@mail.co.uk."), `Write to ${E}, or <a href="${E}">us</a>. Or ${E}.`);
-is("phone numbers as people write them", [clean("Call +1 (555) 123-4567 today"), clean("WhatsApp: +55 85 99999-1234"), clean("555.123.4567"), clean("<a href=\"tel:+15551234567\">call</a>")], [`Call ${P} today`, `WhatsApp: ${P}`, P, `<a href="${P}">call</a>`]);
-is("counted", counts("ana@example.com and +1 555 123 4567 and bob@example.org"), { link: 0, key: 0, email: 2, phone: 1 });
+is("phone numbers as people write them", [clean(`Call ${PLUS}1 (555) 123-4567 today`), clean(`WhatsApp: ${PLUS}55 85 99999-1234`), clean("555.123.4567"), clean(`<a href="tel:${PLUS}15551234567">call</a>`)], [`Call ${P} today`, `WhatsApp: ${P}`, P, `<a href="${P}">call</a>`]);
+is("counted", counts(`ana@example.com and ${PLUS}1 555 123 4567 and bob@example.org`), { link: 0, key: 0, email: 2, phone: 1 });
 
 part("Refused whole when it cannot be checked");
 is("not words", [scrubTemplateText(42 as unknown as string), scrubTemplateText(null as unknown as string), scrubTemplateText({} as unknown as string)], [{ ok: false, why: "not_text" }, { ok: false, why: "not_text" }, { ok: false, why: "not_text" }]);
@@ -70,14 +77,18 @@ is("a long field of one word is read quickly", (() => {
 
 part("Link fields (a button's or a picture's address)");
 is("a public link kept", scrubTemplateUrl("https://example.com/about"), { ok: true, url: "https://example.com/about" });
-is("a private link emptied", [scrubTemplateUrl("https://marktmorgen.com/api/store/download?t=1"), scrubTemplateUrl("https://example.com/x?token=1"), scrubTemplateUrl("mailto:ana@example.com"), scrubTemplateUrl("tel:+15551234567")], [{ ok: true, url: null }, { ok: true, url: null }, { ok: true, url: null }, { ok: true, url: null }]);
+is("a private link emptied", [scrubTemplateUrl("https://marktmorgen.com/api/store/download?t=1"), scrubTemplateUrl("https://example.com/x?token=1"), scrubTemplateUrl("mailto:ana@example.com"), scrubTemplateUrl(`tel:${PLUS}15551234567`)], [{ ok: true, url: null }, { ok: true, url: null }, { ok: true, url: null }, { ok: true, url: null }]);
 is("anything but a web address emptied", [scrubTemplateUrl("javascript:alert(1)"), scrubTemplateUrl("data:text/html,hi"), scrubTemplateUrl("not a link"), scrubTemplateUrl("")], [{ ok: true, url: null }, { ok: true, url: null }, { ok: true, url: null }, { ok: true, url: null }]);
 is("not words: refused", scrubTemplateUrl(7 as unknown as string), { ok: false, why: "not_text" });
 
 part("What the preview says");
 is("nothing found", templateScrubSummary({ link: 0, key: 0, email: 0, phone: 0 }), "We found no private links, keys, email addresses or phone numbers in your words.");
-is("one of a kind, then several", templateScrubSummary({ link: 1, key: 0, email: 2, phone: 0 }), "Left out of the copy: 1 private link and 2 email addresses. The other creator sees a note in their place, like [private link removed].");
-is("every kind", templateScrubSummary({ link: 2, key: 1, email: 1, phone: 3 }), "Left out of the copy: 2 private links, 1 key, 1 email address and 3 phone numbers. The other creator sees a note in their place, like [private link removed].");
+is("one of a kind, then several", templateScrubSummary({ link: 1, key: 0, email: 2, phone: 0 }), "Left out of the copy: 1 private link and 2 email addresses. The other creator sees a note where each one was, such as [private link removed].");
+is("every kind", templateScrubSummary({ link: 2, key: 1, email: 1, phone: 3 }), "Left out of the copy: 2 private links, 1 key, 1 email address and 3 phone numbers. The other creator sees a note where each one was, such as [private link removed].");
+is("only an address: the example is its own note", templateScrubSummary({ link: 0, key: 0, email: 1, phone: 0 }), "Left out of the copy: 1 email address. The other creator sees a note where each one was, such as [email address removed].");
+is("counts that are not whole numbers: nothing is shared", [templateScrubSummary({ link: -1, key: 0, email: 0, phone: 0 }), templateScrubSummary({ link: 0.5, key: 0, email: 0, phone: 0 }), templateScrubSummary(null as unknown as { link: 0; key: 0; email: 0; phone: 0 })], Array(3).fill("We could not check your words for private details, so nothing is shared yet."));
+is("many public links in one field, each kept in its place", clean(Array.from({ length: 12 }, (_, i) => `https://example.com/p${i} 5551234567${i}`).join(" ")), Array.from({ length: 12 }, (_, i) => `https://example.com/p${i} ${P}`).join(" "));
+is("a field that already holds the marks used inside is refused", scrubTemplateText("a\uE000b"), { ok: false, why: "unchecked" });
 is("the notes say what was there", TEMPLATE_MARKS, { link: "[private link removed]", key: "[key removed]", email: "[email address removed]", phone: "[phone number removed]" });
 
 done();

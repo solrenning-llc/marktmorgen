@@ -209,8 +209,45 @@ async function main(): Promise<void> {
   watch();
   const lateEdit = await sched.editScheduled(shop, raced2Post.id, inputAt(7200, { title: "New words" }), t0);
   redis.pipeline = realPipeline;
-  is("an edit read before the job's hold is refused", lateEdit, { ok: false, reason: "busy" });
+  // Regra 23: was { reason: "busy" } ("It is being posted right now"); the edit now reads the record again
+  // after its compare-and-set is refused, finds it posted, and says so ("done"), with its room as the posted record.
+  is("an edit read before the job's hold is refused, and says it is already posted", lateEdit, { ok: false, reason: "done" });
   is("the words posted are the old ones, never a mix", (await feed(id, {})).posts.filter((p) => p.title === "Old words" || p.title === "New words").map((p) => p.title), ["Old words"]);
+  is("its room is the posted record's", slot(raced2Post.id), rules.recordBytes(sched.parseRecord(redis.run(["GET", keys.record(raced2Post.id)]))!));
+
+  // 3b. An edit read, then a cancel lands before the edit's compare-and-set: nothing comes back.
+  const canceledMid = await sched.schedulePost(shop, inputAt(3600), t0);
+  const canceledMidPost = canceledMid.ok ? canceledMid.post : null!;
+  hook = { when: readOf(canceledMidPost.id), then: async () => { await sched.cancelScheduled(shop, canceledMidPost.id, t0); } };
+  watch();
+  const editAfterCancel = await sched.editScheduled(shop, canceledMidPost.id, inputAt(7200, { title: "Too late" }), t0);
+  redis.pipeline = realPipeline;
+  is("an edit of one canceled meanwhile says it is gone, not that it is being posted", editAfterCancel, { ok: false, reason: "gone" });
+  is("its record stays gone", redis.run(["GET", keys.record(canceledMidPost.id)]), null);
+  is("and its room is not taken again for a post that is not there", slot(canceledMidPost.id), 0);
+
+  // 3c. Two edits at once: the second one's compare-and-set is refused, and the room is the record that stands.
+  const twice = await sched.schedulePost(shop, inputAt(3600, { title: "Short" }), t0);
+  const twicePost = twice.ok ? twice.post : null!;
+  hook = { when: readOf(twicePost.id), then: async () => { await sched.editScheduled(shop, twicePost.id, inputAt(5400, { title: "A much longer title", text: "Longer words. ".repeat(40) }), t0); } };
+  watch();
+  const editLost = await sched.editScheduled(shop, twicePost.id, inputAt(7200, { title: "Other" }), t0);
+  redis.pipeline = realPipeline;
+  const standing = sched.parseRecord(redis.run(["GET", keys.record(twicePost.id)]))!;
+  is("the first edit stands", standing.title, "A much longer title");
+  is("the edit that lost says it was changed meanwhile, not that it is being posted", editLost, { ok: false, reason: "changed" });
+  is("the room is the record that stands, never the old size", slot(twicePost.id), rules.recordBytes(standing));
+  is("which is not the old size", rules.recordBytes(standing) > rules.recordBytes(twicePost), true);
+
+  // 3d. A cancel read, then another cancel takes it first: the first says it is gone.
+  const cancelTwice = await sched.schedulePost(shop, inputAt(3600), t0);
+  const cancelTwicePost = cancelTwice.ok ? cancelTwice.post : null!;
+  hook = { when: readOf(cancelTwicePost.id), then: async () => { await sched.cancelScheduled(shop, cancelTwicePost.id, t0); } };
+  watch();
+  const secondCancel = await sched.cancelScheduled(shop, cancelTwicePost.id, t0);
+  redis.pipeline = realPipeline;
+  is("a cancel that finds it canceled meanwhile says it is gone, not that it is being posted", secondCancel, { ok: false, reason: "gone" });
+  is("and its room stays given back", slot(cancelTwicePost.id), 0);
 
   // 4. The claim fails on its way: nothing was held, so nothing is stuck.
   const broken = await sched.schedulePost(shop, inputAt(3600), t0);

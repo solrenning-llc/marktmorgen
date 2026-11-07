@@ -1,0 +1,285 @@
+✖ a drop read before a student's erasure gives the file's bytes back once (13.830099ms)
+✖ an erasure racing a drop the other way round gives the bytes back once (1.981423ms)
+✔ a drop alone gives back every file it removed (0.973302ms)
+✔ an erasure alone gives back the file it removed (0.664268ms)
+✖ applyTaskDrop, HDEL answers null: nothing given back, and said so (2.510062ms)
+✖ forgetTasksPerson, HDEL answers null: nothing given back, and said so (0.941412ms)
+✖ applyTaskDrop, HDEL answers text: nothing given back, and said so (1.334752ms)
+✖ forgetTasksPerson, HDEL answers text: nothing given back, and said so (0.883226ms)
+✖ applyTaskDrop, HDEL answers 2: nothing given back, and said so (1.175611ms)
+✖ forgetTasksPerson, HDEL answers 2: nothing given back, and said so (1.342162ms)
+✖ applyTaskDrop, HDEL answers -1: nothing given back, and said so (1.204655ms)
+✖ forgetTasksPerson, HDEL answers -1: nothing given back, and said so (1.436994ms)
+✖ applyTaskDrop, HDEL answers a list: nothing given back, and said so (1.531408ms)
+✖ forgetTasksPerson, HDEL answers a list: nothing given back, and said so (0.657462ms)
+✖ a hand-in replacing its file says the replaced bytes to give back only when it removed the file (4.131122ms)
+✖ a hand-in racing a drop of the same assignment: the replaced file's bytes are the drop's, given back once (2.608468ms)
+✖ the hand-in route gives back what handIn removed, never the replaced file's size as read (1.020342ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 2
+ℹ fail 15
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.533256
+
+✖ failing tests:
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46453:34
+✖ a drop read before a student's erasure gives the file's bytes back once (13.830099ms)
+  AssertionError [ERR_ASSERTION]: only lesson OTHER's 1000 bytes are still kept
+  
+  900 !== 1000
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46459:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 900,
+    expected: 1000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46462:34
+✖ an erasure racing a drop the other way round gives the bytes back once (1.981423ms)
+  AssertionError [ERR_ASSERTION]: only lesson OTHER's 1000 bytes are still kept
+  
+  900 !== 1000
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46466:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 900,
+    expected: 1000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46482:36
+✖ applyTaskDrop, HDEL answers null: nothing given back, and said so (2.510062ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46493:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46499:36
+✖ forgetTasksPerson, HDEL answers null: nothing given back, and said so (0.941412ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46509:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46482:36
+✖ applyTaskDrop, HDEL answers text: nothing given back, and said so (1.334752ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46493:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46499:36
+✖ forgetTasksPerson, HDEL answers text: nothing given back, and said so (0.883226ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46509:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46482:36
+✖ applyTaskDrop, HDEL answers 2: nothing given back, and said so (1.175611ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46493:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46499:36
+✖ forgetTasksPerson, HDEL answers 2: nothing given back, and said so (1.342162ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46509:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46482:36
+✖ applyTaskDrop, HDEL answers -1: nothing given back, and said so (1.204655ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46493:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46499:36
+✖ forgetTasksPerson, HDEL answers -1: nothing given back, and said so (1.436994ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46509:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46482:36
+✖ applyTaskDrop, HDEL answers a list: nothing given back, and said so (1.531408ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46493:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46499:36
+✖ forgetTasksPerson, HDEL answers a list: nothing given back, and said so (0.657462ms)
+  AssertionError [ERR_ASSERTION]: an unknown removal is never given back
+  
+  1000 !== 1100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46509:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 1100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46516:34
+✖ a hand-in replacing its file says the replaced bytes to give back only when it removed the file (4.131122ms)
+  AssertionError [ERR_ASSERTION]: its bytes are this hand-in's to give back
+  
+  undefined !== 100
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46522:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 100,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46524:34
+✖ a hand-in racing a drop of the same assignment: the replaced file's bytes are the drop's, given back once (2.608468ms)
+  AssertionError [ERR_ASSERTION]: the hand-in did not remove it, so it has nothing to give back
+  
+  undefined !== 0
+  
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46536:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../tmp/n3078-Ey7bCn/case.cjs:46538:34
+✖ the hand-in route gives back what handIn removed, never the replaced file's size as read (1.020342ms)
+  AssertionError [ERR_ASSERTION]: the replaced file's size as read is never given back by itself
+      at TestContext.<anonymous> (/tmp/n3078-Ey7bCn/case.cjs:46540:29)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+N3078_HTTP 0
+N3078_MEMORY_RUN 262

@@ -1,0 +1,27 @@
+✔ a drop read before a student's erasure gives the file's bytes back once (11.191095ms)
+✔ an erasure racing a drop the other way round gives the bytes back once (1.430372ms)
+✔ a drop alone gives back every file it removed (0.813995ms)
+✔ an erasure alone gives back the file it removed (0.397255ms)
+✔ applyTaskDrop, HDEL answers null: nothing given back, and said so (2.19997ms)
+✔ forgetTasksPerson, HDEL answers null: nothing given back, and said so (0.472245ms)
+✔ applyTaskDrop, HDEL answers text: nothing given back, and said so (1.851025ms)
+✔ forgetTasksPerson, HDEL answers text: nothing given back, and said so (0.351008ms)
+✔ applyTaskDrop, HDEL answers 2: nothing given back, and said so (0.935864ms)
+✔ forgetTasksPerson, HDEL answers 2: nothing given back, and said so (0.617322ms)
+✔ applyTaskDrop, HDEL answers -1: nothing given back, and said so (0.607037ms)
+✔ forgetTasksPerson, HDEL answers -1: nothing given back, and said so (0.272381ms)
+✔ applyTaskDrop, HDEL answers a list: nothing given back, and said so (0.321966ms)
+✔ forgetTasksPerson, HDEL answers a list: nothing given back, and said so (0.232337ms)
+✔ a hand-in replacing its file says the replaced bytes to give back only when it removed the file (0.943701ms)
+✔ a hand-in racing a drop of the same assignment: the replaced file's bytes are the drop's, given back once (0.879507ms)
+✔ the hand-in route gives back what handIn removed, never the replaced file's size as read (2.300791ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35.528685
+N3078_HTTP 0
+N3078_MEMORY_RUN 250

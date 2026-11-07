@@ -1,0 +1,17 @@
+✔ readTaskDrop, files: a Proxy of a list: unknown, never read as a list (6.082915ms)
+✔ readTaskDrop, files: an object, not a list: unknown, never read as a list (0.285728ms)
+✔ readTaskDrop, work list: a Proxy of a list: unknown, never read as a list (0.595641ms)
+✔ readTaskDrop, work list: a hole: unknown, never read as a list (0.254193ms)
+✔ readTaskDrop, work list: a member that is not text: unknown, never read as a list (0.435292ms)
+✔ readTaskDrop, healthy: every file and every piece of work read (1.411975ms)
+✔ readTaskDrop, confirmed absence: no files and no work is an empty drop (0.295936ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.132996
+N3078_HTTP 0
+N3078_MEMORY_RUN 32

@@ -1,7 +1,0 @@
-# HT7 — Creator showcase with permission before proof
-Home links to /proof/creator-showcase. Both use one reviewed permission registry.
-No actual creator permission records were found. APPROVED_CREATOR_SHOWCASE is empty, so both surfaces show only Harbor Kitchen, explicitly fictional demo, not customer proof. No portrait, testimonial or result is added.
-A future real listing must have name, description, a local store link, explicit public-showcase scope, granted/recorded dates and evidence reference. Missing, revoked, invalid/future or differently scoped permission fails closed to demo. Evidence reference stays out of public markup; the recorded permission date is shown.
-These are manually reviewed static records, not a new data collection flow or a right to reuse testimonials/portraits/results. Revocation requires removing the entry and deployment. No creator contact, message, account read, provider call, asset fetch or storage operation is introduced.
-The new shared component is added to the existing accessibility inventory. Existing route template, sitemap and SEO system are reused. Paid selling and all financial/consent gates remain unchanged.
-Unit checks cover demo-only actual registry and rejected/accepted synthetic permission shapes. Browser390/1280 checks home/page discovery, demo label/link/date, keyboard/touch, no fabricated result, axe/width and no API writes. Complete final-head CI and exact production proof required.

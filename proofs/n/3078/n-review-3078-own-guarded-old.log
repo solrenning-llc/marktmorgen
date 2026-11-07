@@ -1,0 +1,33 @@
+✔ control: healthy erasure leaves the other file's 1000 bytes counted (9.039913ms)
+✖ conditional unknown submission bytes never release more than the real removed file (3.679948ms)
+✔ control: unrelated file remains physically indexed (0.31452ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25.633856
+
+✖ failing tests:
+
+test at ../../../../tmp/n3078-LMalhj/case.cjs:46100:34
+✖ conditional unknown submission bytes never release more than the real removed file (3.679948ms)
+  AssertionError [ERR_ASSERTION]: 1000-byte unrelated file remains; its room cannot be credited away
+  
+  false !== true
+  
+      at TestContext.<anonymous> (/tmp/n3078-LMalhj/case.cjs:46115:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+N3078_HTTP 0
+N3078_SIZE_DIAGNOSTIC 0 1000
+N3078_MEMORY_RUN 28

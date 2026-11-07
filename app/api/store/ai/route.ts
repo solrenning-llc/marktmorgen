@@ -116,9 +116,10 @@ export async function POST(request: NextRequest) {
       readPageFacts(store, product),
       readDepth(store.statsId, product.id).catch(() => ({ visitors: 0, stopped: {} })),
     ]);
-    const missing = coachChecks({ page, productTitle: product.title, free: isFree(product), picture: Boolean(product.image), pictureAlt: product.image?.alt ?? "", facts })
+    const missing = coachChecks({ page, productTitle: product.title, free: isFree(product), picture: Boolean(product.image), pictureAlt: product.image?.alt ?? "", facts: facts.facts, factsUnread: facts.factsUnread })
       .filter((c) => !c.done)
-      .map((c) => c.label);
+      // A number that could not be read just now is said so, never taken for one the store does not have (rule 24).
+      .map((c) => (c.id === "facts" && facts.factsUnread.length ? `${c.label} (some of the store's numbers could not be read just now)` : c.label));
     const reach = reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);
     const drop = steepestDrop(page.blocks, reach);
     const stats = await readStats(store).catch(() => null);

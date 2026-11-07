@@ -34,62 +34,75 @@ inbox/queue hashes remain identical to the previously read snapshots.
 
 ## Exact LOCAL UI WIP diff against official dc431848
 
-```diff
-diff --git a/app/[handle]/blog/blog-unavailable.tsx b/app/[handle]/blog/blog-unavailable.tsx
-index 92cc012b1..1b406c1c0 100644
---- a/app/[handle]/blog/blog-unavailable.tsx
-+++ b/app/[handle]/blog/blog-unavailable.tsx
-@@ -12,7 +12,7 @@ export function BlogUnavailable({ language, handle, name }: { language: unknown;
-    <a href={base} className="link inline-flex min-h-11 items-center">{name}</a>
-    <h1 className="t-h2 mt-6">{wordsIn(code).blogOf(name)}</h1>
-    <p role="status" className="notice mt-6">{words.unavailable}</p>
--   <a href={`${base}/blog`} className="btn btn-secondary mt-6 min-h-11">{words.retry}</a>
-+   <a href={`${base}/blog`} className="btn btn-secondary mt-6 inline-flex min-h-11 items-center justify-center">{words.retry}</a>
-   </main>
-  </div>;
- }
-diff --git a/lib/buyer-words/blog-reading.ts b/lib/buyer-words/blog-reading.ts
-index 5ff6f8c12..5245b7908 100644
---- a/lib/buyer-words/blog-reading.ts
-+++ b/lib/buyer-words/blog-reading.ts
-@@ -1,13 +1,13 @@
- import { parseLanguage, type LanguageCode } from "@/lib/store-language";
- 
- const WORDS: Record<LanguageCode, { unavailable: string; retry: string }> = {
-- en: { unavailable: "The blog could not be read right now. Try again in a moment. This does not mean there are no posts.", retry: "Try again" },
-- es: { unavailable: "No se ha podido leer el blog en este momento. Inténtalo de nuevo en un momento. Esto no significa que no haya publicaciones.", retry: "Intentar de nuevo" },
-- fr: { unavailable: "Le blog n’a pas pu être lu pour le moment. Réessayez dans un instant. Cela ne signifie pas qu’il n’y a aucune publication.", retry: "Réessayer" },
-- de: { unavailable: "Der Blog konnte gerade nicht gelesen werden. Versuche es gleich noch einmal. Das bedeutet nicht, dass es keine Beiträge gibt.", retry: "Erneut versuchen" },
-- it: { unavailable: "Al momento non è stato possibile leggere il blog. Riprova tra poco. Questo non significa che non ci siano articoli.", retry: "Riprova" },
-- nl: { unavailable: "De blog kon nu niet worden gelezen. Probeer het zo opnieuw. Dit betekent niet dat er geen berichten zijn.", retry: "Opnieuw proberen" },
-- pt: { unavailable: "Não foi possível ler o blog agora. Tente novamente em instantes. Isso não significa que não há publicações.", retry: "Tentar novamente" },
-+ en: { unavailable: "The blog could not be read right now. Try again in a moment. This does not mean there are no posts.", retry: "Try loading the blog again" },
-+ es: { unavailable: "No se ha podido leer el blog en este momento. Inténtalo de nuevo en un momento. Esto no significa que no haya publicaciones.", retry: "Volver a cargar el blog" },
-+ fr: { unavailable: "Le blog n’a pas pu être lu pour le moment. Réessayez dans un instant. Cela ne signifie pas qu’il n’y a aucune publication.", retry: "Réessayer de charger le blog" },
-+ de: { unavailable: "Der Blog konnte gerade nicht gelesen werden. Versuche es gleich noch einmal. Das bedeutet nicht, dass es keine Beiträge gibt.", retry: "Blog erneut laden" },
-+ it: { unavailable: "Al momento non è stato possibile leggere il blog. Riprova tra poco. Questo non significa che non ci siano articoli.", retry: "Riprova a caricare il blog" },
-+ nl: { unavailable: "De blog kon nu niet worden gelezen. Probeer het zo opnieuw. Dit betekent niet dat er geen berichten zijn.", retry: "Probeer de blog opnieuw te laden" },
-+ pt: { unavailable: "Não foi possível ler o blog agora. Tente novamente em instantes. Isso não significa que não há publicações.", retry: "Voltar a carregar o blog" },
- };
- 
- export function blogReadingWords(language: unknown): { unavailable: string; retry: string } {
-diff --git a/tests/blog-availability.test.ts b/tests/blog-availability.test.ts
-index 68ddd178f..27deaa854 100644
---- a/tests/blog-availability.test.ts
-+++ b/tests/blog-availability.test.ts
-@@ -141,6 +141,12 @@ async function main(){
-   is("the acknowledged deletion removed the actual post",await readPost(store.statsId,deleteId),null);
-   is("unknown deletion total does not replace the cached count",(await storeForEmail(email))?.posts,cached);
-  }finally{redis.pipeline=pipeline;}
-+ part("The retry link identifies its destination without surrounding text");
-+ for(const code of Object.keys(LANGUAGES)){
-+  const html=renderToStaticMarkup(createElement(BlogUnavailable,{language:code,handle:store.handle,name:store.name}));
-+  const retry=/<a\b[^>]*href="[^"]*\/blog"[^>]*>([\s\S]*?)<\/a>/.exec(html);
-+  is("retry link names the blog in its own accessible text: "+code,/blog/i.test(retry?.[1]??""),true);
-+ }
-  done();
- }
- main().catch(error=>{console.error(error);process.exit(1);});
+Exact UTF-8 diff encoded as base64 to retain its context-line bytes without
+Markdown trailing whitespace; decode before applying.
+
+```text
+ZGlmZiAtLWdpdCBhL2FwcC9baGFuZGxlXS9ibG9nL2Jsb2ctdW5hdmFpbGFibGUudHN4IGIvYXBwL1toYW5kbGVdL2Jsb2cv
+YmxvZy11bmF2YWlsYWJsZS50c3gKaW5kZXggOTJjYzAxMmIxLi4xYjQwNmMxYzAgMTAwNjQ0Ci0tLSBhL2FwcC9baGFuZGxl
+XS9ibG9nL2Jsb2ctdW5hdmFpbGFibGUudHN4CisrKyBiL2FwcC9baGFuZGxlXS9ibG9nL2Jsb2ctdW5hdmFpbGFibGUudHN4
+CkBAIC0xMiw3ICsxMiw3IEBAIGV4cG9ydCBmdW5jdGlvbiBCbG9nVW5hdmFpbGFibGUoeyBsYW5ndWFnZSwgaGFuZGxlLCBu
+YW1lIH06IHsgbGFuZ3VhZ2U6IHVua25vd247CiAgICA8YSBocmVmPXtiYXNlfSBjbGFzc05hbWU9ImxpbmsgaW5saW5lLWZs
+ZXggbWluLWgtMTEgaXRlbXMtY2VudGVyIj57bmFtZX08L2E+CiAgICA8aDEgY2xhc3NOYW1lPSJ0LWgyIG10LTYiPnt3b3Jk
+c0luKGNvZGUpLmJsb2dPZihuYW1lKX08L2gxPgogICAgPHAgcm9sZT0ic3RhdHVzIiBjbGFzc05hbWU9Im5vdGljZSBtdC02
+Ij57d29yZHMudW5hdmFpbGFibGV9PC9wPgotICAgPGEgaHJlZj17YCR7YmFzZX0vYmxvZ2B9IGNsYXNzTmFtZT0iYnRuIGJ0
+bi1zZWNvbmRhcnkgbXQtNiBtaW4taC0xMSI+e3dvcmRzLnJldHJ5fTwvYT4KKyAgIDxhIGhyZWY9e2Ake2Jhc2V9L2Jsb2dg
+fSBjbGFzc05hbWU9ImJ0biBidG4tc2Vjb25kYXJ5IG10LTYgaW5saW5lLWZsZXggbWluLWgtMTEgaXRlbXMtY2VudGVyIGp1
+c3RpZnktY2VudGVyIj57d29yZHMucmV0cnl9PC9hPgogICA8L21haW4+CiAgPC9kaXY+OwogfQpkaWZmIC0tZ2l0IGEvbGli
+L2J1eWVyLXdvcmRzL2Jsb2ctcmVhZGluZy50cyBiL2xpYi9idXllci13b3Jkcy9ibG9nLXJlYWRpbmcudHMKaW5kZXggNWZm
+NmY4YzEyLi41MjQ1Yjc5MDggMTAwNjQ0Ci0tLSBhL2xpYi9idXllci13b3Jkcy9ibG9nLXJlYWRpbmcudHMKKysrIGIvbGli
+L2J1eWVyLXdvcmRzL2Jsb2ctcmVhZGluZy50cwpAQCAtMSwxMyArMSwxMyBAQAogaW1wb3J0IHsgcGFyc2VMYW5ndWFnZSwg
+dHlwZSBMYW5ndWFnZUNvZGUgfSBmcm9tICJAL2xpYi9zdG9yZS1sYW5ndWFnZSI7CiAKIGNvbnN0IFdPUkRTOiBSZWNvcmQ8
+TGFuZ3VhZ2VDb2RlLCB7IHVuYXZhaWxhYmxlOiBzdHJpbmc7IHJldHJ5OiBzdHJpbmcgfT4gPSB7Ci0gZW46IHsgdW5hdmFp
+bGFibGU6ICJUaGUgYmxvZyBjb3VsZCBub3QgYmUgcmVhZCByaWdodCBub3cuIFRyeSBhZ2FpbiBpbiBhIG1vbWVudC4gVGhp
+cyBkb2VzIG5vdCBtZWFuIHRoZXJlIGFyZSBubyBwb3N0cy4iLCByZXRyeTogIlRyeSBhZ2FpbiIgfSwKLSBlczogeyB1bmF2
+YWlsYWJsZTogIk5vIHNlIGhhIHBvZGlkbyBsZWVyIGVsIGJsb2cgZW4gZXN0ZSBtb21lbnRvLiBJbnTDqW50YWxvIGRlIG51
+ZXZvIGVuIHVuIG1vbWVudG8uIEVzdG8gbm8gc2lnbmlmaWNhIHF1ZSBubyBoYXlhIHB1YmxpY2FjaW9uZXMuIiwgcmV0cnk6
+ICJJbnRlbnRhciBkZSBudWV2byIgfSwKLSBmcjogeyB1bmF2YWlsYWJsZTogIkxlIGJsb2cgbuKAmWEgcGFzIHB1IMOqdHJl
+IGx1IHBvdXIgbGUgbW9tZW50LiBSw6llc3NheWV6IGRhbnMgdW4gaW5zdGFudC4gQ2VsYSBuZSBzaWduaWZpZSBwYXMgcXXi
+gJlpbCBu4oCZeSBhIGF1Y3VuZSBwdWJsaWNhdGlvbi4iLCByZXRyeTogIlLDqWVzc2F5ZXIiIH0sCi0gZGU6IHsgdW5hdmFp
+bGFibGU6ICJEZXIgQmxvZyBrb25udGUgZ2VyYWRlIG5pY2h0IGdlbGVzZW4gd2VyZGVuLiBWZXJzdWNoZSBlcyBnbGVpY2gg
+bm9jaCBlaW5tYWwuIERhcyBiZWRldXRldCBuaWNodCwgZGFzcyBlcyBrZWluZSBCZWl0csOkZ2UgZ2lidC4iLCByZXRyeTog
+IkVybmV1dCB2ZXJzdWNoZW4iIH0sCi0gaXQ6IHsgdW5hdmFpbGFibGU6ICJBbCBtb21lbnRvIG5vbiDDqCBzdGF0byBwb3Nz
+aWJpbGUgbGVnZ2VyZSBpbCBibG9nLiBSaXByb3ZhIHRyYSBwb2NvLiBRdWVzdG8gbm9uIHNpZ25pZmljYSBjaGUgbm9uIGNp
+IHNpYW5vIGFydGljb2xpLiIsIHJldHJ5OiAiUmlwcm92YSIgfSwKLSBubDogeyB1bmF2YWlsYWJsZTogIkRlIGJsb2cga29u
+IG51IG5pZXQgd29yZGVuIGdlbGV6ZW4uIFByb2JlZXIgaGV0IHpvIG9wbmlldXcuIERpdCBiZXRla2VudCBuaWV0IGRhdCBl
+ciBnZWVuIGJlcmljaHRlbiB6aWpuLiIsIHJldHJ5OiAiT3BuaWV1dyBwcm9iZXJlbiIgfSwKLSBwdDogeyB1bmF2YWlsYWJs
+ZTogIk7Do28gZm9pIHBvc3PDrXZlbCBsZXIgbyBibG9nIGFnb3JhLiBUZW50ZSBub3ZhbWVudGUgZW0gaW5zdGFudGVzLiBJ
+c3NvIG7Do28gc2lnbmlmaWNhIHF1ZSBuw6NvIGjDoSBwdWJsaWNhw6fDtWVzLiIsIHJldHJ5OiAiVGVudGFyIG5vdmFtZW50
+ZSIgfSwKKyBlbjogeyB1bmF2YWlsYWJsZTogIlRoZSBibG9nIGNvdWxkIG5vdCBiZSByZWFkIHJpZ2h0IG5vdy4gVHJ5IGFn
+YWluIGluIGEgbW9tZW50LiBUaGlzIGRvZXMgbm90IG1lYW4gdGhlcmUgYXJlIG5vIHBvc3RzLiIsIHJldHJ5OiAiVHJ5IGxv
+YWRpbmcgdGhlIGJsb2cgYWdhaW4iIH0sCisgZXM6IHsgdW5hdmFpbGFibGU6ICJObyBzZSBoYSBwb2RpZG8gbGVlciBlbCBi
+bG9nIGVuIGVzdGUgbW9tZW50by4gSW50w6ludGFsbyBkZSBudWV2byBlbiB1biBtb21lbnRvLiBFc3RvIG5vIHNpZ25pZmlj
+YSBxdWUgbm8gaGF5YSBwdWJsaWNhY2lvbmVzLiIsIHJldHJ5OiAiVm9sdmVyIGEgY2FyZ2FyIGVsIGJsb2ciIH0sCisgZnI6
+IHsgdW5hdmFpbGFibGU6ICJMZSBibG9nIG7igJlhIHBhcyBwdSDDqnRyZSBsdSBwb3VyIGxlIG1vbWVudC4gUsOpZXNzYXll
+eiBkYW5zIHVuIGluc3RhbnQuIENlbGEgbmUgc2lnbmlmaWUgcGFzIHF14oCZaWwgbuKAmXkgYSBhdWN1bmUgcHVibGljYXRp
+b24uIiwgcmV0cnk6ICJSw6llc3NheWVyIGRlIGNoYXJnZXIgbGUgYmxvZyIgfSwKKyBkZTogeyB1bmF2YWlsYWJsZTogIkRl
+ciBCbG9nIGtvbm50ZSBnZXJhZGUgbmljaHQgZ2VsZXNlbiB3ZXJkZW4uIFZlcnN1Y2hlIGVzIGdsZWljaCBub2NoIGVpbm1h
+bC4gRGFzIGJlZGV1dGV0IG5pY2h0LCBkYXNzIGVzIGtlaW5lIEJlaXRyw6RnZSBnaWJ0LiIsIHJldHJ5OiAiQmxvZyBlcm5l
+dXQgbGFkZW4iIH0sCisgaXQ6IHsgdW5hdmFpbGFibGU6ICJBbCBtb21lbnRvIG5vbiDDqCBzdGF0byBwb3NzaWJpbGUgbGVn
+Z2VyZSBpbCBibG9nLiBSaXByb3ZhIHRyYSBwb2NvLiBRdWVzdG8gbm9uIHNpZ25pZmljYSBjaGUgbm9uIGNpIHNpYW5vIGFy
+dGljb2xpLiIsIHJldHJ5OiAiUmlwcm92YSBhIGNhcmljYXJlIGlsIGJsb2ciIH0sCisgbmw6IHsgdW5hdmFpbGFibGU6ICJE
+ZSBibG9nIGtvbiBudSBuaWV0IHdvcmRlbiBnZWxlemVuLiBQcm9iZWVyIGhldCB6byBvcG5pZXV3LiBEaXQgYmV0ZWtlbnQg
+bmlldCBkYXQgZXIgZ2VlbiBiZXJpY2h0ZW4gemlqbi4iLCByZXRyeTogIlByb2JlZXIgZGUgYmxvZyBvcG5pZXV3IHRlIGxh
+ZGVuIiB9LAorIHB0OiB7IHVuYXZhaWxhYmxlOiAiTsOjbyBmb2kgcG9zc8OtdmVsIGxlciBvIGJsb2cgYWdvcmEuIFRlbnRl
+IG5vdmFtZW50ZSBlbSBpbnN0YW50ZXMuIElzc28gbsOjbyBzaWduaWZpY2EgcXVlIG7Do28gaMOhIHB1YmxpY2HDp8O1ZXMu
+IiwgcmV0cnk6ICJWb2x0YXIgYSBjYXJyZWdhciBvIGJsb2ciIH0sCiB9OwogCiBleHBvcnQgZnVuY3Rpb24gYmxvZ1JlYWRp
+bmdXb3JkcyhsYW5ndWFnZTogdW5rbm93bik6IHsgdW5hdmFpbGFibGU6IHN0cmluZzsgcmV0cnk6IHN0cmluZyB9IHsKZGlm
+ZiAtLWdpdCBhL3Rlc3RzL2Jsb2ctYXZhaWxhYmlsaXR5LnRlc3QudHMgYi90ZXN0cy9ibG9nLWF2YWlsYWJpbGl0eS50ZXN0
+LnRzCmluZGV4IDY4ZGRkMTc4Zi4uMjdkZWFhODU0IDEwMDY0NAotLS0gYS90ZXN0cy9ibG9nLWF2YWlsYWJpbGl0eS50ZXN0
+LnRzCisrKyBiL3Rlc3RzL2Jsb2ctYXZhaWxhYmlsaXR5LnRlc3QudHMKQEAgLTE0MSw2ICsxNDEsMTIgQEAgYXN5bmMgZnVu
+Y3Rpb24gbWFpbigpewogICBpcygidGhlIGFja25vd2xlZGdlZCBkZWxldGlvbiByZW1vdmVkIHRoZSBhY3R1YWwgcG9zdCIs
+YXdhaXQgcmVhZFBvc3Qoc3RvcmUuc3RhdHNJZCxkZWxldGVJZCksbnVsbCk7CiAgIGlzKCJ1bmtub3duIGRlbGV0aW9uIHRv
+dGFsIGRvZXMgbm90IHJlcGxhY2UgdGhlIGNhY2hlZCBjb3VudCIsKGF3YWl0IHN0b3JlRm9yRW1haWwoZW1haWwpKT8ucG9z
+dHMsY2FjaGVkKTsKICB9ZmluYWxseXtyZWRpcy5waXBlbGluZT1waXBlbGluZTt9CisgcGFydCgiVGhlIHJldHJ5IGxpbmsg
+aWRlbnRpZmllcyBpdHMgZGVzdGluYXRpb24gd2l0aG91dCBzdXJyb3VuZGluZyB0ZXh0Iik7CisgZm9yKGNvbnN0IGNvZGUg
+b2YgT2JqZWN0LmtleXMoTEFOR1VBR0VTKSl7CisgIGNvbnN0IGh0bWw9cmVuZGVyVG9TdGF0aWNNYXJrdXAoY3JlYXRlRWxl
+bWVudChCbG9nVW5hdmFpbGFibGUse2xhbmd1YWdlOmNvZGUsaGFuZGxlOnN0b3JlLmhhbmRsZSxuYW1lOnN0b3JlLm5hbWV9
+KSk7CisgIGNvbnN0IHJldHJ5PS88YVxiW14+XSpocmVmPSJbXiJdKlwvYmxvZyJbXj5dKj4oW1xzXFNdKj8pPFwvYT4vLmV4
+ZWMoaHRtbCk7CisgIGlzKCJyZXRyeSBsaW5rIG5hbWVzIHRoZSBibG9nIGluIGl0cyBvd24gYWNjZXNzaWJsZSB0ZXh0OiAi
+K2NvZGUsL2Jsb2cvaS50ZXN0KHJldHJ5Py5bMV0/PyIiKSx0cnVlKTsKKyB9CiAgZG9uZSgpOwogfQogbWFpbigpLmNhdGNo
+KGVycm9yPT57Y29uc29sZS5lcnJvcihlcnJvcik7cHJvY2Vzcy5leGl0KDEpO30pOwo=
 ```
 
 ## Remaining and next exact action

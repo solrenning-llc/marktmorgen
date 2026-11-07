@@ -23,7 +23,7 @@ import { AiPosts } from "@/components/ai-posts";
 import { PageCoach } from "@/components/page-coach";
 import { PageStylePicker } from "@/components/page-style-picker";
 import { BlockPicker } from "@/components/block-picker";
-import { addedSaying, chosenSaying, insertAt, insertionPlaces, offeredKinds, placeWords } from "@/lib/block-insert";
+import { addedSaying, chosenSaying, focusAfterRemoval, insertAt, insertionPlaces, movedSaying, offeredKinds, placeWords, removedSaying } from "@/lib/block-insert";
 import { browserFrames, focusWhenDrawn, groupEntry } from "@/lib/focus-when-drawn";
 import { SharePanel } from "@/components/share-panel";
 import { useLeaveGuard } from "@/components/leave-guard";
@@ -171,10 +171,40 @@ export const MESSAGES: Record<string, string> = {
   unknown: "That product is no longer in your store. Reload the page.",
   store_full: "Your store is full. Remove something before adding more.",
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  // This tab still holds the page being edited: logging in here would leave it (WCAG 2.2.5).
+  signed_out: "Your session ended. Your changes are still here, not saved yet: log in again in a new tab, then come back to this tab and press Save the page.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
+
+/** A Clear refused because the session ended: Clear is offered only with nothing unsaved, when Save the page is off, so it says to press its own Yes again. */
+export const SIGNED_OUT_CLEARING = "Your session ended, so the page was not cleared. Log in again in a new tab, then come back to this tab and press Yes, clear it again.";
+
+/** The words for a refusal from the server, for a save or, `clearing`, for Clear. */
+export function refusalWords(error: string | undefined, clearing: boolean): string {
+  if (error === "signed_out" && clearing) return SIGNED_OUT_CLEARING;
+  return MESSAGES[error ?? ""] ?? MESSAGES.server_error;
+}
+
+/**
+ * A refusal, said at once; a session that ended links to the log-in page in a new tab, so this tab keeps the page.
+ * Its words already say so to everyone, so it carries no <NewTab />, which would say it a second time.
+ */
+export function ErrorNotice({ error }: { error: string }) {
+  return (
+    <p className="notice notice-error mt-4" role="alert">
+      {error}
+      {error === MESSAGES.signed_out || error === SIGNED_OUT_CLEARING ? (
+        <>
+          {" "}
+          <a href="/signin" target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-1.5 font-semibold underline underline-offset-4">
+            Log in again in a new tab
+          </a>
+        </>
+      ) : null}
+    </p>
+  );
+}
 
 /** A moment in seconds as the date-and-time field holds it, in the creator's own time zone. */
 function toLocalField(seconds: number): string {
@@ -255,6 +285,7 @@ export function PageEditor({
   folder,
   lang = "en",
   facts = {},
+  factsUnread = [],
   traffic = null,
   outline = [],
   asked = [],
@@ -288,6 +319,8 @@ export function PageEditor({
   lang?: LanguageCode;
   /** The numbers the store has counted for this product (lib/page-facts.ts). */
   facts?: PageFacts;
+  /** The numbers whose read did not come back (lib/page-facts-read.ts): said as not read, never as not shown. */
+  factsUnread?: readonly FactKey[];
   /** Its page's last 30 days: times it was opened, checkouts started. */
   traffic?: { views: number; checkouts: number } | null;
   /** A course's modules and lessons, by title, to fill "What's inside" from (lib/course-outline-items.ts). */
@@ -499,7 +532,13 @@ export function PageEditor({
   const [chosenKind, setChosenKind] = useState<BlockKind | null>(null);
   const [draggingKind, setDraggingKind] = useState<BlockKind | null>(null);
   const [overPlace, setOverPlace] = useState<number | null>(null);
-  const [said, setSaid] = useState("");
+  // The same words said twice are said again, a space apart, so the live region always speaks (as RowEditor's).
+  const [said, setSaidNow] = useState("");
+  const again = useRef(false);
+  const setSaid = (text: string) => {
+    again.current = !again.current;
+    setSaidNow(text ? `${text}${again.current ? "\u00a0" : ""}` : "");
+  };
   const focusNew = useRef<string | null>(null);
   // Places held in a row for a picture still being sent there, by the row's id (lib/row-edit-rules.ts, RowHeld):
   // kept here, not in the row's editor, so closing and reopening the row while it is sent never frees them.
@@ -722,14 +761,18 @@ export function PageEditor({
   }
 
   function move(index: number, by: -1 | 1) {
+    const to = index + by;
+    const moving = drafts[index];
+    if (!moving || to < 0 || to >= drafts.length || moving.block.kind === "hero" || drafts[to].block.kind === "hero") return;
     setDrafts((all) => {
-      const to = index + by;
       if (to < 0 || to >= all.length) return all;
       if (all[index].block.kind === "hero" || all[to].block.kind === "hero") return all;
       const copy = [...all];
       [copy[index], copy[to]] = [copy[to], copy[index]];
       return copy;
     });
+    // The focus stays on the button pressed, which moves with its block; the place it reached is said (WCAG 4.1.3).
+    setSaid(movedSaying(kindLabel(moving.block.kind), to, drafts.length));
   }
 
   /** Dropping one block on another puts it in that place; the hero stays on top. */
@@ -789,8 +832,25 @@ export function PageEditor({
     });
   }
 
+  /**
+   * A block taken off the page, one step of Undo. Its row goes with the focus in it, so the focus moves to the
+   * block now in its place, or the one before it, or to the place to add one when none is left (WCAG 2.4.3),
+   * and what happened is said, with how to bring it back (WCAG 3.3.6, 4.1.3).
+   */
   function remove(index: number) {
+    const gone = drafts[index];
+    if (!gone) return;
+    const left = drafts.filter((_, i) => i !== index);
+    const next = focusAfterRemoval(index, left.length);
+    const nextId = next === null ? null : left[next].block.id;
     setDrafts((all) => all.filter((_, i) => i !== index));
+    setSaid(removedSaying(kindLabel(gone.block.kind), index));
+    stopFocusNew.current?.();
+    stopFocusNew.current = focusWhenDrawn(() => {
+      if (nextId !== null) return document.querySelector<HTMLElement>(`button[aria-controls="panel-${CSS.escape(nextId)}"]`);
+      // The row is gone once the list is drawn again; until then the place to add a block may still be the old one.
+      return document.getElementById(`row-${CSS.escape(gone.block.id)}`) ? null : document.querySelector<HTMLElement>("[data-place]");
+    }, browserFrames());
   }
 
   /**
@@ -1039,12 +1099,18 @@ export function PageEditor({
         if (versions !== null) void loadVersions();
         return;
       }
-      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : refusalWords(data.error, page === null));
     } catch {
       setError(MESSAGES.server_error);
     } finally {
       setBusy(false);
     }
+  }
+
+  /** Save, from a button that keeps the focus while it saves and after (WCAG 2.4.3): a press while it cannot save does nothing. */
+  function saveNow() {
+    if (busy || !dirty) return;
+    void send(pageToSend(), "Page saved.");
   }
 
   const ctx: BlockContext = {
@@ -1863,7 +1929,7 @@ export function PageEditor({
                       <span>
                         <span className="block font-semibold text-ink">
                           {fact.label}
-                          <span className="ml-2 font-normal text-ink-soft">{now ? `now: ${now.value} ${now.label}` : "not shown yet"}</span>
+                          <span className="ml-2 font-normal text-ink-soft">{now ? `now: ${now.value} ${now.label}` : factsUnread.includes(fact.key) ? "could not be read just now" : "not shown yet"}</span>
                         </span>
                         <span className="block text-xs text-ink-soft">{fact.hint}</span>
                       </span>
@@ -1990,7 +2056,8 @@ export function PageEditor({
       }
       case "facts": {
         const live = block.show.filter((key) => facts[key]).length;
-        return `${block.heading ? `${block.heading} · ` : ""}${live} ${live === 1 ? "number" : "numbers"} shown now`;
+        const unread = block.show.filter((key) => !facts[key] && factsUnread.includes(key)).length;
+        return `${block.heading ? `${block.heading} · ` : ""}${live} ${live === 1 ? "number" : "numbers"} shown now${unread ? `, ${unread} could not be read just now` : ""}`;
       }
     }
   };
@@ -2025,9 +2092,10 @@ export function PageEditor({
               type="button"
               aria-pressed={view === v}
               onClick={() => setView(v)}
-              className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold transition-colors ${view === v ? "bg-white text-ink shadow-sm ring-1 ring-line" : "text-ink-soft hover:text-ink"}`}
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-colors ${view === v ? "bg-white text-ink shadow-sm ring-1 ring-line" : "text-ink-soft hover:text-ink"}`}
             >
               {v === "build" ? "Build" : "Preview"}
+              {view === v ? <Icon name="check" size={16} /> : null}
             </button>
           ))}
         </div>
@@ -2102,7 +2170,10 @@ export function PageEditor({
         // On a wide screen the page is drawn beside the blocks as they are edited, in one column it shares with
         // the side menu of blocks to add, switched at its top (375 [TB1]; two columns of their own left the
         // blocks 182 pixels at 1280, lib/side-panel.ts); on a narrow screen the gallery opens where a place is pressed.
-        <div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_25.5rem] items-start gap-5" : ""}>
+        // The two columns come from the style sheet at the same width the script reads (min-width: 1280px), so the
+        // first paint already has the narrow column of blocks; drawn by the script alone, the column went from 856
+        // to 426 pixels once it ran, and what was under it moved (a layout shift of 0.0895 on a slow network).
+        <div className="min-[1280px]:grid min-[1280px]:grid-cols-[minmax(0,1fr)_25.5rem] min-[1280px]:items-start min-[1280px]:gap-5">
         <div className="min-w-0">
           {drafts.length === 0 ? (
             <div className="mt-6 rounded-2xl bg-paper p-5 ring-1 ring-line sm:p-6">
@@ -2186,6 +2257,7 @@ export function PageEditor({
               picture={Boolean(product.picture)}
               pictureAlt={product.picture?.alt ?? ""}
               facts={facts}
+              factsUnread={factsUnread}
               // The version being edited: what the coach adds goes into it. The other version, never this one twice,
               // is the second one, whose pictures are counted too (independent review, 31/10/2026).
               page={{ ...pageToSend(), blocks: drafts.map((d) => d.block), variant: other ? { id: "", blocks: other.map((d) => d.block) } : null }}
@@ -2357,7 +2429,7 @@ export function PageEditor({
                   }}
                 >
                   <div className={`rounded-2xl border bg-white transition-shadow ${over === index && dragged !== null && dragged !== index && !locked ? "border-violet-brand ring-2 ring-violet-brand/30" : "border-line"} ${dragged === index ? "opacity-60" : ""}`}>
-                  <div className="flex items-center gap-2 p-2 pl-3 sm:gap-3">
+                  <div className="flex flex-wrap items-center gap-2 p-2 pl-3 sm:gap-3">
                     {/* The handle: dragged with a mouse to put the block somewhere else. The arrows beside it do the same from a keyboard or a phone. */}
                     <span
                       className={`grid h-9 w-9 shrink-0 place-items-center rounded-full bg-lilac text-violet-deep ${locked ? "" : "cursor-grab active:cursor-grabbing"}`}
@@ -2383,7 +2455,7 @@ export function PageEditor({
                       aria-expanded={isOpen}
                       aria-controls={`panel-${block.id}`}
                       onClick={() => setOpen(isOpen ? null : block.id)}
-                      className="flex min-h-[44px] min-w-0 flex-1 flex-col items-start justify-center text-left"
+                      className="flex min-h-[44px] min-w-[9rem] flex-1 flex-col items-start justify-center text-left"
                     >
                       <span className="text-sm font-semibold text-ink">{`${index + 1}. ${kindLabel(block.kind)}`}</span>
                       <span className="w-full truncate text-xs text-ink-soft">
@@ -2395,12 +2467,12 @@ export function PageEditor({
                           : ""}
                       </span>
                     </button>
-                    <div className="flex shrink-0 items-center">
+                    <div className="ml-auto flex shrink-0 items-center">
                       <button
                         type="button"
                         onClick={() => move(index, -1)}
-                        disabled={locked || index === 0 || (index === 1 && hasHero)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                        aria-disabled={locked || index === 0 || (index === 1 && hasHero) || undefined}
+                        className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                         aria-label={`Move block ${index + 1} up`}
                       >
                         <Icon name="chevron-down" size={18} className="rotate-180" />
@@ -2408,8 +2480,8 @@ export function PageEditor({
                       <button
                         type="button"
                         onClick={() => move(index, 1)}
-                        disabled={locked || index === drafts.length - 1}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                        aria-disabled={locked || index === drafts.length - 1 || undefined}
+                        className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                         aria-label={`Move block ${index + 1} down`}
                       >
                         <Icon name="chevron-down" size={18} />
@@ -2418,8 +2490,8 @@ export function PageEditor({
                         <button
                           type="button"
                           onClick={() => duplicate(index)}
-                          disabled={drafts.length >= MAX_BLOCKS}
-                          className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink disabled:opacity-30"
+                          aria-disabled={drafts.length >= MAX_BLOCKS || undefined}
+                          className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-paper hover:text-ink"
                           aria-label={`Duplicate block ${index + 1}, ${kindLabel(block.kind)}`}
                         >
                           <Icon name="copy" size={17} />
@@ -2428,7 +2500,7 @@ export function PageEditor({
                       <button
                         type="button"
                         onClick={() => remove(index)}
-                        className="inline-flex h-10 w-10 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-danger-soft hover:text-danger"
                         aria-label={`Remove block ${index + 1}, ${kindLabel(block.kind)}`}
                       >
                         <Icon name="trash" size={17} />
@@ -2462,9 +2534,10 @@ export function PageEditor({
                                       }),
                                     )
                                   }
-                                  className={`inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold ring-1 ${on ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`}
+                                  className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold ring-1 ${on ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`}
                                 >
                                   {option.label}
+                                  {on ? <Icon name="check" size={16} /> : null}
                                 </button>
                               );
                             })}
@@ -2515,7 +2588,7 @@ export function PageEditor({
           </div>
 
           {/* On a wide screen the saved sections lead the side menu instead. */}
-          {sideBySide ? null : savedSections}
+          {sideBySide ? null : <div className="min-[1280px]:hidden">{savedSections}</div>}
 
           <div className="mt-6 rounded-2xl bg-paper p-4 ring-1 ring-line sm:p-5">
             <p className="field-label">Page style</p>
@@ -2548,7 +2621,7 @@ export function PageEditor({
               if (event.currentTarget.open) void loadVersions();
             }}
           >
-            <summary className="cursor-pointer text-sm font-semibold text-ink">
+            <summary className="-my-3 cursor-pointer py-3 text-sm font-semibold text-ink">
               <span className="inline-flex items-center gap-2">
                 <Icon name="history" size={17} />
                 Earlier versions
@@ -2585,7 +2658,7 @@ export function PageEditor({
           </details>
 
           <details className="mt-6 rounded-2xl bg-paper p-4 ring-1 ring-line sm:p-5">
-            <summary className="cursor-pointer text-sm font-semibold text-ink">Search and sharing</summary>
+            <summary className="-my-3 cursor-pointer py-3 text-sm font-semibold text-ink">Search and sharing</summary>
             <div className="mt-4 space-y-4">
               {field(
                 "seo-title",
@@ -2672,11 +2745,7 @@ export function PageEditor({
         </div>
       )}
 
-      {error ? (
-        <p className="notice notice-error mt-4" role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error ? <ErrorNotice error={error} /> : null}
 
       {drafts.length > 0 ? (
         <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl bg-paper p-4 ring-1 ring-line">
@@ -2719,7 +2788,7 @@ export function PageEditor({
       ) : null}
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => send(pageToSend(), "Page saved.")} aria-busy={busy} disabled={busy || !dirty} className="btn btn-primary">
+        <button type="button" onClick={saveNow} aria-busy={busy} aria-disabled={busy || !dirty || undefined} className="btn btn-primary">
           {busy ? "Saving…" : "Save the page"}
         </button>
         {dirty ? (
@@ -3389,7 +3458,7 @@ function QuotesEditor({ base, items, onChange }: { base: string; items: Quote[];
               <button
                 type="button"
                 onClick={() => onChange(items.filter((_, j) => j !== i))}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                 aria-label={`Remove what was said elsewhere ${i + 1}`}
               >
                 <Icon name="close" size={15} />
@@ -3482,7 +3551,7 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
             type="button"
             aria-pressed={value === CELL_YES}
             onClick={() => set(i, { [side]: value === CELL_YES ? "" : CELL_YES })}
-            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ring-1 ring-line ${value === CELL_YES ? "bg-mint-soft text-mint-deep" : "text-ink-soft hover:bg-paper"}`}
+            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full ring-1 ring-line ${value === CELL_YES ? "bg-mint-soft text-mint-deep" : "text-ink-soft hover:bg-paper"}`}
             aria-label={`A check mark in ${label.toLowerCase()}`}
           >
             <Icon name="check" size={16} />
@@ -3491,7 +3560,7 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
             type="button"
             aria-pressed={value === CELL_NO}
             onClick={() => set(i, { [side]: value === CELL_NO ? "" : CELL_NO })}
-            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ring-1 ring-line ${value === CELL_NO ? "bg-danger-soft text-danger" : "text-ink-soft hover:bg-paper"}`}
+            className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full ring-1 ring-line ${value === CELL_NO ? "bg-danger-soft text-danger" : "text-ink-soft hover:bg-paper"}`}
             aria-label={`A cross in ${label.toLowerCase()}`}
           >
             <Icon name="close" size={16} />
@@ -3509,7 +3578,7 @@ function CompareEditor({ base, rows, onChange }: { base: string; rows: CompareRo
             <button
               type="button"
               onClick={() => onChange(rows.filter((_, j) => j !== i))}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
               aria-label={`Remove row ${i + 1}`}
             >
               <Icon name="close" size={15} />
@@ -3570,7 +3639,7 @@ function ListEditor({
           <button
             type="button"
             onClick={() => onChange(items.filter((_, j) => j !== i))}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
             aria-label={`Remove ${label.toLowerCase()} ${i + 1}`}
           >
             <Icon name="close" size={16} />
@@ -3620,7 +3689,7 @@ function PairEditor({
             <button
               type="button"
               onClick={() => onChange(items.filter((_, j) => j !== i))}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
               aria-label={`Remove ${first.label.toLowerCase()} ${i + 1}`}
             >
               <Icon name="close" size={16} />
@@ -3957,13 +4026,13 @@ function PicturesEditor({
           </div>
           {single ? null : (
           <div className="flex shrink-0 flex-col items-center">
-            <button type="button" onClick={() => swap(i, -1)} disabled={i === 0} className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink disabled:opacity-30" aria-label={`Move picture ${i + 1} earlier`}>
+            <button type="button" onClick={() => swap(i, -1)} aria-disabled={i === 0 || undefined} className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink" aria-label={`Move picture ${i + 1} earlier`}>
               <Icon name="chevron-down" size={16} className="rotate-180" />
             </button>
-            <button type="button" onClick={() => swap(i, 1)} disabled={i === items.length - 1} className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink disabled:opacity-30" aria-label={`Move picture ${i + 1} later`}>
+            <button type="button" onClick={() => swap(i, 1)} aria-disabled={i === items.length - 1 || undefined} className="icon-btn inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-white hover:text-ink" aria-label={`Move picture ${i + 1} later`}>
               <Icon name="chevron-down" size={16} />
             </button>
-            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove picture ${i + 1}`}>
+            <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className="inline-flex h-11 w-11 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger" aria-label={`Remove picture ${i + 1}`}>
               <Icon name="close" size={16} />
             </button>
           </div>

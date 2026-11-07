@@ -1,0 +1,220 @@
+
+===== red =====
+{"file":"eu-dsa-statement.test.ts","old":true,"exit":1}
+
+The Terms sections the email cites exist
+  ok    each section title is in app/terms/page.tsx
+  ok    the takedown is decided by a person pressing a button
+  ok    copyright: the email has no HTML part to check apart from its text
+
+Art. 17(3), a copyright notice
+  ok    (a) what was restricted
+  FAIL  (a) territorial scope: every country
+        expected true
+        got      false
+  FAIL  (a) duration of a product: until it is published again, and what that risks
+        expected true
+        got      false
+  ok    (a) no promise that only we can change it
+  ok    (b) facts: the notice and the address it named
+  FAIL  (b) that it came from a notice, under which rule
+        expected true
+        got      false
+  ok    (b) the sender of a notice of illegal content is not named
+  FAIL  (c) no automated means
+        expected true
+        got      false
+  FAIL  (d) the legal ground, with why
+        expected true
+        got      false
+  FAIL  (e) the contractual ground: Terms sections 3 and 4, linked
+        expected [true,true,true]
+        got      [false,false,false]
+  ok    (f) how to answer us
+  FAIL  (f) judicial redress
+        expected true
+        got      false
+  ok    (f) no internal complaint system or out-of-court body promised
+  ok    other: the email has no HTML part to check apart from its text
+
+Art. 17(3), a other notice
+  ok    (a) what was restricted
+  FAIL  (a) territorial scope: every country
+        expected true
+        got      false
+  FAIL  (a) duration of a product: until it is published again, and what that risks
+        expected true
+        got      false
+  ok    (a) no promise that only we can change it
+  ok    (b) facts: the notice and the address it named
+  FAIL  (b) that it came from a notice, under which rule
+        expected true
+        got      false
+  ok    (b) the sender of a notice of illegal content is not named
+  FAIL  (c) no automated means
+        expected true
+        got      false
+  FAIL  (d) the legal ground, with why
+        expected true
+        got      false
+  FAIL  (e) the contractual ground: Terms sections 3 and 4, linked
+        expected [true,true,true]
+        got      [false,false,false]
+  ok    (f) how to answer us
+  FAIL  (f) judicial redress
+        expected true
+        got      false
+  ok    (f) no internal complaint system or out-of-court body promised
+
+Art. 17(3)(a), the duration said for each kind of action (Claude 5 on #2928)
+  ok    other: the email has no HTML part to check apart from its text
+  FAIL  link: the duration says what the code does
+        expected true
+        got      false
+  ok    link: no other kind's duration
+  ok    other: the email has no HTML part to check apart from its text
+  FAIL  kit: the duration says what the code does
+        expected true
+        got      false
+  ok    kit: no other kind's duration
+  ok    other: the email has no HTML part to check apart from its text
+  FAIL  store: the duration says what the code does
+        expected true
+        got      false
+  ok    store: no other kind's duration
+
+The anchors the email links to are the ones the Terms page draws (Claude 5's LOW 3 on #2928)
+  ok    "3. Selling through a Marktmorgen store" has no id of its own, so its anchor is the one computed from its title
+  ok    "3. Selling through a Marktmorgen store": the test's anchor is the page's own sectionId
+  ok    "4. Acceptable use" has no id of its own, so its anchor is the one computed from its title
+  ok    "4. Acceptable use": the test's anchor is the page's own sectionId
+  ok    "16. Governing law" has no id of its own, so its anchor is the one computed from its title
+  ok    "16. Governing law": the test's anchor is the page's own sectionId
+
+45 checks, 17 failing.
+MemoryRedis dispatches: 557
+
+===== green =====
+{"file":"eu-dsa-statement.test.ts","old":false,"exit":0}
+
+The Terms sections the email cites exist
+  ok    each section title is in app/terms/page.tsx
+  ok    the takedown is decided by a person pressing a button
+  ok    copyright: the email has no HTML part to check apart from its text
+
+Art. 17(3), a copyright notice
+  ok    (a) what was restricted
+  ok    (a) territorial scope: every country
+  ok    (a) duration of a product: until it is published again, and what that risks
+  ok    (a) no promise that only we can change it
+  ok    (b) facts: the notice and the address it named
+  ok    (b) that it came from a notice, under which rule
+  ok    (b) the sender of a notice of illegal content is not named
+  ok    (c) no automated means
+  ok    (d) the legal ground, with why
+  ok    (e) the contractual ground: Terms sections 3 and 4, linked
+  ok    (f) how to answer us
+  ok    (f) judicial redress
+  ok    (f) no internal complaint system or out-of-court body promised
+  ok    other: the email has no HTML part to check apart from its text
+
+Art. 17(3), a other notice
+  ok    (a) what was restricted
+  ok    (a) territorial scope: every country
+  ok    (a) duration of a product: until it is published again, and what that risks
+  ok    (a) no promise that only we can change it
+  ok    (b) facts: the notice and the address it named
+  ok    (b) that it came from a notice, under which rule
+  ok    (b) the sender of a notice of illegal content is not named
+  ok    (c) no automated means
+  ok    (d) the legal ground, with why
+  ok    (e) the contractual ground: Terms sections 3 and 4, linked
+  ok    (f) how to answer us
+  ok    (f) judicial redress
+  ok    (f) no internal complaint system or out-of-court body promised
+
+Art. 17(3)(a), the duration said for each kind of action (Claude 5 on #2928)
+  ok    other: the email has no HTML part to check apart from its text
+  ok    link: the duration says what the code does
+  ok    link: no other kind's duration
+  ok    other: the email has no HTML part to check apart from its text
+  ok    kit: the duration says what the code does
+  ok    kit: no other kind's duration
+  ok    other: the email has no HTML part to check apart from its text
+  ok    store: the duration says what the code does
+  ok    store: no other kind's duration
+
+The anchors the email links to are the ones the Terms page draws (Claude 5's LOW 3 on #2928)
+  ok    "3. Selling through a Marktmorgen store" has no id of its own, so its anchor is the one computed from its title
+  ok    "3. Selling through a Marktmorgen store": the test's anchor is the page's own sectionId
+  ok    "4. Acceptable use" has no id of its own, so its anchor is the one computed from its title
+  ok    "4. Acceptable use": the test's anchor is the page's own sectionId
+  ok    "16. Governing law" has no id of its own, so its anchor is the one computed from its title
+  ok    "16. Governing law": the test's anchor is the page's own sectionId
+
+45 checks, all passing.
+MemoryRedis dispatches: 557
+{"file":"takedown.test.ts","old":false,"exit":0}
+
+What a notice must say
+  ok    a whole copyright notice is read
+  ok    each missing part is named
+  ok    another kind of notice needs no address or telephone
+
+Kept, and sent to the support inbox only
+  ok    sent
+  ok    to the support inbox, with Reply to the sender, and nothing to the sender
+  ok    saying everything the notice said
+  ok    its link opens it, with the store it names
+  ok    a token that is not one opens nothing
+  ok    five an hour from one connection
+  ok    each notice that reached the inbox is counted once
+  ok    two tries that could not be sent: an error each, and nothing more counted
+  ok    a notice about a product's page points at that product
+
+Taken down, written down, and told
+  ok    a link removed
+  ok    gone from the page, and on the record
+  ok    the creator is told what, why, and how to answer
+  ok    a product unpublished
+  ok    nothing twice
+
+A store switched off
+  ok    before: it sells
+  ok    its pages and sales off, and on the record
+  ok    and back on, with the record kept
+
+20 checks, all passing.
+MemoryRedis dispatches: 288
+{"file":"transparency.test.ts","old":false,"exit":0}
+
+Nothing counted yet
+  ok    no day, no years: the page says counting begins with the first notice
+
+Counted as they happen
+  ok    from the first day counted
+  ok    received, by kind
+  ok    acted on once per notice, however many steps
+  ok    each step counted
+  ok    a made-up notice id is not counted
+  ok    and a later year starts at nothing
+  ok    nothing about who or which store is kept
+
+Where they are counted, and the page
+  ok    a notice when filed, a step when taken
+  ok    orders from authorities are said not to be counted, never shown as zero
+  ok    reached from the report form
+
+11 checks, all passing.
+MemoryRedis dispatches: 34
+
+===== types =====
+
+===== lint =====
+
+===== final-runner-lint =====
+
+===== scanner =====
+Public data check: 4291 tracked files; 0 file(s) require correction.
+
+===== diff =====

@@ -781,15 +781,34 @@ export function listingFinder(store: Store): (id: string | undefined) => Promise
   };
 }
 
-/** The most product records one MGET of listingsById names. */
-export const LISTING_MGET_KEYS = 500;
+/**
+ * The most bytes one MGET of listingsById may be answered with (Codex S and Codex Z on #3101): Upstash refuses a
+ * request past 10 MB (its max_request_size_exceeded page, read 7 November 2026), so an answer is kept to 8 MB, with
+ * room for the envelope.
+ */
+export const LISTING_MGET_ANSWER_BYTES = 8_000_000;
+
+/**
+ * What one record can weigh in that answer at the worst: MAX_PRODUCT_BYTES, every byte escaped in the JSON reply
+ * (\uXXXX is six bytes for one), and its quotes and comma. Bounded by the writer's ceiling, never by what records
+ * usually weigh.
+ */
+const LISTING_ANSWER_WORST_BYTES = 6 * MAX_PRODUCT_BYTES + 3;
+
+/** The most product records one MGET of listingsById names: as many as fit LISTING_MGET_ANSWER_BYTES at the worst. */
+export const LISTING_MGET_KEYS = Math.max(1, Math.floor(LISTING_MGET_ANSWER_BYTES / LISTING_ANSWER_WORST_BYTES));
+
+/** The most of those MGETs in flight at once, so what one sales file holds in answers stays bounded (about 31 MB). */
+export const LISTING_MGET_PARALLEL = 4;
 
 /**
  * The listings these ids name, by id, read before a walk through sales that
  * each name some (the sales file, lib/stats.ts salesCsv): whatever the store
  * record holds is not read again, and the rest is read in MGETs of at most
- * LISTING_MGET_KEYS records sent side by side, so 2,000 products are four
- * commands and one wait, never a GET after another for each product. Ids the
+ * LISTING_MGET_KEYS records, LISTING_MGET_PARALLEL of them side by side, so
+ * every answer stays under LISTING_MGET_ANSWER_BYTES at the worst and 2,000
+ * products are 400 commands in 100 waits, never a GET after another for each
+ * product (2,000) and never one answer past the provider's ceiling. Ids the
  * store does not have, and records Redis answers are not there (nil), are left
  * out, as readListings leaves them. A reply that is not one string or nil for
  * each record asked, or a record that does not read as that product's listing,
@@ -817,14 +836,14 @@ export async function listingsById(store: Store, ids: Iterable<string>): Promise
   if (!missing.length || !catalog.id || !isRedisConfigured()) return found;
   const chunks: string[][] = [];
   for (let i = 0; i < missing.length; i += LISTING_MGET_KEYS) chunks.push(missing.slice(i, i + LISTING_MGET_KEYS));
-  const answers = await Promise.all(
-    chunks.map(async (chunk) => {
-      const [reply] = repliesFor(await redisPipeline([["MGET", ...chunk.map((id) => listingKey(catalog.id!, id))]]), 1) ?? [undefined];
-      const raws = repliesFor(reply, chunk.length);
-      if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a store's product records");
-      return raws as (string | null)[];
-    }),
-  );
+  const readChunk = async (chunk: string[]): Promise<(string | null)[]> => {
+    const [reply] = repliesFor(await redisPipeline([["MGET", ...chunk.map((id) => listingKey(catalog.id!, id))]]), 1) ?? [undefined];
+    const raws = repliesFor(reply, chunk.length);
+    if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a store's product records");
+    return raws as (string | null)[];
+  };
+  const answers: (string | null)[][] = [];
+  for (let c = 0; c < chunks.length; c += LISTING_MGET_PARALLEL) answers.push(...(await Promise.all(chunks.slice(c, c + LISTING_MGET_PARALLEL).map(readChunk))));
   chunks.forEach((chunk, c) => {
     chunk.forEach((id, i) => {
       const raw = answers[c][i];

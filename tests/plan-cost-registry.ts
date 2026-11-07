@@ -1164,7 +1164,9 @@ export const COST_LINES: CostLine[] = [
     feature: "The studio's own reads and writes: every page of it drawn (STUDIO_PAGE_UNITS each), every save and read, its refreshing; and the never-paused plan, cancel, delete and data-download requests (17 October 2026)",
     // The essential requests are still priced here as one heavy request each. A sales file is dearer: measured at its
     // worst (7 November 2026), after its products are read in batches and each cell is bounded (lib/stats.ts salesCsv,
-    // tests/sales-file-cheaper.test.ts), it is about US$0.0159 a call (US$0.0292 before). Pricing it honestly here waits
+    // tests/sales-file-cheaper.test.ts), it is about US$0.0159 a call (US$0.0292 before), measured with 500 records a MGET; since the MGETs are bounded by
+    // the bytes an answer may carry (LISTING_MGET_KEYS, Codex S and Codex Z on #3101), 2,000 products take up to 400
+    // commands instead of 4, about US$0.0008 more a call at US$2.00 a million, not yet measured. Pricing it honestly here waits
     // for the owner's decision on the first-year refund ceiling (Claude 4 to Claude 1, 7 November 2026); not certified.
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8),
     sources: [

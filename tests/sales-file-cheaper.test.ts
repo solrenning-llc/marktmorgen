@@ -4,8 +4,10 @@
  * column (Claude 4's option D measurements, 7 November 2026):
  *
  *   - the products the file names are read before its rows, in MGETs of up to
- *     500 records sent side by side: at most ceil(N/500) + 2 database trips for
- *     N products, never one GET after another for each product (up to 2,002);
+ *     LISTING_MGET_KEYS records (sized by the bytes an answer may carry, Codex S
+ *     and Codex Z on #3101; tests/sales-file-batch-bytes.test.ts), a few side by
+ *     side: at most ceil(N/LISTING_MGET_KEYS) + 2 product reads for N products,
+ *     never one GET for each product (up to 2,002);
  *   - each cell holds a bounded number of UTF-8 bytes in the file, a cut marked
  *     with a visible "…": a row is at most 2,435 bytes, every row is still there,
  *     and an ordinary file is byte for byte what it was;
@@ -14,7 +16,7 @@
  *     not there still falls back to the title the sale carried, as before.
  */
 import { addOption, addProduct, claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
-import { type Item, KIND, listingFinder } from "@/lib/catalog";
+import { type Item, KIND, LISTING_MGET_KEYS, listingFinder } from "@/lib/catalog";
 import { csvRow, readPaidSales, salesCsv } from "@/lib/stats";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { plainAmount } from "@/lib/money";
@@ -132,7 +134,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle("cheaper@example.com", HANDLE, "Cheaper File Store", "");
   await ensureStatsId("cheaper@example.com");
-  await setStripeAccount("cheaper@example.com", "acct_1CheaperFileTest", true);
+  await setStripeAccount("cheaper@example.com", "acct_fixture3101", true);
   const first = await addProduct("cheaper@example.com", "Sourdough \"Starter\" Guide", "", "49", null);
   if (!first.ok) throw new Error("no product");
   const optioned = await addOption("cheaper@example.com", first.product.id, "Signed copy — €", "59");
@@ -177,8 +179,8 @@ async function main(): Promise<void> {
       return checkout(10 + r, { product: a, ...(b ? { bump: b } : {}), ...(c ? { bump2: c } : {}), ...(d ? { bump3: d } : {}), title: "Stale" });
     });
     const { result, trips, commands } = await productTrips(() => salesCsv(store, 0));
-    const bound = Math.ceil(N / 500) + 2;
-    is(`at most ceil(N/500) + 2 = ${bound} trips for ${N} products`, trips <= bound ? "within" : `${trips} trips`, "within");
+    const bound = Math.ceil(N / LISTING_MGET_KEYS) + 2;
+    is(`at most ceil(N/LISTING_MGET_KEYS) + 2 = ${bound} trips for ${N} products`, trips <= bound ? "within" : `${trips} trips`, "within");
     is("and a command for each batch, never one for each product", commands <= bound ? "within" : `${commands} commands`, "within");
     const lines = result.csv.split("\r\n");
     is("every sale is still a row", [result.rows, lines.length - 2], [sessions.length, sessions.length]);

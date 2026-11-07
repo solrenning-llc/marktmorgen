@@ -44,7 +44,7 @@ export function llmsText(): string {
 
 ## MCP tools
 
-${allRead ? "Every tool reads only: nothing a tool does changes the store.\n\n" : ""}${tools}
+${allRead ? "Every tool reads only: nothing a tool does changes the store.\n\n" : "Every tool reads only, except those marked as preparing a change: those keep a proposal that the creator reads beside what is there now and confirms in their studio, and nothing on the store changes until they do. They need a key the creator allowed to prepare changes.\n\n"}${tools}
 
 ## Privacy
 

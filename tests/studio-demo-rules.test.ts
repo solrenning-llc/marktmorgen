@@ -136,7 +136,7 @@ const dollars = (micro: number) => `$${(micro / 1e6).toFixed(2)}`;
 const thirtyMicroUsd = 31 * cohortMicroUsd + 30 * (refusalsMicroUsd + keptDay);
 is(`the doc states what a day's own hashes cost kept (${keptDay.toFixed(2)} µ$)`, readFileSync("docs/studio-demo.md", "utf8").includes(`| ${keptDay.toFixed(2)} µ$ |`), true);
 const doc = readFileSync("docs/studio-demo.md", "utf8");
-is("an action at its worst, in micro-USD", Math.round(perAction * 100) / 100, 51.77);
+is("an action at its worst, in micro-USD", Math.round(perAction * 100) / 100, 108.96);
 is(`the doc states the day's known worst (${dollars(dayMicroUsd)})`, doc.includes(`${dollars(dayMicroUsd)} a day`), true);
 is(`the doc states thirty days (${dollars(thirtyMicroUsd)})`, doc.includes(`${dollars(thirtyMicroUsd)} in thirty days`), true);
 {

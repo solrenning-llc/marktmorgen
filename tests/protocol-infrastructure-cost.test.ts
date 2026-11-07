@@ -4,7 +4,7 @@ import {protocolInfrastructureMicroUsd,type ProtocolInfrastructureBounds} from "
 
 const zero:ProtocolInfrastructureBounds={functionCalls:0,memoryGbMilliseconds:0,cpuMilliseconds:0,redisCommands:0,transferBytes:0,retainedBytes:0,retentionMonths:0,storageCopies:1};
 test("protocol pricing rounds every infrastructure component up and adds the canonical allowance",()=>{
- assert.deepEqual(protocolInfrastructureMicroUsd({...zero,functionCalls:1,memoryGbMilliseconds:1000,cpuMilliseconds:1000,redisCommands:1,transferBytes:1,retainedBytes:1,retentionMonths:1}),{baseMicroUsd:44,providerAllowanceMicroUsd:5,totalMicroUsd:49});
+ assert.deepEqual(protocolInfrastructureMicroUsd({...zero,functionCalls:1,memoryGbMilliseconds:1000,cpuMilliseconds:1000,redisCommands:1,transferBytes:1,retainedBytes:1,retentionMonths:1}),{baseMicroUsd:73,providerAllowanceMicroUsd:8,totalMicroUsd:81});
  assert.deepEqual(protocolInfrastructureMicroUsd(zero),{baseMicroUsd:0,providerAllowanceMicroUsd:0,totalMicroUsd:0});
 });
 test("retention includes every explicit replica and month without a free storage tier",()=>{
@@ -34,7 +34,9 @@ test("large products use exact arithmetic and refuse an unrepresentable reservat
  assert.equal(protocolInfrastructureMicroUsd({...zero,retainedBytes:Number.MAX_SAFE_INTEGER,retentionMonths:Number.MAX_SAFE_INTEGER,storageCopies:Number.MAX_SAFE_INTEGER}),null);
  const bound={...zero,functionCalls:1_000_000,memoryGbMilliseconds:3_600_000,cpuMilliseconds:3_600_000,redisCommands:1_000_000,transferBytes:1_000_000_000};
  const first=protocolInfrastructureMicroUsd(bound)!;
- assert.deepEqual(first,{baseMicroUsd:2_768_600,providerAllowanceMicroUsd:276_860,totalMicroUsd:3_045_460});
+ // 600,000 calls + 18,300 (a GB-hour at the top regional memory rate) + 221,000 (a CPU-hour at the top regional rate)
+ // + 2,000,000 commands + 30,000 (a GB through the database) = 2,869,300; until 7 November 2026, at $0.0106 and $0.128, 2,768,600.
+ assert.deepEqual(first,{baseMicroUsd:2_869_300,providerAllowanceMicroUsd:286_930,totalMicroUsd:3_156_230});
  assert.ok(protocolInfrastructureMicroUsd({...bound,redisCommands:1_000_001})!.totalMicroUsd>first.totalMicroUsd);
  assert.equal(Object.keys(bound).length,8);
 });

@@ -62,22 +62,22 @@ A session opens only while the day has room for its whole worst (`DEMO_SESSION_W
 
 ## Cost: a free feature, a bounded company exposure
 
-The demo earns nothing per session, so its cost is not any plan's: it is a company exposure under MR item 2, covered from the minimum base of paying customers, and needs its line in `docs/funded-exposure-review.md` before it is turned on. Rates come from `lib/spend-cost-table.ts` (read 2026-10-17) and `tests/traffic-cost.ts`; no free quota is counted.
+The demo earns nothing per session, so its cost is not any plan's: it is a company exposure under MR item 2, covered from the minimum base of paying customers, and needs its line in `docs/funded-exposure-review.md` before it is turned on. Rates come from `lib/spend-cost-table.ts` and `tests/traffic-cost.ts`; since November 7, 2026 every Vercel rate is the top of its official regional range (CPU $0.221 an hour, memory $0.0183 a GB-hour, CDN requests $3.20 a million, Fast Origin Transfer $0.43 a GB; vercel.com/docs/pricing/regional-pricing, last updated September 14, 2026), because no deployment region is proven. No free quota is counted.
 
 | Resource | Worst, each | Source |
 | --- | --- | --- |
-| Action: function call, 1.5 s at 2 GB, 0.2 CPU-second | 16.54 µ$ | Vercel rates in `lib/spend-cost-table.ts` |
+| Action: function call, 1.5 s at 2 GB, 0.2 CPU-second | 28.13 µ$ | Vercel rates in `lib/spend-cost-table.ts` |
 | Action: 12 database commands | 24.00 µ$ | Upstash $2.00 a million |
 | Action: 66 KB through the database (a draft read and written, its check and count) | 2.03 µ$ | Upstash $0.03 a GB |
-| Action: CDN request, 120 KB sent to the CDN | 9.20 µ$ | `tests/traffic-cost.ts` ($2 a million; $0.06 a GB) |
-| **Action, in all** | **51.77 µ$** | |
-| Opening: 4 s at 2 GB (bot check waited on), 19 commands, 4 KB through the database, CDN | 78.59 µ$ | same |
-| A counted refusal: 4 s at 2 GB, 7 commands, 2 KB through the database, CDN | 54.53 µ$ | same |
+| Action: CDN request, 120 KB sent to the CDN | 54.80 µ$ | `tests/traffic-cost.ts` ($3.20 a million; $0.43 a GB) |
+| **Action, in all** | **108.96 µ$** | |
+| Opening: 4 s at 2 GB (bot check waited on), 19 commands, 4 KB through the database, CDN | 148.38 µ$ | same |
+| A counted refusal: 4 s at 2 GB, 7 commands, 2 KB through the database, CDN | 122.41 µ$ | same |
 | A session's 256 KB, its record and its keys' names kept its 21 hours | 1.92 µ$ | Upstash $0.25 a GB-month |
 | A day's own hashes kept: its counts for 400 days, and the addresses' hash (a field for each address that opened or was refused) until the day ends, every key name and field at most 64 bytes (`DEMO_FIELD_MAX_BYTES`) | 5.71 µ$ | same |
-| **A session at every cap, its own 10 refusals included** | **3,732 µ$ ($0.0037)** | |
+| **A session at every cap, its own 10 refusals included** | **7,910 µ$ ($0.0079)** | |
 
-Worst day of what is priced: 338 openings and 20,280 actions, with the sessions' own 3,380 refused actions, the site's 5,000 counted refusals and the day's own hashes kept, **$1.53 a day**. A session lives past midnight, so thirty days can hold the actions and refusals of thirty-one days of openings: **$47.28 in thirty days**. `tests/studio-demo-rules.test.ts` checks both figures against the code and checks the day's ceiling against a brute-force search of every number of sessions and actions the caps allow. At the most two days of openings are alive at once: 676 sessions, 177 MB kept.
+Worst day of what is priced: 338 openings and 20,280 actions, with the sessions' own 3,380 refused actions, the site's 5,000 counted refusals and the day's own hashes kept, **$3.29 a day**. A session lives past midnight, so thirty days can hold the actions and refusals of thirty-one days of openings: **$101.24 in thirty days**. `tests/studio-demo-rules.test.ts` checks both figures against the code and checks the day's ceiling against a brute-force search of every number of sessions and actions the caps allow. At the most two days of openings are alive at once: 676 sessions, 177 MB kept.
 
 **Unknown, so the demo stays off** (`DEMO_UNKNOWN_COSTS`; never counted as zero):
 

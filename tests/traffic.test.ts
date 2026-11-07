@@ -355,7 +355,9 @@ async function main(): Promise<void> {
   const reachCount = await counted(() => readRequest({ t: readToken(readStore.statsId, STORE_SCOPE), k: "s", n: 2, b: `p:${product.id}`, c: "" }));
   // Exactly one each: none would mean nothing was counted, which would pass the model for the wrong reason.
   is("and how a page was read is too, without reading the store", [depthCount, reachCount], [COMMANDS.readBeacon, COMMANDS.readBeacon]);
-  is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0002, visitCost() < 0.0003], [3, 13, true, true]);
+  // Since 7 November 2026 the Vercel rates are the top of their regional ranges (tests/traffic-cost.ts): a visit costs
+  // about $0.000405; until then, at the lowest rates, between $0.0002 and $0.0003.
+  is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0004, visitCost() < 0.0005], [3, 13, true, true]);
 
   part("Where it is counted, and where a store rests");
   const hit = read("app/api/store/hit/route.ts");

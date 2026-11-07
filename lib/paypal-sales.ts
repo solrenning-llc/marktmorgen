@@ -872,6 +872,22 @@ export async function watchPayPal(
           console.error("a pending PayPal order's record does not match its order", order);
           return;
         }
+        // The list was read at the start of the pass, and asking PayPal about the orders before this one takes seconds:
+        // the buyer's return may have settled it meanwhile (written, taken off pending, handed over). Read again, exactly,
+        // whether it is still pending (stillPending): no longer, it was handed over by that return and is not again;
+        // unknown, it stays pending and is asked about next pass (Claude 5 on #2871). One ZSCORE, only for an order
+        // written down.
+        let still: boolean;
+        try {
+          still = await stillPending(store, order);
+        } catch (error) {
+          if (!(error instanceof UnknownReplyError)) throw error;
+          console.error("whether a PayPal order is still pending could not be read", order, error);
+          return;
+        }
+        if (!still) return;
+        // A hand-over that fails throws to the loop below: this order stays pending for the next pass, counted as
+        // stuck, and never stops the store's other orders nor the refunds read after them (Claude 5 on #2871).
         await on.handOver(written);
         await redisPipeline(settledWrites(written));
         result.cleared += 1;

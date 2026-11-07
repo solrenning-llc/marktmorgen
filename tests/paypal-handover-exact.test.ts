@@ -35,13 +35,20 @@ const opened = () => ({ s: sid, h: "handshop", p: "p1", c: 1500, cur: "usd", m: 
 
 // PayPal's stand-in: "completed" captures in full as asked, "refunded" answers the capture refunded, "down" fails.
 let paypal: "completed" | "refunded" | "down" = "completed";
-globalThis.fetch = (async (input: string | URL | Request) => {
+// Run once while PayPal is being asked (GET) about this order: what another request does meanwhile.
+let onGet: { order: string; run: () => Promise<void> } | null = null;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "synthetic-token", expires_in: 3600 });
   if (paypal === "down") return new Response("{}", { status: 503 });
   const order = url.pathname.match(/^\/v2\/checkout\/orders\/([A-Z0-9]+)/)?.[1];
   if (!order) return new Response("{}", { status: 404 });
+  if (onGet && onGet.order === order && (init?.method ?? "GET") === "GET") {
+    const hook = onGet;
+    onGet = null;
+    await hook.run();
+  }
   const status = paypal === "refunded" ? "REFUNDED" : "COMPLETED";
   return json({
     id: order,
@@ -188,6 +195,72 @@ test("controls: a written order PayPal says was refunded is not handed over; one
   await sweep();
   assert.deepEqual(handed.map((p) => p.order), [order]);
   assert.deepEqual(await settledMarks(order), SETTLED);
+});
+
+test("a hand-over that fails on one pending order never stops the store's other orders (Claude 5 on #2871)", async () => {
+  redis.clear();
+  paypal = "completed";
+  const failing = nextOrder();
+  const other = nextOrder();
+  for (const order of [failing, other]) {
+    await putOpened(order);
+    await putPending(order);
+    await putWritten(order);
+  }
+  const handed: Paid[] = [];
+  await sweeper(handed, { times: 1 })();
+  assert.deepEqual(handed.map((p) => p.order), [other], "the other order is handed over in the same pass");
+  assert.notEqual(await pending(failing), null, "the failed one stays pending");
+  await sweeper(handed)();
+  assert.deepEqual(handed.map((p) => p.order).sort(), [failing, other].sort(), "and is handed over once next pass");
+});
+
+test("the sweep never hands over again an order the buyer's return settled while the sweep's list was being read (Claude 5 on #2871)", async () => {
+  redis.clear();
+  paypal = "completed";
+  const first = nextOrder();
+  const order = nextOrder();
+  for (const o of [first, order]) {
+    await putOpened(o);
+    await putPending(o);
+  }
+  const handed: Paid[] = [];
+  onGet = {
+    order: first,
+    run: async () => {
+      const returned = await captureOrder(shop, order);
+      if (returned.ok && returned.fresh) handed.push(returned.paid);
+    },
+  };
+  await sweeper(handed)();
+  onGet = null;
+  assert.equal(handed.filter((p) => p.order === order).length, 1, "handed over once, by the return");
+  assert.equal(handed.filter((p) => p.order === first).length, 1, "the other order once, by the sweep");
+  assert.deepEqual(await settledMarks(order), SETTLED);
+});
+
+test("whether a written order is still pending, read in an unknown shape, hands nothing over and keeps it pending", async () => {
+  redis.clear();
+  paypal = "completed";
+  const order = nextOrder();
+  await putOpened(order);
+  await putPending(order);
+  await putWritten(order);
+  const handed: Paid[] = [];
+  const original = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands.length === 1 && commands[0][0] === "ZSCORE" && commands[0][1] === `nl:ppsell:pending:${sid}` && commands[0][2] === order
+      ? []
+      : original.call(redis, commands)) as typeof redis.pipeline;
+  try {
+    await sweeper(handed)();
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.equal(handed.length, 0, "nothing handed over on a guess");
+  assert.notEqual(await pending(order), null, "still pending");
+  await sweeper(handed)();
+  assert.deepEqual(handed.map((p) => p.order), [order], "handed over once when it can be read");
 });
 
 test("control: the return writes a payment down once; nothing is left pending for the sweep to hand over again", async () => {

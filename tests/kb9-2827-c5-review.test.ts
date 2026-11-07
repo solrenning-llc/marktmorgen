@@ -12,7 +12,7 @@
  *     got it yet, and to send it again; every language has those words; an
  *     unknown state never reads as sent;
  *   - 2: the day the page promises is the day the function is still open at
- *     its end: 14 calendar days after the UTC day of payment, a Saturday or a
+ *     its end: 14 calendar days after the day of payment (see D), a Saturday or a
  *     Sunday moved to the Monday, open to the end of that day anywhere on Earth
  *     (11:59:59 UTC the next day), then closed;
  *   - 3: the art. 16(m) yes closes the function as "supplied" only when the
@@ -189,10 +189,12 @@ test("MEDIUM 2: rules: to the end of the last day anywhere on Earth, Saturdays a
   assert.equal(withdrawalWindow(sale(p), end).open, true, "open at the end instant");
   assert.deepEqual(withdrawalWindow(sale(p), end + 1), { open: false, why: "ended" }, "closed after it");
   assert.equal(submittedInTime(withdrawalWindow(sale(p), end), end), true);
-  // A weekday: paid Wednesday October 28 at 23:50 UTC, last day Wednesday November 11.
+  // A weekday: paid Wednesday October 28 at 23:50 UTC, already Thursday October 29 at UTC+14 (the latest calendar day
+  // anywhere, D on the focal return), so the last day is Thursday November 12.
   const w = at(2026, 10, 28, 23, 50);
-  assert.deepEqual(withdrawalWindow(sale(w), at(2026, 11, 11, 23, 59)), { open: true, until: at(2026, 11, 12, 11, 59, 59) });
-  assert.deepEqual(withdrawalWindow(sale(w), at(2026, 11, 12, 12)), { open: false, why: "ended" });
+  assert.deepEqual(withdrawalWindow(sale(w), at(2026, 11, 11, 23, 59)), { open: true, until: at(2026, 11, 13, 11, 59, 59) });
+  assert.deepEqual(withdrawalWindow(sale(w), at(2026, 11, 12, 12)), { open: true, until: at(2026, 11, 13, 11, 59, 59) });
+  assert.deepEqual(withdrawalWindow(sale(w), at(2026, 11, 13, 12)), { open: false, why: "ended" });
   // A Saturday: paid Saturday October 31, day 14 is Saturday November 14, moved to Monday November 16.
   const s = at(2026, 10, 31, 9);
   assert.deepEqual(withdrawalWindow(sale(s), at(2026, 11, 15, 20)), { open: true, until: at(2026, 11, 17, 11, 59, 59) });

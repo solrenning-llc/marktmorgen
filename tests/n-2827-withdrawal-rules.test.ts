@@ -4,8 +4,9 @@ import { done, is, part } from "./check";
 
 const paid = Date.UTC(2026, 10, 1, 12) / 1000;
 const now = Date.UTC(2026, 10, 7, 12) / 1000;
-// Paid Sunday November 1: day 14 is Sunday November 15, moved to Monday November 16, open to its end anywhere on Earth
-// (11:59:59 UTC on November 17; lib/withdrawal-rules.ts, withdrawalEnd, Claude 5 on #2827). Counted here by hand.
+// Paid Sunday November 1 at 12:00 UTC, already Monday November 2 at UTC+14 (the latest calendar day anywhere): day 14 is
+// Monday November 16, open to its end anywhere on Earth (11:59:59 UTC on November 17; lib/withdrawal-rules.ts,
+// withdrawalEnd, Claude 5 on #2827 and its focal return). Counted here by hand.
 const end = Date.UTC(2026, 10, 17, 11, 59, 59) / 1000;
 const facts: WithdrawalFacts = {
   kind: "sale", paidAt: paid, member: false, givenByStore: false,

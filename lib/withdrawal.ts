@@ -44,17 +44,30 @@ const DAY_MS = 86_400_000;
 /** The record of a withdrawal from one order of one store. */
 export const withdrawalKey = (sid: string, reference: string) => `nl:withdraw:${sid}:${reference}`;
 
-/** What deciding the period reads from a purchase on the buyer's list. A PayPal order is a sale made here. */
+/**
+ * Whether a purchase on the list as brought over is a pre-order this store handed over (lib/preorders.ts grants it under
+ * the job "pre:<checkout>", and lib/buyer-orders.ts reads it back with preorder.given): a contract made here, paid at its
+ * checkout's time (the entry's `at`, the checkout's created time as for every sale, or the time it was written down when
+ * that did not read, never the hand-over).
+ */
+const handedOverPreorder = (purchase: Purchase) => purchase.kind === "imported" && purchase.preorder?.given === true && !purchase.giftFrom && !purchase.place && !purchase.givenByStore;
+
+/**
+ * What deciding the period reads from a purchase on the buyer's list. A PayPal order is a sale made here, and so is a
+ * pre-order handed over (Claude 5's focal return on #2827): its yes is not kept with it, so it keeps the 14 days, and
+ * its confirmation is never taken as known (the hand-over email carries no art. 8(7) lines, and the nl:confirm: mark
+ * lib/purchase-email.ts writes for a hand-over does not say whether any email went).
+ */
 export function factsOf(purchase: Purchase): WithdrawalFacts {
   return {
-    kind: purchase.paidWith === "paypal" ? "sale" : purchase.kind,
+    kind: purchase.paidWith === "paypal" || handedOverPreorder(purchase) ? "sale" : purchase.kind,
     paidAt: purchase.paidAt,
     member: purchase.member || purchase.ended,
     givenByStore: purchase.givenByStore === true || Boolean(purchase.giftFrom),
     consent: purchase.consent ?? null,
     ...(purchase.preorder ? { preorder: purchase.preorder } : {}),
     ...(purchase.shipped === true ? { shipped: true } : {}),
-    ...(purchase.confirmed === true ? { confirmed: true } : {}),
+    ...(purchase.confirmed === true && !purchase.preorder ? { confirmed: true } : {}),
   };
 }
 
@@ -68,15 +81,16 @@ const CONFIRMED_REFERENCE = /^(cs_(test|live)_|pi_)[A-Za-z0-9]{10,200}$/;
  * meter before they are read, as its other reads that grow with what the buyer has. Only a reply that is exactly "sent"
  * counts: no mark, "sending", any other value, a reply in another shape or a read that fails all leave it not known,
  * so the function stays offered (CX-123: unknown is never "sent"; never hidden on a guess). The mark is kept 40 days
- * from when the confirmation went (SENT_MARK_SECONDS, set at or after payment), and the period ends before payment + 18
- * days (withdrawalEnd: 14 days, a weekend moved, the end of the day anywhere on Earth), so a mark gone by expiry belongs
- * to an order whose 14 days are over anyway. A confirmation sent by another path that writes no such mark (an order's
+ * from when the confirmation went (SENT_MARK_SECONDS, set at or after payment), and the period ends before payment + 19
+ * days (withdrawalEnd: 14 days from the latest calendar day at payment, a weekend moved, the end of the day anywhere on Earth), so a mark gone by expiry belongs
+ * to an order whose 14 days are over anyway. A pre-order's mark is never read (factsOf). A confirmation sent by another path that writes no such mark (an order's
  * reserved origin, lib/order-confirmation-outbox.ts; a PayPal order) is not known here and keeps the function offered.
  */
 export async function withConfirmations(purchases: Purchase[], meter: Pick<OrdersMeter, "take">, nowSeconds = Math.floor(Date.now() / 1000)): Promise<Purchase[]> {
   const asked = purchases.filter((purchase) => {
     const facts = factsOf(purchase);
-    return CONFIRMED_REFERENCE.test(purchase.reference) && yesEndsOnSupply(facts) && withdrawalWindow(facts, nowSeconds).open;
+    // Never a pre-order's: what its mark says does not prove the art. 8(7) confirmation (factsOf).
+    return !purchase.preorder && CONFIRMED_REFERENCE.test(purchase.reference) && yesEndsOnSupply(facts) && withdrawalWindow(facts, nowSeconds).open;
   });
   if (asked.length === 0) return purchases;
   await meter.take(asked.length);

@@ -39,13 +39,16 @@
  * recital 41 of Directive 2011/83/EU applies to its periods, art. 3(1), 3(2)(b)
  * and 3(4) as the reviewer recalls them: NOT verified against the official
  * text, because EUR-Lex could not be reached from here
- * (docs/kb9-eu-withdrawal-2026-11-06.md). The day of payment is not counted;
- * the period ends at the end of the 14th calendar day after the UTC day of
- * payment; a last day on a Saturday or a Sunday moves to the following
- * Monday; and "the end of the day" is the end of that calendar day anywhere
- * on Earth (23:59:59 at UTC-12, 11:59:59 UTC the next calendar day), so no
- * buyer's own day is cut short. Public holidays differ by country and are not
- * known here, so they are not applied.
+ * (docs/kb9-eu-withdrawal-2026-11-06.md). The day of payment is not counted,
+ * and it is taken as the latest calendar day anywhere on Earth at that moment
+ * (the date at UTC+14), so a buyer east of UTC who paid late in the UTC day
+ * does not lose one of their days (Claude 5's focal return on #2827); the
+ * period ends at the end of the 14th calendar day after it; a last day on a
+ * Saturday or a Sunday moves to the following Monday; and "the end of the
+ * day" is the end of that calendar day anywhere on Earth (23:59:59 at UTC-12,
+ * 11:59:59 UTC the next calendar day). So neither the buyer's first day nor
+ * their last is cut short, wherever they are. Public holidays differ by
+ * country and are not known here, so they are not applied.
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import type { KeptConsent } from "@/lib/digital-consent";
@@ -95,14 +98,16 @@ export type WithdrawalWindow = { open: true; until: number | null } | { open: fa
 
 /** The end of the day anywhere on Earth: the last place a calendar day ends is UTC-12, 12 hours after UTC's. */
 const EARTH_DAY_END = 12 * 3600 - 1;
+/** The most advanced time zone on Earth, UTC+14: its date is the latest calendar day anywhere at a given moment. */
+const EARTH_DAY_AHEAD = 14 * 3600;
 
 /**
  * The last moment of the withdrawal period for a contract made at `paidAt` (seconds), as the file's comment counts it:
- * the end, anywhere on Earth, of the 14th calendar day after the UTC day of payment, a Saturday or a Sunday moved to
- * the Monday.
+ * the end, anywhere on Earth, of the 14th calendar day after the day of payment (the latest calendar day anywhere at
+ * that moment, the date at UTC+14), a Saturday or a Sunday moved to the Monday.
  */
 export function withdrawalEnd(paidAt: number): number {
-  const paid = new Date(paidAt * 1000);
+  const paid = new Date((paidAt + EARTH_DAY_AHEAD) * 1000);
   const last = new Date(Date.UTC(paid.getUTCFullYear(), paid.getUTCMonth(), paid.getUTCDate() + WITHDRAWAL_DAYS));
   const weekday = last.getUTCDay();
   const moved = weekday === 6 ? 2 : weekday === 0 ? 1 : 0;

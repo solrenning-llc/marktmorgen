@@ -31,9 +31,10 @@ import { done, is, part } from "./check";
 const DAY = 86_400;
 const PAID = 1_790_000_000;
 const consent = (kind: "digital" | "membership", at = PAID - 60) => ({ version: "2026-10-30.2", at, kind });
-// The period's end for PAID (Monday September 21, 2026, 14:13:20 UTC): day 14 is Monday October 5, open to its end anywhere on
-// Earth, 11:59:59 UTC on October 6 (lib/withdrawal-rules.ts, withdrawalEnd; Claude 5 on #2827). Counted here by hand.
-const END = Date.UTC(2026, 9, 6, 11, 59, 59) / 1000;
+// The period's end for PAID (Monday September 21, 2026, 14:13:20 UTC, already Tuesday September 22 at UTC+14, the latest
+// calendar day anywhere): day 14 is Tuesday October 6, open to its end anywhere on Earth, 11:59:59 UTC on October 7
+// (lib/withdrawal-rules.ts, withdrawalEnd; Claude 5 on #2827 and its focal return). Counted here by hand.
+const END = Date.UTC(2026, 9, 7, 11, 59, 59) / 1000;
 const sale = (over: Partial<Parameters<typeof withdrawalWindow>[0]> = {}) => ({ kind: "sale" as const, paidAt: PAID, member: false, givenByStore: false, consent: null, ...over });
 
 part("The words the law names");

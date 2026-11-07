@@ -88,7 +88,13 @@ themselves or the contract again.
     not ask): 14 days from the contract.
   - **A pre-order:** 14 days from the contract until it is actually handed over
     (with the consent, that ends the right). Its planned release day proves no
-    supply, so it ends nothing (Codex N, PR #2827).
+    supply, so it ends nothing (Codex N, PR #2827). Once handed over it returns
+    on the buyer's list as brought over (job `pre:`), but it is still a
+    contract made here: 14 days from its payment (the checkout's time, never
+    the hand-over). The yes is not kept with it, and the hand-over email does
+    not carry the art. 8(7) confirmation (the `nl:confirm:` mark written for a
+    hand-over does not prove one either), so its confirmation is never taken
+    as known and it keeps the 14 days (Claude 5, PR #2827).
   - **A membership** (at least partly a service): 14 days from the contract. The
     right is lost only once the service is fully performed (art. 16(a)), and the
     consumer pays in proportion (art. 14(3)).
@@ -108,12 +114,17 @@ themselves or the contract again.
 
 Reading used in `withdrawalEnd` (`lib/withdrawal-rules.ts`), the protective one:
 
-- The day of payment is not counted. The period ends at the end of the 14th
-  calendar day after the UTC day of payment.
+- The day of payment is not counted. It is taken as the latest calendar day
+  anywhere on Earth at the moment of payment (the date at UTC+14), so a buyer
+  east of UTC who paid late in the UTC day keeps all 14 of their own days
+  (Claude 5's focal return, PR #2827). The period ends at the end of the 14th
+  calendar day after that day.
 - A last day on a Saturday or a Sunday moves to the following Monday.
 - "The end of the day" is the end of that calendar day anywhere on Earth:
-  23:59:59 at UTC−12, which is 11:59:59 UTC on the next calendar day. No
-  buyer's own day is cut short.
+  23:59:59 at UTC−12, which is 11:59:59 UTC on the next calendar day.
+- So the start day is the latest calendar day anywhere at payment and the end
+  is the end of the last day anywhere: no buyer's first or last day is cut
+  short, wherever they are. The weekend move reads that same latest day.
 - The page promises that last day, and the function stays open until that
   instant. A statement submitted up to it is in time (art. 11a(5)).
 

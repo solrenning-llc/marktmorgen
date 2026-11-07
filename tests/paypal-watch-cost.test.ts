@@ -113,11 +113,12 @@ async function main(): Promise<void> {
   const late = await recorded(() => sweepPayPal(store, Date.now() - 1));
   is("at most the registry's reads", ranges(late, statsId).length <= (declared?.rangeReadsPerStoreRun ?? -1), true);
 
-  part("a store without PayPal sends nothing");
+  part("a store without PayPal sends nothing to the two lists");
   await setPayPalSeller("owner@example.com", null);
   const without = (await storeForEmail("owner@example.com"))!;
   const none = await recorded(() => sweepPayPal(without, far));
-  is("no command", none.length, 0);
+  // Only the two lists are counted: the hand-over list of #2909 has its own line (PAYPAL_HAND_OVER_RETRY).
+  is("no command on the two lists", none.filter((c) => c[1] === pendingKey(statsId) || c[1] === watchKey(statsId)).length, 0);
 
   done();
 }

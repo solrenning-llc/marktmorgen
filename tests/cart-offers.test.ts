@@ -265,7 +265,7 @@ async function main(): Promise<void> {
 
   part("Its reads are counted, and the studio says it");
   is("what the buyer owns counts as many public requests as the next product after a purchase", CART_OFFER_REQUEST_UNITS, 6);
-  is("counted before it is read", /takeBuyerRead\(store, CART_OFFER_REQUEST_UNITS\)\)\) return null;\s*return ownedHere\(store, email\);/.test(read("lib/cart-offers.ts")), true);
+  is("counted before it is read", /takeBuyerRead\(store, CART_OFFER_REQUEST_UNITS\)\.catch\(unknownLimit\)\) !== true\) return null;\s*return ownedHere\(store, email\);/.test(read("lib/cart-offers.ts")), true);
   is("the cart's form sets the browser's secret as one product's does", /cartOfferOwner\(store, products\)/.test(read("app/api/store/cart/route.ts")) && read("app/api/store/cart/route.ts").includes("`${UPSELL_COOKIE}=${upsell.secret}; Path=/; Max-Age=7200; HttpOnly; SameSite=Lax"), true);
   is("the thanks page passes the cart's named product and the address paid with", /cart: \(order\.record\.metadata as Record<string, string> \| null\)\?\.cart === "yes"\s*\? \{ offerFrom: cartOfferFrom\(/.test(read("app/[handle]/thanks/page.tsx")), true);
   is("the studio says so in one sentence", read("app/studio/funnels/page.tsx").includes("The offers also follow a purchase from the cart: those of the first product in the cart that has offers, never something already in the cart or bought before."), true);

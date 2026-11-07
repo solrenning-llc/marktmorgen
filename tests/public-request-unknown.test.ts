@@ -157,7 +157,7 @@ async function main(): Promise<void> {
   answering("requests", SPENT);
   response = await preview(previewAt());
   is("preview spent: still 429", response.status, 429);
-  const cardAt = () => new Request(`${ORIGIN}/@requestshop/contact/vcard`);
+  const cardAt = () => new NextRequest(`${ORIGIN}/@requestshop/contact/vcard`);
   answering("requests", ["7"]);
   response = await vcard(cardAt(), { params: Promise.resolve({ handle: "@requestshop" }) });
   is("card unknown: 503", response.status, 503);

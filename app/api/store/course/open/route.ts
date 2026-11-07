@@ -4,6 +4,7 @@ import { storeForHandle } from "@/lib/store";
 import { mintPass, openCourseLink, passCookie, storeKey } from "@/lib/learn";
 import { readListing } from "@/lib/catalog";
 import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
  * The link from the email. Whoever holds it has read that inbox, so this
@@ -21,7 +22,10 @@ export async function GET(request: NextRequest) {
     );
   }
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  if (!(await takeBuyerRead(store))) return restingAway(origin, store);
+  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return restingAway(origin, store);
   const product = await readListing(store, grant.p);
   const pass = await mintPass(store, grant.e, "all");
   const headers = new Headers({

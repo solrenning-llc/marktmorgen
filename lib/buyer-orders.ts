@@ -48,6 +48,7 @@ import { type BumpKey, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules"
 import { IMPORTED_REFERENCE, type ImportedPurchase, importedFor, importedFrom, importedKey, importedReference } from "@/lib/imported-purchases";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { takePublicRequest } from "@/lib/traffic";
+import { unknownLimit } from "@/lib/request-guard";
 import {
   ORDERS_LINK_READ_MS,
   DOWNLOAD_LOOKUP_MS,
@@ -1045,7 +1046,10 @@ export async function requestOrdersLink(input: {
   if (byAddress === null) return "error";
   if (!byAddress) return "limited";
 
-  if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return "busy";
+  // An unknown count is an error on our side, never "busy" and never "sent" (rule 24): nothing is read or sent.
+  const taken = await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS).catch(unknownLimit);
+  if (taken === "unknown") return "error";
+  if (!taken) return "busy";
   // From here the answer is "sent" whatever happens, and at once: the reading, the grant and the email run after it,
   // so how long the answer takes does not tell an address that bought from one that did not. What failed is said only in the server's log.
   afterAnswer(() => sendLink(store, raw, email, origin));

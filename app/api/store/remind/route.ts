@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { readListing, readListings } from "@/lib/catalog";
 import { readCartIds } from "@/lib/cart-rules";
 import { askCartReminder, askReminder } from "@/lib/checkout-ask";
@@ -48,7 +48,8 @@ export async function POST(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
   // One of the store's public requests for its window (lib/traffic.ts).
-  if (!(await takePublicRequest(store))) return new Response("Please try again later.", { status: 429 });
+  const taken = await takePublicRequest(store).catch(unknownLimit);
+  if (!taken) return new Response("Please try again later.", { status: 429 });
   const away = (status: string) =>
     new Response(null, {
       status: 303,
@@ -61,6 +62,8 @@ export async function POST(request: NextRequest) {
         "Cache-Control": "no-store",
       },
     });
+  // A count that could not be read is never "try again later" (rule 24): the form's own error notice, nothing asked.
+  if (taken === "unknown") return away("error");
   // A form filled in by something that fills in every field is told it worked.
   if (honeypot.trim()) return away("asked");
   try {

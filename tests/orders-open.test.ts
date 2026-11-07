@@ -435,7 +435,7 @@ test("a link request the store has no room for asks Stripe nothing, and the per-
   assert.deepEqual([asked, (await requestsIn(folder, window)) - before], [0, 0]);
   // The route answers a refusal as it answers a store with no room at all.
   const route = readFileSync("app/api/store/orders/route.ts", "utf8");
-  assert.ok(route.includes('if (result === "busy") return tooMany();') && route.includes("if (!(await takePublicRequest(store, \"buyer\"))) return tooMany();"));
+  assert.ok(route.includes('if (result === "busy") return tooMany();') && route.includes('const taken = await takePublicRequest(store, "buyer").catch(unknownLimit);\n  if (!taken) return tooMany();'));
 });
 
 /** A store selling links, with one paid checkout of BUYER per product, and its link to the list. */
@@ -707,7 +707,11 @@ test("a link request says sent whatever happens past its units: the email not se
   const answer = await ordersRoute(new NextRequest(`${ORIGIN}/api/store/orders`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "198.51.100.4" }, body: body.toString() }));
   assert.deepEqual([answer.status, answer.headers.get("location")], [303, `${ORIGIN}/@moss/orders?status=sent`]);
   const route = readFileSync("app/api/store/orders/route.ts", "utf8");
-  assert.ok(!route.includes("status=error"));
+  // Whatever happens once the address is asked about, the page is "sent". The one "error" is the store's own count
+  // that could not be read (rule 24), before anything of the address is read, so it is the same for every address.
+  assert.ok(/\} catch \(error\) \{\n[^}]*return away\(`\$\{page\}\?status=sent`\);/.test(route));
+  assert.equal(route.split("status=error").length, 2);
+  assert.ok(route.indexOf("status=error") < route.indexOf("requestOrdersLink({"));
 });
 
 test("a link request answers sent before it reads anything for the address, writes a grant or emails, whether or not it bought; the link still goes after", async () => {

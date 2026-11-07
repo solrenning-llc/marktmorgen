@@ -25,7 +25,10 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const product = store && store.statsId === grant.s ? await readListing(store, grant.p) : null;
   if (!store || !product?.podcast || !(await mayListen(store, product.id, grant.e))) return new Response("Not available.", { status: 403 });
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  if (!(await takeBuyerRead(store))) return new Response("Try again later.", { status: 503, headers: { "Retry-After": "3600" } });
+  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return new Response("Try again later.", { status: 503, headers: { "Retry-After": "3600" } });
   const podcast = await readPodcast(product.podcast.id);
   const episode = podcast?.episodes.find((e) => e.id === episodeId);
   if (!episode) return new Response("Not found.", { status: 404 });

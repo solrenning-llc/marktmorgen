@@ -67,7 +67,7 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { CrmDealReadUnavailable, CrmSchemaReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
 import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
@@ -737,7 +737,15 @@ async function actOnPeople(
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
   if (action.do === "field") {
-    const field = (await readFields(statsId)).find((f) => f.id === action.field);
+    let fields: Awaited<ReturnType<typeof readFields>>;
+    try {
+      fields = await readFields(statsId);
+    } catch (error) {
+      if (!(error instanceof CrmSchemaReadUnavailable)) throw error;
+      // Nothing was written: tried again later, which is safe (Claude 6 on #2901), never held as uncertain.
+      return each(emails, "deferred", "Your store's fields could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+    }
+    const field = fields.find((f) => f.id === action.field);
     if (!field) return each(emails, "failed", "The field was removed from your store.");
     const out: Acted[] = [];
     for (const email of emails) {
@@ -829,7 +837,14 @@ async function actOnDeals(
   at: { flow: Flow; step: FlowStep; index: number },
   held: Held | null,
 ): Promise<Acted[]> {
-  const pipelines = await readPipelines(statsId);
+  let pipelines: Awaited<ReturnType<typeof readPipelines>>;
+  try {
+    pipelines = await readPipelines(statsId);
+  } catch (error) {
+    if (!(error instanceof CrmSchemaReadUnavailable)) throw error;
+    // Nothing was written: tried again later, as for the deals below (Claude 6 on #2901), never held as uncertain.
+    return each(emails, "deferred", "Your deals board could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+  }
   const stages = allStages(pipelines);
   let deals: Awaited<ReturnType<typeof readDeals>>;
   try {

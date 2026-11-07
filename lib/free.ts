@@ -33,6 +33,7 @@ import { freeCopiesLimitFor } from "@/lib/order-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { isPaidUp } from "@/lib/billing";
 import { csvCell } from "@/lib/csv";
 import { type Listing, type Store, isFree } from "@/lib/store";
@@ -372,8 +373,11 @@ function cell(value: string): string {
  * the ones a creator in Europe may write to about anything new.
  */
 export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<string> {
-  const fields = await readFields(store.statsId).catch(() => []);
-  const answers = fields.length ? await allValues(store.statsId, fields).catch(() => ({}) as Record<string, Record<string, string>>) : {};
+  // The store's fields and their answers exactly as kept: a read in an unknown shape fails the file and says so (the
+  // route answers 502, the store's export marks the part unread), never a file with every CRM column empty
+  // (CX-123 rules 24 and 30; Claude 4 on #2901).
+  const fields = await readFields(store.statsId);
+  const answers = fields.length ? await allValues(store.statsId, fields) : {};
   const rows = [
     // And the store's own fields, each a column of its own (lib/crm-rules.ts).
     ["email", "agreed_to_emails", "agreed_at", "first_at", "last_at", "asked_for", "unsubscribed_at", "name", "tags", "source", "imported_at", ...fields.map((f) => f.name)]
@@ -387,12 +391,13 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
   // Bounded, so a cursor that never comes back to zero cannot hold the
   // function forever.
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    cursor = String(reply[0]);
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+    // A page exactly as [cursor, flat pairs of strings]: any other shape fails the file, never a file cut short there.
+    const page = repliesFor(repliesFor(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]), 1)?.[0], 2);
+    const flat = stringList(page?.[1]);
+    if (!page || typeof page[0] !== "string" || !/^[0-9]+$/.test(page[0]) || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of the list");
+    cursor = page[0];
     for (let i = 0; i + 1 < flat.length; i += 2) {
-      const email = String(flat[i]);
+      const email = flat[i];
       const lead = parseContact(flat[i + 1]);
       if (!lead) continue;
       if (onlyAgreed && !mailable(lead)) continue;

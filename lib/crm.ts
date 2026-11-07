@@ -571,12 +571,23 @@ export async function dropDeal(statsId: string, id: string, room: DataStore): Pr
  * still taken after the wait throws (LockBusyError), with everything already
  * deleted once. A change that reaches the lock after the store is gone finds
  * no store and writes nothing (changePersonTasks).
+ *
+ * A fields read in an unknown shape (CrmSchemaReadUnavailable) never keeps
+ * the rest: the deals, which name buyers, the stages, pipelines and tasks go
+ * all the same. Only the fields record stays, with the answers kept under
+ * it, so a later try can still find their keys; and the error is thrown
+ * after, so the caller knows they are still kept (Claude 6 on #2901).
  */
 export async function forgetCrm(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const fields = await readFields(statsId);
-  await redisPipeline([["DEL", fieldsKey(statsId), stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))]]);
+  const fields = await readFields(statsId).catch((error: unknown) => {
+    if (error instanceof CrmSchemaReadUnavailable) return null;
+    throw error;
+  });
+  const answers = fields ? [fieldsKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))] : [];
+  await redisPipeline([["DEL", stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...answers]]);
   await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]]));
+  if (!fields) throw new CrmSchemaReadUnavailable();
 }
 
 /** One person's value of a field deleted, answered with what it was (null when there was none). */

@@ -5,7 +5,8 @@ import { connection } from "next/server";
 import { headers } from "next/headers";
 import { SITE_URL } from "@/lib/site-url";
 import { cache } from "react";
-import { type Listing, type Store, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Listing, type Store, normaliseHandle } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
 import { readListing, readListings } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { lookStyle } from "@/lib/store-look";
@@ -65,7 +66,8 @@ type Params = {
 /**
  * The store and the product, or null for one that is not there. A read that
  * failed is `unread`, never "not there" (CX-123 rule 24): the card then says
- * it could not be loaded just now, never that the product is no longer on sale.
+ * it could not be loaded just now, never that the product is no longer on sale. The store is read exactly
+ * (lib/store-exact.ts), so an address that answered out of shape is unread too (Codex J on #2910).
  */
 const load = cache(async (raw: string, id: string): Promise<{ store: Store | null; product: Listing | null; unread: boolean }> => {
   let decoded = "";
@@ -74,12 +76,14 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store | nul
   } catch {
     return { store: null, product: null, unread: false };
   }
-  let store: Store | null;
+  let found: Awaited<ReturnType<typeof storeForHandleExactly>>;
   try {
-    store = await storeForPage(normaliseHandle(decoded.replace(/^@/, "")));
+    found = await storeForHandleExactly(normaliseHandle(decoded.replace(/^@/, "")));
   } catch {
     return { store: null, product: null, unread: true };
   }
+  if (found === "unknown") return { store: null, product: null, unread: true };
+  const store = found === "none" ? null : found;
   // A store switched off after notices (lib/takedown.ts) shows no card.
   if (!store || store.suspended) return { store: null, product: null, unread: false };
   // A draft is not on sale, and its card says so as its page would.

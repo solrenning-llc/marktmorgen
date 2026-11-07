@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { cache } from "react";
-import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Store, normaliseHandle } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
 import { lookStyle } from "@/lib/store-look";
 import { joinOpen } from "@/lib/store-join";
 import { joinWords } from "@/lib/buyer-words/join";
@@ -23,7 +24,10 @@ const STATUSES = ["sent", "email", "limited", "closed", "error"] as const;
 /** Its height in a frame: the form, its box and its line, or the answer. */
 const FRAME_HEIGHT = 420;
 
-/** The store, null for one that is not there, or "unread" for a read that failed: never "not there" (CX-123 rule 24). */
+/**
+ * The store, null for one that is not there, or "unread" for a read that failed or answered out of shape: never "not
+ * there" (CX-123 rule 24). The store is read exactly (lib/store-exact.ts; Codex J on #2910).
+ */
 const load = cache(async (raw: string): Promise<Store | null | "unread"> => {
   let decoded = "";
   try {
@@ -32,8 +36,9 @@ const load = cache(async (raw: string): Promise<Store | null | "unread"> => {
     return null;
   }
   try {
-    const store = await storeForPage(normaliseHandle(decoded.replace(/^@/, "")));
-    return store && !store.suspended ? store : null;
+    const store = await storeForHandleExactly(normaliseHandle(decoded.replace(/^@/, "")));
+    if (store === "unknown") return "unread";
+    return store !== "none" && !store.suspended ? store : null;
   } catch {
     return "unread";
   }

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Icon } from "@/components/icons";
-import { type Store, storeForId } from "@/lib/store";
+import { type Store } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
@@ -48,13 +49,21 @@ export default async function LibraryPage({ searchParams }: Params) {
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
   const shelves: { store: Store; open: string | null; waiting: string }[] = [];
   // What could not be read just now is said, never left out as if nothing were there (CX-123 rule 24): the list of
-  // stores itself, or each store whose record did not answer. A store that is gone (null) is left out, as before.
+  // stores itself, or each store whose record did not answer or answered out of shape, read exactly (lib/store-exact.ts;
+  // Codex J on #2910). A store confirmed gone is left out, as before.
   let listUnread = false;
   let storesUnread = 0;
   if (email) {
     const sids = await storesBoughtFrom(email).catch(() => null);
     if (!sids) listUnread = true;
-    const read = await Promise.all((sids ?? []).map((sid) => storeForId(sid).then((store) => ({ store }), () => null)));
+    const read = await Promise.all(
+      (sids ?? []).map((sid) =>
+        storeForIdExactly(sid).then(
+          (store) => (store === "unknown" ? null : { store: store === "none" ? null : store }),
+          () => null,
+        ),
+      ),
+    );
     storesUnread = read.filter((r) => r === null).length;
     const stores = read.flatMap((r) => (r?.store ? [r.store] : []));
     // What waits on them at one store (lib/buyer-waiting.ts), shown only where its orders page opens to act on it, and read

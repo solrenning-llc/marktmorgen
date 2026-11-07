@@ -37,7 +37,8 @@
  * somebody, a pre-order, a PayPal purchase; not what a creator brings over
  * from another platform or gives through the API.
  */
-import { storeForId } from "@/lib/store";
+import { type Store } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -117,14 +118,14 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!(await withinLimit("library-address", sha(email), 5, 3_600))) return "limited";
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
-  let charged: Awaited<ReturnType<typeof storeForId>> = null;
-  // A store whose record could not be read is not a closed one (CX-123 rule 24): when none read and one did not,
-  // nothing was sent, so the page never says a link is on its way (Claude 5 on #2910).
+  let charged: Store | null = null;
+  // A store whose record could not be read, or answered out of shape, is not a closed one (CX-123 rule 24): when none
+  // read and one did not, nothing was sent, so the page never says a link is on its way (Claude 5 and Codex J on #2910).
   let unread = 0;
   for (const sid of await storesBoughtFrom(email)) {
-    const store = await storeForId(sid).catch(() => undefined);
-    if (store === undefined) unread += 1;
-    if (!store) continue;
+    const store = await storeForIdExactly(sid).catch(() => "unknown" as const);
+    if (store === "unknown") unread += 1;
+    if (store === "unknown" || store === "none") continue;
     stores.push(sid);
     charged ??= store;
   }

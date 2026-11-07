@@ -290,11 +290,18 @@ function validStep(step: unknown): step is PriceStep {
 /**
  * The history in time order, steps of the same second kept in the order they
  * were applied (a stable sort); null when it is not a list or any step is
- * unreadable, so a filtered subset is never taken for the whole history.
+ * unreadable, a missing slot included (every and map skip holes, so each index
+ * is read), so a filtered subset is never taken for the whole history.
  */
 function steps(history: unknown): PriceStep[] | null {
-  if (!Array.isArray(history) || !history.every(validStep)) return null;
-  return history.map((step) => ({ at: step.at, cents: step.cents })).sort((a, b) => a.at - b.at);
+  if (!Array.isArray(history)) return null;
+  const out: PriceStep[] = [];
+  for (let index = 0; index < history.length; index += 1) {
+    const step: unknown = history[index];
+    if (!validStep(step)) return null;
+    out.push({ at: step.at, cents: step.cents });
+  }
+  return out.sort((a, b) => a.at - b.at);
 }
 
 /**
@@ -309,7 +316,9 @@ function steps(history: unknown): PriceStep[] | null {
  * higher. An unreadable history comes back as it came, so it keeps reading as
  * unreadable instead of a filtered subset that would read as complete. Pure.
  */
-export function recordPrice(history: readonly PriceStep[], cents: number, now: number): PriceStep[] {
+export function recordPrice(history: readonly PriceStep[], cents: number, now: number): PriceStep[];
+// The body takes any value: an unreadable one is handed back as it came, a list copied with its holes.
+export function recordPrice(history: unknown, cents: number, now: number): unknown {
   const out = steps(history);
   if (!out) return Array.isArray(history) ? history.slice() : history;
   if (!Number.isSafeInteger(cents) || cents < 0 || !Number.isSafeInteger(now) || now <= 0) return out;

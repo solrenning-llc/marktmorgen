@@ -15,7 +15,16 @@ import { done, is } from "./check";
 const html = renderToStaticMarkup(createElement(GoogleSignIn, { handle: "" }));
 const button = /<button[^>]*>[\s\S]*?<\/button>/.exec(html)?.[0] ?? "";
 
-is("the button still says Continue with Google", button.replace(/<[^>]*>/g, "").trim(), "Continue with Google");
+/** The button's words: tags taken out until none is left, so a tag cut in two cannot leave one behind. */
+const wordsOf = (markup: string): string => {
+  let text = markup;
+  for (let before = ""; before !== text; ) {
+    before = text;
+    text = text.replace(/<[^>]*>/g, "");
+  }
+  return text.replace(/[<>]/g, "");
+};
+is("the button still says Continue with Google", wordsOf(button).trim(), "Continue with Google");
 is("it carries an svg G hidden from screen readers and from the tab order", /<svg[^>]*aria-hidden="true"[^>]*focusable="false"/.test(button), true);
 is("in Google's four standard colors", ["#4285F4", "#34A853", "#FBBC05", "#EA4335"].map((c) => button.includes(`fill="${c}"`)), [true, true, true, true]);
 is("on white, whatever the page's colors", /bg-white[^"]*"[^>]*>\s*<svg/.test(button), true);

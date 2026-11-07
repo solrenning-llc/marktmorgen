@@ -1,3 +1,111 @@
+# C2 blocked-review continuation — 2026-11-07 01:02 Fortaleza
+
+Newest state supersedes affected history below; every old head/RED is preserved.
+Official2695 **dc431848** remains unchanged, OPEN/NOT RELEASED. No push of a
+partial product head, main integration, merge, CI rerun/retry/cancel in this run.
+C4-3100 MAIN VERDE still effective, no later MAIN VERMELHO observed. C4-3110/MV
+applies as coordinator order even before3042:15openPR ceiling, reviews unlimited,
+main integration only when necessary, no push just to retry. 3037G/3042C5
+priority claims preserved, not duplicated. Main instruction/index/5reservation/
+inbox/queue hashes remain identical to the previously read snapshots.
+
+## H2 original scope closed; NEW independent C5 findings block
+
+- H2 nominal **5809878008** on EXACTdc431848 closes THREE original MEDIUM5793479406, no new focal high/medium. Actual store-blog/RSS/MemoryRedis with explicit synthetic provisioning/room/prose/words boundaries, SAME original08f5 proof11 asserts: old53ecd8FAIL+3PASS →11PASS. Old attempt Git materialization timeout was BEFORE assertions, not RED. Demo guard inspected by source, no fresh semantic types/demo full run claimed by H2. Durableb732764832cd4c3a3d43bc02591f6c6379d9d060 on same H2 review branch. This does NOT close C5 or R2 legacy compatibility.
+- Independent C5 **6701786155**: TWO new MEDIUM +FOUR LOW, noHIGH. M1 applied mutation timeout→generic500/server_error/Try again→new-post duplicate. M2 real non-atomic save/delete interleaving→pub index orphan without metadata, public/RSS persistently503 and studioHVALS cannot expose removable orphan. Both BLOCKING; no productive M correction before requested R2/C4 reproduction/classification.
+- LOWs: transient read consistency under concurrent mutation; stale store.posts cache after first confirmed publication/countUnknown (blog navigation/feed404 and misleading reload recovery); retry-link text lacking its own blog context; HTML200/noindex versus RSS503 limitation. Only retry-link LOW3 has LOCAL corrective work below; none self-closed.
+- Requests: **6701910939** asks C5 durable original proof/launcher and R2/C4 execution/classification. C5 supplied **6701948908**, original sourceblob **aa7d6f9590fed341af64f178c99683f410cb3b5c**, launcher **8cfe59ba2e47cfca4c1ab8a5a62145f28d059aed**, full bytes inline in PR. These7 assertions AFFIRM DEFECTS:7/7 confirms bugs, not product GREEN. Assertions A1/A3/B3/B4 are not a correction acceptance suite; don't call old proof7/7 afterfix without interpreting its direction.
+- C2 AUTHOR replay SAME bytes hashchecked unchanged, real product/config blobs verified unchanged fromdc4318: **7/7 defect-affirming assertions**,196 backend commands, external fetch blocked. Exact C5 launcher preserved separately, bounded wrapper canonical aliases/env/1000backend-command/120s/384MiBheap/128KiBlog limits; expected timeout stack retained. No assertion/source rewrite, no product correction, NOT independent R2 classification. Pre-dispatch admission used free+clean inactive cache minusdirty/writeback. Reply/result **6701977406**, preexecution bounds **6701967003**.
+
+## Terminal exact-head CI — owned failures, not flake
+
+- Nine aggregators: EIGHTsuccess +product-checks **128288177972 failure**. verify **128281316045** terminal failure. Full decoded log73516lines/5856592chars read; exactly TWO actual failed files. Synthetic mail-check FAIL wording belongs to PASS controls, not a third failing group; lint141warnings/0errors not the failure; browser272/272 passed in CI.
+- **tap-targets.test.ts**6tests/1failure: own app/[handle]/blog/blog-unavailable.tsx:15 has min-h-11 without centering. Corrected locally below with canonical RED.
+- **wg16-empty-state.test.ts**31checks/1failure expects exact literal await-destructure immediately beforetotal0→notFound. Actual page retains confirmed-total0→notFound after explicit unknown/unavailable branch. Shared test not edited; M/C4 ownership/disposition asked **6701921245** before changing it. Do not restore stale store.posts shortcut or fabricate0 just to satisfy spelling. No independent disposition yet.
+
+## LOCAL ONLY UI WIP — do not push partial head
+
+- Reservation **22bc8fda0c7434070b732746585b16bdb9c24a7b** before new code/tests, scoped to existing THREE own paths: app/[handle]/blog/blog-unavailable.tsx,lib/buyer-words/blog-reading.ts,tests/blog-availability.test.ts. M paths/sharedtests untouched.
+- Durable LOCAL RED **976963be2469c038b8fe9fe6ad51efd6b5a7ce00**, tree **72b4a140e2cbf2760e492eb738c28e7a8fd28006**: canonical tap6/1failure +author84/7failures. Original77 source byte-identical;7ADDITIVE SSR assertions require retry link to name the blog without surrounding text.
+- LOCAL corrected **859dc8209d9edf7b01c15d5f718e4917bd4a7b2c**, tree **8f435cc20de777f62bba17bf72c127073456f1b2**: SAMEtap6/6 +84/84; linked deliverycopy3Node +unavailablepage10Node pass. Actual strictES2017 THREE roots/importgraph0; scoped lint3paths0, scanner4171/0,diffclean. Final4groups209 observedbackend commands/0external. Types1024MiBheap admitted2557784064B free+clean inactive cache/120s; exit0/logempty. No global/browser/native/CI certification. One first GREEN attempt was refused BEFOREdispatch forfree-only memory threshold, not a test failure; refined clean-cache admission is explicit, no cache dropping/foreign process termination.
+- These two LOCAL hashes are NOT remotely fetchable, product branch stilldc4318. Full three-path diff is embedded below for durable recovery without claiming another remote product ref or source execution. Native local parent9ff metadata differs from officialdc4318 but tree600e1582 identical. Original RED +WIP objects remain in /workspace/scratch/c2-resume.LpgUL6/blog-local. Do not open a new PR/recreate this unit or publish a partial candidate while MEDIUMs/shared WG16 pending.
+- Logs /tmp/c2-blog-retry-link-{red,green}.log, /tmp/c2-blog-retry-{types,lint,scanner}.log, /tmp/c2-blog-c5-replay.log. Original C5 bytes /tmp/c5-2695-review.proof.ts and /tmp/c5-2695-original-launcher.mjs; bounded wrapper /tmp/c2-blog-c5-replay.mjs. Existing canonical wrapper /tmp/c2-blog-post-main.mjs now supports explicit file list and correct run-counter guard.
+- PR body rewritten to current blockers/limits, not unconditional clean approval. No postwrite monetary/storage protocol/paidIO/flags/limits/price/account/provider/PII changed.
+
+## Exact LOCAL UI WIP diff against official dc431848
+
+```diff
+diff --git a/app/[handle]/blog/blog-unavailable.tsx b/app/[handle]/blog/blog-unavailable.tsx
+index 92cc012b1..1b406c1c0 100644
+--- a/app/[handle]/blog/blog-unavailable.tsx
++++ b/app/[handle]/blog/blog-unavailable.tsx
+@@ -12,7 +12,7 @@ export function BlogUnavailable({ language, handle, name }: { language: unknown;
+    <a href={base} className="link inline-flex min-h-11 items-center">{name}</a>
+    <h1 className="t-h2 mt-6">{wordsIn(code).blogOf(name)}</h1>
+    <p role="status" className="notice mt-6">{words.unavailable}</p>
+-   <a href={`${base}/blog`} className="btn btn-secondary mt-6 min-h-11">{words.retry}</a>
++   <a href={`${base}/blog`} className="btn btn-secondary mt-6 inline-flex min-h-11 items-center justify-center">{words.retry}</a>
+   </main>
+  </div>;
+ }
+diff --git a/lib/buyer-words/blog-reading.ts b/lib/buyer-words/blog-reading.ts
+index 5ff6f8c12..5245b7908 100644
+--- a/lib/buyer-words/blog-reading.ts
++++ b/lib/buyer-words/blog-reading.ts
+@@ -1,13 +1,13 @@
+ import { parseLanguage, type LanguageCode } from "@/lib/store-language";
+ 
+ const WORDS: Record<LanguageCode, { unavailable: string; retry: string }> = {
+- en: { unavailable: "The blog could not be read right now. Try again in a moment. This does not mean there are no posts.", retry: "Try again" },
+- es: { unavailable: "No se ha podido leer el blog en este momento. Inténtalo de nuevo en un momento. Esto no significa que no haya publicaciones.", retry: "Intentar de nuevo" },
+- fr: { unavailable: "Le blog n’a pas pu être lu pour le moment. Réessayez dans un instant. Cela ne signifie pas qu’il n’y a aucune publication.", retry: "Réessayer" },
+- de: { unavailable: "Der Blog konnte gerade nicht gelesen werden. Versuche es gleich noch einmal. Das bedeutet nicht, dass es keine Beiträge gibt.", retry: "Erneut versuchen" },
+- it: { unavailable: "Al momento non è stato possibile leggere il blog. Riprova tra poco. Questo non significa che non ci siano articoli.", retry: "Riprova" },
+- nl: { unavailable: "De blog kon nu niet worden gelezen. Probeer het zo opnieuw. Dit betekent niet dat er geen berichten zijn.", retry: "Opnieuw proberen" },
+- pt: { unavailable: "Não foi possível ler o blog agora. Tente novamente em instantes. Isso não significa que não há publicações.", retry: "Tentar novamente" },
++ en: { unavailable: "The blog could not be read right now. Try again in a moment. This does not mean there are no posts.", retry: "Try loading the blog again" },
++ es: { unavailable: "No se ha podido leer el blog en este momento. Inténtalo de nuevo en un momento. Esto no significa que no haya publicaciones.", retry: "Volver a cargar el blog" },
++ fr: { unavailable: "Le blog n’a pas pu être lu pour le moment. Réessayez dans un instant. Cela ne signifie pas qu’il n’y a aucune publication.", retry: "Réessayer de charger le blog" },
++ de: { unavailable: "Der Blog konnte gerade nicht gelesen werden. Versuche es gleich noch einmal. Das bedeutet nicht, dass es keine Beiträge gibt.", retry: "Blog erneut laden" },
++ it: { unavailable: "Al momento non è stato possibile leggere il blog. Riprova tra poco. Questo non significa che non ci siano articoli.", retry: "Riprova a caricare il blog" },
++ nl: { unavailable: "De blog kon nu niet worden gelezen. Probeer het zo opnieuw. Dit betekent niet dat er geen berichten zijn.", retry: "Probeer de blog opnieuw te laden" },
++ pt: { unavailable: "Não foi possível ler o blog agora. Tente novamente em instantes. Isso não significa que não há publicações.", retry: "Voltar a carregar o blog" },
+ };
+ 
+ export function blogReadingWords(language: unknown): { unavailable: string; retry: string } {
+diff --git a/tests/blog-availability.test.ts b/tests/blog-availability.test.ts
+index 68ddd178f..27deaa854 100644
+--- a/tests/blog-availability.test.ts
++++ b/tests/blog-availability.test.ts
+@@ -141,6 +141,12 @@ async function main(){
+   is("the acknowledged deletion removed the actual post",await readPost(store.statsId,deleteId),null);
+   is("unknown deletion total does not replace the cached count",(await storeForEmail(email))?.posts,cached);
+  }finally{redis.pipeline=pipeline;}
++ part("The retry link identifies its destination without surrounding text");
++ for(const code of Object.keys(LANGUAGES)){
++  const html=renderToStaticMarkup(createElement(BlogUnavailable,{language:code,handle:store.handle,name:store.name}));
++  const retry=/<a\b[^>]*href="[^"]*\/blog"[^>]*>([\s\S]*?)<\/a>/.exec(html);
++  is("retry link names the blog in its own accessible text: "+code,/blog/i.test(retry?.[1]??""),true);
++ }
+  done();
+ }
+ main().catch(error=>{console.error(error);process.exit(1);});
+```
+
+## Remaining and next exact action
+
+Await R2/C4 classification of SAME C5 MED proof, then design/RED/correct on SAME
+2695 with complete admission for any added commands, preserve reviewer proof,
+obtain nominal final independent returns and9NEW exact successes. Need M/C4
+WG16 test disposition. Keep officialheaddc4318 until a complete causal fix.
+2692 PRIMARY35e6/recovery8c2 with BOTH D2+H2financials remains displayA3blocked.
+2846 PRIMARY7cd/WIP3d838 still awaits NOMINAL C4 composition2963; C6 noted2910
+depends on2846, not a grant to edit C4 loop or promote blocked WIP. 2956LOWC5
+andAPIleads assignments unchanged, no replay. 2903merged0471 stays completed.
+Keep single enabled continuation, no new automation/background-watch claim.
+
+---
+
 # C2 continuation — 2026-11-07 00:05 Fortaleza
 
 Newest state supersedes affected history below. C4-3100 MAIN VERDE remains

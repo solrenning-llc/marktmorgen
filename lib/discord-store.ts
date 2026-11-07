@@ -16,7 +16,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { emailKey, storeKey } from "@/lib/learn";
 import { normaliseEmail } from "@/lib/auth";
@@ -224,8 +224,10 @@ export async function forgetMember(room: string, sid: string, userId: string, em
     ...(held === userId ? [["DEL", addressKey(room, email)]] : []),
   ];
   // The deletes are read too: a missing, short or queued answer is not "forgotten", so the erasure is retried.
+  // Each command names one field, one member or one key, so only 0 or 1 is a known answer: any other count is
+  // unknown and never confirms erasure (Codex Z focal return on #2932, review 5808484150).
   const replies = repliesFor(await redisPipeline(commands), commands.length);
-  if (!replies || !replies.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("the deletion of a Discord member");
+  if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("the deletion of a Discord member");
 }
 
 /** Puts a person first in line to be checked: a refund made in the studio, say. */

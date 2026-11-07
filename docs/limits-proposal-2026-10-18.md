@@ -14,20 +14,20 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 
 | Line | Store monthly ($69) | Store yearly ($690) | Studio monthly ($449) | Studio yearly ($4490) | Scale monthly ($999) | Scale yearly ($9990) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Net today | 55.73% | 55.19% | 59.66% | 59.22% | 60.12% | 59.67% |
-| AI drafts / answers a month | none today | none today | 40 / 250 → **15 / 90** | 40 / 250 → **4 / 25** | 80 / 400 | 80 / 400 → **33 / 160** |
-| Video hours watched a month | 4 | 4 | 32 | 32 → **3** | 64 | 64 |
-| Storage | 5 GiB | 5 GiB | 40 GiB | 40 GiB → **16.5 GiB** | 80 GiB | 80 GiB |
-| Orders a month | 200 | 200 | 450 | 450 | 1,500 | 1,500 |
-| Store emails a month | 75 | 75 | 300 | 300 | 800 | 800 |
-| Access emails a month | 150 | 150 | 400 | 400 | 1,000 | 1,000 |
-| List emails a month | none today | none today | 7,000 | 7,000 | 10,000 | 10,000 |
+| Net today | 51.95% | 50.80% | 58.61% | 58.11% | 59.15% | 58.66% |
+| AI drafts / answers a month | none today | none today | 40 / 250 → **4 / 25** | 40 / 250 → **4 / 25** | 80 / 400 → **8 / 40** | 80 / 400 → **8 / 40** |
+| Video hours watched a month | 4 | 4 | 32 → **3** | 32 → **3** | 64 → **6** | 64 → **6** |
+| Storage | 5 GiB | 5 GiB | 40 GiB → **4 GiB** | 40 GiB → **4 GiB** | 80 GiB → **26 GiB** | 80 GiB → **8 GiB** |
+| Orders a month | 200 | 200 | 450 → **45** | 450 → **45** | 1,500 | 1,500 → **150** |
+| Store emails a month | 75 | 75 | 300 → **30** | 300 → **30** | 800 | 800 → **80** |
+| Access emails a month | 150 | 150 | 400 → **40** | 400 → **40** | 1,000 | 1,000 → **100** |
+| List emails a month | none today | none today | 7,000 → **6,500** | 7,000 → **3,400** | 10,000 | 10,000 → **8,700** |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
-| Net with the cuts | not reachable | not reachable | **60.00%** | **60.00%** | **60.12%** | **60.00%** |
-| Every printed line at 10% / at zero | 57.47% / 57.66% | 57.13% / 57.35% | 62.05% / 62.31% | 61.89% / 62.19% | 62.46% / 62.72% | 62.31% / 62.60% |
-| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 87.48% of today | 73.81% of today | 100.00% of today | 88.95% of today |
+| Net with the cuts | not reachable | not reachable | **60.00%** | **60.01%** | **60.00%** | **60.00%** |
+| Every printed line at 10% / at zero | 54.33% / 54.59% | 53.40% / 53.68% | 61.43% / 61.75% | 61.18% / 61.52% | 62.07% / 62.40% | 61.87% / 62.23% |
+| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 55.79% of today | 44.81% of today | 74.06% of today | 62.56% of today |
 
-Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 57.66%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 57.35%: its hidden lines and receiving alone take more than the floor leaves).
+Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 54.59%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 53.68%: its hidden lines and receiving alone take more than the floor leaves).
 
 ## How each line compares
 
@@ -50,15 +50,15 @@ Sources:
 
 ## Store assistant: the input cap that would keep 60%
 
-Today each reply may send the model 24,576 bytes (lib/store-assistant-rules.ts, ASSISTANT_INPUT_BYTES), of which 16,384 are the store's facts; at $69.00 a month and 700 replies the add-on keeps 60.40%, with its room: no cut to the input is proposed. The rows below are the largest caps the price would carry.
+Today each reply may send the model 24,576 bytes (lib/store-assistant-rules.ts, ASSISTANT_INPUT_BYTES), of which 16,384 are the store's facts; at $69.00 a month and 700 replies the add-on keeps 60.24%. The rows below are the largest caps the price would carry.
 
 | Input cap | Of which the store's facts | About how many of the 40 products read, at today's average of 410 bytes each | Net |
 | --- | --- | --- | --- |
-| 24,576 (today) | 16,384 | 40 | 60.40% |
-| 29,684 (the largest that keeps 60%) | 21,492 | 52 | 60.00% |
-| 26,434 (the largest that keeps 60% with the add-on's 25¢ room, what assistantMeetsFloor asks) | 18,242 | 44 | 60.26% |
+| 24,576 (today) | 16,384 | 40 | 60.24% |
+| 27,694 (the largest that keeps 60%) | 19,502 | 47 | 60.00% |
+| 24,444 (the largest that keeps 60% with the add-on's 25¢ room, what assistantMeetsFloor asks) | 16,252 | 39 | 60.26% |
 
-Nothing is cut: today's cap already keeps 60% with its room at the price set on 18 October 2026.
+The conversation and the rules keep their share; only the catalog text shrinks, so a buyer asking about a product past the cut is told more products exist and is answered less well.
 
 ## AI captions: the price that would keep 60%
 

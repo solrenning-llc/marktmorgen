@@ -36,7 +36,7 @@ test("it changes nothing in force: the price list, the receiving model, the tax 
   assert.equal(STRESS_PROFIT_TAX_BPS, 2_750);
   assert.equal(SIZING_READING.salesTaxOnTopBps, 2_700);
   assert.equal(PER_EMAIL, 0.0009);
-  assert.equal(STORAGE_PER_GB, 0.023);
+  assert.equal(STORAGE_PER_GB, 0.041);
 });
 
 test("each pack's lines add back to its price, and the four factors multiply back to price over cost", () => {

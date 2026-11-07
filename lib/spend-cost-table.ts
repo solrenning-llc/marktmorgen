@@ -55,14 +55,18 @@ export const AI_TOKENS_PER_BLOCK = 32;
 export const IMAGE_TOKEN_CEILING = 4_784;
 
 /** Hosting rates for the request that waits on the model (tests/traffic-cost.ts
- * holds the same figures for visits): function memory $0.0106 per GB-hour at
+ * holds the same figures for visits): function memory $0.0183 per GB-hour at
  * 2 GB, held for the whole 45-second model timeout; $0.60 per million
- * function calls; $0.128 per CPU-hour, one CPU-second counted; $2.00 per
- * million database commands, twenty counted. */
-export const VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR = 10_600;
+ * function calls; $0.221 per CPU-hour, one CPU-second counted; $2.00 per
+ * million database commands, twenty counted. Memory and CPU are the top of
+ * the official regional ranges ($0.0106-$0.0183 and $0.128-$0.221), because
+ * no deployment region is proven in this repository: Vercel "Regional Pricing" (vercel.com/docs/pricing/regional-pricing, last updated September 14, 2026, read November 7, 2026). Function
+ * calls are not regional (vercel.com/docs/functions/usage-and-pricing, last
+ * updated June 16, 2026, read November 7, 2026). */
+export const VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR = 18_300;
 export const VERCEL_FUNCTION_GB = 2;
 export const VERCEL_CALL_MICRO_USD_PER_MILLION = 600_000;
-export const VERCEL_CPU_MICRO_USD_PER_HOUR = 128_000;
+export const VERCEL_CPU_MICRO_USD_PER_HOUR = 221_000;
 export const UPSTASH_MICRO_USD_PER_MILLION_COMMANDS = 2_000_000;
 export const AI_CALL_WAIT_SECONDS = 45;
 const ceilDiv = (a: bigint, b: bigint) => (a + b - BigInt(1)) / b;

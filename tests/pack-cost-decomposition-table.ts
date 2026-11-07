@@ -136,13 +136,13 @@ export const SUPPLIER_RATES: SupplierRate[] = [
   {
     line: "Storage", constant: "STORAGE_PER_GB (tests/plan-cost-registry.ts)", inUse: `$${STORAGE_PER_GB.toFixed(3)} per GB-month`,
     source: "Vercel pricing (Blob storage)", url: "https://vercel.com/pricing", read: READ_ON,
-    finding: "Blob storage \"$0.023 per GB\": the dearest of the three stores a file may be in (R2 $0.015, Bunny Stream $0.01 a region).",
+    finding: "Blob storage \"$0.023 per GB\" (its lowest region); since November 7, 2026 the registry uses the top of Vercel's regional range, $0.041 a GB-month (vercel.com/docs/pricing/regional-pricing, last updated September 14, 2026), because no deployment region is proven: the dearest of the three stores a file may be in (R2 $0.015, Bunny Stream $0.01 a region).",
     verdict: "kept",
   },
   {
     line: "Storage, the store sold files are in (lib/vault.ts)", constant: "R2_STORAGE_MICRO_USD_PER_GB_MONTH (lib/spend-cost-table.ts)", inUse: `$${R2_PER_GB.toFixed(3)} per GB-month, not used by the storage line`,
     source: "Cloudflare R2 pricing", url: "https://developers.cloudflare.com/r2/pricing/", read: "not re-read: the fetch was refused on 18 October 2026; the repository's reading of 17 October 2026 is used",
-    finding: "R2 Standard $0.015 per GB-month (lib/spend-cost-table.ts). Lower than $0.023 only for bytes the code proves are in R2.",
+    finding: "R2 Standard $0.015 per GB-month (lib/spend-cost-table.ts). Lower than the storage line's rate only for bytes the code proves are in R2.",
     verdict: "cheaper only if built",
   },
   {
@@ -152,7 +152,7 @@ export const SUPPLIER_RATES: SupplierRate[] = [
     verdict: "possibly low",
   },
   {
-    line: "Visits (the host's share)", constant: "visitCost() (tests/traffic-cost.ts)", inUse: "$0.60 per million calls, $0.128 a CPU-hour, $0.0106 a GB-hour, $0.06 a GB origin transfer",
+    line: "Visits (the host's share)", constant: "visitCost() (tests/traffic-cost.ts)", inUse: "$0.60 per million calls, $0.221 a CPU-hour, $0.0183 a GB-hour, $0.43 a GB origin transfer (the top of each regional range since November 7, 2026)",
     source: "Vercel pricing", url: "https://vercel.com/pricing", read: READ_ON,
     finding: "The same four rates, each marked \"Starting at\" (regional pricing may be higher); CDN requests \"Included in Flat Rate CDN\", whose amount the page does not show.",
     verdict: "kept",

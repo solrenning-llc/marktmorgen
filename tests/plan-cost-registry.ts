@@ -127,8 +127,13 @@ import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DA
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
 
 export const GB = 1024 * 1024 * 1024;
-/** Keeping a file, at the dearest of the three stores one may be in. */
-export const STORAGE_PER_GB = 0.023;
+/**
+ * Keeping a file, at the dearest of the three stores one may be in: Vercel
+ * Blob storage at the top of its regional range ($0.023-$0.041 a GB-month),
+ * since no deployment region is proven in this repository. Source:
+ * Vercel "Regional Pricing" (vercel.com/docs/pricing/regional-pricing, last updated September 14, 2026, read November 7, 2026).
+ */
+export const STORAGE_PER_GB = 0.041;
 /** Sending a file that is sold: nothing, from the store they are kept in. */
 export const FILE_DELIVERY_PER_GB = 0;
 export const STREAM_STORAGE_PER_GB = 0.02;
@@ -184,10 +189,12 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
   const snsPerAttempt = 5 * 0.6 / 1_000_000 + 320_000 * snsTransferPerGb / 1e9;
   // Include CDN request and BOTH incoming and outgoing Fast Origin/Data
   // Transfer; model 32 KiB of headers plus 300,000 request/128 response bytes.
-  // Regional account coverage still needs an independent review.
+  // Every Vercel rate is the top of its regional range (CDN requests
+  // $2.00-$3.20 a million, Fast Data Transfer $0.15-$0.35 a GB), since no
+  // deployment region is proven: Vercel "Regional Pricing" (vercel.com/docs/pricing/regional-pricing, last updated September 14, 2026, read November 7, 2026).
   const networkBytes = 300_000 + 128 + 32_768;
-  const hostingPerAttempt = CALL + 30 * CPU_SECOND + 30 * MEMORY_SECOND + 2 / 1_000_000
-    + networkBytes * (ORIGIN_PER_BYTE + 0.15 / 1e9);
+  const hostingPerAttempt = CALL + 30 * CPU_SECOND + 30 * MEMORY_SECOND + 3.2 / 1_000_000
+    + networkBytes * (ORIGIN_PER_BYTE + 0.35 / 1e9);
   const redisPerAttempt = 11 * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
   const retainedPerNotice = 512 * 10 / 30 * DB_BYTE_MONTH;
   const snsUsd = deliveries * (snsPerNotice + attempts * snsPerAttempt);
@@ -335,15 +342,16 @@ export const PAUSED_PER_DAY = 20;
 
 /** Commands a store figure costs to take (lib/store-allowance.ts): its count kept, and a store that pays nothing's place. */
 export const TAKE_COMMANDS = 4;
-/** What a function sends on to the browser, by the byte ("Fast Origin Transfer", tests/traffic-cost.ts). */
-export const ORIGIN_PER_BYTE = 0.06 / 1e9;
+/** What a function sends on to the browser, by the byte ("Fast Origin Transfer", tests/traffic-cost.ts): the top of the regional range, $0.06-$0.43 a GB. */
+export const ORIGIN_PER_BYTE = 0.43 / 1e9;
 /**
  * What the file store charges to hand a private file to a function that
- * reads it, by the byte: a review ceiling, twice Vercel Blob's published
- * data transfer rate, for the community pictures that pass through us
- * (app/api/store/community/image).
+ * reads it, by the byte, for the community pictures that pass through us
+ * (app/api/store/community/image): Vercel Blob data transfer at the top of
+ * its regional range, $0.05-$0.117 a GB (until November 7, 2026 a review
+ * ceiling of $0.10, twice the lowest rate). Source: Vercel "Regional Pricing" (vercel.com/docs/pricing/regional-pricing, last updated September 14, 2026, read November 7, 2026).
  */
-export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
+export const BLOB_TRANSFER_PER_BYTE = 0.117 / 1e9;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */

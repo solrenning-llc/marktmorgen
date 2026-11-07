@@ -7,7 +7,7 @@
  * The rates are the published ones, read on October 7, 2026, and they move
  * only when the vendors' do:
  *
- *   Vercel, CDN requests       $2.00 / million   (Flat Rate CDN, which this
+ *   Vercel, CDN requests       $3.20 / million   (Flat Rate CDN, which this
  *                                                 account is on: each tier
  *                                                 is this much a million,
  *                                                 and the bytes sent are in
@@ -15,8 +15,8 @@
  *                                                 costs a request and no
  *                                                 more whatever it weighs)
  *   Vercel, function calls     $0.60 / million
- *   Vercel, function CPU       $0.128 / hour
- *   Vercel, function memory    $0.0106 / GB-hour (2 GB for as long as a
+ *   Vercel, function CPU       $0.221 / hour
+ *   Vercel, function memory    $0.0183 / GB-hour (2 GB for as long as a
  *                                                 request is being answered)
  *   Upstash, commands          $2.00 / million   (pay as you go, $0.20 a
  *                                                 hundred thousand)
@@ -39,9 +39,9 @@
  * thirty times this.
  *
  * One more rate, which Flat Rate CDN does not cover: what a function sends
- * the CDN ("Fast Origin Transfer", $0.06 a gigabyte in the region this runs
- * in). A page of a store is 44 KB as it travels, compressed, and 460 KB
- * before, measured on October 7, 2026; the host said on July 15, 2024 that
+ * the CDN ("Fast Origin Transfer", $0.43 a gigabyte, the top of the
+ * regional range, below). A page of a store is 44 KB as it travels,
+ * compressed, and 460 KB before, measured on October 7, 2026; the host said on July 15, 2024 that
  * what travels between a function and the CDN is compressed, and the page is
  * costed as it travels, a little over. This is the figure to hold against
  * the host's own bill once real stores are visited: charged uncompressed, a
@@ -68,13 +68,20 @@
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
 
-export const CDN_PER_REQUEST = 2.0 / 1_000_000;
+/**
+ * The Vercel rates below are the top of each official regional range (CDN
+ * requests $2.00-$3.20 a million, Active CPU $0.128-$0.221 an hour,
+ * Provisioned Memory $0.0106-$0.0183 a GB-hour, Fast Origin Transfer
+ * $0.06-$0.43 a GB): no deployment region is proven in this repository.
+ * Source: Vercel "Regional Pricing" (vercel.com/docs/pricing/regional-pricing, last updated September 14, 2026, read November 7, 2026).
+ */
+export const CDN_PER_REQUEST = 3.2 / 1_000_000;
 export const COMMAND = 2.0 / 1_000_000;
 const CALL = 0.6 / 1_000_000;
-const CPU_PER_SECOND = 0.128 / 3600;
-const MEMORY_PER_SECOND = (0.0106 * 2) / 3600;
+const CPU_PER_SECOND = 0.221 / 3600;
+const MEMORY_PER_SECOND = (0.0183 * 2) / 3600;
 /** What a function sends the CDN, by the byte. */
-export const ORIGIN_PER_BYTE = 0.06 / 1_000_000_000;
+export const ORIGIN_PER_BYTE = 0.43 / 1_000_000_000;
 /** A page of a store as it leaves the function: 44 KB measured, costed at 48. */
 export const PAGE_BYTES = 48_000;
 

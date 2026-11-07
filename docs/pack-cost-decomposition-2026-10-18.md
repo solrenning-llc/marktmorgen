@@ -42,16 +42,16 @@ Each pack of the proposal at its price, on its own payment, used in full. Every 
 
 | Pack | Price | Use (cost) | Fee, percentages | Fee, fixed | Remittance | Refund reserve | Dispute reserve, % | Dispute reserve, fixed | Free-account share | Profit tax | Unused room | Net |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 5,000 visits | **$44** | $1.36 (3.09%) | $3.71 (8.43%) | $0.30 (0.68%) | $0.66 (1.50%) | $0.44 (1.00%) | $0.56 (1.27%) | $0.30 (0.68%) | $0.00 (0.00%) | $10.09 (22.93%) | $0.25 (0.57%) | $26.58 (60.41%) |
+| 5,000 visits | **$58** | $2.06 (3.55%) | $4.88 (8.41%) | $0.30 (0.52%) | $0.87 (1.50%) | $0.58 (1.00%) | $0.74 (1.28%) | $0.30 (0.52%) | $0.00 (0.00%) | $13.28 (22.90%) | $0.27 (0.47%) | $34.99 (60.33%) |
 | 250 orders, with their access and store emails | **$35** | $0.89 (2.54%) | $2.96 (8.46%) | $0.30 (0.86%) | $0.53 (1.51%) | $0.35 (1.00%) | $0.45 (1.29%) | $0.30 (0.86%) | $0.00 (0.00%) | $8.04 (22.97%) | $0.25 (0.71%) | $21.18 (60.51%) |
 | 2,500 list emails | **$62** | $2.25 (3.63%) | $5.23 (8.44%) | $0.30 (0.48%) | $0.93 (1.50%) | $0.62 (1.00%) | $0.79 (1.27%) | $0.30 (0.48%) | $0.00 (0.00%) | $14.19 (22.89%) | $0.26 (0.42%) | $37.39 (60.31%) |
-| 20 AI writing jobs and 100 answers | **$50** | $1.60 (3.20%) | $4.22 (8.44%) | $0.30 (0.60%) | $0.75 (1.50%) | $0.50 (1.00%) | $0.64 (1.28%) | $0.30 (0.60%) | $0.00 (0.00%) | $11.47 (22.94%) | $0.31 (0.62%) | $30.22 (60.44%) |
-| 25 GB of storage | **$43** | $1.29 (3.00%) | $3.63 (8.44%) | $0.30 (0.70%) | $0.65 (1.51%) | $0.43 (1.00%) | $0.55 (1.28%) | $0.30 (0.70%) | $0.00 (0.00%) | $9.86 (22.93%) | $0.26 (0.60%) | $25.99 (60.44%) |
+| 20 AI writing jobs and 100 answers | **$50** | $1.62 (3.24%) | $4.22 (8.44%) | $0.30 (0.60%) | $0.75 (1.50%) | $0.50 (1.00%) | $0.64 (1.28%) | $0.30 (0.60%) | $0.00 (0.00%) | $11.46 (22.92%) | $0.29 (0.58%) | $30.21 (60.42%) |
+| 25 GB of storage | **$63** | $2.29 (3.63%) | $5.33 (8.46%) | $0.30 (0.48%) | $0.95 (1.51%) | $0.63 (1.00%) | $0.81 (1.29%) | $0.30 (0.48%) | $0.00 (0.00%) | $14.41 (22.87%) | $0.25 (0.40%) | $37.98 (60.29%) |
 | 20 video hours watched | **$24** | $0.29 (1.21%) | $2.04 (8.50%) | $0.30 (1.25%) | $0.36 (1.50%) | $0.24 (1.00%) | $0.31 (1.29%) | $0.30 (1.25%) | $0.00 (0.00%) | $5.55 (23.13%) | $0.29 (1.21%) | $14.61 (60.88%) |
 
 Every column but the unused room adds up to the price: use, fee, remittance, reserves and tax are the unit's costs, and the net is what is left. The unused room is part of the net: what the whole-dollar price leaves above 60%, the add-on's 25¢ included.
 
-- **Of the fee and the dispute reserve, what is charged on the buyer's tax added on top**: visits $0.92, orders $0.73, list-email $1.30, ai $1.06, storage $0.89, video $0.52. The providers charge their percentages on the whole amount the buyer pays, 27% more than the price at the worst.
+- **Of the fee and the dispute reserve, what is charged on the buyer's tax added on top**: visits $1.20, orders $0.73, list-email $1.30, ai $1.06, storage $1.33, video $0.52. The providers charge their percentages on the whole amount the buyer pays, 27% more than the price at the worst.
 - **Free-account share: none.** A pack's own payment carries none of the stores that pay nothing; their share (line free-share, 1/40 of a free store's worst window) is in each plan's own payment. Selling packs to stores whose plan carries that share leaves it where it is.
 - **Sales tax on top** is not revenue and not a cost of its own here: it is collected for the state and passed on; what it costs is the fee and dispute reserve charged on it, in the line above.
 
@@ -59,11 +59,11 @@ The four factors, for every pack:
 
 | Pack | Floor and tax | Percentages | Fixed cents | Whole dollar and room | Price over cost |
 | --- | --- | --- | --- | --- | --- |
-| 5,000 visits | 5.80× | 3.43× | 1.37× | 1.18× | **32.35×** |
+| 5,000 visits | 5.80× | 3.41× | 1.26× | 1.13× | **28.16×** |
 | 250 orders, with their access and store emails | 5.80× | 3.47× | 1.53× | 1.28× | **39.33×** |
 | 2,500 list emails | 5.81× | 3.43× | 1.24× | 1.12× | **27.56×** |
-| 20 AI writing jobs and 100 answers | 5.80× | 3.43× | 1.31× | 1.19× | **31.25×** |
-| 25 GB of storage | 5.80× | 3.45× | 1.39× | 1.20× | **33.33×** |
+| 20 AI writing jobs and 100 answers | 5.80× | 3.43× | 1.31× | 1.18× | **30.86×** |
+| 25 GB of storage | 5.80× | 3.46× | 1.24× | 1.11× | **27.51×** |
 | 20 video hours watched | 5.81× | 3.50× | 2.03× | 2.00× | **82.76×** |
 
 The smaller the cost of a pack's use, the larger factors 3 and 4: the video pack's use is so small that its fixed cents and its rounding nearly double its price.
@@ -76,10 +76,10 @@ The owner's rule: never count a supplier's free quota as zero cost; use the paid
 | --- | --- | --- | --- | --- | --- | --- |
 | List emails (and the order pack's access and store emails) | PER_EMAIL (tests/plan-cost-registry.ts) | $0.90 per 1,000 | [Resend pricing](https://resend.com/pricing) | 18 October 2026 | Pro $20 a month for 50,000 and Scale $90 for 100,000; both: "Extra emails: $0.90 / 1,000"; overage "Available to paid subscriptions". The paid unit price at its most expensive tier is $0.90. | **kept** |
 | List emails, the other sender (lib/ses.ts) | none: the registry prices every email at Resend's rate | not used in any figure | [Amazon SES pricing](https://aws.amazon.com/ses/pricing/) | 18 October 2026 (page updated 2026-10-15) | Outbound "$0.10 / 1,000 emails" à la carte; the plans charge $0.16 (Essentials), $0.22 (Pro), $0.23 (Enterprise) a thousand from 0 to 10 million; new accounts start on Essentials from 21 July 2026; attachments $0.12 a GB on top. The dearest listed rate is $0.23. | **cheaper only if built** |
-| Storage | STORAGE_PER_GB (tests/plan-cost-registry.ts) | $0.023 per GB-month | [Vercel pricing (Blob storage)](https://vercel.com/pricing) | 18 October 2026 | Blob storage "$0.023 per GB": the dearest of the three stores a file may be in (R2 $0.015, Bunny Stream $0.01 a region). | **kept** |
-| Storage, the store sold files are in (lib/vault.ts) | R2_STORAGE_MICRO_USD_PER_GB_MONTH (lib/spend-cost-table.ts) | $0.015 per GB-month, not used by the storage line | [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/) | not re-read: the fetch was refused on 18 October 2026; the repository's reading of 17 October 2026 is used | R2 Standard $0.015 per GB-month (lib/spend-cost-table.ts). Lower than $0.023 only for bytes the code proves are in R2. | **cheaper only if built** |
+| Storage | STORAGE_PER_GB (tests/plan-cost-registry.ts) | $0.041 per GB-month | [Vercel pricing (Blob storage)](https://vercel.com/pricing) | 18 October 2026 | Blob storage "$0.023 per GB" (its lowest region); since November 7, 2026 the registry uses the top of Vercel's regional range, $0.041 a GB-month (vercel.com/docs/pricing/regional-pricing, last updated September 14, 2026), because no deployment region is proven: the dearest of the three stores a file may be in (R2 $0.015, Bunny Stream $0.01 a region). | **kept** |
+| Storage, the store sold files are in (lib/vault.ts) | R2_STORAGE_MICRO_USD_PER_GB_MONTH (lib/spend-cost-table.ts) | $0.015 per GB-month, not used by the storage line | [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing/) | not re-read: the fetch was refused on 18 October 2026; the repository's reading of 17 October 2026 is used | R2 Standard $0.015 per GB-month (lib/spend-cost-table.ts). Lower than the storage line's rate only for bytes the code proves are in R2. | **cheaper only if built** |
 | Video hours watched | STREAM_DELIVERY_PER_GB (tests/plan-cost-registry.ts) | $0.005 per GB | [Bunny Stream pricing](https://bunny.net/docs/stream/pricing) | 18 October 2026 | Volume tier "0 to 500 TB: $0.005" a GB (its dearest volume tier); the Standard tier is billed by region, up to $0.060 a GB (Middle East & Africa). $0.005 holds only while the library is on the Volume tier, a library setting the code does not read. | **possibly low** |
-| Visits (the host's share) | visitCost() (tests/traffic-cost.ts) | $0.60 per million calls, $0.128 a CPU-hour, $0.0106 a GB-hour, $0.06 a GB origin transfer | [Vercel pricing](https://vercel.com/pricing) | 18 October 2026 | The same four rates, each marked "Starting at" (regional pricing may be higher); CDN requests "Included in Flat Rate CDN", whose amount the page does not show. | **kept** |
+| Visits (the host's share) | visitCost() (tests/traffic-cost.ts) | $0.60 per million calls, $0.221 a CPU-hour, $0.0183 a GB-hour, $0.43 a GB origin transfer (the top of each regional range since November 7, 2026) | [Vercel pricing](https://vercel.com/pricing) | 18 October 2026 | The same four rates, each marked "Starting at" (regional pricing may be higher); CDN requests "Included in Flat Rate CDN", whose amount the page does not show. | **kept** |
 | Visits and every request (the database) | UPSTASH_MICRO_USD_PER_MILLION_COMMANDS (lib/spend-cost-table.ts) | $2.00 per million commands | [Upstash Redis pricing](https://upstash.com/pricing/redis) | 18 October 2026 | "$0.20 per 100K commands"; storage $0.25 a GB past the first; bandwidth $0.03 a GB past 200 GB. Free quotas are not counted. | **kept** |
 | AI writing jobs and answers | ANTHROPIC_RATES (lib/spend-cost-table.ts) | Sonnet 5.5 $2 / $10, Haiku 5.5 $0.10 / $0.50 a million tokens, +10% provider charges | [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) | 18 October 2026 | Sonnet 5.5 $2 in / $10 out; Haiku 5.5 $0.10 / $0.50 up to 100,000 prompt tokens, $0.50 / $2.50 above. The rates match; the unit is a hard bound (every byte a token, the whole max_tokens), which a price page cannot show too high. | **kept** |
 | Receiving a payment | PROVIDER_FEES (lib/receiving-costs.ts) | Stripe 6.6% + 30¢, Paddle 5% + 50¢, the dearer | [Stripe pricing](https://stripe.com/pricing) | not re-read: the fetch was refused on 18 October 2026; the repository's reading of 17 October 2026 is used | 2.9% + 30¢, +1.5% international card, +1% currency conversion, +0.7% Billing, +0.5% Tax; dispute $15, and $15 to counter it (lib/receiving-costs.ts). A third-party page read today (checkoutpage.com) says the 1% applies only "when the payment currency does not match your settlement currency": not Stripe's own page, so nothing is changed on it. | **not re-read** |
@@ -96,11 +96,11 @@ The same packs at one, four, ten and forty times their amount, each prepaid on i
 
 | Pack | 1×: price, per unit, price over cost | 4×: price, per unit, price over cost | 10×: price, per unit, price over cost | 40×: price, per unit, price over cost |
 | --- | --- | --- | --- | --- |
-| 5,000 visits | $44, $8.80 per 1,000 visits, 32.35× | $124, $6.20 per 1,000 visits, 22.88× | $284, $5.68 per 1,000 visits, 20.96× | $1,083, $5.42 per 1,000 visits, 19.98× |
+| 5,000 visits | $58, $11.60 per 1,000 visits, 28.16× | $180, $9.00 per 1,000 visits, 21.84× | $422, $8.44 per 1,000 visits, 20.50× | $1,636, $8.18 per 1,000 visits, 19.87× |
 | 250 orders, with their access and store emails | $35, $0.14 per order, 39.33× | $87, $0.09 per order, 24.65× | $191, $0.08 per order, 21.66× | $711, $0.07 per order, 20.16× |
 | 2,500 list emails | $62, $24.80 per 1,000 emails, 27.56× | $195, $19.50 per 1,000 emails, 21.67× | $460, $18.40 per 1,000 emails, 20.44× | $1,786, $17.86 per 1,000 emails, 19.84× |
-| 20 AI writing jobs and 100 answers | $50, $2.50 per writing job with 5 answers, 31.25× | $143, $1.79 per writing job with 5 answers, 22.45× | $331, $1.66 per writing job with 5 answers, 20.78× | $1,269, $1.59 per writing job with 5 answers, 19.92× |
-| 25 GB of storage | $43, $1.72 per GB, 33.33× | $118, $1.18 per GB, 22.96× | $270, $1.08 per GB, 21.01× | $1,028, $1.03 per GB, 20.01× |
+| 20 AI writing jobs and 100 answers | $50, $2.50 per writing job with 5 answers, 30.86× | $145, $1.81 per writing job with 5 answers, 22.38× | $336, $1.68 per writing job with 5 answers, 20.75× | $1,290, $1.61 per writing job with 5 answers, 19.92× |
+| 25 GB of storage | $63, $2.52 per GB, 27.51× | $198, $1.98 per GB, 21.62× | $468, $1.87 per GB, 20.44× | $1,817, $1.82 per GB, 19.84× |
 | 20 video hours watched | $24, $1.20 per hour, 82.76× | $41, $0.51 per hour, 35.34× | $74, $0.37 per hour, 25.61× | $244, $0.31 per hour, 21.16× |
 
 Factor 3 and factor 4 shrink toward 1 as the amount grows; factors 1 and 2 stay. A larger pack asks the buyer to commit a larger sum to one resource, and every pack is used in full only in the worst case the owner's rule prices: the buyer who uses less pays the same. Nothing new has to be built beyond the packs themselves.
@@ -111,11 +111,11 @@ A credit balance bought on its own payment and spent on any of the six resources
 
 | Credit bought | Price over cost | Per 1,000 visits | Per order | Per 1,000 emails | Per writing job with 5 answers | Per GB | Per hour | Net, the whole credit on its dearest-to-serve resource |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| $50 | 30.12× | $8.17 | $0.11 | $27.11 | $2.40 | $1.55 | $0.44 | 60.36% |
-| $100 | 23.70× | $6.43 | $0.09 | $21.33 | $1.89 | $1.22 | $0.35 | 60.18% |
-| $250 | 21.11× | $5.73 | $0.08 | $19.01 | $1.69 | $1.09 | $0.31 | 60.07% |
-| $500 | 20.35× | $5.52 | $0.08 | $18.32 | $1.63 | $1.05 | $0.30 | 60.03% |
-| $1,000 | 19.98× | $5.42 | $0.08 | $17.99 | $1.60 | $1.03 | $0.29 | 60.01% |
+| $50 | 30.12× | $12.41 | $0.11 | $27.11 | $2.44 | $2.76 | $0.44 | 60.36% |
+| $100 | 23.70× | $9.76 | $0.09 | $21.33 | $1.92 | $2.17 | $0.35 | 60.18% |
+| $250 | 21.11× | $8.70 | $0.08 | $19.01 | $1.71 | $1.94 | $0.31 | 60.07% |
+| $500 | 20.35× | $8.38 | $0.08 | $18.32 | $1.65 | $1.87 | $0.30 | 60.03% |
+| $1,000 | 19.98× | $8.23 | $0.08 | $17.99 | $1.62 | $1.83 | $0.29 | 60.01% |
 
 Each rate column is per the unit its pack prints (per 1,000 visits, per order with its emails, per 1,000 list emails, per writing job with 5 answers, per GB of storage for a window and its closing days, per video hour watched).
 
@@ -139,7 +139,7 @@ Credits do what larger packs do without asking the buyer to guess which resource
 
 What must be built: the pack's emails sent with `only: "amazon"` and held, not handed to Resend, while Amazon is down or out of its day; the pack's figure counting only what SES took; no attachments on list emails, or their $0.12 a GB counted; and the page saying pack emails can wait. The order pack's access and store emails must not wait (a buyer is owed their access), so they stay at Resend's rate.
 
-**Storage in R2 only.** A storage pack that raises only the room for sold files (lib/vault.ts, R2 at $0.015) would cost $34 for 25 GB of storage instead of $43 (net 60.52%). It is honest only if the code proves those bytes are in R2; the storage figure today counts a store's files in every store they may be in, at the dearest.
+**Storage in R2 only.** A storage pack that raises only the room for sold files (lib/vault.ts, R2 at $0.015) would cost $34 for 25 GB of storage instead of $63 (net 60.52%). It is honest only if the code proves those bytes are in R2; the storage figure today counts a store's files in every store they may be in, at the dearest.
 
 No other unit cost can be lowered from its own page: visits, the database and AI are priced at their published rates, and video may be low (above).
 

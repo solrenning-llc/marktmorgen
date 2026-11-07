@@ -17,7 +17,7 @@ import {
 import * as rules from "@/lib/studio-demo-rules";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { STORE_COOKIE } from "@/lib/studio-route";
-import { CDN_PER_REQUEST } from "./traffic-cost";
+import { CDN_PER_REQUEST, ORIGIN_PER_BYTE } from "./traffic-cost";
 import { done, is, part } from "./check";
 
 const ON = true;
@@ -101,8 +101,8 @@ is("the sessions a day can reach: each opening reserves its whole worst", reacha
 is("the day's commands bind before its sessions do", reachable < DEMO_SESSIONS_PER_DAY, true);
 const actions = demoDayWorstActions();
 is("every reachable session at every action", actions, reachable * DEMO_ACTIONS_PER_SESSION);
-// The CDN's part, from tests/traffic-cost.ts: a request at the CDN, and the bytes a function sends it ($0.06 a GB, Fast Origin Transfer).
-const ORIGIN_MICRO_USD_PER_BYTE = (0.06 / 1e9) * 1e6;
+// The CDN's part, from tests/traffic-cost.ts: a request at the CDN, and the bytes a function sends it (Fast Origin Transfer, the top of its regional range).
+const ORIGIN_MICRO_USD_PER_BYTE = ORIGIN_PER_BYTE * 1e6;
 const cdnPerAnswer = CDN_PER_REQUEST * 1e6 + DEMO_RESPONSE_MAX_BYTES * ORIGIN_MICRO_USD_PER_BYTE;
 const refusals = num("DEMO_REFUSALS_PER_DAY");
 const perOpening = num("DEMO_START_FUNCTION_MICRO_USD") + num("DEMO_SESSION_KEPT_MICRO_USD") + cdnPerAnswer;

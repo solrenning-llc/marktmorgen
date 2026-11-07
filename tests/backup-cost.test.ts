@@ -60,12 +60,14 @@ is("Upstash commands: every one the caps allow and the report's two reads a day"
 is("Upstash bytes: at most 200 full SCAN pages, every copied byte, each name sent twice, the marks", line("upstash-transfer"), 245_224);
 // 6 marks (three days' counts, the last good copy, the last failure, the lock) × 1,024 bytes = 0.000006144 GB × 250,000 = 1.536 → 2.
 is("Upstash storage: the backup's six marks", line("upstash-storage"), 2);
-// 64 × (2 × 300/3,600 × 10,600 + 300/3,600 × 128,000 + 0.6) = 64 × 12,433.93 = 795,771.73 → 795,772.
-is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 795_772);
-// 17,077 + 4,502,016 + 361,521 + 2,587,008 + 245,224 + 2 + 795,772 = 8,508,620; × 10% = 850,862.
-is("the provider allowance on all of it", line("provider-allowance"), 850_862);
-// 8,508,620 + 850,862 = 9,359,482: $9.36 a month, $112.31 a year.
-is("the month: $9.36", month?.knownMicroUsd, 9_359_482);
+// At the top of Vercel's regional ranges since 7 November 2026 (memory $0.0183 a GB-hour, CPU $0.221 an hour; until then
+// $0.0106 and $0.128, which gave 795,772, 850,862 and 9,359,482 below):
+// 64 × (2 × 300/3,600 × 18,300 + 300/3,600 × 221,000 + 0.6) = 64 × 21,467.27 = 1,373,905.07 → 1,373,906.
+is("Vercel: the whole 300 s at 2 GB, CPU all along", line("vercel"), 1_373_906);
+// 17,077 + 4,502,016 + 361,521 + 2,587,008 + 245,224 + 2 + 1,373,906 = 9,086,754; × 10% = 908,675.4 → 908,676.
+is("the provider allowance on all of it", line("provider-allowance"), 908_676);
+// 9,086,754 + 908,676 = 9,995,430: $10.00 a month, $119.95 a year.
+is("the month: $10.00", month?.knownMicroUsd, 9_995_430);
 is("no free quota anywhere: storage, operations and bytes all above zero", [line("r2-storage"), line("r2-class-a"), line("r2-class-b"), line("upstash-transfer")].every((n) => n > 0), true);
 // With fewer commands than the page cap, the walk can read only what its commands allow: 30 - 10 = 20 pages.
 const fewCommands = backupWorstMonth({ ...builtAsIs, maxRows: 2, maxCommands: 30 }, 300)?.lines.find((l) => l.id === "upstash-transfer")?.basis ?? "";

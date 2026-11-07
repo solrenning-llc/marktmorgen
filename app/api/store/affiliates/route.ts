@@ -216,7 +216,9 @@ export async function POST(request: NextRequest) {
         await answerInvite(guarded.email, invite.id);
         return Response.json({ ok: true, accepted: false });
       }
-      const from = await storeForId(invite.sid).catch(() => null);
+      // A store that could not be read is not gone: the invite is kept and the answer can be sent again.
+      const from = await storeForId(invite.sid).catch(() => undefined);
+      if (from === undefined) return fail("unavailable", 503);
       if (!from) {
         await answerInvite(guarded.email, invite.id);
         return fail("gone");

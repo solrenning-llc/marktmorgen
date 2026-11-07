@@ -48,6 +48,8 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { type Claimed, releaseMark } from "@/lib/claim-mark";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -867,6 +869,34 @@ const handleKey = (handle: string) => `nl:store:handle:${handle}`;
 export const storeHandleKey = handleKey;
 export const handleLeadsToStore = (raw: unknown): boolean => typeof raw === "string" && raw !== "" && !raw.startsWith(RELEASED_PREFIX);
 
+/**
+ * Takes a handle for the store whose key is `ref`, read exactly (CX-123 rule 24, as lib/claim-mark.ts): "OK" is ours
+ * and nil is somebody else's. Any other answer, or none, is read back: the handle holding `ref` is ours, another value
+ * is somebody else's, anything else is unknown. A handle never runs out, so claimMark's expiry does not fit: a claim
+ * that may have landed but is unknown is let go here, only while it still holds `ref` (releaseMark, one
+ * compare-and-delete), and is never left locked to a store that was not made.
+ */
+async function takeHandle(handle: string, ref: string): Promise<Claimed> {
+  let reply: unknown[] | null = null;
+  try {
+    reply = repliesFor(await redisPipeline([["SET", handleKey(handle), ref, "NX"]]), 1);
+  } catch {
+    reply = null;
+  }
+  if (reply && reply[0] === "OK") return "ours";
+  if (reply && reply[0] === null) return "taken";
+  let held: unknown[] | null = null;
+  try {
+    held = repliesFor(await redisPipeline([["GET", handleKey(handle)]]), 1);
+  } catch {
+    held = null;
+  }
+  if (held && held[0] === ref) return "ours";
+  if (held && typeof held[0] === "string") return "taken";
+  await releaseMark(handleKey(handle), ref);
+  return "unknown";
+}
+
 /** The ids of an account's other stores. Deliberately not under nl:store:owner:. */
 const accountKey = async (email: string) =>
   `nl:account:stores:${(await sha256Hex(`nimbus-account-stores:${email.toLowerCase()}`)).slice(0, 40)}`;
@@ -921,11 +951,20 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/**
+ * A store's record read exactly (CX-123 rule 24): Redis's nil is no store
+ * (null); anything else that is not a store's JSON (no reply, another type,
+ * text that is not JSON, JSON without the store's handle, name and address)
+ * is unknown and throws, never "no store", which callers act on.
+ */
 function parseStore(raw: unknown): Store | null {
-  if (typeof raw !== "string" || !raw) return null;
+  if (raw === null) return null;
+  if (typeof raw !== "string" || !raw) throw new UnknownReplyError("a store's record");
   try {
     const value = JSON.parse(raw) as Partial<Store>;
-    if (!value.handle || !value.name || !value.email) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        typeof value.handle !== "string" || !value.handle || typeof value.name !== "string" || !value.name ||
+        typeof value.email !== "string" || !value.email) throw new UnknownReplyError("a store's record");
     // Stores from before there could be several have neither: each of them
     // is its owner's first store, kept under the owner's address.
     const sid = typeof value.sid === "string" && STORE_ID_PATTERN.test(value.sid) ? value.sid : "";
@@ -1076,7 +1115,7 @@ function parseStore(raw: unknown): Store | null {
       paypalSeller: parsePayPalSeller(value.paypalSeller),
     };
   } catch {
-    return null;
+    throw new UnknownReplyError("a store's record");
   }
 }
 
@@ -1088,8 +1127,8 @@ export async function storeForEmail(
   email: string | null,
 ): Promise<Store | null> {
   if (!email || !isRedisConfigured()) return null;
-  const reply = await redisPipeline([["GET", await ownerKey(email)]]);
-  if (!Array.isArray(reply) || reply.length !== 1) return null;
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(email)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's record");
   const store = parseStore(reply[0]);
   // A readable record must belong to this exact owner key. Preserve legacy
   // first-store records and case-insensitive email lookup; extra stores must
@@ -1227,8 +1266,12 @@ export async function storeIdExists(sid: string): Promise<boolean> {
  */
 export async function storeForId(sid: string): Promise<Store | null> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
-  const [ref] = await redisPipeline([["GET", storeIdKey(sid)]]);
-  if (typeof ref !== "string" || !ref) return null;
+  // Read exactly: nil is no store with this id; anything else but its owner's key is unknown.
+  const reply = repliesFor(await redisPipeline([["GET", storeIdKey(sid)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's id");
+  const [ref] = reply;
+  if (ref === null) return null;
+  if (typeof ref !== "string" || !ref) throw new UnknownReplyError("a store's id");
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : null;
 }
@@ -1731,10 +1774,9 @@ export async function claimHandle(
   const existing = await storeForEmail(email);
   if (existing) return { ok: false, reason: "already" };
 
-  const [taken] = await redisPipeline([
-    ["SET", handleKey(handle), email.toLowerCase(), "NX"],
-  ]);
-  if (taken === null) return { ok: false, reason: "taken" };
+  const took = await takeHandle(handle, email.toLowerCase());
+  if (took === "taken") return { ok: false, reason: "taken" };
+  if (took !== "ours") throw new UnknownReplyError("a handle's claim");
 
   const store = await freshStore({ handle, name: rawName, bio: rawBio, email, sid: newListId(), extra: false });
 
@@ -1745,8 +1787,8 @@ export async function claimHandle(
     ]);
   } catch (error) {
     // Give the name back rather than leaving it locked to a store that does
-    // not exist.
-    await redisPipeline([["DEL", handleKey(handle)]]).catch(() => {});
+    // not exist: only while it is still this store's (releaseMark).
+    await releaseMark(handleKey(handle), email.toLowerCase());
     throw error;
   }
 
@@ -1788,10 +1830,11 @@ export async function createStore(
     return { ok: false, reason: "too_many", limit: MAX_STORES_PER_ACCOUNT };
   }
 
-  const [taken] = await redisPipeline([["SET", handleKey(handle), ref, "NX"]]);
-  if (taken === null) {
+  const took = await takeHandle(handle, ref);
+  if (took !== "ours") {
     await redisPipeline([["SREM", account, sid]]);
-    return { ok: false, reason: "taken" };
+    if (took === "taken") return { ok: false, reason: "taken" };
+    throw new UnknownReplyError("a handle's claim");
   }
 
   const store = await freshStore({ handle, name: rawName, bio: rawBio, email, sid, extra: true });
@@ -1801,10 +1844,8 @@ export async function createStore(
       ["SET", storeIdKey(sid), ref],
     ]);
   } catch (error) {
-    await redisPipeline([
-      ["DEL", handleKey(handle)],
-      ["SREM", account, sid],
-    ]).catch(() => {});
+    await releaseMark(handleKey(handle), ref);
+    await redisPipeline([["SREM", account, sid]]).catch(() => {});
     throw error;
   }
   return { ok: true, store };
@@ -1909,10 +1950,9 @@ export async function renameHandle(
       if (store.previousHandles.length + 2 > MAX_ADDRESSES) {
         return { ok: false, reason: "too_many", limit: MAX_ADDRESSES };
       }
-      const [taken] = await redisPipeline([
-        ["SET", handleKey(handle), email.toLowerCase(), "NX"],
-      ]);
-      if (taken === null) return { ok: false, reason: "taken" };
+      const took = await takeHandle(handle, email.toLowerCase());
+      if (took === "taken") return { ok: false, reason: "taken" };
+      if (took !== "ours") throw new UnknownReplyError("a handle's claim");
       claimed = true;
     }
 
@@ -1930,10 +1970,7 @@ export async function renameHandle(
     } catch (error) {
       // The store was not moved: give the address back, or it would stay
       // claimed by a store that never took it, for this creator and everyone.
-      if (claimed) {
-        const [holder] = await redisPipeline([["GET", handleKey(handle)]]);
-        if (holder === email.toLowerCase()) await redisPipeline([["DEL", handleKey(handle)]]);
-      }
+      if (claimed) await releaseMark(handleKey(handle), email.toLowerCase());
       throw error;
     }
     // The store's own domain follows it to the new address.

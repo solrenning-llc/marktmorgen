@@ -1,8 +1,11 @@
 /**
  * The nine required workflows run in the merge queue: merge_group (checks_requested) on
- * every one, the "All checks (…)" final check names unchanged, merge-group runs never
- * canceled by their concurrency group, and the scope always full under merge_group, so
- * turning the queue on for main can never leave a required check pending or skipped.
+ * every one, the "All checks (…)" final check names unchanged, the active merge-group run
+ * never canceled by its concurrency group (a newer delivery of the same merge group may
+ * replace a pending one, which is the same check), a merge group never sharing a group
+ * with a pull request run or another merge group, and the scope always full under
+ * merge_group, so turning the queue on for main can never leave a required check pending
+ * or skipped.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -72,7 +75,7 @@ for (const name of WORKFLOWS) {
     ]);
 }
 
-part("concurrency never cancels a merge-group run and never mixes runs");
+part("concurrency never cancels the active merge-group run and never mixes a merge group with another run");
 for (const name of WORKFLOWS) {
   const on = triggers(read(name));
   const group = /\n {2}group: (.*)\n/.exec(on)?.[1] ?? "";

@@ -365,11 +365,17 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
 export async function removeFlow(store: Store, id: string): Promise<FlowResult> {
   if (!store.listId) return { ok: false, reason: "unknown" };
   const flows = await readFlowListStrict(store.listId);
-  if (!flows.some((f) => f.id === id)) return { ok: false, reason: "unknown" };
+  const flow = flows.find((f) => f.id === id);
+  if (!flow) return { ok: false, reason: "unknown" };
+  // Paused first, so nobody new starts it and nothing more of it is sent while its runs are erased; then its runs,
+  // their history, starts and queued steps, so nothing of the people in it is kept; and only once that is confirmed
+  // is it taken off the list. An erasure that cannot be confirmed throws with the workflow still listed (paused), so a
+  // removal tried again, a person's erasure request (forgetWorkflowPerson) or the store's deletion
+  // (forgetStoreWorkflows), which walk the listed workflows, still reach its runs (CX-123 rule 24).
+  if (flow.active) await writeFlows(store, store.listId, flows.map((f) => (f.id === id ? { ...f, active: false } : f)));
+  await purgeFlow(store, flow);
   const next = flows.filter((f) => f.id !== id);
   await writeFlows(store, store.listId, next);
-  // Its runs, their history, starts and queued steps: nothing of the people in it is kept.
-  await purgeFlow(store, flows.find((f) => f.id === id)!).catch((error) => console.error("erasing a removed workflow's runs failed", error));
   return { ok: true, flows: next };
 }
 

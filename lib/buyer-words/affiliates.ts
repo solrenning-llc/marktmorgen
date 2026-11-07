@@ -352,6 +352,8 @@ const en = {
   reviewsAsk: (who: string) => `Stop review requests from ${who || "this store"}?`,
   reviewsFor: (email: string) => `For ${email}. One press stops them for good. A review you already wrote stays as it is.`,
   stopReviews: "Stop review requests",
+  /** Said on the stop page when the last press was not saved; the button is offered again. */
+  reviewsNotSaved: "We could not save that just now. Please try again.",
 };
 
 export type AffiliatesWords = typeof en;
@@ -638,6 +640,7 @@ const es: AffiliatesWords = {
   reviewsAsk: (who) => `¿Dejar de recibir solicitudes de reseña de ${who || "esta tienda"}?`,
   reviewsFor: (email) => `Para ${email}. Con una sola pulsación dejan de llegar para siempre. Una reseña que ya escribiste se queda como está.`,
   stopReviews: "Dejar de recibir solicitudes de reseña",
+  reviewsNotSaved: "No pudimos guardarlo ahora. Inténtalo de nuevo.",
 };
 
 // ---- French ------------------------------------------------------------------------------------------
@@ -922,6 +925,7 @@ const fr: AffiliatesWords = {
   reviewsAsk: (who) => `Ne plus recevoir de demandes d'avis de ${who || "cette boutique"}${S}?`,
   reviewsFor: (email) => `Pour ${email}. Une seule pression les arrête définitivement. Un avis que vous avez déjà écrit reste tel quel.`,
   stopReviews: "Arrêter les demandes d'avis",
+  reviewsNotSaved: "Nous n'avons pas pu l'enregistrer pour le moment. Veuillez réessayer.",
 };
 
 // ---- German ------------------------------------------------------------------------------------------
@@ -1214,6 +1218,7 @@ const de: AffiliatesWords = {
   reviewsFor: (email) =>
     `Für ${email}. Ein Klick beendet sie endgültig. Eine Bewertung, die Sie bereits geschrieben haben, bleibt, wie sie ist.`,
   stopReviews: "Bewertungsanfragen stoppen",
+  reviewsNotSaved: "Das konnten wir gerade nicht speichern. Bitte versuchen Sie es erneut.",
 };
 
 // ---- Italian -----------------------------------------------------------------------------------------
@@ -1500,6 +1505,7 @@ const it: AffiliatesWords = {
   reviewsAsk: (who) => `Non ricevere più richieste di recensione da ${who || "questo negozio"}?`,
   reviewsFor: (email) => `Per ${email}. Basta un clic per fermarle per sempre. Una recensione che hai già scritto resta com'è.`,
   stopReviews: "Interrompi le richieste di recensione",
+  reviewsNotSaved: "Non siamo riusciti a salvarlo ora. Riprova.",
 };
 
 // ---- Dutch -------------------------------------------------------------------------------------------
@@ -1787,6 +1793,7 @@ const nl: AffiliatesWords = {
   reviewsAsk: (who) => `Geen beoordelingsverzoeken meer van ${who || "deze winkel"}?`,
   reviewsFor: (email) => `Voor ${email}. Eén klik stopt ze voorgoed. Een beoordeling die je al hebt geschreven, blijft zoals hij is.`,
   stopReviews: "Stop de beoordelingsverzoeken",
+  reviewsNotSaved: "We konden dat nu niet opslaan. Probeer het opnieuw.",
 };
 
 // ---- European Portuguese -------------------------------------------------------------------------------
@@ -2078,6 +2085,7 @@ const pt: AffiliatesWords = {
   reviewsAsk: (who) => `Deixar de receber pedidos de avaliação ${deLoja(who)}?`,
   reviewsFor: (email) => `Para ${email}. Basta um clique para os parar de vez. Uma avaliação que já escreveu fica como está.`,
   stopReviews: "Parar os pedidos de avaliação",
+  reviewsNotSaved: "Não conseguimos guardar isso agora. Tente novamente.",
 };
 
 export const AFFILIATES_WORDS: Record<LanguageCode, AffiliatesWords> = { en, es, fr, de, it, nl, pt };

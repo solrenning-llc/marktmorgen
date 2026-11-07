@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { is, part, done } from "./check";
 import {
-  LABEL, TITLE, REQUIRED, decide, unreported, openBody, failureComment, greenComment,
+  LABEL, TITLE, REQUIRED, decide, unreported, openBody, failureComment, greenComment, closable,
   type Run,
 } from "../scripts/main_red_alarm.mjs";
 
@@ -30,8 +30,8 @@ is("one trigger only: workflow_run completed on main", [
   /\non:\n {2}workflow_run:\n/.test(triggers),
   /\n {4}types: \[completed\]\n/.test(triggers),
   /\n {4}branches: \[main\]\n/.test(triggers),
-  [...triggers.matchAll(/^ {2}([a-z_]+):$/gm)].map((m) => m[1]).filter((k) => k !== "group" && k !== "cancel-in-progress"),
-], [true, true, true, ["workflow_run", "issues", "actions"]]);
+  [...(/\non:\n((?: .*\n)+)/.exec(triggers)?.[1] ?? "").matchAll(/^ {2}([a-z_]+):/gm)].map((m) => m[1]),
+], [true, true, true, ["workflow_run"]]);
 is("no pull_request, push, schedule, merge_group or manual trigger", /\n {2}(pull_request|pull_request_target|push|schedule|merge_group|workflow_dispatch):/.test(triggers), false);
 
 part("minimal permissions, pinned actions, no secret, no untrusted text in a shell");
@@ -104,6 +104,8 @@ is("the issue points to the MV rule", body.includes("AGENTS.md") && body.include
 is("a run already in the issue is not reported again", unreported(red, [body]).map((r) => r.id), []);
 is("a new red run is reported once", unreported([...red, run(3, "failure")], [body, failureComment(red)]).map((r) => r.name), [REQUIRED[3].name]);
 is("the closing comment says MAIN VERDE and the head", greenComment(HEAD).includes("MAIN VERDE") && greenComment(HEAD).includes(HEAD), true);
+is("green closes only the issues the alarm opened, never one opened by hand for a failure proven otherwise",
+  closable([{ number: 1, user: { login: "github-actions[bot]" } }, { number: 2, user: { login: "someone" } }, { number: 3, user: null }]).map((i) => i.number), [1]);
 is("label and title", [LABEL, TITLE], ["main-vermelho", "MAIN VERMELHO"]);
 
 part("the MV rule in AGENTS.md");

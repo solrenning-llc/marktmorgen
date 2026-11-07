@@ -126,6 +126,73 @@ test("erasure: beside a record that does not read, the files that do read go to 
   assert.equal(redis.run(["GET", bytes]), "0", "its room is given back");
 });
 
+// The deletion batch's own receipt (Codex P on #2847): DEL, ZREM, HDEL and ZADD each answer a count. A batch that
+// answers nothing, short or in another shape may have applied all, part or none of it: never "done".
+const isDeletion = (batch: Batch) => batch.length > 0 && batch[0][0] === "DEL";
+for (const [label, alter, applied] of [
+  ["nothing applied, no replies", () => [], 0],
+  ["only the first DEL applied, no replies", () => [], 1],
+  ["all applied, one reply short", (_b: Batch, a: unknown[]) => a.slice(0, -1), Infinity],
+  ["all applied, a reply in another shape", (_b: Batch, a: unknown[]) => a.map((r, i) => (i === 0 ? "OK" : r)), Infinity],
+] as [string, (b: Batch, a: unknown[]) => unknown[], number][]) {
+  test(`erasure: the deletion batch's receipt, ${label}, is incomplete and its files are kept for deletion`, async () => {
+    redis.clear();
+    seed(LESSON, JSON.stringify(work(LESSON)));
+    redis.run(["SET", bytes, "100"]);
+    const original = redis.pipeline.bind(redis);
+    const result = await withReplies(
+      (b, a) => (isDeletion(b) ? alter(b, a) : a),
+      async () => {
+        // Apply only part of the deletion batch where the case says so, as a cut connection would.
+        const inner = redis.pipeline;
+        redis.pipeline = (async (batch: Batch) => (isDeletion(batch) && applied !== Infinity ? inner(batch.slice(0, applied)).then(() => []) : inner(batch))) as typeof redis.pipeline;
+        try {
+          return await forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY);
+        } finally {
+          redis.pipeline = inner;
+        }
+      },
+    );
+    redis.pipeline = original;
+    assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
+    assert.equal(redis.run(["ZSCORE", doors, `synthetic/${LESSON}.pdf`]), "0", "the file read is left for the daily job to delete");
+    assert.equal(redis.run(["GET", bytes]), "100", "no room is given back on a guess");
+  });
+}
+
+test("erasure: the deletion batch's exact receipt is still done (healthy control)", async () => {
+  redis.clear();
+  seed(LESSON, JSON.stringify(work(LESSON)));
+  const result = await withReplies((_b, a) => a, () => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM_KEY));
+  assert.deepEqual(result.value, { records: 1, files: [`synthetic/${LESSON}.pdf`] });
+  assert.equal(redis.run(["ZSCORE", doors, `synthetic/${LESSON}.pdf`]), null, "nothing queued when the erasure deletes it itself");
+});
+
+// A record that does not read still has its file listed in the assignment's files hash, under the student's own
+// folder (taskFolder): it is taken from there, so neither this run nor the retry leaves it behind (Claude 6 on #2847).
+test("erasure: the file of a record that does not read is found in the student's own folder and deleted with it", async () => {
+  redis.clear();
+  const mine = `stores/sf_readsexact/tasks/${COURSE}/${LESSON}/${WHO}/${"a".repeat(32)}.pdf`;
+  const theirs = `stores/sf_readsexact/tasks/${COURSE}/${LESSON}/${"d".repeat(32)}/${"b".repeat(32)}.pdf`;
+  redis.run(["SET", sub(LESSON), "{not json"]);
+  redis.run(["ZADD", all, 1_700_000_000, `${LESSON}|${WHO}`]);
+  redis.run(["HSET", files(LESSON), mine, "100", theirs, "100"]);
+  const first = await withReplies((_b, a) => a, () => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM_KEY));
+  assert.ok(first.error, `rejected, not ${JSON.stringify(first.value)}`);
+  assert.equal(redis.run(["HGET", files(LESSON), mine]), null, "their file leaves the hash");
+  assert.equal(redis.run(["ZSCORE", doors, mine]), "0", "and goes to the daily deletion");
+  assert.equal(redis.run(["HGET", files(LESSON), theirs]), "100", "another student's file is untouched");
+  assert.equal(redis.run(["ZSCORE", doors, theirs]), null);
+});
+
+test("erasure: a files hash in another shape beside a record that does not read throws before anything is deleted", async () => {
+  redis.clear();
+  seed(LESSON, "{not json");
+  const result = await withReplies((b, a) => (b.length === 1 && b[0][0] === "HGETALL" ? [7] : a), () => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM_KEY));
+  assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
+  assert.equal(typeof redis.run(["GET", sub(LESSON)]), "string", "the record is still there to erase on the retry");
+});
+
 // ------------------------------------------------------------ one student's work
 
 test("submissionOf: a written record reads, and nil is nothing handed in", async () => {

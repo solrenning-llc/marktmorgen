@@ -23,6 +23,7 @@ import { redisPipeline } from "@/lib/redis";
 import type { DataStore } from "@/lib/store-data";
 import { TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { SET_TAKE_COUNT } from "@/lib/redis-take";
+import { exactReplies, replyCount } from "@/lib/redis-exact";
 import { giveData } from "@/lib/store-data";
 import { forgetMemberRecord, readConfig } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
@@ -52,8 +53,10 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   await unindexMember(id, who);
   // Their trace (lib/community-trace.ts): what they wrote and did, by
   // reference; counted and deleted in one step, each entry's room given back once.
-  const [traced] = await redisPipeline([["EVAL", SET_TAKE_COUNT, 1, traceKey(id, who)]]);
-  const entries = Number(traced) || 0;
+  // Read exactly (Claude 6's note on #2576): a reply that is not one whole count is unknown, never "nothing was
+  // there", so the person is not reported deleted with the trace maybe kept, and no room is given back for it.
+  const [traced] = exactReplies(await redisPipeline([["EVAL", SET_TAKE_COUNT, 1, traceKey(id, who)]]), 1, "a member's trace deletion");
+  const entries = replyCount(traced, "a member's trace deletion");
   records += entries ? 1 : 0;
   if (room && entries > 0) await giveData(room, [{ ...TRACE_ENTRY, bytes: entries * TRACE_ENTRY.bytes }]);
   records += await forgetPointsPerson(id, who);

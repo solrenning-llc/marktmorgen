@@ -16,7 +16,8 @@
  *     when none is open yet, when the next one opens, or which quiz holds
  *     the rest; when they finished, that;
  *   - lessons that opened for them this week (a module's drip day, or a
- *     cohort's start), never a module already open when they joined;
+ *     cohort's start), never a module already open when they joined nor
+ *     a lesson a required quiz still holds shut;
  *   - and, once for the email, the community events of the store starting in
  *     the next seven days, soonest first, canceled ones left out.
  *
@@ -164,9 +165,12 @@ function summarize(week: CourseWeek, now: number): { summary: CourseSummary; new
   }
 
   // Opened this week: its opening fell in the last week and came after the student joined.
-  const opened = all.filter(({ unit }) => {
+  // Never a lesson a required quiz still holds shut: its drip day opened nothing the student can open.
+  // The window is the last seven days by the clock, not the baseline's up to eight: a run that comes
+  // late can only leave an opening out, never call one this week's that was not.
+  const opened = all.filter(({ lesson, unit }) => {
     const at = opensAt(course, unit, week.joinedSeconds);
-    return at > now - WEEK_SECONDS && at <= now && at > week.joinedSeconds;
+    return at > now - WEEK_SECONDS && at <= now && at > week.joinedSeconds && !held.has(lesson.id);
   }).length;
 
   const summary: CourseSummary = {

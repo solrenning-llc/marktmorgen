@@ -41,6 +41,7 @@ import { forVisitor } from "@/lib/visitor";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
 import { saleClock, saleRunning } from "@/lib/store-sale";
 import { endsLine, speech } from "@/lib/buyer-words";
+import { EmptyState } from "@/components/empty-state";
 import { preorderDay, soonState } from "@/lib/preorders";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -308,8 +309,14 @@ export default async function StorePage({ params, searchParams }: Params) {
             )}
           </p>
         ) : null}
-        <section className={bold ? "st-band" : undefined}>
-          <div className={`mx-auto max-w-xl px-4 text-center ${bold ? "pb-8 pt-8 sm:pt-10" : "pb-1 pt-6 sm:pt-8"}`} data-store-profile="">
+        {/*
+          From 1024 px wide, the store's profile stands beside its products, which go two to a row (Encanto 3,
+          C4-20261106-0520-TODOS-19): a computer is no longer one narrow column between empty sides. A phone keeps
+          the one column, the profile above.
+        */}
+        <div className="lg:mx-auto lg:grid lg:max-w-6xl lg:grid-cols-[19rem_minmax(0,1fr)] lg:items-start lg:gap-10 lg:px-6 lg:pt-2" data-store-layout="">
+        <section className={bold ? "st-band lg:rounded-3xl" : undefined}>
+          <div className={`mx-auto max-w-xl px-4 text-center lg:max-w-none ${bold ? "pb-8 pt-8 sm:pt-10" : "pb-1 pt-6 sm:pt-8"}`} data-store-profile="">
             {store.photoId ? (
               // A plain img: the picture is already cropped and sized, and its
               // address never changes, so there is nothing for an optimiser to add.
@@ -358,7 +365,7 @@ export default async function StorePage({ params, searchParams }: Params) {
           </div>
         </section>
 
-        <div className="mx-auto max-w-xl px-4 pb-16 pt-5">
+        <div className="mx-auto max-w-xl px-4 pb-16 pt-5 lg:max-w-none lg:px-0 lg:pt-0">
           {notice ? (
             <div className="st-note mb-6" role="alert">
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{notice.title}</p>
@@ -366,12 +373,8 @@ export default async function StorePage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
-          {total === 0 && links.length === 0 ? (
-            <div className="st-note text-center">
-              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.nothingYet}</p>
-              <p className="mt-2 text-sm">{w.nothingYetBody(store.name)}</p>
-            </div>
-          ) : null}
+          {/* Nothing listed yet: a heading and a sentence for the buyer, and no button (656 [WG16], components/empty-state.tsx). */}
+          {total === 0 && links.length === 0 ? <EmptyState title={w.nothingYet} body={w.nothingYetBody(store.name)} /> : null}
 
           {/*
             The parts of the page, in the order the creator chose (lib/store-order.ts).
@@ -436,10 +439,10 @@ export default async function StorePage({ params, searchParams }: Params) {
                           {group.continued ? <span className="st-muted font-normal">{w.continued}</span> : null}
                         </h2>
                       ) : null}
-                      <ul className="space-y-4">
+                      <ul className="space-y-4 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:space-y-0">
                         {group.products.map((product) => (
                           <ProductCard
-                            eager={(position.get(product.id) ?? 9) < 3 && page === 1}
+                            eager={(position.get(product.id) ?? 9) < 1 && page === 1}
                             first={position.get(product.id) === 0 && page === 1}
                             key={product.id}
                             store={store}
@@ -454,8 +457,9 @@ export default async function StorePage({ params, searchParams }: Params) {
                             bundleItems={bundleItems.get(product.id) ?? null}
                             soon={soon.has(product.id)}
                             preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
-                            cart={cartOn && !soon.has(product.id) && cartable(product)}
+                            cart={cartOn && !soon.has(product.id) && cartable(product) && left.get(product.id) !== 0}
                             sold={soldLine(soldCounts?.byProduct[product.id])}
+                            grid
                           />
                         ))}
                       </ul>
@@ -732,6 +736,7 @@ export default async function StorePage({ params, searchParams }: Params) {
             {cartOn ? <CartButton handle={store.handle} lang={store.language} remind={assistReminderShown(store) ? store.name : ""} notice={cartNotice} restore={typeof query.restore === "string" ? readCartIds(query.restore.slice(0, 400).split(",")) : []} /> : null}
             <ExitOfferSlot store={store} />
           </div>
+        </div>
         </div>
       </main>
       {recent.length ? <RecentSales sales={recent} handle={store.handle} language={store.language} locale={speech(store).lang.locale} /> : null}

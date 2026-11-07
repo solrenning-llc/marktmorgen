@@ -57,13 +57,29 @@ export const openKey = (account: string, sub: string) => `nl:card:open:${account
 
 export type CardGrant = { a: string; c: string; s: string };
 
-/** A new link for one membership, to put in an email. */
+/**
+ * A new link for one membership, to put in an email, only once Redis answered its SET with exactly "OK" (CX-123
+ * rule 24, the exact SET of lib/membership-manage.ts and lib/buyer-library.ts). Any other answer (none, nil, a
+ * word, two replies, or a reply lost after the SET may have landed) throws, so the caller emails nothing and lets
+ * its mark go for the next run (lib/payment-recovery.ts, noticeCards); the link, in case it did land, is removed
+ * first, since nobody was given it. Removal is best effort: CARD_LINK_SECONDS still ends it.
+ *
+ * A link that was stored is kept when its email then fails: the notice is sent under an idempotency key, and a
+ * send whose outcome was unknown may have reached the member, so their link must still open.
+ */
 export async function cardLink(account: string, customer: string, subscription: string): Promise<string> {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   const grant: CardGrant = { a: account, c: customer, s: subscription };
-  await redisPipeline([["SET", await linkKey(token), JSON.stringify(grant), "EX", CARD_LINK_SECONDS]]);
+  const key = await linkKey(token);
+  let stored = false;
+  try {
+    stored = repliesFor(await redisPipeline([["SET", key, JSON.stringify(grant), "EX", CARD_LINK_SECONDS]]), 1)?.[0] === "OK";
+  } finally {
+    if (!stored) await redisPipeline([["DEL", key]]).catch((error) => console.error("removing a card link that was not stored failed", error));
+  }
+  if (!stored) throw new Error("a card link was not stored, so no notice is sent with it");
   return token;
 }
 

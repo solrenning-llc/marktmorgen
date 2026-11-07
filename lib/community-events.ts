@@ -850,11 +850,22 @@ export async function forgetRsvpsPerson(id: string, who: string, email: string):
 /** The live events one member said they are coming to, and when they said it, for the copy of their data (619 [SZ3]). Only reads. */
 export async function rsvpsOf(id: string, who: string): Promise<{ event: string; at: number }[]> {
   if (!isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]);
-  const events = (Array.isArray(raw) ? raw : []).map(String).slice(0, MAX_KEPT_EVENTS);
+  // Read exactly (CX-123 rule 24, Claude 6 on #2957): a reply in another shape is not "no RSVPs" or "at 0", so the
+  // copy of their data says it could not be read instead of coming out without them.
+  const what = "a member's RSVPs";
+  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]), 1)?.[0]);
+  if (!listed) throw new UnknownReplyError(what);
+  const events = listed.slice(0, MAX_KEPT_EVENTS);
   if (!events.length) return [];
-  const replies = await redisPipeline(events.map((e) => ["HGET", rsvpKey(id, e), who]));
-  return events.flatMap((event, i) => (replies[i] === null || replies[i] === undefined ? [] : [{ event, at: Number(replies[i]) || 0 }]));
+  const replies = repliesFor(await redisPipeline(events.map((e) => ["HGET", rsvpKey(id, e), who])), events.length);
+  if (!replies) throw new UnknownReplyError(what);
+  return events.flatMap((event, i) => {
+    const reply = replies[i];
+    if (reply === null) return [];
+    // Written as whole seconds (HSETNX above).
+    if (typeof reply !== "string" || !/^\d{1,15}$/.test(reply)) throw new UnknownReplyError(what);
+    return [{ event, at: Number(reply) }];
+  });
 }
 
 /** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts), and what the walk of its archive reads (lib/community-walk.ts). */

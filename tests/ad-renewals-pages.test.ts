@@ -12,7 +12,10 @@
  *     after that reads from the newest again;
  *   - a pass that stops before handling what it read (its deadline) keeps
  *     the place where it was, so nothing read and not sent is passed over;
- *   - a kept place that is not an invoice's id is unknown: nothing is read;
+ *   - a kept place in a shape it cannot follow is let go and the day read
+ *     from the newest in the same pass (each sent mark is a SET NX, so
+ *     nothing goes twice); a reading of the place that failed throws before
+ *     Stripe is asked;
  *   - the place lasts the day the pass reads (created[gte]), not an hour:
  *     the sweep visits each store in turn and may come back after more than
  *     an hour;
@@ -174,16 +177,39 @@ async function main(): Promise<void> {
   is("still there", redis.run(["GET", placeKey(statsId)]), at("in_Page000100"));
   redis.run(["DEL", placeKey(statsId)]);
 
-  part("A kept place that is not an invoice's id is unknown");
+  part("A kept place in a shape it cannot follow is let go, and the day read from the newest in the same pass");
+  // Every renewal's sent mark is taken with SET NX, so reading the day again never sends one twice.
+  invoices = renewals(350);
+  for (const [label, bad] of [
+    ["not an invoice's id", "not-an-invoice"],
+    ["an invoice's id without the account it was read in", "in_Page000100"],
+    ["an account that is not an account's id", at("in_Page000100", "acct_bad shape")],
+  ] as const) {
+    fresh();
+    redis.run(["SET", placeKey(statsId), bad, "EX", 3600]);
+    is(`${label}: the pass reads from the newest and sends`, await sendRenewals(store, NOW), 300);
+    is(`${label}: from the newest`, asked[0]?.get("starting_after"), null);
+    is(`${label}: the place replaced by this pass's own`, redis.run(["GET", placeKey(statsId)]), at("in_Page000300"));
+  }
+  invoices = renewals(50);
   fresh();
   redis.run(["SET", placeKey(statsId), "not-an-invoice", "EX", 3600]);
-  await rejects("it throws", () => sendRenewals(store, NOW));
-  is("before Stripe is asked", asked.length, 0);
-  redis.run(["SET", placeKey(statsId), "in_Page000100", "EX", 3600]);
-  await rejects("so does an invoice's id without the account it was read in", () => sendRenewals(store, NOW));
-  redis.run(["SET", placeKey(statsId), at("in_Page000100", "acct_bad shape"), "EX", 3600]);
-  await rejects("or with an account that is not an account's id", () => sendRenewals(store, NOW));
-  is("and Stripe is still not asked", asked.length, 0);
+  is("a day read to its end in that pass sends every one", await sendRenewals(store, NOW), 50);
+  is("and lets the place go", redis.run(["GET", placeKey(statsId)]), null);
+
+  part("A reading of the place that failed is not a place: the pass throws");
+  const placeRead = redis.pipeline.bind(redis);
+  for (const [label, answer] of [
+    ["no reply", []],
+    ["a reply that is neither text nor nil", [42]],
+  ] as const) {
+    fresh();
+    (redis as unknown as { pipeline: unknown }).pipeline = async (commands: (string | number)[][]) =>
+      commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === placeKey(statsId) ? answer : placeRead(commands);
+    await rejects(`${label}: it throws`, () => sendRenewals(store, NOW));
+    (redis as unknown as { pipeline: unknown }).pipeline = placeRead;
+    is(`${label}: before Stripe is asked`, asked.length, 0);
+  }
   redis.run(["DEL", placeKey(statsId)]);
 
   part("A place outlasts a sweep that comes back after more than an hour");

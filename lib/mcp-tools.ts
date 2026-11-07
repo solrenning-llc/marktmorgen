@@ -36,7 +36,7 @@ import { type Counts, testState } from "@/lib/headline-test-rules";
 import { reachShares, readDepth } from "@/lib/page-depth";
 import { isFree } from "@/lib/store-field-rules";
 import { keptMembershipBytes, membershipNumbersPaid } from "@/lib/membership-numbers";
-import { type Regrow, broadcastHeadsBytes, measureBroadcastHeads, readMeasuredHeads } from "@/lib/broadcasts";
+import { type PaySizes, type Regrow, broadcastHeadsBytes, broadcastSizesBytes, measureBroadcastHeads, readMeasuredHeads } from "@/lib/broadcasts";
 import { EMAIL_GROWTH_BYTES } from "@/lib/sent-links";
 import { broadcastMoney, flowMoney, keptMailRevenueBytes, readMailRevenuePaid } from "@/lib/mail-revenue";
 import { flowStats, flowsBytes, readFlows } from "@/lib/flows";
@@ -44,7 +44,7 @@ import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
 import {
-  EMAILS_BROADCASTS, EMAILS_HEADS_WORK, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
+  EMAILS_BROADCASTS, EMAILS_HEADS_WORK, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsSizesWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
   membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
   COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork,
 } from "@/lib/api-read-rules";
@@ -367,22 +367,38 @@ export async function membershipsTool(store: Store, charge: Charge) {
  *
  * The emails are measured and read without their bodies, which it never
  * tells (lib/broadcasts.ts, measureBroadcastHeads and readMeasuredHeads):
- * only those measured, each no further than its size, priced as they cross.
+ * asking their sizes is taken before it is sent (emailsSizesWork; refused
+ * with its own words, nothing asked), then only those measured are read,
+ * each no further than its size, priced as they cross.
  * One grown since is read once more up to EMAIL_GROWTH_BYTES after what
  * that comes to was taken (refused with its own words, nothing shown).
  */
 export async function emailsTool(store: Store, meter: { charge: Charge; hold: Hold }) {
   if (!store.listId) return { list: null, note: "This store keeps no list yet." };
-  const [sizes, flowBytes, revenueBytes, paypal] = await Promise.all([
-    measureBroadcastHeads(store.listId, EMAILS_BROADCASTS).catch(() => null),
+  // Asking each email's size is taken first, before the script is sent, and counted apart from what is set aside after.
+  const sizing: { units: number; refused: Response | null } = { units: 0, refused: null };
+  const paySizes: PaySizes = async (count) => {
+    const units = apiReadUnits(emailsSizesWork(count, broadcastSizesBytes(count)));
+    const refused = await meter.charge(units, 0);
+    if (refused) {
+      sizing.refused = refused;
+      return { ok: false, message: "refused" };
+    }
+    sizing.units = units;
+    return { ok: true };
+  };
+  const [measured, flowBytes, revenueBytes, paypal] = await Promise.all([
+    measureBroadcastHeads(store.listId, EMAILS_BROADCASTS, paySizes).catch(() => null),
     flowsBytes(store.listId),
     keptMailRevenueBytes(store),
     paypalCounts(store.statsId),
   ]);
-  if (!sizes || flowBytes === null || revenueBytes === null || !paypal) throw new Error("the emails could not be measured");
+  if (sizing.refused) return sizing.refused;
+  if (!measured || measured.ok !== true || flowBytes === null || revenueBytes === null || !paypal) throw new Error("the emails could not be measured");
+  const sizes = measured;
   // What they sold is read when there is an email or a sequence to credit, and from Stripe when it is not kept.
   const salesRead = Boolean(store.stripeAccountId && store.statsId) && revenueBytes === 0 && (sizes.ids.length > 0 || flowBytes > 0);
-  // The emails as they cross without their bodies, and the two script calls themselves beside each GET inside them.
+  // The emails as they cross without their bodies, and the read's script call itself beside each GET inside it (their sizes were taken apart).
   const emailsAt = (revenue: number) => addWork(EMAILS_PROBE_WORK, addWork(emailsWork({ broadcasts: sizes.ids.length, broadcastBytes: broadcastHeadsBytes(sizes.sizes), flowBytes, revenueBytes: revenue }), EMAILS_HEADS_WORK));
   const held = apiReadUnits(salesRead ? addWork(emailsAt(0), mailRevenueColdWork(paypal.sales)) : emailsAt(revenueBytes));
   const settle = await meter.hold(held);
@@ -391,7 +407,7 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
   const grew: { units: number; refused: Response | null } = { units: 0, refused: null };
   const regrow: Regrow = async (_units, grown) => {
     const more = apiReadUnits({ commands: 1 + grown.length, bytes: broadcastHeadsBytes(grown, EMAIL_GROWTH_BYTES), roundTrips: 1 });
-    const refused = await meter.charge(more, held + grew.units);
+    const refused = await meter.charge(more, sizing.units + held + grew.units);
     if (refused) {
       grew.refused = refused;
       return { ok: false, message: "refused" };
@@ -411,7 +427,7 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
           async () => {
             if (salesRead) return true;
             said.second = apiReadUnits(mailRevenueColdWork(paypal.sales));
-            said.refused = await meter.charge(said.second, held);
+            said.refused = await meter.charge(said.second, sizing.units + held);
             return said.refused === null;
           },
           (bytes) => {

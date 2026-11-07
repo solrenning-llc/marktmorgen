@@ -10,7 +10,7 @@ import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
 import { AGENDA_READ, BUYER_LEDGER, SCHEDULED_READS } from "./plan-cost-registry";
-import { TEST_SALES_PAGES } from "@/lib/broadcasts";
+import { TEST_SALES_PAGES, broadcastSizesBytes } from "@/lib/broadcasts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
@@ -20,7 +20,7 @@ import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
-  codesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
+  codesWork, emailsSizesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
   API_PAGE_ROWS, EMAILS_PROBE_WORK, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, boughtNextWork, keptNumbersWork, listPageMost, settledUnits,
   EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
 } from "@/lib/api-read-rules";
@@ -477,6 +477,8 @@ test("an API reading that reads more than a page takes further requests that cov
     for (const paypal of [0, 1_000, 40_000]) covers(addWork(emails, mailRevenueColdWork(paypal, revenueBytes)), `emails and what they sold, in one go ${paypal}/${revenueBytes}`);
   }
   for (const paypal of [0, 9, 1_000, 40_000]) for (const kept of [undefined, 1, 172_000, 3_000_000]) covers(mailRevenueColdWork(paypal, kept), `what the emails sold ${paypal}/${kept}`);
+  // Asking get_emails' emails' sizes, taken before the script is sent (Codex J 5811457165 on #3034), at every count it can ask.
+  for (let broadcasts = 0; broadcasts <= EMAILS_BROADCASTS; broadcasts += 1) covers(emailsSizesWork(broadcasts, broadcastSizesBytes(broadcasts)), `emails' sizes ${broadcasts}`);
   // The numbers kept an hour: read anew with their keeping, and from the copy at every size it can have.
   for (const paypalSales of [0, 2_000, 50_000]) for (const paypalRefunds of [0, 500, 9_000]) covers(addWork(numbersWork({ kept: true, sales: true, stripe: true, paypalSales, paypalRefunds }), NUMBERS_KEEP_WORK), `numbers kept ${paypalSales}/${paypalRefunds}`);
   for (const bytes of [1, 999, 50_000, 400_000, NUMBERS_KEPT_BYTES + 64]) for (const sent of [0, 2, 30_000, NUMBERS_SENT_BYTES, 3_000_000]) covers(keptNumbersWork(bytes, sent), `numbers from the copy ${bytes}/${sent}`);
@@ -546,8 +548,12 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/mcp-tools.ts", "if (charge && (await charge(apiReadUnits(listingsWork(listingsToRead(store, missing))), taken)))", "await readListings(store, missing)");
   before("lib/membership-numbers.ts", 'if (beforeStripe && !(await beforeStripe())) return "refused";', "/subscriptions?");
   // Regra 23 (#3034's siblings): get_emails reads its emails without their bodies, only those measured (was "listBroadcasts(store.listId, EMAILS_BROADCASTS)").
+  // Asking the emails' sizes is taken before the script is sent, and a refusal is handed back before anything else (Codex J 5811457165 on #3034).
+  before("lib/broadcasts.ts", "const paid = await paySizes(ids.length);", "const sized = await headsOf(");
+  before("lib/mcp-tools.ts", "const refused = await meter.charge(units, 0);", "measureBroadcastHeads(store.listId, EMAILS_BROADCASTS, paySizes)");
+  before("lib/mcp-tools.ts", "if (sizing.refused) return sizing.refused;", "const settle = await meter.hold(held);");
   before("lib/mcp-tools.ts", "const settle = await meter.hold(held);", "readMeasuredHeads(sizes, regrow)");
-  before("lib/mcp-tools.ts", "said.refused = await meter.charge(said.second, held);", "const refused = await settle(due);");
+  before("lib/mcp-tools.ts", "said.refused = await meter.charge(said.second, sizing.units + held);", "const refused = await settle(due);");
   before("lib/mcp-tools.ts", "const refused = await settle(due);", "currency: store.currency,");
   before("lib/mcp-tools.ts", "const held = await meter.hold(most);", "await readPaths(store.statsId)");
   before("lib/api-read.ts", "const settle = await hold(held);", "const { out, work } = await read();");

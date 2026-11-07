@@ -62,9 +62,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
-  // The emails are read without their bodies, which this page never shows: the list and each one's size first,
-  // inside this page's own studio requests, then what reading them comes to is taken before any is read
-  // (lib/broadcasts.ts, readBroadcastHeads).
+  // The emails are read without their bodies, which this page never shows: the list first, inside this page's own
+  // studio requests; then what asking each one's size comes to is taken before it is asked, and what reading them
+  // comes to before any is read (lib/broadcasts.ts, readBroadcastHeads).
   const payStudio = async (units: number) => {
     const counted = await countStudio(store, null, units);
     return counted.ok ? ({ ok: true } as const) : ({ ok: false, message: counted.message } as const);

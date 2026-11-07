@@ -106,9 +106,10 @@ async function main(): Promise<void> {
   part("1c. Small emails cost what they are; none costs nothing more");
   {
     await writeEmails(store, ids.slice(0, 3), () => SMALL);
-    const { result, sum } = await run();
+    const { result, sum, log } = await run();
     is("three small emails", result !== "threw" && result.ok ? result.heads.length : result, 3);
-    is(`a small read takes one studio request more (${sum.paid})`, sum.paid, 1);
+    // Asking their sizes is its own take now, before the script is sent (Codex P 5811379332 on #3034): one for the sizes, one for the read.
+    is(`a small read takes two studio requests more, in two takes: one for the sizes, one for the read (${sum.paid})`, [sum.paid, log.filter((e) => e.kind === "pay").length], [2, 2]);
     is("inside what was taken", sum.ok, true);
     await writeEmails(store, [], () => SMALL);
     const none = await run();
@@ -127,7 +128,8 @@ async function main(): Promise<void> {
     });
     is(`inside what was taken (${JSON.stringify({ paid: grown.sum.paid, commands: grown.sum.commands, bytes: grown.sum.bytes })})`, grown.sum.ok, true);
     is("the grown one is read again, paid first, and shown as it is now", grown.result !== "threw" && grown.result.ok ? [grown.result.heads.length, grown.result.heads[0].note, grown.result.heads[0].failures] : grown.result, [READ, "n".repeat(300), 12]);
-    is("it was taken twice: once for all, once for the grown one", grown.log.filter((e) => e.kind === "pay").length, 2);
+    // Three takes since asking the sizes is paid before it is sent (Codex P 5811379332 on #3034): the sizes, all of them, the grown one.
+    is("it was taken three times: for the sizes, for all, once more for the grown one", grown.log.filter((e) => e.kind === "pay").length, 3);
     await writeEmails(store, ids, () => LONGEST);
     const far = await run(async (batch) => {
       if (sized(batch)) await pipeline([["SET", emailKey(ids[0]), record(store, ids[0], LONGEST, { note: "n".repeat(20_000) })]]);

@@ -351,8 +351,32 @@ return out`;
 
 /** The script as it is sent, with its count of keys, its mode and the take's slack. */
 const HEADS_SCRIPT_WIRE = utf8Length(JSON.stringify(BROADCAST_HEADS)) + 64;
-/** One email in the script's call: its key and its bound, as sent. */
+/** One email in the script's call: its key and its bound, as sent (or, asking its size, its key and the size answered). */
 const HEAD_ARG_BYTES = 128;
+
+/**
+ * The bytes asking `count` emails' sizes without their bodies moves
+ * (BROADCAST_HEADS "size"), both ways as JSON: the script's call, and each
+ * one's key and the size answered. 0 when there is none. Its commands are
+ * 1 + count (the script and each GET inside it).
+ */
+export function broadcastSizesBytes(count: number): number {
+  return Number.isSafeInteger(count) && count > 0 ? HEADS_SCRIPT_WIRE + count * HEAD_ARG_BYTES : 0;
+}
+
+/**
+ * The studio requests asking `count` emails' sizes without their bodies
+ * comes to (broadcastSizesBytes, 1 + count commands, and the take itself):
+ * taken before the script is sent (readBroadcastHeads; Codex P 5811379332
+ * and Codex J 5811457165 on #3034: fifty sizes were asked inside a route's
+ * one studio request). 0 when there is none.
+ */
+export function broadcastSizesUnits(count: number): number {
+  return Number.isSafeInteger(count) && count > 0 ? studioReadUnits(broadcastSizesBytes(count), 1 + count) : 0;
+}
+
+/** What a caller takes before the emails' sizes are asked (measureBroadcastHeads), for `count` of them; refused with the sentence. */
+export type PaySizes = (count: number) => Promise<{ ok: true } | { ok: false; message: string }>;
 
 /**
  * The studio requests reading the emails whose sizes without their bodies
@@ -382,6 +406,8 @@ export function broadcastHeadsBytes(sizes: readonly number[], growth = 0): numbe
 
 /** The emails a reading will read, newest first, and each one's size without its body, as measured (measureBroadcastHeads). */
 export type MeasuredHeads = { listId: string | null; ids: string[]; sizes: number[] };
+/** The emails measured, or the sentence of the caller that would not pay for measuring them (nothing measured). */
+export type Measured = ({ ok: true } & MeasuredHeads) | { ok: false; refused: string };
 
 /** The script's answer for `keys`: one slot a key, or it throws. */
 async function headsOf(keys: string[], bounds: number[] | null): Promise<unknown[]> {
@@ -406,10 +432,12 @@ function headOf(raw: unknown, id: string, listId: string): BroadcastHead | null 
  * The store's newest `limit` emails without their bodies, for a page or a
  * reading that shows none of them (regra 30, the siblings of #3034's
  * reading): the studio's email page, Marktmorgen Path's evidence after a
- * sale and the chart's marks. The list (one LRANGE) and each one's size
- * without its body (BROADCAST_HEADS "size", inside the caller's own
- * requests) first; then what reading them comes to (broadcastHeadsUnits) is
- * taken through `pay`, and only then is each read, no further than its size.
+ * sale and the chart's marks. The list (one LRANGE, inside the caller's own
+ * requests) first; then what asking each one's size without its body comes
+ * to (broadcastSizesUnits) is taken through `pay` before it is asked
+ * (BROADCAST_HEADS "size"); then what reading them comes to
+ * (broadcastHeadsUnits) is taken through `pay`, and only then is each read,
+ * no further than its size.
  * One that grew since (its send moving on: its count, its note) is read once
  * more up to EMAIL_GROWTH_BYTES further, paid first. All or nothing, as
  * listBroadcastsStrict: an index or a record that is not one throws, never a
@@ -417,32 +445,40 @@ function headOf(raw: unknown, id: string, listId: string): BroadcastHead | null 
  * says why.
  */
 export async function readBroadcastHeads(listId: string | null, pay: PayFirst, limit = 30): Promise<BroadcastHeads> {
-  const measured = await measureBroadcastHeads(listId, limit);
+  const measured = await measureBroadcastHeads(listId, limit, (count) => pay(broadcastSizesUnits(count)));
+  if (!measured.ok) return { ok: false, refused: measured.refused };
   if (!measured.ids.length) return { ok: true, heads: [] };
   const paid = await pay(broadcastHeadsUnits(measured.sizes));
-  if (!paid.ok) return { ok: false, refused: paid.message };
+  if (paid.ok !== true) return { ok: false, refused: paid.message };
   return readMeasuredHeads(measured, pay);
 }
 
 /**
  * The store's newest `limit` emails and each one's size without its body,
- * before any is read (one LRANGE, then BROADCAST_HEADS "size"): for a
- * reading that pays for them first (readBroadcastHeads, and get_emails in
- * lib/mcp-tools.ts, which sets them aside with the rest of what it reads).
- * An index or a record that is not one throws.
+ * before any is read: one LRANGE, then, once `paySizes` took what asking
+ * that many sizes comes to, BROADCAST_HEADS "size" (Codex P 5811379332 and
+ * Codex J 5811457165 on #3034: the sizes were asked before anything paid
+ * for them, and a refusal afterwards could not undo it). Not taken, nothing
+ * is asked and the refusal says why. For a reading that pays for them
+ * first (readBroadcastHeads, and get_emails in lib/mcp-tools.ts, which sets
+ * the rest aside with what it reads). With no email, nothing is taken. An
+ * index or a record that is not one throws.
  */
-export async function measureBroadcastHeads(listId: string | null, limit = 30): Promise<MeasuredHeads> {
-  if (!listId) return { listId, ids: [], sizes: [] };
+export async function measureBroadcastHeads(listId: string | null, limit: number, paySizes: PaySizes): Promise<Measured> {
+  if (!listId) return { ok: true, listId, ids: [], sizes: [] };
   if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
   const index = repliesFor(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), 1);
   if (!index || !Array.isArray(index[0])) throw new Error("Campaign index is unavailable");
   const ids: unknown[] = index[0];
   if (ids.length > limit || ids.some((id) => typeof id !== "string" || !BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) throw new Error("Campaign index is incomplete");
-  if (!ids.length) return { listId, ids: [], sizes: [] };
+  if (!ids.length) return { ok: true, listId, ids: [], sizes: [] };
+  // Paid before it is sent: the script and a GET inside it for each email are not the caller's own request's to spend.
+  const paid = await paySizes(ids.length);
+  if (paid.ok !== true) return { ok: false, refused: paid.message };
   const sized = await headsOf((ids as string[]).map(bcKey), null);
   if (sized.some((size) => typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0)) throw new Error("Campaign records are incomplete");
-  return { listId, ids: ids as string[], sizes: sized as number[] };
+  return { ok: true, listId, ids: ids as string[], sizes: sized as number[] };
 }
 
 /**
@@ -466,7 +502,7 @@ export async function readMeasuredHeads(measured: MeasuredHeads, regrow: Regrow)
     // Grown since its size was asked, or not one: read once more, paid first, no further than a send can write on it.
     const grown = again.map(({ size }) => size);
     const more = await regrow(broadcastHeadsUnits(grown, EMAIL_GROWTH_BYTES), grown);
-    if (!more.ok) return { ok: false, refused: more.message };
+    if (more.ok !== true) return { ok: false, refused: more.message };
     const second = await headsOf(again.map(({ id }) => bcKey(id)), again.map(({ size }) => size + EMAIL_GROWTH_BYTES));
     again.forEach(({ i, id }, j) => (heads[i] = headOf(second[j], id, listId)));
   }

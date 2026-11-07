@@ -1,0 +1,249 @@
+/**
+ * The second independent review of PR #2827 (Claude 5, head d4c2af0c), its
+ * three MEDIUM findings and LEVE 4, against the real route, page, rules and
+ * lib/withdrawal.ts, an in-memory Redis and a stand-in email service; nothing
+ * real is reached.
+ *
+ * Checked:
+ *
+ *   - 1: when neither the creator's note nor the acknowledgement went, the
+ *     buyer is never told the withdrawal "was sent": the outcome and the page
+ *     say it is recorded with its time, that neither the store nor their email
+ *     got it yet, and to send it again; every language has those words; an
+ *     unknown state never reads as sent;
+ *   - 2: the day the page promises is the day the function is still open at
+ *     its end: 14 calendar days after the UTC day of payment, a Saturday or a
+ *     Sunday moved to the Monday, open to the end of that day anywhere on Earth
+ *     (11:59:59 UTC the next day), then closed;
+ *   - 3: the art. 16(m) yes closes the function as "supplied" only when the
+ *     order's confirmation (lib/purchase-email.ts, nl:confirm:<session>) is
+ *     read exactly as "sent"; no mark, or any other value, keeps it open;
+ *   - LEVE 4: the creator's note says to refund from the PayPal account for a
+ *     PayPal order, and from the Stripe account otherwise.
+ */
+import { test, beforeEach } from "node:test";
+import assert from "node:assert/strict";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NextRequest } from "next/server";
+import { store as redis } from "./redis-stub";
+import { paidPeriod } from "./billing-period-fixture";
+import { afterTasks } from "./next-server-after-world";
+import { ordersLinkFor, type Purchase } from "@/lib/buyer-orders";
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { withdraw, withdrawalKey, withdrawalStanding } from "@/lib/withdrawal";
+import { submittedInTime, withdrawalWindow, type WithdrawalFacts } from "@/lib/withdrawal-rules";
+import { WITHDRAWAL_WORDS } from "@/lib/buyer-words/withdrawal";
+import { openConversation, readInbox } from "@/lib/inbox";
+import { withinLimit } from "@/lib/request-guard";
+import { NEW_PER_DAY } from "@/lib/inbox-rules";
+import { POST as withdrawRoute } from "@/app/api/store/withdraw/route";
+import WithdrawPage from "@/app/[handle]/orders/withdraw/page";
+
+const OWNER = "mara@example.com";
+const BUYER = "ana@example.com";
+const ORIGIN = "https://marktmorgen.com";
+const DAY = 86_400;
+const realNow = Date.now;
+
+let sessions: Record<string, unknown>[] = [];
+const mails: { to: string; subject: string; text: string }[] = [];
+let refuseMail = 0;
+
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (url.hostname === "api.resend.com") {
+    if (refuseMail > 0) {
+      refuseMail -= 1;
+      return answer({ message: "unavailable" }, 500);
+    }
+    const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
+    mails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
+    return answer({ id: "00000000-0000-4000-8000-000000000000" });
+  }
+  const path = url.pathname.replace(/^\/v1/, "");
+  if (path === "/checkout/sessions") return answer({ object: "list", data: sessions, has_more: false });
+  const one = path.match(/^\/checkout\/sessions\/([A-Za-z0-9_]+)$/);
+  if (one) {
+    const found = sessions.find((row) => row.id === one[1]);
+    return found ? answer(found) : answer({ error: { type: "invalid_request_error", code: "resource_missing" } }, 404);
+  }
+  return answer({ object: "list", data: [], has_more: false });
+}) as typeof fetch;
+
+beforeEach(() => {
+  Date.now = realNow;
+  redis.clear();
+  sessions = [];
+  mails.length = 0;
+  refuseMail = 0;
+  afterTasks.length = 0;
+  process.env.STRIPE_SECRET_KEY = "sk_test_withdrawal_only_a_stand_in";
+  process.env.RESEND_API_KEY = "re_test_orders_only_a_stand_in";
+});
+
+async function shop(): Promise<{ store: Store; product: string; token: string }> {
+  await claimHandle(OWNER, "mara", "Mara's Kitchen", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestMara00001", true);
+  await setSubscription(OWNER, { customerId: "cus_mara00001", subscriptionId: "sub_mara00001", active: true, tier: "creator", period: paidPeriod() });
+  const made = await addProduct(OWNER, "The Butter Course", "", "49", null);
+  if (!made.ok) throw new Error("no product");
+  await setProductLink(OWNER, made.product.id, "https://example.com/butter");
+  const store = (await storeForEmail(OWNER)) as Store;
+  const link = (await ordersLinkFor(store, BUYER, `${ORIGIN}/@mara`))!;
+  return { store, product: made.product.id, token: new URL(link).searchParams.get("token")! };
+}
+
+const paid = (id: string, product: string, created: number, metadata: Record<string, string> = {}) => ({
+  id: `cs_test_${id.padEnd(24, "0")}`,
+  object: "checkout.session",
+  status: "complete",
+  payment_status: "paid",
+  mode: "payment",
+  created,
+  metadata: { store: "mara", product, ...metadata },
+  customer_details: { email: BUYER },
+  payment_intent: { id: `pi_test${id.padEnd(10, "0")}`, status: "succeeded", latest_charge: { refunded: false, amount_refunded: 0 } },
+});
+
+const post = (fields: Record<string, string>) =>
+  withdrawRoute(new NextRequest(`${ORIGIN}/api/store/withdraw`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields).toString() }));
+const stateOf = (answer: Response) => new URL(answer.headers.get("location") ?? "https://x").searchParams.get("w");
+const render = async (query: Record<string, string>) => renderToStaticMarkup(await WithdrawPage({ params: Promise.resolve({ handle: "@mara" }), searchParams: Promise.resolve(query) }));
+const fillInbox = async (store: Store) => {
+  for (let i = 0; i < NEW_PER_DAY + 1; i++) await withinLimit("inbox-new", store.statsId!, NEW_PER_DAY, 86_400);
+};
+const LANGUAGES = ["en", "es", "fr", "de", "it", "nl", "pt"] as const;
+
+test("MEDIUM 1: neither the store nor the email reached: recorded, never said as sent, offered again", async () => {
+  const { store, product, token } = await shop();
+  sessions = [paid("nowhere", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  await fillInbox(store);
+  refuseMail = 1;
+  const answer = await post({ handle: "mara", token, ref, name: "Ana Souza", email: BUYER });
+  assert.equal(stateOf(answer), "unreached", "a state of its own, never 'unsent' (which says the store got it)");
+  assert.equal((await readInbox(store.statsId!)).length, 0, "precondition: the store got nothing");
+  assert.equal(mails.length, 0, "precondition: no acknowledgement went");
+  assert.equal((await withdrawalStanding(store, ref)).owed, "unreached", "the page's standing says the same");
+
+  const said = await render({ token, ref, w: "unreached" });
+  assert.ok(!/was sent/i.test(said), "the page never says it was sent");
+  assert.ok(said.includes(WITHDRAWAL_WORDS.en.notices.unreached?.title ?? "\u0000"), "the page shows the state's own notice");
+  assert.ok(said.includes("Confirm withdrawal"), "and offers the form again, to send it once more");
+  const reopened = await render({ token, ref });
+  assert.ok(!/was sent/i.test(reopened) && reopened.includes(WITHDRAWAL_WORDS.en.notices.unreached?.title ?? "\u0000"), "reopened, it says the same");
+});
+
+test("MEDIUM 1: the words of the state, in every language, never say sent", () => {
+  for (const code of LANGUAGES) {
+    const n = WITHDRAWAL_WORDS[code].notices;
+    assert.ok(n.unreached, `${code}: a notice for the state`);
+    assert.notEqual(n.unreached.title, n.done.title, `${code}: not the 'sent' title`);
+    assert.notEqual(n.unreached.title, n.unsent.title, `${code}: not the 'unsent' title`);
+  }
+  const en = WITHDRAWAL_WORDS.en.notices.unreached;
+  assert.ok(en && !/\bsent\b/i.test(`${en.title} ${en.body}`), `English never says sent: ${en?.title} ${en?.body}`);
+  assert.ok(en && /recorded/i.test(en.body) && /date and time/i.test(en.body) && /store/i.test(en.body) && /email/i.test(en.body) && /again/i.test(en.body), "it says recorded with its time, store and email not reached, send again");
+});
+
+test("MEDIUM 1: a record whose acknowledgement is owed and whose creator was never told, with no tells left, is still 'unreached'", async () => {
+  const { store } = await shop();
+  const ref = "cs_test_exhausted0000000000000000";
+  await redis.pipeline([["HSET", withdrawalKey(store.sid!, ref), "at", String(Date.now()), "tries", "1", "tells", "3"]]);
+  assert.equal((await withdrawalStanding(store, ref)).owed, "unreached", "never claimed to have reached the store");
+});
+
+test("MEDIUM 1: an unknown state never reads as sent", async () => {
+  const { product, token } = await shop();
+  sessions = [paid("unknownw", product, Math.floor(Date.now() / 1000) - DAY)];
+  const html = await render({ token, ref: sessions[0].id as string, w: "bogus" });
+  assert.ok(!/was sent/i.test(html), "an unknown state shows no 'sent' notice");
+});
+
+// The 2026 calendar: November 1 and 15 are Sundays, November 14 a Saturday, October 28 and November 11 Wednesdays.
+const at = (y: number, m: number, d: number, h = 0, min = 0, s = 0) => Date.UTC(y, m - 1, d, h, min, s) / 1000;
+const sale = (paidAt: number): WithdrawalFacts => ({ kind: "sale", paidAt, member: false, givenByStore: false, consent: null });
+
+test("MEDIUM 2: rules: to the end of the last day anywhere on Earth, Saturdays and Sundays moved to the Monday", () => {
+  // Paid Sunday November 1 at 00:30 UTC: day 14 is Sunday November 15, moved to Monday November 16.
+  const p = at(2026, 11, 1, 0, 30);
+  const end = at(2026, 11, 17, 11, 59, 59);
+  assert.deepEqual(withdrawalWindow(sale(p), at(2026, 11, 15, 12)), { open: true, until: end }, "still open at noon on day 14 (the reviewer's case)");
+  assert.equal(withdrawalWindow(sale(p), at(2026, 11, 16, 12)).open, true, "open at noon UTC on the day shown");
+  assert.equal(withdrawalWindow(sale(p), at(2026, 11, 16, 23)).open, true, "open at 23:00 UTC on the day shown");
+  assert.equal(withdrawalWindow(sale(p), end).open, true, "open at the end instant");
+  assert.deepEqual(withdrawalWindow(sale(p), end + 1), { open: false, why: "ended" }, "closed after it");
+  assert.equal(submittedInTime(withdrawalWindow(sale(p), end), end), true);
+  // A weekday: paid Wednesday October 28 at 23:50 UTC, last day Wednesday November 11.
+  const w = at(2026, 10, 28, 23, 50);
+  assert.deepEqual(withdrawalWindow(sale(w), at(2026, 11, 11, 23, 59)), { open: true, until: at(2026, 11, 12, 11, 59, 59) });
+  assert.deepEqual(withdrawalWindow(sale(w), at(2026, 11, 12, 12)), { open: false, why: "ended" });
+  // A Saturday: paid Saturday October 31, day 14 is Saturday November 14, moved to Monday November 16.
+  const s = at(2026, 10, 31, 9);
+  assert.deepEqual(withdrawalWindow(sale(s), at(2026, 11, 15, 20)), { open: true, until: at(2026, 11, 17, 11, 59, 59) });
+});
+
+test("MEDIUM 2: the page shows the last day the function is still open on", async () => {
+  // Every clock of this test at a fixed time: paid Sunday November 1, 2026 at 00:30 UTC, the page opened on November 14.
+  Date.now = () => at(2026, 11, 14, 12) * 1000;
+  try {
+    const { product, token } = await shop();
+    sessions = [paid("deadline", product, at(2026, 11, 1, 0, 30))];
+    const html = await render({ token, ref: sessions[0].id as string });
+    assert.ok(html.includes("You can withdraw until November 16, 2026."), `the Monday after the Sunday: ${html.match(/You can withdraw until[^<]*/)?.[0]}`);
+    Date.now = () => at(2026, 11, 16, 23) * 1000;
+    assert.ok((await render({ token, ref: sessions[0].id as string })).includes("Confirm withdrawal"), "still offered late on the day shown");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("MEDIUM 3: rules: the yes closes the function only with the confirmation known sent", () => {
+  const p = at(2026, 11, 1, 12);
+  const yes = { ...sale(p), consent: { version: "2026-10-30.2", at: p, kind: "digital" as const } };
+  assert.equal(withdrawalWindow(yes, p + 60).open, true, "the yes alone: open");
+  assert.equal(withdrawalWindow({ ...yes, confirmed: false } as WithdrawalFacts, p + 60).open, true, "confirmation not known sent: open");
+  assert.deepEqual(withdrawalWindow({ ...yes, confirmed: true } as WithdrawalFacts, p + 60), { open: false, why: "supplied" }, "confirmation sent: supplied");
+});
+
+test("MEDIUM 3: the list, the page and the route read the order's confirmation mark exactly", async () => {
+  const { store, product, token } = await shop();
+  const now = Math.floor(Date.now() / 1000);
+  const dc = { dc: `yes:2026-10-30.2:d:${now - 2 * DAY}` };
+  sessions = [paid("nomark", product, now - 2 * DAY, dc), paid("sentmark", product, now - 2 * DAY, dc), paid("sending", product, now - 2 * DAY, dc), paid("oldone", product, now - 2 * DAY, dc)];
+  const [nomark, sentmark, sending, oldone] = sessions.map((s) => s.id as string);
+  await redis.pipeline([["SET", `nl:confirm:${sentmark}`, "sent"], ["SET", `nl:confirm:${sending}`, "sending"], ["SET", `nl:confirm:${oldone}`, "1"]]);
+
+  const list = await render({ token });
+  assert.ok(list.includes(`ref=${nomark}`), "no mark: the function stays offered");
+  assert.ok(list.includes(`ref=${sending}`), "a send in progress is not 'sent': offered");
+  assert.ok(list.includes(`ref=${oldone}`), "any other value is not 'sent': offered");
+  assert.ok(!list.includes(`ref=${sentmark}`), "confirmation sent: supplied, not offered");
+
+  assert.equal(stateOf(await post({ handle: "mara", token, ref: sentmark, name: "Ana", email: BUYER })), "closed", "the route closes it only when sent");
+  assert.equal(stateOf(await post({ handle: "mara", token, ref: nomark, name: "Ana", email: BUYER })), "done", "without the mark the route takes the withdrawal");
+  void store;
+});
+
+test("LEVE 4: the creator's note names the account the order was paid into", async () => {
+  const { store } = await shop();
+  const purchase = (reference: string, paypal: boolean): Purchase => ({
+    reference, kind: paypal ? "imported" : "sale", title: "The Butter Course", option: null, paidAt: Math.floor(Date.now() / 1000) - DAY,
+    member: false, ended: false, productId: "p1", courseProduct: null, main: null, items: null, added: [], consent: null,
+    ...(paypal ? { paidWith: "paypal" as const } : {}),
+  });
+  const viaPaypal = "imp_paypal0000000001";
+  const viaStripe = "cs_test_stripe0000000000000000";
+  assert.equal(await withdraw(store, purchase(viaPaypal, true), { name: "Ana", reference: viaPaypal, email: BUYER }), "done");
+  assert.equal(await withdraw(store, purchase(viaStripe, false), { name: "Ana", reference: viaStripe, email: BUYER }), "done");
+  const threads = JSON.stringify(await Promise.all((await readInbox(store.statsId!)).map((c) => openConversation(store.statsId!, c.id))));
+  const note = (ref: string) => threads.match(new RegExp(`order ${ref}[^"]*`))?.[0] ?? "";
+  assert.ok(note(viaPaypal).includes("from your PayPal account") && !note(viaPaypal).includes("Stripe"), `PayPal: ${note(viaPaypal)}`);
+  assert.ok(note(viaStripe).includes("from your Stripe account"), `Stripe: ${note(viaStripe)}`);
+  for (const code of LANGUAGES) {
+    const words = WITHDRAWAL_WORDS[code].creatorNote as (...args: unknown[]) => string;
+    assert.ok(words("P", "o", "w", "PayPal").includes("PayPal") && !words("P", "o", "w", "PayPal").includes("Stripe"), `${code}: PayPal named`);
+  }
+});

@@ -9,6 +9,13 @@ import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { libraryOwner, storesBoughtFrom } from "@/lib/buyer-library";
+import { WAITING_LATER, waitingFor, waitingLine } from "@/lib/buyer-waiting";
+import { LIBRARY_WAITING_UNITS } from "@/lib/public-read-rules";
+import { takePublicRequest } from "@/lib/traffic";
+import { requestsOpen } from "@/lib/payment-requests";
+
+/** How many stores of a library are read at the same time. */
+const LIBRARY_STORES_AT_ONCE = 6;
 
 export const metadata: Metadata = {
   title: "Your library — Marktmorgen",
@@ -37,12 +44,28 @@ export default async function LibraryPage({ searchParams }: Params) {
   const email = token ? await libraryOwner(token) : null;
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
-  const shelves: { store: Store; open: string | null }[] = [];
+  const shelves: { store: Store; open: string | null; waiting: string }[] = [];
   if (email) {
     const stores = (await Promise.all((await storesBoughtFrom(email)).map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
-    for (const store of stores) {
+    // What waits on them at one store (lib/buyer-waiting.ts), shown only where its orders page opens to act on it, and read
+    // only once that store's buyer requests paid for the read (LIBRARY_WAITING_UNITS; Codex J on #1969). Without them nothing
+    // is read, and the card says it could not check, never that something waits. Payment requests are read only where they
+    // take payment.
+    const shelf = async (store: Store) => {
       const base = storeBase(store);
-      shelves.push({ store, open: canRecover(store) ? await ordersLinkFor(store, email, base).catch(() => null) : null });
+      const open = canRecover(store) ? await ordersLinkFor(store, email, base).catch(() => null) : null;
+      let waiting = "";
+      if (open) {
+        const paid = await takePublicRequest(store, "buyer", undefined, LIBRARY_WAITING_UNITS).catch(() => false);
+        const found = paid ? await waitingFor(store, email, undefined, requestsOpen(store)).catch(() => null) : null;
+        waiting = !paid ? WAITING_LATER : waitingLine(found ?? { requestsTotal: 0, agreementsTotal: 0, unread: true });
+      }
+      return { store, open, waiting };
+    };
+    // A few stores at a time, each paying before it reads, so a library of many stores is not read one round trip after
+    // another (Claude 5 on #1969, AX274 performance).
+    for (let at = 0; at < stores.length; at += LIBRARY_STORES_AT_ONCE) {
+      shelves.push(...(await Promise.all(stores.slice(at, at + LIBRARY_STORES_AT_ONCE).map(shelf))));
     }
     shelves.sort((a, b) => a.store.name.localeCompare(b.store.name, "en"));
   }
@@ -71,7 +94,7 @@ export default async function LibraryPage({ searchParams }: Params) {
               </p>
               {shelves.length ? (
                 <ul className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {shelves.map(({ store, open }) => (
+                  {shelves.map(({ store, open, waiting }) => (
                     <li key={store.sid} className="card flex min-w-0 flex-col p-5" data-library-store={store.handle}>
                       <div className="flex items-center gap-3">
                         {store.photoId ? (
@@ -84,6 +107,7 @@ export default async function LibraryPage({ searchParams }: Params) {
                         )}
                         <p className="min-w-0 truncate text-lg font-semibold">{store.name}</p>
                       </div>
+                      {waiting ? <p className="mt-4 text-sm font-semibold text-ink">{waiting}</p> : null}
                       {!open ? (
                         <p role="status" className="mt-4 text-sm text-ink-soft">
                           Your purchases could not be opened just now. Try again in a moment, or visit the store for help.

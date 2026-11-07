@@ -5,9 +5,15 @@
  * buyer used to get "error" while an address that never bought got "sent",
  * and the token written for the failed email stayed in Redis for an hour.
  *
+ * Its time must not tell them apart either: the buyer used to wait for the
+ * mail provider while a stranger got the answer at once.
+ *
  * Actual functions under test: requestCourseLink, sendCourseLink and
  * POST /api/store/course/link, with MemoryRedis and the synthetic SES fixture
- * (provider HTTP replies only, never the send result).
+ * (provider HTTP replies only, never the send result). "next/server" is
+ * tests/next-server-after-world.ts here (tests/test-config.mjs): what a
+ * request leaves for after its answer is held, and run by afterAnswers(), as
+ * the route's after() does once the answer is sent.
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -21,6 +27,7 @@ import { LANGUAGE_CODES } from "@/lib/store-language";
 import { POST as courseLinkRoute } from "@/app/api/store/course/link/route";
 import { store as redis } from "@/tests/redis-stub";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { afterTasks } from "./next-server-after-world";
 
 const origin = "https://marktmorgen.com";
 const owner = "uniform-course-owner@example.test";
@@ -28,12 +35,18 @@ const buyer = "uniform-course-buyer@example.test";
 const stranger = "uniform-course-stranger@example.test";
 type Command = (string | number)[];
 
+/** Runs what the requests left for after their answers, as the route's after() does. */
+async function afterAnswers(): Promise<void> {
+  for (const task of afterTasks.splice(0)) await (task as () => Promise<unknown>)();
+}
+
 const tokens = () => redis.keys().filter((k) => k.startsWith("nl:learn:link:") && !k.endsWith(":opens")).length;
 
 async function world(handle: string) {
   delete process.env.RESEND_API_KEY;
   const fixture = installSesMailFixture();
   redis.clear();
+  afterTasks.length = 0;
   fixture.configure();
   await fixture.setReady(true, { max24: 50_000, rate: 100 });
   assert.ok((await claimHandle(owner, handle, "Uniform School", "")).ok);
@@ -57,6 +70,7 @@ test("a refused final send gives the buyer and a stranger the same reply and kee
     fixture.setSesOutcome("refused");
     const entitled = await requestCourseLink({ store: paidStore, product, email: buyer, ip: "192.0.2.50", origin });
     const unentitled = await requestCourseLink({ store: paidStore, product, email: stranger, ip: "192.0.2.51", origin });
+    await afterAnswers();
     assert.ok(fixture.calls.ses > 0, "the buyer's send really reached SES and was refused");
     assert.equal(fixture.sent.length, 0);
     assert.equal(entitled, unentitled, "the reply never says whether the address bought the course");
@@ -94,8 +108,10 @@ test("an outage after the token was written gives the same reply as a stranger a
       return reply;
     };
     const entitled = await requestCourseLink({ store: paidStore, product, email: buyer, ip: "192.0.2.52", origin });
+    await afterAnswers();
     armed = false;
     const unentitled = await requestCourseLink({ store: paidStore, product, email: stranger, ip: "192.0.2.53", origin });
+    await afterAnswers();
     assert.ok(thrown > 0, "the outage really happened after the token was written");
     assert.equal(fixture.sent.length, 0);
     assert.equal(entitled, unentitled);
@@ -122,6 +138,7 @@ test("the public route redirects the buyer and a stranger to the same place when
       }));
     const a = await post(buyer, "192.0.2.54");
     const b = await post(stranger, "192.0.2.55");
+    await afterAnswers();
     assert.equal(a.status, 303);
     assert.equal(a.headers.get("location"), b.headers.get("location"));
     assert.equal(tokens(), 0);
@@ -134,6 +151,7 @@ test("a delivered link still opens the course", async () => {
   const { fixture, product, paidStore } = await world("uniform-ok-school");
   try {
     assert.equal(await requestCourseLink({ store: paidStore, product, email: buyer, ip: "192.0.2.56", origin }), "sent");
+    await afterAnswers();
     const mail = fixture.sent.at(-1)!;
     const token = /token=([a-f0-9]{64})/.exec(mail.text)?.[1];
     assert.ok(token);
@@ -142,6 +160,42 @@ test("a delivered link still opens the course", async () => {
     assert.equal(grant?.e, buyer);
   } finally {
     fixture.restore();
+  }
+});
+
+test("the buyer and a stranger get the answer in the same time, whatever the mail provider takes", async () => {
+  for (const outcome of ["refused", "ok"] as const) {
+    const { fixture, product, paidStore } = await world(`uniform-time-${outcome}`);
+    // A mail provider that takes 300 ms to answer, as a real one can.
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return inner(...args);
+    }) as typeof fetch;
+    try {
+      fixture.setSesOutcome(outcome);
+      let started = performance.now();
+      const entitled = await requestCourseLink({ store: paidStore, product, email: buyer, ip: "192.0.2.60", origin });
+      const buyerMs = performance.now() - started;
+      started = performance.now();
+      const unentitled = await requestCourseLink({ store: paidStore, product, email: stranger, ip: "192.0.2.61", origin });
+      const strangerMs = performance.now() - started;
+      assert.equal(entitled, unentitled);
+      assert.equal(entitled, "sent");
+      // Far below the provider's 300 ms: the answer never waits for the send.
+      assert.ok(Math.abs(buyerMs - strangerMs) < 100, `${outcome}: the time tells them apart: buyer ${Math.round(buyerMs)} ms, stranger ${Math.round(strangerMs)} ms`);
+      assert.ok(buyerMs < 250, `${outcome}: the buyer's answer waited for the provider: ${Math.round(buyerMs)} ms`);
+      // The send still happens, after the answer, only for the buyer.
+      assert.equal(fixture.calls.ses, 0, `${outcome}: nothing was sent before the answer`);
+      await afterAnswers();
+      assert.ok(fixture.calls.ses > 0, `${outcome}: the buyer's send ran after the answer`);
+      assert.equal(fixture.sent.length, outcome === "ok" ? 1 : 0);
+      assert.ok(fixture.sent.every((mail) => mail.to.length === 1 && mail.to[0] === buyer), "a stranger is never emailed");
+      assert.equal(tokens(), outcome === "ok" ? 1 : 0, "a refused send keeps no token; a delivered one keeps its own");
+    } finally {
+      globalThis.fetch = inner;
+      fixture.restore();
+    }
   }
 });
 

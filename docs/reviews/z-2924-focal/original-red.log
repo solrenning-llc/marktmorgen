@@ -1,0 +1,454 @@
+z-2924-meta-spend-partial.proof.ts
+✔ control: wholly valid typed and Meta members produce the known $17 cost (21.268624ms)
+✖ Meta read rejects the whole list when any member is malformed (1.459302ms)
+✖ typed spend read rejects the whole hash when any field value is malformed (0.85008ms)
+✖ partial provider values leave daily ad cost and after-ads result unknown (1.541194ms)
+✖ askNumbers does not hand the partial $17 to the model as all ad spend (25.550287ms)
+✖ weeklySummary does not hand the partial $17 to the model as all ad spend (2.778445ms)
+COUNTED_MEMORY_COMMANDS 63
+COUNTED_MOCK_HTTP 2
+ℹ tests 6
+ℹ suites 0
+ℹ pass 1
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 60.915445
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12428:27
+✖ Meta read rejects the whole list when any member is malformed (1.459302ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12431:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12433:27
+✖ typed spend read rejects the whole hash when any field value is malformed (0.85008ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12436:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12438:27
+✖ partial provider values leave daily ad cost and after-ads result unknown (1.541194ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+  +   1700,
+  +   1300
+  -   null,
+  -   null
+    ]
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12443:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12445:27
+✖ askNumbers does not hand the partial $17 to the model as all ad spend (25.550287ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12449:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12451:27
+✖ weeklySummary does not hand the partial $17 to the model as all ad spend (2.778445ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial.proof.ts.cjs:12455:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+z-2924-meta-spend-partial-derived.proof.ts
+✔ control: wholly valid typed and Meta members produce the known $17 cost (25.359198ms)
+✖ Meta read rejects the whole list when any member is malformed (1.964442ms)
+✖ typed spend read rejects the whole hash when any field value is malformed (1.892206ms)
+✖ partial provider values leave daily ad cost and after-ads result unknown (2.691218ms)
+✖ askNumbers does not hand the partial $17 to the model as all ad spend (40.103163ms)
+✖ weeklySummary does not hand the partial $17 to the model as all ad spend (3.353851ms)
+COUNTED_MEMORY_COMMANDS 63
+COUNTED_MOCK_HTTP 2
+ℹ tests 6
+ℹ suites 0
+ℹ pass 1
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85.304228
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12428:27
+✖ Meta read rejects the whole list when any member is malformed (1.964442ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12431:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12433:27
+✖ typed spend read rejects the whole hash when any field value is malformed (1.892206ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12436:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12438:27
+✖ partial provider values leave daily ad cost and after-ads result unknown (2.691218ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+  +   1700,
+  +   1300
+  -   null,
+  -   null
+    ]
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12446:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12448:27
+✖ askNumbers does not hand the partial $17 to the model as all ad spend (40.103163ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12452:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12454:27
+✖ weeklySummary does not hand the partial $17 to the model as all ad spend (3.353851ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/z-2924-meta-spend-partial-derived.proof.ts.cjs:12458:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+meta-lines-exact.test.ts
+✔ metaLines: a missing envelope is unknown, never "no lines" (31.997773ms)
+✔ metaLines: a connection count that is not a count is unknown, never "no lines" (0.506866ms)
+✔ metaLines: a null connection count is unknown, never "no lines" (0.20722ms)
+✔ metaLines: lines that are not text is unknown, never "no lines" (0.549332ms)
+✔ metaLines: lines that are not JSON is unknown, never "no lines" (0.359972ms)
+✔ metaLines: lines that are not a list is unknown, never "no lines" (0.350906ms)
+✔ the spend route answers the typed lines with spendsUnread when Meta's lines cannot be read (19.879692ms)
+✔ the Meta account route answers spendsUnread when Meta's lines cannot be read (9.019611ms)
+✔ the model is told ad spend is unknown, not given the typed lines as all of it, when Meta's lines cannot be read (7.845222ms)
+✔ healthy controls: typed and Meta lines both counted everywhere (6.971663ms)
+✔ confirmed absence: not connected, or connected with nothing read yet, is no Meta line (0.421912ms)
+✖ metaLines: a kept list holding a line with no id beside a whole line is unknown, never that line alone (0.952337ms)
+✖ metaLines: a kept list holding a line whose id is not Meta's beside a whole line is unknown, never that line alone (0.436305ms)
+✖ metaLines: a kept list holding a line of no amount beside a whole line is unknown, never that line alone (0.583052ms)
+✖ metaLines: a kept list holding text beside a whole line is unknown, never that line alone (0.256878ms)
+✖ metaLines: a kept list holding null beside a whole line is unknown, never that line alone (0.202788ms)
+✖ the model is told ad spend is unknown when a Meta line is in another shape, never handed the rest as all of it (2.957982ms)
+✖ typed spend holding a field that is not an id beside a whole entry is unknown, never that entry alone (0.800698ms)
+✖ typed spend holding a value that is not JSON beside a whole entry is unknown, never that entry alone (0.449932ms)
+✖ typed spend holding a value that is not a record beside a whole entry is unknown, never that entry alone (0.390477ms)
+✖ typed spend holding a record of no channel beside a whole entry is unknown, never that entry alone (0.446879ms)
+✖ the model is told ad spend is unknown when a typed entry is in another shape (2.802375ms)
+✖ the spend route answers 503 when a typed entry is in another shape, never the rest as all of it (3.68818ms)
+COUNTED_MEMORY_COMMANDS 109
+COUNTED_MOCK_HTTP 4
+ℹ tests 23
+ℹ suites 0
+ℹ pass 11
+ℹ fail 12
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 110.850728
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52137:29
+✖ metaLines: a kept list holding a line with no id beside a whole line is unknown, never that line alone (0.952337ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withMetaRead (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52049:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52139:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52137:29
+✖ metaLines: a kept list holding a line whose id is not Meta's beside a whole line is unknown, never that line alone (0.436305ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withMetaRead (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52049:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52139:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52137:29
+✖ metaLines: a kept list holding a line of no amount beside a whole line is unknown, never that line alone (0.583052ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withMetaRead (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52049:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52139:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52137:29
+✖ metaLines: a kept list holding text beside a whole line is unknown, never that line alone (0.256878ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withMetaRead (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52049:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52139:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52137:29
+✖ metaLines: a kept list holding null beside a whole line is unknown, never that line alone (0.202788ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withMetaRead (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52049:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52139:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52142:27
+✖ the model is told ad spend is unknown when a Meta line is in another shape, never handed the rest as all of it (2.957982ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52145:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52165:29
+✖ typed spend holding a field that is not an id beside a whole entry is unknown, never that entry alone (0.800698ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withTypedExtra (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52153:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52167:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52165:29
+✖ typed spend holding a value that is not JSON beside a whole entry is unknown, never that entry alone (0.449932ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withTypedExtra (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52153:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52167:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52165:29
+✖ typed spend holding a value that is not a record beside a whole entry is unknown, never that entry alone (0.390477ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withTypedExtra (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52153:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52167:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52165:29
+✖ typed spend holding a record of no channel beside a whole entry is unknown, never that entry alone (0.446879ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withTypedExtra (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52153:12)
+      at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52167:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52170:27
+✖ the model is told ad spend is unknown when a typed entry is in another shape (2.802375ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  false !== true
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52173:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52175:27
+✖ the spend route answers 503 when a typed entry is in another shape, never the rest as all of it (3.68818ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  200 !== 503
+
+      at TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52181:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 200,
+    expected: 503,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:50059:62)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:50244:25)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:50059:62)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:50244:25)
+    at async Promise.all (index 1)
+    at async POST2 (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:51996:27)
+    at async withMetaRead (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52049:12)
+    at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52081:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:50059:62)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:50244:25)
+    at async knownSpends (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:51275:17)
+    at async askNumbers (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:51281:18)
+    at async withMetaRead (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52049:12)
+    at async TestContext.<anonymous> (/tmp/z-points-fd6RTk/meta-lines-exact.test.ts.cjs:52110:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

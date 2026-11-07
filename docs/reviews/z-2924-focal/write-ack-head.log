@@ -1,0 +1,56 @@
+z-2924-write-ack.proof.ts
+{"firstFailed":true,"beforeRetry":[1200],"afterRetry":[1200,1200],"total":2400}
+{"ok":true,"kept":[]}
+✔ control: a healthy add records one real line (11.644011ms)
+✖ a lost receipt after applying a write must not make the same retry record the expense twice (14.676512ms)
+✖ a write not applied with an unknown empty receipt must not be reported saved (1.356197ms)
+COUNTED_MEMORY_COMMANDS 23
+COUNTED_MOCK_HTTP 0
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 37.561263
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-z1DaGr/z-2924-write-ack.proof.ts.cjs:10310:27
+✖ a lost receipt after applying a write must not make the same retry record the expense twice (14.676512ms)
+  AssertionError [ERR_ASSERTION]: one real expense remains one after retry of the refused operation
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> (/tmp/z-points-z1DaGr/z-2924-write-ack.proof.ts.cjs:10329:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-z1DaGr/z-2924-write-ack.proof.ts.cjs:10331:27
+✖ a write not applied with an unknown empty receipt must not be reported saved (1.356197ms)
+  AssertionError [ERR_ASSERTION]: unknown write is never saved success with no saved row
+
+  true !== false
+
+      at TestContext.<anonymous> (/tmp/z-points-z1DaGr/z-2924-write-ack.proof.ts.cjs:10343:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

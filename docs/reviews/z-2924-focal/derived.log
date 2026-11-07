@@ -1,0 +1,42 @@
+z-2924-meta-spend-partial-derived.proof.ts
+✔ control: wholly valid typed and Meta members produce the known $17 cost (28.656995ms)
+✔ Meta read rejects the whole list when any member is malformed (0.791479ms)
+✔ typed spend read rejects the whole hash when any field value is malformed (0.834681ms)
+✔ partial provider values leave daily ad cost and after-ads result unknown (1.432446ms)
+✔ askNumbers does not hand the partial $17 to the model as all ad spend (29.797265ms)
+✔ weeklySummary does not hand the partial $17 to the model as all ad spend (2.630242ms)
+COUNTED_MEMORY_COMMANDS 63
+COUNTED_MOCK_HTTP 2
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 80.206992
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:11390:27)
+    at async TestContext.<anonymous> (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:12443:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:11390:27)
+    at async knownSpends (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:12300:16)
+    at async askNumbers (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:12306:18)
+    at async TestContext.<anonymous> (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:12453:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading Meta's ad spend lines failed UnknownReplyError: Redis answered Meta's ad spend lines in an unknown shape
+    at metaLines (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:11351:21)
+    at async Promise.all (index 1)
+    at async readSpendLines (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:11390:27)
+    at async knownSpends (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:12300:16)
+    at async weeklySummary (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:12334:18)
+    at async TestContext.<anonymous> (/tmp/z-points-14QTyj/z-2924-meta-spend-partial-derived.proof.ts.cjs:12459:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

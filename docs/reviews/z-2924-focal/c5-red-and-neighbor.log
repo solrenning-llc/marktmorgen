@@ -1,0 +1,208 @@
+meta-spend-review-2924.test.ts
+✖ 1. a kept entry in another shape refuses the add: three tries write nothing (22.428897ms)
+✖ 1. a read after the write that fails answers the lines known, never 'not saved' with the line saved (4.083763ms)
+✔ 1. control: a healthy add writes once and answers both kinds of line (5.505654ms)
+✖ 2. the weekly email's spend: whole, or none at all (1.279469ms)
+✖ 3. disconnecting Meta: a connection read answering no reply is never 'not connected' (3.671442ms)
+✖ 3. disconnecting Meta: a connection read answering cut text is never 'not connected' (2.597787ms)
+✖ 3. disconnecting Meta: a connection read answering a number is never 'not connected' (1.686874ms)
+✖ 3. disconnecting Meta: a deletion answered in no known shape is not 'disconnected' (8.491088ms)
+✔ 3. control: a healthy disconnect forgets the connection and its lines (2.413443ms)
+COUNTED_MEMORY_COMMANDS 97
+COUNTED_MOCK_HTTP 0
+ℹ tests 9
+ℹ suites 0
+ℹ pass 2
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 64.579849
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11169:27
+✖ 1. a kept entry in another shape refuses the add: three tries write nothing (22.428897ms)
+  AssertionError [ERR_ASSERTION]: only the entry in another shape is there; nothing was written behind the refusals
+
+  4 !== 1
+
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11176:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 4,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11178:27
+✖ 1. a read after the write that fails answers the lines known, never 'not saved' with the line saved (4.083763ms)
+  AssertionError [ERR_ASSERTION]: so the add is not answered as failed
+  + actual - expected
+
+  + UnknownReplyError: Redis answered the ad spend typed in an unknown shape
+  +     at typedSpends (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11096:22)
+  +     at async addSpend (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11123:18)
+  +     at async settle (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11164:21)
+  +     at async TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11186:17)
+  +     at async Test.run (node:internal/test_runner/test:1409:7)
+  +     at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+  - undefined
+
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11189:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: UnknownReplyError: Redis answered the ad spend typed in an unknown shape
+        at typedSpends (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11096:22)
+        at async addSpend (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11123:18)
+        at async settle (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11164:21)
+        at async TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11186:17)
+        at async Test.run (node:internal/test_runner/test:1409:7)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:974:7),
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11200:27
+✖ 2. the weekly email's spend: whole, or none at all (1.279469ms)
+  AssertionError [ERR_ASSERTION]: lib/ad-spend.ts gives the weekly email its spend
+  + actual - expected
+
+  + 'undefined'
+  - 'function'
+
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11201:29)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11217:29
+✖ 3. disconnecting Meta: a connection read answering no reply is never 'not connected' (3.671442ms)
+  AssertionError [ERR_ASSERTION]: it throws, so the studio is told it could not be done
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11229:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11217:29
+✖ 3. disconnecting Meta: a connection read answering cut text is never 'not connected' (2.597787ms)
+  AssertionError [ERR_ASSERTION]: it throws, so the studio is told it could not be done
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11229:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11217:29
+✖ 3. disconnecting Meta: a connection read answering a number is never 'not connected' (1.686874ms)
+  AssertionError [ERR_ASSERTION]: it throws, so the studio is told it could not be done
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11229:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11233:27
+✖ 3. disconnecting Meta: a deletion answered in no known shape is not 'disconnected' (8.491088ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+
+    import_node_assert.strict.ok(gone.error)
+
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/meta-spend-review-2924.test.ts.cjs:11238:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+z-2924-write-ack.proof.ts
+{"firstFailed":true,"beforeRetry":[1200],"afterRetry":[1200,1200],"total":2400}
+{"ok":true,"kept":[]}
+✔ control: a healthy add records one real line (7.359445ms)
+✖ a lost receipt after applying a write must not make the same retry record the expense twice (11.941594ms)
+✖ a write not applied with an unknown empty receipt must not be reported saved (1.152944ms)
+COUNTED_MEMORY_COMMANDS 25
+COUNTED_MOCK_HTTP 0
+ℹ tests 3
+ℹ suites 0
+ℹ pass 1
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 30.416886
+
+✖ failing tests:
+
+test at ../../../tmp/z-points-KJ5BQu/z-2924-write-ack.proof.ts.cjs:10303:27
+✖ a lost receipt after applying a write must not make the same retry record the expense twice (11.941594ms)
+  AssertionError [ERR_ASSERTION]: one real expense remains one after retry of the refused operation
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/z-2924-write-ack.proof.ts.cjs:10322:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/z-points-KJ5BQu/z-2924-write-ack.proof.ts.cjs:10324:27
+✖ a write not applied with an unknown empty receipt must not be reported saved (1.152944ms)
+  AssertionError [ERR_ASSERTION]: unknown write is never saved success with no saved row
+
+  true !== false
+
+      at TestContext.<anonymous> (/tmp/z-points-KJ5BQu/z-2924-write-ack.proof.ts.cjs:10336:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

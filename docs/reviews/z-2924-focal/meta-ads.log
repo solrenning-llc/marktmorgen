@@ -1,0 +1,184 @@
+meta-ads.test.ts
+
+Marketing API version
+  ok    without a setting, use the supported Marketing API default
+  ok    an invalid version setting uses the supported default: ""
+  ok    an invalid version setting uses the supported default: " "
+  ok    an invalid version setting uses the supported default: "26.0"
+  ok    an invalid version setting uses the supported default: "v25"
+  ok    an invalid version setting uses the supported default: "v25.0/path"
+  ok    an invalid version setting uses the supported default: "https://example.com"
+  ok    a version explicitly configured for a deployment is still honored
+
+Meta's rows as lines
+  ok    each platform on the channel the numbers count it under
+  ok    in the smallest unit of the account's currency
+  ok    Meta's own utm_source words counted as the channels
+  ok    added up by day, channel and campaign, nothing spent left out
+
+A read replaces its days and keeps the days before, a week to a line
+  ok    the week before is one line over the days it had, the day read again is Meta's new figure
+  ok    and the week's money is all there over its days
+  ok    nothing older than 400 days is kept
+  ok    merging again changes nothing
+  ok    a typed line on a channel and day Meta read is pointed out; another channel is not
+
+Which account is read without asking
+  ok    the only one, or the only active one in the store's currency
+
+Connecting
+  ok    before, the studio offers it and nothing is read
+  ok    Meta's page, asked for ads_read and nothing else
+  ok    another session cannot take it
+  ok    the right session takes it once
+  ok    provider requests use the supported Marketing API version
+  ok    a code Meta refuses keeps nothing
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    without ads_read granted, it is given back and nothing kept
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    one account: read without asking
+  ok    the token is kept sealed, never in the clear
+  ok    it ends when Meta's token ends, about 60 days on
+
+Read into the numbers
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    read
+  ok    every call to Meta carries appsecret_proof
+  ok    Meta's next page is followed
+  ok    Meta's lines come with the typed ones, marked as Meta's
+  ok    the studio says when and how much
+
+A read whose kept lines cannot be read replaces nothing (Claude 6 on #2924)
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    control: a read keeps the line before its 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines read as not JSON: not read, and the older line is still kept
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines read as no reply: not read, and the older line is still kept
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines read as a number: not read, and the older line is still kept
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines read as a list that is not text: not read, and the older line is still kept
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines holding a line with no id: not read, and nothing kept is replaced
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines holding a line of no amount: not read, and nothing kept is replaced
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines holding text: not read, and nothing kept is replaced
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    kept lines holding null: not read, and nothing kept is replaced
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    back as it was: read again
+
+Another currency is not read
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    the account in the store's currency is still the one read
+  ok    choosing one that is not listed does nothing
+  ok    in EUR for a store in USD: not read, and the lines of the other account are gone
+
+A token Meta refuses
+  ok    provider requests use the supported Marketing API version
+  ok    marks it broken
+  ok    the owner is told once, and the studio says why
+
+The daily pass
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    connecting again works again
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    each store read once a day
+
+Funded new Meta connection phases refuse before provider work
+  ok    a new start stays at the studio
+  ok    valid new callback state cannot exchange credentials without funding
+  ok    canceling remains available
+  ok    no provider request or extra integration allowance
+
+Marked paid Meta spend reads require the current store cohort before new work
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    fresh paid read refuses without a cohort creator month
+  ok    no provider request or spend/read record creator month
+  ok    fresh paid read refuses without a cohort creator year
+  ok    no provider request or spend/read record creator year
+  ok    fresh paid read refuses without a cohort pro month
+  ok    no provider request or spend/read record pro month
+  ok    fresh paid read refuses without a cohort pro year
+  ok    no provider request or spend/read record pro year
+  ok    fresh paid read refuses without a cohort scale month
+  ok    no provider request or spend/read record scale month
+  ok    fresh paid read refuses without a cohort scale year
+  ok    no provider request or spend/read record scale year
+  ok    the actual daily pass skips the unfunded new read
+  ok    connection and cached view remain readable
+  ok    provider requests use the supported Marketing API version
+  ok    retained disconnect still works without a cohort
+
+Meta's notice, and disconnecting
+  ok    a notice signed with the app's secret names the user; another does not
+  ok    every store that user connected forgets it, and what was read
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    asked by campaign, day by day, by platform, for the last 30 days
+  ok    provider requests use the supported Marketing API version
+  ok    provider requests use the supported Marketing API version
+  ok    disconnecting gives it back to Meta and deletes what was read; the typed line stays
+  ok    disconnecting what is not connected says so
+
+145 checks, all passing.
+COUNTED_MEMORY_COMMANDS 486
+COUNTED_MOCK_HTTP 60
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape
+reading Meta ad spend failed Redis answered the Meta ad spend lines kept in an unknown shape

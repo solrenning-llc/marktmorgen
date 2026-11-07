@@ -12,9 +12,10 @@
  * things over already reads that.
  *
  * What can go in one is what one plain payment can sell: a paid product at
- * one price, sold once, that nobody has to choose, book, hold or answer
- * questions for first, handed over digitally or shipped by the creator
- * (lib/cart-shipping.ts). Up to MAX_CART at a time, which is how many
+ * one price, sold once, that nobody has to choose, book or answer questions
+ * for first, handed over digitally or shipped by the creator
+ * (lib/cart-shipping.ts), limited or not (a limited one's unit is held for
+ * the checkout, lib/stock.ts). Up to MAX_CART at a time, which is how many
  * products one order can name.
  */
 import type { Listing } from "@/lib/store";
@@ -32,14 +33,15 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 export function cartable(product: Listing): boolean {
   if (product.priceCents <= 0 || product.hidden) return false;
   if (product.recurring || product.call || product.callPackage || product.podcast) return false;
-  if (product.options.length > 0 || product.pwyw || product.stock !== null) return false;
+  // A limited one goes in too (513 [PF1], unit 3): its checkout holds one of its units (lib/stock.ts, withCartStockHolds).
+  if (product.options.length > 0 || product.pwyw) return false;
   // A bundle its buyer builds is chosen on its own page (lib/bundle-rules.ts).
   if (product.bundle && product.pick) return false;
   if (product.bundle) return product.bundle.length >= 2;
   if (product.course) return product.course.lessons > 0;
   // A physical product the creator ships (513 [PF1], unit 2b): Stripe asks for
   // one address in a country every physical product in the cart ships to
-  // (lib/cart-shipping.ts). A limited one waits for the cart to hold stock.
+  // (lib/cart-shipping.ts).
   if (activeShipping(product)) return true;
   return product.file !== null || product.link !== null;
 }

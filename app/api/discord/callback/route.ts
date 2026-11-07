@@ -61,11 +61,11 @@ export async function GET(request: NextRequest) {
   // marked creator contract before exchanging credentials or replacing a server.
   // Cancellation and existing buyer access above remain separate.
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return back("discord=funding");
-  const granted = await exchange(code, trip.redirect);
-  if (!granted?.serverId) return back("discord=error");
   const room = storeKey(store);
   // Read exactly (CX-123 rule 24): a server kept in another shape is not "no server", or the new one would be written
-  // over it, with the bot still in the old one and its buyers' addresses linked to their Discord ids for good.
+  // over it, with the bot still in the old one and its buyers' addresses linked to their Discord ids for good. Read
+  // before the code is swapped: with "Requires OAuth2 Code Grant" (lib/discord.ts, authorizeUrl) Discord adds the bot
+  // only on the swap, so this refusal adds it to no server and "nothing was connected" is exactly true.
   let before: DiscordServer | null;
   try {
     before = await readServerOrThrow(room);
@@ -73,8 +73,13 @@ export async function GET(request: NextRequest) {
     if (error instanceof UnknownReplyError) return back("discord=unavailable");
     throw error;
   }
+  const granted = await exchange(code, trip.redirect);
+  if (!granted?.serverId) return back("discord=error");
   // Another server than the one connected: the old one is let go, with whoever it gave roles to. As on "Disconnect"
   // (app/api/store/discord/route.ts), the bot first: its people are forgotten only once Discord confirmed it left.
+  // On the two refusals below the code was swapped, so the bot is now in the new server too. It is not told to leave
+  // it: no record says which stores use a server, and the bot may be there for another store. The notice says where
+  // the bot is and how to remove it (Claude 4's focal return on #3017).
   if (before && before.id !== granted.serverId) {
     if (!(await leaveServer(before.id))) return back("discord=server");
     try {

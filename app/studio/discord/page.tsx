@@ -27,8 +27,9 @@ const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
   // Switching servers (app/api/discord/callback/route.ts): the connected server could not be read exactly, Discord
   // did not take the bot out of the old one, or the old one's people could not be read exactly to forget them.
   unavailable: { tone: "error", text: "We could not read your Discord connection just now, so nothing was connected. Try again in a few minutes." },
-  server: { tone: "error", text: "Discord could not take the bot out of your old server just now, so your old server is still connected. Try again in a moment." },
-  not_finished: { tone: "error", text: "The bot left your old server, but we could not finish switching just now. Try again in a few minutes." },
+  // On "server" and "not_finished" Discord already added the bot to the server just picked; it stays there.
+  server: { tone: "error", text: "Discord could not take the bot out of your old server just now, so your old server is still connected. The bot is now in the server you just picked too. Try again in a moment, or remove it there in Discord's server settings." },
+  not_finished: { tone: "error", text: "The bot left your old server, but we could not finish switching just now. The bot is now in the server you just picked. Try again in a few minutes to connect it, or remove it there in Discord's server settings." },
 };
 
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };

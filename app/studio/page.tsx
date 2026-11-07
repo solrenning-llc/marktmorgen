@@ -855,7 +855,16 @@ export default async function StudioPage({
     aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => 0)) : null,
     live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
     pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
-    list: store && may("export") ? early(listSize(store)) : null,
+    // A size that could not be read is "unread" here, inside the early read, so the joint wait for the kept readings
+    // below (`answered`) still resolves and the visits and sales are shown (Claude 4, LEVE on #2862).
+    list: store && may("export")
+      ? early(
+          listSize(store).catch((error: unknown) => {
+            console.error("could not read a list's size", error);
+            return "unread" as const;
+          }),
+        )
+      : null,
     callProducts: store ? early(readKind(store, "call")) : null,
     meet: store && meetOn && (may("products") || may("orders")) ? early(meetView(store.statsId, store, arrivedZoom).catch(() => null)) : null,
     shelf: store ? early(studioShelf(store, params)) : null,
@@ -1112,12 +1121,7 @@ export default async function StudioPage({
   // The list is shown once there is something that fills it, or once it holds
   // anybody — a creator who stops giving things away still owns what came in.
   // A size that could not be read is said as such, never shown as an empty list (lib/free.ts listSize, sweep A2).
-  const list = firstReads.list
-    ? await firstReads.list.catch((error: unknown) => {
-        console.error("could not read a list's size", error);
-        return "unread" as const;
-      })
-    : null;
+  const list = firstReads.list ? await firstReads.list : null;
   const givesAway = store ? sellsAny(store, "free") : false;
   // Booked calls are read from the creator's Stripe account, the ledger, and
   // only asked for when the store sells calls at all.

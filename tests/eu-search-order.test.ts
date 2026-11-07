@@ -110,6 +110,13 @@ async function main(): Promise<void> {
   // Claude 5's LOW 1 on #2850: many stores carry the creator's own name, so the English line names no pronoun for it.
   part("The English line reads right for a store named after a person");
   is("no \"its\" for the store", / its /.test(String(orderLine("en"))), false);
+  // Claude 5's LEVE on #2850: the code holds that Marktmorgen sells no place, not that nobody can pay the creator
+  // for one; every language says who cannot be paid.
+  is(
+    "every language says it is Marktmorgen that cannot be paid to list a product higher",
+    LANGUAGES.map((language) => [language, String(orderLine(language)).includes("Marktmorgen")]),
+    LANGUAGES.map((language) => [language, true]),
+  );
 
   part("No match, no order to tell");
   await setLanguage(OWNER, "en");

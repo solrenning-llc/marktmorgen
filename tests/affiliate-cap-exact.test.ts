@@ -9,12 +9,17 @@
  * limit for the people hash (tests/store-data-registry.ts). Now the count is read exactly (peopleCount): an unknown
  * reply throws UnknownReplyError before anything is written or sent, and each caller answers the honest "try again"
  * (503, or the page's status=error) with the link or the offer kept.
+ *
+ * (MEDIUM, the same pattern next to it, rule 30) bookSize, which counts the book before the affiliate page reads it
+ * (lib/affiliate-page-admission.ts), read its eight counts with `.map(Number)`: null is 0 and [3] is 3, so an unknown
+ * count read as a small book and fewer public requests were taken than the read then made. Now each is read with
+ * countOf, and one not known makes the size null, which reads nothing.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { invitePartner, joinAsBuyer, openAffiliateLink } from "@/lib/affiliates";
+import { bookSize, invitePartner, joinAsBuyer, openAffiliateLink } from "@/lib/affiliates";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { store as redis } from "./redis-stub";
@@ -53,12 +58,19 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 const real = redis.pipeline.bind(redis);
 /** What the people hash's HLEN answers instead of Redis; undefined: Redis itself. */
 let countReply: { reply: unknown } | undefined;
+/** What the people hash's count answers inside bookSize's eight; undefined: Redis itself. */
+let sizeReply: { reply: unknown } | undefined;
 /** Invitation links written (an invitation made), counted with the emails sent. */
 let invitations = 0;
 redis.pipeline = (async (commands: (string | number)[][]) => {
   for (const c of commands) if (c[0] === "SET" && /^nl:aff:link:/.test(String(c[1])) && String(c[2]).includes('"k":1')) invitations += 1;
   const one = commands.length === 1 ? commands[0] : null;
   if (countReply && one?.[0] === "HLEN" && /:people$/.test(String(one[1]))) return [countReply.reply];
+  // bookSize's eight counts, the people hash's first.
+  if (sizeReply && commands.length === 8 && commands[0][0] === "HLEN" && /:people$/.test(String(commands[0][1]))) {
+    const replies = await real(commands);
+    return [sizeReply.reply, ...replies.slice(1)];
+  }
   return real(commands);
 }) as typeof redis.pipeline;
 
@@ -131,6 +143,15 @@ async function main(): Promise<void> {
     is(`an HLEN answered ${label} never lets a buyer in past the cap`, got === "let in", false);
   }
   is("the program still holds at most MAX_AFFILIATES", await count(), MAX_AFFILIATES);
+
+  part("The book's size, counted before it is read (bookSize), is never read as small");
+  is("(counted exactly, every person is in it)", ((await bookSize(store))?.fields ?? 0) >= MAX_AFFILIATES, true);
+  for (const [label, reply] of [["null", null], ["no reply", undefined], ["a list", [3]]] as const) {
+    sizeReply = { reply };
+    const got = await bookSize(store);
+    sizeReply = undefined;
+    is(`a count answered ${label} is not counted: null, which reads nothing`, got, null);
+  }
   done();
 }
 

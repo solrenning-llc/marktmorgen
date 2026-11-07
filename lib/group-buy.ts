@@ -344,7 +344,19 @@ export async function resendGroupReceipt(input: { store: Store; session: Session
   return sendReceipt({ ...input, group, lead: givingWords(input.store.language).resentReceipt(input.store.name), again: true });
 }
 
-type Member = { e: string; at: number };
+/**
+ * A place taken: the address, when, and the value only the run that took it wrote (`k`, lib/claim-mark.ts claimValue;
+ * Claude 6 on #2872), so a run lets go of a place's record only while it is its own. Records written before `k` have
+ * none, and no run lets them go.
+ */
+type Member = { e: string; at: number; k?: string };
+
+/**
+ * Deletes a place's record only while it still holds exactly what this run wrote (Claude 6 on #2872; CX-123 rules 25
+ * and 30), in one script, as releaseMark does for a mark: a run whose own write is unknown never deletes the place
+ * another run of the same link holds. The first line names it for the local stand-in (lib/redis-memory.ts).
+ */
+const HDEL_OWN = '-- marktmorgen:hdel-own:v1\nif redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) else return 0 end';
 
 function parseMember(raw: unknown): Member | null {
   if (typeof raw !== "string") return null;
@@ -515,16 +527,23 @@ export async function takePlace(input: {
   if (owned === 1) return { outcome: "has", email, group };
 
   const at = now();
-  // Let go of this address's hold on a place it was not given, so its link works again on a later try; the count is
-  // left alone, since whether it moved is unknown: at worst a place stays counted, never one handed out too many.
-  const letGo = () => redisPipeline([["HDEL", membersKey(group.id), who]]);
-  const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, JSON.stringify({ e: email, at } satisfies Member)]]), 1)?.[0];
+  // The hold carries a value only this run writes, so only this run's own hold is ever let go (Claude 6 on #2872).
+  const hold = JSON.stringify({ e: email, at, k: claimValue() } satisfies Member);
+  const dropOwn: (string | number)[] = ["EVAL", HDEL_OWN, 1, membersKey(group.id), who, hold];
+  // Let go of this address's hold on a place it was not given, so its link works again on a later try, and only while
+  // the record is still this run's own: a hold whose write came back unknown may be another run's of the same link (a
+  // double click), whose place is the one a refund takes back. The count is left alone, since whether it moved is
+  // unknown: at worst a place stays counted, never one handed out too many. When the script cannot run, the hold
+  // stays and the link says "already" with nothing more handed out; never another run's record deleted.
+  const letGo = () => redisPipeline([dropOwn]).catch(() => null);
+  const fresh = repliesFor(await redisPipeline([["HSETNX", membersKey(group.id), who, hold]]), 1)?.[0];
   if (fresh === 0) return { outcome: "already", email, group };
   if (fresh !== 1) {
     await letGo();
     throw new UnknownReplyError("a place's hold");
   }
-  const giveBack = () => redisPipeline([["HDEL", membersKey(group.id), who], ["DECR", takenKey(group.id)]]);
+  // The place given back: this run's own record (the same script) and the count its own INCR moved.
+  const giveBack = () => redisPipeline([dropOwn, ["DECR", takenKey(group.id)]]);
   const count = repliesFor(await redisPipeline([["INCR", takenKey(group.id)]]), 1)?.[0];
   if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) {
     await letGo();

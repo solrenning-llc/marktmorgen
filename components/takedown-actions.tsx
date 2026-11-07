@@ -30,7 +30,10 @@ export function TakedownButton({ token, action, label, danger = false }: { token
               return;
             }
             setState("idle");
-            setSaid(answer.nothing ? "Nothing to do: it is already down." : "It did not work. Try again.");
+            const unsent = Boolean(raw) && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "error") && (raw as Record<string, unknown>).error === "notice_unsent";
+            setSaid(answer.nothing ? "Nothing to do: it is already down."
+              : unsent ? "It is down, but we could not confirm that the email to the creator went out. Press the button again. If you see this again, write to the creator yourself."
+              : "It did not work. Try again.");
           } catch {
             setState("idle");
             setSaid("It did not work. Try again.");

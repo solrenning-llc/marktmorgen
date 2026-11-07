@@ -19,7 +19,7 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/takedown/route";
-import { addProduct, addStoreLink, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, addStoreLink, claimHandle, ensureStatsId, setKit, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, takeDown } from "@/lib/takedown";
 import { transparencyCounts } from "@/lib/transparency";
@@ -33,13 +33,17 @@ type Sent = { to: string[] | string; subject: string; text: string; key: string 
 const sent: Sent[] = [];
 /** Every key a send was tried under, whether the provider took it or not. */
 const tried: string[] = [];
-let senderDown = false;
+/**
+ * "refused": the provider answers 422, a confirmed refusal, so the same email may be sent again.
+ * "unknown": it answers 500, which may follow acceptance, so lib/resend-fallback-transport.ts never posts that email again.
+ */
+let senderDown: false | "refused" | "unknown" = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     const key = new Headers(init?.headers).get("Idempotency-Key") ?? "";
     tried.push(key);
-    if (senderDown) return new Response(JSON.stringify({ message: "unavailable" }), { status: 500 });
+    if (senderDown) return new Response(JSON.stringify({ message: "unavailable" }), { status: senderDown === "refused" ? 422 : 500 });
     sent.push({ ...(JSON.parse(String(init?.body)) as Omit<Sent, "key">), key });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
   }
@@ -142,7 +146,7 @@ async function main(): Promise<void> {
   tried.length = 0;
   const linkId = link.store.links[0].id;
   const linkKey = `takedown-${report.id}-link-${linkId}`;
-  senderDown = true;
+  senderDown = "refused";
   const unsent = await answer({ type: "link", id: linkId });
   senderDown = false;
   is("the email could not be sent: not \"Done\", and the operator is told the notice did not go out", [unsent.status, unsent.error, unsent.done], [500, "notice_unsent", null]);
@@ -167,7 +171,7 @@ async function main(): Promise<void> {
   part("A store switched off, its notice unsent");
   sent.length = 0;
   tried.length = 0;
-  senderDown = true;
+  senderDown = "refused";
   const off = await answer({ type: "store", on: true });
   senderDown = false;
   is("not Done, and the store stays off", [off.status, off.error, Boolean((await store()).suspended)], [500, "notice_unsent", true]);
@@ -175,6 +179,18 @@ async function main(): Promise<void> {
   is("pressed again: the notice goes out once, under the same key", [offAgain.status, sent.length, [...new Set(tried)]], [200, 1, [`takedown-${report.id}-store-`]]);
   const offThird = await answer({ type: "store", on: true });
   is("and then nothing more", [offThird.status, sent.length], [409, 1]);
+
+  part("A notice the provider may have taken is never called sent, nor sent twice");
+  await setKit(owner, { ...(await store()).kit, on: true });
+  if (!(await store()).kit.on) throw new Error("setup: the media kit did not switch on");
+  sent.length = 0;
+  tried.length = 0;
+  senderDown = "unknown";
+  const maybe = await answer({ type: "kit" });
+  senderDown = false;
+  is("the provider answered 500: not Done, the kit stays down", [maybe.status, maybe.error, (await store()).kit.on], [500, "notice_unsent", false]);
+  const maybeAgain = await answer({ type: "kit" });
+  is("pressed again: still not Done and not \"already down\", and the email is not posted a second time", [maybeAgain.status, maybeAgain.error, tried.length, sent.length], [500, "notice_unsent", 1, 0]);
   done();
 }
 

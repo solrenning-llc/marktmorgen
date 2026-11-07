@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { type TakedownAction, openReport, takeDown } from "@/lib/takedown";
+import { type TakedownAction, TakedownNoticeUnsent, openReport, takeDown } from "@/lib/takedown";
 
 /**
  * Acts on a notice (app/takedown/[token]): `{ token, action }`, where the
@@ -37,6 +37,11 @@ export async function POST(request: NextRequest) {
     if (!done) return Response.json({ ok: false, error: "nothing" }, { status: 409 });
     return Response.json({ ok: true, done });
   } catch (error) {
+    // Down, but the creator was not told: the operator presses again to send the notice (lib/takedown.ts).
+    if (error instanceof TakedownNoticeUnsent) {
+      console.error("the takedown notice to the creator was not sent");
+      return Response.json({ ok: false, error: "notice_unsent" }, { status: 500 });
+    }
     console.error("taking content down failed", error);
     return Response.json({ ok: false, error: "error" }, { status: 500 });
   }

@@ -154,8 +154,9 @@ export type Settled = {
 /**
  * The payment intent an invoice was paid by, whichever way this account's API version names it; "" only when this
  * invoice's own whole list of payments holds none paid. A reply for another invoice, a list that is not one, a row of
- * another invoice or a list that is not whole is unknown and throws, so the member is tried again, never refunded on
- * another payment and never settled as owed nothing.
+ * another invoice, a list that is not whole, or a paid row whose payment does not read as a payment intent (missing,
+ * null, off-pattern, or of another type: Codex G on #3120) is unknown and throws, so the member is tried again, never
+ * refunded on another payment and never settled as owed nothing.
  */
 async function intentOf(account: string, invoice: string, count: () => void): Promise<string> {
   count();
@@ -167,6 +168,8 @@ async function intentOf(account: string, invoice: string, count: () => void): Pr
   const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
   const rows = objectOf(listed)?.data;
   if (!Array.isArray(rows)) throw new Error("an invoice's payments did not come as a list");
+  // A paid row is a payment made, whatever it reads as: one that does not name a readable intent proves no absence.
+  let unread = false;
   for (const item of rows) {
     const row = objectOf(item);
     if (!row || idOf(row.invoice) !== invoice) throw new Error("a payment listed is not this invoice's");
@@ -174,7 +177,9 @@ async function intentOf(account: string, invoice: string, count: () => void): Pr
     const pi = (row.payment as { payment_intent?: unknown } | null)?.payment_intent;
     const id = typeof pi === "string" ? pi : (pi as { id?: unknown } | null)?.id;
     if (typeof id === "string" && INTENT_ID.test(id)) return id;
+    unread = true;
   }
+  if (unread) throw new Error("an invoice's paid payment did not read as a payment intent");
   if (objectOf(listed)?.has_more !== false) throw new Error("an invoice's payments could not be read whole");
   return "";
 }

@@ -65,7 +65,7 @@ async function remember(id: string, what: string): Promise<void> {
  * throws UnknownReplyError.
  */
 async function storeIdGone(sid: string): Promise<boolean> {
-  // The same key lib/store.ts keeps a store's id under (`storeIdKey`, "nl:store:id:<id>"); written here because lib/store.ts
+  // The same key lib/store.ts keeps a store's id under (`storeIdKey`: its prefix, then the id); written here because lib/store.ts
   // is reserved by another unit. tests/plan-disputes-open-mark.test.ts reads a real store through it: a different key
   // would answer 0 and give a live store's open mark up, which that test fails on.
   const n = countOf(repliesFor(await redisPipeline([["EXISTS", `nl:store:id:${sid}`]]), 1)?.[0]);

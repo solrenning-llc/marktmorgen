@@ -47,7 +47,7 @@ function tableAfter(text, heading) {
   for (const line of lines.slice(start + 1)) {
     if (line.startsWith("## ")) break;
     if (line.trim().startsWith("|")) { inTable = true; rows.push(cells(line)); }
-    else if (inTable) break;
+    else if (inTable && line.trim()) break;
   }
   return rows.slice(2); // header and separator
 }
@@ -59,7 +59,7 @@ export function lanePrefixes(text) {
   const rows = [];
   for (const line of lines.slice(start + 1)) {
     if (line.trim().startsWith("|")) rows.push(cells(line));
-    else if (rows.length) break;
+    else if (rows.length && line.trim()) break;
   }
   return rows.slice(2).map(([agent, prefix]) => ({ agent: agentKey(agent), prefix: prefix.replace(/`/g, "").trim() })).filter((r) => r.prefix);
 }

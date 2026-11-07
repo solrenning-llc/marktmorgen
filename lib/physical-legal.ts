@@ -169,7 +169,9 @@ export function prop65Matters(shipsTo: readonly string[]): boolean {
 export type Prop65Problem = "control" | "long" | "signal" | "site";
 
 const SIGNAL = /^(WARNING|CA WARNING|CALIFORNIA WARNING):/;
-const SITE = /www\.P65Warnings\.ca\.gov/i;
+// The site as a name of its own: not the end of a longer hostname, and not followed by more of a hostname, a "@"
+// (a user name before another host) or a port (Codex J on #2934). A path, a sentence's period or a parenthesis may follow.
+const SITE = /(?:^|[^\w.-])www\.P65Warnings\.ca\.gov(?![\w@:-]|\.[\w-])/i;
 
 /**
  * The creator's Proposition 65 text, as their manufacturer or supplier gave
@@ -274,27 +276,42 @@ export const PRICE_KEEP_SECONDS = PRIOR_PRICE_SECONDS + MAX_SALE_DAYS * DAY;
 /** The most steps kept per product; beyond it the oldest two merge into one at the lower price. */
 export const MAX_PRICE_STEPS = 64;
 
-function steps(history: readonly PriceStep[]): PriceStep[] {
-  return history
-    .filter((step) => Number.isSafeInteger(step?.at) && step.at > 0 && Number.isSafeInteger(step.cents) && step.cents >= 0)
-    .map((step) => ({ at: step.at, cents: step.cents }))
-    .sort((a, b) => a.at - b.at);
+/**
+ * The history in time order, steps of the same second kept in the order they
+ * were applied (a stable sort); null when it is not a list or any step cannot
+ * be read, so a part of it is never taken for the whole (Codex J on #2934).
+ */
+function steps(history: unknown): PriceStep[] | null {
+  if (!Array.isArray(history)) return null;
+  const out: PriceStep[] = [];
+  for (const step of history) {
+    if (!step || typeof step !== "object") return null;
+    const { at, cents } = step as Record<string, unknown>;
+    if (typeof at !== "number" || !Number.isSafeInteger(at) || at <= 0) return null;
+    if (typeof cents !== "number" || !Number.isSafeInteger(cents) || cents < 0) return null;
+    out.push({ at, cents });
+  }
+  return out.sort((a, b) => a.at - b.at);
 }
 
 /**
  * The history once `cents` is the price applied from `now` (seconds). The
- * same price adds nothing; a clock that went back adds the step a second
- * after the last one, so no price that was applied is lost. Steps that ended
+ * same price adds nothing; a change in the same second as the last step, or
+ * after a clock that went back, is dated at the last step's own time, after
+ * it in order: no price that was applied is lost and no step is ever dated
+ * after it was applied (Codex J on #2934). A history that cannot be read
+ * starts again from this price, so a prior price read from it is said as
+ * incomplete until the period has passed. Steps that ended
  * before the kept period are dropped; past the cap, the oldest two merge at
  * the lower price, so a prior price read later can only come out lower than
  * the truth (a smaller reduction announced), never higher. Pure.
  */
 export function recordPrice(history: readonly PriceStep[], cents: number, now: number): PriceStep[] {
-  const out = steps(history);
+  const out = steps(history) ?? [];
   if (!Number.isSafeInteger(cents) || cents < 0 || !Number.isSafeInteger(now) || now <= 0) return out;
   const last = out[out.length - 1];
   if (!last) out.push({ at: now, cents });
-  else if (last.cents !== cents) out.push({ at: Math.max(now, last.at + 1), cents });
+  else if (last.cents !== cents) out.push({ at: Math.max(now, last.at), cents });
   const edge = Math.max(now, out[out.length - 1].at) - PRICE_KEEP_SECONDS;
   while (out.length > 1 && out[1].at <= edge) out.shift();
   while (out.length > MAX_PRICE_STEPS) out.splice(0, 2, { at: out[0].at, cents: Math.min(out[0].cents, out[1].cents) });
@@ -305,15 +322,24 @@ export function recordPrice(history: readonly PriceStep[], cents: number, now: n
  * The lowest price applied in the 30 days before `start` (seconds), the
  * reduction's own price from `start` excluded; `complete` is false when the
  * history begins inside that period (a product priced less than 30 days
- * before). Null when no price was applied before `start`.
+ * before). Null when no price was applied before `start`, or when the history
+ * cannot be read. The reduction's own price is the last step at or before
+ * `start`; a step of that same second before it was applied, if briefly,
+ * before the reduction, so it counts (it can only make the prior price lower).
  */
 export function priorLowestPrice(history: readonly PriceStep[], start: number): { cents: number; complete: boolean } | null {
   const list = steps(history);
+  if (!list) return null;
   const from = start - PRIOR_PRICE_SECONDS;
+  let own = -1;
+  list.forEach((step, index) => {
+    if (step.at <= start) own = index;
+  });
   let lowest: number | null = null;
   list.forEach((step, index) => {
     const end = index + 1 < list.length ? list[index + 1].at : Infinity;
-    if (step.at < start && end > from) lowest = lowest === null ? step.cents : Math.min(lowest, step.cents);
+    const before = step.at < start || (step.at === start && index < own);
+    if (before && end > from) lowest = lowest === null ? step.cents : Math.min(lowest, step.cents);
   });
   if (lowest === null) return null;
   return { cents: lowest, complete: list[0].at <= from };

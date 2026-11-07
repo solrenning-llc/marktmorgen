@@ -104,7 +104,8 @@ Ireland ships under `GB` and cannot be told apart by country code: not covered;
 warning" on a physical product that ships to the US, with the text exactly as
 the creator's manufacturer or supplier gave it. The code does not write the
 warning and does not decide whether one is needed; it checks that a given text
-starts with a signal word and names the P65Warnings site, and shows it on the
+starts with a signal word and names the P65Warnings site as a name of its own
+(not the start or end of a longer hostname), and shows it on the
 product page before the buy button and on the checkout path. No product is
 blocked for leaving it empty. The yellow triangle symbol of the long form is
 not drawn yet (out of scope; see below).
@@ -174,8 +175,12 @@ type Prop65 = string;                                      // "" is none
 
 Limits: each text field has a maximum length (`MAX_*` in the module), control
 characters and overlong values read as empty (never silently cut),
-a clock that goes back adds the new step one second after the last (no
-applied price is lost), the price history holds at most `MAX_PRICE_STEPS`
+a change in the same second as the last step, or after a clock that went back,
+is dated at the last step's own time and kept after it in order (no applied
+price is lost and no step is dated after it was applied; Codex J on #2934), a
+history with any step that cannot be read gives no prior price at all and the
+next price starts it again (said as incomplete until 30 days have passed),
+the price history holds at most `MAX_PRICE_STEPS`
 steps; when a creator changes prices more often than that within the kept period,
 adjacent old steps are merged into one at the **lower** price, so the prior
 price can only come out lower (a smaller announced reduction), never higher.

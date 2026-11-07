@@ -46,6 +46,7 @@ import { redisPipeline } from "@/lib/redis";
 import { takeManyWithin } from "@/lib/request-guard";
 import { GIVES_PER_DAY } from "@/lib/api-write";
 import { putMember } from "@/lib/team";
+import { dataUsed } from "@/lib/store-data";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -278,6 +279,26 @@ async function main(): Promise<void> {
   const backAfter = await post({ action: "apply", change: "takeback", to, emails: ["ana@example.com"], expect: 1 });
   is("taking back is never held by the day", [backAfter.status, backAfter.body.changed], [200, ["ana@example.com"]]);
   for (const key of await dayKeys()) await redisPipeline([["DEL", key]]);
+
+  part("The store's data room given back (pre-review of unit 2, MEDIO 2)");
+  // The finding: the room grantImported takes for a gift ("imp") was never given back when the studio took the gift
+  // back (only HDEL), and was taken also for a gift HSETNX refused: three rounds with 50 people kept +72,000 bytes.
+  store = (await storeForEmail(owner))!;
+  const usedNow = async () => (await dataUsed(store))?.used ?? -1;
+  const fifty = Array.from({ length: 50 }, (_, i) => `round${String(i).padStart(2, "0")}@example.org`);
+  const before = await usedNow();
+  for (let round = 0; round < 3; round += 1) {
+    const gave = await applyGive(store, target, { change: "give", to, emails: fifty, expect: 50 }, async () => ({ ok: true }));
+    const took = await applyGive(store, target, { change: "takeback", to, emails: fifty, expect: 50 }, async () => ({ ok: true }));
+    if (gave.kind !== "done" || took.kind !== "done" || gave.done.changed.length !== 50 || took.done.changed.length !== 50) throw new Error(`round ${round} did not give and take back all fifty`);
+  }
+  is("three rounds of giving fifty people a course and taking it back leave the room as it was", (await usedNow()) - before, 0);
+  for (const key of await dayKeys()) await redisPipeline([["DEL", key]]);
+  await grantImported(store.statsId!, STUDIO_GIVE_JOB, [{ email: "once@example.org", productId: to, items: null }], now, store.sid, store);
+  const once = await usedNow();
+  const again = await grantImported(store.statsId!, STUDIO_GIVE_JOB, [{ email: "once@example.org", productId: to, items: null }], now, store.sid, store);
+  is("a gift the record already holds (HSETNX refused) takes no room", [again, (await usedNow()) - once], [[false], 0]);
+  await redisPipeline([["HDEL", importedKey(store.statsId!, "once@example.org"), to]]);
 
   part("The screen");
   const studentLines = [line("ana@example.com", now), line("ben@example.com", now)];

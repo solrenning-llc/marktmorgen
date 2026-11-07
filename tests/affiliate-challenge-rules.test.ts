@@ -163,6 +163,9 @@ for (const how of ["code", "buyer", "contact"] as const) is(`credited by ${how}:
 for (const how of ["recurring", "partner", "bonus", "tier2", "lead"] as const) is(`credited as ${how}: not a new sale they brought`, counted(sale("a", T0 + 10, { how })), []);
 is("a sale in another currency is still a sale", counted(sale("a", T0 + 10, { currency: "eur" })), [1]);
 is("refunds not checked: no standings at all, never a guess", counted(sale("a", T0 + 10), { refundsChecked: false }), "refunds");
+const twice = sale("a", T0 + 10);
+const dup = challengeStandings(c, book([twice, { ...twice }], rows));
+is("the same payment twice on the book is one sale", dup.ok ? dup.standings.map((x) => x.sales) : dup.problem, [1]);
 is("a status the book does not know is not counted", counted(sale("a", T0 + 10, { status: "something new" as LineStatus })), []);
 
 part("Who can be placed");
@@ -209,7 +212,7 @@ is("the same count at the same second: the same place", s2.ok ? s2.standings.map
   [1, "a"],
   [1, "b"],
 ]);
-const s3 = challengeStandings({ ...c, places: 1 }, book([sale("a", T0 + 100), sale("b", T0 + 100), sale("c", T0 + 50)], rows));
+const s3 = challengeStandings({ ...c, places: 1 }, book([sale("a", T0 + 100), sale("b", T0 + 100), sale("c", T0 + 150)], rows));
 is("a shared last winning place: both win", s3.ok ? s3.standings.map((x) => [x.aff, x.wins]) : s3.problem, [
   ["a", true],
   ["b", true],

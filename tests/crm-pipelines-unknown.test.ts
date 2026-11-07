@@ -22,7 +22,8 @@ import { POST as mailRoute } from "@/app/api/store/mail/route";
 import { POST as formOpportunityRoute } from "@/app/api/store/form-opportunity/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { upsertContact } from "@/lib/contacts";
-import { readDeals, readPipelines, readStages } from "@/lib/crm";
+import { readDeals, readPipelines, readStages, readValues, writeFields } from "@/lib/crm";
+import { personKey } from "@/lib/person-key";
 import { DEFAULT_STAGES } from "@/lib/crm-rules";
 import { enroll, readFlows, saveFlow, sendDueSteps } from "@/lib/flows";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
@@ -178,6 +179,49 @@ async function main(): Promise<void> {
   await redis.pipeline((queued as string[]).map((member) => ["ZADD", "nl:mail:flowq", 0, member]));
   await run();
   is("once they read: the deal is made in the store's own stage", (await readDeals(sid, stages)).filter((d) => d.email === "ana@example.com").map((d) => d.stage), [WON]);
+
+
+  part("Fields read in an unknown shape are unknown too, never none (review of #2981, LEVE 2; rule 30)");
+  const fieldsKey = `nl:crm:fields:${sid}`;
+  const GOAL = { id: "fld001", name: "Goal", type: "text" as const, options: [] as string[] };
+  await writeFields(sid, [GOAL]);
+  const fieldFlow = { name: "Joined: goal", trigger: "joined", active: true, steps: [{ delayHours: 0, subject: "", body: "", action: { do: "field", field: GOAL.id, value: "Launch" } }] };
+  const flowsBefore = JSON.stringify(await readFlows(list));
+  for (const [label, reply] of [
+    ["fields that do not read", "{not json"],
+    ["fields not a string", 42],
+    ["fields not a list", JSON.stringify(GOAL)],
+    ["fields with one that does not read", JSON.stringify([GOAL, { id: "BAD" }])],
+  ] as const) {
+    faults.set(fieldsKey, reply);
+    is(`${label}: a sequence setting a field is refused as unavailable, not as a bad step`, await outcome(() => saveFlow(store, fieldFlow, { activate: true })), "CrmSchemaReadUnavailable");
+    faults.clear();
+  }
+  is("nothing written", JSON.stringify(await readFlows(list)) === flowsBefore, true);
+  faults.set(fieldsKey, "{not json");
+  is("the email route: 503, unavailable", await post(mailRoute, "/api/store/mail", { action: "flow", flow: fieldFlow }), [503, "crm_schema_read_unavailable"]);
+  faults.clear();
+  is("nothing written by the route", JSON.stringify(await readFlows(list)) === flowsBefore, true);
+  const goal = await saveFlow(store, fieldFlow, { activate: true });
+  is("control: with the fields known, the same sequence saves", goal.ok, true);
+
+  part("A workflow's field step waits while the fields are unknown, and runs once they read");
+  await upsertContact(list, "bea@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  store = (await storeForEmail(OWNER))!;
+  await redis.pipeline([["DEL", "nl:mail:flowq"]]);
+  await enroll(store, "bea@example.com", { joined: true });
+  const queuedFor = async () => ((await redis.pipeline([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]))[0] as string[]);
+  const beaKey = personKey(sid, "bea@example.com");
+  faults.set(fieldsKey, "{not json");
+  await run();
+  faults.clear();
+  is("while unknown: no value written", (await readValues(sid, beaKey, [GOAL]))[GOAL.id] ?? "", "");
+  const waiting = await queuedFor();
+  // The deal workflow's step for bea ran and ended; only the field step is back in the queue, not ended as "removed".
+  is("while unknown: the field step is queued again, not ended as removed", waiting.length, 1);
+  await redis.pipeline(waiting.map((member) => ["ZADD", "nl:mail:flowq", 0, member]));
+  await run();
+  is("once they read: the field is set", (await readValues(sid, beaKey, [GOAL]))[GOAL.id], "Launch");
 
   done();
 }

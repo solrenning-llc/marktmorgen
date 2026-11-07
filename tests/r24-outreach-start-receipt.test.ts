@@ -8,7 +8,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { type PageReader, linkKey, listPitches, saveSender, startPitch } from "@/lib/outreach";
+import { OUTREACH_TRACE_BYTES, type PageReader, dropPitch, linkKey, listPitches, saveSender, startPitch } from "@/lib/outreach";
+import { dataUsed } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -87,4 +88,44 @@ test("saveSender: no receipt is never said saved", async () => {
 test("saveSender healthy control: saved", async () => {
   const store = await fresh();
   assert.deepEqual(await saveSender(store, SENDER), SENDER);
+});
+
+// The room of a replaced draft is given back only on its own receipt (Claude 3 for Claude 4 on #2870, the same sweep as
+// dropPitch): an HDEL that answered 0 removed nothing here, because a drop that got there first gave that room back
+// already. Given back twice, the store's data room would count less than it keeps.
+async function replacing(dropFirst: boolean) {
+  const store = await fresh();
+  const first = await startPitch(store, INPUT, { reader, now: NOW });
+  if (!first.ok) throw new Error(`first draft not written: ${first.reason}`);
+  const keptOne = (await dataUsed(store))!.used;
+  let dropped: boolean | null = null;
+  if (dropFirst) {
+    redis.pipeline = (async (commands: Command[]) => {
+      if (isDraftWrite(commands)) {
+        redis.pipeline = real;
+        dropped = await dropPitch(store, first.pitch.id);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+  }
+  let second;
+  try {
+    second = await startPitch(store, INPUT, { reader, now: NOW + 60 });
+  } finally { restore(); }
+  if (!second.ok) throw new Error(`second draft not written: ${second.reason}`);
+  assert.deepEqual(second.replaced, [first.pitch.id]);
+  assert.deepEqual((await listPitches(store)).map((p) => p.id), [second.pitch.id]);
+  return { store, keptOne, dropped, used: (await dataUsed(store))!.used };
+}
+
+test("startPitch: a replaced draft another drop removed first is never given back twice", async () => {
+  const { keptOne, dropped, used } = await replacing(true);
+  assert.equal(dropped, true, "the concurrent drop did not remove the first draft");
+  // Kept now: the first pitch's stop link (never forgotten) and the second pitch with its stop link.
+  assert.equal(used, keptOne + OUTREACH_TRACE_BYTES, `the data room counts ${used} bytes for ${keptOne + OUTREACH_TRACE_BYTES} kept`);
+});
+
+test("control: a replaced draft this write removed gives its room back once", async () => {
+  const { keptOne, used } = await replacing(false);
+  assert.equal(used, keptOne + OUTREACH_TRACE_BYTES);
 });

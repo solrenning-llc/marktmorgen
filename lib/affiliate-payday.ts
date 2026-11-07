@@ -71,6 +71,8 @@ export function paydayEmail(input: {
   refundsChecked: boolean;
   /** Of what is waiting, the leads in hold or waiting for the creator's approval (lib/affiliate-leads.ts). */
   leadsCents?: number;
+  /** The creator's PayPal connection could not be read on payday, so nothing was paid by itself. */
+  linkUnread?: boolean;
 }): { subject: string; text: string } {
   // What can be paid today, not what is owed in all: when a wait is set the
   // two differ, and a subject line that calls the smaller number "owed" tells
@@ -99,6 +101,12 @@ export function paydayEmail(input: {
     lines.push(
       "",
       `${formatMoney(leads, input.currency)} more is for leads still in their hold or waiting for your approval on the same page, so it is not in this batch either. A lead joins a batch once you approve it.`,
+    );
+  }
+  if (input.linkUnread) {
+    lines.push(
+      "",
+      "We could not read your PayPal connection just now, so we did not pay anyone by ourselves today. Nothing left your PayPal. Pay them from the page above when you are ready.",
     );
   }
   if (!input.refundsChecked) {
@@ -182,10 +190,23 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   // month's claim either: a sale that lands later today should still be able
   // to bring the email.
   if (lines.length === 0) return false;
-  // Whether it pays by itself is read before the claim: a link that could not
-  // be read throws here with the month still unclaimed, so the next run of the
-  // job pays or reminds as a healthy one would (Codex J's MEDIUM on 7b1baef6).
-  const auto = book.refundsChecked && (await paysAutomatically(store));
+  // Whether it pays by itself is read before the claim. A link that cannot be
+  // read is never permission to pay, and it cannot wait for "the next run"
+  // either: the job runs once a day and looks at a store only on its payday, so
+  // tomorrow's run would skip it and the month would go by with neither a batch
+  // nor an email (Claude 5's MEDIUM on 91815567). It is read as "not by itself":
+  // the month is claimed below and the manual reminder goes, saying the
+  // connection could not be read. Nothing is sent to PayPal.
+  let auto = false;
+  let linkUnread = false;
+  if (book.refundsChecked) {
+    try {
+      auto = await paysAutomatically(store);
+    } catch (error) {
+      linkUnread = true;
+      console.error("reading the PayPal link on payday failed; sending the manual reminder", error);
+    }
+  }
   // Claimed last, so that whichever run gets here first is the only one that
   // sends. A second run reads the same book and stops here.
   if (!(await claimMonth(store.statsId, month))) return false;
@@ -206,6 +227,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     hold: store.affiliates.hold,
     refundsChecked: book.refundsChecked,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
+    linkUnread,
   });
   return sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,

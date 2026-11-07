@@ -4,7 +4,9 @@
  *   1. payday: the month's claim was taken before the creator's PayPal link was
  *      read, so a link read that failed spent the month and the healthy retry
  *      paid nobody. Everything that can fail before money moves is read before
- *      the claim; the claim is still taken before anything is sent.
+ *      the claim; the claim is still taken before anything is sent. Since
+ *      Claude 5's MEDIUM on 91815567, a link that cannot be read is "not by
+ *      itself": the month is claimed and the manual reminder goes.
  *   2. the link's auto-pay switch: only true or false is a switch. "false", 1,
  *      {}, [], null or a missing switch is a record in an unknown shape, never
  *      permission to pay and never "off".
@@ -122,25 +124,25 @@ async function main(): Promise<void> {
   const claimKey = `nl:aff:payday:${STATS}:2026-11`;
   const claimed = async () => (await real([["GET", claimKey]]))[0];
 
-  // ---- 1. Payday: a link read that fails does not spend the month ----
+  // ---- 1. Payday: a link read that fails never pays, and the month still gets its reminder ----
+  // Since Claude 5's MEDIUM on 91815567 the month is claimed on that same run: the job runs
+  // once a day and looks at a store only on its payday, so "the next run" would never come
+  // (tests/affiliate-payday-unread-link.test.ts walks the real schedule).
   for (const [label, reply] of [
     ["a number", [42]],
     ["undefined", [undefined]],
     ["no reply at all", []],
     ["unreadable JSON", ["{"]],
   ] as [string, unknown[]][]) {
-    part(`Payday, auto-pay on, the link answers ${label}: the month is not spent, and the healthy retry pays once`);
+    part(`Payday, auto-pay on, the link answers ${label}: nothing paid, the month claimed for the reminder`);
     await seed(store);
     await setAutoPay(store, true);
     const first = await intercepted(linkRead, async () => [...reply], () => sendPaydayEmails(Date.now() + 60_000, payday));
-    is("that store failed", [first.due, first.sent, first.failed], [1, 0, 1]);
+    is("that store did not fail", [first.due, first.failed], [1, 0]);
     is("nothing was sent to PayPal", created.length, 0);
-    is("the month's claim is not taken", await claimed(), null);
+    is("the month's claim is taken for the reminder", await claimed(), "1");
     await sendPaydayEmails(Date.now() + 60_000, payday);
-    is("the healthy retry sends one PayPal batch", created.length, 1);
-    is("the month is now claimed", await claimed(), "1");
-    await sendPaydayEmails(Date.now() + 60_000, payday);
-    is("a third run sends nothing more", created.length, 1);
+    is("a healthy run the same day pays nobody again", created.length, 0);
   }
 
   part("Control: payday, auto-pay on, healthy: one batch, the month claimed once");
@@ -173,8 +175,8 @@ async function main(): Promise<void> {
     is("payday's auto-pay question rejects", await rejects(() => paysAutomatically(store)), true);
     is("the studio view rejects", await rejects(() => readPayPal(store)), true);
     const run = await sendPaydayEmails(Date.now() + 60_000, payday);
-    is("payday sends no PayPal batch and counts the store failed", [created.length, run.failed], [0, 1]);
-    is("and does not spend the month", await claimed(), null);
+    is("payday sends no PayPal batch and does not fail", [created.length, run.failed], [0, 0]);
+    is("and claims the month for the manual reminder", await claimed(), "1");
   }
 
   part("Controls: the switch stored as true and as false");

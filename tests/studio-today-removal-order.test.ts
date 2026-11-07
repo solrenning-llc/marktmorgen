@@ -21,7 +21,7 @@ import { isValidElement, type ReactNode } from "react";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { REMOVAL_DAYS, listPasskeys } from "@/lib/passkeys";
-import { addProduct, claimHandle, ensureStatsId, setAssistantPlan, setPixels, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setAdsServer, setAssistantPlan, setPixels, setSubscription, storeForEmail } from "@/lib/store";
 import { NO_PIXELS } from "@/lib/pixels";
 import StudioPage from "@/app/studio/page";
 import { makePasskey } from "./passkey-world";
@@ -68,6 +68,99 @@ async function passkeyLists(node: unknown, found: string[][] = [], seen = new Se
     await Promise.all(Object.values(props).map((value) => passkeyLists(value as ReactNode, found, seen)));
   }
   return found;
+}
+
+/**
+ * #2900, merged with main's ready cart link: a trial that ends while Today is drawn. The page counted itself in the
+ * trial; the cart link's count then finds the billing month not known and reads it from Stripe and writes it, under
+ * the store's lock, as do the writes after it. Synthetic Stripe replies only. `aligned`: the store already keeps the
+ * token's platforms, so no platforms write is made.
+ */
+async function writeOrder(aligned: boolean): Promise<void> {
+  const FOURTH = aligned ? "today-write-aligned@example.com" : "today-write-order@example.com";
+  await claimHandle(FOURTH, aligned ? "todaywritealigned" : "todaywriteorder", "Today write order", "");
+  const statsId = (await ensureStatsId(FOURTH))?.statsId;
+  if (!statsId) throw new Error("setup: statsId");
+  // A first page of free products, so the two paid ones are read from their records (lib/cart-link-products.ts):
+  // only then is the count taken.
+  for (let i = 0; i < 24; i += 1) await addProduct(FOURTH, `Free ${i}`, "", "0", null);
+  await addProduct(FOURTH, "Paid one", "", "19", null);
+  await addProduct(FOURTH, "Paid two", "", "29", null);
+  await setPixels(FOURTH, { ...NO_PIXELS, meta: "123456789012345" });
+  await redis.pipeline([["SET", `nl:adsrv:${statsId}`, JSON.stringify({ meta: "synthetic-sealed-token" })]]);
+  // Codex M's case on #2900 (review comment 6701366711): the store already keeps the token's platforms, so the
+  // ServerEvents part writes nothing, and the add-on's write must still come after the cart link's.
+  if (aligned) await setAdsServer(FOURTH, ["meta"]);
+  const realNow = Date.now;
+  const startS = Math.floor(realNow() / 1000);
+  await setSubscription(FOURTH, { customerId: "cus_TodayOrder01", subscriptionId: "sub_TodayOrder01", active: true, tier: "creator", trialEnds: startS + 60 });
+  await setAssistantPlan(FOURTH, { subscriptionId: "sub_TodayAssist01", active: true, period: { start: startS - 40 * 86_400, end: startS - 10 * 86_400, renews: true }, cancelsAtEnd: false, disputedAt: "" });
+  const fourthSession = await openSession(FOURTH);
+  const ownerKey = `nl:store:owner:${hex(`nimbus-store:${FOURTH}`).slice(0, 40)}`;
+  const groups: Record<string, string[]> = { plan: ["subscriptionActive", "trialEnds", "period"], ads: ["adsServer"], assistant: ["assistantPlan"] };
+  const fieldsOf = (raw: unknown) => {
+    const record = JSON.parse(String(raw)) as Record<string, unknown>;
+    return Object.fromEntries(Object.entries(groups).map(([name, keys]) => [name, JSON.stringify(keys.map((k) => record[k] ?? null))]));
+  };
+  const keptPipeline = redis.pipeline;
+  let seen = fieldsOf((await keptPipeline.call(redis, [["GET", ownerKey]]))[0]);
+  const writes: string[] = [];
+  let shifted = false;
+  let offset = 0;
+  Date.now = () => realNow() + offset;
+  redis.pipeline = async (commands) => {
+    // The cart link's first read (lib/cart-link-products.ts weigh): from here on the trial has ended.
+    if (!shifted && commands.some((c) => c[0] === "HMGET" && String(c[2] ?? "").startsWith("p:"))) {
+      shifted = true;
+      offset = 120_000;
+    }
+    // Each trip takes a while, as over a real network: a part with fewer trips before its write reaches the lock first.
+    await new Promise((wait) => setTimeout(wait, 5));
+    const reply = await keptPipeline.call(redis, commands);
+    if (commands.some((c) => c[0] !== "GET" && c[0] !== "MGET" && c[0] !== "HMGET" && c[0] !== "HGETALL" && c[0] !== "STRLEN")) {
+      const now = fieldsOf((await keptPipeline.call(redis, [["GET", ownerKey]]))[0]);
+      // Counted from the cart link's first read: what the page's own loading wrote before it is not a part's write.
+      for (const name of Object.keys(groups)) if (shifted && now[name] !== seen[name]) writes.push(name);
+      seen = now;
+    }
+    return reply;
+  };
+  const stripePeriod = { current_period_start: startS + 60, current_period_end: startS + 60 + 30 * 86_400 };
+  const keptFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.hostname !== "api.stripe.com") throw new Error("Unexpected external request: " + url.hostname);
+    const method = init?.method ?? "GET";
+    // Still in its trial when the page loads (so the page's own sync writes no billing month), paid once it ended.
+    if (method === "GET" && url.pathname === "/v1/subscriptions/sub_TodayOrder01")
+      return Response.json(
+        shifted
+          ? { id: "sub_TodayOrder01", status: "active", cancel_at_period_end: false, items: { data: [stripePeriod] } }
+          : { id: "sub_TodayOrder01", status: "trialing", trial_end: startS + 60, cancel_at_period_end: false, items: { data: [{ current_period_start: startS - 86_400, current_period_end: startS + 60 }] } },
+      );
+    if (method === "GET" && url.pathname === "/v1/subscriptions/sub_TodayAssist01") return Response.json({ id: "sub_TodayAssist01", status: "active", cancel_at_period_end: false, items: { data: [stripePeriod] } });
+    if (method === "GET") return Response.json({ object: "list", data: [], has_more: false });
+    throw new Error("Unexpected provider operation: " + method + " " + url.pathname);
+  }) as typeof fetch;
+  const keptKey = process.env.STRIPE_SECRET_KEY;
+  process.env.STRIPE_SECRET_KEY = "sk_test_today_write_order_only";
+  answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${fourthSession}` } }));
+  try {
+    await words(await StudioPage({ searchParams: Promise.resolve({}) }));
+  } finally {
+    redis.pipeline = keptPipeline;
+    globalThis.fetch = keptFetch;
+    Date.now = realNow;
+    if (keptKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = keptKey;
+    answering(null);
+  }
+  is("the trial ended during the visit, at the cart link's first read", shifted, true);
+  const order = aligned ? ["plan", "assistant"] : ["plan", "ads", "assistant"];
+  is(aligned ? "the billing month and the add-on's month are each written once, the platforms not at all" : "the billing month, the platforms and the add-on's month are each written once", [...writes].sort(), [...order].sort());
+  is("in the order Today wrote them one section after another", writes, order);
+  const after = await storeForEmail(FOURTH);
+  is("and each is in the store", [after?.trialEnds, after?.adsServer, after?.assistantPlan?.period?.end], [0, ["meta"], stripePeriod.current_period_end]);
 }
 
 async function main(): Promise<void> {
@@ -163,90 +256,10 @@ async function main(): Promise<void> {
   is("the warning is not shown as fact", unread.includes("Two-step login is set to turn off"), false);
   is("the request is still there", JSON.parse(String((await redis.pipeline([["GET", recordKey]]))[0])).reset, reset);
 
-  // #2900, merged with main's ready cart link: a trial that ends while Today is drawn. The page counted itself in the
-  // trial; the cart link's count then finds the billing month not known and reads it from Stripe and writes it, under
-  // the store's lock, as do the two writes after it. Synthetic Stripe replies only.
   part("Today's store writes, when the billing month is read again during the visit");
-  const FOURTH = "today-write-order@example.com";
-  await claimHandle(FOURTH, "todaywriteorder", "Today write order", "");
-  const statsId = (await ensureStatsId(FOURTH))?.statsId;
-  if (!statsId) throw new Error("setup: statsId");
-  // A first page of free products, so the two paid ones are read from their records (lib/cart-link-products.ts):
-  // only then is the count taken.
-  for (let i = 0; i < 24; i += 1) await addProduct(FOURTH, `Free ${i}`, "", "0", null);
-  await addProduct(FOURTH, "Paid one", "", "19", null);
-  await addProduct(FOURTH, "Paid two", "", "29", null);
-  await setPixels(FOURTH, { ...NO_PIXELS, meta: "123456789012345" });
-  await redis.pipeline([["SET", `nl:adsrv:${statsId}`, JSON.stringify({ meta: "synthetic-sealed-token" })]]);
-  const realNow = Date.now;
-  const startS = Math.floor(realNow() / 1000);
-  await setSubscription(FOURTH, { customerId: "cus_TodayOrder01", subscriptionId: "sub_TodayOrder01", active: true, tier: "creator", trialEnds: startS + 60 });
-  await setAssistantPlan(FOURTH, { subscriptionId: "sub_TodayAssist01", active: true, period: { start: startS - 40 * 86_400, end: startS - 10 * 86_400, renews: true }, cancelsAtEnd: false, disputedAt: "" });
-  const fourthSession = await openSession(FOURTH);
-  const ownerKey = `nl:store:owner:${hex(`nimbus-store:${FOURTH}`).slice(0, 40)}`;
-  const groups: Record<string, string[]> = { plan: ["subscriptionActive", "trialEnds", "period"], ads: ["adsServer"], assistant: ["assistantPlan"] };
-  const fieldsOf = (raw: unknown) => {
-    const record = JSON.parse(String(raw)) as Record<string, unknown>;
-    return Object.fromEntries(Object.entries(groups).map(([name, keys]) => [name, JSON.stringify(keys.map((k) => record[k] ?? null))]));
-  };
-  const keptPipeline = redis.pipeline;
-  let seen = fieldsOf((await keptPipeline.call(redis, [["GET", ownerKey]]))[0]);
-  const writes: string[] = [];
-  let shifted = false;
-  let offset = 0;
-  Date.now = () => realNow() + offset;
-  redis.pipeline = async (commands) => {
-    // The cart link's first read (lib/cart-link-products.ts weigh): from here on the trial has ended.
-    if (!shifted && commands.some((c) => c[0] === "HMGET" && String(c[2] ?? "").startsWith("p:"))) {
-      shifted = true;
-      offset = 120_000;
-    }
-    // Each trip takes a while, as over a real network: a part with fewer trips before its write reaches the lock first.
-    await new Promise((wait) => setTimeout(wait, 5));
-    const reply = await keptPipeline.call(redis, commands);
-    if (commands.some((c) => c[0] !== "GET" && c[0] !== "MGET" && c[0] !== "HMGET" && c[0] !== "HGETALL" && c[0] !== "STRLEN")) {
-      const now = fieldsOf((await keptPipeline.call(redis, [["GET", ownerKey]]))[0]);
-      // Counted from the cart link's first read: what the page's own loading wrote before it is not a part's write.
-      for (const name of Object.keys(groups)) if (shifted && now[name] !== seen[name]) writes.push(name);
-      seen = now;
-    }
-    return reply;
-  };
-  const stripePeriod = { current_period_start: startS + 60, current_period_end: startS + 60 + 30 * 86_400 };
-  const keptFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = new URL(String(input));
-    if (url.hostname !== "api.stripe.com") throw new Error("Unexpected external request: " + url.hostname);
-    const method = init?.method ?? "GET";
-    // Still in its trial when the page loads (so the page's own sync writes no billing month), paid once it ended.
-    if (method === "GET" && url.pathname === "/v1/subscriptions/sub_TodayOrder01")
-      return Response.json(
-        shifted
-          ? { id: "sub_TodayOrder01", status: "active", cancel_at_period_end: false, items: { data: [stripePeriod] } }
-          : { id: "sub_TodayOrder01", status: "trialing", trial_end: startS + 60, cancel_at_period_end: false, items: { data: [{ current_period_start: startS - 86_400, current_period_end: startS + 60 }] } },
-      );
-    if (method === "GET" && url.pathname === "/v1/subscriptions/sub_TodayAssist01") return Response.json({ id: "sub_TodayAssist01", status: "active", cancel_at_period_end: false, items: { data: [stripePeriod] } });
-    if (method === "GET") return Response.json({ object: "list", data: [], has_more: false });
-    throw new Error("Unexpected provider operation: " + method + " " + url.pathname);
-  }) as typeof fetch;
-  const keptKey = process.env.STRIPE_SECRET_KEY;
-  process.env.STRIPE_SECRET_KEY = "sk_test_today_write_order_only";
-  answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${fourthSession}` } }));
-  try {
-    await words(await StudioPage({ searchParams: Promise.resolve({}) }));
-  } finally {
-    redis.pipeline = keptPipeline;
-    globalThis.fetch = keptFetch;
-    Date.now = realNow;
-    if (keptKey === undefined) delete process.env.STRIPE_SECRET_KEY;
-    else process.env.STRIPE_SECRET_KEY = keptKey;
-    answering(null);
-  }
-  is("the trial ended during the visit, at the cart link's first read", shifted, true);
-  is("the billing month, the platforms and the add-on's month are each written once", [...writes].sort(), ["ads", "assistant", "plan"]);
-  is("in the order Today wrote them one section after another", writes, ["plan", "ads", "assistant"]);
-  const after = await storeForEmail(FOURTH);
-  is("and each is in the store", [after?.trialEnds, after?.adsServer, after?.assistantPlan?.period?.end], [0, ["meta"], stripePeriod.current_period_end]);
+  await writeOrder(false);
+  part("Today's store writes, when the token's platforms are already in the store");
+  await writeOrder(true);
   done();
 }
 

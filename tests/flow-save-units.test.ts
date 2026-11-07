@@ -54,7 +54,8 @@ async function measure(session: string, body: Record<string, unknown>): Promise<
     commands += batch.length;
     dbBytes += utf8(JSON.stringify(batch));
     for (const c of batch) {
-      if (c[0] === "GET" && c[1] === flowsKey) flowsRead += 1;
+      // A read of the list: a GET of it, or the bounded read (lib/flow-list.ts, READ_FLOWS_WITHIN) given its key.
+      if ((c[0] === "GET" && c[1] === flowsKey) || (c[0] === "EVAL" && c.slice(3).includes(flowsKey))) flowsRead += 1;
       if (c[0] === "SET" && c[1] === flowsKey) flowsWritten += 1;
     }
     const reply = await base(batch);

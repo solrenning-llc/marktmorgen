@@ -44,7 +44,7 @@ is("a post checks one picture at most, after its own buyer action", [count(commu
 const communityImage = read("lib/community-image.ts");
 is("the check is one head and one read of the first bytes", [count(communityImage, "files.head("), count(communityImage, "files.firstBytes(")], [1, 1]);
 const communityFiles = read("lib/community-files.ts");
-is("the first bytes are one plain get, cancelled after sixteen bytes", [count(communityFiles, "await get("), communityFiles.includes("reader.cancel()")], [1, true]);
+is("the first bytes are one plain get, canceled after sixteen bytes", [count(communityFiles, "await get("), communityFiles.includes("reader.cancel()")], [1, true]);
 const taskDoor = read("app/api/store/course/task/upload/route.ts");
 is("a student's door signs one token after a buyer action, its file at most MAX_TASK_FILE_BYTES", [count(taskDoor, "issueSignedToken({"), taskDoor.includes("takeBuyerAction(on.store)"), taskDoor.includes("maximumSizeInBytes: MAX_TASK_FILE_BYTES")], [1, true, true]);
 is("a student's door asks the store nothing else", /\b(head|get|list|put)\(/.test(taskDoor.replace(/issueSignedToken\(/g, "")), false);

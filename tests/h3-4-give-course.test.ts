@@ -43,7 +43,7 @@ import { STUDIO_GIVE_JOB, STUDIO_GIVE_PREFIX, TAKE_IF_SAME, grantImported, impor
 import { paidCourses, setBlocked, touchStudent } from "@/lib/learn";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { redisPipeline } from "@/lib/redis";
-import { takeManyWithin, withinLimit } from "@/lib/request-guard";
+import { TAKE_MANY, takeMany, takeManyWithin, withinLimit } from "@/lib/request-guard";
 import * as apiWrite from "@/lib/api-write";
 import { GIVES_PER_DAY } from "@/lib/api-write";
 import * as bulkRules from "@/lib/student-bulk-rules";
@@ -474,6 +474,36 @@ async function main(): Promise<void> {
   is("an HSETNX answer that is neither 0 nor 1 keeps the day's gift taken", [oddGive.kind, await dayCount()], ["done", 1]);
   await redisPipeline([["HDEL", oddKey, to]]);
   for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
+
+  part("A day's count not known is not a day used (third pre-review of unit 2, LEVE)");
+  // The finding: when Redis failed, or answered the take in no known shape, takeMany said null, the same as a day
+  // used, so the studio answered "daily_limit" and told the creator the store had given its 1,000 of the day.
+  is("past the day, takeMany says the day is used", await takeMany("api-give", "full-day-store", 3, DAY, 4), { ok: false, why: "full" });
+  const taken = await takeMany("api-give", "full-day-store", 3, DAY, 2);
+  is("within the day, it says what it took", taken.ok ? [taken.n, taken.ends > 0] : taken.why, [2, true]);
+  for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
+  const counter = redis.pipeline.bind(redis);
+  const unknownCount: [string, () => Promise<unknown>][] = [
+    ["Redis failing", async () => { throw new Error("connection reset"); }],
+    ["an answer of no known shape", async () => ["soon"]],
+    ["an answer below zero", async () => [-2]],
+  ];
+  for (const [what, answer] of unknownCount) {
+    redis.pipeline = async (commands: (string | number)[][]) => (commands.some((c) => c[0] === "EVAL" && c[1] === TAKE_MANY) ? answer() : counter(commands));
+    const direct = await takeMany("api-give", store.sid!, GIVES_PER_DAY, DAY, 1);
+    const viaRoute = await post({ action: "apply", change: "give", to, emails: ["unknown@example.org"], expect: 1 });
+    redis.pipeline = counter;
+    is(
+      `${what}: not known, said as unavailable (503), never as the day used; nothing given, nothing of the day taken`,
+      [direct, viaRoute.status, viaRoute.body.error, viaRoute.body.message, await given("unknown@example.org"), await dayCount()],
+      [{ ok: false, why: "unknown" }, 503, "unavailable", GIVE_REFUSALS.unavailable, [], 0],
+    );
+  }
+  is("the words for it never say the day was used", /day|1,000|tomorrow/i.test(GIVE_REFUSALS.unavailable), false);
+  is("takeManyWithin still says no when the count is not known (closed)", await (async () => {
+    redis.pipeline = async () => { throw new Error("down"); };
+    try { return await takeManyWithin("api-give", "closed-store", GIVES_PER_DAY, DAY, 1); } finally { redis.pipeline = counter; }
+  })(), false);
 
   part("The day's gifts said as one count (second pre-review of unit 2, LEVE 3 and LEVE 4)");
   is("the studio's refusal names the day's figure from GIVES_PER_DAY, never a number typed in", readFileSync("lib/student-bulk-rules.ts", "utf8").includes("(1,000)"), false);

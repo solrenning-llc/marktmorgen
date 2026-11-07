@@ -44,6 +44,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
 import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
@@ -158,7 +159,15 @@ async function startJob(
   const id = createHash("sha256").update(`${community}|${event.id}|${kind}|${seq}`).digest("hex").slice(0, 24);
   const [claimed] = await redisPipeline([["SET", madeKey(id), "1", "NX", "EX", KEEP_SECONDS]]);
   if (claimed === null) return null;
-  const readers = (await rsvpList(community, event.id)).map((r) => r.key);
+  // Who is coming could not be read (rule 30): the claim is given back, so the send is not made short now nor
+  // refused as made later; the caller says it failed, and a due reminder stays queued (runEventQueue).
+  const readers = await rsvpList(community, event.id).then(
+    (list) => list.map((r) => r.key),
+    async (error: unknown) => {
+      await redisPipeline([["DEL", madeKey(id)]]).catch(() => {});
+      throw error;
+    },
+  );
   if (!readers.length) return null;
   const job: EventMailJob = {
     id,
@@ -448,6 +457,9 @@ export async function runEventQueue(
       } else counts.dropped += 1;
     } catch (error) {
       console.error("a live event reminder failed", error);
+      // Who is coming could not be read: the reminder stays queued and is tried again on the next run, while it is
+      // still useful (stillUseful), never sent to a short list nor dropped as sent.
+      if (error instanceof UnknownReplyError) continue;
     }
     await redisPipeline([["ZREM", EVENT_QUEUE, member]]);
   }

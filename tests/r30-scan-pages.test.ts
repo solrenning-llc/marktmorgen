@@ -61,9 +61,10 @@ async function outcome(run: () => Promise<string>): Promise<string> {
   }
 }
 
-/** The page shapes that are not a page, each with what it should come to. */
-function shapes(first: string[]): [string, (call: number) => unknown, string][] {
+/** The page shapes that are not a page, each with what it should come to; `pairs` for a hash's page (field, value). */
+function shapes(first: string[], pairs = false): [string, (call: number) => unknown, string][] {
   return [
+    ...(pairs ? [["an odd number of items on a hash's page", () => ["0", ["lonely"]], "unknown"] as [string, (call: number) => unknown, string]] : []),
     ["not a pair: QUEUED", () => "QUEUED", "unknown"],
     ["not a pair: null", () => null, "unknown"],
     ["one slot", () => ["0"], "unknown"],
@@ -180,7 +181,7 @@ async function main(): Promise<void> {
   is("the next run, with pages that read, erases it and finishes it", [await outcome(walk), finished, await leftBehind()], ["done:true finished:1", [entry.ref], []]);
 
   part("lib/closed-store-data.ts, scanAll (HSCAN of a follower's hash): a page that does not read is not the end of it");
-  for (const [label, answer, want] of shapes(["someone@example.com", "{}"])) {
+  for (const [label, answer, want] of shapes(["someone@example.com", "{}"], true)) {
     await closingWorld();
     answering("HSCAN", answer);
     is(`${label}: ${want}, the store not finished`, [await outcome(walk), finished], [want, []]);
@@ -194,20 +195,20 @@ async function main(): Promise<void> {
   }
 
   part("lib/free.ts, listAsCsv: a page that does not read is not a shorter list");
-  for (const [label, answer, want] of shapes(["one@example.com", contact])) {
+  for (const [label, answer, want] of shapes(["one@example.com", contact], true)) {
     await listWorld();
     answering("HSCAN", answer);
     is(`${label}: ${want}`, await outcome(csvRows), want);
   }
 
   part("lib/community-events.ts, rsvpList: a page that does not read is not fewer people coming");
-  for (const [label, answer, want] of shapes(["e".repeat(32), "100"])) {
+  for (const [label, answer, want] of shapes(["e".repeat(32), "100"], true)) {
     await rsvpWorld();
     answering("HSCAN", answer);
     is(`${label}: ${want}`, await outcome(going), want);
   }
   part("lib/community-event-mail.ts: a send whose list did not read is not sent short, and is not claimed for good");
-  for (const [label, answer, want] of shapes(["e".repeat(32), "100"]).filter(([label]) => label.startsWith("not a pair: Q") || label.startsWith("a second page"))) {
+  for (const [label, answer, want] of shapes(["e".repeat(32), "100"], true).filter(([label]) => label.startsWith("not a pair: Q") || label.startsWith("a second page"))) {
     await rsvpWorld();
     answering("HSCAN", answer);
     is(`${label}: the move's notice is ${want}`, await outcome(notice), want);

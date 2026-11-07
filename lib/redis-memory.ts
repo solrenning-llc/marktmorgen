@@ -547,6 +547,13 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
+        if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, people, field, expected, next] = args;
+          if (this.run(["HGET", people, field]) !== expected) return 0;
+          this.run(["HSET", people, field, next]);
+          return 1;
+        }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
         if (key.startsWith("-- marktmorgen:crm-deal-move:v2\n") && args[0] === "1" && args.length === 5) {
           const target = args[1];

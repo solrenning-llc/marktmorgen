@@ -74,7 +74,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const gte = Number(url.searchParams.get("created[gte]") ?? 0);
   const after = url.searchParams.get("starting_after");
   const limit = Number(url.searchParams.get("limit") ?? 10);
-  const rows = (stripe[path] ?? []).filter((r) => r.created >= gte).sort((a, b) => b.created - a.created);
+  const status = url.searchParams.get("status");
+  const rows = (stripe[path] ?? []).filter((r) => r.created >= gte && (!status || r.status === status)).sort((a, b) => b.created - a.created);
   if (broken[path] === "shuffled" && rows.length > 2) [rows[0], rows[rows.length - 1]] = [rows[rows.length - 1], rows[0]];
   const start = after ? rows.findIndex((r) => r.id === after) + 1 : 0;
   return json({ object: "list", data: rows.slice(start, start + limit), has_more: start + limit < rows.length });
@@ -400,6 +401,50 @@ async function main(): Promise<void> {
     is("the line prices READING_KINDS.length copies, now four", [READING_KINDS.length, line?.sources.some((s) => s.file === "lib/store-readings.ts" && s.names.includes("READING_KINDS"))], [4, true]);
     const source = line?.sources.find((s) => s.file === "lib/earnings-read.ts");
     is("and names the reading that keeps it, a heavy reading of the day", [source?.names.includes("readEarningsYear"), source?.names.includes('keptReading(store, "earnings"')], [true, true]);
+  }
+
+  part("Findings still open on #3022: the first review (6698473954) and Claude 3's MÉDIO 2 (6702455814)");
+  reset();
+  {
+    // First review, LEVE 1: void, open and draft invoices must not use up the invoices' ten pages.
+    const shop = makeStore(false);
+    const voids = Array.from({ length: 1000 }, (_, i) => invoice(`void${i}`, NOW - HOUR - i * 60_000, NOW - HOUR - i * 60_000, 2000, { status: "void", status_transitions: { paid_at: null } }));
+    const paid = Array.from({ length: 122 }, (_, i) => invoice(`year${i}`, NOW - DAY - i * 3 * DAY, NOW - DAY - i * 3 * DAY, 2000));
+    stripe["/invoices"] = [...voids, ...paid];
+    const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
+    is("1,000 newer void invoices: the paid renewals of the year are still read (status=paid), the eleven newer months read", states(e, "stripe").slice(0, 11), Array(11).fill("read"));
+  }
+  reset();
+  {
+    // First review, LEVE 2: a kept copy is of one time zone; another zone never gets it.
+    const shop = makeStore(false);
+    stripe["/checkout/sessions"] = [checkout("zone1", Date.UTC(2031, 5, 1, 2), 5000)];
+    await readEarningsYear(shop, "UTC", NOW);
+    const fortaleza = (await readEarningsYear(shop, "America/Fortaleza", NOW + 60_000))?.value ?? null;
+    is("a fresh UTC copy is not given for Fortaleza: the sale of 1 June 02:00 UTC is in May there", [fortaleza?.timeZone, (of(fortaleza, "2031-05", "stripe") as { lines?: { salesCents: number }[] })?.lines?.[0]?.salesCents], ["America/Fortaleza", 5000]);
+    const other = makeStore(false);
+    stripe["/checkout/sessions"] = [checkout("zone2", Date.UTC(2031, 5, 1, 2), 5000)];
+    await readEarningsYear(other, "UTC", NOW);
+    redis.run(["SET", `nl:reading:day:${other.statsId}:2031-06-15:heavy`, String(HEAVY_READINGS_PER_DAY), "EX", 86_400]);
+    const late = await readEarningsYear(other, "America/Fortaleza", NOW + 20 * 60_000).then((k) => k?.value?.timeZone ?? "none", (error: unknown) => (error instanceof ReadingsUsed ? "used" : String(error)));
+    is("the day's heavy readings used: the stale UTC copy is not shown as Fortaleza's (said as used)", late, "used");
+  }
+  reset();
+  {
+    // Claude 3, MÉDIO 2: no bound on when an invoice is paid is proved (lib/card-update.ts pays an old open invoice).
+    const shop = makeStore(false);
+    stripe["/invoices"] = [invoice("late45", Date.UTC(2031, 2, 1), Date.UTC(2031, 3, 15), 2000)];
+    const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
+    is("an invoice paid 45 days after it was made: dated by its invoice, as readRenewals, in March; no month unread for it", [states(e, "stripe"), (of(e, "2031-03", "stripe") as { lines?: { renewalCents: number }[] })?.lines?.[0]?.renewalCents], [Array(12).fill("read"), 2000]);
+    reset();
+    const empty = (await readEarningsYear(makeStore(false), "UTC", NOW))?.value ?? null;
+    is("renewals listed by the date they are dated by: the oldest month is read, never given up on an unproved window", states(empty, "stripe")[11], "read");
+    reset();
+    const busy = makeStore(false);
+    stripe["/invoices"] = Array.from({ length: 1200 }, (_, i) => invoice(`cap${i}`, NOW - HOUR - i * 6 * HOUR, NOW - HOUR - i * 6 * HOUR, 100));
+    const capped = (await readEarningsYear(busy, "UTC", NOW))?.value ?? null;
+    // 1,000 invoices read, one every 6 hours, reach back to 9 October 2030: November 2030 on is proved, never every month lost.
+    is("the invoices' ten pages used up: the months after the oldest invoice read are still read", states(capped, "stripe"), [...Array(8).fill("read"), ...Array(4).fill("not_reached")]);
   }
 
   done();

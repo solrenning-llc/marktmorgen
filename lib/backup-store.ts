@@ -15,12 +15,22 @@
  * and the other is answered 412 (https://developers.cloudflare.com/r2/api/s3/api/,
  * read 31 October 2026; a 412 is billed as a Class A operation,
  * https://developers.cloudflare.com/r2/pricing/). A read is held to its byte
- * cap as it streams. There is no delete here: retention is a later unit, with
- * its own reviewed key.
+ * cap as it streams.
+ *
+ * Retention (inbox C4-49): the daily run lists its own objects under backups/
+ * (ListObjectsV2, a Class A operation each page, with each object's time and
+ * size) and deletes, one by one with
+ * DeleteObject (free on R2, https://developers.cloudflare.com/r2/pricing/, read
+ * 4 November 2026 by Claude 1, inbox C4-38), the oldest when a set would not
+ * fit under the review's ceiling and, after a write, those older than the
+ * review's retention (lib/backup-run.ts). The listing offers only names this store
+ * writes (backups/<uuid>.mmbk), so nothing else in the bucket is ever deleted;
+ * a listing it cannot read whole throws, never reads as an empty bucket. The
+ * bucket's lifecycle rule stays as a safety net.
  */
 import { EMPTY_HASH, hashOf, signV4, type AwsKey } from "@/lib/aws-sign";
 import { timed } from "@/lib/fetch-timeout";
-import type { BackupObjectStore } from "@/lib/backup-roundtrip";
+import type { BackupBucket } from "@/lib/backup-roundtrip";
 
 export type BackupStoreConfig = { endpoint: string; bucket: string; key: AwsKey };
 
@@ -29,6 +39,12 @@ const SERVICE = "s3";
 const TIMEOUT_MS = 20_000;
 /** The names verifyBackupRoundtrip gives: a random UUID. */
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Where the backup's objects live in its bucket, and the name of one of them. */
+const PREFIX = "backups/";
+const OBJECT_NAME = /^backups\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.mmbk$/;
+/** Names one listing page holds at the most (S3's own limit), and the most its answer may weigh. */
+export const BACKUP_LIST_PAGE_KEYS = 1_000;
+const LIST_MAX_BYTES = 1_048_576;
 
 /** The owner's own backup bucket and key; null when any is missing or malformed, or is the sold files' bucket or key. */
 export function backupStoreConfig(): BackupStoreConfig | null {
@@ -52,8 +68,74 @@ const objectUrl = (config: BackupStoreConfig, id: string) => {
   return `${config.endpoint}/${config.bucket}/backups/${id}.mmbk`;
 };
 
-/** The store lib/backup-roundtrip.ts writes to and reads back from. Every failure throws: nothing is taken as written or read on doubt. */
-export function r2BackupStore(config: BackupStoreConfig): BackupObjectStore {
+/** A response's body, held to `maxBytes` as it streams; throws past it. */
+async function bodyWithin(response: Response, maxBytes: number): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array(0);
+  if (Number(response.headers.get("content-length") ?? "0") > maxBytes) {
+    await response.body.cancel().catch(() => {});
+    throw new Error("Backup read exceeds bound");
+  }
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error("Backup read exceeds bound");
+    }
+    parts.push(value);
+  }
+  const whole = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) {
+    whole.set(part, at);
+    at += part.byteLength;
+  }
+  return whole;
+}
+
+/** The text of one field that appears exactly once in a listing; null when it is missing or repeated. */
+function single(xml: string, name: string): string | null {
+  const openings = xml.match(new RegExp(`<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?${name}[^A-Za-z0-9_.:-]`, "g")) ?? [];
+  const fields = [...xml.matchAll(new RegExp(`<${name}>([^<]*)</${name}>`, "g"))];
+  return openings.length === 1 && fields.length === 1 ? fields[0][1] : null;
+}
+
+/**
+ * One listing page read whole, or a throw: the backup's own objects with their write times, and the token to go on.
+ * A field missing, repeated or out of shape, a count that does not match, or a truncated page with no token throws.
+ */
+export function readListing(xml: string): { objects: { id: string; writtenAt: number; bytes: number }[]; next: string | null } {
+  if (!xml.includes("<ListBucketResult") || !xml.includes("</ListBucketResult>")) throw new Error("Invalid backup listing");
+  const truncated = single(xml, "IsTruncated");
+  if (truncated !== "true" && truncated !== "false") throw new Error("Invalid backup listing");
+  const entries = xml.match(/<Contents>[\s\S]*?<\/Contents>/g) ?? [];
+  const opened = (xml.match(/<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?Contents[^A-Za-z0-9_.:-]/g) ?? []).length;
+  if (entries.length > BACKUP_LIST_PAGE_KEYS || opened !== entries.length) throw new Error("Invalid backup listing");
+  if (/<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?KeyCount[^A-Za-z0-9_.:-]/.test(xml) && single(xml, "KeyCount") !== String(entries.length)) throw new Error("Invalid backup listing");
+  const objects: { id: string; writtenAt: number; bytes: number }[] = [];
+  for (const entry of entries) {
+    const name = single(entry, "Key");
+    const when = single(entry, "LastModified");
+    const writtenAt = when !== null && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(when) ? Date.parse(when) : NaN;
+    const size = single(entry, "Size");
+    const bytes = size !== null && /^\d{1,15}$/.test(size) ? Number(size) : NaN;
+    if (name === null || !name.startsWith(PREFIX) || !Number.isSafeInteger(writtenAt) || !Number.isSafeInteger(bytes)) throw new Error("Invalid backup listing entry");
+    // Only what this store writes is offered; any other name under the prefix is left alone.
+    const id = OBJECT_NAME.exec(name)?.[1];
+    if (id) objects.push({ id, writtenAt, bytes });
+  }
+  const token = truncated === "true" ? single(xml, "NextContinuationToken") : null;
+  const next = token === null ? null : token.replace(/&(amp|lt|gt|quot|apos);/g, (_, e: string) => ({ amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" })[e] as string);
+  if (truncated === "true" && !next) throw new Error("Invalid backup listing");
+  return { objects, next };
+}
+
+/** The store lib/backup-roundtrip.ts writes to and reads back from, and the run lists and prunes. Every failure throws: nothing is taken as written, read or deleted on doubt. */
+export function r2BackupStore(config: BackupStoreConfig): BackupBucket {
   return {
     putNew: async (id, bytes) => {
       const url = objectUrl(config, id);
@@ -86,31 +168,40 @@ export function r2BackupStore(config: BackupStoreConfig): BackupObjectStore {
           await response.body?.cancel().catch(() => {});
           throw new Error(`Backup read failed with status ${response.status}`);
         }
-        if (Number(response.headers.get("content-length") ?? "0") > maxBytes) {
-          await response.body.cancel().catch(() => {});
-          throw new Error("Backup read exceeds bound");
-        }
-        const reader = response.body.getReader();
-        const parts: Uint8Array[] = [];
-        let total = 0;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          total += value.byteLength;
-          if (total > maxBytes) {
-            await reader.cancel().catch(() => {});
-            throw new Error("Backup read exceeds bound");
-          }
-          parts.push(value);
-        }
-        const whole = new Uint8Array(total);
-        let at = 0;
-        for (const part of parts) {
-          whole.set(part, at);
-          at += part.byteLength;
-        }
-        return whole;
+        return bodyWithin(response, maxBytes);
       });
+    },
+    list: async (next) => {
+      const url = new URL(`${config.endpoint}/${config.bucket}`);
+      url.searchParams.set("list-type", "2");
+      url.searchParams.set("prefix", PREFIX);
+      url.searchParams.set("max-keys", String(BACKUP_LIST_PAGE_KEYS));
+      if (next !== null) {
+        if (typeof next !== "string" || next.length === 0 || next.length > 1_024) throw new Error("Invalid backup listing token");
+        url.searchParams.set("continuation-token", next);
+      }
+      const address = url.toString();
+      const headers = signV4({ method: "GET", url: address, headers: { "x-amz-content-sha256": EMPTY_HASH }, payloadHash: EMPTY_HASH, region: REGION, service: SERVICE, key: config.key });
+      const xml = await timed(TIMEOUT_MS, async (signal) => {
+        const response = await fetch(address, { headers: { ...headers, "accept-encoding": "identity" }, signal, cache: "no-store", redirect: "error" });
+        if (response.status !== 200) {
+          await response.body?.cancel().catch(() => {});
+          throw new Error(`Backup listing failed with status ${response.status}`);
+        }
+        return new TextDecoder("utf-8", { fatal: true }).decode(await bodyWithin(response, LIST_MAX_BYTES));
+      });
+      return readListing(xml);
+    },
+    delete: async (id) => {
+      const url = objectUrl(config, id);
+      const headers = signV4({ method: "DELETE", url, headers: { "x-amz-content-sha256": EMPTY_HASH }, payloadHash: EMPTY_HASH, region: REGION, service: SERVICE, key: config.key });
+      const status = await timed(TIMEOUT_MS, async (signal) => {
+        const response = await fetch(url, { method: "DELETE", headers, signal, cache: "no-store", redirect: "error" });
+        await response.body?.cancel().catch(() => {});
+        return response.status;
+      });
+      // S3 answers 204 for a delete, the object there or not; anything else is not taken as done.
+      if (status !== 204 && status !== 200) throw new Error(`Backup delete failed with status ${status}`);
     },
   };
 }

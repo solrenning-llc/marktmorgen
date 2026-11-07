@@ -33,6 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { orderWrite } from "@/lib/order-data";
@@ -186,13 +187,22 @@ export async function forgetPaid(store: Store, email: string): Promise<void> {
   await redisPipeline([["DEL", paidCacheKey(store, email)]]);
 }
 
-/** Takes a course off an address's ledger: a gift taken back by a refund (lib/gifts.ts). */
+/**
+ * Takes a course off an address's ledger: a gift, pre-order, group place or PayPal sale taken back by a refund. Both
+ * replies are read exactly (CX-123 rule 24; Codex G on #2781): the HDEL and the DEL each answer 0 or 1, or this
+ * throws UnknownReplyError, so the caller keeps the refund to be tried again and never reads "taken away" from a
+ * reply it could not read. Running it again is harmless.
+ */
 export async function dropEnrollment(store: Store, email: string, productId: string): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([
-    ["HDEL", ledgerKey(store, email), productId],
-    ["DEL", paidCacheKey(store, email)],
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HDEL", ledgerKey(store, email), productId],
+      ["DEL", paidCacheKey(store, email)],
+    ]),
+    2,
+  );
+  if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("taking a course off a ledger");
 }
 
 type Listed = { data?: unknown };
@@ -434,14 +444,28 @@ export async function touchStudent(courseId: string, email: string, startSeconds
  */
 export async function studentDates(courseId: string, email: string): Promise<{ since: number; lastSeen: number } | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", studentsKey(courseId), emailKey(email)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const reply = repliesFor(await redisPipeline([["HGET", studentsKey(courseId), emailKey(email)]]), 1);
+  // Null is a student never seen; anything but null or a kept row with whole times is unknown, never "never
+  // opened" (CX-123 rule 24).
+  if (!reply) throw new UnknownReplyError("a student's course dates");
+  if (reply[0] === null) return null;
+  const row = studentTimes(reply[0]);
+  if (!row) throw new UnknownReplyError("a student's course dates");
+  return { since: row.s, lastSeen: row.l };
+}
+
+/** A kept student row's address (as kept) and times, only when the row is JSON with both times as whole seconds; otherwise null. */
+function studentTimes(raw: unknown): { e: unknown; s: number; l: number } | null {
+  if (typeof raw !== "string") return null;
+  let row: unknown;
   try {
-    const row = JSON.parse(raw) as Partial<StudentRow>;
-    return { since: Number(row.s) || 0, lastSeen: Number(row.l) || 0 };
+    row = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  const { e, s, l } = row as Partial<StudentRow>;
+  return countOf(s) === null || countOf(l) === null ? null : { e, s: s as number, l: l as number };
 }
 
 /**
@@ -452,17 +476,15 @@ export async function studentDates(courseId: string, email: string): Promise<{ s
 export async function lastSeenMany(courseId: string, emails: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!emails.length || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HMGET", studentsKey(courseId), ...emails.map(emailKey)]]);
-  const rows = Array.isArray(raw) ? raw : [];
+  const rows = repliesFor(await redisPipeline([["HMGET", studentsKey(courseId), ...emails.map(emailKey)]]), 1)?.[0];
+  // One value for each address, null for one never seen (0); a list of another length, or a value that is not a
+  // kept row with whole times, is unknown, never "never seen" (CX-123 rule 24).
+  if (!Array.isArray(rows) || rows.length !== emails.length) throw new UnknownReplyError("when students last opened a course");
   emails.forEach((email, i) => {
-    let seen = 0;
-    if (typeof rows[i] === "string") {
-      try {
-        const row = JSON.parse(rows[i] as string) as Partial<StudentRow>;
-        seen = Number(row.l) || Number(row.s) || 0;
-      } catch {}
-    }
-    out.set(email, seen);
+    if (rows[i] === null) return out.set(email, 0);
+    const row = studentTimes(rows[i]);
+    if (!row) throw new UnknownReplyError("when students last opened a course");
+    out.set(email, row.l || row.s);
   });
   return out;
 }
@@ -592,15 +614,19 @@ export async function studentPage(
     ["HLEN", studentsKey(course.id)],
     ["SCARD", blockedKey(course.id)],
   ]);
-  const blockedAll = Number(blockedCount);
-  if (!Array.isArray(reply) || reply.length < 2 || !Number.isSafeInteger(blockedAll) || blockedAll < 0) return null;
-  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  const blockedAll = countOf(blockedCount);
+  // HLEN and SCARD in their exact shape (CX-123 rule 24): an unknown number of students is never 0.
+  const students = countOf(total);
+  if (!Array.isArray(reply) || reply.length !== 2 || typeof reply[0] !== "string" || blockedAll === null || students === null) return null;
+  // The page in its exact shape (Codex G on #2717, CX-123 rule 24): field and row in pairs, each row a kept one with
+  // its address and whole times. A page of another shape is unknown, never fewer students.
+  const flat = stringList(reply[1]);
+  if (!flat || flat.length % 2 !== 0) return null;
   const rows: StudentRow[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const row = JSON.parse(String(flat[i + 1])) as StudentRow;
-      if (typeof row?.e === "string") rows.push(row);
-    } catch {}
+  for (let i = 0; i < flat.length; i += 2) {
+    const row = studentTimes(flat[i + 1]);
+    if (!row || typeof row.e !== "string" || !row.e) return null;
+    rows.push({ e: row.e, s: row.s, l: row.l });
   }
   // Accepted race: the blocked list can grow between SCARD and SMEMBERS and be read past what was paid for,
   // bounded by how fast the store blocks students.
@@ -608,18 +634,29 @@ export async function studentPage(
   const whole = blockedAll <= BLOCKED_READ_MAX;
   const blockedReads: (string | number)[][] =
     blockedAll === 0 ? [] : whole ? [["SMEMBERS", blockedKey(course.id)]] : rows.map((row) => ["SISMEMBER", blockedKey(course.id), emailKey(row.e)]);
-  const replies = rows.length ? await redisPipeline([...rows.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]), ...blockedReads]) : [];
-  const blockedSet = new Set(blockedAll > 0 && whole && Array.isArray(replies[rows.length]) ? (replies[rows.length] as string[]) : []);
+  const reads = rows.length ? [...rows.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]), ...blockedReads] : [];
+  const replies = reads.length ? repliesFor(await redisPipeline(reads), reads.length) : [];
+  if (!replies) return null;
+  // Each done list a list of lesson ids, the blocked list a list of ids, each answer past it 0 or 1 (CX-123 rule 24):
+  // an unknown one is never 0 lessons or "not blocked", it leaves the whole page unknown.
+  const done = rows.map((_, i) => stringList(replies[i]));
+  if (done.some((list) => list === null)) return null;
+  // A page with no rows asked nothing more (Codex G, review 5793946540): nothing is waited on for it.
+  const blockedList = rows.length && blockedAll > 0 && whole ? stringList(replies[rows.length]) : [];
+  if (!blockedList) return null;
+  const answers = blockedAll > 0 && !whole ? rows.map((_, i) => countOf(replies[rows.length + i])) : [];
+  if (answers.some((n) => n === null || n > 1)) return null;
+  const blockedSet = new Set(blockedList);
   const lessonIds = new Set(lessonsInOrder(course).map(({ lesson }) => lesson.id));
   return {
-    total: Number(total) || 0,
-    next: String(reply[0]),
+    total: students,
+    next: reply[0],
     students: rows.map((row, i) => ({
       email: row.e,
       since: row.s,
       lastSeen: row.l,
-      done: Array.isArray(replies[i]) ? (replies[i] as string[]).filter((id) => lessonIds.has(id)).length : 0,
-      blocked: blockedAll === 0 ? false : whole ? blockedSet.has(emailKey(row.e)) : Number(replies[rows.length + i]) === 1,
+      done: (done[i] as string[]).filter((id) => lessonIds.has(id)).length,
+      blocked: blockedAll === 0 ? false : whole ? blockedSet.has(emailKey(row.e)) : answers[i] === 1,
     })),
   };
 }
@@ -739,11 +776,13 @@ function senderAddress(): string {
 }
 
 async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
     ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+  ]), 2);
+  // A count in any other shape is unknown (CX-123 rule 24): no course link is emailed on it.
+  const count = countOf(replies?.[1]);
+  return count !== null && count <= limit;
 }
 
 export type LinkRequest = "sent" | "email" | "limited" | "error";
@@ -794,12 +833,15 @@ export async function sendCourseLink(store: Store, product: Listing, email: stri
 /** Spends one open of an emailed link, and says who and what it was for. */
 export async function openCourseLink(token: string): Promise<LinkGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw, , opens] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["GET", linkKey(token)],
     ["SET", opensKey(token), "0", "EX", LINK_SECONDS, "NX"],
     ["INCR", opensKey(token)],
-  ]);
-  if (typeof raw !== "string" || Number(opens) > MAX_LINK_OPENS) return null;
+  ]), 3);
+  const raw = replies?.[0];
+  // The opens in their exact shape (CX-123 rule 24): an unknown count opens nothing.
+  const opens = countOf(replies?.[2]);
+  if (typeof raw !== "string" || opens === null || opens > MAX_LINK_OPENS) return null;
   try {
     const grant = JSON.parse(raw) as LinkGrant;
     return typeof grant.e === "string" && typeof grant.h === "string" && typeof grant.p === "string" ? grant : null;
@@ -903,8 +945,10 @@ export async function forgetLearnerPerson(
 ): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const email = normaliseEmail(rawEmail);
-  const [held] = await redisPipeline([["SMEMBERS", passesKey(store, email)]]);
-  const passes = (Array.isArray(held) ? held : []).filter((h): h is string => typeof h === "string" && /^[0-9a-f]{64}$/.test(h));
+  // The passes in their exact shape (CX-123 rules 24 and 28): read as none, their records would stay after the person.
+  const held = stringList(repliesFor(await redisPipeline([["SMEMBERS", passesKey(store, email)]]), 1)?.[0]);
+  if (held === null) throw new UnknownReplyError("the passes of a person being deleted");
+  const passes = held.filter((h) => /^[0-9a-f]{64}$/.test(h));
   const keys = [
     ledgerKey(store, email),
     paidCacheKey(store, email),
@@ -913,6 +957,10 @@ export async function forgetLearnerPerson(
     ...courses.flatMap((c) => [doneKey(c.courseId, email), ...c.moduleIds.map((m) => dripMailKey(c.courseId, email, m))]),
   ];
   const commands: (string | number)[][] = [["DEL", ...keys], ...courses.map((c) => ["HDEL", studentsKey(c.courseId), emailKey(email)])];
-  const replies = await redisPipeline(commands);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  // One whole count for each DEL and HDEL (CX-123 rule 24): never 0 removed on another shape; thrown, so the
+  // erasure says this part did not finish (lib/person-erasure.ts).
+  const counts = replies?.map(countOf);
+  if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's course records");
+  return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }

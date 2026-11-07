@@ -762,10 +762,14 @@ html {
  * its words stay above 9:1 (--ink-soft on --sand), and the ring outside it
  * keeps its full colour. The dashed edge (--line-off) is light, at 3:1 or
  * more, so an off button never looks louder than the ones that work. Hover
- * does not light it up.
+ * does not light it up. A round icon button (.icon-btn: the page editor's
+ * Move, Duplicate, Earlier and Later) takes the same signs; told off by a
+ * lighter gray alone, it was 1.07:1 from one that works.
  */
 .btn[aria-disabled="true"],
-.btn[aria-disabled="true"]:hover {
+.btn[aria-disabled="true"]:hover,
+.icon-btn[aria-disabled="true"],
+.icon-btn[aria-disabled="true"]:hover {
   opacity: 1;
   cursor: not-allowed;
   transform: none;
@@ -784,7 +788,9 @@ html {
 @media (forced-colors: active) {
   /* The system's colour for an unavailable control, and the dashed border still says "off". */
   .btn[aria-disabled="true"],
-  .btn[aria-disabled="true"]:hover {
+  .btn[aria-disabled="true"]:hover,
+  .icon-btn[aria-disabled="true"],
+  .icon-btn[aria-disabled="true"]:hover {
     color: GrayText;
     border-style: dashed;
     border-color: GrayText;
@@ -793,9 +799,11 @@ html {
    * No color of a button is animated in forced colors. WebKit animates them:
    * a button that turned usable was still drawn, for a moment, in GrayText on
    * the page's own sand (2.78:1, Studio AAA, inbox C4-35). It shows the
-   * system's colors at once instead.
+   * system's colors at once instead. The round icon buttons (.icon-btn) too,
+   * which take GrayText when off and keep Tailwind's transition-colors.
    */
-  .btn {
+  .btn,
+  .icon-btn {
     transition: none;
   }
 }
@@ -1600,8 +1608,10 @@ a.chip {
   flex: none;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  /* A 44 px target (2.5.5) that still sits on the first line of text. */
+  width: 44px;
+  height: 44px;
+  margin: -6px -6px -6px 0;
   border-radius: 8px;
   background: transparent;
   color: #fff;
@@ -1616,12 +1626,38 @@ a.chip {
   outline-offset: 2px;
   border-radius: 8px;
 }
+/*
+ * Focus not obscured (2.4.11, 2.4.12): components/toast.tsx sets data-place to
+ * the first corner that leaves the focused control clear, or to "hidden" when
+ * none does. The move is instant, never animated.
+ */
+.nb-toast-region[data-place^="top"] {
+  top: max(16px, env(safe-area-inset-top));
+  bottom: auto;
+}
+.nb-toast-region[data-place="hidden"] .nb-toast {
+  visibility: hidden;
+}
+@media (forced-colors: active) {
+  .nb-toast {
+    border: 2px solid CanvasText;
+  }
+}
 @media (min-width: 640px) {
   .nb-toast-region {
     left: auto;
     right: 24px;
     bottom: 24px;
     justify-content: flex-end;
+  }
+  .nb-toast-region[data-place^="top"] {
+    top: 24px;
+    bottom: auto;
+  }
+  .nb-toast-region[data-place$="start"] {
+    left: 24px;
+    right: auto;
+    justify-content: flex-start;
   }
   .nb-toast {
     width: auto;
@@ -2412,6 +2448,9 @@ a.chip {
    shadow animations only while keyboard-focused. */
 .st-btn:focus-visible,
 .st-btn-ghost:focus-visible,
+.st-page .btn-secondary:focus-visible,
+.st-page .btn-primary:focus-visible,
+.st-page .st-footer-link:focus-visible,
 .st-social:focus-visible {
   outline: 3px solid #000;
   outline-offset: 3px;
@@ -2420,6 +2459,9 @@ a.chip {
 @media (forced-colors: active) {
   .st-btn:focus-visible,
   .st-btn-ghost:focus-visible,
+  .st-page .btn-secondary:focus-visible,
+  .st-page .btn-primary:focus-visible,
+  .st-page .st-footer-link:focus-visible,
   .st-social:focus-visible {
     outline: 3px solid CanvasText;
     box-shadow: none !important;
@@ -2782,6 +2824,11 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
     padding: 2.25rem 1.25rem;
     margin-inline: -0.5rem;
   }
+  /* A link on a band: black or white, whichever reads at 7:1 on it, always underlined (274 [AX1], lib/store-look.ts bandLink). */
+  .sp-style-bands .sp-band-phone > .sp-section a:not(.btn):not(.st-btn) {
+    color: var(--st-band-link);
+    text-decoration-line: underline;
+  }
   .sp-only-computer {
     display: none;
   }
@@ -2792,6 +2839,11 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
     border-radius: 1.75rem;
     padding: 3rem 2.5rem;
     margin-inline: -1.5rem;
+  }
+  /* A link on a band: black or white, whichever reads at 7:1 on it, always underlined (274 [AX1], lib/store-look.ts bandLink). */
+  .sp-style-bands .sp-band-computer > .sp-section a:not(.btn):not(.st-btn) {
+    color: var(--st-band-link);
+    text-decoration-line: underline;
   }
   .sp-only-phone {
     display: none;
@@ -2813,6 +2865,38 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 @container (min-width: 700px) {
   .sp-style-cards .sp-block > .sp-section {
     padding: 2.25rem;
+  }
+}
+/* A divider and a space (lib/sales-page.ts, 375 [TB1]): only arrangement,
+   never on a card or a band. The line is drawn in the store's muted text
+   colour, which lib/store-look.ts holds at 7:1 or more on the page, so it
+   passes the 3:1 a graphic needs in every store; it keeps the room a section
+   is set off by above it. Nothing here moves or animates. In forced colours
+   the line takes the system's text colour, so it stays visible. */
+.sp-divider {
+  margin: 3.5rem 0 0;
+  height: 0;
+  border: 0;
+  border-top: 1px solid var(--st-muted);
+}
+.sp-style-bands .sp-divider {
+  margin-top: 2.75rem;
+}
+.sp-style-cards .sp-divider {
+  margin-top: 1.5rem;
+}
+.sp-space-small {
+  height: 1rem;
+}
+.sp-space-medium {
+  height: 2.5rem;
+}
+.sp-space-large {
+  height: 5rem;
+}
+@media (forced-colors: active) {
+  .sp-divider {
+    border-top-color: CanvasText;
   }
 }
 @media (min-width: 1100px) {
@@ -3293,6 +3377,48 @@ a.sp-product:focus-visible {
 }
 .sp-row-icon {
   display: inline-flex;
+}
+/* A video in a window (components/video-window.tsx): the picture viewer's
+   dialog, with the player as wide as the screen allows at 16:9 and a Close
+   button that says its name. */
+.sp-video-window-mark {
+  font-weight: 500;
+}
+.vw-dialog {
+  width: min(100vw, 64rem);
+  /* A long title at 400% zoom can push the player's controls past the screen: the window scrolls to them
+     (WCAG 1.4.4, 1.4.10; review of #2135). */
+  overflow-y: auto;
+}
+.vw-title {
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.pv-button.vw-close {
+  display: inline-flex;
+  gap: 0.375rem;
+  width: auto;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding-inline: 0.875rem 1rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+/* The light hover of the picture viewer's buttons is kept under 7:1 text only on a dark ground: darker here. */
+.pv-button.vw-close:hover {
+  background-color: rgb(255 255 255 / 0.18);
+}
+.vw-video {
+  width: min(100%, calc((100dvh - 6rem) * 16 / 9));
+  margin-inline: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vw-dialog .pv-button {
+    transition: none;
+  }
 }
 @container (min-width: 560px) {
   .sp-row-2 {

@@ -109,7 +109,7 @@ function invoice(id: string, cents: number, createdDaysAgo: number, paidDaysAgo:
     created: nowS - createdDaysAgo * DAY,
     status_transitions: { paid_at: nowS - paidDaysAgo * DAY },
     parent: { type: "subscription_details", subscription_details: { subscription: "sub_x" } },
-    payments: { data: [{ payment: { type: "payment_intent", payment_intent: pi } }] },
+    payments: { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: pi } }], has_more: false },
     ...extra,
   };
 }

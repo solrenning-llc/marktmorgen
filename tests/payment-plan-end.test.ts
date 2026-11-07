@@ -32,11 +32,18 @@ const updates: { id: string; body: URLSearchParams }[] = [];
 /** What Stripe answers to an update, when a case needs a reply other than the subscription. */
 const updateReplies: Record<string, Record<string, unknown>> = {};
 
+/** A reply given as it is, by "METHOD path", when a case needs one that is not an object (a JSON null, a string, a number). */
+const raw = new Map<string, unknown>();
+
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (raw.has(`${method} ${path}`)) {
+    if (method === "POST") updates.push({ id: path.slice(15), body: new URLSearchParams(String(init?.body)) });
+    return answer(raw.get(`${method} ${path}`));
+  }
   const session = /^\/checkout\/sessions\/(cs_test_[A-Za-z0-9]+)$/.exec(path);
   if (session) return sessions[session[1]] ? answer(sessions[session[1]]) : answer({ error: { message: "No such checkout" } }, 404);
   const sub = /^\/subscriptions\/(sub_[A-Za-z0-9]+)$/.exec(path);
@@ -135,6 +142,35 @@ async function main(): Promise<void> {
   const third = await settlePlans();
   const fourth = await settlePlans();
   is("the job keeps such a plan and asks again on its next pass", [third.failed, third.done, fourth.failed, fourth.done], [1, 0, 1, 0]);
+
+  // Claude 6 on #3098: a 200 whose JSON body is null (or not an object) is not the object asked for. It is "unread",
+  // never a TypeError, and never settles, drops or changes the plan.
+  part("A reply that is not an object (null, a string, a number) decides nothing");
+  for (const [i, [name, body]] of ([["null", null], ["a string", "sub_plan000000"], ["a number", 7]] as const).entries()) {
+    const n = String(30 + i);
+    const cs = `cs_test_plan000000${n}y`;
+    const id = `sub_plan000000${n}y`;
+    sessions[cs] = checkout(cs, { kind: "plan", plan_payments: "3", plan_interval: "month" }, { subscription: id });
+    subscriptions[id] = { id, status: "active", billing_cycle_anchor: ANCHOR };
+    const before = updates.length;
+    raw.set(`GET /checkout/sessions/${cs}`, body);
+    is(`a checkout read answered with ${name} is unread, and changes nothing`, [await finishPlan(ACCOUNT, cs), updates.length], ["unread", before]);
+    raw.clear();
+    raw.set(`GET /subscriptions/${id}`, body);
+    is(`a subscription read answered with ${name} is unread, and changes nothing`, [await finishPlan(ACCOUNT, cs), updates.length], ["unread", before]);
+    raw.clear();
+    raw.set(`POST /subscriptions/${id}`, body);
+    is(`an update answered with ${name} is unread`, [await finishPlan(ACCOUNT, cs), updates.length], ["unread", before + 1]);
+    raw.clear();
+  }
+  const nullCs = "cs_test_plan00000040z";
+  sessions[nullCs] = checkout(nullCs, { kind: "plan", plan_payments: "3", plan_interval: "month" }, { subscription: "sub_plan00000040z" });
+  await rememberPlan(ACCOUNT, nullCs);
+  raw.set(`GET /checkout/sessions/${nullCs}`, null);
+  const fifth = await settlePlans();
+  const sixth = await settlePlans();
+  is("the job keeps a plan whose read was answered with null and asks again", [fifth.failed, fifth.done, fifth.dropped, sixth.failed, sixth.dropped], [2, 0, 0, 2, 0]);
+  raw.clear();
 
   done();
 }

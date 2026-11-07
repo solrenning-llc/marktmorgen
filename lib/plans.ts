@@ -54,9 +54,12 @@ export type PlanState = "done" | "open" | "gone" | "unread";
 /**
  * A Stripe reply decides only when it is the object asked for (rule 30): it
  * holds its own id, equal to the one requested. A reply for another object,
- * or with no id, proves nothing about this plan.
+ * or with no id, proves nothing about this plan. A reply that is not an
+ * object at all (a JSON null, a string, a number) is not its own either: it
+ * answers "unread", never a TypeError (Claude 6 on #3098).
  */
-const isOwnReply = (reply: Record<string, unknown>, id: string): boolean => Object.hasOwn(reply, "id") && reply.id === id;
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 
 /**
  * Gives a paid plan, or a membership that ends by itself, its end. "open"

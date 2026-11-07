@@ -101,6 +101,28 @@ for (const [label, reply] of [["undefined", undefined], ["a short pipeline", "sh
   });
 }
 
+// Codex Q and Claude 5 on #2898 (LOW, introduced): a SET NX that landed with its reply lost threw, and the next day's
+// run saw the mark (EXISTS 1) and skipped, so the first nudge was lost. The claim is read back now (lib/claim-mark.ts):
+// holding this run's own value it is ours and the nudge goes, once; unknown even then, it is let go and goes next day.
+const isMarkRead = (cmd: Cmd) => cmd[0] === "GET" && String(cmd[1]).startsWith("nl:nudge:");
+test("a nudge whose SET NX landed with its reply lost goes once, never lost and never twice", async () => {
+  const { email } = await trialStore();
+  emails.length = 0;
+  const lost = await withReply(isClaim, "QUEUED", () => sendTrialNudges(START + 3 * DAY));
+  const next = await sendTrialNudges(START + 4 * DAY);
+  assert.deepEqual({ emails, lost: lost.sent + lost.failed, next: next.sent }, { emails: [email], lost: 1, next: 0 });
+});
+
+test("a nudge whose claim and its read-back are both unknown goes the next day, once", async () => {
+  const { email } = await trialStore();
+  emails.length = 0;
+  const unknown = await withReplies([[isClaim, "QUEUED"], [isMarkRead, {}]], () => sendTrialNudges(START + 3 * DAY));
+  assert.deepEqual([unknown.sent, unknown.failed, emails.length], [0, 1, 0], "nothing sent on it, said as failed");
+  const next = await sendTrialNudges(START + 4 * DAY);
+  const after = await sendTrialNudges(START + 5 * DAY);
+  assert.deepEqual({ emails, next: next.sent, after: after.sent }, { emails: [email], next: 1, after: 0 });
+});
+
 const STATS = "a".repeat(32);
 test("forgetting come-back marks counts what DEL removed (healthy and confirmed-absence controls)", async () => {
   const onceKeys = async () => {

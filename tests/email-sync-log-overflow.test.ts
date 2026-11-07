@@ -156,3 +156,62 @@ test("a finished job whose log reads unknown goes back on the queue, still found
   assert.equal(queued(id), true, "back on the queue");
   assert.deepEqual((await syncJobsOf(STATS, FIRST)).map((job) => job.id), [id], "and still found");
 });
+
+/**
+ * A reply lost after Redis ran the commands (a timeout, a dropped connection) must never leave a job's record, which
+ * holds the buyer's address, outside both the log and the queue, where the copy would say 0 jobs and the erasure 0
+ * while the record lives on for up to a week (Claude 4's focal return on #2860, comment 6709710311). Each step that
+ * moves a job off one of its indexes is tried with its reply lost, one step at a time: Redis runs the batch, then the
+ * caller gets a throw instead of the answer.
+ */
+let losing = -1;
+let seenBatches = 0;
+function loseReplyOf(step: number): void {
+  losing = step;
+  seenBatches = 0;
+  alter = (_b, a) => {
+    seenBatches += 1;
+    if (seenBatches - 1 === losing) throw new Error("synthetic: the reply was lost after the batch ran");
+    return a;
+  };
+}
+function stopLosing(): boolean {
+  alter = (_b, a) => a;
+  const reached = seenBatches > losing;
+  losing = -1;
+  return reached;
+}
+async function stillFoundOrGone(id: string, step: number, where: string): Promise<void> {
+  const alive = record(id) !== null;
+  assert.equal(!alive || logged(id) || queued(id), true, `${where}, reply of batch ${step} lost: a record still alive is in the log or on the queue`);
+  const copied = (await syncJobsOf(STATS, FIRST)).length;
+  assert.equal(copied, alive ? 1 : 0, `${where}, reply of batch ${step} lost: the copy lists a record still alive`);
+  assert.equal(await forgetSyncPerson(STATS, FIRST), copied, `${where}, reply of batch ${step} lost: the erasure counts it`);
+  assert.equal(record(id), null, `${where}, reply of batch ${step} lost: no record with the address survives the erasure`);
+}
+
+test("a lost reply while a push moves a finished job out of the studio's log never leaves its record unfound", async () => {
+  for (let step = 0; step < 20; step += 1) {
+    const id = await seed(0);
+    const finished = { ...JSON.parse(String(record(id))), state: "added", next: 0, attempts: 1, lastAt: Date.now() };
+    redis.run(["SET", jobKey(id), JSON.stringify(finished)]);
+    redis.run(["ZREM", QUEUE_KEY, `${STATS}|${id}`]);
+    for (let i = 0; i < LOG_SIZE - 1; i += 1) await queuePerson(store, person(`later${i}@example.com`, false));
+    assert.equal(logged(id), true, "still the oldest job in the studio's log");
+    loseReplyOf(step);
+    await queuePerson(store, person("pusher@example.com", false)).catch(() => "threw");
+    if (!stopLosing()) break;
+    await stillFoundOrGone(id, step, "the push");
+  }
+});
+
+test("a lost reply while the five-minute run retires a waiting send already out of the log never leaves its record unfound", async () => {
+  for (let step = 0; step < 20; step += 1) {
+    const id = await seed(LOG_SIZE);
+    assert.deepEqual([logged(id), queued(id)], [false, true], "out of the studio's log, still waiting");
+    loseReplyOf(step);
+    await retried().catch(() => ({ tried: -1 }));
+    if (!stopLosing()) break;
+    await stillFoundOrGone(id, step, "the five-minute run");
+  }
+});

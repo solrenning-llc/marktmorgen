@@ -1,0 +1,413 @@
+=== head ===
+J_MODE head HEAD 8619a3ea07ddb4553854d677509e096dc8f6911e
+
+The card: controls
+  ok    a product on sale shows its buy button
+  ok    a store that does not exist says the product is no longer on sale
+  ok    a product the store does not have says it is no longer on sale, in the store's words
+
+The card: a store that could not be read
+  ok    never says the product is no longer on sale
+  ok    says it could not be loaded just now
+
+The card: a product that could not be read
+  ok    never says the product is no longer on sale
+  ok    says it could not be loaded just now
+  ok    and still leads to the store
+
+The card: whether it is coming soon could not be read
+  ok    control: a coming-soon product leads to its waitlist
+  ok    control: a product confirmed not coming soon shows its buy button
+  ok    a failed request: no buy button for something that may not be out yet
+  ok    a failed request: says buying is not available just now
+  ok    a failed request: the product's title is still shown and leads to its page
+
+The card's words, in every language the store can have
+  ok    cardUnread exists in every language
+  ok    cardBuyUnread exists in every language
+
+The sign-up form: a store that could not be read
+  ok    control: a store that does not exist says the list is not taking sign-ups
+  ok    never says the list is not taking sign-ups
+  ok    says it could not be loaded just now
+
+The library
+  ok    control: the store bought from is listed
+  ok    control: its stores are read exactly
+  ok    the stores answered as a string: storesBoughtFrom says the reading is unknown
+  ok    the stores answered as a string: never says nothing is listed
+  ok    the stores answered as a string: says the stores could not be read just now
+  ok    the stores answered with a number among them: storesBoughtFrom says the reading is unknown
+  ok    the stores answered with a number among them: never says nothing is listed
+  ok    the stores answered with a number among them: says the stores could not be read just now
+  ok    no reply at all: storesBoughtFrom says the reading is unknown
+  ok    no reply at all: never says nothing is listed
+  ok    no reply at all: says the stores could not be read just now
+
+The library: a link whose address could not be read
+  ok    control: a link that does not exist has expired
+  ok    no reply at all: never says the link has expired
+  ok    no reply at all: says the link could not be read just now
+  ok    a number for the address: never says the link has expired
+  ok    a number for the address: says the link could not be read just now
+  ok    a list for the address: never says the link has expired
+  ok    a list for the address: says the link could not be read just now
+  ok    a failed request: never says the link has expired
+  ok    a failed request: says the link could not be read just now
+
+The library: asking for a link when no store could be read
+  ok    control: a store that reads: a link is made for its buyer
+  ok    control: an address that bought nothing: the same answer, and no link
+  ok    a store whose record could not be read: never says a link is on its way
+  ok    a store whose record could not be read: and makes no link
+  ok    a store whose record could not be read: never says nothing is listed
+  ok    a store whose record could not be read: says one store could not be read just now
+
+44 checks, all passing.
+J_COUNTS {"run":1587,"fetch":0}
+J_CHILD_EXIT 0
+
+
+=== old-library ===
+J_MODE old-library HEAD 8619a3ea07ddb4553854d677509e096dc8f6911e
+
+The card: controls
+  ok    a product on sale shows its buy button
+  ok    a store that does not exist says the product is no longer on sale
+  ok    a product the store does not have says it is no longer on sale, in the store's words
+
+The card: a store that could not be read
+  ok    never says the product is no longer on sale
+  ok    says it could not be loaded just now
+
+The card: a product that could not be read
+  ok    never says the product is no longer on sale
+  ok    says it could not be loaded just now
+  ok    and still leads to the store
+
+The card: whether it is coming soon could not be read
+  ok    control: a coming-soon product leads to its waitlist
+  ok    control: a product confirmed not coming soon shows its buy button
+  ok    a failed request: no buy button for something that may not be out yet
+  ok    a failed request: says buying is not available just now
+  ok    a failed request: the product's title is still shown and leads to its page
+
+The card's words, in every language the store can have
+  ok    cardUnread exists in every language
+  ok    cardBuyUnread exists in every language
+
+The sign-up form: a store that could not be read
+  ok    control: a store that does not exist says the list is not taking sign-ups
+  ok    never says the list is not taking sign-ups
+  ok    says it could not be loaded just now
+
+The library
+  ok    control: the store bought from is listed
+  ok    control: its stores are read exactly
+  ok    the stores answered as a string: storesBoughtFrom says the reading is unknown
+  ok    the stores answered as a string: never says nothing is listed
+  ok    the stores answered as a string: says the stores could not be read just now
+  ok    the stores answered with a number among them: storesBoughtFrom says the reading is unknown
+  ok    the stores answered with a number among them: never says nothing is listed
+  ok    the stores answered with a number among them: says the stores could not be read just now
+  ok    no reply at all: storesBoughtFrom says the reading is unknown
+  ok    no reply at all: never says nothing is listed
+  ok    no reply at all: says the stores could not be read just now
+
+The library: a link whose address could not be read
+  ok    control: a link that does not exist has expired
+  FAIL  no reply at all: never says the link has expired
+        expected false
+        got      true
+  FAIL  no reply at all: says the link could not be read just now
+        expected true
+        got      false
+  FAIL  a number for the address: never says the link has expired
+        expected false
+        got      true
+  FAIL  a number for the address: says the link could not be read just now
+        expected true
+        got      false
+  FAIL  a list for the address: never says the link has expired
+        expected false
+        got      true
+  FAIL  a list for the address: says the link could not be read just now
+        expected true
+        got      false
+  ok    a failed request: never says the link has expired
+  ok    a failed request: says the link could not be read just now
+
+The library: asking for a link when no store could be read
+  ok    control: a store that reads: a link is made for its buyer
+  ok    control: an address that bought nothing: the same answer, and no link
+  FAIL  a store whose record could not be read: never says a link is on its way
+        expected "error"
+        got      "sent"
+  ok    a store whose record could not be read: and makes no link
+  ok    a store whose record could not be read: never says nothing is listed
+  ok    a store whose record could not be read: says one store could not be read just now
+
+44 checks, 7 failing.
+J_COUNTS {"run":1587,"fetch":0}
+J_CHILD_EXIT 1
+
+
+=== derived ===
+J_MODE derived HEAD 8619a3ea07ddb4553854d677509e096dc8f6911e
+
+The card: controls
+  ok    a product on sale shows its buy button
+  ok    a store that does not exist says the product is no longer on sale
+  ok    a product the store does not have says it is no longer on sale, in the store's words
+
+The card: a store that could not be read
+  ok    never says the product is no longer on sale
+  ok    says it could not be loaded just now
+  FAIL  J store missing: no false off-sale
+        expected false
+        got      true
+  FAIL  J store missing: honest unavailable
+        expected true
+        got      false
+  FAIL  J store number: no false off-sale
+        expected false
+        got      true
+  FAIL  J store number: honest unavailable
+        expected true
+        got      false
+
+The card: a product that could not be read
+  ok    never says the product is no longer on sale
+  ok    says it could not be loaded just now
+  ok    and still leads to the store
+
+The card: whether it is coming soon could not be read
+  ok    control: a coming-soon product leads to its waitlist
+  ok    control: a product confirmed not coming soon shows its buy button
+  ok    a failed request: no buy button for something that may not be out yet
+  ok    a failed request: says buying is not available just now
+  ok    a failed request: the product's title is still shown and leads to its page
+  FAIL  J missing member: no buy button for something that may not be out yet
+        expected false
+        got      true
+  FAIL  J missing member: says buying is not available just now
+        expected true
+        got      false
+  ok    J missing member: the product's title is still shown and leads to its page
+  FAIL  J no envelope: no buy button for something that may not be out yet
+        expected false
+        got      true
+  FAIL  J no envelope: says buying is not available just now
+        expected true
+        got      false
+  ok    J no envelope: the product's title is still shown and leads to its page
+  FAIL  J word member: no buy button for something that may not be out yet
+        expected false
+        got      true
+  FAIL  J word member: says buying is not available just now
+        expected true
+        got      false
+  ok    J word member: the product's title is still shown and leads to its page
+  FAIL  J invalid member: no buy button for something that may not be out yet
+        expected false
+        got      true
+  FAIL  J invalid member: says buying is not available just now
+        expected true
+        got      false
+  ok    J invalid member: the product's title is still shown and leads to its page
+
+The card's words, in every language the store can have
+  ok    cardUnread exists in every language
+  ok    cardBuyUnread exists in every language
+
+The sign-up form: a store that could not be read
+  ok    control: a store that does not exist says the list is not taking sign-ups
+  ok    never says the list is not taking sign-ups
+  ok    says it could not be loaded just now
+
+The library
+  ok    control: the store bought from is listed
+  ok    control: its stores are read exactly
+  ok    the stores answered as a string: storesBoughtFrom says the reading is unknown
+  ok    the stores answered as a string: never says nothing is listed
+  ok    the stores answered as a string: says the stores could not be read just now
+  ok    the stores answered with a number among them: storesBoughtFrom says the reading is unknown
+  ok    the stores answered with a number among them: never says nothing is listed
+  ok    the stores answered with a number among them: says the stores could not be read just now
+  ok    no reply at all: storesBoughtFrom says the reading is unknown
+  ok    no reply at all: never says nothing is listed
+  ok    no reply at all: says the stores could not be read just now
+
+The library: a link whose address could not be read
+  ok    control: a link that does not exist has expired
+  ok    no reply at all: never says the link has expired
+  ok    no reply at all: says the link could not be read just now
+  ok    a number for the address: never says the link has expired
+  ok    a number for the address: says the link could not be read just now
+  ok    a list for the address: never says the link has expired
+  ok    a list for the address: says the link could not be read just now
+  ok    a failed request: never says the link has expired
+  ok    a failed request: says the link could not be read just now
+
+The library: asking for a link when no store could be read
+  ok    control: a store that reads: a link is made for its buyer
+  ok    control: an address that bought nothing: the same answer, and no link
+  ok    a store whose record could not be read: never says a link is on its way
+  ok    a store whose record could not be read: and makes no link
+  FAIL  J ask missing: not falsely sent
+        expected "error"
+        got      "sent"
+  ok    J ask missing: no token
+  FAIL  J ask number: not falsely sent
+        expected "error"
+        got      "sent"
+  ok    J ask number: no token
+  ok    a store whose record could not be read: never says nothing is listed
+  ok    a store whose record could not be read: says one store could not be read just now
+  FAIL  J library malformed store: not empty
+        expected false
+        got      true
+  FAIL  J library malformed store: unavailable
+        expected true
+        got      false
+
+66 checks, 16 failing.
+J_COUNTS {"run":1611,"fetch":0}
+J_CHILD_EXIT 1
+
+
+=== buyer-library.test.ts ===
+J_MODE head HEAD 8619a3ea07ddb4553854d677509e096dc8f6911e
+
+What is kept
+  ok    the store's id, under the address whatever its capitals
+  ok    and the address itself is nowhere in the key
+  ok    a purchase handed over another way puts its store in too
+  ok    a purchase brought over from another platform does not
+  ok    kept in its quarter's set, which ends three years and at most a quarter on
+
+Signing in by email
+  ok    an address that bought nothing: the same answer, and no email
+  ok    not an address
+  ok    a buyer: a link to their library
+  ok    the link opens it for that address, and a made-up one for nobody
+  ok    a few times an hour per address, then no more
+
+10 checks, all passing.
+J_COUNTS {"run":148,"fetch":5}
+J_CHILD_EXIT 0
+
+
+=== embed.test.ts ===
+J_MODE head HEAD 8619a3ea07ddb4553854d677509e096dc8f6911e
+
+The code
+  ok    the card is a frame of the card page, tagged with the place
+  ok    and has a size, a name and no border
+  ok    taller for a product with a picture, and never a height that makes no sense
+  ok    the button is a link to the product's page, in the store's color
+  ok    a title cannot leave the frame's attribute
+  ok    nor the button's words its link
+  ok    the button says what was typed, on one line, or Buy and the title
+  ok    the card page's address
+
+The place name
+  ok    cleaned as the sales report keeps it
+  ok    read back from the card's own address
+  ok    tags join an address that already has a question mark
+  ok    and a sale made from the card is reported under that place
+
+Who may frame what
+  ok    the card page is drawn per visit, with its nonce
+  ok    nothing else counts as the card page
+  ok    its policy lets any site frame it
+  ok    and gives it no ad pixels and no players
+  ok    every other page may still be framed only by this site
+  ok    X-Frame-Options is sent everywhere but the card page
+  ok    and the card page's own headers name neither
+  ok    the proxy gives it the framing policy
+
+The card page
+  ok    counts no visit, sets no cookie, reads no session
+  ok    only an open by the checkout script is counted, and elsewhere
+  ok    every link opens a new tab in a frame, and stays in the tab only as a page
+  ok    and the ones that stay in the frame stay on this card's own address
+  ok    which is the one way out of each
+  ok    and so does its checkout
+  ok    which is told only which product, never a price, and the listed site it came from
+  ok    and is kept out of search
+
+28 checks, all passing.
+J_COUNTS {"run":0,"fetch":0}
+J_CHILD_EXIT 0
+
+
+=== platform-us-english.test.ts ===
+J_MODE head HEAD 8619a3ea07ddb4553854d677509e096dc8f6911e
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+J_COUNTS {"run":0,"fetch":0}
+J_CHILD_EXIT 0
+
+
+=== types ===
+
+
+=== lint ===
+
+
+=== scanner ===
+Public data check: 4256 tracked files; 0 file(s) require correction.
+
+
+=== diff ===
+
+
+=== explicit statuses ===
+{"head": 0, "old-library": 1, "derived": 1, "buyer-library.test.ts": 0, "embed.test.ts": 0, "platform-us-english.test.ts": 0, "types": 0, "lint": 0, "scanner": 0, "diff": 0}

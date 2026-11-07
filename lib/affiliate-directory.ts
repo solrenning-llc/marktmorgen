@@ -46,6 +46,7 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
+import { sellableOptions } from "@/lib/product-option";
 import { DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
@@ -143,7 +144,9 @@ function earns(store: Store, listing: Listing): DirectoryProduct | null {
   if (listing.recurring && months < RECURRING_ALWAYS && trialDays >= months * 28) return null;
   const rate = commissionRate(store.affiliates, listing.id);
   if (rate <= 0) return null;
-  const price = listing.options.length ? Math.min(...listing.options.map((option) => option.priceCents)) : listing.priceCents;
+  // Only the prices a buyer can pick today (lib/product-option.ts, sellableOptions): never one taken off sale (642 [WG2]).
+  const offered = sellableOptions(listing);
+  const price = listing.options.length ? (offered.length ? Math.min(...offered.map((option) => option.priceCents)) : 0) : listing.priceCents;
   if (!(price > 0)) return null;
   return {
     id: listing.id,

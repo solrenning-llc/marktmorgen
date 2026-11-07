@@ -74,7 +74,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:meet:refresh:", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
-  "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
+  "nl:monthly:sent:", "nl:mv:due", "nl:mv:open:", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
@@ -308,7 +308,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:metaads:conn:": E, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
   "nl:mnum:": E,
   "nl:monthly:lock": C, "nl:monthly:sent:": Cr(62),
-  "nl:mv:": E, "nl:mv:due": I, "nl:mv:link:": T("nl:mv:"),
+  "nl:mv:": E, "nl:mv:due": I, "nl:mv:link:": T("nl:mv:"), "nl:mv:open:": X(2),
   // ---------------------------------------------------------------- n-p
   "nl:next:": E, "nl:next:lock:": E,
   "nl:nlink:": E, "nl:nlink:opens:": E,

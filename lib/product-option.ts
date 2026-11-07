@@ -139,6 +139,18 @@ export type ProductOption = {
    * here measures.
    */
   best: boolean;
+  /**
+   * Taken off sale by the creator (642 [WG2]): never shown or sold again
+   * (sellableOptions leaves it out, so every page and every checkout path,
+   * an old link included, refuses it), while whoever bought or subscribes on
+   * it keeps what they have: delivery reads options by id, never through
+   * sellableOptions, and renewals bill the price Stripe already holds. A
+   * member invited to move here on it from another platform keeps it too:
+   * their invitation, not yet kept, opens it (withInvitedOption,
+   * lib/move-members.ts), and nothing else does.
+   * Absent on every option written before this existed, which is on sale.
+   */
+  offSale?: true;
 };
 
 /** Lines of what an option includes, trimmed, bounded and without blanks. */
@@ -182,6 +194,7 @@ export function parseOptions(raw: unknown): ProductOption[] {
       details: parseDetails(value.details),
       // Only the first one marked counts: a page with two picks has none.
       best: value.best === true && !picked,
+      ...(value.offSale === true ? { offSale: true as const } : {}),
     });
     if (value.best === true) picked = true;
     if (options.length >= MAX_OPTIONS) break;
@@ -212,7 +225,8 @@ export function sellableOptions(product: Listing): ProductOption[] {
   // A course or a private podcast is its own delivery: every option opens it,
   // and a file or link on one is something extra that option includes.
   const opens = Boolean(product.course || product.podcast || product.shipping);
-  return product.options.filter((option) => optionDelivers(option, opens));
+  // One the creator took off sale is never offered, whatever it hands over (642 [WG2]).
+  return product.options.filter((option) => !option.offSale && optionDelivers(option, opens));
 }
 
 /**
@@ -230,6 +244,9 @@ export function sellableOptions(product: Listing): ProductOption[] {
  * product: at least one has to be ready, because that is what the buyer picks.
  */
 export function handsOver(product: Listing): boolean {
+  // Every price taken off sale (642 [WG2]): nothing is for sale, whatever the product is. Without this a course or a
+  // podcast, which answer by their lessons or episodes below, would open a checkout at the product's own price.
+  if (product.options.length > 0 && product.options.every((option) => option.offSale)) return false;
   // A bundle hands over its products: it is ready once it holds two. Whether
   // each can still be handed over is read when the checkout opens.
   if (product.bundle) return product.options.length === 0 && product.recurring === null && product.bundle.length >= MIN_BUNDLE_ITEMS;
@@ -255,6 +272,25 @@ export function handsOver(product: Listing): boolean {
  */
 export function namedPriceGone(product: { options: { id: string }[] }, optionId: string): boolean {
   return optionId ? !product.options.some((option) => option.id === optionId) : product.options.length > 0;
+}
+
+/**
+ * The product as one invited member sees it (642 [WG2], C4-20261105-1945-C2-2): the option their invitation
+ * recorded back on sale, and only it, so the price they already paid elsewhere is kept here. Every other option,
+ * and the product for everyone else, is untouched; the same object comes back when there is nothing to change.
+ * Used only on the moving-in path, after the invitation was read by its token and found not yet kept.
+ */
+export function withInvitedOption<T extends { options: ProductOption[] }>(product: T, optionId: string): T {
+  if (!optionId) return product;
+  const at = product.options.findIndex((option) => option.id === optionId);
+  if (at < 0 || product.options[at].offSale !== true) return product;
+  const options = product.options.map((option, index) => {
+    if (index !== at) return option;
+    const kept = { ...option };
+    delete kept.offSale;
+    return kept;
+  });
+  return { ...product, options };
 }
 
 /**

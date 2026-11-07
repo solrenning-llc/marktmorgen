@@ -1412,13 +1412,17 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
   const ours = paid && paid.store === store.statsId ? paid : null;
   // Handed over only when the buyer's grant proves it (lib/paypal-handed.ts): this order's own, or, when the address
   // already held the product (a repeat purchase, a gift: the record keeps the first grant), this order standing behind
-  // it (the Claude 4 team's re-review of #2911). The pending mark is no proof:
+  // it (the Claude 4 team's re-review of #2911), which proves the payment and the access but not this order's receipt. The pending mark is no proof:
   // settle() in lib/paypal-sales.ts clears it before anything is handed over (Claude 5's MEDIUM on #2911), so a paid
   // order without its grant is still being handed over (the sweep running, or a hand-over that failed), and a grant
   // that cannot be read is unknown: never a link to the purchase or a purchase event for the creator's pixels.
   const handed = ours ? await paypalHandedOver(ours).catch(() => "unknown" as const) : false;
   if (handed === "unknown") unread = true;
-  const delivered = ours !== null && handed === true;
+  // "owned": a repeat purchase (or one after a gift) whose buyer already holds the product through another grant. The
+  // purchase, its link and the event are shown (paid, and the access is real), but the receipt is promised only when
+  // this order's own hand-over is proven (Claude 5's LOW on #2911).
+  const delivered = ours !== null && (handed === true || handed === "owned");
+  const ownReceipt = ours !== null && handed === true;
   const handing = ours !== null && handed === false;
   // A product that cannot be read (or is gone) never sends a paid buyer to the error page or to "not found"
   // (Claude 5's LOW 2 on #2911): the page then says it was paid and opens the list of purchases.
@@ -1463,8 +1467,8 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
                   {t.openPurchases}
                 </Link>
               )}
-              <p className="st-muted mt-5 text-sm">{t.ppReceipt(ours.email)}</p>
-              <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
+              {ownReceipt ? <p className="st-muted mt-5 text-sm">{t.ppReceipt(ours.email)}</p> : null}
+              <p className={`st-muted ${ownReceipt ? "mt-3" : "mt-5"} text-sm`}>{t.ppPaidTo(store.name)}</p>
               <StoreTracking
                 store={store}
                 event={{ type: "purchase", id: order, value: toMajor(ours.cents, ours.currency), currency: ours.currency, productId: product.id, title: product.title }}
@@ -1483,8 +1487,8 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
                   {t.openPurchases}
                 </Link>
               )}
-              <p className="st-muted mt-5 text-sm">{t.ppReceipt(ours.email)}</p>
-              <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
+              {ownReceipt ? <p className="st-muted mt-5 text-sm">{t.ppReceipt(ours.email)}</p> : null}
+              <p className={`st-muted ${ownReceipt ? "mt-3" : "mt-5"} text-sm`}>{t.ppPaidTo(store.name)}</p>
             </>
           ) : unread ? (
             <>

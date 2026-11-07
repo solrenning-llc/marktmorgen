@@ -12,7 +12,9 @@
  * only while it is one of the paid orders standing behind that product (the set ownKey names, written by settle() and
  * taken off when PayPal refunds it in full), read exactly.
  *
- *   true       the grant names this order; or another grant holds the product and this order stands behind it
+ *   true       the grant names this order: this order's own hand-over ran
+ *   "owned"    another grant holds the product and this order stands behind it: paid, and the buyer holds it, but this
+ *              order's own hand-over (its receipt among it) is not proven
  *   false      no grant; or another grant holds it and this order does not stand behind it
  *   "unknown"  a read failed or did not answer in its exact shape: never taken as handed over
  *
@@ -24,7 +26,7 @@ import { type Paid, ownKey } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 
-export async function paypalHandedOver(paid: Pick<Paid, "store" | "email" | "product" | "order">): Promise<boolean | "unknown"> {
+export async function paypalHandedOver(paid: Pick<Paid, "store" | "email" | "product" | "order">): Promise<boolean | "owned" | "unknown"> {
   if (!isRedisConfigured() || !paid.store || !paid.email || !paid.product || !paid.order) return "unknown";
   const read = repliesFor(await redisPipeline([["HGET", importedKey(paid.store, paid.email), paid.product]]), 1);
   if (!read) return "unknown";
@@ -39,9 +41,11 @@ export async function paypalHandedOver(paid: Pick<Paid, "store" | "email" | "pro
   }
   if (!value || typeof value !== "object" || Array.isArray(value) || typeof (value as { job?: unknown }).job !== "string") return "unknown";
   if ((value as { job: string }).job === `paypal:${paid.order}`) return true;
-  // Another grant holds the product: this order is handed over while it stands behind it. SISMEMBER answers 0 or 1;
-  // anything else is unknown, never "handed over" and never "not yet".
+  // Another grant holds the product: while this order stands behind it, the buyer holds what it bought ("owned"). That
+  // proves the payment and the access, not that this order's own hand-over ran: settle() adds the order to the set
+  // before anything is handed over, so its receipt is never promised on it (Claude 5's LOW on #2911). SISMEMBER answers
+  // 0 or 1; anything else is unknown, never "owned" and never "not yet".
   const stands = repliesFor(await redisPipeline([["SISMEMBER", ownKey(paid.store, paid.email, paid.product), paid.order]]), 1);
   if (!stands || (stands[0] !== 0 && stands[0] !== 1)) return "unknown";
-  return stands[0] === 1;
+  return stands[0] === 1 ? "owned" : false;
 }

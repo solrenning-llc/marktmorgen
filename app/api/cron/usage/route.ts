@@ -268,6 +268,9 @@ export async function GET(request: NextRequest) {
   const owners = await ownersOf(fresh.map((s) => s.folder));
   let told = 0;
   const unknown: string[] = [];
+  // Only a notice that went out is recorded as given: a refused send, a store left because no sender is configured,
+  // or an ownerless store support could not be told about stays off the told list and is tried again next run.
+  const given: string[] = [];
 
   for (let i = 0; i < fresh.length; i += 1) {
     const store = fresh[i];
@@ -312,7 +315,10 @@ export async function GET(request: NextRequest) {
       console.error("sending the allowance notice failed", error);
       return false;
     });
-    if (sent !== false) told += 1;
+    if (sent === true) {
+      told += 1;
+      given.push(store.folder);
+    }
   }
 
   /*
@@ -322,7 +328,7 @@ export async function GET(request: NextRequest) {
     It is said out loud rather than passed over in silence.
   */
   if (unknown.length > 0 && isSenderConfigured()) {
-    await sendEmail({ meter: { by: "company" },
+    const supportTold = await sendEmail({ meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
       subject: `${unknown.length} store(s) over the allowance could not be written to`,
@@ -333,11 +339,15 @@ export async function GET(request: NextRequest) {
         "",
         ...unknown.map((f) => `  ${f}`),
       ].join("\n"),
-    }).catch((error) => console.error("sending the unknown-owner notice failed", error));
+    }).catch((error) => {
+      console.error("sending the unknown-owner notice failed", error);
+      return false;
+    });
+    if (supportTold === true) given.push(...unknown);
   }
 
   await redisPipeline([
-    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...over.map((s) => s.folder)])]), "EX", 40 * 86_400],
+    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],
   ]);
 
   return Response.json(

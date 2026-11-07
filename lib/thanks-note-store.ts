@@ -35,11 +35,12 @@ export async function readThanksNote(statsId: string | null, productId: string):
 const MAX_STORED_NOTE = 20_000;
 
 /**
- * A kept note from its GET or MGET slot: null is "none kept"; a text that is a
- * JSON object, as writeThanksNote stores (JSON.stringify of a ThanksNote), is
- * read by parseNote as before (null when it says nothing); anything else (not
- * a text, longer than any stored note, not JSON, JSON that is not an object)
- * throws UnknownReplyError.
+ * A kept note from its GET or MGET slot: null is "none kept"; a text that is
+ * what writeThanksNote stores (JSON.stringify of a ThanksNote that says
+ * something) is read by parseNote as before. Anything else throws
+ * UnknownReplyError: not a text, longer than any stored note, not JSON, not a
+ * ThanksNote's fields with their types, a video or a button kept that parseNote
+ * cannot read, or a note that says nothing (Claude 4 team's L1 on c2376695).
  */
 function noteOf(raw: unknown): ThanksNote | null {
   if (raw === null) return null;
@@ -50,8 +51,21 @@ function noteOf(raw: unknown): ThanksNote | null {
   } catch {
     throw new UnknownReplyError("a kept note");
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a kept note");
-  return parseNote(value);
+  if (!isKeptNote(value)) throw new UnknownReplyError("a kept note");
+  const note = parseNote(value);
+  if (!note || (value.video !== null && note.video === null) || (value.button !== null && note.button === null)) {
+    throw new UnknownReplyError("a kept note");
+  }
+  return note;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+
+/** A ThanksNote's fields with their types, as JSON.stringify keeps them. */
+function isKeptNote(value: unknown): value is { video: unknown; button: unknown } {
+  if (!isRecord(value) || typeof value.heading !== "string" || typeof value.body !== "string") return false;
+  if (value.video !== null && !isRecord(value.video)) return false;
+  return value.button === null || (isRecord(value.button) && typeof value.button.label === "string" && typeof value.button.url === "string");
 }
 
 /**

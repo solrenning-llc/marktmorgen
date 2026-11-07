@@ -14,6 +14,7 @@ import { claimHandle, ensureStatsId, addProduct, storeForEmail } from "@/lib/sto
 import { writeAbout, readAbout, readAbouts } from "@/lib/product-about";
 import { writeThanksNote, readThanksNote, readThanksNotes } from "@/lib/thanks-note-store";
 import { storeExport } from "@/lib/store-export";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
 redis.clear();
@@ -88,3 +89,47 @@ for(const family of ["about","note"] as const){
  });
  test(`${family}: direct transport error already propagates`,async()=>{await altered(family,"transport",async()=>{await assert.rejects(batch,/SYNTHETIC_TEXT_TRANSPORT/);});});
 }
+
+/**
+ * A kept note that is not a ThanksNote (Claude 4 team's L1 on c2376695): only
+ * writeThanksNote stores a note, always JSON.stringify of a ThanksNote that
+ * says something, so any other kept value is unknown, never "no note". The
+ * key holds the wrong value only inside the test and is put back after it.
+ */
+const wrongNotes: [string, string][] = [
+ ["a body that is a number", JSON.stringify({ body: 5 })],
+ ["an object missing fields", JSON.stringify({ heading: "Only a heading" })],
+ ["a field of the wrong type", JSON.stringify({ ...note, heading: 7 })],
+ ["a button without its link", JSON.stringify({ ...note, button: { label: "Open" } })],
+ ["a video that cannot be read", JSON.stringify({ ...note, video: { provider: "elsewhere", id: "x", hash: "" } })],
+ ["a note that says nothing", JSON.stringify({ heading: "", body: "", video: null, button: null })],
+ ["an array", JSON.stringify([note])],
+ ["a number", "5"],
+ ["a JSON string", JSON.stringify(note.body)],
+ ["text that is not JSON", "not a kept note"],
+];
+async function keptAs(raw: string, task: () => Promise<void>) {
+ const {shop,ids}=await fixture, key=`nl:product:note:${shop.statsId}:${ids[0]}`;
+ const [before]=await redis.pipeline([["GET",key]]);
+ await redis.pipeline([["SET",key,raw]]);
+ try{await task();}finally{await redis.pipeline([["SET",key,String(before)]]);}
+}
+for(const [name,raw] of wrongNotes){
+ test(`note: kept as ${name}, a note is unknown, never "no note"`,async context=>{
+  const {shop,ids}=await fixture;
+  await keptAs(raw,async()=>{
+   await assert.rejects(async()=>{context.diagnostic(JSON.stringify({name,one:await readThanksNote(shop.statsId,ids[0])}));},UnknownReplyError);
+   await assert.rejects(async()=>{context.diagnostic(JSON.stringify({name,batch:await readThanksNotes(shop.statsId,ids)}));},UnknownReplyError);
+   const out=await exportedProducts();
+   assert.ok(typeof out.thanksNote==="string"&&out.thanksNote.length>0,"missing explicit unavailable note");
+   assert.ok(out.products.every(p=>!Object.hasOwn(p,"thanks")),"unknown note exported as known");
+  });
+ });
+}
+test("note: after a wrong kept value, the healthy note and confirmed absence read as before",async()=>{
+ const {shop,ids}=await fixture;
+ assert.deepEqual(await readThanksNote(shop.statsId,ids[0]),note);
+ assert.deepEqual(await readThanksNotes(shop.statsId,ids),[note,note]);
+ assert.equal(await readThanksNote(shop.statsId,"no-such-product"),null);
+ assert.deepEqual(await readThanksNotes(shop.statsId,["no-such-product",ids[1]]),[null,note]);
+});

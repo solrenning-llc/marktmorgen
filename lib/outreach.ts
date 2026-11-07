@@ -34,6 +34,7 @@ import {
   MAX_PITCH_SUBJECT,
   MAX_PITCHES,
   type OutreachGoal,
+  PITCH_STATUSES,
   READER_NAME,
   STOP_LINK,
   type Pitch,
@@ -230,9 +231,21 @@ export async function listPitches(store: Store): Promise<Pitch[]> {
     // Every writer keeps when a pitch was made, and when a sent or stopped one went out (Codex Q on #2870): one kept
     // without them would count as written long ago and let the same business be written to again before its wait.
     if (!pitch || !(pitch.createdAt > 0) || (pitch.status !== "draft" && !(pitch.sentAt > 0))) throw new UnknownReplyError("a store's pitches");
+    // A status this code never writes ("Sent", or none) is unknown, never a draft with no wait (Claude 6 on #2870).
+    if (!keptStatusKnown(all[i])) throw new UnknownReplyError("a store's pitches");
     pitches.push(pitch);
   }
   return pitches.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Whether a kept pitch's own status is one this code writes (parsePitch reads any other as a draft). */
+function keptStatusKnown(raw: string): boolean {
+  try {
+    const status = (JSON.parse(raw) as { status?: unknown }).status;
+    return PITCH_STATUSES.includes(status as PitchStatus);
+  } catch {
+    return false;
+  }
 }
 
 export type StartResult =
@@ -415,16 +428,33 @@ export async function startPitch(
 /** The creator's own changes to a pitch they have not sent yet. The footer is not theirs to change. */
 export async function editPitch(store: Store, id: string, subject: string, body: string): Promise<Pitch | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", key(store.statsId, "pitches"), id]]);
-  const pitch = parsePitch(raw);
+  const pitch = parsePitch(await keptPitch(store.statsId, id));
   if (!pitch || pitch.status !== "draft") return null;
   const next: Pitch = {
     ...pitch,
     subject: subject.replace(/\s+/g, " ").trim().slice(0, MAX_PITCH_SUBJECT) || pitch.subject,
     body: body.replace(/\r\n?/g, "\n").trim().slice(0, MAX_PITCH_BODY) || pitch.body,
   };
-  await redisPipeline([["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)]]);
+  wrote(await redisPipeline([["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)]]), 1, "a pitch's edit");
   return next;
+}
+
+/**
+ * One kept pitch, read exactly (Claude 6 on #2870, rule 24): nil (not there) or its text; any other answer throws,
+ * never "no such pitch".
+ */
+async function keptPitch(statsId: string, id: string): Promise<string | null> {
+  const raw = repliesFor(await redisPipeline([["HGET", key(statsId, "pitches"), id]]), 1)?.[0];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a kept pitch");
+  return raw;
+}
+
+/** A write's receipt: one count for each command, or it throws, so a change is never said done on an unknown answer. */
+function wrote(replies: unknown, length: number, what: string): number[] {
+  const receipt = repliesFor(replies, length);
+  const counts = receipt?.map((reply) => countOf(reply));
+  if (!counts || counts.some((count) => count === null)) throw new UnknownReplyError(what);
+  return counts as number[];
 }
 
 /**
@@ -434,26 +464,31 @@ export async function editPitch(store: Store, id: string, subject: string, body:
  */
 export async function setPitchStatus(store: Store, id: string, status: PitchStatus, now = Math.floor(Date.now() / 1000)): Promise<Pitch | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", key(store.statsId, "pitches"), id]]);
-  const pitch = parsePitch(raw);
+  const pitch = parsePitch(await keptPitch(store.statsId, id));
   if (!pitch) return null;
   // Once they asked to stop, it stays stopped.
   if (pitch.status === "stopped") return pitch;
   const next: Pitch = { ...pitch, status, sentAt: status === "draft" ? 0 : pitch.sentAt || now };
-  await redisPipeline([
+  // Said done only on the exact receipt (Claude 6 on #2870): "stopped" is a business's opt-out and "sent" starts the
+  // wait before the same business is written to again, so neither is answered done on a write not known to land.
+  const commands: (string | number)[][] = [
     ["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)],
     ...(status === "stopped" ? [["SADD", key(store.statsId, "stop"), pitch.domain]] : []),
-  ]);
+  ];
+  wrote(await redisPipeline(commands), commands.length, "a pitch's status");
   return next;
 }
 
 /** Takes a draft away. Only a draft: what was sent stays, so the same business is not written to twice. */
 export async function dropPitch(store: Store, id: string): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["HGET", key(store.statsId, "pitches"), id]]);
-  const pitch = parsePitch(raw);
+  const pitch = parsePitch(await keptPitch(store.statsId, id));
   if (!pitch || pitch.status !== "draft") return false;
-  await redisPipeline([["HDEL", key(store.statsId, "pitches"), id], ...(pitch.stop ? [["DEL", linkKey(pitch.stop)]] : [])]);
+  const commands: (string | number)[][] = [["HDEL", key(store.statsId, "pitches"), id], ...(pitch.stop ? [["DEL", linkKey(pitch.stop)]] : [])];
+  // The room is given back only for a drop known to have removed it (Claude 6 on #2870); another drop that got
+  // there first gave it back already.
+  const [removed] = wrote(await redisPipeline(commands), commands.length, "a pitch's drop");
+  if (removed !== 1) return false;
   await giveData(store, [{ slot: PITCHES_SLOT, bytes: PITCH_BYTES }]);
   return true;
 }

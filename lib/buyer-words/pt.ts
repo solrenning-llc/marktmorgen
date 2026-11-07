@@ -39,7 +39,7 @@ export const pt: BuyerWords = {
 
   fairHead: (country, percent) => `Preço justo para o seu país (${country}): ${percent}${S}% de desconto`,
   fairNote: (store, plan) =>
-    `${store} baixa os preços onde o dinheiro vale menos. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço reduzido é para pagamento integral" : ""}.`,
+    `${store} baixa os preços onde o dinheiro vale menos. Este preço foi definido automaticamente para si, a partir do país da sua ligação à internet. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço reduzido é para pagamento integral" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% de desconto · ${ends}`,
   saleNote: (until, plan) =>
     `Até ${until}. O desconto é aplicado na página de pagamento, sem código${plan ? "; o preço promocional é para pagamento integral" : ""}.`,
@@ -135,7 +135,8 @@ export const pt: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog de ${store}`,
-  blogEmpty: "Ainda não há nada aqui.",
+  blogPastEnd: "Não há publicações nesta página",
+  blogPastEndBody: "Esta página fica depois da última publicação.",
   blogMinutes: (n) => `${n} min de leitura`,
   blogNewer: "Publicações mais recentes",
   blogOlder: "Publicações anteriores",
@@ -148,6 +149,7 @@ export const pt: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `poupa ${percent}%`,
   chooseOptionFor: (title) => `Escolha uma opção para ${title}`,
+  chooseOne: "Escolha uma",
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Como pagar ${title}`,
@@ -299,6 +301,7 @@ export const pt: BuyerWords = {
   newer: "Mais recentes",
   older: "Mais antigas",
   askUnknown: (store) => `Esta página não o indica. Pergunte a ${store} antes de comprar.`,
+  askTermsCut: () => "Não tenho aqui as condições completas. Pergunte ao criador antes de comprar.",
 
   noLongerOnSale: "Este produto já não está à venda.",
   seeStore: (store) => `Ver ${store}`,

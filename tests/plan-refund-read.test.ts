@@ -35,6 +35,10 @@ const world = {
   down: false,
   /** The customer's charge list says there is more. */
   moreCharges: false,
+  /** An exact stand-in answer for the paid-invoice list; undefined keeps the normal list. */
+  invoiceListReply: undefined as unknown | undefined,
+  /** One exact list/search response used to prove that partial history rows stay unknown. */
+  historyReply: null as { path: "/charges" | "/charges/search" | "/customers/search"; customer?: string; data: unknown[] } | null,
   /** A customer's Stripe balance (negative: a credit), 0 when not set. */
   balance: new Map<string, number>(),
   calls: 0,
@@ -55,6 +59,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const q = url.searchParams;
   const page = (data: unknown[], more = false) => json({ object: "list", data, has_more: more });
+  const searchPage = (data: unknown[]) => json({ object: "search_result", data, has_more: false, next_page: null });
   const sub = path.match(/^\/subscriptions\/(sub_\w+)$/);
   if (sub) {
     const row = world.subs.get(sub[1]);
@@ -63,9 +68,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ ...row, customer: q.getAll("expand[]").includes("customer") ? { id: customer, email: world.customers.get(customer) ?? "", balance: world.balance.get(customer) ?? 0 } : customer });
   }
   if (path === "/invoices") {
+    if (world.invoiceListReply !== undefined) return json(world.invoiceListReply);
     return page(world.invoices.filter((i) => i.subscription === q.get("subscription") && i.status === q.get("status")).sort((a, b) => Number(b.created) - Number(a.created)));
   }
   if (path === "/charges") {
+    if (world.historyReply?.path === path && (!world.historyReply.customer || world.historyReply.customer === q.get("customer"))) {
+      return page(world.historyReply.data);
+    }
     const lt = Number(q.get("created[lt]") ?? Infinity);
     const rows = world.charges.filter((c) => c.customer === q.get("customer") && c.created < lt).sort((a, b) => b.created - a.created).map((c) => ({ ...c, balance_transaction: "txn_unexpanded" })).slice(0, Number(q.get("limit") ?? 10));
     return page(rows, world.moreCharges);
@@ -83,14 +92,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return row ? json(row) : json({ error: { message: "No such charge" } }, 404);
   }
   if (path === "/charges/search") {
+    if (world.historyReply?.path === path) return searchPage(world.historyReply.data);
     const query = q.get("query") ?? "";
     const fp = query.match(/fingerprint:"(\w+)"/)?.[1];
     const lt = Number(query.match(/created<(\d+)/)?.[1] ?? Infinity);
-    return page(world.charges.filter((c) => (c.payment_method_details as { card: { fingerprint: string } }).card.fingerprint === fp && c.status === "succeeded" && c.created < lt));
+    return searchPage(world.charges.filter((c) => (c.payment_method_details as { card: { fingerprint: string } }).card.fingerprint === fp && c.status === "succeeded" && c.created < lt));
   }
   if (path === "/customers/search") {
+    if (world.historyReply?.path === path) return searchPage(world.historyReply.data);
     const email = (q.get("query") ?? "").match(/email:"([^"]+)"/)?.[1];
-    return page([...world.customers].filter(([, e]) => e === email).map(([id, e]) => ({ id, email: e })));
+    return searchPage([...world.customers].filter(([, e]) => e === email).map(([id, e]) => ({ id, email: e })));
   }
   if (path === "/disputes") return page(world.disputes.filter((d) => d.charge === q.get("charge")));
   return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
@@ -152,11 +163,11 @@ async function main() {
   const g = await shop();
   const gTwin = `cus_shop${n}twin`;
   world.customers.set(gTwin, g.email);
-  world.charges.push({ id: `ch_twin${n}`, customer: gTwin, created: NOW - 20 * DAY, status: "succeeded", paid: true, payment_method_details: { card: { fingerprint: "fpother" } } });
+  world.charges.push({ id: `ch_twin${n}0001`, customer: gTwin, created: NOW - 20 * DAY, status: "succeeded", paid: true, payment_method_details: { card: { fingerprint: "fpother" } } });
   pay(g, { at: NOW - 3 * DAY });
   is("another customer with the same address paid before: no second guarantee", (await g.read()).refund, { kind: "none", reason: "guarantee_used" });
   const h = await shop();
-  world.charges.push({ id: `ch_card${n}`, customer: "cus_someoneelse01", created: NOW - 20 * DAY, status: "succeeded", paid: true, payment_method_details: { card: { fingerprint: "fpsamecard" } } });
+  world.charges.push({ id: `ch_card${n}0001`, customer: "cus_someoneelse01", created: NOW - 20 * DAY, status: "succeeded", paid: true, payment_method_details: { card: { fingerprint: "fpsamecard" } } });
   pay(h, { at: NOW - 3 * DAY, card: "fpsamecard" });
   is("the same card paid before on another customer: no second guarantee", (await h.read()).refund, { kind: "none", reason: "guarantee_used" });
   const i = await shop();
@@ -249,6 +260,85 @@ async function main() {
   is("an amount owed on the balance (not a credit): the guarantee as before", (await cr.read()).refund, { kind: "guarantee", cents: 6_900 });
   world.balance.set(cr.customer, Number.NaN);
   is("a balance that cannot be read: unknown", (await cr.read()).refund, { kind: "unknown", reason: "unreadable" });
+  const unreadablePaid = await shop();
+  pay(unreadablePaid, { at: NOW - 3 * DAY });
+  for (const answer of [{ object: "list", has_more: false }, { object: "list", data: null, has_more: false }, { object: "list", data: [null], has_more: false }]) {
+    world.invoiceListReply = answer;
+    is("an unreadable paid-invoice list is unknown, never no payment", (await unreadablePaid.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  world.invoiceListReply = undefined;
+
+  part("Partial history rows are unknown, never proof that nobody paid before");
+  const partialHistory = await shop();
+  pay(partialHistory, { at: NOW - 3 * DAY });
+  for (const data of [[{}], [{ id: "cus_partial0001" }]]) {
+    world.historyReply = { path: "/customers/search", data };
+    is("a customer search row needs its identity and address", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  for (const data of [[{}], [{ id: "ch_partial0001" }]]) {
+    world.historyReply = { path: "/charges/search", data };
+    is("a card search row needs its identity, state and time", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  for (const data of [[{}], [{ id: "ch_partial0001", status: "succeeded", paid: true }]]) {
+    world.historyReply = { path: "/charges", customer: partialHistory.customer, data };
+    is("a charge history row needs its identity, state and time", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  const currentHistory = world.charges.find((charge) => charge.customer === partialHistory.customer)!;
+  for (const status of ["unrecognized", "", "processing"]) {
+    world.historyReply = {
+      path: "/charges",
+      customer: partialHistory.customer,
+      data: [currentHistory, { ...currentHistory, id: `ch_unknownown${status.length}0001`, created: NOW - 40 * DAY, status, paid: true }],
+    };
+    is("an unknown status in this customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  const unknownOther = "cus_unknownother0001";
+  world.customers.set(unknownOther, partialHistory.email);
+  for (const status of ["unrecognized", "", "processing"]) {
+    world.historyReply = {
+      path: "/charges",
+      customer: unknownOther,
+      data: [{ ...currentHistory, id: `ch_unknownother${status.length}0001`, customer: unknownOther, created: NOW - 40 * DAY, status, paid: true }],
+    };
+    is("an unknown status in a same-address customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  world.historyReply = {
+    path: "/charges",
+    customer: partialHistory.customer,
+    data: [currentHistory, { ...currentHistory, id: "ch_succeededunpaidown0001", created: NOW - 40 * DAY, status: "succeeded", paid: false }],
+  };
+  is("a succeeded but unpaid charge in this customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: unknownOther,
+    data: [{ ...currentHistory, id: "ch_succeededunpaidother0001", customer: unknownOther, created: NOW - 40 * DAY, status: "succeeded", paid: false }],
+  };
+  is("a succeeded but unpaid charge in a same-address customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: partialHistory.customer,
+    data: [currentHistory, { ...currentHistory, id: "ch_failedpaidown0001", created: NOW - 40 * DAY, status: "failed", paid: true }],
+  };
+  is("a failed but paid charge in this customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: unknownOther,
+    data: [{ ...currentHistory, id: "ch_failedpaidother0001", customer: unknownOther, created: NOW - 40 * DAY, status: "failed", paid: true }],
+  };
+  is("a failed but paid charge in a same-address customer's history is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: partialHistory.customer,
+    data: [currentHistory, { ...currentHistory, id: "ch_pendingbeforeown0001", created: NOW - 40 * DAY, status: "pending", paid: false }],
+  };
+  is("a pending charge older than this customer's first success is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = {
+    path: "/charges",
+    customer: unknownOther,
+    data: [{ ...currentHistory, id: "ch_pendingbeforeother0001", customer: unknownOther, created: NOW - 40 * DAY, status: "pending", paid: false }],
+  };
+  is("a pending charge older than a same-address customer's first success is unknown", (await partialHistory.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.historyReply = null;
   world.down = true;
   is("Stripe failing: unknown", (await a.read()).refund, { kind: "unknown", reason: "stripe_unread" });
   world.down = false;

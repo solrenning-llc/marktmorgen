@@ -243,8 +243,11 @@ const HELD_WORDS: Record<EndpointHeld, string> = {
 /** A delivery whose API key's state could not be read: held, never sent on a guess (rule 24). */
 const KEY_UNREAD_WORDS = {
   retrying: "Not sent yet: the state of the API key that added this endpoint could not be read. It will be tried again.",
-  failed: "Not sent: the state of the API key that added this endpoint could not be read at any try. You can send it again by hand.",
+  failed: "Not sent: the state of the API key that added this endpoint could not be read at any try. Once the key can be read again, you can send it again by hand.",
 };
+/** A delivery whose month's webhook count could not be made at its last try: the endpoint was never called (rule 30). */
+const COUNT_UNREAD_FAILED_WORDS =
+  "Not sent: this month's webhook deliveries could not be counted at any try, so the endpoint was not called. Once they can be counted again, you can send it again by hand.";
 const KEY_ID_PATTERN = /^[0-9a-f]{12}$/;
 
 /** How long the old secret still signs after it is replaced: one day, then it is gone. */
@@ -281,7 +284,29 @@ export type Delivery = {
    * again (its body is empty).
    */
   givenUp?: true;
+  /**
+   * Whether one of the store's webhook deliveries for its month was, or may
+   * have been, taken for this delivery at any try (a count whose reply was
+   * unknown may have landed). Written as true or false by every try from the
+   * marker on; read only by countedByMonth.
+   */
+  counted?: boolean;
 };
+
+/**
+ * Whether the month counted this delivery at some try, so its message may be
+ * kept past a month that is used (Claude 2 on #3096, comment 6713512225, LOW 1).
+ * Read strictly (rule 24): true and false as written; with no marker (written
+ * before it), the old reading, under which a try raised `attempts` only when
+ * the month counted it; anything off-shape is read as counted, so a message is
+ * never dropped on a guess. It only decides whether a message is kept: every
+ * try and every resend still takes its own delivery, so nothing is charged twice.
+ */
+function countedByMonth(delivery: Pick<Delivery, "attempts" | "counted">): boolean {
+  if (delivery.counted === true || delivery.counted === false) return delivery.counted;
+  if (delivery.counted !== undefined) return true;
+  return !(typeof delivery.attempts === "number" && delivery.attempts === 0);
+}
 
 const cfgKey = (statsId: string) => `nl:hooks:cfg:${statsId}`;
 const STORES_KEY = "nl:hooks:stores";
@@ -489,8 +514,10 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
       // kept, and can be sent again by hand once the key reads (Claude 2 on #3096, comment 6712352850).
       console.error("WEBHOOK KEY STATE UNREAD: the delivery is held, not sent", delivery.statsId, delivery.id, next.attempts);
       const retryIn = delivery.type === "test" ? undefined : RETRY_MINUTES[next.attempts - 1];
-      if (retryIn === undefined) return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: KEY_UNREAD_WORDS.failed };
-      return { ...next, state: "retrying", next: now + retryIn * 60_000, lastStatus: 0, lastError: KEY_UNREAD_WORDS.retrying };
+      // Nothing of the month taken at this try: the marker keeps what earlier tries said.
+      const held = { ...next, counted: countedByMonth(delivery) };
+      if (retryIn === undefined) return { ...held, state: "failed", next: 0, lastStatus: 0, lastError: KEY_UNREAD_WORDS.failed };
+      return { ...held, state: "retrying", next: now + retryIn * 60_000, lastStatus: 0, lastError: KEY_UNREAD_WORDS.retrying };
     }
   }
   if (keyHeld) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: HELD_WORDS[keyHeld] };
@@ -504,20 +531,31 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   const paused = store === "taken" || delivery.type === "test" ? null : integrationPauseWord(store, now / 1000);
   // One of the store's webhook deliveries for its month, before the endpoint is called.
   const taken = store === "taken" ? ({ ok: true } as const) : await takeAllowance(store, "webhook", 1, now);
-  // The month's deliveries used before its first try: not sent, and its message is not kept past it (a line, as
-  // emitEvent writes one), so a message is kept only by a delivery the month counted. One counted at an earlier try
-  // keeps its message, and can be sent again by hand.
-  const unkept = !taken.ok && taken.reason === "used" && delivery.type !== "test" && delivery.attempts === 0 ? { body: "", givenUp: true as const } : {};
+  // Whether the month has counted this delivery, after this try: written on every outcome from here on. A count
+  // whose reply is unknown may have landed (lib/store-allowance.ts keeps such an increment), so it is marked as
+  // counted: a message is never dropped on a guess (rule 24); keeping it costs only its storage for the week.
+  const counted = { counted: taken.ok || taken.reason === "unknown" || countedByMonth(delivery) };
+  // The month's deliveries used and none ever taken for this delivery: not sent, and its message is not kept past
+  // it (a line, as emitEvent writes one), so a message is kept only by a delivery the month counted. One counted at
+  // an earlier try keeps its message, and can be sent again by hand. Read off the marker, not off `attempts`, which
+  // a held or an uncounted try raises without taking anything (Claude 2 on #3096, comment 6713512225, LOW 1).
+  const unkept = !taken.ok && taken.reason === "used" && delivery.type !== "test" && !countedByMonth(delivery) ? { body: "", givenUp: true as const } : {};
   // Paused: never retried, whatever the count answered; a month already used is said too.
   if (paused) {
-    const counted = taken.ok ? ` ${WEBHOOK_PAUSED_COUNTED}` : taken.reason === "unknown" ? "" : ` ${taken.message}`;
-    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `${WEBHOOK_PAUSED_NOT_SENT_WORDS[paused]}${counted}`, notSentPaused: true, ...unkept };
+    const countedWords = taken.ok ? ` ${WEBHOOK_PAUSED_COUNTED}` : taken.reason === "unknown" ? "" : ` ${taken.message}`;
+    return { ...delivery, ...counted, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `${WEBHOOK_PAUSED_NOT_SENT_WORDS[paused]}${countedWords}`, notSentPaused: true, ...unkept };
   }
   if (!taken.ok) {
-    const retryIn = delivery.type === "test" ? undefined : RETRY_MINUTES[delivery.attempts];
-    // A count that could not be made is tried again on the schedule; a month whose deliveries are used is not.
-    if (taken.reason === "unknown" && retryIn !== undefined) return { ...delivery, state: "retrying", next: now + retryIn * 60_000, lastAt: now, lastStatus: 0, lastError: taken.message };
-    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `Not sent. ${taken.message}`, ...unkept };
+    // A count that could not be made: the endpoint is not called, the try is counted and waits on the published
+    // schedule like a network failure, and after the last try the delivery is failed with the reason, its message
+    // kept for a resend by hand; never tried again every five minutes for the week a delivery is kept (Claude 2 on
+    // #3096, comment 6713512225, LOW 4; rule 30). A month whose deliveries are used is not tried again.
+    if (taken.reason === "unknown" && delivery.type !== "test") {
+      const retryIn = RETRY_MINUTES[next.attempts - 1];
+      if (retryIn === undefined) return { ...next, ...counted, state: "failed", next: 0, lastStatus: 0, lastError: COUNT_UNREAD_FAILED_WORDS };
+      return { ...next, ...counted, state: "retrying", next: now + retryIn * 60_000, lastStatus: 0, lastError: taken.message };
+    }
+    return { ...delivery, ...counted, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: `Not sent. ${taken.message}`, ...unkept };
   }
   const timestamp = Math.floor(now / 1000);
   let status = 0;
@@ -544,10 +582,10 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   } catch (caught) {
     error = caught instanceof SafeFetchError ? problemWords(caught) : "The endpoint could not be reached.";
   }
-  if (!error) return { ...next, state: "delivered", next: 0, lastStatus: status, lastError: "" };
+  if (!error) return { ...next, ...counted, state: "delivered", next: 0, lastStatus: status, lastError: "" };
   const retryIn = delivery.type === "test" ? undefined : RETRY_MINUTES[next.attempts - 1];
-  if (retryIn === undefined) return { ...next, state: "failed", next: 0, lastStatus: status, lastError: error };
-  return { ...next, state: "retrying", next: now + retryIn * 60_000, lastStatus: status, lastError: error };
+  if (retryIn === undefined) return { ...next, ...counted, state: "failed", next: 0, lastStatus: status, lastError: error };
+  return { ...next, ...counted, state: "retrying", next: now + retryIn * 60_000, lastStatus: status, lastError: error };
 }
 
 /**

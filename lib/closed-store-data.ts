@@ -86,6 +86,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
+import { repliesFor } from "@/lib/redis-reply";
 import { idsIn } from "@/lib/data-recount";
 import { readAllListingsExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
@@ -312,8 +313,22 @@ export async function deleteSalesTraces(store: Store): Promise<number> {
   return keys.length;
 }
 
+/** Deletes these, DEL_BATCH a command, each receipt read exactly (Codex G on #2560): an unknown one throws, so nothing is said deleted on it. */
 async function del(keys: string[]): Promise<void> {
-  for (let i = 0; i < keys.length; i += DEL_BATCH) await redisPipeline([["DEL", ...keys.slice(i, i + DEL_BATCH)]]);
+  for (let i = 0; i < keys.length; i += DEL_BATCH) {
+    const [gone] = repliesFor(await redisPipeline([["DEL", ...keys.slice(i, i + DEL_BATCH)]]), 1) ?? refuse("a delete");
+    countOf(gone, "a delete");
+  }
+}
+
+/**
+ * Writes a store's line of the walk's batch, its receipt read exactly (Codex G on #2560): the line is the only
+ * way a store whose record is gone is still walked, so an unknown receipt throws before the record goes, and the
+ * store stays in line to be tried again.
+ */
+async function keepBatched(ref: string, entry: Batched): Promise<void> {
+  const [put] = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1) ?? refuse("the walk's batch line");
+  if (countOf(put, "the walk's batch line") > 1) refuse("the walk's batch line");
 }
 
 /**
@@ -749,7 +764,8 @@ type PageWays = { skip?: Skip; unread?: (list: string, error: unknown) => void; 
  */
 export async function walkPage(keys: string[], batch: Map<string, Batched>, owners: Owners, ways: PageWays = {}): Promise<{ deleted: number; pruned: number }> {
   const refFree = ways.refFree ?? refGuard();
-  const doomed = new Set<string>();
+  /** Each key to delete, with the closing store it belongs to. */
+  const doomed = new Map<string, string>();
   // The keys each follower is handed, by store and family: read together, once the page is sorted.
   const followed = new Map<string, { family: string; owner: string; keys: string[] }>();
   let pruned = 0;
@@ -788,11 +804,11 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
       group.keys.push(key);
       followed.set(`${hit.owner}|${family}`, group);
     }
-    doomed.add(key);
+    doomed.set(key, hit.owner);
   }
   for (const { family, owner, keys: found } of followed.values()) {
     try {
-      for (const key of await FOLLOWERS[family].find(found, batch.get(owner)!)) if (followable(key, family)) doomed.add(key);
+      for (const key of await FOLLOWERS[family].find(found, batch.get(owner)!)) if (followable(key, family)) doomed.set(key, owner);
     } catch (error) {
       if (!ways.skip) throw error;
       // Its keys are kept for the next walk, which follows them again: deleted now, what they lead to would be lost.
@@ -800,7 +816,15 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
       ways.skip([owner], error);
     }
   }
-  await del([...doomed]);
+  try {
+    await del([...doomed.keys()]);
+  } catch (error) {
+    // A delete whose receipt is unknown (Codex G on #2560): its stores are never finished on it. Before PAGE_TRIES
+    // the page is read again; after them its stores are passed over, not finished, and walked again with the next walk.
+    if (!ways.skip) throw error;
+    ways.skip([...new Set(doomed.values())], error);
+    return { deleted: 0, pruned };
+  }
   return { deleted: doomed.size, pruned };
 }
 
@@ -1103,10 +1127,10 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
             const deleted = deletedByItsOwner(ref, now);
             if (!deleted) throw new ClosedReadError("a store's record is gone, and its walk was never prepared");
             console.error("closed-data: a closed store was deleted by its owner before its walk; the keys named by its id are deleted with this walk");
-            await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(deleted)]]);
+            await keepBatched(ref, deleted);
           }
         } else {
-          await prepareStore(found, now, async (entry) => void (await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]])));
+          await prepareStore(found, now, (entry) => keepBatched(ref, entry));
           report.stores += 1;
         }
         await redisPipeline([["HSET", WALK_KEY, "pending", 1], ["ZREM", DUE_KEY, ref], ["HDEL", WALK_KEY, triesField(ref)]]);

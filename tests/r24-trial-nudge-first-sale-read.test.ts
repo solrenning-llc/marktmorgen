@@ -47,6 +47,17 @@ async function main() {
   }) as typeof memory.pipeline;
   await sendTrialNudges(START + 3 * DAY);
   is("no 'has not made its first sale' email to a store that sold", emails.length, 0);
+
+  part("A store that sold, its first sale noted with a claim value (milliseconds, a point, a random part)");
+  memory.pipeline = real;
+  trials.push({ id: "sub_SoldClaim001", status: "trialing", trial_start: START, trial_end: START + 14 * DAY, cancel_at_period_end: false, metadata: { store: "soldclaim" } });
+  await claimHandle("soldclaim@example.com", "soldclaim", "Sold Claim", "");
+  await setSubscription("soldclaim@example.com", { subscriptionId: "sub_SoldClaim001", active: true, tier: "creator", cycle: "month", trialEnds: START + 14 * DAY, period: paidPeriod() });
+  const claimed = (await storeForEmail("soldclaim@example.com"))!;
+  await redisPipeline([["SET", `nl:firstsale:${claimed.sid || `h:${claimed.handle}`}`, `${(START + DAY) * 1000}.000000042`]]);
+  const result = await sendTrialNudges(START + 3 * DAY + 60);
+  is("read as sold: no email to it", emails.length, 0);
+  is("and not counted as failed", result.failed, 0);
   done();
 }
 

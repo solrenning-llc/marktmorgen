@@ -130,3 +130,54 @@ test("queueRelease queues a product whose only pre-order record does not read", 
   await queueRelease(store, PID);
   assert.deepEqual(jobs(), [job(PID)]);
 });
+
+// Codex C2's residual (review 5807688707, codex/c-review-2963-preorder-release@b0317404, proofs/c2/review-2963.mjs),
+// kept with credit: after the exact HGETALL, the hand-over reads the one entry again with HGET. A reply to that HGET
+// in an unknown shape was parsed as "no entry": the hand-over answered skip, the job was let go, and the paid
+// pre-order was never handed over. Unknown now throws: the job is kept, nothing is handed over, the entry is not
+// marked given. A confirmed absence (HGET null) is still nothing to hand over.
+const unknownEntryReplies: [string, (raw: unknown) => unknown[]][] = [
+  ["no reply", () => []],
+  ["undefined", () => [undefined]],
+  ["false", () => [false]],
+  ["broken JSON", () => ["{"]],
+  ["one reply too many", (raw) => [raw, "extra"]],
+  ["a hole", () => Array<unknown>(1)],
+];
+async function releaseWithEntryReply(answer: (raw: unknown) => unknown[]): Promise<number> {
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (c: (string | number)[][]) => {
+    const a = await real(c);
+    return c.length === 1 && c[0][0] === "HGET" && c[0][1] === entriesKey(PID) && c[0][2] === SESSION ? answer(a[0]) : a;
+  }) as typeof redis.pipeline;
+  const errors = console.error;
+  console.error = () => {};
+  try {
+    return await runPreorderReleases(async () => store, async (_s: Store, pid: string) => listing(pid), () => deps, Date.now() + 10_000);
+  } finally {
+    redis.pipeline = real;
+    console.error = errors;
+  }
+}
+for (const [name, answer] of unknownEntryReplies) {
+  test(`the hand-over's own read of the entry answered in an unknown shape (${name}): nothing handed over, the job kept`, async () => {
+    seed();
+    assert.equal(await releaseWithEntryReply(answer), 0);
+    assert.deepEqual(jobs(), [job(PID)], "the paid pre-order's job is kept for the next run");
+    assert.equal(given(PID), false, "the entry is not marked given");
+    // The next run, with Redis answering again, hands it over once.
+    assert.equal(await release(), 1);
+    assert.deepEqual(jobs(), []);
+    assert.equal(given(PID), true);
+  });
+}
+
+test("control: the hand-over's own read healthy hands over once; an entry confirmed gone (HGET null) is nothing to hand over", async () => {
+  seed();
+  assert.equal(await releaseWithEntryReply((raw) => [raw]), 1);
+  assert.deepEqual(jobs(), []);
+  assert.equal(given(PID), true);
+  seed();
+  assert.equal(await releaseWithEntryReply(() => [null]), 0);
+  assert.deepEqual(jobs(), [], "confirmed absence: nothing left to hand over");
+});

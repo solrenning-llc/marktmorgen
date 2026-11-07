@@ -131,26 +131,52 @@ export function paidOn(invoice: Invoice, refunded: number): number {
  * the owed set. Both are sets, so a credit listed already is unchanged. The invited store's own bonus is relisted
  * with them, since it was listed by the same write. One read and one write for all of them (Claude 4 on #2722).
  * Throws UnknownReplyError when it cannot be sure (Codex N on #2722): the read not answered exactly, a credit
- * written before that does not read back whole (only the bonus may be absent: it is written only with a paid
- * first invoice), or the write not answered exactly. The run then counts the store as failed and not complete,
- * and pays nothing on what it could not read; the next run tries again.
+ * written before that does not read back whole, or the write not answered exactly. The run then counts the store as
+ * failed and not complete, and pays nothing on what it could not read; the next run tries again.
+ *
+ * The bonus may be absent: it is written only with a paid invoice. When it is absent and a share of this store's
+ * paid invoice is already written (more than 0 cents, so the invoice paid), the run that wrote that share did not
+ * finish the bonus (its claim was unknown, Claude 5 on #2722), so it is written here, once for good, with the same
+ * claim (SET NX, ours only on OK or this record read back) and at the first such invoice's time; an unknown claim
+ * throws as above. Returns how many bonuses it wrote (0 or 1).
  */
-async function relist(ids: string[], sid: string): Promise<void> {
-  if (!ids.length) return;
-  const keys = [...ids, `bonus_${sid}`].map((id) => creditKey(id));
+async function relist(ids: string[], sid: string, bonusCents: number): Promise<number> {
+  if (!ids.length) return 0;
+  const bonusId = `bonus_${sid}`;
+  const keys = [...ids, bonusId].map((id) => creditKey(id));
   const read = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
   if (!read) throw new UnknownReplyError("relisting invite credits: the read");
   const writes: (string | number)[][] = [];
+  let bonusAbsent = false;
+  let firstPaid: Credit | null = null;
   read.forEach((raw, i) => {
     const bonus = i === ids.length;
-    if (bonus && raw === null) return;
+    if (bonus && raw === null) {
+      bonusAbsent = true;
+      return;
+    }
     const credit = parseCredit(raw);
     if (!credit) throw new UnknownReplyError(`relisting invite credits: ${bonus ? "the bonus" : ids[i]} does not read back`);
+    // The ids come oldest first, so the first share that earned is the first paid invoice's.
+    if (!bonus && !firstPaid && credit.kind === "share" && credit.from === sid && credit.cents > 0) firstPaid = credit;
     if (credit.state === "owed" && credit.cents > 0) writes.push(["ZADD", mineKey(credit.to), credit.at, credit.id], ["SADD", OWED_KEY, credit.id]);
   });
-  if (!writes.length) return;
+  let made = 0;
+  const paidShare = firstPaid as Credit | null;
+  if (bonusAbsent && paidShare && bonusCents > 0) {
+    const bonus: Credit = { id: bonusId, kind: "bonus", to: sid, from: sid, cents: bonusCents, cur: paidShare.cur, at: paidShare.at, state: "owed" };
+    const claimed = await claimMark(creditKey(bonusId), null, JSON.stringify(bonus));
+    if (claimed === "unknown") throw new UnknownReplyError("relisting invite credits: the bonus claim");
+    // Taken: written meanwhile by another run, which lists it; the next run relists it if that run did not.
+    if (claimed === "ours") {
+      writes.push(["ZADD", mineKey(sid), bonus.at, bonusId], ["SADD", OWED_KEY, bonusId]);
+      made = 1;
+    }
+  }
+  if (!writes.length) return made;
   const wrote = repliesFor(await redisPipeline(writes), writes.length);
   if (!wrote || wrote.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("relisting invite credits: the write");
+  return made;
 }
 
 /** Step 1 for one invited store. Returns how many credits it wrote. */
@@ -197,7 +223,7 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   if (!seen || seen.some((reply) => countOf(reply) !== 0 && countOf(reply) !== 1)) throw new UnknownReplyError("invite credits: EXISTS");
   // Written before: a credit still owed is put back on the lists it is paid from (both idempotent), so one whose
   // listing failed after its record was written is never left unpaid (L9).
-  await relist(ordered.filter((_, i) => countOf(seen[i]) === 1).map((inv) => String(inv.id)), sid);
+  wrote += await relist(ordered.filter((_, i) => countOf(seen[i]) === 1).map((inv) => String(inv.id)), sid, terms.bonusCents);
   for (let i = 0; i < ordered.length; i += 1) {
     const mark = countOf(seen[i]);
     if (mark !== 0) continue;
@@ -208,8 +234,12 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     const paid = num(inv.amount_paid) > 0 ? paidOn(inv, await refundedOn(inv)) : 0;
     const cents = inviteShare(paid, terms);
     const share: Credit = { id, kind: "share", to: by.r, from: sid, cents, cur, at: paidAt, state: cents > 0 ? "owed" : "none" };
-    // Written once, for good: ours only on OK or this record read back (CX-123 rule 24, L9).
-    if ((await claimMark(creditKey(id), null, JSON.stringify(share))) !== "ours") continue;
+    // Written once, for good: ours only on OK or this record read back (CX-123 rule 24, L9). Not known (it may have
+    // landed): the store fails this run and the run is not complete (Claude 5 on #2722); the next run finds the record,
+    // if it landed, and relists it with the bonus it earned (relist), or writes it then.
+    const claimed = await claimMark(creditKey(id), null, JSON.stringify(share));
+    if (claimed === "unknown") throw new UnknownReplyError(`invite credits: the claim on ${id}`);
+    if (claimed === "taken") continue;
     const writes: (string | number)[][] = [["ZADD", mineKey(by.r), paidAt, id]];
     if (cents > 0) writes.push(["SADD", OWED_KEY, id]);
     wrote += 1;
@@ -217,7 +247,11 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     if (paid > 0 && terms.bonusCents > 0) {
       const bonusId = `bonus_${sid}`;
       const bonus: Credit = { id: bonusId, kind: "bonus", to: sid, from: sid, cents: terms.bonusCents, cur, at: paidAt, state: "owed" };
-      if ((await claimMark(creditKey(bonusId), null, JSON.stringify(bonus))) === "ours") {
+      const gotBonus = await claimMark(creditKey(bonusId), null, JSON.stringify(bonus));
+      // Not known: the store fails this run (Claude 5 on #2722); the next run relists this share and writes or relists
+      // the bonus (relist), so it is never left unpaid.
+      if (gotBonus === "unknown") throw new UnknownReplyError("invite credits: the bonus claim");
+      if (gotBonus === "ours") {
         writes.push(["ZADD", mineKey(sid), paidAt, bonusId], ["SADD", OWED_KEY, bonusId]);
         wrote += 1;
       }
@@ -227,24 +261,43 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   return wrote;
 }
 
-/** The credits already on a customer's balance, by the credit id each carries. */
+/** The most pages of a customer's balance history read; a history longer than that is not known whole. */
+const HISTORY_PAGES = 10;
+
+/**
+ * The credits already on a customer's balance, by the credit id each carries. Read exactly (Claude 5 on #2722): each
+ * page Stripe's list, `has_more` true or false, at most the hundred asked for, each row with a string id and its
+ * metadata an object (or null) whose credit mark, when there, is text. Anything else, a page that says there is more
+ * but has no rows, or a history still going on after the last page read, is not "not sent": it throws
+ * UnknownReplyError before any credit is sent, the credit stays owed, and the next run reads again.
+ */
 async function creditedAt(customer: string): Promise<Map<string, string>> {
   const found = new Map<string, string>();
   let after = "";
-  for (let page = 0; page < 10; page += 1) {
+  for (let page = 0; page < HISTORY_PAGES; page += 1) {
     const query = new URLSearchParams({ limit: "100" });
     if (after) query.set("starting_after", after);
     const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/customers/${customer}/balance_transactions?${query}`);
-    const rows = (list.data as { id?: unknown; metadata?: Record<string, string> | null }[] | undefined) ?? [];
+    const rows = list && list.object === "list" && typeof list.has_more === "boolean" && Array.isArray(list.data) && list.data.length <= 100
+      ? (list.data as unknown[])
+      : null;
+    if (!rows) throw new UnknownReplyError("invite credits: a customer's balance history");
+    let last = "";
     for (const row of rows) {
-      const credit = row.metadata?.nimbus_invite_credit;
-      if (credit && typeof row.id === "string") found.set(credit, row.id);
+      if (!row || typeof row !== "object") throw new UnknownReplyError("invite credits: a balance history row");
+      const { id, metadata } = row as { id?: unknown; metadata?: unknown };
+      if (typeof id !== "string" || !id) throw new UnknownReplyError("invite credits: a balance history row");
+      if (metadata !== null && (typeof metadata !== "object" || Array.isArray(metadata))) throw new UnknownReplyError("invite credits: a balance history row");
+      const credit = metadata ? (metadata as Record<string, unknown>).nimbus_invite_credit : undefined;
+      if (credit !== undefined && typeof credit !== "string") throw new UnknownReplyError("invite credits: a balance history row");
+      if (credit) found.set(credit, id);
+      last = id;
     }
-    if (list.has_more !== true || !rows.length) break;
-    after = String(rows[rows.length - 1].id ?? "");
-    if (!after) break;
+    if (list.has_more === false) return found;
+    if (!last) throw new UnknownReplyError("invite credits: a customer's balance history");
+    after = last;
   }
-  return found;
+  throw new UnknownReplyError("invite credits: a balance history longer than read");
 }
 
 /** Step 2 for one credit. True when it is now on the plan. */

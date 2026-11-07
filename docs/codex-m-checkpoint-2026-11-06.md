@@ -4085,3 +4085,789 @@ Parecer M5815395861 publicado e FULLbody confirmado no head5557ec81b2024faa049b6
 
 ### Entrega reconciliada — 07/11/2026,19h42 Fortaleza
 CXM-20261107-1939-C1-2 publicada após409NÃOAPLICADO e espera>=120s(22:39:45→22:41:47UTC), FULL fresco4562332/IDausente:commita0c3f0cf7ce483acd573546197720015c7fd3f5d/blob718077dae029827d361ad4676266c5212c494f65/FULL4564496 exatamente relido. Não resta mensagem pendente. C6-1939 recebeu M5815395861 e pediu fila3126;44checks são autor, não execuçãoM. C6/G3123novoMEDtokenrace,3108C4+C6opiniõesjáexistem,não3ªM. Provas/tipos/scanner/priorheads intactos. Próximo novo nominal M/disposição2730 ou revisão pedida livre; pausa1746 temporária, sem automação alterada/sem vigia em fundo. Não repetir verdes nem recriar ramos.
+
+
+## 07/11/2026 — revisão independente #3136, exclusão de sala e DMs
+
+CPcanônico b22134b2a0b5a9a4f5b636019bae7879c6e699e7/blob786f3615a4003d23463034484763234504936f61 FULL525428 recuperado, prefixo inteiro preservado. Main frescoe3c71cf3c96c2597a6a74b39bc13de84e52a69eb: nove normativos/caixa/todasreservas BYTE-ID prévios; docs/codex-queue mudou para57a00e211a3a360c117f44cd6c4941e55564385b. FULLnovo+antigo recuperados; primeira extração contígua atravessou alterações dispersas e truncou saída, SUBSTITUÍDA por todos os9hunks reais lidos integralmente(TX2/SR3/4/SR5/EL3/SG4). Nada de trabalho tributário/preço/teto concedido aM por isso. C1-2014-TODOS16 LIDA: pausaSUSPENSA. C1-2027TODOS17/2030CXG1 lidas,3037equipeC1/Gpriority,nãoMduplica. Canal FULL4624128/prefixo4564496EXATO antesmetadata; FULLseguinte0ff0ec27 lido deltaC4custo+2030Gnominal. #3135segunda foi consultada SÓmetadata/timeline e P6714476141jáassumiu juntoN6714469537; ZERO Mdiff/fonte/testes3135, sem terceira opinião.
+
+RES3136 antesfonte/testes: CXM-20261107-2032-C1-1 commitcd19599774c4d5cfc8e19668b64f7281050b7bb7/blob3a33ffbc1e0a44e3dadd5587eca9cad3f1931f3c, FULLreadbackEXATO. Header nominal20h32adiantou-seao relógioimediatamenteanterior23:31:14UTC=20:31:14; sequência deações realpreservada, não história reescrita. PedidoC6-2026, timelinevazia/semclaimconcorrente observado. SerialMédiozeroagentes, nenhuma fonte/refautor/CI/fila alterada.
+
+#3136 headc56698c00839189dfde7b5462105ef84e3af987d/basee3c71cf3. Diff3pathsinteiro lido: community-chat.ts8186eec2cbba4cad7db2a256f7e6d02a76499e58;community-dm.tsf2313bb9d1f71181c012d86c92c96573baa4a6b9;test96 0ad7ef2363841a043f2afb191c5338023d34bd07. Cada lista precisa pipeline/slots próprios exatos,stringList; deletes contamcountOf/replyCount. DMconversas/readmarks/índicesoutrosAPAGADOS+ACKconfirmadoANTESownindexes; unknownpreservaownlistaspararetry. Salaunknownantesdelete;deletionunknownlança. Callercommunity-erasurepropaga;person-erasure296..323marca módulo failed/incomplete. Essas sãochecagensfonte+helperexecutado,nãoerasureuniversalnativacert.
+
+SAME96 comSÓmodulesbase chat/e1063a8e4d7bad2c10ba82145772ec01f9168ace +dm/1a7b579df794029f9981e47305f469634cf00b43 no grafofinal:61FAIL→head96PASS. Own5imutávelGitblobec0c558b76736b1877aa9719dc02e786a164de83:before1FAIL→head5PASS, intercepta pipelineDELdoc hatreal, NÃOaplica commands, respostacomnullsexataquantidade:recusaACK,ownindex+mensagemmantidos,healthyretryencontra/apagaambosíndices. Nãoasserçãoafrouxada. Ligadoscommunitychat35+DM26+chatcopy32+personerasure32+erasurerequestfull21PASS. **TOTAL247headPASS**, REDsseparados. Novatest96incluiAfteraplicoumasACKnull e5owncomplementaNÃOAPLICOU. Nenhumtetoatingido20kpipe+20kMemorynested100mock120s512MiB256KiB;tipos1024MiB. Globalfetchfechadoparaexterno,sófixtures;semprovider/Redisreal.
+
+Setup inicialda cópiafalhou antesexecução em JSON: normalizadormetadata parseou package-lock comoJSON e não conservou stringfonte; corrigido para srcraw,recuperadosúltimos12paths/JSONbyteshead e snapshotfinalverificado. Isso NÃOREDproduto. erasure-request-full inicialmente BUILDfaltasite-footer; recuperadoGitblobhead, sóesse teste rerun→21PASS. Restoverdes não repetidos. Tipos3roots839/0, own5adicionado→SÓverifyafetadorepetido4roots840/0,eslint4zeroerros. Scanneroficial3981tracked0:3980headfilesEXATOS+1own,387não recuperados; SNAPSHOTPARCIALnãorepoFULL. Diffdoisprodutosnoindexemitiuzerodiagnósticos,exit1porarquivosdiferentes,não0inventado. Completude de todosinputs dobundle conferida antes spawn.
+
+Semnovoachado noDELTA. Ressalvas: JSONtexto malformado/semântica de mensagem e paresDMfiltrados não foram auditados nesta unidade;readersconversationsOf/searchMessages/searchRoomnãofechados;RSVP2957 eothererasers/3095tokenretry permanecemoutrosescopos;2576roomcreditconflito previsto não composto/nãocertificado. Nenhumtotallegal/MR/custoextra1requestapagamentoDMcertificado,nenhummainmerge/9CI/fila/deploy/browser/nativeRedisclaim. C6autorpede1reviewprivacidade,nãodinheiro. PróximoformalCOMMENT independente exatoheadapósCPreadback+freshmetadata,canalcomrecibo. #2730reconciliaçãonominalpréviaseparada,C4+C1same83járeview,nãoterceira; #3126entregue/filaC1relatada nãoCInovaM. EvidênciaíntegraabaixoANTESparecer.
+
+### run.mjs
+```
+import{readFileSync,writeFileSync,mkdirSync,existsSync,symlinkSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),view=join(root,'view'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');if(!existsSync(join(view,'node_modules')))symlinkSync(deps,join(view,'node_modules'),'dir');mkdirSync('logs',{recursive:true});
+const jobs=process.argv.slice(2);for(const job of jobs){const [mode,test]=job.split(':');
+ const bootstrap=`import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=()=>{throw Error('NO_EXTERNAL_NETWORK')};Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>100)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before'){alias['@/lib/community-chat']=join(root,'before-community-chat.ts');alias['@/lib/community-dm']=join(root,'before-community-dm.ts');}const b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});const f=resolve('logs/'+mode+'-'+test+'.cjs');const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const file=resolve(view,input);const bytes=readFileSync(file);const hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(file===join(root,'before-community-chat.ts')){if(hash!=='e1063a8e4d7bad2c10ba82145772ec01f9168ace')throw Error('Old chat mismatch');}else if(file===join(root,'before-community-dm.ts')){if(hash!=='1a7b579df794029f9981e47305f469634cf00b43')throw Error('Old dm mismatch');}else if(input==='tests/m-3125-read-boundaries.proof.ts'){if(hash!=='75911d0e19878f16377b562eb16e954332ae56be')throw Error('Own proof changed');}else if(input==='tests/m-3125-notice-retry.proof.ts'){if(hash!=='2e5977e79a2a9254daa4fbffb7c755b6d525a89b')throw Error('Notice proof changed');}else if(input==='tests/m-3133-multiple-payments.proof.ts'){if(hash!=='2b65432e7692438b40fa60a3f55050a9c57d88ca')throw Error('Own proof changed');}else if(input==='tests/m-3136-delete-retry.proof.ts'){if(hash!=='ec0c558b76736b1877aa9719dc02e786a164de83')throw Error('Own proof mismatch');}else if(hash!==pin[input])throw Error('Head pin mismatch '+input);checked++;}console.log(JSON.stringify({mode,test,checked}));writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));
+ const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1700)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+
+### verify.cjs
+```
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/community-chat.ts','lib/community-dm.ts','tests/community-erasers-unknown.test.ts','tests/m-3136-delete-retry.proof.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+
+### run.log
+```
+{"mode":"before","test":"community-erasers-unknown.test.ts","checked":268}
+{"mode":"before","test":"community-erasers-unknown.test.ts","exit":1,"signal":null,"tail":"ests keeps the conversation\n        expected 1\n        got      0\n\nPrivate messages: their own lists go only after the conversations are confirmed gone\n  FAIL  a null delete answer throws\n        expected true\n        got      false\n  FAIL  a null delete answer keeps their inbox for the retry\n        expected 1\n        got      0\n  FAIL  a null delete answer keeps their requests for the retry\n        expected 1\n        got      0\n  FAIL  a short delete answer throws\n        expected true\n        got      false\n  FAIL  a short delete answer keeps their inbox for the retry\n        expected 1\n        got      0\n  FAIL  a short delete answer keeps their requests for the retry\n        expected 1\n        got      0\n  FAIL  a text delete answer throws\n        expected true\n        got      false\n  FAIL  a text delete answer keeps their inbox for the retry\n        expected 1\n        got      0\n  FAIL  a text delete answer keeps their requests for the retry\n        expected 1\n        got      0\n  FAIL  an unknown answer to deleting their own lists throws\n        expected true\n        got      false\n\nPrivate messages controls\n  ok    exact empty lists finish with nothing\n  ok    exact empty lists still clear who they declined\n  ok    healthy lists erase both conversations\n  ok    the first conversation is gone\n  ok    its read marks are gone\n  ok    the request is gone\n  ok    the other person's index no longer points to it\n  ok    the third person's index no longer points to it\n  ok    their inbox is gone\n  ok    their requests are gone\n  ok    who they declined is gone\n\n96 checks, 61 failing.\nM_BUDGET {\"pipelineCommands\":101,\"memoryRun\":309,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"community-erasers-unknown.test.ts","checked":268}
+{"mode":"head","test":"community-erasers-unknown.test.ts","exit":0,"signal":null,"tail":"ct inbox sends no delete\n  ok    an object inbox keeps their inbox\n  ok    an object inbox keeps the conversation\n  ok    a non-string entry throws\n  ok    a non-string entry sends no delete\n  ok    a non-string entry keeps their inbox\n  ok    a non-string entry keeps the conversation\n  ok    a hole in the requests throws\n  ok    a hole in the requests sends no delete\n  ok    a hole in the requests keeps their inbox\n  ok    a hole in the requests keeps the conversation\n\nPrivate messages: their own lists go only after the conversations are confirmed gone\n  ok    a null delete answer throws\n  ok    a null delete answer keeps their inbox for the retry\n  ok    a null delete answer keeps their requests for the retry\n  ok    a short delete answer throws\n  ok    a short delete answer keeps their inbox for the retry\n  ok    a short delete answer keeps their requests for the retry\n  ok    a text delete answer throws\n  ok    a text delete answer keeps their inbox for the retry\n  ok    a text delete answer keeps their requests for the retry\n  ok    an unknown answer to deleting their own lists throws\n\nPrivate messages controls\n  ok    exact empty lists finish with nothing\n  ok    exact empty lists still clear who they declined\n  ok    healthy lists erase both conversations\n  ok    the first conversation is gone\n  ok    its read marks are gone\n  ok    the request is gone\n  ok    the other person's index no longer points to it\n  ok    the third person's index no longer points to it\n  ok    their inbox is gone\n  ok    their requests are gone\n  ok    who they declined is gone\n\n96 checks, all passing.\nM_BUDGET {\"pipelineCommands\":59,\"memoryRun\":267,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"community-chat.test.ts","checked":15}
+{"mode":"head","test":"community-chat.test.ts","exit":0,"signal":null,"tail":"\nWhat the settings parse to\n  ok    a community from before has no room\n  ok    links are allowed unless said otherwise\n  ok    a cooldown past the limit is clamped\n  ok    a negative one is none\n\nSaying something\n  ok    a closed room takes nothing\n  ok    empty is not a message\n  ok    a real message is kept\n  ok    it is numbered\n  ok    the room holds it\n\nReading the room\n  ok    both are there, oldest first\n  ok    the cursor is the last number\n  ok    asking since the first brings only the second\n  ok    asking since the last brings nothing\n\nWeb addresses, when the room does not take them\n  ok    a member is refused\n  ok    the creator is not\n  ok    plain words still pass\n\nWhen only the creator writes\n  ok    a member is refused\n  ok    the creator is not\n\nThe cooldown\n  ok    the first goes\n  ok    the second is refused\n  ok    and says how long is left\n  ok    somebody else is not waiting\n  ok    the creator never waits\n  ok    once the wait is over, they may speak again\n\nTaking something out, and emptying it\n  ok    one message goes\n  ok    a number that is not there says so\n  ok    emptying it leaves nothing\n\nHow much it keeps\n  ok    never more than the cap\n  ok    and what it kept is the newest\n\nEvery refusal has its own words\n  ok    none is empty\n  ok    none repeats another\n  ok    the cooldown says how long is left\n  ok    the hourly ceiling is NOT the cooldown's sentence\n  ok    somebody whose place ended is not told to try again\n  ok    a full community is not told to try again\n\n35 checks, all passing.\nM_BUDGET {\"pipelineCommands\":1606,\"memoryRun\":1606,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"community-dm.test.ts","checked":269}
+{"mode":"head","test":"community-dm.test.ts","exit":0,"signal":null,"tail":"\nA stranger's first message waits\n  ok    it lands as a request\n  ok    one request is waiting\n  ok    it is NOT among her conversations\n  ok    it is among the sender's\n  ok    she sees it in the request list\n  ok    the thread reads as pending for her\n  ok    she can read what was written\n\nAccepting turns it into a conversation\n  ok    accepting works\n  ok    it is among her conversations now\n  ok    no request is left\n  ok    and it is no longer pending\n  ok    a reply is not a request\n  ok    nor is the one after it\n  ok    all three are in the thread\n\nDeclining removes it, with its messages, for good\n  ok    the stranger is queued\n  ok    declining works\n  ok    the request is gone\n  ok    it is gone from the sender's list too\n  ok    the messages went with it\n  ok    and they cannot ask again\n\nThe creator neither asks nor is made to ask\n  ok    creator to member goes straight through\n  ok    member to creator goes straight through\n\nWith the queue switched off\n  ok    a first message arrives directly\n  ok    and lands among her conversations\n\nWhat counts as unread\n  ok    a message she has not opened is new\n  ok    opening it stops it being new\n\n26 checks, all passing.\nM_BUDGET {\"pipelineCommands\":148,\"memoryRun\":148,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"community-chat-copy-evidence.test.ts","checked":15}
+{"mode":"head","test":"community-chat-copy-evidence.test.ts","exit":0,"signal":null,"tail":"\nConfirmed room evidence\n  ok    a confirmed empty room gives an empty copy\n  ok    only this member's valid message is copied\n  ok    the copy uses one existing pipeline\n  ok    the copy asks one existing room read\n  ok    the room is read by score\n\nThe pipeline envelope is evidence\n  ok    a non-list response is unknown\n  ok    a missing result is unknown\n  ok    an extra result is unknown\n  ok    a null room is unknown\n  ok    an object room is unknown\n\nThe nested room must contain only own inert rows\n  ok    a sparse room is unknown\n  ok    an inherited row is unknown\n  ok    a row getter is rejected before execution\n  ok    a proxied room is rejected before its traps\n  ok    an outer getter is rejected before execution\n\nEvery stored row must identify whose words it holds\n  ok    non-string row is unknown\n  ok    invalid JSON is unknown\n  ok    null JSON is unknown\n  ok    array JSON is unknown\n  ok    missing number is unknown\n  ok    fractional number is unknown\n  ok    missing author is unknown\n  ok    non-string author is unknown\n  ok    whitespace author is unknown\n  ok    impossible author is unknown\n  ok    missing text is unknown\n  ok    non-string text is unknown\n  ok    missing time is unknown\n  ok    non-number time is unknown\n  ok    invalid other member row is unknown\n  ok    other then member duplicate authors are unknown\n  ok    member then other duplicate authors are unknown\n\n32 checks, all passing.\nM_BUDGET {\"pipelineCommands\":0,\"memoryRun\":0,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"person-erasure.test.ts","checked":499}
+{"mode":"head","test":"person-erasure.test.ts","exit":0,"signal":null,"tail":"verything else is as it was before them\n  ok    the activity log says a person was deleted, never who\n\nWhat it takes covers what it costs\n  ok    the base units cover the request itself and Discord\n  ok    units cover 550 commands and 310000 bytes\n  ok    units cover 1272 commands and 1709000 bytes\n  ok    units cover 39130 commands and 20115000 bytes\n  ok    the least a deletion takes is what the help says\n\n32 checks, all passing.\nM_BUDGET {\"pipelineCommands\":3131,\"memoryRun\":3332,\"httpMockDispatch\":2,\"exceeded\":false}\ndeleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.\n    at resolveBlobAuth (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:44135:9)\n    at async requestApi (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:44304:16)\n    at async del (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:45483:3)\ndeleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.\n    at resolveBlobAuth (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:44135:9)\n    at async requestApi (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:44304:16)\n    at async del (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:45483:3)\n"}
+✘ [ERROR] Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3136/view/components/site-footer" (originally "@/components/site-footer")
+
+    app/privacy/delete/page.tsx:5:27:
+      5 │ import { SiteFooter } from "@/components/site-footer";
+        ╵                            ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  The path "@/components/site-footer" was remapped to "/workspace/scratch/d1ece80b1417/m-review-3136/view/components/site-footer" using the alias feature, which then couldn't be resolved. Keep in mind that import path aliases are resolved in the current working directory.
+
+/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+app/privacy/delete/page.tsx:5:27: ERROR: Could not resolve "/workspace/scratch/d1ece80b1417/m-review-3136/view/components/site-footer" (originally "@/components/site-footer")
+    at failureErrorWithLog (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+```
+
+### own.log
+```
+{"mode":"before","test":"m-3136-delete-retry.proof.ts","checked":268}
+{"mode":"before","test":"m-3136-delete-retry.proof.ts","exit":1,"signal":null,"tail":"  ok    the real conversation-delete pipeline was refused once\n  FAIL  unapplied null deletion replies cannot say done\n        expected true\n        got      false\n  ok    the member index and actual private message remain reachable\n  ok    a healthy retry still discovers and erases the conversation\n  ok    healthy retry clears data and both index entries\n\n5 checks, 1 failing.\nM_BUDGET {\"pipelineCommands\":16,\"memoryRun\":16,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+{"mode":"head","test":"m-3136-delete-retry.proof.ts","checked":268}
+{"mode":"head","test":"m-3136-delete-retry.proof.ts","exit":0,"signal":null,"tail":"  ok    the real conversation-delete pipeline was refused once\n  ok    unapplied null deletion replies cannot say done\n  ok    the member index and actual private message remain reachable\n  ok    a healthy retry still discovers and erases the conversation\n  ok    healthy retry clears data and both index entries\n\n5 checks, all passing.\nM_BUDGET {\"pipelineCommands\":16,\"memoryRun\":16,\"httpMockDispatch\":0,\"exceeded\":false}\n"}
+
+```
+
+### route.log
+```
+{"mode":"head","test":"erasure-request-full.test.ts","checked":474}
+{"mode":"head","test":"erasure-request-full.test.ts","exit":0,"signal":null,"tail":"  ok    the address is known to both stores\n\n(a) The first store has no room: the next one sends the link\n  ok    the link is sent\n  ok    to the address, naming both stores\n  ok    taken from the second store's share, nothing more from the first\n\n(b) Asked for every store, no store has room: the same answer as an unknown address\n  ok    nothing is sent\n  ok    the known address is told what an unknown one is: 'sent', no day\n  ok    and that page gives the privacy contact\n\n(c) Asked from one store that has no room: the page says so honestly, the same for every address\n  ok    nothing is sent\n  ok    the answer is that it is full, not an error\n  ok    with the first whole day the store's window has ended by\n  ok    the page says it cannot be emailed now\n  ok    and when\n  ok    and does not say to try again in a moment\n  ok    the contact it gives is the one the Privacy Policy publishes\n  ok    a day that cannot be read is left out, the rest is said\n  ok    an address the store does not know gets exactly the same answer\n\nThe day shown is never one the store is still full on\n  ok    its window ends at 23:30 UTC\n  ok    it is shown as the day after it ends, the first whole day it is open\n  ok    a window ending at 00:00 UTC keeps its own day\n\nBuyers keep their reserved half\n  ok    a buyer's course link from a full store is still sent\n  ok    and the deletion links never went past a visitor's share of either store\n\n21 checks, all passing.\nM_BUDGET {\"pipelineCommands\":135,\"memoryRun\":188,\"httpMockDispatch\":2,\"exceeded\":false}\na deletion link asked for every store was not emailed: full (stores c5949c76a06341dfbe9fce54b052a131,bb8c105d66cc4dbebe5cf7d797d4c1a0)\n"}
+
+```
+
+### final-verify.log
+```
+types 0
+lint 0 null undefined
+
+```
+
+### types.log
+```
+{"roots":4,"sources":840,"diagnostics":0}
+```
+
+### lint.log
+```
+
+```
+
+### scanner-final.log
+```
+Public data check: 3981 tracked files; 0 file(s) require correction.
+
+```
+
+### verified.json
+```
+{"verified": 3980, "mismatch": [], "unrecovered": 387}
+```
+
+### FULL before-community-erasers-unknown.test.ts.cjs.log
+```
+
+Room: a lost or off-shape read deletes nothing and is not done
+  ok    a null pipeline throws
+  ok    a null pipeline sends no delete
+  ok    a null pipeline keeps their line
+  ok    a non-list pipeline throws
+  ok    a non-list pipeline sends no delete
+  ok    a non-list pipeline keeps their line
+  FAIL  a short pipeline throws
+        expected true
+        got      false
+  FAIL  a short pipeline sends no delete
+        expected 0
+        got      1
+  ok    a short pipeline keeps their line
+  FAIL  an extra reply throws
+        expected true
+        got      false
+  FAIL  an extra reply sends no delete
+        expected 0
+        got      2
+  FAIL  an extra reply keeps their line
+        expected true
+        got      false
+  FAIL  a null room throws
+        expected true
+        got      false
+  FAIL  a null room sends no delete
+        expected 0
+        got      1
+  ok    a null room keeps their line
+  FAIL  a text room throws
+        expected true
+        got      false
+  FAIL  a text room sends no delete
+        expected 0
+        got      1
+  ok    a text room keeps their line
+  FAIL  an object room throws
+        expected true
+        got      false
+  FAIL  an object room sends no delete
+        expected 0
+        got      1
+  ok    an object room keeps their line
+  FAIL  a non-string entry throws
+        expected true
+        got      false
+  FAIL  a non-string entry sends no delete
+        expected 0
+        got      2
+  FAIL  a non-string entry keeps their line
+        expected true
+        got      false
+  FAIL  a hole in the room throws
+        expected true
+        got      false
+  FAIL  a hole in the room sends no delete
+        expected 0
+        got      1
+  ok    a hole in the room keeps their line
+
+Room: an unknown answer to the delete is not done
+  FAIL  a null delete answer throws
+        expected true
+        got      false
+  FAIL  a short delete answer throws
+        expected true
+        got      false
+  FAIL  a text delete answer throws
+        expected true
+        got      false
+
+Room controls
+  ok    an exact empty room finishes with nothing
+  ok    an exact empty room still clears the cooldown
+  ok    a healthy room erases their one line
+  ok    their line is gone
+  ok    their cooldown is gone
+
+Private messages: a lost or off-shape read deletes nothing, own lists included
+  ok    a null pipeline throws
+  ok    a null pipeline sends no delete
+  ok    a null pipeline keeps their inbox
+  ok    a null pipeline keeps the conversation
+  FAIL  a non-list pipeline throws
+        expected true
+        got      false
+  FAIL  a non-list pipeline sends no delete
+        expected 0
+        got      1
+  FAIL  a non-list pipeline keeps their inbox
+        expected 1
+        got      0
+  ok    a non-list pipeline keeps the conversation
+  FAIL  a short pipeline throws
+        expected true
+        got      false
+  FAIL  a short pipeline sends no delete
+        expected 0
+        got      4
+  FAIL  a short pipeline keeps their inbox
+        expected 1
+        got      0
+  FAIL  a short pipeline keeps the conversation
+        expected 1
+        got      0
+  FAIL  an empty pipeline throws
+        expected true
+        got      false
+  FAIL  an empty pipeline sends no delete
+        expected 0
+        got      1
+  FAIL  an empty pipeline keeps their inbox
+        expected 1
+        got      0
+  ok    an empty pipeline keeps the conversation
+  FAIL  an extra reply throws
+        expected true
+        got      false
+  FAIL  an extra reply sends no delete
+        expected 0
+        got      7
+  FAIL  an extra reply keeps their inbox
+        expected 1
+        got      0
+  FAIL  an extra reply keeps the conversation
+        expected 1
+        got      0
+  FAIL  a null inbox throws
+        expected true
+        got      false
+  FAIL  a null inbox sends no delete
+        expected 0
+        got      4
+  FAIL  a null inbox keeps their inbox
+        expected 1
+        got      0
+  ok    a null inbox keeps the conversation
+  FAIL  a null requests list throws
+        expected true
+        got      false
+  FAIL  a null requests list sends no delete
+        expected 0
+        got      4
+  FAIL  a null requests list keeps their inbox
+        expected 1
+        got      0
+  FAIL  a null requests list keeps the conversation
+        expected 1
+        got      0
+  FAIL  an object inbox throws
+        expected true
+        got      false
+  FAIL  an object inbox sends no delete
+        expected 0
+        got      1
+  FAIL  an object inbox keeps their inbox
+        expected 1
+        got      0
+  ok    an object inbox keeps the conversation
+  FAIL  a non-string entry throws
+        expected true
+        got      false
+  FAIL  a non-string entry sends no delete
+        expected 0
+        got      4
+  FAIL  a non-string entry keeps their inbox
+        expected 1
+        got      0
+  FAIL  a non-string entry keeps the conversation
+        expected 1
+        got      0
+  FAIL  a hole in the requests throws
+        expected true
+        got      false
+  FAIL  a hole in the requests sends no delete
+        expected 0
+        got      4
+  FAIL  a hole in the requests keeps their inbox
+        expected 1
+        got      0
+  FAIL  a hole in the requests keeps the conversation
+        expected 1
+        got      0
+
+Private messages: their own lists go only after the conversations are confirmed gone
+  FAIL  a null delete answer throws
+        expected true
+        got      false
+  FAIL  a null delete answer keeps their inbox for the retry
+        expected 1
+        got      0
+  FAIL  a null delete answer keeps their requests for the retry
+        expected 1
+        got      0
+  FAIL  a short delete answer throws
+        expected true
+        got      false
+  FAIL  a short delete answer keeps their inbox for the retry
+        expected 1
+        got      0
+  FAIL  a short delete answer keeps their requests for the retry
+        expected 1
+        got      0
+  FAIL  a text delete answer throws
+        expected true
+        got      false
+  FAIL  a text delete answer keeps their inbox for the retry
+        expected 1
+        got      0
+  FAIL  a text delete answer keeps their requests for the retry
+        expected 1
+        got      0
+  FAIL  an unknown answer to deleting their own lists throws
+        expected true
+        got      false
+
+Private messages controls
+  ok    exact empty lists finish with nothing
+  ok    exact empty lists still clear who they declined
+  ok    healthy lists erase both conversations
+  ok    the first conversation is gone
+  ok    its read marks are gone
+  ok    the request is gone
+  ok    the other person's index no longer points to it
+  ok    the third person's index no longer points to it
+  ok    their inbox is gone
+  ok    their requests are gone
+  ok    who they declined is gone
+
+96 checks, 61 failing.
+M_BUDGET {"pipelineCommands":101,"memoryRun":309,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL before-m-3136-delete-retry.proof.ts.cjs.log
+```
+  ok    the real conversation-delete pipeline was refused once
+  FAIL  unapplied null deletion replies cannot say done
+        expected true
+        got      false
+  ok    the member index and actual private message remain reachable
+  ok    a healthy retry still discovers and erases the conversation
+  ok    healthy retry clears data and both index entries
+
+5 checks, 1 failing.
+M_BUDGET {"pipelineCommands":16,"memoryRun":16,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-community-chat-copy-evidence.test.ts.cjs.log
+```
+
+Confirmed room evidence
+  ok    a confirmed empty room gives an empty copy
+  ok    only this member's valid message is copied
+  ok    the copy uses one existing pipeline
+  ok    the copy asks one existing room read
+  ok    the room is read by score
+
+The pipeline envelope is evidence
+  ok    a non-list response is unknown
+  ok    a missing result is unknown
+  ok    an extra result is unknown
+  ok    a null room is unknown
+  ok    an object room is unknown
+
+The nested room must contain only own inert rows
+  ok    a sparse room is unknown
+  ok    an inherited row is unknown
+  ok    a row getter is rejected before execution
+  ok    a proxied room is rejected before its traps
+  ok    an outer getter is rejected before execution
+
+Every stored row must identify whose words it holds
+  ok    non-string row is unknown
+  ok    invalid JSON is unknown
+  ok    null JSON is unknown
+  ok    array JSON is unknown
+  ok    missing number is unknown
+  ok    fractional number is unknown
+  ok    missing author is unknown
+  ok    non-string author is unknown
+  ok    whitespace author is unknown
+  ok    impossible author is unknown
+  ok    missing text is unknown
+  ok    non-string text is unknown
+  ok    missing time is unknown
+  ok    non-number time is unknown
+  ok    invalid other member row is unknown
+  ok    other then member duplicate authors are unknown
+  ok    member then other duplicate authors are unknown
+
+32 checks, all passing.
+M_BUDGET {"pipelineCommands":0,"memoryRun":0,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-community-chat.test.ts.cjs.log
+```
+
+What the settings parse to
+  ok    a community from before has no room
+  ok    links are allowed unless said otherwise
+  ok    a cooldown past the limit is clamped
+  ok    a negative one is none
+
+Saying something
+  ok    a closed room takes nothing
+  ok    empty is not a message
+  ok    a real message is kept
+  ok    it is numbered
+  ok    the room holds it
+
+Reading the room
+  ok    both are there, oldest first
+  ok    the cursor is the last number
+  ok    asking since the first brings only the second
+  ok    asking since the last brings nothing
+
+Web addresses, when the room does not take them
+  ok    a member is refused
+  ok    the creator is not
+  ok    plain words still pass
+
+When only the creator writes
+  ok    a member is refused
+  ok    the creator is not
+
+The cooldown
+  ok    the first goes
+  ok    the second is refused
+  ok    and says how long is left
+  ok    somebody else is not waiting
+  ok    the creator never waits
+  ok    once the wait is over, they may speak again
+
+Taking something out, and emptying it
+  ok    one message goes
+  ok    a number that is not there says so
+  ok    emptying it leaves nothing
+
+How much it keeps
+  ok    never more than the cap
+  ok    and what it kept is the newest
+
+Every refusal has its own words
+  ok    none is empty
+  ok    none repeats another
+  ok    the cooldown says how long is left
+  ok    the hourly ceiling is NOT the cooldown's sentence
+  ok    somebody whose place ended is not told to try again
+  ok    a full community is not told to try again
+
+35 checks, all passing.
+M_BUDGET {"pipelineCommands":1606,"memoryRun":1606,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-community-dm.test.ts.cjs.log
+```
+
+A stranger's first message waits
+  ok    it lands as a request
+  ok    one request is waiting
+  ok    it is NOT among her conversations
+  ok    it is among the sender's
+  ok    she sees it in the request list
+  ok    the thread reads as pending for her
+  ok    she can read what was written
+
+Accepting turns it into a conversation
+  ok    accepting works
+  ok    it is among her conversations now
+  ok    no request is left
+  ok    and it is no longer pending
+  ok    a reply is not a request
+  ok    nor is the one after it
+  ok    all three are in the thread
+
+Declining removes it, with its messages, for good
+  ok    the stranger is queued
+  ok    declining works
+  ok    the request is gone
+  ok    it is gone from the sender's list too
+  ok    the messages went with it
+  ok    and they cannot ask again
+
+The creator neither asks nor is made to ask
+  ok    creator to member goes straight through
+  ok    member to creator goes straight through
+
+With the queue switched off
+  ok    a first message arrives directly
+  ok    and lands among her conversations
+
+What counts as unread
+  ok    a message she has not opened is new
+  ok    opening it stops it being new
+
+26 checks, all passing.
+M_BUDGET {"pipelineCommands":148,"memoryRun":148,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-community-erasers-unknown.test.ts.cjs.log
+```
+
+Room: a lost or off-shape read deletes nothing and is not done
+  ok    a null pipeline throws
+  ok    a null pipeline sends no delete
+  ok    a null pipeline keeps their line
+  ok    a non-list pipeline throws
+  ok    a non-list pipeline sends no delete
+  ok    a non-list pipeline keeps their line
+  ok    a short pipeline throws
+  ok    a short pipeline sends no delete
+  ok    a short pipeline keeps their line
+  ok    an extra reply throws
+  ok    an extra reply sends no delete
+  ok    an extra reply keeps their line
+  ok    a null room throws
+  ok    a null room sends no delete
+  ok    a null room keeps their line
+  ok    a text room throws
+  ok    a text room sends no delete
+  ok    a text room keeps their line
+  ok    an object room throws
+  ok    an object room sends no delete
+  ok    an object room keeps their line
+  ok    a non-string entry throws
+  ok    a non-string entry sends no delete
+  ok    a non-string entry keeps their line
+  ok    a hole in the room throws
+  ok    a hole in the room sends no delete
+  ok    a hole in the room keeps their line
+
+Room: an unknown answer to the delete is not done
+  ok    a null delete answer throws
+  ok    a short delete answer throws
+  ok    a text delete answer throws
+
+Room controls
+  ok    an exact empty room finishes with nothing
+  ok    an exact empty room still clears the cooldown
+  ok    a healthy room erases their one line
+  ok    their line is gone
+  ok    their cooldown is gone
+
+Private messages: a lost or off-shape read deletes nothing, own lists included
+  ok    a null pipeline throws
+  ok    a null pipeline sends no delete
+  ok    a null pipeline keeps their inbox
+  ok    a null pipeline keeps the conversation
+  ok    a non-list pipeline throws
+  ok    a non-list pipeline sends no delete
+  ok    a non-list pipeline keeps their inbox
+  ok    a non-list pipeline keeps the conversation
+  ok    a short pipeline throws
+  ok    a short pipeline sends no delete
+  ok    a short pipeline keeps their inbox
+  ok    a short pipeline keeps the conversation
+  ok    an empty pipeline throws
+  ok    an empty pipeline sends no delete
+  ok    an empty pipeline keeps their inbox
+  ok    an empty pipeline keeps the conversation
+  ok    an extra reply throws
+  ok    an extra reply sends no delete
+  ok    an extra reply keeps their inbox
+  ok    an extra reply keeps the conversation
+  ok    a null inbox throws
+  ok    a null inbox sends no delete
+  ok    a null inbox keeps their inbox
+  ok    a null inbox keeps the conversation
+  ok    a null requests list throws
+  ok    a null requests list sends no delete
+  ok    a null requests list keeps their inbox
+  ok    a null requests list keeps the conversation
+  ok    an object inbox throws
+  ok    an object inbox sends no delete
+  ok    an object inbox keeps their inbox
+  ok    an object inbox keeps the conversation
+  ok    a non-string entry throws
+  ok    a non-string entry sends no delete
+  ok    a non-string entry keeps their inbox
+  ok    a non-string entry keeps the conversation
+  ok    a hole in the requests throws
+  ok    a hole in the requests sends no delete
+  ok    a hole in the requests keeps their inbox
+  ok    a hole in the requests keeps the conversation
+
+Private messages: their own lists go only after the conversations are confirmed gone
+  ok    a null delete answer throws
+  ok    a null delete answer keeps their inbox for the retry
+  ok    a null delete answer keeps their requests for the retry
+  ok    a short delete answer throws
+  ok    a short delete answer keeps their inbox for the retry
+  ok    a short delete answer keeps their requests for the retry
+  ok    a text delete answer throws
+  ok    a text delete answer keeps their inbox for the retry
+  ok    a text delete answer keeps their requests for the retry
+  ok    an unknown answer to deleting their own lists throws
+
+Private messages controls
+  ok    exact empty lists finish with nothing
+  ok    exact empty lists still clear who they declined
+  ok    healthy lists erase both conversations
+  ok    the first conversation is gone
+  ok    its read marks are gone
+  ok    the request is gone
+  ok    the other person's index no longer points to it
+  ok    the third person's index no longer points to it
+  ok    their inbox is gone
+  ok    their requests are gone
+  ok    who they declined is gone
+
+96 checks, all passing.
+M_BUDGET {"pipelineCommands":59,"memoryRun":267,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-erasure-request-full.test.ts.cjs.log
+```
+  ok    the address is known to both stores
+
+(a) The first store has no room: the next one sends the link
+  ok    the link is sent
+  ok    to the address, naming both stores
+  ok    taken from the second store's share, nothing more from the first
+
+(b) Asked for every store, no store has room: the same answer as an unknown address
+  ok    nothing is sent
+  ok    the known address is told what an unknown one is: 'sent', no day
+  ok    and that page gives the privacy contact
+
+(c) Asked from one store that has no room: the page says so honestly, the same for every address
+  ok    nothing is sent
+  ok    the answer is that it is full, not an error
+  ok    with the first whole day the store's window has ended by
+  ok    the page says it cannot be emailed now
+  ok    and when
+  ok    and does not say to try again in a moment
+  ok    the contact it gives is the one the Privacy Policy publishes
+  ok    a day that cannot be read is left out, the rest is said
+  ok    an address the store does not know gets exactly the same answer
+
+The day shown is never one the store is still full on
+  ok    its window ends at 23:30 UTC
+  ok    it is shown as the day after it ends, the first whole day it is open
+  ok    a window ending at 00:00 UTC keeps its own day
+
+Buyers keep their reserved half
+  ok    a buyer's course link from a full store is still sent
+  ok    and the deletion links never went past a visitor's share of either store
+
+21 checks, all passing.
+M_BUDGET {"pipelineCommands":135,"memoryRun":188,"httpMockDispatch":2,"exceeded":false}
+a deletion link asked for every store was not emailed: full (stores c5949c76a06341dfbe9fce54b052a131,bb8c105d66cc4dbebe5cf7d797d4c1a0)
+
+```
+
+### FULL head-m-3136-delete-retry.proof.ts.cjs.log
+```
+  ok    the real conversation-delete pipeline was refused once
+  ok    unapplied null deletion replies cannot say done
+  ok    the member index and actual private message remain reachable
+  ok    a healthy retry still discovers and erases the conversation
+  ok    healthy retry clears data and both index entries
+
+5 checks, all passing.
+M_BUDGET {"pipelineCommands":16,"memoryRun":16,"httpMockDispatch":0,"exceeded":false}
+
+```
+
+### FULL head-person-erasure.test.ts.cjs.log
+```
+
+A person in every part of a store, deleted
+  ok    the person is in many parts of the store
+  ok    and their seeding changed many keys, so the comparison below means something
+  ok    the store finds them for every-store requests
+  ok    asking sends a link
+  ok    the email carries a link that works
+  ok    asking about an address no store knows sends nothing, and says the same
+  ok    the link names the address and the store
+  ok    the link deletes them
+  ok    it sent no more commands than it took units for (240 of 602)
+  ok    and moved no more bytes (60705 of 396850)
+  ok    the units it takes cover that work
+  ok    the link works once
+  ok    the store's owner is told, not asked
+  (left as allowed: nl:allow:email:…:2026-10-28, nl:allow:studio:…:2026-10-28, nl:allow:transactional:…:2026-10-28, nl:data:…, nl:data:room-test-store, nl:erased:…, nl:health:…, nl:mail:flowstats:7b26f98790416e19, nl:rl:erase-address:…, nl:rl:erase-address:…, nl:rl:erase-ip:…, nl:rl:erase-ip:…, nl:rsum:ver:…:aac5ec1109, nl:sender:2026-11, nl:stats:…:ledger, nl:tasks:doors, nl:wf:day:…:2026-11-07, nl:wl:…:aac5ec1109:send)
+  ok    everything is as it was before them, but what is allowed to change
+  ok    no key or value names them, by address or by any key made from it
+  ok    only a fingerprint is kept, under the store's list
+  ok    which cannot be read back to the address
+  ok    the other person is untouched
+  ok    the store knows the address was deleted
+  ok    an import leaves them out
+  ok    a purchase without their own yes notes the purchase, not a yes
+  ok    their own yes, given again, puts them back and lifts the fingerprint
+  ok    the studio deletes them
+  ok    what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them
+  ok    their review stays, without their address (a store may not take reviews down)
+  ok    and everything else is as it was before them
+  ok    the activity log says a person was deleted, never who
+
+What it takes covers what it costs
+  ok    the base units cover the request itself and Discord
+  ok    units cover 550 commands and 310000 bytes
+  ok    units cover 1272 commands and 1709000 bytes
+  ok    units cover 39130 commands and 20115000 bytes
+  ok    the least a deletion takes is what the help says
+
+32 checks, all passing.
+M_BUDGET {"pipelineCommands":3131,"memoryRun":3332,"httpMockDispatch":2,"exceeded":false}
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:44135:9)
+    at async requestApi (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:44304:16)
+    at async del (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:45483:3)
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:44135:9)
+    at async requestApi (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:44304:16)
+    at async del (/workspace/scratch/d1ece80b1417/m-review-3136/logs/head-person-erasure.test.ts.cjs:45483:3)
+
+```
+
+### Own proof ec0c558b76736b1877aa9719dc02e786a164de83
+```ts
+import { forgetDmPerson } from "@/lib/community-dm";
+import { store as redis } from "./redis-stub";
+import { done, is } from "./check";
+const id = "c".repeat(32), who = "a".repeat(32), other = "b".repeat(32);
+const pair = `${who}.${other}`, base = `nl:cm:${id}`;
+const inbox = `${base}:dm:i:${who}`, chat = `${base}:dm:${pair}`;
+const original = redis.pipeline;
+async function main() {
+  redis.clear();
+  await original.call(redis, [["ZADD", inbox, 1, pair], ["ZADD", `${base}:dm:i:${other}`, 1, pair], ["RPUSH", chat, "private synthetic message"]]);
+  let intercepted = 0, rejected = false;
+  redis.pipeline = (async commands => {
+    if (commands.some(command => command[0] === "DEL" && command[1] === chat)) { intercepted++; return commands.map(() => null); }
+    return original.call(redis, commands);
+  }) as typeof redis.pipeline;
+  try { await forgetDmPerson(id, who); } catch { rejected = true; } finally { redis.pipeline = original; }
+  is("the real conversation-delete pipeline was refused once", intercepted, 1);
+  is("unapplied null deletion replies cannot say done", rejected, true);
+  is("the member index and actual private message remain reachable", await original.call(redis, [["EXISTS", inbox], ["EXISTS", chat]]), [1, 1]);
+  is("a healthy retry still discovers and erases the conversation", await forgetDmPerson(id, who), 1);
+  is("healthy retry clears data and both index entries", await original.call(redis, [["EXISTS", inbox], ["EXISTS", chat], ["ZSCORE", `${base}:dm:i:${other}`, pair]]), [0, 0, null]);
+  done();
+}
+void main();
+
+```
+

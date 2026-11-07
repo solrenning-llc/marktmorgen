@@ -49,7 +49,8 @@ import { type Store, saleHandles } from "@/lib/store";
 import { listingFinder } from "@/lib/catalog";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { type Contact, leadsKey, parseContact } from "@/lib/contacts";
-import { readFlows, flowsStartedFor } from "@/lib/flows";
+import { type FlowCharge, FlowMeter, FlowNotCounted, flowsStartedFor } from "@/lib/flows";
+import { NOT_COUNTED } from "@/lib/person-agenda-read";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
@@ -282,8 +283,15 @@ export type BuyerProfile = {
   memberships: ProfileMembership[];
   courses: ProfileCourse[];
   calls: BookedCall[];
-  /** The names of the sequences they were started on. */
-  sequences: string[];
+  /**
+   * The names of the sequences they were started on; null when they could
+   * not be loaded (the studio requests reading the store's workflows takes
+   * were not left, or the list or the starts did not come back), never
+   * shown as none.
+   */
+  sequences: string[] | null;
+  /** Why the sequences are not on the page, in words; "" when they are. */
+  sequencesNotLoaded: string;
   person: string;
   notes: PersonNote[];
   /** Stripe held more of their payments than one reading takes. */
@@ -328,12 +336,41 @@ function periodEnd(sub: Row): number {
   return Array.isArray(items) && items[0] && typeof items[0] === "object" ? num((items[0] as Row).current_period_end) : 0;
 }
 
+/** Said when the store's workflows or this person's starts in them could not be read. */
+export const SEQUENCES_UNREAD = "Your sequences could not be read just now. Try again in a minute.";
+
+/**
+ * Which of the store's sequences this address was started on, by name. The
+ * whole list of workflows is read to know their names (up to MAX_FLOWS of
+ * MAX_STEPS steps), so it goes through the workflows' meter (lib/flows.ts,
+ * FlowMeter, as the email page and the studio's actions do): measured before
+ * it is read, and what reading it comes to past the page's own studio
+ * requests taken first. Only the names of the sequences they are on are sent
+ * on, so nothing is counted for sending it (regra 30 of #1927, 7 November
+ * 2026). Not counted, not left, or not read: not loaded, with why.
+ */
+async function sequencesFor(store: Store, email: string, charge: FlowCharge): Promise<{ names: string[] | null; why: string }> {
+  if (!store.listId) return { names: [], why: "" };
+  try {
+    const flows = await new FlowMeter(charge).list(store.listId, false);
+    const started = new Set(await flowsStartedFor(flows, email));
+    return { names: flows.filter((f) => started.has(f.id)).map((f) => f.name), why: "" };
+  } catch (error) {
+    if (error instanceof FlowNotCounted) {
+      return { names: null, why: error.said ? `Reading your sequences takes studio requests. ${error.said}` : NOT_COUNTED };
+    }
+    console.error("reading a buyer's sequences failed", error);
+    return { names: null, why: SEQUENCES_UNREAD };
+  }
+}
+
 /**
  * Everything one address has done with this store, for its page in the
  * studio. Stripe is read for the money; when it cannot be, the rest of the
- * page is still there and says so.
+ * page is still there and says so. `chargeFlows` takes the studio requests
+ * reading the store's workflows comes to (sequencesFor).
  */
-export async function buyerProfile(store: Store, rawEmail: string): Promise<BuyerProfile> {
+export async function buyerProfile(store: Store, rawEmail: string, chargeFlows: FlowCharge): Promise<BuyerProfile> {
   const email = normaliseEmail(rawEmail);
   const person = store.statsId ? personKey(store.statsId, email) : "";
   const find = listingFinder(store);
@@ -591,14 +628,13 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   const lastRecorded = [...sales].reverse().find((s) => s.recorded);
 
   // The list, the sequences, the courses, the calls and the notes, side by side.
-  const [contactRaw, flows, calls, notes] = await Promise.all([
+  const [contactRaw, sequences, calls, notes] = await Promise.all([
     store.listId && isRedisConfigured() ? redisPipeline([["HGET", leadsKey(store.listId), email]]).then(([raw]) => raw) : Promise.resolve(null),
-    store.listId ? readFlows(store.listId).catch(() => []) : Promise.resolve([]),
+    sequencesFor(store, email, chargeFlows),
     callsFor(store, email).catch(() => [] as BookedCall[]),
     store.statsId ? readPersonNotes(store.statsId, person) : Promise.resolve([]),
   ]);
   const contact = parseContact(contactRaw);
-  const started = new Set(await flowsStartedFor(flows, email).catch(() => [] as string[]));
 
   const courses: ProfileCourse[] = [];
   const seen = new Set<string>();
@@ -636,7 +672,8 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
     memberships: memberships.sort((a, b) => b.since - a.since),
     courses,
     calls,
-    sequences: flows.filter((f) => started.has(f.id)).map((f) => f.name),
+    sequences: sequences.names,
+    sequencesNotLoaded: sequences.why,
     person,
     notes,
     partial,

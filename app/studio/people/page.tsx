@@ -14,7 +14,7 @@ import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
 import { readFields, readPersonTasks, readValues } from "@/lib/crm";
 import { PERSON_KEY, addressForPerson } from "@/lib/person-agenda";
-import { agendaData, countLedger } from "@/lib/person-agenda-read";
+import { agendaData, countLedger, countUnits } from "@/lib/person-agenda-read";
 import { type PersonTask, taskAssignees } from "@/lib/person-tasks";
 import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
@@ -110,7 +110,9 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
     });
   }
   const asked = Boolean(token || sale || who);
-  const profile = email ? await buyerProfile(store, email) : null;
+  // The store's workflows are measured before they are read for the sequences this person is on, and what reading them
+  // comes to past the page's own studio requests is taken first (lib/buyer-profile.ts, sequencesFor).
+  const profile = email ? await buyerProfile(store, email, (units) => countUnits(store, units)) : null;
   // The store's own fields about each person (lib/crm-rules.ts), and this one's answers.
   const fields = profile ? await readFields(store.statsId) : [];
   const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
@@ -441,7 +443,9 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
       <section aria-labelledby="mail-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="mail-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Your emails to them</h2>
         <p className="mt-2 text-sm text-ink-soft">{listWords}</p>
-        {profile.sequences.length ? (
+        {profile.sequences === null ? (
+          <p role="status" className="mt-2 text-sm text-ink-soft">{`Which of your sequences they are on is not shown. ${profile.sequencesNotLoaded}`}</p>
+        ) : profile.sequences.length ? (
           <p className="mt-2 text-sm text-ink-soft">{`Started on ${profile.sequences.length === 1 ? "the sequence" : "the sequences"}: ${profile.sequences.join(", ")}.`}</p>
         ) : null}
         {contact && contact.tags.length ? (

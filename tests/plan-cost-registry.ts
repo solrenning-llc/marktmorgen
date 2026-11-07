@@ -1183,6 +1183,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/flows.ts", names: ["readFlowsForPage", "PAGE_SENT_TIMES", "sent * this.sentTimes", "FLOW_UNIT_COMMANDS", "purgeCost", "await meter?.purge(store, id);", "counted + 2 * dailyRunLimit(store)", "read ?? (await readFlowListStrict(store.listId))"] },
       { file: "lib/flow-runs.ts", names: ["export async function runCount"] },
       { file: "app/studio/email/page.tsx", names: ["readFlowsForPage(store.listId, payStudio)", "countUnits(store, units)", "flowsRefused"] },
+      // A buyer's page in the studio reads the workflows for the sequences the person is on through the same meter, sending
+      // only their names back; without the studio requests, or unread, they are shown as not loaded (tests/people-flow-units.test.ts, 7 November 2026).
+      { file: "lib/buyer-profile.ts", names: ["new FlowMeter(charge).list(store.listId, false)", "sequencesNotLoaded", "SEQUENCES_UNREAD"] },
+      { file: "app/studio/people/page.tsx", names: ["buyerProfile(store, email, (units) => countUnits(store, units))", "profile.sequences === null"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).

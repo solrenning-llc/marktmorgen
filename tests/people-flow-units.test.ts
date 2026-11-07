@@ -133,13 +133,15 @@ async function main(): Promise<void> {
   is("read once", worst.tally.flowsRead, 1);
 
   // ---------------------------------------------------------------- part 2
+  // Regra 23 (changed after the RED commit): "?? \"threw\"" also turned the expected null into "threw"; read as
+  // "a result, or threw" instead, here and in part 3. The expected values are unchanged.
   part("2. Without the studio requests the list needs: not read, said in words, the rest of the page still there");
   const used = await allowanceUsed(store, "studio");
   await forceAllowance(store, "studio", STORE_ALLOWANCES.pro.studio - used - 1);
   const refused = await tallied(listId, () => open(store, BUYER, (u) => countUnits(store, u)));
   const r = refused.result !== "threw" ? refused.result : null;
   is("the list was not read", refused.tally.flowsRead, 0);
-  is("the sequences are not loaded, not 'none'", r?.sequences ?? "threw", null);
+  is("the sequences are not loaded, not 'none'", r ? r.sequences : "threw", null);
   is("and why, in words", (r?.sequencesNotLoaded ?? "").length > 20, true);
   is("the list's record is still on the page", [r?.contact?.agreed, r?.contact?.tags], [true, ["vip"]]);
   is("the page says it in words", /sequencesNotLoaded/.test(page) && /sequences === null/.test(page), true);
@@ -152,14 +154,14 @@ async function main(): Promise<void> {
   await seedPerson(sStore, [one[0]]);
   const down = await tallied(sStore.listId as string, () => open(sStore, BUYER, (u) => countUnits(sStore, u)), (c, key) => c === "GET" && key.startsWith("nl:mail:flows:"));
   const d = down.result !== "threw" ? down.result : null;
-  is("the list did not come back: not loaded", [d?.sequences ?? "threw", (d?.sequencesNotLoaded ?? "").length > 20], [null, true]);
+  is("the list did not come back: not loaded", [d ? d.sequences : "threw", (d?.sequencesNotLoaded ?? "").length > 20], [null, true]);
   is("the rest is still there", d?.contact?.agreed, true);
   const noStart = await tallied(sStore.listId as string, () => open(sStore, BUYER, (u) => countUnits(sStore, u)), (c) => c === "EXISTS");
   const n = noStart.result !== "threw" ? noStart.result : null;
-  is("the starts did not come back: not loaded", [n?.sequences ?? "threw", (n?.sequencesNotLoaded ?? "").length > 20], [null, true]);
+  is("the starts did not come back: not loaded", [n ? n.sequences : "threw", (n?.sequencesNotLoaded ?? "").length > 20], [null, true]);
   const strlen = await tallied(sStore.listId as string, () => open(sStore, BUYER, async () => ({ ok: true })), (c) => c === "STRLEN");
   const s = strlen.result !== "threw" ? strlen.result : null;
-  is("its size did not come back: not loaded, nothing read", [s?.sequences ?? "threw", strlen.tally.flowsRead], [null, 0]);
+  is("its size did not come back: not loaded, nothing read", [s ? s.sequences : "threw", strlen.tally.flowsRead], [null, 0]);
 
   // ---------------------------------------------------------------- part 4
   part("4. A small list costs nothing beyond the page's own studio requests");

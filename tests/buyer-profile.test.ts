@@ -223,7 +223,9 @@ async function main(): Promise<void> {
   await markLesson(COURSE, "buyer@example.com", "lesson000002", true, ROOM);
 
   part("What they paid");
-  const profile = await buyerProfile(store, "  BUYER@example.com ");
+  // Regra 23 (7 November 2026): buyerProfile takes the studio requests reading the store's workflows comes to
+  // (tests/people-flow-units.test.ts holds them); here every count is granted, no assertion changed.
+  const profile = await buyerProfile(store, "  BUYER@example.com ", async () => ({ ok: true }));
   is("the address, as one", profile.email, "buyer@example.com");
   is("the name Stripe has", profile.name, "Ada Baker");
   is(
@@ -285,7 +287,7 @@ async function main(): Promise<void> {
 
   part("When Stripe cannot be read");
   stripeDown = true;
-  const down = await buyerProfile(store, "buyer@example.com");
+  const down = await buyerProfile(store, "buyer@example.com", async () => ({ ok: true }));
   is("the page says so, and the rest is still there", [down.stripeError, down.orders.length, down.contact?.agreed, down.courses.length], [true, 0, true, 0]);
   stripeDown = false;
 

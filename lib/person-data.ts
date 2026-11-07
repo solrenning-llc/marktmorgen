@@ -74,6 +74,8 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/store-readings.ts", how: "erased", what: "The day's copy of your sales numbers in your studio, which names your biggest buyers, and of your members' numbers" },
   { file: "lib/calendar-sync.ts", how: "erased", what: "The copy of your private booking calendar file, which names who booked" },
   { file: "lib/membership-numbers.ts", how: "erased", via: "lib/store-readings.ts", what: "Your members' numbers, kept a few minutes with what members wrote when they left; what a deleted member wrote is left out each time the numbers are read again from your Stripe account, which keeps it" },
+  { file: "lib/customer-voice.ts", how: "erased", only: "person", what: "The month's summary of what your customers said, which may quote their review words without their name; read again, it leaves them out, and one being read while they are deleted is not kept. What members wrote when leaving is counted there, never quoted" },
+  { file: "lib/customer-voice.ts", how: "erased", only: "team", what: "The month's summary of what your customers said, which may quote their review words without their name; read again, it still quotes the reviews they wrote, which are kept. What members wrote when leaving is counted there, never quoted" },
   { file: "lib/member-health.ts", how: "erased", what: "The ten-minute copy of your members' scores" },
   { file: "lib/inbox.ts", how: "erased", what: "Their conversations in your inbox: what they wrote and what you answered" },
   { file: "lib/imports.ts", how: "expires", days: 14, what: "A file you imported is kept for 14 days after the import began, then deleted with everything in it" },
@@ -102,6 +104,7 @@ export const PERSON_DATA: PersonData[] = [
 
   // ---------------------------------------------------------------- courses
   { file: "lib/learn.ts", how: "erased", what: "Their progress in your courses: when they began and came back, the lessons they marked done, the drip emails sent them, and every browser let in with their address" },
+  { file: "lib/lesson-position.ts", how: "none", what: "Where they stopped in a lesson video is kept only in their own browser, under a code made on our server, and never sent to us (Privacy #lesson-places)" },
   { file: "lib/learn.ts", how: "expires", days: 1, what: "A sign-in link to a course already emailed works for an hour" },
   { file: "lib/course-finish.ts", how: "erased", what: "The marks that they opened and finished each course" },
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },

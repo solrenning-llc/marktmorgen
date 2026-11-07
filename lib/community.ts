@@ -45,6 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -367,11 +368,27 @@ export function memberKey(email: string): string {
 export async function lastSeenIn(id: string, emails: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!emails.length || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HMGET", membersKey(id), ...emails.map(memberKey)]]);
-  const rows = Array.isArray(raw) ? raw : [];
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...emails.map(memberKey)]]), 1);
+  const rows = replies && repliesFor(replies[0], emails.length);
+  if (!rows) throw new UnknownReplyError("community member activity");
   emails.forEach((email, i) => {
-    const member = parseMember(rows[i]);
-    out.set(email, member && !member.removed ? member.seen || member.at || 0 : 0);
+    const raw = rows[i];
+    if (raw === null) { out.set(email, 0); return; }
+    if (typeof raw !== "string") throw new UnknownReplyError("community member activity record");
+    let member: Partial<Member>;
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not a member");
+      member = value as Partial<Member>;
+    } catch {
+      throw new UnknownReplyError("community member activity record");
+    }
+    if (member.k !== memberKey(email) || member.e !== normaliseEmail(email) || typeof member.removed !== "boolean" ||
+        typeof member.seen !== "number" || !Number.isSafeInteger(member.seen) || member.seen < 0 ||
+        typeof member.at !== "number" || !Number.isSafeInteger(member.at) || member.at < 0) {
+      throw new UnknownReplyError("community member activity fields");
+    }
+    out.set(email, member.removed ? 0 : member.seen || member.at);
   });
   return out;
 }
@@ -585,15 +602,25 @@ export async function mailableMembers(id: string): Promise<Member[]> {
 
 // ------------------------------------------------------------------ limits
 
-/** Counts one more of `kind` for this member, and says whether it is allowed. */
+/**
+ * Counts one more of `kind` for this member, and says whether it is allowed.
+ * A count not read in its exact shape is never taken as room, nor said as
+ * the limit reached: it is thrown, and the route answers with its error
+ * (CX-123 rule 24).
+ */
 export async function within(id: string, who: string, kind: RateKind): Promise<boolean> {
   const { limit, seconds } = RATE_LIMITS[kind];
   const key = rateKey(id, who, kind);
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", seconds, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", seconds, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  const count = both && (both[0] === "OK" || both[0] === null) ? countOf(both[1]) : null;
+  if (count === null || count < 1) throw new UnknownReplyError(`a community ${kind} count`);
+  return count <= limit;
 }
 
 // ------------------------------------------------------------------ posts

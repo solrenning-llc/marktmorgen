@@ -4,6 +4,8 @@ import { isResting } from "@/lib/traffic";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
@@ -27,7 +29,10 @@ import { speech } from "@/lib/buyer-words";
 import { type CoursesWords, coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
-import { VideoStamp } from "@/components/video-stamp";
+import { StampedPlayer } from "@/components/video-stamp";
+import { LessonPlayer } from "@/components/lesson-player";
+import { devicePlaceKey } from "@/lib/lesson-position";
+import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
 
 type Params = {
@@ -79,6 +84,12 @@ export default async function LessonPage({ params, searchParams }: Params) {
   if (!store) notFound();
   const product = await readListing(store, productId);
   if (!product?.course) redirect(`/@${store.handle}`);
+  const jar = await cookies();
+  const access = await courseAccess(store, product, jar);
+  // A draft is not: only its students and the store's owner and team, signed
+  // in, see anything of it, a free preview included (MM-SA-30). Anyone else
+  // goes where an id that does not exist goes, before its lessons are read.
+  if (product.hidden && access.state !== "open" && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const course = await readCourse(product.course.id);
   const base = `/@${store.handle}/course/${product.id}`;
   const found = course ? findLesson(course, lessonId) : null;
@@ -86,7 +97,6 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const said = speech(store);
   const w = coursesWords(store.language);
 
-  const access = await courseAccess(store, product, await cookies());
   const open = access.state === "open" && isOpen(course, found.unit, access.start);
   // A free preview is open to anyone; everything else to a student whose
   // module has opened.
@@ -150,6 +160,11 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const previous = order.slice(0, at).reverse().find(reachable) ?? null;
   const next = order.slice(at + 1).find(reachable) ?? null;
   const isDone = done.has(lesson.id);
+  // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
+  // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
+  const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
+  // Plain text only: a function cannot cross to the client player (Claude 5 on #2728).
+  const resumeWords = resumeWordsOf(w);
   const moduleNumber = course.modules.findIndex((m) => m.id === unit.id) + 1;
 
   return (
@@ -183,41 +198,86 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {lesson.video ? (
               video?.kind === "stream" ? (
-                <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
-                  {stamp ? <VideoStamp text={stamp} seed={`${course.id}:${who}`} /> : null}
-                  {/* The video service's player (lib/stream.ts): it sends the
-                      size the line can carry, so the video does not stop to
-                      wait. The frame takes the video's own shape, so one
-                      filmed upright stays upright, and is never taller than
-                      three quarters of the screen. */}
-                  <iframe
-                    src={video.src}
-                    title={lesson.title}
-                    allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
-                    allowFullScreen
-                    referrerPolicy="strict-origin-when-cross-origin"
-                    className="mx-auto block w-full"
-                    style={{
-                      aspectRatio: `${video.width} / ${video.height}`,
-                      maxWidth: `calc(75vh * ${video.width} / ${video.height})`,
-                      border: 0,
-                    }}
-                  />
-                </div>
+                stamp ? (
+                  <StampedPlayer text={stamp} seed={`${course.id}:${who}`} enter={w.fullScreen} exit={w.exitFullScreen}>
+                    {/* Stamped: the service's own full screen and picture in
+                        picture are not given to its frame, since they would
+                        show the video without the mark; the button under it
+                        puts both in full screen instead. */}
+                    <iframe
+                      src={video.src}
+                      title={lesson.title}
+                      allow="accelerometer; gyroscope; autoplay; encrypted-media"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      className="mx-auto block w-full"
+                      style={{
+                        aspectRatio: `${video.width} / ${video.height}`,
+                        maxWidth: `calc(var(--player-tall, 75vh) * ${video.width} / ${video.height})`,
+                        border: 0,
+                      }}
+                    />
+                  </StampedPlayer>
+                ) : (
+                  <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
+                    {/* The video service's player (lib/stream.ts): it sends the
+                        size the line can carry, so the video does not stop to
+                        wait. The frame takes the video's own shape, so one
+                        filmed upright stays upright, and is never taller than
+                        three quarters of the screen. */}
+                    <iframe
+                      src={video.src}
+                      title={lesson.title}
+                      allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
+                      allowFullScreen
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      className="mx-auto block w-full"
+                      style={{
+                        aspectRatio: `${video.width} / ${video.height}`,
+                        maxWidth: `calc(75vh * ${video.width} / ${video.height})`,
+                        border: 0,
+                      }}
+                    />
+                  </div>
+                )
               ) : video?.kind === "file" ? (
-                <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
-                  {stamp ? <VideoStamp text={stamp} seed={`${course.id}:${who}`} /> : null}
-                  {/* Vertical videos stay vertical: the player takes the
-                      shape of the video instead of forcing it wide. */}
-                  <video
-                    src={video.src}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    controlsList="nodownload"
-                    className="mx-auto block max-h-[75vh] w-full object-contain"
-                  />
-                </div>
+                stamp ? (
+                  <StampedPlayer text={stamp} seed={`${course.id}:${who}`} enter={w.fullScreen} exit={w.exitFullScreen}>
+                    {/* Stamped: the video's own full screen and picture in
+                        picture are turned off where the browser allows it,
+                        and the button under it puts the video and the mark
+                        in full screen together. */}
+                    <LessonPlayer
+                      courseId={course.id}
+                      lessonId={lesson.id}
+                      learner={placeKey}
+                      words={resumeWords}
+                      src={video.src}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      controlsList="nodownload nofullscreen"
+                      disablePictureInPicture
+                      className="mx-auto block max-h-[var(--player-tall,75vh)] w-full object-contain"
+                    />
+                  </StampedPlayer>
+                ) : (
+                  <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
+                    {/* Vertical videos stay vertical: the player takes the
+                        shape of the video instead of forcing it wide. */}
+                    <LessonPlayer
+                      courseId={course.id}
+                      lessonId={lesson.id}
+                      learner={placeKey}
+                      words={resumeWords}
+                      src={video.src}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      controlsList="nodownload"
+                      className="mx-auto block max-h-[75vh] w-full object-contain"
+                    />
+                  </div>
+                )
               ) : video?.kind === "preparing" ? (
                 <p className="st-note mt-6" role="status">
                   <strong>{w.preparingStrong}</strong>{` ${w.preparingRest}`}

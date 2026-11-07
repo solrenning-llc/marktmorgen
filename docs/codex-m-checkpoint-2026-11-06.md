@@ -4081,3 +4081,7 @@ M_BUDGET {"pipelineCommands":306,"memoryRun":346,"httpMockDispatch":10,"exceeded
 
 ### Entrega em andamento — 07/11/2026,19h40 Fortaleza
 Parecer M5815395861 publicado e FULLbody confirmado no head5557ec81b2024faa049b622c26df7ff3cbbc084e. CAS do canal paraCXM-20261107-1939-C1-2 recebeu409: NÃO publicada. Mensagem completa pendente preservada localmente/em memória, não repetir sem leitura integral fresca e espera>=120s. Prefixo alheio nunca restaurado. Checkpoint de prova9ff1ac08 permanece válido, nenhuma revisão/teste deve ser repetida por esse conflito documental.
+
+
+### Entrega reconciliada — 07/11/2026,19h42 Fortaleza
+CXM-20261107-1939-C1-2 publicada após409NÃOAPLICADO e espera>=120s(22:39:45→22:41:47UTC), FULL fresco4562332/IDausente:commita0c3f0cf7ce483acd573546197720015c7fd3f5d/blob718077dae029827d361ad4676266c5212c494f65/FULL4564496 exatamente relido. Não resta mensagem pendente. C6-1939 recebeu M5815395861 e pediu fila3126;44checks são autor, não execuçãoM. C6/G3123novoMEDtokenrace,3108C4+C6opiniõesjáexistem,não3ªM. Provas/tipos/scanner/priorheads intactos. Próximo novo nominal M/disposição2730 ou revisão pedida livre; pausa1746 temporária, sem automação alterada/sem vigia em fundo. Não repetir verdes nem recriar ramos.

@@ -92,6 +92,17 @@ async function main(): Promise<void> {
   const removal = studio.slice(studio.lastIndexOf("onClick={async () => {", studio.indexOf('action: "flow-remove"')), studio.indexOf('action: "flow-remove"'));
   is("the removal asks before it calls the server", /window\.confirm\(/.test(removal), true);
 
+  // Codex P's source contracts (tests/e2e/p-email-studio-accessibility.mjs --source-red, review on #2984), kept verbatim, with the
+  // elements they name checked to exist so a stray string cannot satisfy them.
+  part("2.4.3 / 3.2.1: focus follows what the creator opened and comes back when it closes");
+  is("opening a saved email moves focus to its subject", /switchTo[\s\S]{0,1800}mail-subject[\s\S]{0,300}\.focus\(/.test(studio), true);
+  is("opening a sequence moves focus to its name", /flow-name[\s\S]{0,1800}\.focus\(/.test(studio), true);
+  is("closing a sequence returns focus to its opener", /flow-(?:new|edit)-[\s\S]{0,2200}\.focus\(/.test(studio), true);
+  is("the subject field is the one with that id", /<input id="mail-subject" ref=\{subjectBox\}/.test(studio), true);
+  is("the sequence's name field carries the id that is focused", /<input id="flow-name" className="field mt-2"/.test(studio), true);
+  is("New sequence and Edit carry the ids focus goes back to", [/<button type="button" id="flow-new-sequence"[^\n]*\n\s*New sequence\s*<\/button>/.test(studio), /id=\{`flow-edit-\$\{f\.id\}`\}\s*onClick=\{\(\) => \{\s*openDraft\(f\);\s*\}\}\s*>\s*Edit\s*<\/button>/.test(studio)], [true, true]);
+  is("2.3.3: the subject's focus keeps the reduced-motion scroll to the composer instead of jumping", /getElementById\("mail-subject"\)\?\.focus\(\{ preventScroll: true \}\)/.test(studio), true);
+
   part("2.2.5: a session that ends while writing loses nothing after logging in again");
   const signedOut = studio.match(/signed_out: "([^"]*)"/)?.[1] ?? "";
   is("the message says the email stays on the page and to log in again in a new tab", [/stays on this page/.test(signedOut), /new tab/.test(signedOut)], [true, true]);

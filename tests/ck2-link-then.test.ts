@@ -357,7 +357,13 @@ async function main(): Promise<void> {
   is("third pre-review: a date that comes while the panel is open is said in a live region, the focus kept", [/aria-live="polite"/.test(panel), /datesReached\(/.test(panel), /document\.activeElement/.test(panel)], [true, true, true]);
   is("third pre-review: any saved change clears a refusal beside a link", /if \(answer\.ok && answer\.links\) \{[^}]*setRowProblem\(null\)/.test(panel), true);
   const studio = readFileSync("app/studio/page.tsx", "utf8");
-  is("third pre-review: the panel starts on the server's clock", [/<ShortLinks\s+now=\{todayNow\(\)\}/.test(studio), /now: serverStart/.test(panel)], [true, true]);
+  is(
+    "third pre-review: the panel starts on the server's clock",
+    // Rule 23 (fourth pre-review of 510 [CK2]): main's block reads the links and titles first, so `now` is no longer the first prop;
+    // that it is read after them is checked below (P2).
+    [/<ShortLinks\s[^>]*now=\{todayNow\(\)\}/.test(studio), /now: serverStart/.test(panel)],
+    [true, true],
+  );
   const route = readFileSync("app/l/[code]/route.ts", "utf8");
   is("the route reads the time once and keeps the CDN inside the date", [/targetNow\(/.test(route), /linkCache\(/.test(route), /never keeps it past the date/.test(route)], [true, true, false]);
 

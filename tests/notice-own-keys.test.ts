@@ -12,13 +12,15 @@
  *   - bookingNotice (lib/buyer-words/booking.ts) returns null for them;
  *   - every page that looks a notice table up by the raw address key does so
  *     only behind Object.hasOwn on the same table and key;
- *   - the word tables those pages read (requests, agreements, Discord, move)
+ *   - the word tables those pages read (requests, agreements, Discord, move,
+ *     community, community links, course links and certificates, store home)
  *     really do inherit these names in every language, so the guard is what
  *     stands between them and the page;
  *   - a sweep of every page file under app/ finds no other lookup by a key
  *     from the address without the guard, except the ones listed by name in
- *     NOT_HERE with the reason (another pull request owns the line, the key
- *     is already narrowed, or the family is the next unit).
+ *     NOT_HERE with the reason (another pull request owns the line, or the
+ *     key is already narrowed). That includes keys written inline
+ *     (`TABLE[typeof query.n === "string" ? query.n : ""]`).
  *
  * Synthetic only; nothing is read from Redis or sent.
  */
@@ -35,6 +37,9 @@ import { agreementWords } from "@/lib/buyer-words/agreements";
 import { discordWords } from "@/lib/buyer-words/discord";
 import { moveWords } from "@/lib/buyer-words/move";
 import { requestWords } from "@/lib/buyer-words/requests";
+import { coursesWords } from "@/lib/buyer-words/courses";
+import { speechFor } from "@/lib/buyer-words";
+import { communityNotices, linkNotices } from "@/components/community-parts";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 
 const INHERITED = ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf", "isPrototypeOf"];
@@ -156,6 +161,18 @@ const LOOKUPS: [string, string, string][] = [
   ["app/[handle]/discord/page.tsx", "w.notices", "status"],
   ["app/[handle]/move/[product]/page.tsx", "m.notices", "status"],
   ["app/privacy/delete/page.tsx", "STATUS", "statusKey"],
+  ["app/[handle]/community/page.tsx", "notices", "word"],
+  ["app/[handle]/community/page.tsx", "linkNotices(store.language)", "query.link"],
+  ["app/[handle]/community/post/[post]/page.tsx", "notices", "query.n"],
+  ["app/[handle]/community/you/page.tsx", "NOTICES", "query.n"],
+  ["app/[handle]/community/search/page.tsx", "notices", "query.n"],
+  ["app/[handle]/community/events/page.tsx", "notices", "query.n"],
+  ["app/[handle]/community/events/[event]/page.tsx", "notices", "query.n"],
+  ["app/[handle]/community/messages/page.tsx", "notices", "query.n"],
+  ["app/[handle]/community/messages/[pair]/page.tsx", "NOTICES", "query.n"],
+  ["app/[handle]/page.tsx", "w.notices", "query.status"],
+  ["app/[handle]/course/[product]/page.tsx", "w.linkNotices", "query.link"],
+  ["app/[handle]/course/[product]/page.tsx", "certNotices", "query.cert"],
 ];
 
 for (const [path, table, key] of LOOKUPS) {
@@ -178,7 +195,35 @@ const TABLES: [string, (language: string) => object][] = [
   ["agreementWords().notices (sign)", (l) => agreementWords(l).notices],
   ["discordWords().notices (store Discord page)", (l) => discordWords(l).notices],
   ["moveWords().notices (move)", (l) => moveWords(l).notices],
+  ["communityNotices() (community pages)", (l) => communityNotices(l)],
+  ["linkNotices() (community front page)", (l) => linkNotices(l)],
+  ["coursesWords().linkNotices (course page)", (l) => coursesWords(l).linkNotices],
+  ["speechFor().w.notices (store home page)", (l) => speechFor(l, "usd").w.notices],
 ];
+
+/** The certificate notices are sentences, not { title } notices: the same proof with their own control. */
+const certNotices = (language: string) => coursesWords(language).certNotices(2, 80);
+
+test("coursesWords().certNotices (course page): every own key has words, in every language (control)", () => {
+  for (const language of LANGUAGE_CODES) {
+    const table = certNotices(language);
+    assert.ok(Object.keys(table).length > 0, `${language}: no notices`);
+    for (const key of Object.keys(table)) {
+      const words = pick(table, key);
+      assert.ok(typeof words === "string" && words.length > 0, `${language}.${key}`);
+    }
+  }
+});
+
+test("coursesWords().certNotices (course page): an inherited name reads as something unguarded and as nothing guarded", () => {
+  for (const language of LANGUAGE_CODES) {
+    const table = certNotices(language);
+    for (const inherited of INHERITED) {
+      assert.notEqual((table as Record<string, unknown>)[inherited], undefined, `${language}: ${inherited} is not inherited here`);
+      assert.equal(pick(table, inherited), undefined, `${language}: ${inherited}`);
+    }
+  }
+});
 
 for (const [name, of] of TABLES) {
   test(`${name}: every own key is a notice with words, in every language (control)`, () => {
@@ -187,8 +232,10 @@ for (const [name, of] of TABLES) {
       const keys = Object.keys(table);
       assert.ok(keys.length > 0, `${language}: no notices`);
       for (const key of keys) {
-        const notice = pick(table, key) as { title?: unknown };
-        assert.ok(notice && typeof notice.title === "string" && notice.title.length > 0, `${language}.${key}`);
+        // A notice has a title (pages with a heading) or a text (the community's one line).
+        const notice = pick(table, key) as { title?: unknown; text?: unknown };
+        const words = notice && (notice.title ?? notice.text);
+        assert.ok(typeof words === "string" && words.length > 0, `${language}.${key}`);
       }
     }
   });
@@ -217,19 +264,6 @@ const NOT_HERE: Record<string, string> = {
   "app/[handle]/affiliates/page.tsx lw.status[status]": "an inner `status` (line.status, a LeadStatus) shadows ?status=",
   "app/embed/[handle]/join/page.tsx w.notices[status]": "status is already one of STATUSES or empty",
   "app/[handle]/thanks/page.tsx t.upsellNotes[query.upsell]": "read only after Object.hasOwn(UPSELL_NOTES, query.upsell)",
-  // Same fault with the key written inline; the next unit (community family overlaps #3020).
-  "app/[handle]/community/page.tsx notices[word]": "next unit: community family",
-  "app/[handle]/community/page.tsx linkNotices(store.language)[query.link]": "next unit: community family",
-  "app/[handle]/community/post/[post]/page.tsx notices[query.n]": "next unit: community family",
-  "app/[handle]/community/you/page.tsx NOTICES[query.n]": "next unit: community family",
-  "app/[handle]/community/search/page.tsx communityNotices(store.language)[query.n]": "next unit: community family",
-  "app/[handle]/community/events/page.tsx communityNotices(store.language)[query.n]": "next unit: community family",
-  "app/[handle]/community/events/[event]/page.tsx communityNotices(store.language)[query.n]": "next unit: community family",
-  "app/[handle]/community/messages/page.tsx communityNotices(store.language)[query.n]": "next unit: community family",
-  "app/[handle]/community/messages/[pair]/page.tsx NOTICES[query.n]": "next unit: community family",
-  "app/[handle]/page.tsx w.notices[query.status]": "next unit: inline keys on the store home page",
-  "app/[handle]/course/[product]/page.tsx w.linkNotices[query.link]": "next unit: inline keys on the course page",
-  "app/[handle]/course/[product]/page.tsx w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[query.cert]": "next unit: inline keys on the course page",
 };
 
 function pageFiles(dir: string, into: string[] = []): string[] {

@@ -3,16 +3,20 @@
  * creator picks (lib/short-link-rules.ts, lib/short-links.ts,
  * app/l/[code]/route.ts, app/api/store/short-links/route.ts). Checked:
  *
- *   - the date is at least a minute and at most two years away, and the page
- *     it goes to after is the store or one of the store's own products, never
- *     the page it already opens and never an error page;
+ *   - the date is at least ten minutes and at most two years away, and the
+ *     page it goes to after is the store or one of the store's own products,
+ *     never the page it already opens and never an error page;
  *   - before the date the link opens its page, from the date on the other one,
  *     still tagged with the post's name, so its visits and sales stay on the
  *     post's line;
  *   - the CDN never keeps the answer past the date: five minutes and a minute
- *     stale at most, less as the date comes near;
- *   - the change can be taken back, only by the store that owns the link, and
- *     a change of where the link goes keeps it;
+ *     stale at most, less as the date comes near, and an answer it kept before
+ *     the date was set runs out before the soonest date one may set (the
+ *     ten-minute floor is longer than five minutes and a minute);
+ *   - the change can be taken back, only by the store that owns the link;
+ *     before the date a change of where the link goes keeps it, after the date
+ *     "Goes to" changes the page the link opens, and taking the date back
+ *     keeps the page it opens now;
  *   - every write is a compare-and-swap of the whole record: a record changed
  *     since it was read is never written over, and an unknown reply is never
  *     taken for a write;
@@ -55,7 +59,8 @@ async function main(): Promise<void> {
 
   part("The rules: when, and where to after");
   const guide = (id: string) => id === "guide";
-  is("a date at least a minute away and a page of the store", readThen({ at: NOW + MIN_THEN_MS, target: { kind: "product", id: "guide" } }, guide, NOW), { at: NOW + MIN_THEN_MS, target: { kind: "product", id: "guide" } });
+  is("the soonest date is ten minutes away", MIN_THEN_MS, 600_000);
+  is("a date at least ten minutes away and a page of the store", readThen({ at: NOW + MIN_THEN_MS, target: { kind: "product", id: "guide" } }, guide, NOW), { at: NOW + MIN_THEN_MS, target: { kind: "product", id: "guide" } });
   is("the store itself", readThen({ at: NOW + 86_400_000, target: { kind: "store" } }, guide, NOW), { at: NOW + 86_400_000, target: { kind: "store" } });
   is(
     "refused: past, too soon, too far, not a whole number of milliseconds, not a number",
@@ -100,36 +105,53 @@ async function main(): Promise<void> {
   const made = await addLink(mine, { name: "Spring sale", place: "instagram", target: { kind: "product", id: "guide" } }, guide, 1000);
   if (!made.ok) throw new Error("no link");
   const code = made.link.code;
+  const product = (id: string) => `https://marktmorgen.com/@harbor/p/${id}?utm_source=instagram&utm_medium=post&utm_campaign=spring-sale`;
+  const storePage = "https://marktmorgen.com/@harbor?utm_source=instagram&utm_medium=post&utm_campaign=spring-sale";
+  const thenOf = (result: Awaited<ReturnType<typeof setThen>>) => (result.ok ? result.links.find((l) => l.code === code)?.then ?? "none" : result.reason);
+  const targetOf = (result: Awaited<ReturnType<typeof setThen>>) => (result.ok ? result.links.find((l) => l.code === code)?.target : result.reason);
+
+  // An answer the CDN kept before any date was set: how long it may still be served, fresh and stale.
+  const keptAt = Date.now();
   const plain = await open(code);
+  const lifetime = [...plain.cache.matchAll(/(?:s-maxage|stale-while-revalidate)=(\d+)/g)].reduce((sum, m) => sum + Number(m[1]) * 1000, 0);
+  is("an answer kept before the date was set runs out before the soonest date one may set", [lifetime, keptAt + lifetime < keptAt + MIN_THEN_MS], [360_000, true]);
+
   const now = Date.now();
   const set = await setThen(mine.statsId, code, { at: now + 3_600_000, target: { kind: "store" } }, guide, now);
-  is("set: the list shows when and where to", set.ok ? set.links.find((l) => l.code === code)?.then : set.reason, { at: now + 3_600_000, target: { kind: "store" } });
+  is("set: the list shows when and where to", thenOf(set), { at: now + 3_600_000, target: { kind: "store" } });
   const before = await open(code);
-  is("before the date it still opens the product, kept no longer than five minutes", [before.to, before.cache], [
-    "https://marktmorgen.com/@harbor/p/guide?utm_source=instagram&utm_medium=post&utm_campaign=spring-sale",
-    STANDARD,
-  ]);
+  is("before the date it still opens the product, kept no longer than five minutes", [before.to, before.cache], [product("guide"), STANDARD]);
   is("opening a link with a date sends exactly what it sent without one: the same reads, nothing written", before.sent, plain.sent);
-  is("refused: the page it already opens", (await setThen(mine.statsId, code, { at: now + 3_600_000, target: { kind: "product", id: "guide" } }, guide, now)).ok ? "" : "same", "same");
-  is("refused: a date that is not one", (await setThen(mine.statsId, code, { at: now - 5, target: { kind: "store" } }, guide, now)).ok ? "" : "target", "target");
-  is("refused: another store's link", (await setThen("someoneelse0000", code, { at: now + 3_600_000, target: { kind: "store" } }, guide, now)).ok ? "" : "gone", "gone");
-  is("refused: a code that is not one", (await setThen(mine.statsId, "bad", null, guide, now)).ok ? "" : "gone", "gone");
+  // Rule 23: these four said only "not ok" (a tautology on the reason); each now reads the exact reason the studio words.
+  is("refused: the page it already opens", thenOf(await setThen(mine.statsId, code, { at: now + 3_600_000, target: { kind: "product", id: "guide" } }, guide, now)), "same");
+  is("refused: a date sooner than ten minutes, said as the date", thenOf(await setThen(mine.statsId, code, { at: now + MIN_THEN_MS - 1, target: { kind: "store" } }, guide, now)), "when");
+  is("refused: a date in the past, said as the date", thenOf(await setThen(mine.statsId, code, { at: now - 5, target: { kind: "store" } }, guide, now)), "when");
+  is("refused: a page the store does not have, said as the page", thenOf(await setThen(mine.statsId, code, { at: now + 3_600_000, target: { kind: "product", id: "theirs" } }, guide, now)), "target");
+  is("refused: another store's link", thenOf(await setThen("someoneelse0000", code, { at: now + 3_600_000, target: { kind: "store" } }, guide, now)), "gone");
+  is("refused: a code that is not one", thenOf(await setThen(mine.statsId, "bad", null, guide, now)), "gone");
 
-  // Set as if two minutes ago, so its date is a minute behind the real clock the route reads.
-  const past = Date.now() - 120_000;
-  await setThen(mine.statsId, code, { at: past + MIN_THEN_MS, target: { kind: "store" } }, guide, past);
-  const after = await open(code);
-  is("from the date on it opens the other page, tagged with the same post", [after.status, after.to, after.cache], [302, "https://marktmorgen.com/@harbor?utm_source=instagram&utm_medium=post&utm_campaign=spring-sale", STANDARD]);
-
-  const kept = await retarget(mine.statsId, code, { kind: "product", id: "guide" }, () => true);
-  is("changing where it goes keeps the date", kept.ok ? kept.links.find((l) => l.code === code)?.then?.target : kept.reason, { kind: "store" });
+  const moved = await retarget(mine.statsId, code, { kind: "product", id: "extra" }, () => true);
+  is("before the date, changing where it goes keeps the date", [targetOf(moved), thenOf(moved), (await open(code)).to], [{ kind: "product", id: "extra" }, { at: now + 3_600_000, target: { kind: "store" } }, product("extra")]);
+  await retarget(mine.statsId, code, { kind: "product", id: "guide" }, () => true);
   is("another store still cannot change where it goes", (await retarget("someoneelse0000", code, { kind: "store" }, () => true)).ok, false);
-
   const back = await setThen(mine.statsId, code, null, guide, Date.now());
-  is("taken back: no date, and it opens its page again", [back.ok ? back.links.find((l) => l.code === code)?.then ?? "none" : back.reason, (await open(code)).to], [
-    "none",
-    "https://marktmorgen.com/@harbor/p/guide?utm_source=instagram&utm_medium=post&utm_campaign=spring-sale",
-  ]);
+  is("taken back before the date: no date, and it opens its page again", [thenOf(back), (await open(code)).to], ["none", product("guide")]);
+
+  // Set as if eleven minutes ago, so its date is a minute behind the real clock the route reads.
+  const past = () => Date.now() - MIN_THEN_MS - 60_000;
+  const lapsed = past();
+  await setThen(mine.statsId, code, { at: lapsed + MIN_THEN_MS, target: { kind: "store" } }, guide, lapsed);
+  const after = await open(code);
+  is("from the date on it opens the other page, tagged with the same post", [after.status, after.to, after.cache], [302, storePage, STANDARD]);
+  const settled = await setThen(mine.statsId, code, null, guide, Date.now());
+  is("after the date, taking the date back keeps the page it opens now", [thenOf(settled), targetOf(settled), (await open(code)).to], ["none", { kind: "store" }, storePage]);
+
+  const again = past();
+  const setAgain = await setThen(mine.statsId, code, { at: again + MIN_THEN_MS, target: { kind: "product", id: "guide" } }, guide, again);
+  is("past its date again, it opens the product", [thenOf(setAgain), (await open(code)).to], [{ at: again + MIN_THEN_MS, target: { kind: "product", id: "guide" } }, product("guide")]);
+  const changedAfter = await retarget(mine.statsId, code, { kind: "product", id: "extra" }, () => true);
+  is("after the date, \"Goes to\" changes the page it opens, and the date is spent", [targetOf(changedAfter), thenOf(changedAfter), (await open(code)).to], [{ kind: "product", id: "extra" }, "none", product("extra")]);
+  await retarget(mine.statsId, code, { kind: "product", id: "guide" }, () => true);
 
   part("Compare-and-swap, and unknown replies");
   const [raw] = await redisPipeline([["GET", linkKey(code)]]);
@@ -162,6 +184,8 @@ async function main(): Promise<void> {
     return { status: response.status, body: (await response.json()) as { ok?: boolean; error?: string; links?: { code: string; then?: unknown }[] } };
   };
   const when = Date.now() + 86_400_000;
+  const soon = await post({ action: "then", code: fresh.link.code, then: { at: Date.now() + 120_000, target: { kind: "store" } } });
+  is("a date two minutes away is refused as the date", [soon.status, soon.body.error], [400, "when"]);
   const saved = await post({ action: "then", code: fresh.link.code, then: { at: when, target: { kind: "store" } } });
   is("the same page it opens is refused in words the studio has", [saved.status, saved.body.error], [400, "same"]);
   const good = await post({ action: "then", code: fresh.link.code, then: { at: when, target: { kind: "product", id: "nothing-here" } } });
@@ -171,10 +195,17 @@ async function main(): Promise<void> {
 
   part("Words and wiring");
   const panel = readFileSync("components/short-links.tsx", "utf8");
-  is("the panel says what happens and when, in the creator's own time", [/Change on a date/.test(panel), /type="datetime-local"/.test(panel), /Then it goes to/.test(panel), /Cancel the change/.test(panel)], [true, true, true, true]);
+  is("the panel says what happens and when, in the creator's own time", [/Change on a date/.test(panel), /type="datetime-local"/.test(panel), /Then it goes to/.test(panel), /Cancel the change/.test(panel), /At least ten minutes from now/.test(panel)], [true, true, true, true, true]);
+  is(
+    "a refusal of the date form is said beside its fields, focused, the field marked, never only in a passing toast",
+    [/setProblem\(REASONS\[/.test(panel), /aria-invalid=\{problemOn === "when"/.test(panel), /aria-invalid=\{problemOn === "same"/.test(panel), /problemRef\.current\?\.focus\(\)/.test(panel), /quiet: true/.test(panel)],
+    [true, true, true, true, true],
+  );
+  is("focus goes back to the link's date line when the form closes", /focusDate\.current/.test(panel), true);
+  is("the line \"to X\" and \"Goes to\" read the page the link opens now", [/where\(targetNow\(link, now\)\)/.test(panel), /targetValue\(targetNow\(link, now\)\)/.test(panel)], [true, true]);
   is("the panel explains each refusal", ["same", "when", "changed", "gone"].map((reason) => new RegExp(`\\b${reason}: "`).test(panel)), [true, true, true, true]);
   const route = readFileSync("app/l/[code]/route.ts", "utf8");
-  is("the route reads the time once and keeps the CDN inside the date", [/targetNow\(/.test(route), /linkCache\(/.test(route)], [true, true]);
+  is("the route reads the time once and keeps the CDN inside the date", [/targetNow\(/.test(route), /linkCache\(/.test(route), /never keeps it past the date/.test(route)], [true, true, false]);
 
   done();
 }

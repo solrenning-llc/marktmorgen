@@ -27,6 +27,7 @@ import { formatMoney } from "@/lib/money";
 import { MAX_MEMBER_QUALIFYING, MAX_MEMBER_RULES, MEMBER_PERCENT_CHOICES } from "@/lib/member-price-rules";
 import { MEMBER_EDIT_MESSAGES, checkMemberEdit, memberRuleLine } from "@/lib/member-price-edit";
 import { memberEditChoices } from "@/lib/member-price-choices";
+import { MemberPriceSection } from "@/components/member-price-section";
 import { AGENT_COVERAGE } from "@/lib/agent-coverage";
 import { POST as memberPriceRoute } from "@/app/api/store/member-price/route";
 import { store as redis } from "./redis-stub";
@@ -68,6 +69,20 @@ async function main(): Promise<void> {
     ["Knife Guide", 1200],
     ["Meal Planner", 2700],
   ]);
+
+  part("A listing that cannot be read is not a product gone (Claude 4 team review of #3026; fixed by Claude 4 on Claude 5's behalf)");
+  // The Knife Guide's listing left out of the record's first page and unreadable where it is kept: the read gives back fewer than asked.
+  const whole = (await storeForEmail(OWNER))!;
+  const unread = { ...whole, catalog: { ...whole.catalog, head: whole.catalog.head.filter((l) => l.id !== G) } };
+  const guideKey = `nl:catalog:${whole.catalog.id}:l:${G}`;
+  const kept = redis.run(["GET", guideKey]);
+  is("control: read from where it is kept, every listing comes back", (await memberEditChoices(unread)).qualifying.map((q) => q.title).sort(), ["Kitchen Club", "Knife Guide", "Meal Planner", "Name Your Price Zine"]);
+  redis.run(["SET", guideKey, "{not json"]);
+  is("one unreadable listing: the read throws, never a list without it", await memberEditChoices(unread).then(() => "returned", (error: unknown) => (error instanceof Error ? "threw" : "rejected")), "threw");
+  const shown = await MemberPriceSection({ store: unread, connected: true });
+  is("so the editor shows that the products could not be read, and offers no save that would drop the rule", (shown.props as { choices: unknown }).choices, null);
+  redis.run(["SET", guideKey, String(kept)]);
+  is("control: readable again, the editor gets every choice", ((await MemberPriceSection({ store: unread, connected: true })).props as { choices: { qualifying: unknown[] } | null }).choices?.qualifying.length, 4);
 
   part("Signed in, as a settings change");
   is("signed out is refused", (await post({ on: false, rules: [] }, "")).error, "signed_out");

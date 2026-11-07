@@ -20,7 +20,7 @@ import { holdCharges, paidKey, retryHolds, workKey } from "@/lib/closing-holds";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_closing_holds_own_reply_only";
 
-const ACCOUNT = "acct_1ClosingOwnReply";
+const ACCOUNT = "acct_1ClosingOwnRep";
 const ENDED_AT = Date.UTC(2026, 9, 1, 12);
 const MEMBER = "sub_ClosingMember01";
 const OTHER = "sub_ClosingOther001";

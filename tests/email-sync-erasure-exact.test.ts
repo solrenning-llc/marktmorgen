@@ -68,7 +68,8 @@ const unknown = (result: { value: unknown } | { error: unknown }) => "error" in 
 
 const isLog = (batch: Batch) => batch[0]?.[0] === "LRANGE" && batch[0]?.[1] === logKey;
 const isJobs = (batch: Batch) => batch[0]?.[0] === "GET" && String(batch[0]?.[1]).startsWith("nl:esync:j:");
-const isQueuePage = (batch: Batch) => batch[0]?.[0] === "ZRANGEBYSCORE" && batch[0]?.[2] === "-inf" && batch[0]?.[3] === "+inf";
+// The store's queued jobs are read with ZSCAN since the fix of Codex Q's finding on #2860 (an offset page skips members).
+const isQueuePage = (batch: Batch) => batch[0]?.[0] === "ZSCAN" && batch[0]?.[1] === QUEUE_KEY;
 const isErase = (batch: Batch) => batch[0]?.[0] === "DEL" && String(batch[0]?.[1]).startsWith("nl:esync:j:");
 
 const LOG_SHAPES: [string, (batch: Batch, answers: unknown[]) => unknown[]][] = [

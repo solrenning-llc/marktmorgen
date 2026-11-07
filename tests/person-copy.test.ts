@@ -26,7 +26,7 @@ const TEAMMATE = "teammate@example.com";
 const PERSON = "ada@example.com";
 
 /** Every command that only reads; anything else sent during the copy is a write. */
-const READS = new Set(["GET", "MGET", "HGET", "HMGET", "HGETALL", "HEXISTS", "HLEN", "HKEYS", "HVALS", "SMEMBERS", "SISMEMBER", "SCARD", "SUNION", "LRANGE", "LLEN", "LINDEX", "ZRANGE", "ZREVRANGE", "ZRANGEBYSCORE", "ZREVRANGEBYSCORE", "ZSCORE", "ZCARD", "ZCOUNT", "ZRANK", "EXISTS", "TTL", "PTTL", "TYPE", "STRLEN"]);
+const READS = new Set(["GET", "MGET", "HGET", "HMGET", "HGETALL", "HEXISTS", "HLEN", "HKEYS", "HVALS", "SMEMBERS", "SISMEMBER", "SCARD", "SUNION", "LRANGE", "LLEN", "LINDEX", "ZRANGE", "ZREVRANGE", "ZRANGEBYSCORE", "ZREVRANGEBYSCORE", "ZSCORE", "ZCARD", "ZCOUNT", "ZRANK", "ZSCAN", "EXISTS", "TTL", "PTTL", "TYPE", "STRLEN"]);
 const sent: string[] = [];
 const run = redis.run.bind(redis);
 redis.run = (command: (string | number)[]) => {

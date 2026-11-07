@@ -163,9 +163,11 @@ async function apiKeyed(
     const held = await hold(store);
     if (held) return held;
   }
-  // Read-only API/MCP work needs its paid resource month. Writing includes
-  // access revocation and needs its own retained-cleanup classification.
-  if (purpose === "read" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
+  // Read-only API/MCP work, and an agent's preparation of a change (it reads
+  // the store and writes a proposal), need their paid resource month (Claude 5
+  // on #1856, CX72). Writing includes access revocation and needs its own
+  // retained-cleanup classification.
+  if (purpose !== "write" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
     return apiError(429, "unavailable", "The store could not answer just now. Try again in a moment.");
   }
   // Each request is one of the store's window (lib/store-allowance-rules.ts), taken before any work.

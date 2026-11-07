@@ -4,7 +4,7 @@ import { useContext, useState } from "react";
 import { Icon } from "@/components/icons";
 import { AiOn } from "@/components/ai-assist";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
-import { BLOCK_KINDS, type BlockKind, type SalesPage } from "@/lib/sales-page";
+import { BLOCK_KINDS, type BlockKind, type FactKey, type SalesPage } from "@/lib/sales-page";
 import { BUYER_LENSES, type CoachCheck, coachChecks, coachScore, scoreWord, steepestDrop } from "@/lib/page-coach";
 import type { PageFacts } from "@/lib/page-facts";
 
@@ -44,6 +44,7 @@ export function PageCoach({
   picture,
   pictureAlt,
   facts,
+  factsUnread = [],
   page,
   reach,
   onAdd,
@@ -61,6 +62,8 @@ export function PageCoach({
   /** The product picture's own description, shown at the top when the hero shows a picture. */
   pictureAlt: string;
   facts: PageFacts;
+  /** The numbers whose read did not come back (lib/page-facts-read.ts). */
+  factsUnread?: readonly FactKey[];
   /** The page as it stands in the editor, saved or not. */
   page: SalesPage;
   reach: { shares: Record<string, number>; visitors: number } | null;
@@ -83,7 +86,7 @@ export function PageCoach({
   const [left, setLeft] = useState(ai.left);
   const [used, setUsed] = useState<Set<string>>(new Set());
 
-  const checks = coachChecks({ page, productTitle, free, picture, pictureAlt, facts });
+  const checks = coachChecks({ page, productTitle, free, picture, pictureAlt, facts, factsUnread });
   const score = coachScore(checks);
   const missing = checks.filter((c) => !c.done).sort((a, b) => b.weight - a.weight);
   const drop = steepestDrop(page.blocks, reach);

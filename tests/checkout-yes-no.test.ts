@@ -110,6 +110,12 @@ async function main(): Promise<void> {
   is("the help answer names it", help.includes("a yes or no question"), true);
   const features = readFileSync("lib/feature-pages.ts", "utf8");
   is("the checkout page's card names it", /title: "Questions at checkout", body: "[^"]*a yes or no question/.test(features), true);
+  // Pre-review of 387 [TB13] unit 1, LEVE: the list of what the checkout does not do yet, and the mission page's list of
+  // what is not built, named every kind of question but this one.
+  const limitsLine = features.split("\n").find((l) => l.includes('"Questions are '));
+  is("the checkout page's limits name it, and still no checkbox question", [/yes or no/.test(limitsLine ?? ""), /no checkbox question/.test(limitsLine ?? "")], [true, true]);
+  const mission = readFileSync("app/mission/page.tsx", "utf8").split("\n").find((l) => l.includes('"Checkbox questions at checkout'));
+  is("the mission page's list names it, and still no checkbox", [/yes or no/.test(mission ?? ""), /but not a checkbox/.test(mission ?? "")], [true, true]);
 
   done();
 }

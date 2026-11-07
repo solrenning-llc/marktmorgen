@@ -100,11 +100,14 @@ class Fake implements FindNode {
     return found;
   }
 }
-const lesson = (title: string) => new Fake(["data-find-lesson"], "", [new Fake([], "○"), new Fake(["data-find-text"], title), new Fake([], " (done)")]);
+// The outline draws " · video" beside a title but outside its data-find-text,
+// so the fake does too (the drawn markup is checked further down).
+const lesson = (title: string, suffix = "") =>
+  new Fake(["data-find-lesson"], "", [new Fake([], "○"), new Fake(["data-find-text"], title), new Fake([], suffix), new Fake([], " (done)")]);
 const unit = (n: number, title: string, lessons: Fake[]) =>
   new Fake(["data-find-module"], "", [new Fake(["data-find-name"], `Module ${n}`), new Fake(["data-find-name"], title), new Fake([], "", lessons)]);
 const root = new Fake([], "", [
-  unit(1, "Holding the knife", [lesson("The grip · video"), lesson("The claw")]),
+  unit(1, "Holding the knife", [lesson("The grip", " · video"), lesson("The claw")]),
   unit(2, "Cutting", [lesson("Onions"), lesson("Herbs"), lesson("A whole chicken")]),
   unit(3, "Sauces", []),
 ]);
@@ -117,6 +120,7 @@ is("a word: only its lessons and their modules stay", [narrowDom(root, "CLÁW"),
 ]);
 is("the hidden '(done)' and the marks beside a title are not searched", narrowDom(root, "done")?.matches, 0);
 is("the module's number is its name too", narrowDom(root, "module 2")?.matches, 3);
+is("the ' · video' beside a title is not searched: the help says titles only", narrowDom(root, "video")?.matches, 0);
 is("cleared: everything is back", [narrowDom(root, ""), visible()], [null, [[false, [false, false]], [false, [false, false, false]], [false, []]]]);
 
 part("Shown only where it helps");
@@ -151,14 +155,29 @@ is(
   [true, true, true, true, true],
 );
 
+part("The count is said once typing pauses, not at every key");
+is(
+  "the list narrows at once; only the spoken count waits about half a second, and each key restarts the wait",
+  [
+    component.includes("onChange={(e) => search(e.target.value)}"),
+    /const ANNOUNCE_AFTER_MS = 500;/.test(component),
+    component.includes("setTimeout(") && component.includes("ANNOUNCE_AFTER_MS"),
+    component.includes("clearTimeout("),
+  ],
+  [true, true, true, true],
+);
+is("the visible help is not itself live, so a key is not read out at once", /id=\{hint\}[^>]*aria-live/.test(component), false);
+is("the spoken count is in its own polite region, empty until there is something to say", /className="sr-only" aria-live="polite"/.test(component), true);
+
 part("The outline carries the marks, the page places the box");
 const make = (id: string, title: string): Lesson => ({ id, title, preview: false, video: null, files: [], link: null, hasBody: false, quiz: null });
+const clip = { pathname: "private/clip.mp4", name: "clip.mp4", bytes: 1, contentType: "video/mp4", addedAt: "2026-11-07T00:00:00.000Z" };
 const course: Course = {
   id: "c".repeat(32),
   certificate: false,
   startsAt: null,
   modules: [
-    { id: "m1aaaaaaaaaa", title: "Holding the knife", dripDays: 0, lessons: [make("l1aaaaaaaaaa", "The grip"), make("l2aaaaaaaaaa", "The claw")] },
+    { id: "m1aaaaaaaaaa", title: "Holding the knife", dripDays: 0, lessons: [{ ...make("l1aaaaaaaaaa", "The grip"), video: clip }, make("l2aaaaaaaaaa", "The claw")] },
     { id: "m2aaaaaaaaaa", title: "Cutting", dripDays: 30, lessons: [make("l3aaaaaaaaaa", "Onions")] },
   ],
 };
@@ -168,6 +187,12 @@ is(
   "one mark per module, per module name line, per lesson and per lesson title, locked ones too",
   [count("data-find-module"), count("data-find-name"), count("data-find-lesson"), count("data-find-text")],
   [2, 4, 3, 3],
+);
+const searched = [...drawn.matchAll(/data-find-text=""[^>]*>([^<]*)</g)].map((m) => m[1]);
+is(
+  "only the title is searched; ' · video' is still drawn beside it, outside the searched text",
+  [searched, drawn.replace(/<[^>]+>/g, "").includes("The grip · video")],
+  [["The grip", "The claw", "Onions"], true],
 );
 const page = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
 is(

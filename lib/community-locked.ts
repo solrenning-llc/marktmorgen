@@ -36,8 +36,8 @@
 import type { CommunityConfig } from "@/lib/community";
 import { type LockedSpace, type Unlock, lockedList, lockedOf } from "@/lib/community-gate";
 import { readListings } from "@/lib/catalog";
-import { bundleItemsToRead } from "@/lib/bundles";
 import { productsBuyableNow } from "@/lib/mail-product-sellable";
+import { soonState } from "@/lib/preorders";
 import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
 import { MAX_COLLECTION_PRODUCTS } from "@/lib/store-collections";
 import { productSegment } from "@/lib/product-slug";
@@ -94,10 +94,18 @@ function unlockOf(needs: readonly string[], read: ReadonlySet<string>, byId: Rea
  *
  * Read in rounds, one product per unsettled space first and twice as many
  * each round after, so a space settled by its first product leaves the rest
- * of the cap to the others; each round is paid before it is read, and the
- * rounds together pay exactly what reading them at once would. A space still
- * unread when the cap is spent is "capped": reloading would read the same
- * products again, so the page says to ask the creator instead.
+ * of the cap to the others. Each round pays before it reads, and nothing is
+ * read twice: the pre-orders are read once, in the first round, and every
+ * listing read (a space's product or a bundle's item) is kept and handed to
+ * productsBuyableNow, so a bundle reached again in a later round, or an item
+ * held by several bundles, is never read again. A round pays only for the
+ * products and items it reads for the first time, so the rounds together pay
+ * what reading them at once would. A failed read of the listings, the items
+ * or the pre-orders makes the answer empty ("unknown"), never "none" (a
+ * product whose stock or keys cannot be read is left out by
+ * productsBuyableNow, as on its page). A space still unread when the cap is
+ * spent is "capped": reloading would read the same products again, so the
+ * page says to ask the creator instead.
  */
 export async function unlocksOf(
   store: Store,
@@ -106,38 +114,50 @@ export async function unlocksOf(
 ): Promise<Record<string, Unlock> | null> {
   const locked = lockedOf(config, new Set());
   if (locked.length === 0) return {};
+  // `read`: the spaces' products judged so far, the cap's count. `asked`: every id read, as a product or an item;
+  // `known`: what those reads found (an id asked and not here is gone from the store). `items`: the items read, paid.
   const read = new Set<string>();
-  const byId = new Map<string, Listing>();
+  const asked = new Set<string>();
+  const known = new Map<string, Listing>();
   const buyable = new Set<string>();
   const items = new Set<string>();
+  let soon: ReadonlySet<string> | null = null;
   const pay = async (units: number) => units <= 0 || (await take(units));
+  const readOnce = async (ids: readonly string[]): Promise<boolean> => {
+    const fresh = ids.filter((id) => !asked.has(id));
+    if (fresh.length === 0) return true;
+    try {
+      for (const listing of await readListings(store, fresh)) known.set(listing.id, listing);
+    } catch (error) {
+      console.error("reading a locked space's products failed", error);
+      return false;
+    }
+    for (const id of fresh) asked.add(id);
+    return true;
+  };
   for (let share = 1; ; share *= 2) {
-    const open = locked.filter(({ needs }) => unlockOf(needs, read, byId, buyable) === "unread");
+    const open = locked.filter(({ needs }) => unlockOf(needs, read, known, buyable) === "unread");
     const ids = unlockCandidates(open, read, share);
     if (ids.length === 0) break;
     if (!(await pay(collectionUnits(read.size + ids.length) - collectionUnits(read.size)))) return null;
-    let listings: Listing[];
+    if (!(await readOnce(ids))) return {};
+    const listings = ids.map((id) => known.get(id)).filter((listing): listing is Listing => Boolean(listing));
+    const fresh = [...new Set(listings.flatMap((p) => (p.bundle && p.bundle.length > 0 ? p.bundle : [])))].filter((id) => !asked.has(id));
+    if (!(await pay(bundleItemUnits(items.size + fresh.length) - bundleItemUnits(items.size)))) return null;
+    if (!(await readOnce(fresh))) return {};
+    for (const id of fresh) items.add(id);
     try {
-      listings = await readListings(store, ids);
-    } catch (error) {
-      console.error("reading a locked space's products failed", error);
-      return {};
-    }
-    const before = items.size;
-    for (const item of bundleItemsToRead(listings)) items.add(item);
-    if (!(await pay(bundleItemUnits(items.size) - bundleItemUnits(before)))) return null;
-    try {
-      for (const id of await productsBuyableNow(store, listings)) buyable.add(id);
+      soon ??= (await soonState(store)).soon;
+      for (const id of await productsBuyableNow(store, listings, Date.now(), { soon, listings: known })) buyable.add(id);
     } catch (error) {
       console.error("reading a locked space's products failed", error);
       return {};
     }
     for (const id of ids) read.add(id);
-    for (const listing of listings) byId.set(listing.id, listing);
   }
   return Object.fromEntries(
     locked.map(({ space, needs }) => {
-      const way = unlockOf(needs, read, byId, buyable);
+      const way = unlockOf(needs, read, known, buyable);
       const unlock: Unlock = way === "unread" ? "capped" : way === "none" ? "none" : { title: way.title, href: `/@${store.handle}/p/${productSegment(way)}` };
       return [space.id, unlock];
     }),

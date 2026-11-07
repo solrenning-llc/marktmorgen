@@ -82,6 +82,18 @@ const isOwnReply = (reply: unknown, id: string): boolean =>
   reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 type Cursor = { h: number; p: string };
 
+/**
+ * The rows of a list or search Stripe gave (rule 30). A reply that is not one
+ * (a JSON null, a string, a number, an object with no data array) is not an
+ * empty list, which would read as nothing to hold and the last page: it
+ * throws, so the member is tried again and the pages read again (Claude 6 on
+ * #3098, same class). The rows themselves are checked by each caller.
+ */
+const listOf = (reply: unknown): unknown[] => {
+  if (reply === null || typeof reply !== "object" || !Array.isArray((reply as { data?: unknown }).data)) throw new Error("Stripe answered with something that is not a list");
+  return (reply as { data: unknown[] }).data;
+};
+
 const parseCursor = (raw: unknown): Cursor => {
   try {
     const value = typeof raw === "string" ? (JSON.parse(raw) as Cursor) : null;
@@ -128,7 +140,7 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
     const found = await onAccount("GET", account, `/subscriptions/search?${query}`);
     // Only the store's own sales of the handle searched (rule 30): a row the search gave that names another handle,
     // or none, is not this store's member, and is never held, let go or written down.
-    const listed = Array.isArray(found.data) ? (found.data as unknown[]) : [];
+    const listed = listOf(found);
     const rows = listed.filter((row): row is Row => Boolean(row) && typeof row === "object" && (row as Row).metadata?.store === handles[cursor.h]);
     if (rows.length < listed.length) console.error(`plan-closing: Stripe's search gave ${listed.length - rows.length} subscription(s) of another store; left alone`);
     if (!(await each(rows))) return false;
@@ -186,8 +198,6 @@ export function paidPeriodOf(invoice: Record<string, unknown>, email: string, in
   return { inv: invoice.id, ...(pi ? { pi } : {}), amt: line.amt, tot, cur, ps: line.ps, pe: line.pe, e: email };
 }
 
-const listOf = (reply: Record<string, unknown>) => (Array.isArray(reply.data) ? (reply.data as Record<string, unknown>[]) : []);
-
 /** An id as Stripe gives it: a string, or an expanded object's own id; "" when it is neither. */
 const idOf = (value: unknown): string =>
   typeof value === "string" ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : "";
@@ -211,11 +221,12 @@ function isOwnInvoice(invoice: Record<string, unknown>, sub: string, customer: s
  * customer's, or one naming none) is never acted on, and throws before any
  * write: the list cannot be trusted to be the member's whole, so the member is
  * tried again the next day (f:), never counted as held with its hold part done.
+ * A reply that is not a list throws the same way (listOf).
  */
-function ownInvoices(reply: Record<string, unknown>, sub: string, customer: string, what: string): Record<string, unknown>[] {
+function ownInvoices(reply: unknown, sub: string, customer: string, what: string): Record<string, unknown>[] {
   const rows = listOf(reply);
-  if (rows.some((row) => !row || typeof row !== "object" || !isOwnInvoice(row, sub, customer))) throw new Error(`Stripe listed ${what} that is not the member's own`);
-  return rows;
+  if (rows.some((row) => !row || typeof row !== "object" || !isOwnInvoice(row as Record<string, unknown>, sub, customer))) throw new Error(`Stripe listed ${what} that is not the member's own`);
+  return rows as Record<string, unknown>[];
 }
 
 /**

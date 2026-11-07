@@ -34,7 +34,9 @@ export default async function LibraryPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
   const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
-  const email = token ? await libraryOwner(token) : null;
+  // A link whose address could not be read is said so, never "expired" (CX-123 rule 24; Claude 5 on #2910).
+  const owner = token ? await libraryOwner(token).then((email) => ({ email }), () => null) : { email: null };
+  const email = owner?.email ?? null;
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
   const shelves: { store: Store; open: string | null }[] = [];
@@ -124,7 +126,11 @@ export default async function LibraryPage({ searchParams }: Params) {
             </>
           ) : (
             <div className="max-w-xl">
-              {token ? (
+              {!owner ? (
+                <p className="notice notice-error mb-6" role="alert">
+                  That link could not be read just now. Reload this page in a moment.
+                </p>
+              ) : token ? (
                 <p className="notice notice-error mb-6" role="alert">
                   That link has expired or was already replaced. Ask for a new one below.
                 </p>

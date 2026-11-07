@@ -118,13 +118,17 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
   let charged: Awaited<ReturnType<typeof storeForId>> = null;
+  // A store whose record could not be read is not a closed one (CX-123 rule 24): when none read and one did not,
+  // nothing was sent, so the page never says a link is on its way (Claude 5 on #2910).
+  let unread = 0;
   for (const sid of await storesBoughtFrom(email)) {
-    const store = await storeForId(sid).catch(() => null);
+    const store = await storeForId(sid).catch(() => undefined);
+    if (store === undefined) unread += 1;
     if (!store) continue;
     stores.push(sid);
     charged ??= store;
   }
-  if (!stores.length) return "sent";
+  if (!stores.length) return unread ? "error" : "sent";
   if (!charged) return "error";
   const token = randomBytes(32).toString("hex");
   await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]);
@@ -147,9 +151,15 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   return sent ? "sent" : "error";
 }
 
-/** The address a live library link was sent to, or null. */
+/**
+ * The address a live library link was sent to, or null when the link is confirmed gone. Read in its exact shape
+ * (CX-123 rule 24): any other reply throws UnknownReplyError, never "expired" (Claude 5 on #2910).
+ */
 export async function libraryOwner(token: string): Promise<string | null> {
   if (!LIBRARY_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [email] = await redisPipeline([["GET", linkKey(token)]]);
-  return typeof email === "string" && email ? email : null;
+  const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+  const email = replies ? replies[0] : undefined;
+  if (email === null) return null;
+  if (typeof email !== "string" || !email) throw new UnknownReplyError("a library link's address");
+  return email;
 }

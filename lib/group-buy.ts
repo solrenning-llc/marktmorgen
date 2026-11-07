@@ -561,6 +561,24 @@ const PLACE_RELEASE = `-- marktmorgen:group-place-release:v1
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0`;
 
+/**
+ * Marks a place done (KEYS[1] the marks, ARGV[1] the address, ARGV[2] the
+ * mark with d = 1): 1 only when it turned a mark that was there and not done,
+ * 0 when it was done already, 2 when there was no mark (written, nothing to
+ * give back), -1 for a mark that is not JSON (left as it is).
+ */
+const PLACE_DONE = `-- marktmorgen:group-place-done:v1
+local now = redis.call('HGET', KEYS[1], ARGV[1])
+if not now then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+  return 2
+end
+local ok, mark = pcall(cjson.decode, now)
+if not ok or type(mark) ~= 'table' then return -1 end
+if mark.d == 1 then return 0 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+return 1`;
+
 /** How long one open of a link holds it, at most. */
 const OPENING_SECONDS = 30;
 
@@ -626,8 +644,11 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
     for (const id of [group.p, ...(group.items ?? [])]) await input.recordStart(email, id, mark.at);
     // The purchase was paid, so it is covered wherever its sale paid a share.
     await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0);
-    const done = await redisPipeline([["HSET", members, who, write({ ...mark, d: 1 })]]).then((r) => repliesFor(r, 1), () => null);
-    if (done && countOf(done[0]) !== null && mark.h !== undefined) await settleAdmitted(store, mark.h);
+    // Only the open that turns the mark to done gives the room back (Claude 5's review of #2654): an open that
+    // outlived its hold and one that came after it may both get here, and the hour's room is shared by every
+    // checkout of the store, so a second give-back would take another order's room.
+    const done = await redisPipeline([["EVAL", PLACE_DONE, 1, members, who, write({ ...mark, d: 1 })]]).then((r) => repliesFor(r, 1), () => null);
+    if (done && done[0] === 1 && mark.h !== undefined) await settleAdmitted(store, mark.h);
   };
 
   // Read again now that this open holds the link.

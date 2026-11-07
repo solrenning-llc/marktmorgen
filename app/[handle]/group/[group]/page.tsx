@@ -137,8 +137,16 @@ export default async function GroupPage({ params, searchParams }: Params) {
     }
   }
 
-  const count = await placesTaken(group.id).catch(() => 0);
-  const left = Math.max(0, group.people - count);
+  // A count that could not be read is not said at all, never as every place open (CX-123 rule 24); the form
+  // stays, and asking for a place counts again before any link is sent.
+  const count = await placesTaken(group.id).then(
+    (n): number | null => n,
+    (error: unknown) => {
+      console.error("counting a purchase's places failed", error);
+      return null;
+    },
+  );
+  const left = count === null ? 1 : Math.max(0, group.people - count);
   const noticeName = placeNotice({ token, tokenValid: PLACE_TOKEN.test(token), taken, threw: failed, status });
   const notice = noticeName ? g.groupNotices[noticeName as keyof typeof g.groupNotices] ?? null : null;
 
@@ -153,7 +161,7 @@ export default async function GroupPage({ params, searchParams }: Params) {
       <p className="st-price text-sm">{g.paidForYou}</p>
       <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{title}</h1>
       <p className="st-muted mt-4 text-lg">
-        {g.boughtForPeople(store.name, group.people, placesWords(group.people, count, store.language))}
+        {g.boughtForPeople(store.name, group.people, count === null ? "" : placesWords(group.people, count, store.language)).trim()}
       </p>
       {left > 0 ? (
         <form action="/api/store/group" method="post" className="mt-8 space-y-3">

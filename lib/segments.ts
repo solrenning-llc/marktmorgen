@@ -31,7 +31,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
 import { rfmGroup } from "@/lib/rfm-rules";
-import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
+import { IncludedBytes } from "@/lib/sent-bytes";
 import { ALL_TIME_PAGES, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -91,8 +91,13 @@ export const LEDGER_BYTES_PER_UNIT = 1_000_000;
 export const IMPORTED_BUYER_BYTES = 2 * (254 + 64);
 
 
-/** Studio requests reading (or writing) `bytes` of the buyers costs, by size: none within PAGE_INCLUDED_BYTES. */
-export const ledgerUnits = (bytes: number) => (bytes <= PAGE_INCLUDED_BYTES ? 0 : Math.ceil(bytes / LEDGER_BYTES_PER_UNIT));
+/**
+ * Studio requests reading (or writing) `bytes` of the buyers costs, by size:
+ * none within what is left of the request's included bytes (`included`, one
+ * for the whole request, lib/sent-bytes.ts IncludedBytes; C3-112 (2)), then
+ * one a megabyte. A fresh one when the reading is the request's only part.
+ */
+export const ledgerUnits = (bytes: number, included: IncludedBytes = new IncludedBytes()) => included.take(bytes, LEDGER_BYTES_PER_UNIT).units;
 
 /**
  * What a reading of the buyers moves besides Stripe's pages, from what is
@@ -121,18 +126,20 @@ export async function ledgerReadingUnits(store: Store): Promise<number> {
   if (!readsBuyers(store)) return 0;
   let copy = 0;
   let imported = 0;
+  // The copy and the rest share one reading's included bytes, as buyerLedger counts them (C3-112 (2)).
+  const included = new IncludedBytes();
   if (store.statsId && isRedisConfigured()) {
     const replies = repliesFor(await redisPipeline([["STRLEN", ledgerKey(store.statsId)], ["HLEN", importedWhoKey(store.statsId)]]).catch(() => null), 2);
     // STRLEN and HLEN answer 0 for a key that is not there, never null: any other shape is unknown (CX-123 rule 24).
     const size = countOf(replies?.[0]);
     const who = countOf(replies?.[1]);
     if (size === null || who === null) throw new LedgerNotCounted();
-    copy = size > 0 ? ledgerUnits(size) : 0;
+    copy = size > 0 ? ledgerUnits(size, included) : 0;
     imported = who;
   }
   const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)).catch(() => null) : { sales: 0, refunds: 0 };
   if (!paypal) throw new LedgerNotCounted();
-  return copy + (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds }));
+  return copy + (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds }), included);
 }
 
 /**
@@ -144,18 +151,19 @@ export async function ledgerReadingUnits(store: Store): Promise<number> {
  * with the imported buyers and the PayPal sales and refunds by how many are
  * kept (ledgerReadBytes), before any is read.
  */
-export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>): Promise<Ledger> {
+export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>, included: IncludedBytes = new IncludedBytes()): Promise<Ledger> {
   if (!readsBuyers(store)) return { buyers: new Map(), partial: false };
   const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
   if (store.statsId && isRedisConfigured()) {
     // STRLEN answers 0 for a copy that is not there, never null: a size in any other shape is unknown (CX-123
-    // rule 24), so it is neither read as no copy nor counted as 0 units.
-    const size = countOf(repliesFor(await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]), 1)?.[0]);
-    if (size === null) throw new LedgerNotCounted();
-    const units = ledgerUnits(size);
-    if (size > 0 && !(await counted(units))) throw new LedgerNotCounted();
+    // rule 24; Codex J on #2270), so it is neither read as no copy nor counted as 0 units, and nothing more is read.
+    const bytes = countOf(repliesFor(await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]), 1)?.[0]);
+    if (bytes === null) throw new LedgerNotCounted();
+    // The copy is taken from the request's included bytes (`included`, shared with the page's other parts), or counted.
+    const taken = bytes > 0 ? included.take(bytes, LEDGER_BYTES_PER_UNIT) : { units: 0, covers: 0 };
+    if (bytes > 0 && !(await counted(taken.units))) throw new LedgerNotCounted();
     // Never more than was counted: a copy grown since is read cut, cannot be parsed, and is read again below, counted.
-    const [cached] = size > 0 ? await redisPipeline([["GETRANGE", ledgerKey(store.statsId), 0, Math.max(units * LEDGER_BYTES_PER_UNIT, PAGE_INCLUDED_BYTES) - 1]]) : [null];
+    const [cached] = bytes > 0 ? await redisPipeline([["GETRANGE", ledgerKey(store.statsId), 0, taken.covers - 1]]) : [null];
     if (typeof cached === "string" && cached) {
       try {
         const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; v?: number };
@@ -177,7 +185,7 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   // A store that reads no sales (no Stripe, no PayPal: imported buyers only) reads none of them (round 7, M1).
   const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };
   const moved = ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds });
-  if (!(await counted((store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(moved)))) throw new LedgerNotCounted();
+  if (!(await counted((store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(moved, included)))) throw new LedgerNotCounted();
   // Checkouts and offers after paying; and, on a Stripe account, the renewals
   // of memberships and payment plans, and what refunds and disputes took back
   // (270 [GR1], unit 2): a member who pays every month is not quiet since they

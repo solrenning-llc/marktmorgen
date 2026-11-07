@@ -12,13 +12,17 @@
  * every lesson in it (ratedLessonCount, lib/person-erasure.ts erasureSize).
  *
  * Every rating takes RATING_ROOM_BYTES of the store's data room before it is
- * written, once per student and lesson; a change takes nothing more, and the
- * room comes back only when a deletion is confirmed. A reply that is not
- * exactly what was asked for leaves the outcome unknown: the charge stays
- * (never less than what may be kept) and the caller is told.
+ * written, once per student and lesson; a change takes nothing more. A
+ * deletion gives the room back in the same script that deletes (the data
+ * room's own steps, TAKE_DATA, run first inside it), so a give-back is never
+ * lost after the ratings went, and a room that cannot be counted deletes
+ * nothing. A reply that is not exactly what was asked for leaves the outcome
+ * unknown: the charge stays (never less than what may be kept) and the
+ * caller is told.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, TAKE_DATA, dataKey, giveData, monthOf, needData } from "@/lib/store-data";
+import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { ITEM_ID_PATTERN } from "@/lib/course";
 import {
@@ -37,6 +41,17 @@ const indexKey = (course: string) => `nl:lr:${course}:ls`;
 const RATINGS_SLOT = (course: string) => `lr:${course}`;
 
 const unreadable = () => new Error("Lesson ratings could not be read. Try again.");
+
+/**
+ * The data room's own steps (TAKE_DATA) for a course's slot, grown or shrunk
+ * by `bytes`, inside a script whose KEYS[1] is the room. Its own name, so it
+ * never meets lib/course-survey.ts's helper of the same shape.
+ */
+const RATINGS_ROOM = `local function ratingsRoom(limit, month, slot, bytes)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, '1', month, 'a', slot, bytes}
+${TAKE_DATA}
+end`;
 
 /**
  * Keeps one student's rating of a lesson. KEYS: the lesson's ratings, the
@@ -59,26 +74,59 @@ redis.call("SADD", KEYS[2], ARGV[4])
 return 1`;
 
 /**
- * Takes one student's rating of a lesson out, and the lesson out of the
- * course's rated lessons when it was the last. KEYS: the lesson's ratings, the
- * course's rated lessons; ARGV: the student's key, the lesson. Answers 1 when
- * a rating went, 0 when there was none.
+ * Takes one student's ratings out of the lessons named, each lesson out of
+ * the course's rated lessons when it was its last, and gives back their room
+ * in the same step. KEYS: the store's data room, the course's rated lessons,
+ * then each lesson's ratings; ARGV: the room's limit, this month, the
+ * course's slot, the bytes a rating is charged at, the student's key, then
+ * each lesson (in KEYS' order). The room's step comes first: when it cannot
+ * be made ({-1, total, 0}) nothing is taken out. Answers {1, total, how many
+ * went}, {1, 0, 0} when there was none. Modelled by lib/redis-memory.ts.
  */
-export const DROP_LESSON_RATING = `-- marktmorgen:lesson-rating-drop:v1
-local gone = redis.call("HDEL", KEYS[1], ARGV[1])
-if redis.call("HLEN", KEYS[1]) == 0 then redis.call("SREM", KEYS[2], ARGV[2]) end
-return gone`;
+export const DROP_LESSON_RATING = `-- marktmorgen:lesson-rating-drop:v2
+${RATINGS_ROOM}
+local each = tonumber(ARGV[4])
+if not each or each < 0 or #KEYS < 3 or #KEYS - 2 ~= #ARGV - 5 then return {-1, 0, 0} end
+local held = 0
+for i = 3, #KEYS do
+  if redis.call("HEXISTS", KEYS[i], ARGV[5]) == 1 then held = held + 1 end
+end
+if held == 0 then
+  for i = 3, #KEYS do
+    if redis.call("HLEN", KEYS[i]) == 0 then redis.call("SREM", KEYS[2], ARGV[i + 3]) end
+  end
+  return {1, 0, 0}
+end
+local taken = ratingsRoom(ARGV[1], ARGV[2], ARGV[3], -held * each)
+if taken[1] ~= 1 then return {taken[1], taken[2], 0} end
+for i = 3, #KEYS do
+  redis.call("HDEL", KEYS[i], ARGV[5])
+  if redis.call("HLEN", KEYS[i]) == 0 then redis.call("SREM", KEYS[2], ARGV[i + 3]) end
+end
+return {1, taken[2], held}`;
 
 /**
- * Takes every rating of a lesson the creator removed, and the lesson out of
- * the course's rated lessons. KEYS: the lesson's ratings, the course's rated
- * lessons; ARGV: the lesson. Answers how many ratings went.
+ * Takes every rating of the lessons the creator removed, each lesson out of
+ * the course's rated lessons, and gives back their room in the same step.
+ * KEYS: the store's data room, the course's rated lessons, then each lesson's
+ * ratings; ARGV: the room's limit, this month, the course's slot, the bytes a
+ * rating is charged at, then each lesson (in KEYS' order). The room's step
+ * comes first: when it cannot be made ({-1, total, 0}) nothing is deleted.
+ * Answers {1, total, how many went}. Modelled by lib/redis-memory.ts.
  */
-export const DROP_LESSON_RATINGS = `-- marktmorgen:lesson-ratings-drop-lesson:v1
-local count = redis.call("HLEN", KEYS[1])
-redis.call("DEL", KEYS[1])
-redis.call("SREM", KEYS[2], ARGV[1])
-return count`;
+export const DROP_LESSON_RATINGS = `-- marktmorgen:lesson-ratings-drop-lesson:v2
+${RATINGS_ROOM}
+local each = tonumber(ARGV[4])
+if not each or each < 0 or #KEYS < 3 or #KEYS - 2 ~= #ARGV - 4 then return {-1, 0, 0} end
+local count = 0
+for i = 3, #KEYS do count = count + redis.call("HLEN", KEYS[i]) end
+local taken = ratingsRoom(ARGV[1], ARGV[2], ARGV[3], -count * each)
+if taken[1] ~= 1 then return {taken[1], taken[2], 0} end
+for i = 3, #KEYS do
+  redis.call("DEL", KEYS[i])
+  redis.call("SREM", KEYS[2], ARGV[i + 2])
+end
+return {1, taken[2], count}`;
 
 /**
  * Reads every rating of a lesson, only while there are no more than were paid
@@ -89,6 +137,42 @@ export const READ_LESSON_RATINGS = `-- marktmorgen:lesson-rating-read:v1
 local count = redis.call("HLEN", KEYS[1])
 if count > tonumber(ARGV[1]) then return {0, count} end
 return {1, redis.call("HGETALL", KEYS[1])}`;
+
+/**
+ * Runs one of the scripts that delete ratings with their room
+ * (DROP_LESSON_RATING, DROP_LESSON_RATINGS) over these lessons and answers
+ * how many went. A store with no room to count in, a room that cannot be
+ * counted, or a reply that is not exactly the script's throws UnknownReply:
+ * nothing is deleted for none, and nothing is given back that was not.
+ */
+async function dropWithRoom(script: string, courseId: string, lessons: readonly string[], room: DataStore, who: string[], what: string): Promise<number> {
+  const key = dataKey(room);
+  if (!key) throw new UnknownReply(what);
+  // A lesson named twice would be counted twice before it went, and give back room it never took.
+  lessons = [...new Set(lessons)];
+  const now = Date.now();
+  const [reply] = exactReplies(
+    await redisPipeline([[
+      "EVAL",
+      script,
+      2 + lessons.length,
+      key,
+      indexKey(courseId),
+      ...lessons.map((lesson) => lessonKey(courseId, lesson)),
+      contentRoomFor(room, now / 1000),
+      monthOf(now),
+      RATINGS_SLOT(courseId),
+      RATING_ROOM_BYTES,
+      ...who,
+      ...lessons,
+    ]]),
+    1,
+    what,
+  );
+  const [state, , gone] = exactReplies(reply, 3, what);
+  if (state !== 1 || typeof gone !== "number" || !Number.isSafeInteger(gone) || gone < 0) throw new UnknownReply(what);
+  return gone;
+}
 
 /** The student's own rating of a lesson, or null when they gave none. */
 export async function readMyRating(courseId: string, lessonId: string, who: string): Promise<LessonRating | null> {
@@ -164,18 +248,16 @@ export async function rateLesson(input: {
   return { ok: false, reason: "unknown" };
 }
 
-/** Takes a student's rating of a lesson out; true when one went, and its room came back. */
+/**
+ * Takes a student's rating of a lesson out; true when one went, its room back
+ * in the same step. A reply that is not exactly the script's throws UnknownReply.
+ */
 export async function removeMyRating(courseId: string, lessonId: string, who: string, room: DataStore): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const [gone] = exactReplies(
-    await redisPipeline([["EVAL", DROP_LESSON_RATING, 2, lessonKey(courseId, lessonId), indexKey(courseId), who, lessonId]]),
-    1,
-    "a lesson rating's removal",
-  );
-  if (gone === 0) return false;
-  if (gone !== 1) throw new UnknownReply("a lesson rating's removal");
-  await giveData(room, [{ slot: RATINGS_SLOT(courseId), bytes: RATING_ROOM_BYTES }]);
-  return true;
+  const what = "a lesson rating's removal";
+  const gone = await dropWithRoom(DROP_LESSON_RATING, courseId, [lessonId], room, [who], what);
+  if (gone !== 0 && gone !== 1) throw new UnknownReply(what);
+  return gone === 1;
 }
 
 /**
@@ -236,46 +318,31 @@ export async function ratingsOfPerson(courseId: string, who: string): Promise<{ 
 /**
  * Deletes one person's ratings from every lesson of a course they rated
  * (lib/person-erasure.ts), a lesson no longer in the course too, and gives
- * back the room of each one confirmed gone. Answers how many went; a reply
- * that is not exactly what was asked for throws UnknownReply, and only what
- * was confirmed comes back.
+ * back their room in the same step (DROP_LESSON_RATING, one script for every
+ * lesson). Answers how many went; a room that cannot be counted deletes
+ * nothing, and a reply that is not exactly the script's throws UnknownReply.
  */
-export async function forgetLessonRatingsPerson(courseId: string, who: string, room?: DataStore): Promise<number> {
+export async function forgetLessonRatingsPerson(courseId: string, who: string, room: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const lessons = await ratedLessons(courseId);
   if (!lessons.length) return 0;
   const what = "the deletion of a person's lesson ratings";
-  const replies = exactReplies(
-    await redisPipeline(lessons.map((lesson) => ["EVAL", DROP_LESSON_RATING, 2, lessonKey(courseId, lesson), indexKey(courseId), who, lesson])),
-    lessons.length,
-    what,
-  );
-  const gone = replies.filter((reply) => reply === 1).length;
-  if (room && gone) await giveData(room, [{ slot: RATINGS_SLOT(courseId), bytes: RATING_ROOM_BYTES * gone }]);
-  if (!replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReply(what);
+  const gone = await dropWithRoom(DROP_LESSON_RATING, courseId, lessons, room, [who], what);
+  if (gone > lessons.length) throw new UnknownReply(what);
   return gone;
 }
 
 /**
  * Takes away every rating of lessons gone from a course (the creator removed
  * the lesson or its module), with each lesson's place in the course's rated
- * lessons, and gives back the room of each rating confirmed gone. Answers
- * how many went; a reply that is not a count throws UnknownReply, after
- * what was confirmed came back.
+ * lessons, and gives back their room in the same step (DROP_LESSON_RATINGS,
+ * one script for every lesson). Answers how many went; a room that cannot be
+ * counted deletes nothing, and a reply that is not exactly the script's
+ * throws UnknownReply.
  */
 export async function dropLessonRatings(courseId: string, lessonIds: readonly string[], room: DataStore): Promise<number> {
   if (!isRedisConfigured() || !lessonIds.length) return 0;
-  const what = "the deletion of a removed lesson's ratings";
-  const replies = exactReplies(
-    await redisPipeline(lessonIds.map((lesson) => ["EVAL", DROP_LESSON_RATINGS, 2, lessonKey(courseId, lesson), indexKey(courseId), lesson])),
-    lessonIds.length,
-    what,
-  );
-  const counted = replies.filter((reply): reply is number => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= 0);
-  const gone = counted.reduce((sum, n) => sum + n, 0);
-  if (gone) await giveData(room, [{ slot: RATINGS_SLOT(courseId), bytes: RATING_ROOM_BYTES * gone }]);
-  if (counted.length !== replies.length) throw new UnknownReply(what);
-  return gone;
+  return dropWithRoom(DROP_LESSON_RATINGS, courseId, lessonIds, room, [], "the deletion of a removed lesson's ratings");
 }
 
 /**
@@ -299,7 +366,7 @@ export async function ratedLessonCount(courseIds: readonly string[]): Promise<nu
 /**
  * Takes away every rating of a course the creator removes or turns off, a
  * lesson no longer in it too, found by the course's index, and gives back
- * the room of each one confirmed gone. Answers how many went.
+ * their room in the same step as each drop. Answers how many went.
  *
  * Each lesson leaves the index in the same step its ratings go
  * (DROP_LESSON_RATINGS), so the index is gone once it is empty: there is no

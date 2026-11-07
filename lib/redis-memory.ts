@@ -261,18 +261,42 @@ export class MemoryRedis {
           this.run(["SADD", index, lesson]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:lesson-rating-drop:v1\n") && args[0] === "2" && args.length === 5) {
-          const [, ratings, index, who, lesson] = args;
-          const gone = this.run(["HDEL", ratings, who]);
-          if (this.run(["HLEN", ratings]) === 0) this.run(["SREM", index, lesson]);
-          return gone;
+        // A lesson rating's deletions (lib/lesson-rating.ts): the room's step first (TAKE_DATA, as storeData), then the
+        // deletes, in one step; nothing deleted when the room cannot be counted.
+        if (key.startsWith("-- marktmorgen:lesson-rating-drop:v2\n")) {
+          const keys = Number(args[0]);
+          const [room, index, ...ratings] = args.slice(1, 1 + keys);
+          const [limit, month, slot, rawEach, who, ...lessons] = args.slice(1 + keys);
+          const each = Number(rawEach);
+          if (!Number.isFinite(each) || each < 0 || !(keys >= 3) || ratings.length !== keys - 2 || lessons.length !== ratings.length) return [-1, 0, 0];
+          const held = ratings.filter((hash) => this.run(["HEXISTS", hash, who]) === 1).length;
+          const tidy = () => ratings.forEach((hash, i) => {
+            if (this.run(["HLEN", hash]) === 0) this.run(["SREM", index, lessons[i]]);
+          });
+          if (held === 0) {
+            tidy();
+            return [1, 0, 0];
+          }
+          const taken = this.storeData([room, limit, "1", month, "a", slot, String(-held * each)]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return [Array.isArray(taken) ? taken[0] : -1, Array.isArray(taken) ? taken[1] : 0, 0];
+          ratings.forEach((hash) => this.run(["HDEL", hash, who]));
+          tidy();
+          return [1, taken[1], held];
         }
-        if (key.startsWith("-- marktmorgen:lesson-ratings-drop-lesson:v1\n") && args[0] === "2" && args.length === 4) {
-          const [, ratings, index, lesson] = args;
-          const count = Number(this.run(["HLEN", ratings]));
-          this.run(["DEL", ratings]);
-          this.run(["SREM", index, lesson]);
-          return count;
+        if (key.startsWith("-- marktmorgen:lesson-ratings-drop-lesson:v2\n")) {
+          const keys = Number(args[0]);
+          const [room, index, ...ratings] = args.slice(1, 1 + keys);
+          const [limit, month, slot, rawEach, ...lessons] = args.slice(1 + keys);
+          const each = Number(rawEach);
+          if (!Number.isFinite(each) || each < 0 || !(keys >= 3) || ratings.length !== keys - 2 || lessons.length !== ratings.length) return [-1, 0, 0];
+          const count = ratings.reduce((sum, hash) => sum + Number(this.run(["HLEN", hash])), 0);
+          const taken = this.storeData([room, limit, "1", month, "a", slot, String(-count * each)]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return [Array.isArray(taken) ? taken[0] : -1, Array.isArray(taken) ? taken[1] : 0, 0];
+          ratings.forEach((hash, i) => {
+            this.run(["DEL", hash]);
+            this.run(["SREM", index, lessons[i]]);
+          });
+          return [1, taken[1], count];
         }
         if (key.startsWith("-- marktmorgen:lesson-rating-read:v1\n") && args[0] === "1" && args.length === 3) {
           const [, ratings, most] = args;

@@ -142,28 +142,37 @@ async function main(): Promise<void> {
   const M = "m".repeat(32);
   const lessons = Array.from({ length: MAX_LESSONS }, (_, i) => `l${String(i).padStart(11, "0")}`);
   for (const lesson of lessons) await rateLesson({ room: ROOM, courseId: M, lessonId: lesson, who: ana, score: 4, note: "" });
-  let commands = 0;
-  let bytes = 0;
+  // Regra 23: was one count of commands and bytes, held to 2 + MAX_LESSONS commands and to the mean bytes a command
+  // times 4 + 3 * MAX_LESSONS; a pass is one script for every lesson now, its room given back inside it, so the reads
+  // and the scripts are measured apart, each at its largest, and the worst case is four reads and three scripts.
+  let reads = 0;
+  let scripts = 0;
+  let readBytes = 0;
+  let scriptBytes = 0;
   redis.pipeline = (async (sent: (string | number)[][]) => {
     const replies = await original(sent);
-    if (sent.some((c) => c[0] === "SMEMBERS" || (c[0] === "EVAL" && c[1] === DROP_LESSON_RATINGS))) {
-      commands += sent.length;
-      bytes += Buffer.byteLength(JSON.stringify(sent)) + Buffer.byteLength(JSON.stringify(replies));
+    const size = Buffer.byteLength(JSON.stringify(sent)) + Buffer.byteLength(JSON.stringify(replies));
+    if (sent.some((c) => c[0] === "SMEMBERS")) {
+      reads += sent.length;
+      readBytes = Math.max(readBytes, size);
+    } else if (sent.some((c) => c[0] === "EVAL" && c[1] === DROP_LESSON_RATINGS)) {
+      scripts += sent.length;
+      scriptBytes = Math.max(scriptBytes, size);
     }
     return replies;
   }) as typeof redis.pipeline;
   is("a course with a rating on each of its MAX_LESSONS lessons: all go", await dropCourseRatings(M, ROOM), MAX_LESSONS);
   redis.pipeline = original;
-  // One pass with nothing written in between: two reads of the index and one script a lesson.
-  is(`measured: ${commands} commands, ${bytes} bytes`, commands, 2 + MAX_LESSONS);
-  // The worst case: three passes, each re-dropping every lesson, and a fourth read; bytes per command at most the measured mean, read replies included.
-  const perCommand = Math.ceil(bytes / commands);
-  const worstCommands = 4 + 3 * MAX_LESSONS;
+  // One pass with nothing written in between: two reads of the index and one script for every lesson.
+  is(`measured: ${reads} reads of at most ${readBytes} bytes, ${scripts} script of at most ${scriptBytes} bytes`, [reads, scripts], [2, 1]);
+  // The worst case: three passes, each re-dropping every lesson, and a fourth read, each at the largest measured.
+  const worstCommands = 4 + 3;
+  const worstBytes = 4 * readBytes + 3 * scriptBytes;
   const route = readFileSync(join(process.cwd(), "app/api/store/product/route.ts"), "utf8");
   const written = route.match(/at most (\d+) commands and about (\d+) KB/);
   is("the product removal says the worst case it was measured at", Boolean(written), true);
-  is("its commands are the four reads and three scripts a lesson", Number(written?.[1]), worstCommands);
-  is(`its kilobytes cover the measured bytes a command (${perCommand}) at that count`, Number(written?.[2]) * 1000 >= worstCommands * perCommand, true);
+  is("its commands are the four reads and three scripts", Number(written?.[1]), worstCommands);
+  is(`its kilobytes cover the measured bytes (${worstBytes}) at that count`, Number(written?.[2]) * 1000 >= worstBytes, true);
   is("each rating's room is charged when written, not here", RATING_ROOM_BYTES > 0, true);
 
   done();

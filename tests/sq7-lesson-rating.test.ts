@@ -206,8 +206,14 @@ async function main(): Promise<void> {
   is("dropping it again does nothing and gives nothing back", [await dropLessonRatings(COURSE, [L1], ROOM), three - (await used())], [0, RATING_ROOM_BYTES * 2]);
   is("no lessons, nothing sent", await dropLessonRatings(COURSE, [], ROOM), 0);
   const realDrop = redis.pipeline.bind(redis);
+  // Regra 23: was the v1 header answered [1, "?"] without running (one script a lesson, the room given back after it on
+  // its own); the drop and its room's give-back are one script for every lesson now (v2): it runs, and its reply comes
+  // back garbled, so what it deleted already gave its room back inside it.
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:lesson-ratings-drop-lesson:v1"))) return [1, "?"];
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:lesson-ratings-drop-lesson:v2"))) {
+      await realDrop(commands);
+      return [[1, 0, "?"]];
+    }
     return realDrop(commands);
   }) as typeof redis.pipeline;
   // Another rating stays in the course's slot, so what comes back is only the ratings' own bytes.
@@ -221,7 +227,8 @@ async function main(): Promise<void> {
   }
   redis.pipeline = realDrop;
   is("a reply that is not a count is unknown, said so", oddThrew, true);
-  is("and only what was confirmed comes back", beforeOdd - (await used()), RATING_ROOM_BYTES);
+  // Regra 23: was "only what was confirmed comes back"; the same bytes, now given back by the script that deleted them.
+  is("and what went gave its room back in the same step, no more", beforeOdd - (await used()), RATING_ROOM_BYTES);
   await forgetLessonRatingsPerson(COURSE, ana, ROOM);
   await forgetLessonRatingsPerson(COURSE, ben, ROOM);
   is("the room counts ratings, and a store's closing erases them", [countedInRoom(`nl:lr:${COURSE}:l:${L1}`), countedInRoom(`nl:lr:${COURSE}:ls`), closingOf(`nl:lr:${COURSE}:ls`)], [true, true, { how: "erase" }]);

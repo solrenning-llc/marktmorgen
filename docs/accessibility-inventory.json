@@ -931,9 +931,27 @@
       "parameters": []
     },
     {
+      "source": "app/status/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/status",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/add/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/add",
+      "parameters": []
+    },
+    {
       "source": "app/studio/affiliates/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/affiliates",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/agent/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/agent",
       "parameters": []
     },
     {
@@ -958,6 +976,12 @@
       "source": "app/studio/calendar/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/calendar",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/card/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/card",
       "parameters": []
     },
     {
@@ -1226,6 +1250,7 @@
   ],
   "componentSources": [
     "components/ad-spend-editor.tsx",
+    "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",
     "components/affiliate-click.tsx",
     "components/affiliate-commission-history.tsx",
@@ -1235,12 +1260,14 @@
     "components/affiliate-link-box.tsx",
     "components/affiliate-promotion-results.tsx",
     "components/affiliate-studio.tsx",
+    "components/agent-proposals.tsx",
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",
     "components/ai-posts.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",
+    "components/arrival-notice.tsx",
     "components/ask-box.tsx",
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",
@@ -1264,6 +1291,7 @@
     "components/call-editor.tsx",
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
+    "components/cart-link-builder.tsx",
     "components/certificate-actions.tsx",
     "components/certificate-validity.tsx",
     "components/chat-summary-editor.tsx",
@@ -1283,6 +1311,7 @@
     "components/community-push-toggle.tsx",
     "components/community-room.tsx",
     "components/community-studio.tsx",
+    "components/company-owner-report.tsx",
     "components/confirm-action.tsx",
     "components/contact-box-editor.tsx",
     "components/copy-link.tsx",
@@ -1296,6 +1325,8 @@
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",
     "components/cover-maker.tsx",
+    "components/creator-card-editor.tsx",
+    "components/creator-card-view.tsx",
     "components/creator-research-form.tsx",
     "components/creator-showcase.tsx",
     "components/custom-range.tsx",
@@ -1314,18 +1345,21 @@
     "components/dispute-purchase-review.tsx",
     "components/domain-editor.tsx",
     "components/dunning-editor.tsx",
+    "components/email-code-form.tsx",
     "components/email-field.tsx",
     "components/email-input.tsx",
     "components/email-studio.tsx",
     "components/email-suggestion.tsx",
     "components/email-sync-editor.tsx",
     "components/embed-messenger.tsx",
+    "components/empty-state.tsx",
     "components/exit-offer-editor.tsx",
     "components/exit-offer-slot.tsx",
     "components/exit-offer.tsx",
     "components/fair-price-editor.tsx",
     "components/faq-editor.tsx",
     "components/faq-from-inbox.tsx",
+    "components/feature-captures.tsx",
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
@@ -1425,6 +1459,7 @@
     "components/path-share-card.tsx",
     "components/path-social-scripts.tsx",
     "components/path-studio-reminder.tsx",
+    "components/path-weekly-summary.tsx",
     "components/pause-editor.tsx",
     "components/payment-comparison.tsx",
     "components/payment-mix.tsx",
@@ -1497,6 +1532,7 @@
     "components/site-footer.tsx",
     "components/site-nav.tsx",
     "components/site-pages-editor.tsx",
+    "components/skip-link.tsx",
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
     "components/stats-panel.tsx",
@@ -1580,6 +1616,7 @@
     "app/api/affiliate/route.ts",
     "app/api/auth/callback/route.ts",
     "app/api/auth/code/route.ts",
+    "app/api/auth/email-code/route.ts",
     "app/api/auth/google/route.ts",
     "app/api/auth/join/route.ts",
     "app/api/auth/lost/confirm/route.ts",
@@ -1659,6 +1696,7 @@
     "app/api/store/affiliates/payto/route.ts",
     "app/api/store/affiliates/route.ts",
     "app/api/store/affiliates/signout/route.ts",
+    "app/api/store/agent/route.ts",
     "app/api/store/agreement-sign/route.ts",
     "app/api/store/agreements/route.ts",
     "app/api/store/ai/route.ts",
@@ -1994,6 +2032,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 135
+    "pageTemplates": 139
   }
 }

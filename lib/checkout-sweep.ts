@@ -47,6 +47,7 @@ import { revokeRefundedGroups } from "@/lib/group-buy";
 import { sweepPayPal } from "@/lib/paypal-delivery";
 import { dropEnrollment } from "@/lib/learn";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { CONFIRM_WITHIN_SECONDS, type SessionRecord, canConfirm, confirmPurchase, confirmationKey } from "@/lib/purchase-email";
@@ -345,6 +346,11 @@ function worthAsking(store: Store, requesting = false): boolean {
   );
 }
 
+/** What an order's error is said as in the log: its name and the start of its message, never the whole object. */
+function describe(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message.slice(0, 200)}` : typeof error;
+}
+
 /** One store: its checkouts of the last day, each handed to what it needs. */
 async function sweepStore(store: Store, counts: SweepCounts, deadline: number, reviewed: boolean, requesting: boolean, taxPass: { policy: unknown; pagesLeft: number }): Promise<void> {
   // Refunds first: a key that should no longer open anything matters more
@@ -404,6 +410,14 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   const now = Math.floor(Date.now() / 1000);
   const since = now - CONFIRM_WITHIN_SECONDS;
   const reminding = recoveryOn(store);
+  // An order that fails is counted once in this pass, however many of its steps failed (Claude 5 on #2977): its
+  // confirmation and its place on the list can both throw on the same unreadable record, and that is one order.
+  const failedOrders = new Set<string>();
+  const failOrder = (id: string): void => {
+    if (failedOrders.has(id)) return;
+    failedOrders.add(id);
+    counts.failed += 1;
+  };
   let after = "";
   for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
     const listed = await onAccount(
@@ -411,7 +425,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       store.stripeAccountId as string,
       `/checkout/sessions?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as SessionRecord[]) : [];
+    // A page that is not a list is not "no checkouts" (CX-123 rule 24, L6): it stops this store's sweep, said as failed.
+    if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of checkouts");
+    const rows = listed.data as SessionRecord[];
 
     // Asked in one round trip: which of the paid ones were already confirmed.
     const paid = rows.filter((row) => isSettled(row) && typeof row.id === "string");
@@ -477,14 +493,35 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       }
     }
     const confirming = canConfirm(store);
+    // Which confirmations already went: one exact answer per order, 0 or 1 (CX-123 rule 24, L6). Anything else is
+    // unknown, and that order waits for the next run's whole reading rather than being sent on a guess.
     const marks = paid.length && confirming
-      ? await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)]))
+      ? repliesFor(await redisPipeline(paid.map((row) => ["EXISTS", confirmationKey(row.id as string)])), paid.length)
       : [];
     for (let i = 0; confirming && i < paid.length && Date.now() < deadline; i += 1) {
-      if (Number(marks[i]) === 1) continue;
-      const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
-      if (outcome === "sent") counts.confirmed += 1;
-      if (outcome === "failed") counts.failed += 1;
+      const mark = marks ? countOf(marks[i]) : null;
+      // Unknown is said as failed (Claude 3 on #2714): past the confirmation window the order is not read again, so a
+      // silent skip would be a confirmation never sent and never noticed.
+      if (mark === null || mark > 1) {
+        failOrder(paid[i].id as string);
+        continue;
+      }
+      if (mark !== 0) continue;
+      try {
+        const outcome = await confirmPurchase(store, paid[i].id as string, paid[i]);
+        if (outcome === "sent") counts.confirmed += 1;
+        if (outcome === "failed") failOrder(paid[i].id as string);
+      } catch (error) {
+        // One order's confirmation that throws (a record that does not read) never ends the store's pass: the orders
+        // behind it, the next pages, the library and the list go on (Claude 4, C4-2990). It is counted as failed, once,
+        // and logged by the order, not the buyer. When it is tried again depends on where it threw: before its
+        // "sending" mark was taken (a record that does not read), nothing is marked and the next run tries it; when
+        // the mark was taken and letting it go failed too, the runs skip it until the mark expires
+        // (SENDING_MARK_SECONDS in lib/purchase-email.ts, 15 minutes) and the first run after that tries it; after
+        // the email went (a throw after sending), it is marked sent and never sent again.
+        failOrder(paid[i].id as string);
+        console.error("a paid order's confirmation was left for the next run", paid[i].id, describe(error));
+      }
     }
 
     // Every buyer of an ordinary order finds this store in their library,
@@ -517,6 +554,10 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         const row = ordinary[i];
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
         if (!email) continue;
+        // One order that throws here (its products not read) never holds back the orders behind it (C4-2990): nothing
+        // marks it, so it is listed on the next run; it is counted as failed (once, with its confirmation), logged by
+        // the order, not the buyer. The try's body is left unindented on purpose: #2719 rewrites those lines.
+        try {
         const products = await listingsNamed(store, row.metadata);
         if ((await listOrder(store, {
           sessionId: row.id as string,
@@ -526,6 +567,10 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
           created: typeof row.created === "number" ? row.created : Math.floor(Date.now() / 1000),
           products: products.map((p) => ({ id: p.id, title: p.title })),
         })) === "done") counts.listed += 1;
+        } catch (error) {
+          failOrder(row.id as string);
+          console.error("a paid order was left off the list for the next run", row.id, describe(error));
+        }
       }
     }
 
@@ -533,7 +578,13 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       for (const row of rows) {
         if (Date.now() >= deadline) break;
         if (row.status !== "expired" || row.consent?.promotions !== "opt_in") continue;
-        const outcome = await remindAbandoned(store, row);
+        // One checkout whose reminder cannot be decided (an unknown reply,
+        // CX-123 rule 24) is that checkout's failure only: the next buyer's
+        // reminder, the workflows and the later pages still go (CX-116).
+        const outcome = await remindAbandoned(store, row).catch((error) => {
+          console.error("a checkout reminder could not be decided", store.handle, error);
+          return "failed" as const;
+        });
         if (outcome === "sent") counts.reminded += 1;
         if (outcome === "failed") counts.failed += 1;
       }
@@ -633,8 +684,9 @@ async function startAbandonedWorkflows(store: Store, rows: SessionRecord[]): Pro
     if (!handles.has(meta.store ?? "") || !meta.product || !flows.some((f) => f.productId === meta.product)) continue;
     const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
     if (!email || typeof row.id !== "string") continue;
-    const [fresh] = await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]);
-    if (fresh === null) continue;
+    // Handed on only on an exact OK (CX-123 rule 24, L6): taken by an earlier run, or unknown, starts nothing.
+    const fresh = repliesFor(await redisPipeline([["SET", `nl:wf:abandoned:${row.id}`, "1", "NX", "EX", 2 * 86_400]]), 1);
+    if (!fresh || fresh[0] !== "OK") continue;
     await enroll(store, email, { joined: false, abandoned: meta.product });
   }
 }

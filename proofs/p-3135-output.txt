@@ -1,0 +1,754 @@
+
+===== initial-harness =====
+✘ [ERROR] The symbol "http" has already been declared
+
+    <stdin>:6:4:
+      6 │ let http=0;let handler=()=>{throw Error('review external network pr...
+        ╵     ~~~~
+
+  The symbol "http" was originally declared here:
+
+    <stdin>:1:34:
+      1 │ ...rt net from 'node:net';import http from 'node:http';import https...
+        ╵                                  ~~~~
+
+✘ [ERROR] Cannot assign to import "http"
+
+    <stdin>:6:168:
+      6 │ ...,get(){return(...args)=>{if(++http>100)throw Error('review mock ...
+        ╵                                  ~~~~
+
+  Imports are immutable in JavaScript. To modify the value of this import, you must export a setter function in the imported file (e.g. "setHttp") and then import and call that function here instead.
+
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 2 errors:
+<stdin>:6:4: ERROR: The symbol "http" has already been declared
+<stdin>:6:168: ERROR: Cannot assign to import "http"
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+===== green =====
+▲ [WARNING] Import "issueSignedToken" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:57:29:
+      57 │ ...onst token = await blob.issueSignedToken({ pathname, operations...
+         ╵                            ~~~~~~~~~~~~~~~~
+
+▲ [WARNING] Import "presignUrl" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:58:40:
+      58 │ ...resignedUrl } = await blob.presignUrl(token, { operation: "get"...
+         ╵                               ~~~~~~~~~~
+
+▲ [WARNING] Import "put" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:102:13:
+      102 │   await blob.put(pathname, Buffer.from(bytes), { access: "private...
+          ╵              ~~~
+
+▲ [WARNING] Import "list" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:120:28:
+      120 │     const page = await blob.list({ prefix, cursor, limit: 1000 });
+          ╵                             ~~~~
+
+{"file":"hand-in-replace-exact.test.ts","old":false,"exit":0}
+✔ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (72.040952ms)
+✔ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (617.799063ms)
+✔ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (19.39978ms)
+✔ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (600.830449ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1322.288188
+MemoryRedis dispatches: 626 mock HTTP: 0
+could not delete a replaced assignment file: its room stays counted Error: the file store is down
+    at del ([stdin]:2210:26)
+    at deleteFile ([stdin]:14098:27)
+    at [stdin]:53969:28
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+    at async TestContext.<anonymous> ([stdin]:54116:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+could not delete a replaced assignment file: its room stays counted Error: the file store is down
+    at del ([stdin]:2210:26)
+    at deleteFile ([stdin]:14098:27)
+    at [stdin]:53969:28
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+    at async TestContext.<anonymous> ([stdin]:54116:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+▲ [WARNING] Import "issueSignedToken" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:57:29:
+      57 │ ...onst token = await blob.issueSignedToken({ pathname, operations...
+         ╵                            ~~~~~~~~~~~~~~~~
+
+▲ [WARNING] Import "presignUrl" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:58:40:
+      58 │ ...resignedUrl } = await blob.presignUrl(token, { operation: "get"...
+         ╵                               ~~~~~~~~~~
+
+▲ [WARNING] Import "put" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:102:13:
+      102 │   await blob.put(pathname, Buffer.from(bytes), { access: "private...
+          ╵              ~~~
+
+▲ [WARNING] Import "list" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:120:28:
+      120 │     const page = await blob.list({ prefix, cursor, limit: 1000 });
+          ╵                             ~~~~
+
+{"file":"task-hand-in-kept.test.ts","old":false,"exit":0}
+✔ control: a hand-in that goes through keeps its file and counts its bytes (56.12194ms)
+✔ the work's write reached Redis but its answer was lost: the kept file stays counted (9.788723ms)
+✔ the work's write never reached Redis: no file is left in the file store uncounted (7.12857ms)
+✔ the data room could not be counted before the write: the file is deleted and its bytes given back (9.042174ms)
+✔ a lesson nobody reads: marking it passed fails after the write, and the kept file stays counted (8.673034ms)
+✔ a hand-in after a failed one that kept its file: replacing it gives its bytes back once, never below what is kept (11.6973ms)
+✔ handing the same file in again into a full data room: the file the earlier work keeps is never deleted (13.69189ms)
+✔ the data room could not be counted and the file cannot be deleted either: it stays counted while it is in the file store (40.469593ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 171.019191
+MemoryRedis dispatches: 809 mock HTTP: 0
+a hand-in failed after its write: its file and the room it took are kept Error: Redis request failed with status 502
+    at [stdin]:54132:15
+handing in an assignment failed Error: Redis request failed with status 502
+    at [stdin]:54132:15
+a hand-in failed after its write: its file and the room it took are kept Error: Redis request failed with status 502
+    at [stdin]:54146:15
+    at store.pipeline ([stdin]:54076:14)
+    at redisPipeline ([stdin]:2156:41)
+    at handIn ([stdin]:52980:9)
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+    at async TestContext.<anonymous> ([stdin]:54148:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+handing in an assignment failed Error: Redis request failed with status 502
+    at [stdin]:54146:15
+    at store.pipeline ([stdin]:54076:14)
+    at redisPipeline ([stdin]:2156:41)
+    at handIn ([stdin]:52980:9)
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+    at async TestContext.<anonymous> ([stdin]:54148:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+could not count a store's data Error: Redis request failed with status 502
+    at [stdin]:54157:15
+    at store.pipeline ([stdin]:54076:14)
+    at redisPipeline ([stdin]:2156:41)
+    at run ([stdin]:6349:27)
+    at takeData ([stdin]:6357:10)
+    at needData ([stdin]:6360:23)
+    at handIn ([stdin]:52978:24)
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+handing in an assignment failed Error: the store's data room could not be counted
+    at needData ([stdin]:6363:9)
+    at async handIn ([stdin]:52978:18)
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+    at async TestContext.<anonymous> ([stdin]:54159:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+a hand-in failed after its write: its file and the room it took are kept Error: Redis request failed with status 502
+    at [stdin]:54173:17
+    at store.pipeline ([stdin]:54076:14)
+    at redisPipeline ([stdin]:2156:41)
+    at markPassed ([stdin]:11573:25)
+    at finish ([stdin]:52996:9)
+    at handIn ([stdin]:52987:27)
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+handing in an assignment failed Error: Redis request failed with status 502
+    at [stdin]:54173:17
+    at store.pipeline ([stdin]:54076:14)
+    at redisPipeline ([stdin]:2156:41)
+    at markPassed ([stdin]:11573:25)
+    at finish ([stdin]:52996:9)
+    at handIn ([stdin]:52987:27)
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+a hand-in failed after its write: its file and the room it took are kept Error: Redis request failed with status 502
+    at [stdin]:54188:15
+handing in an assignment failed Error: Redis request failed with status 502
+    at [stdin]:54188:15
+could not count a store's data Error: Redis request failed with status 502
+    at [stdin]:54222:15
+    at store.pipeline ([stdin]:54076:14)
+    at redisPipeline ([stdin]:2156:41)
+    at run ([stdin]:6349:27)
+    at takeData ([stdin]:6357:10)
+    at needData ([stdin]:6360:23)
+    at handIn ([stdin]:52978:24)
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+deleting a task file that was not handed in failed Error: the file store is down
+    at del ([stdin]:2210:26)
+    at deleteFile ([stdin]:14098:27)
+    at [stdin]:53956:30
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+    at async TestContext.<anonymous> ([stdin]:54225:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+handing in an assignment failed Error: the store's data room could not be counted
+    at needData ([stdin]:6363:9)
+    at async handIn ([stdin]:52978:18)
+    at async [stdin]:53952:20
+    at async withLock ([stdin]:8330:12)
+    at async POST ([stdin]:53907:22)
+    at async handIn2 ([stdin]:54060:20)
+    at async TestContext.<anonymous> ([stdin]:54225:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+▲ [WARNING] Import "issueSignedToken" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:57:29:
+      57 │ ...onst token = await blob.issueSignedToken({ pathname, operations...
+         ╵                            ~~~~~~~~~~~~~~~~
+
+▲ [WARNING] Import "presignUrl" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:58:40:
+      58 │ ...resignedUrl } = await blob.presignUrl(token, { operation: "get"...
+         ╵                               ~~~~~~~~~~
+
+▲ [WARNING] Import "put" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:102:13:
+      102 │   await blob.put(pathname, Buffer.from(bytes), { access: "private...
+          ╵              ~~~
+
+▲ [WARNING] Import "list" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:120:28:
+      120 │     const page = await blob.list({ prefix, cursor, limit: 1000 });
+          ╵                             ~~~~
+
+{"file":"task-room-unknown.test.ts","old":false,"exit":0}
+✔ control: with the room counter answering as Redis does, the file is handed in and kept (55.470665ms)
+✔ an unknown room reply (a null reply) deletes the uploaded file and hands nothing in (11.865902ms)
+✔ an unknown room reply (a word for a count) deletes the uploaded file and hands nothing in (8.061995ms)
+✔ an unknown room reply (no reply at all) deletes the uploaded file and hands nothing in (6.631692ms)
+✔ an unknown room reply (a count smaller than what was added) deletes the uploaded file and hands nothing in (6.340066ms)
+✔ an unknown room reply (a failed call) deletes the uploaded file and hands nothing in (7.602424ms)
+✔ a reply lost after the room was really taken: the file is deleted, and the bytes it took come back (11.2142ms)
+✔ a reply lost before the room was taken: nothing is given back that never entered (9.28049ms)
+✔ a lost reply whose giving back also fails: the route still answers, the file is deleted, the room only refuses sooner (12.683915ms)
+✔ a full room: refused as before, nothing kept, no mark left (12.850863ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 157.11052
+MemoryRedis dispatches: 907 mock HTTP: 0
+{"file":"assignments.test.ts","old":false,"exit":0}
+
+An assignment and its switches
+  ok    an assignment with no prompt is refused
+  ok    the prompt is trimmed, its line ends made plain
+  ok    a switch is on only when it is true
+  ok    a file's name loses what could break a download
+
+A student's file is theirs, for that lesson, of a kind taken
+  ok    a fresh name in their own folder
+  ok    another student's folder
+  ok    a kind that is not taken
+  ok    a folder inside it
+  ok    a way out of it
+  ok    a Word file is taken
+  ok    a web page is not
+  ok    nor anything that only looks like a key
+
+The lesson carries the switches, and a quiz or an assignment
+  ok    the switches are on the lesson
+  ok    taking it off leaves no trace on the lesson
+
+A must-finish assignment holds the rest shut until it is done
+  ok    the next lesson waits on it
+  ok    and the one after
+  ok    the lesson itself is open
+
+Reviewed: waiting, another try, approved
+  ok    the prompt is kept apart from the outline
+  ok    handed in, it waits for the creator
+  ok    and is in the creator's list
+  ok    the lesson is not done yet
+  ok    the next lesson still waits
+  ok    another try asked for
+  ok    nothing waits any more
+  ok    work already answered is not answered twice
+  ok    the old file is handed back to be deleted
+  ok    the second try is counted
+  ok    and the old answer is cleared with it
+  ok    the same file kept is not deleted
+  ok    approved
+  ok    approving finishes the lesson
+  ok    and opens the lessons after it
+
+Not reviewed: handing in is enough
+  ok    done at once
+  ok    the lesson is marked done
+  ok    nothing waits for the creator
+  ok    everything handed in, newest first
+
+What a store's students keep is held to its figure
+  ok    room up to the figure
+  ok    no room past it
+  ok    room given back is room again
+
+Removing an assignment forgets the work and returns its files
+  ok    every file still kept for it, to delete: the replaced one went when it was replaced
+  ok    the student's work is forgotten
+  ok    and the assignment
+
+Uploads never handed in, and doors used once
+  ok    the old one is deleted, the new one left
+  ok    and handed to the deletion once
+  ok    a door is used
+  ok    once
+
+Who hears about it
+  ok    the creator is told
+  ok    not again within the hour
+  ok    at the store's address
+  ok    the student's email is in the store's language
+  ok    with what the creator wrote, and the way back
+
+AI needs something to go on
+  ok    a file alone, with nothing said about it, is not enough
+
+52 checks, all passing.
+MemoryRedis dispatches: 115 mock HTTP: 2
+{"file":"assignment-room-exact.test.ts","old":false,"exit":0}
+✔ an unknown assignment-room read never becomes zero free usage (5.132622ms)
+✔ known assignment-room counts retain their exact boundary (0.727356ms)
+✔ the route says an unread room as unavailable, never as full (0.867161ms)
+✔ the upload route asks the room reader before signing storage IO (0.440658ms)
+✔ a counter below zero is nothing used, never a store locked out (Revisor 1 on #2655) (7.917156ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.966523
+MemoryRedis dispatches: 13 mock HTTP: 0
+{"file":"assignment-drop-exact.test.ts","old":false,"exit":0}
+✔ a healthy read returns every file and forgets the list (8.725783ms)
+✔ a file handed in after the reading stays listed, never lost (Revisor 1 on #2810) (1.038065ms)
+✔ the course route reads the work before it saves the course without the assignment (0.703391ms)
+✔ files: no reply: unknown, and the list of files is kept (0.339825ms)
+✔ files: null: unknown, and the list of files is kept (0.227132ms)
+✔ files: odd list: unknown, and the list of files is kept (0.262109ms)
+✔ files: a size not a whole number: unknown, and the list of files is kept (0.24841ms)
+✔ files: a name not text: unknown, and the list of files is kept (0.234598ms)
+✔ work list: null: unknown, and the list of files is kept (0.590378ms)
+✔ records: one reply missing: unknown, and the list of files is kept (0.417328ms)
+✔ a product's course: every assignment read before the product goes (Revisor 1 on #2810) (1.244943ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31.706657
+MemoryRedis dispatches: 46 mock HTTP: 0
+{"file":"task-upload-sweep.test.ts","old":false,"exit":0}
+✔ healthy: a stale upload is deleted once, a fresh one is left, and a second run deletes nothing again (22.97595ms)
+✔ healthy: a hand-in that won the door before the sweep keeps its file (1.475931ms)
+✔ the sweep does not hand the cron a file a hand-in already took (5.822798ms)
+✔ a leftover whose deletion failed is found again by the next run (5.179048ms)
+✔ a ZREM answered the text "1" deletes nothing (1.441432ms)
+✔ a ZREM answered 2 deletes nothing (1.321078ms)
+✔ a ZREM answered -1 deletes nothing (2.20656ms)
+✔ a ZREM answered null deletes nothing (4.227424ms)
+✔ a ZREM answered true deletes nothing (2.413806ms)
+✔ a ZREM answered 1.5 deletes nothing (1.280536ms)
+✔ a ZREM answered an object deletes nothing (1.527552ms)
+✔ a ZREM answered a list deletes nothing (1.228749ms)
+✔ the list read answered as a list holding a number deletes nothing (2.122478ms)
+✔ the list read answered as an object, not a list deletes nothing (1.496542ms)
+✔ the list read answered as no reply at all deletes nothing (1.159826ms)
+✔ the list read answered as two replies for one command deletes nothing (7.247643ms)
+✔ one ZREM won and one in an unknown shape: only the won file is deleted, and the job still answers (1.871278ms)
+✔ cost: the healthy sweep is one list read and one pipeline of one ZREM per stale path, nothing more (2.037644ms)
+✔ MEDIUM: a path whose deletion always fails holds only itself, never the rest of the batch (4.26432ms)
+✔ LOW: with one ZREM unknown and one won, the cron still counts the won file deleted (1.120958ms)
+✔ LOW: the ZREMs go in pipelines of 25, so a reply lost after they ran leaves at most 25 doors off the list (9.916371ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 110.132791
+MemoryRedis dispatches: 399 mock HTTP: 48
+could not delete an unused assignment upload; it is put back for the next run Error: a file could not be deleted
+    at deleteFile ([stdin]:49716:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:80542:7)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async TestContext.<anonymous> ([stdin]:80771:7)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+could not sweep unused assignment uploads UnknownReplyError: Redis answered the uploads never handed in in an unknown shape
+    at sweepTaskUploads ([stdin]:80515:69)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async watching ([stdin]:80673:12)
+    at async TestContext.<anonymous> ([stdin]:80804:9)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not sweep unused assignment uploads UnknownReplyError: Redis answered the uploads never handed in in an unknown shape
+    at sweepTaskUploads ([stdin]:80515:69)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async watching ([stdin]:80673:12)
+    at async TestContext.<anonymous> ([stdin]:80804:9)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not sweep unused assignment uploads UnknownReplyError: Redis answered the uploads never handed in in an unknown shape
+    at sweepTaskUploads ([stdin]:80515:69)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async watching ([stdin]:80673:12)
+    at async TestContext.<anonymous> ([stdin]:80804:9)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not sweep unused assignment uploads UnknownReplyError: Redis answered the uploads never handed in in an unknown shape
+    at sweepTaskUploads ([stdin]:80515:69)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async watching ([stdin]:80673:12)
+    at async TestContext.<anonymous> ([stdin]:80804:9)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+could not delete an unused assignment upload; it is put back for the next run Error: a file could not be deleted
+    at deleteFile ([stdin]:49716:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:80542:7)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async TestContext.<anonymous> ([stdin]:80836:25)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not delete an unused assignment upload; it is put back for the next run Error: a file could not be deleted
+    at deleteFile ([stdin]:49716:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:80542:7)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async TestContext.<anonymous> ([stdin]:80836:38)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not delete an unused assignment upload; it is put back for the next run Error: a file could not be deleted
+    at deleteFile ([stdin]:49716:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:80542:7)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async TestContext.<anonymous> ([stdin]:80836:51)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+taking 25 unused assignment uploads off their list: no reply, their files are kept Error: the reply was lost after the ZREMs ran
+    at [stdin]:80868:17
+    at store.pipeline ([stdin]:80670:18)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:80523:26)
+    at async GET ([stdin]:80635:20)
+    at async run ([stdin]:80699:30)
+    at async watching ([stdin]:80673:12)
+    at async TestContext.<anonymous> ([stdin]:80865:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+25 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+{"file":"store-data-registry.test.ts","old":false,"exit":0}
+creator: room 18 MB; outside it 121.5 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 288.3 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 704.9 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (187.336419ms)
+✔ each family is bounded one way at least, and what it says can be checked (99.966851ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (7.59898ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (5.392081ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (1.255566ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (10.611217ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.383478ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 321.45923
+MemoryRedis dispatches: 0 mock HTTP: 0
+
+===== probe =====
+▲ [WARNING] Import "issueSignedToken" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:57:29:
+      57 │ ...onst token = await blob.issueSignedToken({ pathname, operations...
+         ╵                            ~~~~~~~~~~~~~~~~
+
+▲ [WARNING] Import "presignUrl" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:58:40:
+      58 │ ...resignedUrl } = await blob.presignUrl(token, { operation: "get"...
+         ╵                               ~~~~~~~~~~
+
+▲ [WARNING] Import "put" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:102:13:
+      102 │   await blob.put(pathname, Buffer.from(bytes), { access: "private...
+          ╵              ~~~
+
+▲ [WARNING] Import "list" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:120:28:
+      120 │     const page = await blob.list({ prefix, cursor, limit: 1000 });
+          ╵                             ~~~~
+
+{"file":"p-3135-expired-lease.proof.ts","old":false,"exit":1}
+✔ expired holder alone: files that remain stored remain counted (55.931668ms)
+expired lease observation {"overdue":200,"successor":200,"kept":2,"used":1000,"deletions":2,"currentIsOverdue":true,"currentIsSuccessor":false}
+✖ a holder paused beyond its lease must not overwrite its successor and credit the earlier file twice (18.314203ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 85.121514
+
+✖ failing tests:
+
+test at [stdin]:54120:31
+✖ a holder paused beyond its lease must not overwrite its successor and credit the earlier file twice (18.314203ms)
+  AssertionError [ERR_ASSERTION]: 2 files still stored but only 1000 bytes counted
+      at TestContext.<anonymous> ([stdin]:54150:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+MemoryRedis dispatches: 289 mock HTTP: 0
+
+===== red =====
+▲ [WARNING] Import "issueSignedToken" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:57:29:
+      57 │ ...onst token = await blob.issueSignedToken({ pathname, operations...
+         ╵                            ~~~~~~~~~~~~~~~~
+
+▲ [WARNING] Import "presignUrl" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:58:40:
+      58 │ ...resignedUrl } = await blob.presignUrl(token, { operation: "get"...
+         ╵                               ~~~~~~~~~~
+
+▲ [WARNING] Import "put" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:102:13:
+      102 │   await blob.put(pathname, Buffer.from(bytes), { access: "private...
+          ╵              ~~~
+
+▲ [WARNING] Import "list" will always be undefined because there is no matching export in "tests/buyer-actions-blob.ts" [import-is-undefined]
+
+    lib/file-store.ts:120:28:
+      120 │     const page = await blob.list({ prefix, cursor, limit: 1000 });
+          ╵                             ~~~~
+
+{"file":"hand-in-replace-exact.test.ts","old":true,"exit":1}
+✖ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (66.475128ms)
+✖ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (21.525226ms)
+✖ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (10.009741ms)
+✖ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (18.025115ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 128.288929
+
+✖ failing tests:
+
+test at [stdin]:54060:33
+✖ the replaced file's delete failed (read by the creator): its room stays counted, never given back while it is kept (66.475128ms)
+  AssertionError [ERR_ASSERTION]: both files kept in storage stay counted: 2 kept, 1000 bytes counted
+  
+  1000 !== 2000
+  
+      at TestContext.<anonymous> ([stdin]:54073:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 2000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54075:33
+✖ two hand-ins at once over an earlier file (read by the creator): its room is given back once, and one current file is kept (21.525226ms)
+  AssertionError [ERR_ASSERTION]: the earlier file is deleted exactly once
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> ([stdin]:54101:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54060:33
+✖ the replaced file's delete failed (done at once): its room stays counted, never given back while it is kept (10.009741ms)
+  AssertionError [ERR_ASSERTION]: both files kept in storage stay counted: 2 kept, 1000 bytes counted
+  
+  1000 !== 2000
+  
+      at TestContext.<anonymous> ([stdin]:54073:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 1000,
+    expected: 2000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54075:33
+✖ two hand-ins at once over an earlier file (done at once): its room is given back once, and one current file is kept (18.025115ms)
+  AssertionError [ERR_ASSERTION]: the earlier file is deleted exactly once
+  
+  2 !== 1
+  
+      at TestContext.<anonymous> ([stdin]:54101:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 2,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+MemoryRedis dispatches: 572 mock HTTP: 0
+could not delete a replaced assignment file Error: the file store is down
+    at del ([stdin]:2210:26)
+    at deleteFile ([stdin]:14090:27)
+    at POST ([stdin]:53929:13)
+    at async handIn2 ([stdin]:54011:20)
+    at async TestContext.<anonymous> ([stdin]:54067:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+could not delete a replaced assignment file Error: the file store is down
+    at del ([stdin]:2210:26)
+    at deleteFile ([stdin]:14090:27)
+    at POST ([stdin]:53929:13)
+    at async handIn2 ([stdin]:54011:20)
+    at async TestContext.<anonymous> ([stdin]:54067:24)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+===== types =====
+
+===== lint =====
+
+/workspace/scratch/452ffd7d3d6c/p-review-3135-hand-in/tests/p-3135-expired-lease.proof.ts
+  110:16  warning  'lessonFiles' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 1 problem (0 errors, 1 warning)
+
+
+===== scanner =====
+Public data check: 4370 tracked files; 0 file(s) require correction.
+
+===== source-clean =====
+
+===== proof-diff =====
+
+===== runner-diff =====

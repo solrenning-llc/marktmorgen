@@ -409,11 +409,17 @@ const CAS_MEMBER = [
  * Changes some of a member's fields on the record as it is now, so a change
  * the member makes never writes back a mute or a removal the creator just
  * undid, or undoes one they just made. Null when there is no record.
+ *
+ * With `exact` (a consent or moderation write that is then said done: an
+ * email stop, a mute), only an exact null is "no record": a reply that is
+ * neither null nor a record that reads is unknown (CX-123 rule 24) and throws
+ * UnknownReplyError before anything is written, never answering as if done.
  */
-async function patchMember(id: string, key: string, change: (member: Member) => Partial<Member>): Promise<Member | null> {
+async function patchMember(id: string, key: string, change: (member: Member) => Partial<Member>, exact = false): Promise<Member | null> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const [raw] = await redisPipeline([["HGET", membersKey(id), key]]);
     const member = parseMember(raw);
+    if (exact && raw !== null && (!member || typeof raw !== "string")) throw new UnknownReplyError("a member's record");
     if (!member || typeof raw !== "string") return null;
     const next: Member = { ...member, ...change(member), k: member.k };
     const listed = next.dir && next.n && !next.removed ? "1" : "0";
@@ -507,7 +513,7 @@ export function answersFor(
 
 /** Switches a member's announcement emails off (the unsubscribe link) or on. */
 export async function setMail(id: string, member: Member, mail: boolean): Promise<Member> {
-  return (await patchMember(id, member.k, () => ({ mail }))) ?? member;
+  return (await patchMember(id, member.k, () => ({ mail }), true)) ?? member;
 }
 
 /** Keeps the unsubscribe token a member's emails carry. */
@@ -521,10 +527,15 @@ export async function moderateMember(
   key: string,
   change: { muted?: boolean; removed?: boolean },
 ): Promise<Member | null> {
-  return patchMember(id, key, (member) => ({
-    muted: change.muted ?? member.muted,
-    removed: change.removed ?? member.removed,
-  }));
+  return patchMember(
+    id,
+    key,
+    (member) => ({
+      muted: change.muted ?? member.muted,
+      removed: change.removed ?? member.removed,
+    }),
+    true,
+  );
 }
 
 /** One page of the member directory: those who chose to be listed, newest first. */

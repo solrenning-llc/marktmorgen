@@ -14,7 +14,11 @@
  *   - a best month, growth, projection, rank or status by revenue (561 [NE1]),
  *     or the page without the sentence that Marktmorgen promises no earnings;
  *   - "Entered by you" shown before it exists (VR: nothing that does not work);
- *   - PayPal amounts shown without saying PayPal disputes are left out;
+ *   - a month shown without saying, from the reading itself, what it leaves out
+ *     (Stripe disputes and money given back, PayPal disputes) or reads only in
+ *     part (PayPal refunds of part of a sale), or saying disputes are counted
+ *     where they are not read (the rule's contract of #2941);
+ *   - money given back (reinstatedCents) left out of money in;
  *   - a page view taking more than one of the day's two heavy readings, or one
  *     at all when the kept copy is fresh or the store sells through neither;
  *   - the day's readings used and the page pretending to have numbers, or not
@@ -29,6 +33,7 @@ import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import EarningsPage from "../app/studio/earnings/page";
 import { READING_FRESH_SECONDS, readingsLeft, takeStoreReading } from "@/lib/store-readings";
+import { earningsByMonth, readingSince } from "@/lib/earnings-by-month";
 import type { Store } from "@/lib/store";
 import { who } from "./bx2-u3-page-world";
 import { store as redis } from "./redis-stub";
@@ -106,6 +111,13 @@ const times = (text: string, part: string) => text.split(part).length - 1;
 const shows = (text: string, money: string) => new RegExp(money.replace(/[$.]/g, "\\$&") + "(?![\\d,]|\\.\\d)").test(text);
 const ZERO = /[$€]0(?![\d,]|\.\d)|[$€]0\.00/;
 
+/** The html of one month's section, from its heading to the next month's. */
+const section = (html: string, month: string) => {
+  const start = html.indexOf(`aria-labelledby="month-${month}"`);
+  const end = html.indexOf("aria-labelledby=\"month-", start + 1);
+  return start < 0 ? "" : html.slice(start, end < 0 ? undefined : end);
+};
+
 /** What NE1 forbids: ranking, rating or projecting the creator by revenue. */
 const NE1_FORBIDDEN = /best month|worst month|growth|\bgrew\b|growing|projection|projected|forecast|on track|record month|\brank|badge|\blevel\b|top seller|\bincrease|\bdecrease|[+-]\d+(\.\d+)?%|\bstatus\b/i;
 const NE1_SENTENCE = "Marktmorgen is software for selling your own work. We make no promise that using it will bring you sales, income or any result. What you earn depends on your products, your audience and your work.";
@@ -131,9 +143,22 @@ async function main(): Promise<void> {
     is("each currency named on its own row header", /<th scope="row"[^>]*>[^<]*Stripe[^<]*US dollars/.test(html) && /<th scope="row"[^>]*>[^<]*Stripe[^<]*euros/i.test(html), true);
     is("PayPal in June: $40.00 on its own row", /<th scope="row"[^>]*>[^<]*PayPal[^<]*US dollars/.test(html) && shows(text, "$40"), true);
     is("June's dollars from every source together, within one currency only: $105", shows(text, "$105"), true);
-    is("PayPal disputes said as left out", text.includes("PayPal disputes are not read"), true);
+    // Rule 23: was text.includes("PayPal disputes are not read"), one sentence typed for PayPal only. Under the rule's
+    // contract of #2941 each month says, from its own leftOut and partly, what its amounts do not hold.
+    const june = words(section(html, "2031-06"));
+    is("June says, in the rule's own words (netWords), that Stripe and PayPal disputes are not taken off", june.includes("After refunds, before disputes: Stripe and PayPal disputes are not read, so they are not taken off."), true);
+    is("that Stripe's money given back is not added", june.includes("Money given back by Stripe is not read, so it is not added."), true);
+    is("and that partial PayPal refunds are not taken off (PayPal records only full refunds)", june.includes("Partial PayPal refunds are not recorded, so they are not taken off."), true);
+    is("every month's table is described by its own note of what its difference is after", (html.match(/<table[^>]*aria-describedby="(month-[\d-]+-notes)"/g) ?? []).length === 12 && [...html.matchAll(/aria-describedby="(month-[\d-]+-notes)"/g)].every((m) => html.includes(`id="${m[1]}"`)), true);
+    is("the page never says disputes are counted when no dispute is read, in a sentence or in a column's name", [/A dispute counts when/.test(text), /Left after refunds and disputes/.test(text)], [false, false]);
+    is("the columns are named in plain words and explained once: money in, money out, left", [/<th scope="col"[^>]*>Money in<\/th>/.test(html), /<th scope="col"[^>]*>Money out<\/th>/.test(html), /<th scope="col"[^>]*>Left<\/th>/.test(html), /Money in:/.test(text), /Money out:/.test(text)], [true, true, true, true, true]);
     is("a month read in full with nothing in it says so", text.includes("Nothing recorded"), true);
-    is("the oldest month's Stripe renewals are not proved, so it says Could not be read, never $0", text.includes("Could not be read"), true);
+    // Rule 23: was text.includes("Could not be read") (the oldest month's Stripe renewals taken as not proved, a sentence
+    // the page's own explanation also matched). Every paid invoice is now read from the account's first (Claude 3 on
+    // #3022, MEDIUM 2): the oldest month is read, and the page no longer says it cannot be.
+    is("the oldest month, July 2030, is read for Stripe: Nothing recorded, never Could not be read", [words(section(html, "2030-07")).includes("Stripe Nothing recorded"), words(section(html, "2030-07")).includes("Could not be read")], [true, false]);
+    is("the page no longer says the oldest month can be unknown for Stripe because of renewals", /oldest month can say it/.test(text), false);
+    is("it says why a Stripe month can be unknown: more paid invoices than one reading covers", /more paid invoices than one reading covers/.test(text), true);
     is("no amount of zero anywhere: an empty month is words, an unknown one is words", ZERO.test(text), false);
     is("nothing typed by the creator is shown: Entered by you does not exist yet", /entered by you/i.test(text), false);
     is("before fees and taxes, and not profit", [/before .*fees/i.test(text), /not profit/i.test(text)], [true, true]);
@@ -160,6 +185,22 @@ async function main(): Promise<void> {
     is("no Stripe page read", stripeCalls - calls, 0);
     is("the kept months, said as read at 12:00 UTC", [shows(used, "$65"), used.includes("12:00 UTC")], [true, true]);
     is("and when the readings come back", /used/i.test(used) && used.includes("00:00 UTC"), true);
+  }
+
+  part("Money given back is money in, and a month that leaves nothing out says nothing is left out");
+  reset();
+  {
+    const shop = makeStore(true, false);
+    const since = readingSince(NOW, "UTC");
+    const list = (kind: "sale" | "renewal" | "refund" | "dispute" | "reinstated", cents: number[]) => ({ kind, since, complete: true, reachedBack: null, events: cents.map((c, i) => ({ id: `stripe:${kind}${i}`, at: Date.UTC(2031, 5, 3 + i), cents: c, currency: "usd" })) });
+    // A copy of the months kept a minute ago, as a reading that read Stripe's disputes and money given back would keep it.
+    const value = earningsByMonth({ at: NOW, timeZone: "UTC", manual: [], providers: [{ source: "stripe", notRead: [], lists: [list("sale", [5000]), list("renewal", []), list("refund", [300]), list("dispute", [1000]), list("reinstated", [700])] }] });
+    redis.run(["SET", `nl:reading:earnings:${shop.statsId}`, JSON.stringify({ at: NOW - 60_000, value }), "EX", 86_400]);
+    const html = await draw(shop);
+    const june = words(section(html, "2031-06"));
+    is("no Stripe page read: the kept copy is fresh", stripeCalls, 0);
+    is("money in: the $50 sale and the $7 given back, $57; money out: the $3 refund and the $10 dispute, $13; left $44", [shows(june, "$57"), shows(june, "$13"), shows(june, "$44")], [true, true, true]);
+    is("nothing left out that month: its difference is after refunds and disputes, and nothing is said not read", [june.includes("After refunds and disputes."), /not read|not recorded/.test(june)], [true, false]);
   }
 
   part("The day's readings used and nothing kept: said, never as $0 or empty months");

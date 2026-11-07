@@ -23,9 +23,15 @@ const LINE = /^([A-Za-z0-9_-]{1,64}):(\d{1,2})$/;
 /** Lines a cart holds at most (lib/cart-rules.ts, MAX_CART), with room for the products a cart was shown before it changed. */
 const MAX_LINES = 8;
 
-/** The cookie, one per store, so two stores on one domain never read each other's. */
+/**
+ * The cookie, one per store, so two stores on one domain never read each
+ * other's. A handle's own characters (lib/store-handle-pattern.ts: a-z, 0-9,
+ * ".", "_", "-") are all valid in a cookie name and kept as they are, so
+ * "ana.art" and "anaart" never share one; any other character is written as
+ * "~" and its code, "~" being one no handle holds, so no two handles meet.
+ */
 export function cartMemberCookie(store: Pick<Store, "handle">): string {
-  return `nl_cartm_${store.handle.replace(/[^a-z0-9_-]/g, "")}`;
+  return `nl_cartm_${store.handle.replace(/[^a-z0-9._-]/g, (c) => `~${c.codePointAt(0)!.toString(16)}~`)}`;
 }
 
 /** What the cart showed, as the cookie keeps it: "id:percent" for each line with a member price, in the cart's order. */

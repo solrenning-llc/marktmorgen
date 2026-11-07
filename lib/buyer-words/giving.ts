@@ -210,6 +210,8 @@ const en = {
   placesLeft: (people: number, left: number): string =>
     left === 0 ? `All ${people} places have been taken.` : `${left} of ${people} places ${left === 1 ? "is" : "are"} still open.`,
   sendPlaceLink: "Send me the link to my place",
+  /** The count of places taken could not be read: no place is offered. */
+  placesUnchecked: "We could not check how many places are left just now. Try this page again in a moment.",
   placeNote: (title: string) =>
     `A link goes to that address, and opening it takes one place and puts ${title} on it. Nothing is charged to you. Your address is used to hand this over and to open it again later, and it is not added to any list.`,
   alreadyTook: "Already took yours?",
@@ -556,6 +558,7 @@ const es: GivingWords = {
         ? `Queda ${left} plaza libre de ${people}.`
         : `Quedan ${left} plazas libres de ${people}.`,
   sendPlaceLink: "Envíame el enlace a mi plaza",
+  placesUnchecked: "No pudimos comprobar cuántas plazas quedan en este momento. Vuelve a abrir esta página en un momento.",
   placeNote: (title) =>
     `Se envía un enlace a esa dirección, y al abrirlo se ocupa una plaza y ${title} queda en ella. No se te cobra nada. Tu dirección se usa para entregártelo y para volver a abrirlo más adelante, y no se añade a ninguna lista.`,
   alreadyTook: "¿Ya ocupaste la tuya?",
@@ -882,6 +885,7 @@ const fr: GivingWords = {
       ? `Les ${people} places ont toutes été prises.`
       : `${left} ${pluralFr(left, "place", "places")} sur ${people} ${pluralFr(left, "est encore libre", "sont encore libres")}.`,
   sendPlaceLink: "M'envoyer le lien vers ma place",
+  placesUnchecked: "Nous n'avons pas pu vérifier combien de places restent pour le moment. Rouvrez cette page dans un instant.",
   placeNote: (title) =>
     `Un lien part à cette adresse, et l'ouvrir prend une place et y ajoute ${title}. Rien ne vous est débité. Votre adresse sert à vous le remettre et à le rouvrir plus tard, et elle n'est ajoutée à aucune liste.`,
   alreadyTook: `Vous avez déjà pris la vôtre${S}?`,
@@ -1205,6 +1209,7 @@ const de: GivingWords = {
   placesLeft: (people, left) =>
     left === 0 ? `Alle ${people} Plätze sind vergeben.` : `${left} von ${people} Plätzen ${left === 1 ? "ist" : "sind"} noch frei.`,
   sendPlaceLink: "Link zu meinem Platz senden",
+  placesUnchecked: "Wir konnten gerade nicht prüfen, wie viele Plätze noch frei sind. Öffnen Sie diese Seite gleich noch einmal.",
   placeNote: (title) =>
     `Ein Link geht an diese Adresse; wenn Sie ihn öffnen, wird ein Platz belegt und ${title} unter dieser Adresse freigeschaltet. Ihnen wird nichts berechnet. Ihre Adresse wird verwendet, um es zu übergeben und später wieder zu öffnen, und sie wird keiner Liste hinzugefügt.`,
   alreadyTook: "Haben Sie Ihren Platz schon?",
@@ -1532,6 +1537,7 @@ const it: GivingWords = {
         ? `È ancora libero ${left} posto su ${people}.`
         : `Sono ancora liberi ${left} posti su ${people}.`,
   sendPlaceLink: "Inviami il link al mio posto",
+  placesUnchecked: "Al momento non è stato possibile verificare quanti posti restano. Riapri questa pagina tra poco.",
   placeNote: (title) =>
     `Un link va a quell'indirizzo, e aprirlo occupa un posto e associa ${title} a quell'indirizzo. Non ti viene addebitato nulla. Il tuo indirizzo serve a consegnartelo e a riaprirlo in seguito, e non viene aggiunto a nessuna lista.`,
   alreadyTook: "Hai già preso il tuo?",
@@ -1854,6 +1860,7 @@ const nl: GivingWords = {
   placesLeft: (people, left) =>
     left === 0 ? `Alle ${people} plekken zijn bezet.` : `${left} van de ${people} plekken ${left === 1 ? "is" : "zijn"} nog vrij.`,
   sendPlaceLink: "Stuur me de link naar mijn plek",
+  placesUnchecked: "We konden nu niet controleren hoeveel plekken er nog vrij zijn. Open deze pagina zo opnieuw.",
   placeNote: (title) =>
     `Er gaat een link naar dat adres, en als je die opent, neem je een plek in en komt ${title} op dat adres. Er wordt niets bij je afgeschreven. Je adres wordt gebruikt om dit over te dragen en het later opnieuw te openen, en het wordt aan geen enkele lijst toegevoegd.`,
   alreadyTook: "Heb je de jouwe al?",
@@ -2181,6 +2188,7 @@ const pt: GivingWords = {
         ? `Ainda está livre ${left} de ${people} lugares.`
         : `Ainda estão livres ${left} de ${people} lugares.`,
   sendPlaceLink: "Enviar-me a ligação para o meu lugar",
+  placesUnchecked: "Não foi possível verificar agora quantos lugares restam. Abra esta página novamente daqui a pouco.",
   placeNote: (title) =>
     `É enviada uma ligação para esse endereço; ao abri-la, ocupa um lugar e ${title} fica associado a ele. Nada lhe é cobrado. O seu endereço é usado para lho entregar e para o voltar a abrir mais tarde, e não é adicionado a nenhuma lista.`,
   alreadyTook: "Já ocupou o seu?",

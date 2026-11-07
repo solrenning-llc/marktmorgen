@@ -171,12 +171,18 @@ export async function openGroup(store: Store, id: string): Promise<Group | null>
   return group;
 }
 
-/** How many of its places are taken. */
+/**
+ * How many of its places are taken, read exactly (sweep app5, finding 1; CX-123 rules 24 and 30): no count yet is 0,
+ * and a reply that is not one whole number from zero up (as text or a number) or nothing is unknown and throws, never
+ * "nobody took a place", so a full purchase is never shown as all places open.
+ */
 export async function placesTaken(id: string): Promise<number> {
   if (!GROUP_ID.test(id) || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["GET", takenKey(id)]]);
-  const taken = Number(raw);
-  return Number.isFinite(taken) && taken > 0 ? Math.floor(taken) : 0;
+  const raw = repliesFor(await redisPipeline([["GET", takenKey(id)]]), 1)?.[0];
+  if (raw === null) return 0;
+  const taken = typeof raw === "string" && /^\d{1,15}$/.test(raw) ? Number(raw) : countOf(raw);
+  if (taken === null) throw new UnknownReplyError("the count of places taken");
+  return taken;
 }
 
 export type NewGroup = { ok: true; group: Group } | { ok: false; reason: "people" | "product" | "option" | "amount" | "unavailable" };

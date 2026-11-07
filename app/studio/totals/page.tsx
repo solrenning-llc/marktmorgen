@@ -10,7 +10,7 @@ import { can } from "@/lib/team-roles";
 import { ReadingsUsed, keptMembers, keptNumbers, readingsBackAt } from "@/lib/store-readings";
 import { UtcAndLocal } from "@/components/local-clock";
 import { formatMoney } from "@/lib/money";
-import { LEFT_WORDS, type Money, type StoreFigures, type StoreRead, TOTAL_WINDOWS, sumStores } from "@/lib/account-totals";
+import { LEFT_WORDS, type StoreFigures, type StoreRead, TOTAL_WINDOWS, memberLines, membersOf, moneyWords, sumStores } from "@/lib/account-totals";
 import type { Store } from "@/lib/store";
 
 export const metadata: Metadata = {
@@ -22,7 +22,6 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
 
 const WINDOW_NAMES = { d7: "Last 7 days", d30: "Last 30 days", d90: "Last 90 days" } as const;
 const count = (n: number) => n.toLocaleString("en-US");
-const moneyLines = (lines: Money[]) => (lines.length ? lines.map((m) => formatMoney(m.cents, m.currency)).join(" + ") : formatMoney(0, "USD"));
 
 /**
  * One store's figures, read the way its own studio reads them, inside its own
@@ -41,8 +40,9 @@ async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean
     if (!counted.ok) return { state: "paused" };
   }
   try {
-    const [data, club] = await Promise.all([keptNumbers(store), keptMembers(store).catch(() => null)]);
-    return { state: "ok", data, members: club ? { currency: club.currency, paying: club.paying, trialing: club.trialing, mrr: club.mrr } : null };
+    // Members that could not be read stay "unread" and are named on the page, never added in as none (sweep app5, finding 3).
+    const [data, members] = await Promise.all([keptNumbers(store), membersOf(keptMembers(store))]);
+    return { state: "ok", data, members };
   } catch (error) {
     // Said as what it is: read as often as the day allows, never as an error or as no numbers (inbox C4-33).
     if (error instanceof ReadingsUsed) return { state: "used" };
@@ -77,6 +77,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
       )
     : [];
   const totals = sumStores(figures);
+  const members = memberLines(totals);
 
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
@@ -125,7 +126,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
                         <td className="py-2.5 pr-4 text-right tabular-nums">{count(totals.windows[w].visitors)}</td>
                         <td className="py-2.5 pr-4 text-right tabular-nums">{count(totals.windows[w].checkouts)}</td>
                         <td className="py-2.5 pr-4 text-right tabular-nums">{count(totals.windows[w].sales)}</td>
-                        <td className="py-2.5 text-right tabular-nums">{moneyLines(totals.windows[w].revenue)}</td>
+                        <td className="py-2.5 text-right tabular-nums">{moneyWords(totals.windows[w].revenue)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -133,18 +134,21 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
               </section>
               <section aria-labelledby="members-title" className="card mt-6 p-6 sm:p-8">
                 <h2 id="members-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Members</h2>
+                {members.note ? (
+                  <p className="notice notice-info mt-4" role="status">{members.note}</p>
+                ) : null}
                 <dl className="mt-4 grid gap-4 sm:grid-cols-3">
                   <div>
                     <dt className="text-sm text-ink-soft">Paying members</dt>
-                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{count(totals.members.paying)}</dd>
+                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{members.paying}</dd>
                   </div>
                   <div>
                     <dt className="text-sm text-ink-soft">On a free trial</dt>
-                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{count(totals.members.trialing)}</dd>
+                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{members.trialing}</dd>
                   </div>
                   <div>
                     <dt className="text-sm text-ink-soft">Monthly recurring revenue</dt>
-                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{moneyLines(totals.members.mrr)}</dd>
+                    <dd className="mt-1 text-2xl font-semibold tabular-nums">{members.mrr}</dd>
                   </div>
                 </dl>
               </section>

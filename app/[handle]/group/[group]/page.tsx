@@ -134,8 +134,13 @@ export default async function GroupPage({ params, searchParams }: Params) {
     }
   }
 
-  const count = await placesTaken(group.id).catch(() => 0);
-  const left = Math.max(0, group.people - count);
+  // Read exactly (sweep app5, finding 1): a count that could not be read is said as not checked, and no place is
+  // offered, never "all places still open".
+  const count = await placesTaken(group.id).catch((error: unknown) => {
+    console.error("reading a purchase for several's places failed", error);
+    return null;
+  });
+  const left = count === null ? 0 : Math.max(0, group.people - count);
   const notice =
     taken?.outcome === "full"
       ? g.groupNotices.full
@@ -158,7 +163,7 @@ export default async function GroupPage({ params, searchParams }: Params) {
       <p className="st-price text-sm">{g.paidForYou}</p>
       <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{title}</h1>
       <p className="st-muted mt-4 text-lg">
-        {g.boughtForPeople(store.name, group.people, placesWords(group.people, count, store.language))}
+        {g.boughtForPeople(store.name, group.people, count === null ? g.placesUnchecked : placesWords(group.people, count, store.language))}
       </p>
       {left > 0 ? (
         <form action="/api/store/group" method="post" className="mt-8 space-y-3">

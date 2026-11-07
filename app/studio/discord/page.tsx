@@ -24,6 +24,11 @@ const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
   limited: { tone: "error", text: "That is a lot of tries in a few minutes. Wait a little and try again." },
   // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.
   funding: { tone: "error", text: "Connections can't be made just now. Nothing was changed; try again later." },
+  // Switching servers (app/api/discord/callback/route.ts): the connected server could not be read exactly, Discord
+  // did not take the bot out of the old one, or the old one's people could not be read exactly to forget them.
+  unavailable: { tone: "error", text: "We could not read your Discord connection just now, so nothing was connected. Try again in a few minutes." },
+  server: { tone: "error", text: "Discord could not take the bot out of your old server just now, so your old server is still connected. Try again in a moment." },
+  not_finished: { tone: "error", text: "The bot left your old server, but we could not finish switching just now. Try again in a few minutes." },
 };
 
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };

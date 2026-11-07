@@ -153,6 +153,9 @@ export function pauseLevelWords(measure: HealthMeasure): string {
     : `${n(COMPLAINT_FLOOR)} or more, and ${percent(COMPLAINT_RATE)} or more of those sent`;
 }
 
+/** Said when the seven days could not be read: no figure, and what to do. */
+export const UNREAD = "This week's bounces and spam reports could not be read just now, so no count and no distance from a pause is shown. Open this page again in a few minutes.";
+
 /** Said under the table, so a high share beside a low level reads as it should. */
 export const BOTH_NEEDED = "A level is reached only when the count and the share both reach it.";
 

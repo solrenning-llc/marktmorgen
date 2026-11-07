@@ -1,6 +1,6 @@
 import { HEALTH_WINDOW_DAYS } from "@/lib/mail-health-rules";
 import type { HealthCounts } from "@/lib/mail-health-levels";
-import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, pauseLevelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
+import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, UNREAD, healthRows, levelWords, pauseLevelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
 
 /**
  * The list's health as a table, inside the email studio's health section
@@ -31,7 +31,7 @@ export function ListHealthTable({ health }: { health: HealthCounts }) {
   const distance = room.atLevel ? "" : roomLine(room);
   return (
     <>
-      <div className="mt-4 overflow-x-auto" role="region" aria-label="Bounces and spam reports, and how far they are from a pause" tabIndex={0}>
+      <div className="mt-4 overflow-x-auto rounded-[6px] focus-visible:[outline:3px_solid_var(--focus)] focus-visible:[outline-offset:3px]" role="region" aria-label="Bounces and spam reports, and how far they are from a pause" tabIndex={0}>
         <table className="w-full text-left text-sm text-ink">
           <caption className="pb-2 text-left font-semibold">{`Email to your list, and the one email to buyers you brought over, in the last ${HEALTH_WINDOW_DAYS} days (counting starts again when a pause ends): how far it is from a pause`}</caption>
           <thead>
@@ -52,7 +52,8 @@ export function ListHealthTable({ health }: { health: HealthCounts }) {
                 <td className="px-3 py-2 text-right tabular-nums">{row.share}</td>
                 <td className="px-3 py-2">{levelWords(row.level)}</td>
                 <td className="px-3 py-2 tabular-nums">{pauseLevelWords(row.measure)}</td>
-                <td className="py-2 pl-3 text-right tabular-nums">{roomWords(row.room, row.atLevel)}</td>
+                {/* A number sits on the right with the other figures; the sentence said at the level reads from the left. */}
+                <td className={row.atLevel ? "py-2 pl-3" : "py-2 pl-3 text-right tabular-nums"}>{roomWords(row.room, row.atLevel)}</td>
               </tr>
             ))}
           </tbody>
@@ -70,4 +71,14 @@ export function ListHealthTable({ health }: { health: HealthCounts }) {
       <p className="mt-3 text-sm text-ink-soft">{TERMS.spamUnknown}</p>
     </>
   );
+}
+
+/**
+ * The health section when the seven days could not be read (lib/mail-health.ts
+ * listHealth throws on an incomplete or malformed read, CX-123 rule 24): no
+ * count, no level, no distance from a pause and no "nothing was sent", since
+ * none of them is known.
+ */
+export function ListHealthUnread() {
+  return <p className="mt-2 text-sm text-ink-soft">{UNREAD}</p>;
 }

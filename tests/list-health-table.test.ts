@@ -23,7 +23,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { healthLevels, shareWords, type HealthLevel } from "@/lib/mail-health-levels";
-import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, healthRows, levelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
+import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, UNREAD, healthRows, levelWords, roomBeforePause, roomLine, roomWords } from "@/lib/list-health-rules";
 import { ListHealthTable, ListHealthUnread } from "@/components/list-health-table";
 import { overTheLine } from "@/lib/mail-health";
 import { done, is, part } from "./check";
@@ -61,7 +61,7 @@ function main(): void {
   // Claude 5's review of #2314 (6704385828), two LOW findings: the site's ring on the focusable region (2.4.13),
   // and a sentence in the last column read from the left, numbers alone on the right (1.4.8).
   is("the focusable region draws the site's own ring", /<div(?=[^>]*role="region")(?=[^>]*class="[^"]*focus-visible:\[outline:3px_solid_var\(--focus\)\])[^>]*>/.test(html), true);
-  const lastCell = (markup: string, label: string) => markup.split("<tr").find((r) => r.includes(`>${label}</th>`))?.match(/<td[^>]*class="([^"]*)"[^>]*>[^<]*<\/td>\s*<\/tr>|<td class="([^"]*)"[^>]*>(?:(?!<td).)*<\/td><\/tr>/s)?.slice(1).find(Boolean) ?? "";
+  const lastCell = (markup: string, label: string) => markup.split("<tr").find((r) => r.includes(`>${label}</th>`))?.match(/<td class="([^"]*)"[^>]*>(?:(?!<td)[\s\S])*<\/td><\/tr>/)?.[1] ?? "";
   is("short of the level, the room is a number on the right", lastCell(html, "Bounced for good").split(" ").includes("text-right"), true);
   is("at the level, the room is a sentence read from the left", lastCell(render(h(1000, 30, 0)), "Bounced for good").split(" ").includes("text-right"), false);
 
@@ -124,7 +124,7 @@ function main(): void {
 
   part("Not read just now (Codex S and Claude 5 on #2314)");
   const unread = renderToStaticMarkup(createElement(ListHealthUnread));
-  is("says the counts could not be read just now, with no table and no figure", [unread.includes("could not be read just now"), unread.includes("<table"), /\d/.test(unread)], [true, false, false]);
+  is("says the counts could not be read just now, with no table and no figure", [unread.includes("could not be read just now"), unread.includes("<table"), /\d/.test(UNREAD) || !unread.includes(UNREAD.replace("'", "&#x27;"))], [true, false, false]);
   is("never says nothing was sent, or how far a pause is", /Nothing was sent|would pause it|more bounces/.test(unread), false);
 
   part("Words");

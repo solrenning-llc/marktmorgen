@@ -27,7 +27,7 @@ import { readCards, readListing, readListings } from "@/lib/catalog";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { MAX_CONTACT_NAME, changeLabels, importContactRows, leadsKey, parseContact, readTags } from "@/lib/contacts";
 import { enroll } from "@/lib/flows";
-import { GIVES_PER_DAY, GIVE_DAY_SCOPE, grantImported, importedFor, takeGiven } from "@/lib/imported-purchases";
+import { GIVES_PER_DAY, grantImported, importedFor, takeGiven } from "@/lib/imported-purchases";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { releaseDay, reserveDay } from "@/lib/mail";
 import { pausedFor } from "@/lib/mail-health";
@@ -210,7 +210,7 @@ export async function giveAccess(
   const already = (await importedFor({ ...store, statsId, pastBuyers: true }, email)).some((p) => p.productId === product.id);
   if (already) return { ok: true, value: { email, product: product.id, status: "already", emailed: false } };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return fail("unavailable");
-  if (!(await withinLimit(GIVE_DAY_SCOPE, store.sid, GIVES_PER_DAY, 86_400))) return fail("daily_limit");
+  if (!(await withinLimit("api-give", store.sid, GIVES_PER_DAY, 86_400))) return fail("daily_limit");
   const taken = await takeAllowance(store, "api", API_WRITE_UNITS - 1);
   if (!taken.ok) return refusedFigure(taken);
   const [isNew] = await grantImported(statsId, `api:${keyId}`, [{ email, productId: product.id, items }], undefined, store.sid, store);

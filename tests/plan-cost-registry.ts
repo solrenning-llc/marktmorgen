@@ -8,7 +8,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  *
  *   - a line's sources do not hold the constants it names (moved or renamed);
  *   - a counter in the code (withinLimit, withinMonth, withinStore,
- *     withinService, countUse) has a scope that no entry of SCOPES classifies,
+ *     withinService, takeManyWithin, countUse) has a scope that no entry of SCOPES classifies,
  *     a store figure (takeAllowance) has a kind no line prices, or a file
  *     sends email with a meter EMAIL_SITES does not allow it;
  *   - an exported limit or cost constant in lib/ (a name with _PER_DAY,

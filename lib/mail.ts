@@ -538,7 +538,17 @@ export async function sendTo(
     }
     // In a sequence, those who allowed their link use to be seen get links that say so (lib/mail-clicks.ts).
     const counting = tag?.medium === "sequence" ? new Set<string>() : undefined;
-    const tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    // Who may still be written to, and their links, read in their exact shape (lib/contacts.ts tokensFor): an
+    // unknown answer is not "they all left", so nobody in this batch is counted as gone. Nothing went to the
+    // provider, so what was taken for it is given back and the batch is tried again later.
+    let tokens: Map<string, string>;
+    try {
+      tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    } catch {
+      await release(store, chunk.length);
+      await rampBack(watched, chunk.length);
+      return { done, rest: emails.slice(i), stopped: "retry" };
+    }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))

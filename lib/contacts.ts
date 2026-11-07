@@ -35,6 +35,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
@@ -619,18 +620,31 @@ const CAS_HSET = [
 async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
   try {
     const [result] = await redisPipeline([["EVAL", CAS_HSET, 1, key, ...writes.flatMap((w) => [w.email, w.was, w.value])]]);
-    if (Array.isArray(result) && result.length === writes.length) return result.map((v) => Number(v) === 1);
+    // Each one exactly 1 (written) or 0 (changed meanwhile); anything else is read back below, never "not written".
+    const each = repliesFor(result, writes.length);
+    if (each && each.every((v) => v === 0 || v === 1)) return each.map((v) => v === 1);
     throw new Error("unexpected answer");
   } catch {
-    const [now] = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]);
-    const read = writes.map((_, i) => (Array.isArray(now) ? now[i] : null));
+    // Read back only in its exact shape (CX-123 rule 24): one text or nothing for each. Anything else is unknown and
+    // throws, never "not written": a caller that undoes what it wrote alongside (tokensFor's token record) must not.
+    const read = fieldsOf((await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]))[0], writes.length, "a contact write's read-back");
     // A field that already holds what was to be written was written (the script ran and its answer was lost): not written again, never reported as lost.
     const landed = writes.map((w, i) => read[i] === w.value);
     const same = writes.map((w, i) => !landed[i] && (typeof read[i] === "string" ? sha1(read[i] as string) : "") === w.was);
     const pairs = writes.flatMap((w, i) => (same[i] ? [w.email, w.value] : []));
-    if (pairs.length) await redisPipeline([["HSET", key, ...pairs]]);
+    if (pairs.length) {
+      const [set] = await redisPipeline([["HSET", key, ...pairs]]);
+      if (countOf(set) === null) throw new UnknownReplyError("a contact write");
+    }
     return writes.map((_, i) => landed[i] || same[i]);
   }
+}
+
+/** An HMGET's answer for `count` fields, each its text or nothing; any other shape throws UnknownReplyError. */
+function fieldsOf(reply: unknown, count: number, what: string): (string | null)[] {
+  const each = repliesFor(reply, count);
+  if (!each || each.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError(what);
+  return each as (string | null)[];
 }
 
 /**
@@ -738,8 +752,9 @@ export async function tokensFor(
   // A row changed between the read and the write (a purchase noted, a name
   // added) is read again and tried again; one that left meanwhile is dropped.
   for (let round = 0; round < 3 && pending.length; round += 1) {
-    const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
-    const found = Array.isArray(rows) ? rows : [];
+    // Read only in its exact shape (CX-123 rule 24): an unknown answer is unknown, never "everyone left the list",
+    // so a send counts nobody as gone on it (lib/mail.ts sendTo stops for a retry).
+    const found = fieldsOf((await redisPipeline([["HMGET", key, ...pending]]))[0], pending.length, "the contacts for unsubscribe links");
     const writes: { email: string; value: string; was: string; token: string }[] = [];
     pending.forEach((email, i) => {
       const raw = found[i];
@@ -758,7 +773,14 @@ export async function tokensFor(
     // nowhere; then each contact only if it is still as it was read, so an
     // unsubscribe made meanwhile is never written over, and two sends at
     // once keep one token between them.
-    await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
+    // Each record answered exactly "OK", or no token is handed out nor kept on a contact: a token whose record may not
+    // exist would put a link and a one-click header leading nowhere into this email and every later one (rule 24).
+    const records = await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
+    const set = repliesFor(records, writes.length);
+    if (!set || set.some((reply) => reply !== "OK")) {
+      await redisPipeline(writes.map((w) => ["DEL", tokenKey(w.token)])).catch(() => null);
+      throw new UnknownReplyError("an unsubscribe link's record");
+    }
     const done = await casWrite(key, writes);
     writes.forEach((w, i) => {
       if (done[i]) out.set(w.email, w.token);

@@ -514,6 +514,27 @@ async function main() {
     is("no old $27.00", v.text.includes("$27.00"), false);
     cart.unmount();
   }
+  part("Claude 6 focal L1: reopening after \"not taking orders\" never shows the old lines or a checkout form");
+  {
+    const cart = await openCart(["a", "b"], [answer(both), unknownStore, hang()]);
+    await cart.press((n) => n.type === "button" && n.props?.["aria-label"] === c.remove("Product b"));
+    is("first, it is gone", cart.view().alerts, [closedWord()]);
+    await cart.reopen();
+    const v = cart.view();
+    is("while the new read runs, no checkout form", v.posted, null);
+    is("no checkout button", v.button, []);
+    is("and the panel says the prices are being checked", v.statuses.includes(c.loading), true);
+    await cart.waitOut();
+    const w = cart.view();
+    is("when that read runs out of time, still no checkout form", w.posted, null);
+    is("it says the product could not be checked", w.alerts, [uncheckedSome(1)]);
+    is("with \"Try again\"", w.retry.length, 1);
+    cart.unmount();
+  }
+  part("Claude 6 focal L2: the store-gone sentence follows each table's own writing");
+  is("pt is the table's European Portuguese (\"a aceitar\", \"por isso\")", [closedWord(CART_WORDS.pt).includes("a aceitar"), closedWord(CART_WORDS.pt).includes("por isso"), closedWord(CART_WORDS.pt).includes("então")], [true, true, false]);
+  is("fr uses the no-break space before \":\" and the straight apostrophe", [closedWord(CART_WORDS.fr).includes("\u00a0:"), closedWord(CART_WORDS.fr).includes(" :"), closedWord(CART_WORDS.fr).includes("\u2019")], [true, false, false]);
+
   part("Claude 6 L2 control: a 404 that is not the cart's own answer is an ordinary failure");
   {
     const cart = await openCart(["a"], [async () => new Response("<html>not found</html>", { status: 404 })]);

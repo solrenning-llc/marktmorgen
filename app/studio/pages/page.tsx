@@ -2,6 +2,7 @@ import { readSection } from "@/lib/saved-block-store";
 import { fitsPage, blocksForPage } from "@/lib/saved-blocks";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { isSenderConfigured } from "@/lib/email";
 import { readableFile } from "@/lib/product-file";
 import { ThanksNoteEditor } from "@/components/thanks-note-editor";
 import { readThanksNote } from "@/lib/thanks-note-store";
@@ -259,7 +260,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
             />
             </AiOn>
             {/* The email a buyer gets after paying, as an example (lib/purchase-email-preview.ts): no read, nothing sent. */}
-            {example ? <PurchaseEmailPreview preview={example} productTitle={selected.title} /> : null}
+            {example ? <PurchaseEmailPreview preview={example} productTitle={selected.title} sending={isSenderConfigured()} /> : null}
             {/* What a buyer reads after paying (lib/thanks-note.ts). Something free has its own page after a sign-up. */}
             {!isFree(selected) ? (
               <ThanksNoteEditor

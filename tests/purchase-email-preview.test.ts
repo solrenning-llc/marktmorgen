@@ -96,7 +96,8 @@ async function main(): Promise<void> {
   is("not one Redis command for all of the above", commands, 0);
 
   part("The panel in the studio");
-  const html = renderToStaticMarkup(createElement(PurchaseEmailPreview, { preview: plain!, productTitle: listing.title }));
+  // Regra 23 (review of 7 November 2026): the panel now takes `sending` (isSenderConfigured()); these checks draw it as sending, and no assertion below changed.
+  const html = renderToStaticMarkup(createElement(PurchaseEmailPreview, { preview: plain!, productTitle: listing.title, sending: true }));
   is("a named region with its own heading", [/<section[^>]*aria-labelledby="purchase-email-title"/.test(html), html.includes('id="purchase-email-title"')], [true, true]);
   is("says it is an example and that nothing is sent", [html.includes("An example"), html.includes("Nothing is sent")], [true, true]);
   is("the quote is in the buyer's language", /<pre[^>]*lang="en-US"/.test(html), true);

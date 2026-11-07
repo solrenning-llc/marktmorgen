@@ -288,7 +288,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     <li>Every member starts at 100. A failed payment Stripe is retrying takes off 40, a membership already canceled and running out what was paid for takes off 40, and a pause takes off 15.</li>
                     <li>{`Being away takes off up to ${AWAY_POINTS}, shared between the course and the community the membership includes: all of a place's share for never opening it after the first week, 90% for 30 days or more away, 40% for 14 to 29 days. While paused, being away is not counted.`}</li>
                     <li>A membership with neither a course nor a community has nothing here that says how much it is used, so its score is about paying alone. It is a rule, not a prediction.</li>
-                    {health.unscored ? <li>{`${health.unscored} running ${health.unscored === 1 ? "membership" : "memberships"}`} could not be scored because the reporting evidence could not be confirmed. The figures shown are partial.</li> : null}
+                    {health.unscored ? <li>{`${health.unscored} running ${health.unscored === 1 ? "membership is" : "memberships are"}`} not counted here because Stripe did not send all their details. The numbers above leave them out and are partial.</li> : null}
                     {health.complete ? null : <li>Your Stripe account holds more memberships than one reading takes, so the oldest are not scored.</li>}
                   </ul>
                 </section>

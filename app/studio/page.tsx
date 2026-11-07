@@ -985,11 +985,20 @@ export default async function StudioPage({
           })(),
         )
       : null,
-    stats: current && may("stats") ? early(Promise.all([
+  };
+  // "Update now" takes the day's reading of the store's numbers (lib/store-readings.ts takeStoreReading), so the two
+  // kept readings are asked for only once every read this page waits for before them, and the shelf after them, has
+  // answered: a page that ends in its error never spends it (Claude 5, LEVE 1 on #2835). Those reads are already
+  // under way, and the rest of the panel's reads still go with them.
+  const answered = current && may("stats")
+    ? early(Promise.all([...Object.values(planReads), firstReads.pause, firstReads.list, firstReads.callProducts, firstReads.meet, firstReads.shelf]))
+    : null;
+  const statsRead = current && answered
+    ? early(Promise.all([
         // Kept for every page that shows them, and read again only from the store's own daily budget (lib/store-readings.ts).
-        keptStats(current, undefined, freshNumbers).then((kept) => kept, () => null),
+        answered.then(() => keptStats(current, undefined, freshNumbers)).then((kept) => kept, () => null),
         readsSales(current)
-          ? keptSales(current, undefined, freshNumbers).then(
+          ? answered.then(() => keptSales(current, undefined, freshNumbers)).then(
               (kept) => ({ state: "ok" as const, value: kept.value, at: kept.at, used: false, failed: kept.failed === true, unnamed: kept.unnamed === true }),
               (error: unknown) => ({ state: "error" as const, value: null, at: null, used: error instanceof ReadingsUsed, failed: error instanceof ReadingFailed, unnamed: false }),
             )
@@ -1000,8 +1009,8 @@ export default async function StudioPage({
         readTrouble(current.statsId).catch(() => ({ week: 0, last: null })),
         // What the store recorded on its own: emails sent, products added, sales (lib/auto-marks.ts).
         readMarks(current, ...chartDays()).catch(() => []),
-      ])) : null,
-  };
+      ]))
+    : null;
   const renewalPage = planReads.renewalPage ? await planReads.renewalPage : null;
   const trialing = live?.state === "active" && live.trialing;
   // The trial is once per store. A store starting again is told, on every
@@ -1147,7 +1156,7 @@ export default async function StudioPage({
   if (current && paidList && paidList.length) after(() => catchUpBookings(current, paidList, SITE_URL));
   // Visits from Redis and sales from the creator's Stripe, read side by side,
   // with the creator's own notes on the chart and what they spent on ads.
-  const [visitsKept, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = planReads.stats ? await planReads.stats : [null, null, [], [], false, { week: 0, last: null }, []];
+  const [visitsKept, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = statsRead ? await statsRead : [null, null, [], [], false, { week: 0, last: null }, []];
   const visits = visitsKept?.value ?? null;
   // When the numbers shown were read, whether the day still has a reading to read them again, and when the
   // day's readings come back: said on the panel, the kept copy shown as it is (inbox C4-33 (2), (3)).
@@ -1307,7 +1316,7 @@ export default async function StudioPage({
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">Two-step login could not be read just now</p>
             <p className="mt-1 text-sm text-ink-soft">
-              So this page cannot tell whether somebody asked to turn your two-step login off. Open this page again in a moment to see. If a request is waiting and it was not you, press Cancel under Two-step login, and change your email password.
+              So this page cannot tell whether somebody asked to turn your two-step login off. Open this page again in a moment to see. Once it shows, if a request is waiting and it was not you, press Cancel under Two-step login, and change your email password.
             </p>
             <a href="#two-step" className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
               Go to Two-step login

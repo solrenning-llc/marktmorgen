@@ -29,8 +29,9 @@ async function run(request: NextRequest): Promise<Response> {
   }
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   if (!isStreamConfigured()) return Response.json({ ok: true, off: true }, { headers: { "Cache-Control": "no-store" } });
-  const [got] = await redisPipeline([["SET", "nl:stream:lock", "1", "NX", "EX", 90]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  const lockReceipt = await redisPipeline([["SET", "nl:stream:lock", "1", "NX", "EX", 90]]);
+  if (Array.isArray(lockReceipt) && lockReceipt.length === 1 && lockReceipt[0] === null) return Response.json({ ok: true, busy: true });
+  if (!Array.isArray(lockReceipt) || lockReceipt.length !== 1 || lockReceipt[0] !== "OK") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   try {
     const counts = await sweep(Date.now() + 35_000);
     if (counts.looked || counts.deleted) {

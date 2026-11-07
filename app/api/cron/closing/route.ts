@@ -37,8 +37,9 @@ async function run(request: NextRequest): Promise<Response> {
     return new Response("Unauthorized", { status: 401, headers: { "Cache-Control": "no-store" } });
   }
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const [got] = await redisPipeline([["SET", "nl:closing:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  const lockReceipt = await redisPipeline([["SET", "nl:closing:lock", "1", "NX", "EX", 120]]);
+  if (Array.isArray(lockReceipt) && lockReceipt.length === 1 && lockReceipt[0] === null) return Response.json({ ok: true, busy: true });
+  if (!Array.isArray(lockReceipt) || lockReceipt.length !== 1 || lockReceipt[0] !== "OK") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   try {
     // Stores whose plan was started again before their closing: their members
     // go on being charged as they were, and their buyers are told it stays

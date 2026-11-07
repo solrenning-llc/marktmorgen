@@ -106,8 +106,14 @@ export function waitingLine(waiting: Pick<Waiting, "requestsTotal" | "agreements
   if (toSign > 0) parts.push(`${countWords(toSign)} ${toSign === 1 ? "proposal or agreement" : "proposals or agreements"} to sign`);
   const counted = parts.length ? `Waiting for you: ${parts.join(" and ")}.` : "";
   if (!waiting.unread) return counted;
-  return counted ? `${counted} Some of it could not be read just now.` : "What this store is waiting on from you could not be read just now.";
+  return counted ? `${counted} Some of it could not be read just now.` : WAITING_UNCHECKED;
 }
 
-/** What a store's card says when its requests for the read were used up, so nothing was read (Codex J, #1969). */
-export const WAITING_LATER = "What this store is waiting on from you will show here again soon.";
+/**
+ * What a store's card says when nothing could be checked: its read was not known, or its requests for the read
+ * were used up, so nothing was read (Codex J, #1969). It says neither that something waits nor when it will show,
+ * since the code knows neither (Claude 5 on #1969, VR item 2).
+ */
+export const WAITING_UNCHECKED = "We could not check just now whether this store is waiting on anything from you.";
+/** The same words when the store's requests for the read were used up. */
+export const WAITING_LATER = WAITING_UNCHECKED;

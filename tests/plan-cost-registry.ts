@@ -464,7 +464,10 @@ export const AGREEMENT_VERSION_MOST =
  * before it is read: the requests taken, the person's two sets and their
  * records (MAX_PER_PERSON of each kind, twice as many ids read at the most, at
  * 16 KB a record), and each agreement listed checked or read whole
- * (AGREEMENT_VERSION_MOST), within the library page's own call.
+ * (AGREEMENT_VERSION_MOST). The card's own wait on Redis (its take and about
+ * four round trips) is not a separate line: the room LIBRARY_WAITING_UNITS
+ * leaves above these commands and bytes (about US$0.000019 a card) pays some
+ * 3 s at 2 GB, well over it (Claude 5 on #1969); the units must keep that room.
  */
 export const libraryWaitingRead = (): number => {
   const bytes = 2 * (AGREEMENTS_PER_PERSON + REQUESTS_PER_PERSON) * 16_384 + WAITING_SHOWN * AGREEMENT_VERSION_MOST;

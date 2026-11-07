@@ -1,0 +1,22 @@
+z-review-3055-parents.proof.ts
+  ok    healthy parent control
+  FAIL  zero quantity control
+        expected [0,"month",1]
+        got      [1500,"month",1]
+  FAIL  malformed scalar quantity already rejected
+        expected "unknown"
+        got      [1500,"month",1]
+  FAIL  price in text is unknown, not a free membership
+        expected "unknown"
+        got      [0,"month",1]
+  FAIL  price as a list is unknown, not a free membership
+        expected "unknown"
+        got      [0,"month",1]
+  FAIL  recurring in text is unknown, not monthly
+        expected "unknown"
+        got      [1500,"month",1]
+  FAIL  recurring as a list is unknown, not monthly
+        expected "unknown"
+        got      [1500,"month",1]
+
+7 checks, 6 failing.

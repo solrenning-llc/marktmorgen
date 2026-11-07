@@ -1,0 +1,194 @@
+readsub-exact.test.ts
+
+Healthy and absent shapes read as before
+  ok    one at $15 a month
+  ok    two at $15 a year
+  ok    every 3 weeks
+  ok    no quantity (null): one
+  ok    no interval or count (null): a month, once
+  ok    a quantity of 0 is worth nothing, never one at the full price
+
+Any other shape is unknown, never a month, one or nothing
+  ok    a negative quantity: unknown
+  ok    a fractional quantity: unknown
+  ok    a quantity in text: unknown
+  ok    an interval of 12: unknown
+  ok    an interval that is no Stripe interval: unknown
+  ok    an empty interval: unknown
+  ok    a count of 0: unknown
+  ok    a negative count: unknown
+  ok    a fractional count: unknown
+  ok    a count in text: unknown
+  ok    a price in text: unknown
+  ok    a negative price: unknown
+
+18 checks, all passing.
+membership-numbers.test.ts
+
+A payment as a month
+  ok    monthly is itself
+  ok    yearly is a twelfth
+  ok    and twelve of them are the yearly price exactly, never a cent over
+  ok    every 3 months is a third
+  ok    weekly is 52 twelfths
+
+What counts
+  ok    MRR counts paying members, a yearly one as a twelfth, not the trial, not another currency
+  ok    paying members include the one being retried
+  ok    trials are counted apart
+  ok    the one being retried is at risk
+  ok    another currency is said apart
+  ok    ended in the last 30 days
+  ok    churn: of those paying 30 days ago, the share that ended since
+  ok    trials: one of two that ended became paying
+  ok    by membership
+  ok    nobody paying 30 days ago: no churn figure, rather than 0%
+
+What Stripe holds, read
+  ok    another store's membership is not read
+  ok    a payment plan is not a membership
+  ok    quantity counts
+
+18 checks, all passing.
+numbers-six.test.ts
+
+Why members leave
+  ok    the member's own reason and words are read from Stripe, the words on one line
+  ok    a membership with a set number of payments ending is not somebody leaving
+  ok    those who chose to leave in the last year, and those who said why
+  ok    reasons summed, the most first, with what they paid a month
+  ok    a payment that never went through is said apart, not counted as a choice
+  ok    their words, the latest first, with no name or address
+
+The next three months
+  ok    no forecast from fewer than five members paying 90 days ago
+  ok    losing one of eleven in 90 days is about 3% a month
+  ok    gaining one $10 member in 90 days is $3.33 a month
+  ok    each month keeps its share and adds its gain
+  ok    a member who joined and left inside the 90 days gained nothing
+  ok    nor one whose first payment never went through
+  ok    a trial that ended unpaid never paid
+
+A checkout Stripe would not open
+  ok    a refusal is counted and the creator told
+  ok    in Stripe's own words, saying what to look at
+  ok    a second on the same day is counted, not emailed
+  ok    Stripe being down is counted, never emailed
+  ok    nor a refusal of our own making, which is not Stripe's
+  ok    the studio reads the week's count and the last words
+  ok    and nothing a week later
+  ok    the next day's first refusal is emailed again
+
+Spend more, keep or cut
+  ok    below the floor, nothing is said
+  ok    2 back for each 1 is spend more, under 1 is cut, between is keep
+
+When ads paid back
+  ok    counted from the first day of spend, to the day the money covered it
+  ok    not yet, with how much has come back
+  ok    and nothing for a channel nobody spent on
+  ok    a renewal is put on its channel's day, so payback counts it
+
+Buyers for ad audiences
+  ok    only buyers who agreed and are still on the list, one address a line
+  ok    an empty file still has its header
+
+The month's goal
+  ok    a goal is a whole positive amount, or 0 for none
+  ok    kept for the store, with the month it was set in
+  ok    and not read as a goal in another currency
+  ok    every channel's money on a day added up
+  ok    this month only, with what a day must bring for the days left
+  ok    and the day it was reached
+  ok    no goal, nothing to show
+
+Records
+  ok    a new store's first sales are not called records
+  ok    a best day of the last 90, set this week
+  ok    a best day long ago is no news
+
+Said in words
+  ok    a channel's recorded payments less costs, not a budget instruction
+  ok    a channel with spend and no payments discloses the negative result
+  ok    no direction to scale or cut follows from gross attributed sales
+  ok    and the record, said as of the last 90 days
+  ok    the Monday email carries the goal
+  ok    the month just ended is the one before today
+  ok    a goal set on the 1st is not held against the month before it, only against its own and after
+  ok    the month's email: its visitors set beside the month before, its money, its best day and the goal
+  ok    a month with nobody and nothing says nothing
+
+Slack and Discord
+  ok    only a Slack or Discord webhook address is taken
+  ok    anything else is refused before a request is made
+  ok    an address the chat will not post to is not kept
+  ok    one that took a first message is kept
+  ok    sealed, never as given
+  ok    Slack's marks escaped, so a name cannot ping a channel
+  ok    Discord pings nobody and stays under its length
+  ok    the email's lines about stopping it are not posted
+  ok    kept by the store, not by its address, so another store with the same handle never reaches the channel
+  ok    forgotten when emptied
+
+58 checks, all passing.
+mrr-movements.test.ts
+
+What each membership was charged at
+  ok    each line read, either shape, a credit left out
+
+Month by month
+  ok    from the first month anything was paid
+  ok    June: Ana joins
+  ok    July: Ben leaves
+  ok    August: Ana moves up, the month she did
+  ok    September: Ben comes back
+  ok    October: Cy, once the trial ended
+  ok    March: Fay leaves; January: Dee joins, a yearly membership as a month
+  ok    the last month ends on today's memberships, euros left out
+  ok    each month starts where the last ended
+
+ARR, per member, and kept from a year ago
+  ok    a year at this rate, and per paying member
+  ok    Eve stayed and Fay left: three quarters kept
+  ok    nobody paying a year ago: nothing to say
+
+13 checks, all passing.
+mrr-invoice-listing.test.ts
+
+Control: a whole list of invoices
+  ok    the movements are drawn from it
+
+A list still saying more after the last page read
+  ok    the movements are left out, never drawn from the newest part
+  ok    the members themselves are still read
+  ok    no more pages than the ceiling are asked for
+
+A page whose data is not a list
+  ok    the first page: movements left out, never 'no invoices'
+  ok    a later page: movements left out, never the pages before it alone
+
+The memberships' list in an unknown shape
+  ok    control: the member is counted
+  ok    data that is not a list: unread, never no members
+  ok    more said in text: unread, never the end of the list
+  ok    more said with no last membership to go on from: unread, never the end of the list
+
+10 checks, all passing.
+reading invoices for recurring revenue movements failed mrrlist UnreadInvoiceError: Stripe gave more invoices than 20 pages in a shape that cannot be read
+    at readMemberships (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11457:24)
+    at async membershipNumbersPaid (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11395:16)
+    at async membershipNumbers (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11391:16)
+    at async read (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11560:21)
+    at async main (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11567:19)
+reading invoices for recurring revenue movements failed mrrlist UnreadInvoiceError: Stripe gave a page of invoices that is not a list in a shape that cannot be read
+    at readMemberships (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11445:46)
+    at async membershipNumbersPaid (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11395:16)
+    at async membershipNumbers (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11391:16)
+    at async read (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11560:21)
+    at async main (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11572:66)
+reading invoices for recurring revenue movements failed mrrlist UnreadInvoiceError: Stripe gave a page of invoices that is not a list in a shape that cannot be read
+    at readMemberships (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11445:46)
+    at async membershipNumbersPaid (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11395:16)
+    at async membershipNumbers (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11391:16)
+    at async read (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11560:21)
+    at async main (/tmp/z-points-i2Wtrf/mrr-invoice-listing.test.ts.cjs:11573:76)

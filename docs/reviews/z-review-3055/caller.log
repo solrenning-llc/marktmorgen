@@ -1,0 +1,8 @@
+z-review-3055-caller.proof.ts
+  ok    healthy paid: value, invoice calls, cache written
+  ok    zero quantity: value, invoice calls, cache written
+  ok    unknown quantity: value, invoice calls, cache written
+  ok    unknown price: value, invoice calls, cache written
+{"commands":27,"requests":6,"externalRequests":0}
+
+4 checks, all passing.

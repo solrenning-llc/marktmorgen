@@ -70,6 +70,7 @@ const QUESTION_KIND_WORDS: Record<FieldType, string> = {
   text: "a short answer",
   numeric: "a number",
   dropdown: "a list to choose from",
+  yes_no: "a yes or no choice",
   phone: "a phone number in Stripe's own box",
 };
 

@@ -14,6 +14,7 @@ import {
   MAX_DROPDOWN_OPTION_LENGTH,
   MAX_FIELD_LABEL_LENGTH,
   MIN_DROPDOWN_OPTIONS,
+  YES_NO_NOTE,
 } from "@/lib/checkout-fields";
 
 type Row = { label: string; type: FieldType; optional: boolean; options: string };
@@ -172,7 +173,15 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
                     type="text"
                     maxLength={MAX_FIELD_LABEL_LENGTH}
                     value={row.label}
-                    placeholder={row.type === "dropdown" ? "Your size" : row.type === "numeric" ? "How many people will join" : "Name to print on it"}
+                    placeholder={
+                      row.type === "dropdown"
+                        ? "Your size"
+                        : row.type === "numeric"
+                          ? "How many people will join"
+                          : row.type === "yes_no"
+                            ? "Is this a gift?"
+                            : "Name to print on it"
+                    }
                     onChange={(event) => update(i, { label: event.target.value })}
                     className="field mt-1"
                   />
@@ -186,6 +195,7 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
                   <select
                     id={`${id}-t`}
                     value={row.type}
+                    aria-describedby={row.type === "yes_no" ? `${id}-n` : undefined}
                     onChange={(event) => update(i, { type: event.target.value as FieldType })}
                     className="field mt-1"
                   >
@@ -212,7 +222,11 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
                     {`${row.options.split(/\n/).filter((line) => line.trim()).length} of up to ${MAX_DROPDOWN_OPTIONS}`}
                   </span>
                 </label>
-              ) : row.type === "phone" ? null : (
+              ) : row.type === "phone" ? null : row.type === "yes_no" ? (
+                <p id={`${id}-n`} className="mt-2 text-xs text-ink-soft">
+                  {YES_NO_NOTE}
+                </p>
+              ) : (
                 <p className="mt-2 text-xs text-ink-soft">
                   {row.type === "numeric" ? "Digits only, up to 255 of them." : "Up to 255 characters."}
                 </p>

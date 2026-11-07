@@ -15,6 +15,12 @@
  * 50 characters, and a list of up to 200 choices of up to 100 characters each.
  * A text answer may be up to 255 characters, as Stripe allows.
  *
+ * A yes or no question (387 [TB13], 7 November 2026) is Stripe's list with
+ * exactly two choices, "Yes" and "No", because Stripe's page has no checkbox
+ * among its custom fields. Nothing is picked for the buyer, and the answer is
+ * only an answer: it never signs anyone up for emails, which the checkout asks
+ * about on its own, with its own words kept.
+ *
  * Questions are asked wherever the buyer pays through Stripe's page: a file,
  * a link, a course, a membership, a paid call. Something free is given for an
  * email address and never reaches Stripe, so it has no questions.
@@ -28,13 +34,14 @@ export const MAX_DROPDOWN_OPTIONS = 200;
 export const MAX_DROPDOWN_OPTION_LENGTH = 100;
 export const MIN_DROPDOWN_OPTIONS = 2;
 
-export const FIELD_TYPES = ["text", "numeric", "dropdown", "phone"] as const;
+export const FIELD_TYPES = ["text", "numeric", "dropdown", "yes_no", "phone"] as const;
 export type FieldType = (typeof FIELD_TYPES)[number];
 
 export const FIELD_TYPE_NAMES: Record<FieldType, string> = {
   text: "Short answer",
   numeric: "Number",
   dropdown: "Choose from a list",
+  yes_no: "Yes or no",
   phone: "Phone number",
 };
 
@@ -48,13 +55,20 @@ export const FIELD_TYPE_NAMES: Record<FieldType, string> = {
  */
 export const PHONE_LABEL = "Phone number";
 
+/** The two choices of a yes or no question, fixed by the code, in this order. */
+export const YES_NO_CHOICES = ["Yes", "No"] as const;
+
+/** What the studio says under a yes or no question, so the creator knows what the buyer sees. */
+export const YES_NO_NOTE =
+  "On Stripe's payment page, the buyer picks from a short list with Yes and No. Nothing is picked for them. The answer never signs anyone up for your emails: the checkout asks about emails on its own.";
+
 export type CheckoutField = {
   /** What the buyer reads above the box, in the creator's words. */
   label: string;
   type: FieldType;
   /** Whether the buyer may leave it empty. Required unless the creator says. */
   optional: boolean;
-  /** The choices, for a list. Empty for the other two kinds. */
+  /** The choices, for a list. Empty for every other kind, a yes or no question included (its two are fixed). */
   options: string[];
 };
 
@@ -148,9 +162,15 @@ export function applyCheckoutFields(body: URLSearchParams, fields: CheckoutField
     body.set(`${at}[key]`, `question${i + 1}`);
     body.set(`${at}[label][type]`, "custom");
     body.set(`${at}[label][custom]`, field.label.slice(0, MAX_FIELD_LABEL_LENGTH));
-    body.set(`${at}[type]`, field.type);
+    // A yes or no question is Stripe's own list, with its two fixed choices and no default_value, so nothing is picked.
+    body.set(`${at}[type]`, field.type === "yes_no" ? "dropdown" : field.type);
     body.set(`${at}[optional]`, field.optional ? "true" : "false");
-    if (field.type === "dropdown") {
+    if (field.type === "yes_no") {
+      YES_NO_CHOICES.forEach((choice, j) => {
+        body.set(`${at}[dropdown][options][${j}][label]`, choice);
+        body.set(`${at}[dropdown][options][${j}][value]`, choice.toLowerCase());
+      });
+    } else if (field.type === "dropdown") {
       field.options.slice(0, MAX_DROPDOWN_OPTIONS).forEach((option, j) => {
         body.set(`${at}[dropdown][options][${j}][label]`, option.slice(0, MAX_DROPDOWN_OPTION_LENGTH));
         body.set(`${at}[dropdown][options][${j}][value]`, `choice${j + 1}`);

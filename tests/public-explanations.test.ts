@@ -84,7 +84,7 @@ test("the blog and the comparisons explain PayPal and affiliates the same way", 
 
 test("the checkout questions row says what the checkout really asks", () => {
   const row = checkoutQuestionWords();
-  assert.equal(row, "Up to three: a short answer, a number, a list to choose from or a phone number in Stripe's own box. No checkbox question");
+  assert.equal(row, "Up to three: a short answer, a number, a list to choose from, a yes or no choice or a phone number in Stripe's own box. No checkbox question");
   assert.equal(MAX_CHECKOUT_FIELDS, 3);
   // A phone number is accepted by the studio's own reading, so the row must not deny it.
   assert.ok(FIELD_TYPES.includes("phone"));

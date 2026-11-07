@@ -628,8 +628,8 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         q: "Can I ask buyers something before they pay?",
         a: [
-          "Yes. Up to three questions on any paid product, shown on Stripe's page under the card: a short answer, a number, or a list to choose from, each required or optional. Or the buyer's phone number, in Stripe's own phone box with their country, which is always required. The answers are in your list of sales and in your Stripe dashboard, and for a call they are in your booking email too.",
-          "There is no checkbox question, and nothing is asked for a free product, which never reaches Stripe.",
+          "Yes. Up to three questions on any paid product, shown on Stripe's page under the card: a short answer, a number, a list to choose from, or a yes or no question, each required or optional. Or the buyer's phone number, in Stripe's own phone box with their country, which is always required. The answers are in your list of sales and in your Stripe dashboard, and for a call they are in your booking email too.",
+          "There is no checkbox question, because Stripe's page has none: a yes or no question is a short list with Yes and No, with nothing picked for the buyer, and its answer never signs anyone up for your emails. Nothing is asked for a free product, which never reaches Stripe.",
         ],
       },
       {

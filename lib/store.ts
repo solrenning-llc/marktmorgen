@@ -3186,10 +3186,14 @@ export async function editProduct(
 export async function removeProduct(
   email: string,
   id: string,
-): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" }> {
+  before?: (product: Product, store: Store) => Promise<boolean>,
+): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "unavailable" }> {
   const result = await withStore(email, async (store, save) => {
     const product = await readProduct(store, id);
     if (!product) return { ok: false as const, reason: "unknown" as const };
+    if (before && !(await before(product, store))) {
+      return { ok: false as const, reason: "unavailable" as const };
+    }
     // A bundle that held it holds it no more, in the same write, so no bundle
     // goes on promising a product the store no longer has. Whoever bought the
     // bundle before kept its list on their order (lib/bundle-rules.ts).

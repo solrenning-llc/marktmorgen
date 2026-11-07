@@ -197,6 +197,36 @@ test("an offer's claim whose reply and read-back are both unknown charges nothin
   assert.deepEqual({ second, charged: charges.length - before }, { second: "done", charged: 1 });
 });
 
+// A write after the claim was won fails (Claude 5 on #2897, MEDIUM 1): the claim is let go, so the "try again"
+// the buyer is told is true; the retry claims it again and charges once. Both a write that never landed and one that
+// landed with its reply lost are covered. Nothing is charged before the retry.
+for (const [label, landed] of [["never landed", false], ["landed, its reply lost", true]] as [string, boolean][]) {
+  test(`an offer whose record write after the claim ${label} is let go, and a retry charges once`, async () => {
+    const { front, plain, browser } = await world;
+    const session = nextSession();
+    sessions[session] = paidCheckout(session, front, browser.fingerprint);
+    const before = charges.length;
+    let failed = false;
+    redis.pipeline = (async (commands: Cmd[]) => {
+      const write = commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === `nl:upsell:${session}` && !commands[0].includes("NX");
+      if (!write || failed) return original(commands);
+      failed = true;
+      if (landed) await original(commands);
+      throw new Error("Redis could not be reached");
+    }) as typeof redis.pipeline;
+    let first: string;
+    try {
+      first = await outcomeOf(yes(plain, session, browser.secret));
+    } finally {
+      redis.pipeline = original;
+    }
+    assert.equal(failed, true, "the record write after the claim was reached");
+    assert.deepEqual({ first, charged: charges.length - before }, { first: "threw", charged: 0 });
+    const second = await outcomeOf(yes(plain, session, browser.secret));
+    assert.deepEqual({ second, charged: charges.length - before, state: (await readUpsell(session))?.state }, { second: "done", charged: 1, state: "paid" });
+  });
+}
+
 test("an offer's once-only claim already held (null) charges nothing and says done (confirmed control)", async () => {
   const { front, plain, browser } = await world;
   const session = nextSession();

@@ -11,6 +11,9 @@
  * not be read, the page says so plainly, rather than reading it as "no request to turn it off" and showing nothing.
  * Nor does Two-step login below, or the invitation to add an app's code, take that unread login for "off": they offer
  * no way to turn it on over it, and say it could not be read (CX-123 rule 24, lib/redis-reply.ts).
+ *
+ * And "Update now" (Claude 5's LEVE 1 on #2835): the day's reading of the store's numbers is taken only once the
+ * reads the page waits for have answered, never for a page that ends in its error.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -19,7 +22,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { REMOVAL_DAYS, listPasskeys } from "@/lib/passkeys";
-import { claimHandle, ensureStatsId } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId } from "@/lib/store";
 import StudioPage from "@/app/studio/page";
 import { AppCodeInvite } from "@/components/app-code-invite";
 import { TwoStepManager } from "@/components/two-step-manager";
@@ -181,6 +184,7 @@ async function main(): Promise<void> {
   is("the page says plainly it could not be read", unread.includes("Two-step login could not be read just now"), true);
   is("and that a request to turn it off may be waiting", unread.includes("cannot tell whether somebody asked to turn your two-step login off"), true);
   is("the warning is not shown as fact", unread.includes("Two-step login is set to turn off"), false);
+  is("and it names Cancel only for once the request shows", unread.includes("Once it shows, if a request is waiting and it was not you, press Cancel"), true);
   is("the request is still there", JSON.parse(String((await redis.pipeline([["GET", recordKey]]))[0])).reset, reset);
 
   part("Two-step login below, read");
@@ -201,6 +205,42 @@ async function main(): Promise<void> {
   is("nor any other button or form, on a state it does not know", unreadShown.map((html) => /<button|<form/.test(html)), unreadShown.map(() => false));
   is("no invitation to add an app's code", propsOf(unreadTree, AppCodeInvite).length, 0);
   is("and the record is untouched", JSON.parse(String((await redis.pipeline([["GET", recordKey]]))[0])).s, "synthetic-secret");
+
+  // Claude 5's LEVE 1 on #2835: "Update now" (numbers=fresh) reads the store's numbers again from the day's own
+  // budget (lib/store-readings.ts takeStoreReading). Sent together with the other reads, that reading was taken
+  // even when a read the page waits for failed and the page ended in its error; it waits for them now.
+  const freshPage = async (owner: string, fault: boolean): Promise<{ loaded: boolean; spent: number }> => {
+    await claimHandle(owner, owner.split("@")[0].replace(/[^a-z]/g, ""), "Today fresh", "");
+    await ensureStatsId(owner);
+    await addProduct(owner, "Guide", "", "19", null);
+    const ownerSession = await openSession(owner);
+    const kept = redis.pipeline;
+    let spent = 0;
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "INCRBY" && String(c[1]).startsWith("nl:reading:day:"))) spent += 1;
+      if (fault && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:catalog:"))) throw new Error("SYNTHETIC_PRODUCTS_READ_FAULT");
+      return kept.call(redis, commands);
+    };
+    answering(new NextRequest("https://marktmorgen.com/studio?numbers=fresh", { headers: { cookie: `${SESSION_COOKIE}=${ownerSession}` } }));
+    let loaded = true;
+    try {
+      await StudioPage({ searchParams: Promise.resolve({ numbers: "fresh" }) });
+    } catch {
+      loaded = false;
+    } finally {
+      redis.pipeline = kept;
+      answering(null);
+    }
+    return { loaded, spent };
+  };
+  part("Update now, when a read the page waits for fails");
+  const failing = await freshPage("todayfreshfault@example.com", true);
+  is("the page ends in its error (precondition)", failing.loaded, false);
+  is("the day's reading is not taken for it", failing.spent, 0);
+  part("Update now, when every read answers");
+  const healthy = await freshPage("todayfreshok@example.com", false);
+  is("the page loads", healthy.loaded, true);
+  is("and the numbers are read again, from the day's budget", healthy.spent, 1);
   done();
 }
 

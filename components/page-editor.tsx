@@ -4103,7 +4103,9 @@ function PicturesEditor({
         </div>
       ))}
       {left > 0 ? (
-        <button type="button" id={itemAddId(base)} onClick={() => input.current?.click()} disabled={busy > 0} aria-busy={busy > 0} className="btn btn-secondary btn-sm">
+        // Off while it sends, but kept focusable (aria-disabled, drawn off by .btn[aria-disabled]): the focus sent here after
+        // a removal, or resting here as the send starts, never falls to the page's body (WCAG 2.4.3).
+        <button type="button" id={itemAddId(base)} onClick={() => (busy > 0 ? undefined : input.current?.click())} aria-disabled={busy > 0 || undefined} aria-busy={busy > 0} className="btn btn-secondary btn-sm">
           <Icon name="camera" size={15} />
           {busy > 0 ? `Sending ${busy} ${busy === 1 ? "picture" : "pictures"}…` : (words?.add ?? `Add pictures (${items.length} of ${room})`)}
         </button>

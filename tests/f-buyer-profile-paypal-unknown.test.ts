@@ -10,7 +10,7 @@
  */
 import { readFileSync } from "node:fs";
 import { buyerProfile } from "@/lib/buyer-profile";
-import { grantImported } from "@/lib/imported-purchases";
+import { grantImported, importedKey } from "@/lib/imported-purchases";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -139,6 +139,38 @@ async function main(): Promise<void> {
   // Rule 23: the RED regex wanted " ?" on the same line; the page is formatted with the "?" on the next line, so any whitespace is read.
   is("the empty list checks partial and Stripe's failure before saying nothing was bought", /profile\.partial \|\| profile\.stripeError\s*\?/.test(empty), true);
   is("and says the list may be incomplete instead", page.includes("Their purchases could not all be read just now, so this list may be missing some."), true);
+
+  // Claude 6 on #2908 (LEVE, comment 6697867589): the record's own order was not checked, yet it keys the payment that
+  // is summed into "Spent with you". A record without its order, or one naming another order, collapsed two $49 sales
+  // into one $49 payment with no warning. A record that does not name its own order is unknown.
+  part("A paid record that does not name its own order (RED)");
+  is("a record without its order: no money counted, the sale shown without an amount, and the page warns", await (async () => {
+    await redis.pipeline([["SET", paidKey, JSON.stringify({ ...base, order: undefined })]]);
+    const s = await seen(store);
+    await redis.pipeline([["SET", paidKey, record]]);
+    return s;
+  })(), { kind: "brought", cents: 0, note: "paypal", paid: 0, stripeError: false, partial: true });
+  const ORDER_B = "7XK51290AB1234567";
+  const paidKeyB = `nl:ppsell:paid:${ORDER_B}`;
+  await grantImported(STATS, `paypal:${ORDER_B}`, [{ email: "buyer@example.com", productId: "guide2", items: null }], NOW - 1800, store.sid);
+  await redis.pipeline([["SET", paidKeyB, JSON.stringify({ ...base, product: "guide2", capture: "9D111111AA222222", at: NOW - 1800 })]]);
+  const two = await buyerProfile(store, "buyer@example.com");
+  const shown = two.orders.filter((o) => o.note === "paypal").map((o) => ({ kind: o.kind, cents: o.cents })).sort((a, b) => a.kind.localeCompare(b.kind));
+  is("a second sale whose record names the first order: never two $49 sales summed as $49 with no warning", { shown, paid: two.paid, partial: two.partial }, { shown: [{ kind: "brought", cents: 0 }, { kind: "sale", cents: 4900 }], paid: 4900, partial: true });
+  await redis.pipeline([["SET", paidKeyB, JSON.stringify({ ...base, order: ORDER_B, product: "guide2", capture: "9D111111AA222222", at: NOW - 1800 })]]);
+  const both = await buyerProfile(store, "buyer@example.com");
+  is("with each record naming its own order, both sales are counted", { sales: both.orders.filter((o) => o.kind === "sale").length, paid: both.paid, partial: both.partial }, { sales: 2, paid: 9800, partial: false });
+  await redis.pipeline([["DEL", paidKeyB], ["HDEL", importedKey(STATS, "buyer@example.com"), "guide2"]]);
+
+  // Claude 4 (comment 6696369130) and Claude 6 (comment 6697867589) on #2908 (LEVE): with nothing read and the reading
+  // partial or Stripe unread, the tiles above the list still said "$0.00", "0" and "nothing bought yet". Unknown is not zero.
+  part("The person page tiles never say $0 or 'nothing bought yet' when nothing could be read (RED)");
+  const tilesSrc = page.slice(page.indexOf("const tiles = "), page.indexOf("const contact = profile.contact;"));
+  is("an unread flag: no order read and the reading partial or Stripe unread", /const unread = !bought && \(profile\.partial \|\| profile\.stripeError\);/.test(page), true);
+  const unreadBranch = tilesSrc.slice(tilesSrc.indexOf("unread"), tilesSrc.indexOf(": ["));
+  is("the tiles take the unread branch first", /^unread\s*\?\s*\[/.test(unreadBranch), true);
+  is("each of the 4 unread tiles shows a dash and says it could not be read", [(unreadBranch.match(/value: "—"/g) ?? []).length, (unreadBranch.match(/could not be read/g) ?? []).length], [4, 4]);
+  is("no amount, count or 'nothing bought yet' in the unread tiles", /money\(|String\(profile|nothing bought yet/.test(unreadBranch), false);
 
   part("Control after the failures");
   is("the healthy sale is read again, nothing flagged", await seen(store), { kind: "sale", cents: 4900, note: "paypal", paid: 4900, stripeError: false, partial: false });

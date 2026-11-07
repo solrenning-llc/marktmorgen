@@ -405,6 +405,73 @@ async function main() {
     }
   }
 
+  // Codex M's review of #1924 (head de6839a3): an end that is present but does not read was dropped by the lenient
+  // record parser, so the share read as having no end and earned on a sale after the agreement really ended. A share
+  // that does not read exactly is unknown: no earning is written from it, while absent or null still means no end
+  // and every other partner of the sale is still credited.
+  part("A partner's end that does not read never earns after the agreement");
+  {
+    const start = now - 2 * 86400;
+    const end = start + 86400;
+    const sharesOf = async (statsId: string) => {
+      const reply = (await redis.pipeline([["HGETALL", `nl:aff:${statsId}:shares`]]))[0] as string[];
+      const out: Record<string, number> = {};
+      for (let i = 0; i + 1 < reply.length; i += 2) out[reply[i]] = (JSON.parse(reply[i + 1]) as { percent: number }).percent;
+      return out;
+    };
+    const sale = (ref: string, at: number) => ({ ref, pi: `pi_${ref}`, at, product: A, title: "Pottery", base: 1000, total: 1000, currency: "usd", buyer: "buyer@example.test" });
+    // p holds a running 20% with no end; q a dated 40% that ended yesterday.
+    const twoPartners = async () => {
+      const shop = await fixture();
+      is("p starts with no end", (await proposePartnerShare(shop.store, p, { percent: 20, products: [A] }, start)).ok, true);
+      is("q starts with an end", (await proposePartnerShare(shop.store, q, { percent: 40, products: [A], until: end }, start)).ok, true);
+      return shop;
+    };
+    const setUntil = async (statsId: string, value: unknown) => {
+      const people = `nl:aff:${statsId}:people`;
+      const stored = JSON.parse(String(await field(statsId, q))) as { share: Record<string, unknown> };
+      if (value === undefined) delete stored.share.until;
+      else stored.share.until = value;
+      await redis.pipeline([["HSET", people, q, JSON.stringify(stored)]]);
+    };
+    for (const [what, bad] of [
+      ["a word", "unknown"],
+      ["a boolean", true],
+      ["a fraction", end + 0.5],
+    ] as const) {
+      for (const route of ["read here", "read by the sweep"] as const) {
+        const { store, statsId } = await twoPartners();
+        await setUntil(statsId, bad);
+        const ref = `cs_test_bad_${route === "read here" ? "here" : "sweep"}`;
+        let outcome = "returned";
+        try {
+          if (route === "read here") await affiliates.notePartners(store, sale(ref, end + 1));
+          else await affiliates.notePartners(store, sale(ref, end + 1), await listPartners(store));
+        } catch {
+          outcome = "thrown";
+        }
+        is(`${what} (${route}): the sale is still processed`, outcome, "returned");
+        is(`${what} (${route}): no earning from the unreadable agreement, the other partner still credited`, await sharesOf(statsId), { [`${ref}:${p}`]: 20 });
+      }
+    }
+    {
+      const { store, statsId } = await twoPartners();
+      await affiliates.notePartners(store, sale("cs_test_after", end + 1));
+      is("a healthy end: nothing earned after it", await sharesOf(statsId), { [`cs_test_after:${p}`]: 20 });
+      await affiliates.notePartners(store, sale("cs_test_before", end - 1));
+      is("a healthy end: earned before it", (await sharesOf(statsId))[`cs_test_before:${q}`], 40);
+    }
+    for (const [what, value] of [
+      ["no end field", undefined],
+      ["an end that is null", null],
+    ] as const) {
+      const { store, statsId } = await twoPartners();
+      await setUntil(statsId, value);
+      await affiliates.notePartners(store, sale("cs_test_open", end + 1), await listPartners(store));
+      is(`${what} still means no end: earned`, await sharesOf(statsId), { [`cs_test_open:${p}`]: 20, [`cs_test_open:${q}`]: 40 });
+    }
+  }
+
   done();
 }
 

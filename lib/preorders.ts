@@ -33,7 +33,7 @@ import { givingWords } from "@/lib/buyer-words/giving";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { isSettled } from "@/lib/instant-pay";
 import { formatMoney } from "@/lib/money";
-import { type Preorder, keptDay, parsePreorder, preorderCounts, preorderOpen, preorderProblem } from "@/lib/preorder-rules";
+import { type Preorder, keptDay, parsePreorder, preorderCounts, preorderJob, preorderOpen, preorderProblem, readPreorderJob } from "@/lib/preorder-rules";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const dayKey = (sid: string) => `nl:wl:${sid}:pre`;
@@ -264,7 +264,8 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
     const entry = await readPreorder(store, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
     if (entry.given) return "already";
-    await grantImported(sid, `pre:${sessionId}`, [{ email: entry.to, productId: product.id, items: null }], entry.at, store.sid);
+    // Whether it ships goes with the grant, which outlives the entry (Claude 1's H on #2827; lib/preorder-rules.ts).
+    await grantImported(sid, preorderJob(sessionId, entry.ship), [{ email: entry.to, productId: product.id, items: null }], entry.at, store.sid);
     if (!store.pastBuyers) await setPastBuyers(storeRef(store));
     if (product.course) await deps.recordStart(entry.to, product.id, now());
     await redisPipeline([["HSET", entriesKey(sid, product.id), sessionId, JSON.stringify({ ...entry, given: now() } satisfies Preorder)], keep(sid, product.id)]);
@@ -526,7 +527,7 @@ export async function revokeRefundedPreorders(
             }
             job = named;
           }
-          if (job === `pre:${session}`) {
+          if (readPreorderJob(job)?.checkout === session) {
             // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
             // purchase, so the next run takes both away again; taking a course away twice is harmless.
             try {

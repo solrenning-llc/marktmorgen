@@ -168,3 +168,20 @@ export function preorderCounts(entries: Preorder[]): { waiting: number; given: n
   }
   return { waiting, given, refunded };
 }
+
+/**
+ * The job a handed-over pre-order's grant is made with (lib/imported-purchases.ts, kept with no end, where its entry
+ * expires): "pre:<checkout>", and ":s" when it ships or ":d" when it does not, whenever its entry says so at the
+ * hand-over (Claude 1's H on #2827). An entry gone later never turns a known digital purchase into an unknown one,
+ * whose withdrawal would stay open with no end.
+ */
+export function preorderJob(checkout: string, ship: boolean | undefined): string {
+  return `pre:${checkout}${ship === true ? ":s" : ship === false ? ":d" : ""}`;
+}
+
+/** A pre-order grant's job read back: its checkout, and whether it ships (null when the job does not say: an older grant). */
+export function readPreorderJob(job: string): { checkout: string; ship: boolean | null } | null {
+  const m = /^pre:([^:]+)(?::([sd]))?$/.exec(job);
+  if (!m) return null;
+  return { checkout: m[1], ship: m[2] === "s" ? true : m[2] === "d" ? false : null };
+}

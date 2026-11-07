@@ -241,7 +241,7 @@ export async function settleGroup(input: {
   const id = session.metadata?.group ?? "";
   const group = await readGroupExactly(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
-  if (group.paid) return "already";
+  if (group.paid) return receiptForPaid(input, group);
   const settling = `${groupKey(id)}:settling`;
   // Claimed with this run's own value and read exactly (C4-3000): an answer in another shape is read back, never taken
   // as ours, and the mark is let go only while it still holds this run's value (lib/claim-mark.ts).
@@ -249,9 +249,10 @@ export async function settleGroup(input: {
   const claimed = await claimMark(settling, 300, mark);
   if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
   if (claimed === "taken") {
-    // Another run is settling it. "already" only once it is paid: confirmGroup (lib/purchase-email.ts) keeps its
-    // "sent" mark on "already", so said while the other run may still fail, the paid purchase would never be settled
-    // (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and the next run tries again.
+    // Another run is settling it. "already" only once it is paid: said while the other run may still fail, the paid
+    // purchase would never be settled (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and
+    // the next run tries again. Once paid, the run holding the mark sends the receipt (it keeps the mark until then),
+    // and confirmGroup keeps no "sent" mark on "already" (#2872, M1), so a sender that fails is followed by the next run.
     if ((await readGroupExactly(id))?.paid) return "already";
     throw new Error("another run is settling this purchase for several right now");
   }
@@ -279,12 +280,39 @@ export async function settleGroup(input: {
     await releaseMark(settling, mark);
     throw new UnknownReplyError("a paid purchase for several's record");
   }
-  await releaseMark(settling, mark);
+  // Kept, not let go, until it runs out: it covers the receipt below and the "sent" mark confirmGroup writes after it
+  // (lib/purchase-email.ts), so a run that reads the purchase paid meanwhile answers "already" and never sends it twice.
+  await paidReceipt(input, paid);
+  return "settled";
+}
 
-  await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
+/**
+ * Within this time of being paid, a purchase read paid with no confirmation "sent" mark (lib/purchase-email.ts keeps
+ * that mark 40 days) was settled by a run that did not get to send the receipt: its last write landed with a reply in
+ * another shape, so it threw (Claude 4 and Claude 1 on #2872, M1). Past it, the mark ran out long after the receipt.
+ */
+const RECEIPT_LATE_SECONDS = 30 * 86_400;
+
+/**
+ * A purchase read paid: its receipt, with the link that hands out the places, sent now, once, when no run sent it (M1
+ * on #2872). The settling mark, read exactly (lib/claim-mark.ts), decides who sends: ours sends and answers "settled",
+ * so confirmGroup keeps its "sent" mark and the order is counted once; another run's answers "already" (that run
+ * sends, and confirmGroup keeps no mark on "already", so if it fails the next run sends); unknown throws, nothing sent.
+ */
+async function receiptForPaid(input: Parameters<typeof settleGroup>[0], group: Group): Promise<SettleOutcome> {
+  if (group.revoked || now() - (group.paid ?? 0) > RECEIPT_LATE_SECONDS) return "already";
+  const claimed = await claimMark(`${groupKey(group.id)}:settling`, 300, claimValue());
+  if (claimed === "taken") return "already";
+  if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
+  await paidReceipt(input, group);
+  return "settled";
+}
+
+/** The payer's receipt with the places link, under its own idempotency key. */
+async function paidReceipt(input: Parameters<typeof settleGroup>[0], group: Group): Promise<void> {
+  await sendReceipt({ ...input, group, lead: givingWords(input.store.language).thanksReceipt(input.store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),
   );
-  return "settled";
 }
 
 /** The buyer's receipt, with the link that hands out the places. False when it has nobody to go to or was not sent. */

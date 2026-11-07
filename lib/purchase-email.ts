@@ -585,7 +585,9 @@ async function confirmGift(store: Store, session: SessionRecord, key: string): P
     },
     ordersLink: (email) => ordersLinkFor(store, email, base),
   });
-  if (outcome !== "skip") await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
+  // The "sent" mark only on the run that told the gift (Claude 4 and Claude 1 on #2872, M1): on "already" another run
+  // tells it and keeps the mark itself, and if that run fails, the next run finds no mark and tells it (lib/gifts.ts).
+  if (outcome === "given") await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
   return outcome === "given" ? "sent" : outcome === "already" ? "already" : "skip";
 }
 
@@ -629,7 +631,8 @@ async function confirmGroup(store: Store, session: SessionRecord, key: string): 
     base: storeBase(store),
     from: fromStore(store),
   });
-  if (outcome !== "skip") await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
+  // The "sent" mark only on the run that sent the receipt (#2872, M1), as confirmGift does (lib/group-buy.ts).
+  if (outcome === "settled") await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);
   return outcome === "settled" ? "sent" : outcome === "already" ? "already" : "skip";
 }
 

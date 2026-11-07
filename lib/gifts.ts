@@ -191,20 +191,21 @@ export async function deliverGift(input: {
   recordStart: (email: string, courseProductId: string, startSeconds: number) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
 }): Promise<GiftOutcome> {
-  const { store, session, product, base } = input;
+  const { store, session, product } = input;
   const id = session.metadata?.gift ?? "";
   const gift = await readGiftExactly(id);
   if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
-  if (gift.given) return "already";
+  if (gift.given) return tellGiven(input, gift);
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
   // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
   const mark = `${giftKey(id)}:giving`;
   const value = claimValue();
   const claimed = await claimMark(mark, 300, value);
   if (claimed === "taken") {
-    // Another run holds the mark. "already" only once the gift is given (Claude 4 on #2726): confirmGift
-    // (lib/purchase-email.ts) keeps its "sent" mark on "already", so said while the other run may still fail, the
-    // paid gift would never be given. Thrown, no "sent" mark is kept and the next run tries again.
+    // Another run holds the mark. "already" only once the gift is given (Claude 4 on #2726): said while the other run
+    // may still fail, the paid gift would never be given. Thrown, no "sent" mark is kept and the next run tries again.
+    // Once given, the run holding the mark tells it (it keeps the mark until then), and confirmGift keeps no "sent"
+    // mark on "already" (#2872, M1), so a teller that fails is followed by the next run.
     if (await givenExactly(id)) return "already";
     throw new Error("another run is giving this gift right now");
   }
@@ -235,9 +236,40 @@ export async function deliverGift(input: {
     await releaseMark(mark, value);
     throw new UnknownReplyError("a given gift's record");
   }
-  // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
-  await releaseMark(mark, value);
+  // Kept, not let go, until it runs out: it covers the emails below and the "sent" mark confirmGift writes after them
+  // (lib/purchase-email.ts), so a run that reads the gift given meanwhile answers "already" and never tells it twice.
+  await tellGift(input, gift);
+  return "given";
+}
 
+/**
+ * Within this time of being given, a gift read given with no confirmation "sent" mark (lib/purchase-email.ts keeps
+ * that mark 40 days) was given by a run that did not get to tell anybody: its last write landed with a reply in
+ * another shape, so it threw (Claude 4 and Claude 1 on #2872, M1). Past it, the mark ran out long after the emails.
+ */
+const TELL_LATE_SECONDS = 30 * 86_400;
+
+/**
+ * A gift read given: told now, once, when no run told it (M1 on #2872). The giving mark, read exactly
+ * (lib/claim-mark.ts), decides who tells: ours tells and answers "given", so confirmGift keeps its "sent" mark and the
+ * order is counted once; another run's answers "already" (that run tells, and confirmGift keeps no mark on "already",
+ * so if it fails the next run tells); unknown throws, nothing sent.
+ */
+async function tellGiven(input: Parameters<typeof deliverGift>[0], gift: Gift): Promise<GiftOutcome> {
+  if (gift.revoked || now() - (gift.given ?? 0) > TELL_LATE_SECONDS) return "already";
+  const mark = `${giftKey(gift.id)}:giving`;
+  const value = claimValue();
+  const claimed = await claimMark(mark, 300, value);
+  if (claimed === "taken") return "already";
+  if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
+  await tellGift(input, gift);
+  return "given";
+}
+
+/** The friend's email and the payer's receipt, each under its own idempotency key. */
+async function tellGift(input: Parameters<typeof deliverGift>[0], gift: Gift): Promise<void> {
+  const { store, session, product, base } = input;
+  const sessionId = typeof session.id === "string" ? session.id : "";
   const g = givingWords(store.language);
   const who = gift.from || g.someone;
   // Given at one of the product's prices: named with it, as on the receipt.
@@ -287,7 +319,6 @@ export async function deliverGift(input: {
       idempotencyKey: `nimbus-gift-receipt:${gift.id}`,
     }).catch((error) => console.error("a gift receipt failed", error));
   }
-  return "given";
 }
 
 /** The buyer's name on a gift, for the recipient's list of purchases. */

@@ -121,7 +121,10 @@ async function main(): Promise<void> {
   {
     const g = await gift();
     is("the mark free: given", [await g.give(), await has(g.to)], ["given", true]);
-    is("and let go after", (await pipeline([["GET", g.key]]))[0], null);
+    // Rule 23 (#2872, M1): was "and let go after" (null). The run that gave the gift now keeps its mark until it runs
+    // out, so a run reading the gift given before confirmGift's "sent" mark lands answers "already" and never tells the
+    // gift twice; a run reading it given with the mark free tells it (lib/gifts.ts tellGiven).
+    is("and kept after, so another run reading the gift given answers already", [typeof (await pipeline([["GET", g.key]]))[0], await g.give()], ["string", "already"]);
   }
   {
     const g = await gift();

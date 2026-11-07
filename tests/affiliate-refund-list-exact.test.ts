@@ -95,7 +95,12 @@ function unreadable(row: (over?: Record<string, unknown>) => Record<string, unkn
     ["a counted row whose amount is text", { object: "list", data: [row({ amount: "10000" })], has_more: false }],
     ["a counted row whose amount is negative", { object: "list", data: [row({ amount: -10000 })], has_more: false }],
     ["a counted row whose amount is a fraction", { object: "list", data: [row({ amount: 99.5 })], has_more: false }],
-    ["a row whose status is not text", { object: "list", data: [row({ status: null })], has_more: false }],
+    // Rule 23: this row's status was null; Stripe documents a refund's status as a nullable string, and a null
+    // one is now taken off as a refund that may still go back (tests/affiliate-recurring-payment-exact.test.ts),
+    // so the unreadable status held here for both lists is a number. A dispute's status is never null in Stripe's
+    // reference and stays unreadable (the case right below).
+    ["a row whose status is a number", { object: "list", data: [row({ status: 42 })], has_more: false }],
+    ...(row({}).object === "dispute" ? [["a dispute whose status is null", { object: "list", data: [row({ status: null })], has_more: false }] as [string, unknown]] : []),
     ["a counted row whose payment is a number", { object: "list", data: [row({ payment_intent: 42 })], has_more: false }],
     ["a counted row whose payment is an object without an id", { object: "list", data: [row({ payment_intent: { object: "payment_intent" } })], has_more: false }],
   ];

@@ -60,6 +60,17 @@ async function main() {
     is(`${what}: not a first sale, nothing written, no offer`, [noted, await firstSaleAt(store)], [false, 0]);
   }
 
+  part("A page of earlier checkouts with no paid sale that does not say it is the last");
+  const free = Array.from({ length: 100 }, (_, n) => ({ id: `cs_free_${n}`, created: NOW - 600, amount_total: 0, payment_status: "no_payment_required", metadata: { store: store.handle } }));
+  for (const [what, body] of [
+    ["a full page of free checkouts with more after it", { object: "list", data: free, has_more: true }],
+    ["an empty page with has_more absent", { object: "list", data: [] }],
+    ["an empty page with has_more as text", { object: "list", data: [], has_more: "false" }],
+  ] as const) {
+    page = body;
+    is(`${what}: not known, not a first sale, nothing written`, [await noteFirstSale(store, [sale(store.handle)], true), await firstSaleAt(store)], [false, 0]);
+  }
+
   part("Control: a page read whole, with no earlier sale");
   page = { object: "list", data: [], has_more: false };
   is("the first sale is noted", await noteFirstSale(store, [sale(store.handle)], true), true);

@@ -106,7 +106,7 @@ parties only as law requires; Art. 30(7) show (a), (d), (e) "at least on the
 online platform's online interface where the information on the product or
 service is presented". Art. 31(1)–(3) interface designed so traders can give
 pre-contract, product-safety and identity information (operator name, address,
-telephone, email), product identification, a trader sign and labelling; best
+telephone, email), product identification, a trader sign and labeling; best
 efforts before allowing offers; "reasonable efforts to randomly check" an
 official database for illegal items afterwards. Art. 32(1) tell purchasers of an
 illegal product (the fact, the trader's identity, redress), for purchases in the
@@ -137,7 +137,7 @@ of the texts above:
 | # | Fact to measure | Source in the texts | Where it can come from | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Headcount in annual work units, including the owner as owner-manager and any person working for the enterprise under subordination | Annex Art. 5 | Owner's own records; contractor terms | NEEDS-FACT |
-| 2 | Annual turnover excluding VAT, per accounting period | Annex Art. 4(1) | The LLC's books. Note which receipts count: Marktmorgen takes no money from creators' sales (direct charges on the creator's account); plan subscriptions and add-ons are its own turnover | NEEDS-FACT |
+| 2 | Annual turnover excluding VAT, per accounting period | Annex Art. 4(1) | The LLC's books. Note which receipts count: today, while `COMMISSION_LIVE` is false (`lib/plan.ts`), Marktmorgen takes no money from creators' sales (direct charges on the creator's account); once the share in `lib/platform-share.ts` is live, its application fees on creators' sales count as turnover too; plan subscriptions and add-ons are its own turnover | NEEDS-FACT |
 | 3 | Annual balance sheet total | Annex Art. 2 | The LLC's books | NEEDS-FACT |
 | 4 | The accounting period and its closing date; whether accounts are "approved" or a bona fide estimate (a newly established enterprise) | Annex Art. 4(1)–(3) | Owner; not verified | NEEDS-FACT |
 | 5 | Partner or linked enterprises, **including through the owner as a natural person** in the same or an adjacent market (any other business the owner controls; products held by the same LLC are the same enterprise) | Annex Art. 3(2)–(3), Art. 6(2) | Owner's list of holdings | NEEDS-FACT |
@@ -176,7 +176,7 @@ Section 4 (rows 16–18):
 - Show name, address, telephone, email, register entry and the self-certification
   on each product page and at the checkout (Art. 30(7)).
 - Studio fields so a creator can give operator identity, a trader sign, product
-  identification and safety labelling (Art. 31(1)–(2)).
+  identification and safety labeling (Art. 31(1)–(2)).
 - Best-efforts check before a creator may sell, and random checks against an
   official illegal-products database after (Art. 31(3)).
 - Buyer notice for illegal products: purchase records within six months, the
@@ -192,7 +192,7 @@ Section 3 (row 22), same date:
 - Transparency additions: disputes and suspensions in the reports, and the
   recipients figure every six months (Art. 24(1)–(2)); statements of reasons to
   the Commission database (Art. 24(5)).
-- No deceptive interface (Art. 25); advertising labelling and no profiling-based
+- No deceptive interface (Art. 25); advertising labeling and no profiling-based
   ads using special categories (Art. 26); recommender parameters in the terms
   (Art. 27); protection of minors (Art. 28). Each was named by the audit; only the openings of Arts. 24–27 were read here.
 

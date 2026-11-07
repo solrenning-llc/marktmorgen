@@ -1193,6 +1193,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/tax/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/tax",
+      "parameters": []
+    },
+    {
       "source": "app/studio/team/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/team",
@@ -2032,6 +2038,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 139
+    "pageTemplates": 140
   }
 }

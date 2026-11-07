@@ -78,7 +78,6 @@ async function main(): Promise<void> {
     ["a number", 7],
     ["a list", [config]],
     ["an object", { spaces: [] }],
-    ["text that is not settings", "{not json"],
   ] as [string, unknown][]) {
     part(`The settings answered as ${what}`);
     await setup();
@@ -107,6 +106,19 @@ async function main(): Promise<void> {
     is("the damaged setup is left as it is, for the creator", (await real([["GET", cfgKey]]))[0], stored);
     is("pressing again finishes too", await rejects(() => forgetCommunityPerson(CM, "mem1", EMAIL, ["prod1"])), false);
   }
+
+  // Redis answering the setup as text that is not settings is what a setup
+  // stored damaged answers, and every reader gets the same answer: before the
+  // review of #3091 this case refused for good, like the stored ones above.
+  part("The settings answered as text that is not settings: damage, the same for every reader");
+  await setup();
+  await real([["SET", okKey, "1"]]);
+  answer(isCfg, "{not json");
+  const reader = await communityViewer({ community: { id: CM, on: true } } as unknown as Store, { get: () => undefined });
+  is("the community is off for everyone who reads it so", reader.state, "off");
+  is("the erasure finishes", await rejects(() => forgetCommunityPerson(CM, "mem1", EMAIL, ["prod1"])), false);
+  healthy();
+  is("and deletes what does not hang on the spaces", await exists(okKey), false);
 
   part("A lost reply is still not damage: it refuses, and nothing is deleted");
   await setup();

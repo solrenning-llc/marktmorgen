@@ -43,6 +43,9 @@ import { STUDIO_GIVE_JOB, grantImported, importedFor, importedKey, isGivenByStor
 import { paidCourses, setBlocked, touchStudent } from "@/lib/learn";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { redisPipeline } from "@/lib/redis";
+import { takeManyWithin } from "@/lib/request-guard";
+import { GIVES_PER_DAY } from "@/lib/api-write";
+import { putMember } from "@/lib/team";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -235,6 +238,44 @@ async function main(): Promise<void> {
   const paused = await applyGive(unpaid, target, { change: "give", to, emails: ["ana@example.com"], expect: 1 }, async () => ({ ok: true }));
   is("nothing is given while the plan's renewal is unpaid", [paused.kind, paused.kind === "refused" ? paused.reason : "", await given("ana@example.com")], ["refused", "paused_unpaid", []]);
 
+  const page = readFileSync("app/studio/students/page.tsx", "utf8");
+  part("Who may give, and how many a day (pre-review of unit 2, ALTO 1)");
+  // The finding: the gift needed only "products", which an editor has, while the API's gift needs "import" (owner and
+  // admins: who owns what), and the addresses came from the body unchecked: an editor gave the course to two
+  // addresses from outside and to himself, 200, changed 3.
+  const editor = "ed@example.com";
+  await putMember(store, editor, "editor");
+  const edCookie = `${SESSION_COOKIE}=${await openSession(editor)}`;
+  const outsiders = ["out1@example.net", "out2@example.net", editor];
+  const byEditor = await post({ action: "apply", change: "give", to, emails: outsiders, expect: 3 }, { cookie: edCookie });
+  const editorReview = await post({ action: "review", change: "give", to, emails: outsiders }, { cookie: edCookie });
+  const editorBack = await post({ action: "review", change: "takeback", to, emails: outsiders }, { cookie: edCookie });
+  is(
+    "an editor may neither give a course nor take one back, nor see what it would do; nothing is given",
+    [byEditor.status, editorReview.status, editorBack.status, await given("out1@example.net"), await given(editor)],
+    [403, 403, 403, [], []],
+  );
+  const editorAccess = await post({ action: "review", change: "revoke", id: bread.product.id, emails: ["ana@example.com"] }, { cookie: edCookie });
+  is("an editor still takes students off a course, as before", editorAccess.status, 200);
+  const adminEmail = "ad@example.com";
+  await putMember(store, adminEmail, "admin");
+  const adminReview = await post({ action: "review", change: "give", to, emails: ["ana@example.com"] }, { cookie: `${SESSION_COOKIE}=${await openSession(adminEmail)}` });
+  is("an admin may", [adminReview.status, adminReview.body.review?.changes], [200, 1]);
+  is("the page offers the action only to whoever may give", page.includes('can(view.role, "import")'), true);
+
+  // The store's gifts in a day are the API's (GIVES_PER_DAY, the same count), so neither way passes it.
+  is("filled to one short of the day", await takeManyWithin("api-give", store.sid, GIVES_PER_DAY, DAY, GIVES_PER_DAY - 1), true);
+  const pastDay = await post({ action: "apply", change: "give", to, emails: ["ana@example.com", "zed@example.com"], expect: 2 });
+  is("past the store's gifts of the day: refused, nothing given", [pastDay.status, pastDay.body.error, await given("ana@example.com"), await given("zed@example.com")], [429, "daily_limit", [], []]);
+  is("said plainly", GIVE_REFUSALS.daily_limit, "Nothing was given: that is as many as a store may give in a day, here and through the API together (1,000). Try again tomorrow.");
+  const lastOne = await post({ action: "apply", change: "give", to, emails: ["ana@example.com"], expect: 1 });
+  is("what is left of the day is given", [lastOne.status, lastOne.body.changed], [200, ["ana@example.com"]]);
+  const dayUsed = await post({ action: "apply", change: "give", to, emails: ["zed@example.com"], expect: 1 });
+  is("and then the day is used", [dayUsed.status, dayUsed.body.error, await given("zed@example.com")], [429, "daily_limit", []]);
+  const backAfter = await post({ action: "apply", change: "takeback", to, emails: ["ana@example.com"], expect: 1 });
+  is("taking back is never held by the day", [backAfter.status, backAfter.body.changed], [200, ["ana@example.com"]]);
+  for (const key of (await redis.keys()).filter((k: string) => k.startsWith("nl:rl:api-give:"))) await redisPipeline([["DEL", key]]);
+
   part("The screen");
   const studentLines = [line("ana@example.com", now), line("ben@example.com", now)];
   const html = renderToStaticMarkup(
@@ -249,7 +290,6 @@ async function main(): Promise<void> {
   is("said plainly: no payment, no email", html.includes("with no payment") && html.includes("No email is sent"), true);
   const none = renderToStaticMarkup(createElement(StudentsBulk, { productId: bread.product.id, courseTitle: "Bread Course", lessons: 1, lines: studentLines, canTag: true, canExport: true, others: [] }));
   is("with no other course, the action is not offered", none.includes("Give another course"), false);
-  const page = readFileSync("app/studio/students/page.tsx", "utf8");
   is("the page filters by when they were last here and offers the other courses that can be given", [page.includes('name="seen"'), page.includes("givable(")], [true, true]);
 
   done();

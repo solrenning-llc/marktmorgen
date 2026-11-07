@@ -452,17 +452,22 @@ export async function askPlace(input: {
   const title = groupTitle(product, group);
   const g = givingWords(store.language);
 
-  // Whether this address holds a place, and how many are taken, read exactly (sweep A3; CX-123 rule 24): an answer
-  // in another shape sends nothing and says so ("unavailable": nothing was taken or lost), never "nobody, none".
+  // Whether this address holds a place, whether the product is on it, and how many are taken, read exactly (sweep A3;
+  // CX-123 rule 24): an answer in another shape sends nothing and says so ("unavailable": nothing was taken or lost),
+  // never "nobody, none".
   const looked = repliesFor(await redisPipeline([
     ["HEXISTS", membersKey(group.id), addressHash(email)],
     ["GET", takenKey(group.id)],
-  ]), 2);
+    ["HEXISTS", importedKey(group.s, email), group.p],
+  ]), 3);
   const held = looked?.[0];
   const takenRaw = looked?.[1];
+  const owned = looked?.[2];
   const taken = takenRaw === null ? 0 : typeof takenRaw === "string" && /^\d{1,15}$/.test(takenRaw) ? Number(takenRaw) : null;
-  if (!looked || (held !== 0 && held !== 1) || taken === null) return "unavailable";
-  const has = held === 1;
+  if (!looked || (held !== 0 && held !== 1) || (owned !== 0 && owned !== 1) || taken === null) return "unavailable";
+  // A place is held only when its record is there and the product is on the address, as takePlace reads it (Claude 4
+  // on #2872, rule 30): a record left over without the product (a give-back that failed) is never sent "Your place".
+  const has = held === 1 && owned === 1;
   if (!has && taken >= group.people) return "full";
 
   // The link can be passed to anybody, and each address typed on it is sent

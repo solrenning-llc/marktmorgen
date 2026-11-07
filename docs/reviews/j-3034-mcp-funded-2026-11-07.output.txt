@@ -1,0 +1,584 @@
+PINNED FINAL SOURCES
+{
+  "lib/broadcasts.ts": "acadaeeea95fcdb32115001aeb14af51dbe5b8f8",
+  "lib/mcp-tools.ts": "035d26d29e271e098c63769c8c3a01d0b33c9b9e",
+  "lib/api-read-rules.ts": "0dd371d6b838f9588a3103c61ee2074ad95bdc43",
+  "lib/api-guard.ts": "e06c0fff0446fd5ee507203aefc53ff5e3353e45",
+  "lib/store-allowance.ts": "55d1b13e749624c15fae5136afda48d5206218d9",
+  "lib/redis-memory.ts": "d8c951e086f850a9770b287d453278daf3f2cecc",
+  "tests/broadcasts-read-cost-world.ts": "d75896654ec4cd15d4d01fb624bc5880c4adc8ea",
+  "tests/test-config.mjs": "3d25065d9fc211649a1aad676a0f64e057badb5b",
+  "tests/broadcasts-read-cost-mcp.test.ts": "43cae503ffbf7d899e27f608c50b547991f10a1c",
+  "tests/api-events-measured.test.ts": "02e709c4164406e96b1936cceca9752dc6ca4a97",
+  "tests/plan-cost-registry.test.ts": "b4431676cdb5de8573cc92053cf5a22367312c19"
+}
+MAIN-MERGE REACHABLE DELTA
+["lib/buyer-words/en.ts", "lib/buyer-words/es.ts", "lib/buyer-words/fr.ts", "lib/buyer-words/de.ts", "lib/buyer-words/it.ts", "lib/buyer-words/nl.ts", "lib/buyer-words/pt.ts", "lib/claim-mark.ts", "lib/paypal-sales.ts", "lib/mrr-movements.ts", "lib/membership-numbers.ts", "lib/buyer-words/cart.ts", "components/store-cart.tsx"]
+
+--- frozen ---
+J_MCP_RECEIPT {"count":1,"last":false,"measured":2,"generous":27,"allObserved":16,"holdCalls":1,"asked":3,"usedBefore":1,"usedAfter":5,"status":"data"}
+J_MCP_RECEIPT {"count":30,"last":false,"measured":31,"generous":27,"allObserved":74,"holdCalls":1,"asked":5,"usedBefore":1,"usedAfter":9,"status":"data"}
+J_MCP_RECEIPT {"count":30,"last":true,"measured":0,"generous":27,"allObserved":7,"holdCalls":0,"asked":0,"usedBefore":2000,"usedAfter":2000,"status":429}
+{
+  "checks": 13,
+  "pass": 11,
+  "fail": 2,
+  "countedMemoryCommands": 271,
+  "failed": [
+    {
+      "name": "30/false: measuring alone fits the generous initial API budget",
+      "pass": false,
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "30/true: one actual hold attempted",
+      "pass": false,
+      "actual": 0,
+      "expected": 1
+    }
+  ]
+}
+J_CHILD_EXIT 1
+
+--- derived ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE head FILE j-3034-mcp-funded.proof.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+J_FUNDED_RECEIPT {"count":1,"last":false,"measured":1,"read":1,"observed":16,"sizingPaid":1,"charged":1,"reserved":3,"holdCalls":1,"peakUncovered":0,"usedBefore":1,"usedAfter":5,"events":[{"kind":"charge","more":1,"taken":0,"ok":true},{"kind":"measure","n":1,"sizingPaid":1,"observed":8,"budget":40},{"kind":"hold","most":3},{"kind":"settle","actual":3,"ok":true}]}
+J_FUNDED_RECEIPT {"count":30,"last":false,"measured":30,"read":30,"observed":74,"sizingPaid":3,"charged":3,"reserved":5,"holdCalls":1,"peakUncovered":0,"usedBefore":1,"usedAfter":9,"events":[{"kind":"charge","more":3,"taken":0,"ok":true},{"kind":"measure","n":30,"sizingPaid":3,"observed":37,"budget":80},{"kind":"hold","most":5},{"kind":"settle","actual":5,"ok":true}]}
+J_FUNDED_RECEIPT {"count":30,"last":true,"measured":0,"read":0,"observed":7,"sizingPaid":0,"charged":0,"reserved":0,"holdCalls":0,"peakUncovered":0,"usedBefore":2000,"usedAfter":2000,"events":[{"kind":"charge","more":3,"taken":0,"ok":false}]}
+{
+  "checks": 26,
+  "pass": 26,
+  "fail": 0,
+  "failed": []
+}
+MEMORY_REDIS_RUN 271
+J_CHILD_EXIT 0
+
+--- derived-old ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE old-cost-graph FILE j-3034-mcp-funded.proof.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+J_FUNDED_RECEIPT {"count":1,"last":false,"measured":1,"read":1,"observed":14,"sizingPaid":0,"charged":0,"reserved":3,"holdCalls":1,"peakUncovered":0,"usedBefore":1,"usedAfter":4,"events":[{"kind":"measure","n":1,"sizingPaid":0,"observed":6,"budget":20},{"kind":"hold","most":3},{"kind":"settle","actual":3,"ok":true}]}
+J_FUNDED_RECEIPT {"count":30,"last":false,"measured":30,"read":30,"observed":72,"sizingPaid":0,"charged":0,"reserved":6,"holdCalls":1,"peakUncovered":17,"usedBefore":1,"usedAfter":7,"events":[{"kind":"measure","n":30,"sizingPaid":0,"observed":35,"budget":20},{"kind":"hold","most":6},{"kind":"settle","actual":6,"ok":true}]}
+J_FUNDED_RECEIPT {"count":30,"last":true,"measured":30,"read":0,"observed":38,"sizingPaid":0,"charged":0,"reserved":0,"holdCalls":1,"peakUncovered":18,"usedBefore":2000,"usedAfter":2000,"events":[{"kind":"measure","n":30,"sizingPaid":0,"observed":35,"budget":20}]}
+{
+  "checks": 26,
+  "pass": 16,
+  "fail": 10,
+  "failed": [
+    {
+      "name": "1/false: no sizing without successful real precharge",
+      "pass": false,
+      "actual": 1,
+      "expected": 0
+    },
+    {
+      "name": "1/false: sizing itself fits only its paid units",
+      "pass": false,
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "30/false: no sizing without successful real precharge",
+      "pass": false,
+      "actual": 30,
+      "expected": 0
+    },
+    {
+      "name": "30/false: every observed prefix covered at strict20 commands/unit",
+      "pass": false,
+      "actual": 17,
+      "expected": 0
+    },
+    {
+      "name": "30/false: sizing itself fits only its paid units",
+      "pass": false,
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "30/true: no sizing without successful real precharge",
+      "pass": false,
+      "actual": 30,
+      "expected": 0
+    },
+    {
+      "name": "30/true: every observed prefix covered at strict20 commands/unit",
+      "pass": false,
+      "actual": 18,
+      "expected": 0
+    },
+    {
+      "name": "30/true: sizing itself fits only its paid units",
+      "pass": false,
+      "actual": false,
+      "expected": true
+    },
+    {
+      "name": "30/true: actual size/read count",
+      "pass": false,
+      "actual": [
+        30,
+        0
+      ],
+      "expected": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "30/true: hold follows accepted sizing only",
+      "pass": false,
+      "actual": 1,
+      "expected": 0
+    }
+  ]
+}
+MEMORY_REDIS_RUN 298
+J_CHILD_EXIT 1
+
+--- mcp ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE head FILE broadcasts-read-cost-mcp.test.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+1. Twenty-nine emails at their longest, and one more listed between the measure and the read
+  ok    told
+  ok    the late one was listed after the measure
+  ok    what the reading did comes to no more API requests than were taken ({"took":7,"units":5,"bytes":18196,"commands":68})
+  ok    the email listed after the measure is not read
+  ok    each measured email is read once
+  ok    no body crosses (18196 bytes)
+  ok    the late one is told on the next call
+
+2. An email grown between the measure and the read is read once more, paid first
+  ok    told as it is now
+  ok    inside what was taken ({"took":6,"units":2})
+  ok    the store's API count is where it is counted
+  ok    refused with its own words
+  ok    the grown one read once, as far as it was paid
+
+4. The sizes are paid before they are asked; with nothing left, none is asked
+  ok    told
+  ok    all thirty sizes asked
+  ok    no size is asked before the API requests asking it comes to are taken
+  ok    what the reading did comes to no more API requests than were taken ({"took":8,"units":5})
+  ok    refused with its own words
+  ok    no size asked, no email read
+  ok    nothing taken
+
+19 checks, all passing.
+MEMORY_REDIS_RUN 436
+J_CHILD_EXIT 0
+
+--- mcp-old ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE old-cost-graph FILE broadcasts-read-cost-mcp.test.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+1. Twenty-nine emails at their longest, and one more listed between the measure and the read
+  ok    told
+  ok    the late one was listed after the measure
+  ok    what the reading did comes to no more API requests than were taken ({"took":6,"units":5,"bytes":18196,"commands":68})
+  ok    the email listed after the measure is not read
+  ok    each measured email is read once
+  ok    no body crosses (18196 bytes)
+  ok    the late one is told on the next call
+
+2. An email grown between the measure and the read is read once more, paid first
+  ok    told as it is now
+  ok    inside what was taken ({"took":5,"units":2})
+  ok    the store's API count is where it is counted
+  ok    refused with its own words
+  ok    the grown one read once, as far as it was paid
+
+4. The sizes are paid before they are asked; with nothing left, none is asked
+  ok    told
+  ok    all thirty sizes asked
+  FAIL  no size is asked before the API requests asking it comes to are taken
+        expected false
+        got      true
+  ok    what the reading did comes to no more API requests than were taken ({"took":6,"units":5})
+  ok    refused with its own words
+  FAIL  no size asked, no email read
+        expected [0,0]
+        got      [30,0]
+  ok    nothing taken
+
+19 checks, 2 failing.
+MEMORY_REDIS_RUN 455
+J_CHILD_EXIT 1
+
+--- page ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE head FILE broadcasts-read-cost-email-page.test.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+  ok    an email at its longest, as stored, past a hundred kilobytes
+  ok    listBroadcastsStrict reads all thirty, bodies and all
+  ok    read whole, thirty emails are more than the page's own 4 studio requests (4204712 bytes)
+  ok    the page reads its emails without their bodies, paying from the store's studio requests, and no longer whole
+  ok    and says, in words, when there are not enough studio requests left to read them
+  ok    the reader of the emails without their bodies exists
+
+1. Thirty emails at their longest: every field the page shows, without the body
+  ok    every email, newest first, each field as listBroadcastsStrict reads it, and no body
+  ok    only the list is asked inside the page's own studio requests, small ({"commands":1,"bytes":877})
+  ok    no email's size is asked before the studio requests asking it comes to are taken
+  ok    no email is read before the studio requests are taken
+  ok    every command and byte after it is inside what was taken when sent ({"paid":4,"commands":66,"bytes":17762})
+  ok    no body crosses: all of it is a few kilobytes (18639)
+
+1b. What a body holds never moves where the body ends
+  ok    each read exactly as stored, but its body
+
+1c. Small emails cost what they are; none costs nothing more
+  ok    three small emails
+  ok    a small read takes two studio requests more, in two takes: one for the sizes, one for the read (2)
+  ok    inside what was taken
+  ok    with no email, nothing is taken and only the list is asked
+  ok    a store with no list has no email, read from nowhere
+  ok    an invalid limit is refused (0)
+  ok    an invalid limit is refused (-1)
+  ok    an invalid limit is refused (101)
+  ok    an invalid limit is refused (1.5)
+  ok    an invalid limit is refused (NaN)
+
+1d. An email that grows between its size and its read is read no further than paid
+  ok    inside what was taken ({"paid":5,"commands":70,"bytes":19544})
+  ok    the grown one is read again, paid first, and shown as it is now
+  ok    it was taken three times: for the sizes, for all, once more for the grown one
+  ok    grown past what a send writes on it: could not be read
+  ok    and still inside what was taken
+
+2. Without the studio requests they need, none is read
+  ok    refused, in words
+  ok    no email read
+  ok    no email's size asked either
+
+3. All or nothing, as listBroadcastsStrict
+  ok    a record missing from the list: could not be read
+  ok    a record of another list: could not be read
+  ok    a malformed record: could not be read
+  ok    a record with an empty body: could not be read
+  ok    a record with no body: could not be read
+  ok    a record that is not JSON: could not be read
+  ok    a record whose first body is a nested one: could not be read
+  ok    an email not sent yet is read as it is
+  ok    an index that is not one: could not be read
+
+40 checks, all passing.
+MEMORY_REDIS_RUN 757
+J_CHILD_EXIT 0
+
+--- path ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE head FILE broadcasts-read-cost-path-growth.test.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+1. The newest emails at their longest: everything after the first take is inside what was taken
+  ok    read
+  ok    a sent email is found
+  ok    nothing read before the first take
+  ok    every command and byte after it is inside what was taken when sent ({"paid":10,"commands":17,"bytes":4068})
+  ok    no body crosses (4068 bytes)
+
+2. Whether an email was sent is told exactly
+  ok    fewer than it reads, none sent: no email sent
+  ok    as many as it reads, none sent: unknown
+  ok    sent under another store's address: unknown, never read as this store's
+  ok    a record that is not one: unknown
+
+3. Without the studio requests the emails need, none is read
+  ok    the fact stays unknown, never 'no email sent'
+  ok    no email read
+
+11 checks, all passing.
+MEMORY_REDIS_RUN 154
+J_CHILD_EXIT 0
+
+--- registry ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE head FILE plan-cost-registry.test.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (91.227058ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (269.292974ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (69.47782ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.642561ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.250313ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (1.294565ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (4.263615ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (100.082084ms)
+✔ every store figure taken in the code is a kind a line prices (64.366092ms)
+✔ every email sent names a meter, and each file only the meters it may use (89.08773ms)
+✔ the units a figure is taken in cost at least what they stand for (10.242903ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.219979ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.209366ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.40093ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.12874ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.145923ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.537314ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (4.028136ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.157766ms)
+✔ Path push fits its reserved studio requests (0.073093ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.051678ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.06258ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.145485ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (118.412942ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 869.314799
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0
+
+--- events ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE head FILE api-events-measured.test.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+  ok    an endpoint hears sales
+
+The largest sale the code makes: a bundle of twenty, three checked at checkout, each a bundle of twenty, every title 80 characters of a three-byte script
+  ok    the newest LOG_SIZE deliveries are in the log
+  a delivery of this sale is kept at 29,995 bytes; the 50 at 1,499,740
+  ok    the message names the bundle and every product checked, each with its own bundle
+  ok    far past the 4 KB a delivery was priced at
+  ok    inside the bound a delivery is made under, with the room its tries write later
+  ok    the store's data registry prices a delivery at the bound, at or above the largest the code makes
+
+GET /api/v1/events: measured, set aside, settled at what was read and sent
+  limit=10: 1,501,140 bytes read, 286,931 sent, 12 requests taken (priced at 4 KB a delivery it was 5)
+  ok    answered, ten messages
+  ok    every delivery in the log read once
+  ok    the requests taken are what the bytes read and sent cost, with the door's
+  ok    more than the flat 5 the 4 KB price took for this
+  ok    each delivery measured before any was read
+  ok    limit=1: one message, settled at the one sent
+  ok    and no more than limit=10
+  ok    a type none of them is: the deliveries read, nothing sent
+
+Too few requests left for what was measured: refused, no delivery read, only the door's request and the measuring kept
+  ok    the month is taken down to 11
+  ok    refused with the whole count it may take
+  ok    no delivery read
+  ok    only the door's request and the measuring done kept
+  ok    the month is taken down to 12
+  ok    with exactly what it may take left, answered
+  ok    and what it did not need given back
+  ok    the month is taken down to 1000
+
+A log or sizes answered broken: unavailable before any delivery is read; the measuring set aside is kept (C3-124, Codex G2)
+  ok    partial-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    empty-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    text-sizes: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    null-log: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    not-ids: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+  ok    one-not-id: unavailable, never a list (empty or not), no delivery read, the door's request and the measuring taken
+
+Every text cleaned where the message is made: the worst a text can escape is a quotation mark, four bytes kept
+  ok    control characters become a space, a text is cut at its most, a lone surrogate half becomes U+FFFD
+MEMORY_REDIS_RUN 10002
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62457:21)
+    at async GET (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62498:19)
+    at async main (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:67892:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62457:21)
+    at async GET (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62498:19)
+    at async main (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:67892:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62457:21)
+    at async GET (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62498:19)
+    at async main (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:67892:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62457:21)
+    at async GET (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62498:19)
+    at async main (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:67892:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62457:21)
+    at async GET (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62498:19)
+    at async main (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:67892:20)
+api: reading recent events failed Error: the recent deliveries could not be measured
+    at recentEvents (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62457:21)
+    at async GET (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:62498:19)
+    at async main (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:67892:20)
+Error: REVIEW_RUN_LIMIT_BEFORE_DISPATCH
+    at MemoryRedis.run (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:282:46)
+    at /dev/shm/j3034-funded-7Ta7DG/proof.cjs:225:74
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:225:56)
+    at store.pipeline (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:67764:10)
+    at redisPipeline (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:2203:42)
+    at /dev/shm/j3034-funded-7Ta7DG/proof.cjs:12318:59
+    at Array.map (<anonymous>)
+    at getMany (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:12318:44)
+    at fill (/dev/shm/j3034-funded-7Ta7DG/proof.cjs:12456:24)
+J_CHILD_EXIT 1
+
+--- types ---
+
+<--- Last few GCs --->
+
+[50:0xf03d000]    20620 ms: Mark-Compact 507.9 (514.1) -> 506.0 (514.4) MB, pooled: 1 MB, 216.72 / 0.00 ms  (average mu = 0.203, current mu = 0.277) allocation failure; scavenge might not succeed
+[50:0xf03d000]    20919 ms: Mark-Compact 508.0 (514.9) -> 506.4 (514.4) MB, pooled: 1 MB, 286.06 / 0.00 ms  (average mu = 0.126, current mu = 0.044) allocation failure; scavenge might not succeed
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x91d810  [node]
+ 2: 0x75bb1b node::OOMErrorHandler(char const*, v8::OOMDetails const&) [node]
+ 3: 0xc755c0  [node]
+ 4: 0xc756bf  [node]
+ 5: 0xf24835  [node]
+ 6: 0xf24862  [node]
+ 7: 0xf24be4  [node]
+ 8: 0xf3694a  [node]
+ 9: 0xf3ae00  [node]
+10: 0x1a3ed81  [node]
+
+--- types-focal ---
+
+<--- Last few GCs --->
+
+[4:0x74eb000]    23688 ms: Scavenge (interleaved) 508.6 (514.3) -> 507.1 (514.3) MB, pooled: 0 MB, 1.28 / 0.00 ms  (average mu = 0.198, current mu = 0.268) allocation failure;
+[4:0x74eb000]    23959 ms: Mark-Compact (reduce) 508.9 (514.3) -> 506.6 (511.3) MB, pooled: 0 MB, 244.97 / 0.00 ms  (+ 3.4 ms in 10 steps since start of marking, biggest step 3.4 ms, walltime since start of marking 256 ms) (average mu = 0.229, current mu
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 0x91d810  [node]
+ 2: 0x75bb1b node::OOMErrorHandler(char const*, v8::OOMDetails const&) [node]
+ 3: 0xc755c0  [node]
+ 4: 0xc756bf  [node]
+ 5: 0xf24835  [node]
+ 6: 0xf24862  [node]
+ 7: 0xf24be4  [node]
+ 8: 0xf3694a  [node]
+ 9: 0xf3ae00  [node]
+10: 0x1a3ed81  [node]
+
+--- directed-types ---
+{
+  "scope": "direct roots plus imported types; imported dependency bodies not separately checked",
+  "roots": [
+    "lib/broadcasts.ts",
+    "lib/mcp-tools.ts",
+    "lib/api-read-rules.ts",
+    "tests/j-3034-mcp-funded.proof.ts",
+    "tests/j-3034-mcp-admission.proof.ts",
+    "tests/broadcasts-read-cost-mcp.test.ts",
+    "tests/j-3034-mcp-http-focal.proof.ts"
+  ],
+  "sources": 1048,
+  "options": {
+    "target": "ES2017",
+    "strict": true,
+    "moduleResolution": "Bundler"
+  },
+  "diagnostics": [
+    {
+      "file": "/workspace/scratch/72485b6ecfa0/j-review-3034-return-8dd37/tests/j-3034-mcp-http-focal.proof.ts",
+      "code": 2304,
+      "message": "Cannot find name 'commands'."
+    },
+    {
+      "file": "/workspace/scratch/72485b6ecfa0/j-review-3034-return-8dd37/tests/j-3034-mcp-http-focal.proof.ts",
+      "code": 2304,
+      "message": "Cannot find name 'commands'."
+    },
+    {
+      "file": "/workspace/scratch/72485b6ecfa0/j-review-3034-return-8dd37/tests/j-3034-mcp-http-focal.proof.ts",
+      "code": 7006,
+      "message": "Parameter 'c' implicitly has an 'any' type."
+    }
+  ]
+}
+
+--- http-focal-initial-setup ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE head FILE j-3034-mcp-http-focal.proof.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+get_emails with a kept copy of what they sold of 172 KB: measured, set aside and settled at it
+  ok    asking the email's size takes a request of its own
+  get_emails: a kept copy of 172,020 bytes takes 6; priced at 64,000 it took 4
+  ok    answered
+  ok    the copy is the size asked
+  ok    the requests taken are what the copy read costs, with the door's and asking the sizes
+  ok    the copy's own bytes are priced, not its old 64 KB
+  ok    the month is taken down to 5
+  ok    one short of it: refused, nothing read
+
+7 checks, all passing.
+MEMORY_REDIS_RUN 105
+J_CHILD_EXIT 0
+
+--- http-focal ---
+J_FUNDED_TARGET 8dd37f9493844cc6c9aaaba849f3c029febd09bd MODE head FILE j-3034-mcp-http-focal.proof.ts
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+get_emails with a kept copy of what they sold of 172 KB: measured, set aside and settled at it
+  ok    asking the email's size takes a request of its own
+  get_emails: a kept copy of 172,020 bytes takes 6; priced at 64,000 it took 4
+  ok    answered
+  ok    the copy is the size asked
+  ok    the requests taken are what the copy read costs, with the door's and asking the sizes
+  ok    the copy's own bytes are priced, not its old 64 KB
+  ok    the month is taken down to 5
+  ok    one short of it: refused, nothing read
+  ok    refused read never dispatches a heads read-mode EVAL
+
+8 checks, all passing.
+MEMORY_REDIS_RUN 105
+J_CHILD_EXIT 0
+
+--- directed-types-final ---
+{
+  "scope": "direct roots plus imported types; imported dependency bodies not separately checked",
+  "roots": [
+    "lib/broadcasts.ts",
+    "lib/mcp-tools.ts",
+    "lib/api-read-rules.ts",
+    "tests/j-3034-mcp-funded.proof.ts",
+    "tests/j-3034-mcp-admission.proof.ts",
+    "tests/broadcasts-read-cost-mcp.test.ts",
+    "tests/j-3034-mcp-http-focal.proof.ts"
+  ],
+  "sources": 1048,
+  "options": {
+    "target": "ES2017",
+    "strict": true,
+    "moduleResolution": "Bundler"
+  },
+  "diagnostics": []
+}
+
+--- lint ---
+
+--- new-lint ---
+
+--- http-final-lint ---
+
+--- scanner ---
+Public data check: 4295 tracked files; 0 file(s) require correction.
+
+--- diff ---
+
+--- final-diff ---
+
+EXPLICIT STATUS RECORDS
+status: {"derived-old": 1, "mcp": 0, "events": 1, "registry": 0, "page": 0, "path": 0}
+checks-status: {"mcp-old": 1, "types": -6, "lint": 0, "scanner": 0, "diff": 0}
+final-status: {"directed-types": 2, "new-lint": 0, "final-diff": 0}
+last-status: {"directed-types-final": 0, "http-final-lint": 0}

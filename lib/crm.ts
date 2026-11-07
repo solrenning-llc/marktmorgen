@@ -13,7 +13,7 @@
  *                                    and TASK_COUNT_FIELD -> how many tasks the store keeps in all
  *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
  *   nl:crm:erased:<statsId>:<person> a person deleted and not come back (server time), ERASED_MARK_SECONDS: no value is set
- *   nl:crm:gen:<statsId>:<person>    a person's generation, one more at each deletion: a page read before one is refused
+ *   nl:crm:gen:<statsId>:<person>    a person's generation, the time of their last deletion: a page read before one is refused
  *   nl:crm:taskrecount:<statsId>     one paid recount of the store's tasks at a time (lib/redis-lock.ts), thirty seconds at the most
  *
  * A value is kept under the person's key, never the address (as a note
@@ -164,10 +164,13 @@ const PERSON = /^[0-9a-f]{32}$/;
  */
 const erasedKey = (statsId: string, person: string) => `nl:crm:erased:${statsId}:${person}`;
 /**
- * The person's generation: 0 until they are first deleted, one more at each
- * deletion. A page reads it with the person, and a save from it carries it:
- * one read before a deletion differs, and is refused, even after the person
- * came back (SET_CRM_VALUE). Kept ERASED_MARK_SECONDS from the last deletion.
+ * The person's generation: 0 until they are first deleted, then the time of
+ * their last deletion in milliseconds, so it never comes back to a value it
+ * had: once it lapsed, a count would start again from 1 and match a page read
+ * between two deletions (Claude 5 on #2287). A page reads it with the person,
+ * and a save from it carries it: one read before a deletion differs, and is
+ * refused, even after the person came back (SET_CRM_VALUE). Kept
+ * ERASED_MARK_SECONDS from the last deletion.
  */
 const generationKey = (statsId: string, person: string) => `nl:crm:gen:${statsId}:${person}`;
 /**
@@ -192,7 +195,7 @@ export const ERASED_MARK_SECONDS = 31 * 86_400;
  * before the deletion). An hour less, for clocks that differ.
  */
 export const PAGE_MARK_SECONDS = ERASED_MARK_SECONDS - 3_600;
-const PAGE_MARK = /^(\d{1,9})\.(\d{1,12})\.([A-Za-z0-9_-]{22})$/;
+const PAGE_MARK = /^(\d{1,15})\.(\d{1,12})\.([A-Za-z0-9_-]{22})$/;
 let pageKey: Buffer | null | undefined;
 function pageSignature(statsId: string, person: string, generation: number, at: number): string {
   if (pageKey === undefined) pageKey = deriveKey("crm-page-read");
@@ -856,10 +859,9 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   // written before is taken away below. An erasure whose mark is not confirmed fails, to be run again.
   const marked = await redisPipeline([
     ["SET", erasedKey(statsId, person), String(Date.now()), "EX", ERASED_MARK_SECONDS],
-    ["INCR", generationKey(statsId, person)],
-    ["EXPIRE", generationKey(statsId, person), ERASED_MARK_SECONDS],
+    ["SET", generationKey(statsId, person), String(Date.now()), "EX", ERASED_MARK_SECONDS],
   ]);
-  if (!Array.isArray(marked) || marked.length !== 3 || marked[0] !== "OK" || typeof marked[1] !== "number" || marked[2] !== 1) throw new CrmValueWriteUnconfirmed();
+  if (!Array.isArray(marked) || marked.length !== 2 || marked[0] !== "OK" || marked[1] !== "OK") throw new CrmValueWriteUnconfirmed();
   const fields = await readFields(statsId);
   const address = email.trim().toLowerCase();
   const [raw] = await redisPipeline([["HGETALL", dealsKey(statsId)]]);

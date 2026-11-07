@@ -16,7 +16,7 @@ import { ALL_TIME_PAGES } from "@/lib/stats";
 import { AGENDA_UNITS } from "@/lib/person-agenda";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
-import { ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
+import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
@@ -336,7 +336,7 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // A field saved from the studio (lib/crm.ts, setValue; C3-125): the whole request, every trip at the review ceiling of
   // a trip. Its trips (more than six) do not fit in one studio request's 1.5 s, so it is counted as two, both taken with
   // the first, before anything is read, never three; the line is held under what the two cost, in time, commands and bytes.
-  const studioShape = request("studio", 20 + TAKE_COMMANDS, 50_000);
+  const studioShape = request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000);
   assert.equal(UNIT_COST.studio, studioShape);
   assert.equal(CRM_VALUE_SAVE_UNITS, 2);
   assert.ok(CRM_VALUE_SAVE_TRIPS * ROUND_TRIP_SECONDS > SHAPES.studio.seconds, "the save does not fit in one studio request: it is counted as two");

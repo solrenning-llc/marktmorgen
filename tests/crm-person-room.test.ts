@@ -98,7 +98,8 @@ async function main(): Promise<void> {
 
     part("While they are deleted, nothing a request says writes about them (C3-125, the reviewer's case)");
     const now = await readGeneration(STATS, CAL);
-    is("their generation is one more", now, 1);
+    // The time of the deletion, never a count that could come back to a value it had (Claude 5 on #2287).
+    is("their generation is the deletion's time, never 0", now > 0 && now <= Date.now() && now !== read, true);
     // However long ago the deletion was, and whatever a save carries: a page read before, one read since, a made-up one.
     await redis.pipeline([["SET", `nl:crm:erased:${STATS}:${CAL}`, String(Date.now() - 86_400_000), "EX", ERASED_MARK_SECONDS]]);
     for (const carried of [0, now, now + 1, -1, Number.NaN, Date.now()]) {
@@ -126,7 +127,7 @@ async function main(): Promise<void> {
     is("and is kept", (await readValues(STATS, CAL, fields)).fielda, "Returned customer");
     is("its room counted", await used(), empty + dataBytes([CAL, "Returned customer"], 1));
     is("Cal deleted again", await forgetCrmPerson(STATS, CAL, "cal@example.com", ROOM), 1);
-    is("with his room, and a generation more", [await used(), await readGeneration(STATS, CAL)], [empty, 2]);
+    is("with his room, and a later generation than any before", [await used(), (await readGeneration(STATS, CAL)) > since], [empty, true]);
 
     part("What a value set sends (the whole save is measured through the route in tests/crm-contact-writes.test.ts)");
     let commands = 0;

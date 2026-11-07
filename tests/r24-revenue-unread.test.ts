@@ -300,6 +300,21 @@ for (const [shape, v] of [["0", 0], ["negative", -2], ["fractional", 1.5], ["tex
   );
 }
 
+// Claude 5's focal return on #3048 (6704697572), LOW A: an invoice with more lines whose customer is absent or null
+// may be a member's (with Accounts v2 it can come with only customer_account): refused, never passed over.
+{
+  const longOther = (customer: unknown): Invoice[] => [
+    ...beaInvoices(beaLine(at(2026, 7, 5), 3000)),
+    { created: at(2026, 7, 9), subscription: null, ...(customer === undefined ? {} : { customer }), lines: { data: [{ ...line(at(2026, 7, 9)), subscription: "sub_someone_else", amount: 900 }], has_more: true } } as Invoice,
+  ];
+  is("an invoice with more lines and no customer: refused, never passed over", beaMoves(longOther(undefined)), "refused");
+  is("an invoice with more lines and a null customer: refused", beaMoves(longOther(null)), "refused");
+  is("healthy: another business's customer is still passed over", beaMoves(longOther("cus_other")), moved);
+}
+// LOW B: a count and a quantity are numbers, never text, even text that reads as one.
+is("an interval count given as the text \"2\": refused", beaMoves(yearly("2")), "refused");
+is("a quantity given as the text \"1\": refused", beaMoves(beaInvoices(beaLine(at(2026, 7, 5), 3000, { quantity: "1" }))), "refused");
+
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_revenue_stand_in";
 const NOW = Date.parse("2026-10-13T12:00:00Z");
 const S = NOW / 1000;

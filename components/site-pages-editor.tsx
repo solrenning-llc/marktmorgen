@@ -14,6 +14,8 @@ const MESSAGES: Record<string, string> = {
   taken: "Another of your pages has that address.",
   unknown: "That is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include its pages.",
+  // A new page made from a starter whose first blocks could not be written (app/api/store/site-page, writePage).
+  page_not_written: "The page was added, but its starting blocks were not saved: the page could not be read just now. Reload to see it, then add its blocks.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

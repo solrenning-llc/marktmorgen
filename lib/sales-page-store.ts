@@ -29,7 +29,7 @@
  * another page is.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
@@ -183,19 +183,31 @@ export function hasBlocks(page: SalesPage): boolean {
  * Writes a page, or forgets it when it has no blocks and nothing else set.
  * Its room is taken first (DataRoomError when it does not fit); `always`
  * counts it whatever it comes to, for what the store already had.
+ *
+ * The page as it was decides what the save keeps (its version, the creator's
+ * undo), which saved-section uses it takes off and whether an ended test is
+ * counted, so it is read exactly: three replies, the page a text or null, the
+ * count of versions a whole number from zero up, the oldest version a text or
+ * null. Any other answer throws UnknownReplyError before anything is counted
+ * or written, and the page stays as it was (Claude 5's review of #2830).
  */
 export async function writePage(statsId: string, productId: string, page: SalesPage, room: DataStore, always = false): Promise<void> {
   const empty = page.blocks.length === 0 && !page.seoTitle && !page.seoDescription && !page.next;
   const json = JSON.stringify(page);
   const key = versionsKey(statsId, productId);
-  const [before, kept, oldest] = await redisPipeline([["GET", pageKey(statsId, productId)], ["LLEN", key], ["LINDEX", key, -1]]);
+  const read = repliesFor(await redisPipeline([["GET", pageKey(statsId, productId)], ["LLEN", key], ["LINDEX", key, -1]]), 3);
+  if (!read) throw new UnknownReplyError("the page as it was");
+  const [before, kept, oldest] = read;
+  if (before !== null && typeof before !== "string") throw new UnknownReplyError("the page as it was");
+  if (typeof kept !== "number" || !Number.isSafeInteger(kept) || kept < 0) throw new UnknownReplyError("the count of a page's versions");
+  if (oldest !== null && typeof oldest !== "string") throw new UnknownReplyError("a page's oldest version");
   const commands: (string | number)[][] = [empty ? ["DEL", pageKey(statsId, productId)] : ["SET", pageKey(statsId, productId), json]];
   // What the page was, kept so a save can be undone from the studio. The
   // version pushed takes room; the oldest one it pushes out gives its own back.
   let versions = 0;
   if (typeof before === "string" && before && before !== json && before.length <= MAX_STORED_PAGE_BYTES) {
     const entry = `${Date.now()}\n${before}`;
-    versions = dataBytes([entry], 1) - (Number(kept) >= MAX_VERSIONS && typeof oldest === "string" ? dataBytes([oldest], 1) : 0);
+    versions = dataBytes([entry], 1) - (kept >= MAX_VERSIONS && typeof oldest === "string" ? dataBytes([oldest], 1) : 0);
     commands.push(["LPUSH", key, entry], ["LTRIM", key, 0, MAX_VERSIONS - 1], ["PERSIST", key]);
   }
   const ended = testOfRecord(before);

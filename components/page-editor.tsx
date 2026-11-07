@@ -170,6 +170,8 @@ export const MESSAGES: Record<string, string> = {
   next: "After a sign-up, only another product that costs money can be shown.",
   unknown: "That product is no longer in your store. Reload the page.",
   store_full: "Your store is full. Remove something before adding more.",
+  // The page as it was did not come back in a known shape when the save read it (lib/sales-page-store.ts writePage).
+  page_not_written: "This page could not be read just now, so your changes were not saved. Its earlier versions are kept. Reload to see what is saved, then try again.",
   none: "This account has no store yet.",
   // This tab still holds the page being edited: logging in here would leave it (WCAG 2.2.5).
   signed_out: "Your session ended. Your changes are still here, not saved yet: log in again in a new tab, then come back to this tab and press Save the page.",

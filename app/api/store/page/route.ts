@@ -11,6 +11,7 @@ import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sa
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -117,6 +118,11 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, blocks: saved.blocks.length, page: saved });
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    // The page as it was could not be read exactly (writePage): nothing of the page was written, and the editor says so.
+    if (error instanceof UnknownReplyError) {
+      console.error("reading a product page as it was before saving it failed", error);
+      return Response.json({ ok: false, error: "page_not_written" }, { status: 503 });
+    }
     console.error("saving a product page failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

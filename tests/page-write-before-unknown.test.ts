@@ -12,8 +12,8 @@ import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/sto
 import { readVersions, writePage } from "@/lib/sales-page-store";
 import { emptyBlock, parsePage, type PageBlock } from "@/lib/sales-page";
 import { sectionUsesKey } from "@/lib/saved-block-store";
-import { siteKey } from "@/lib/site-page-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { SITE_STARTERS, siteKey } from "@/lib/site-page-rules";
+import { MESSAGES } from "@/components/page-editor";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { POST as savePage } from "@/app/api/store/page/route";
 import { POST as siteRoute } from "@/app/api/store/site-page/route";
@@ -125,9 +125,11 @@ async function main(): Promise<void> {
   const siteSave = await withBeforeRead(unknown, () => site({ action: "save", id: added.body.id, page: { blocks: [{ ...emptyBlock("hero"), headline: "Changed" }], style: "plain" } }));
   is("a store page: refused with page_not_written", [siteSave.result?.status, siteSave.result?.body.error], [503, "page_not_written"]);
   is("and the store page stays as it was", await raw(`nl:product:page:${statsId}:${siteKey(added.body.id)}`), keyBefore);
+  const starter = await withBeforeRead(unknown, () => site({ action: "add", title: "Started", starter: SITE_STARTERS[0].slug }));
+  is("a new store page from a starter: its blocks not written is said, never a page made whole", [starter.result?.status, starter.result?.body.error], [503, "page_not_written"]);
 
   part("The words the studio shows");
-  const words = STUDIO_MESSAGES.page_not_written ?? "";
+  const words = MESSAGES.page_not_written ?? "";
   is("they say the page could not be read and was not saved", /could not be read/.test(words) && /not saved/.test(words), true);
   done();
 }

@@ -9,6 +9,7 @@ import { claimNewPictures, dropPage, readPage, releasePictures, writePage } from
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
@@ -144,6 +145,11 @@ export async function POST(request: NextRequest) {
     return refuse("invalid");
   } catch (error) {
     if (error instanceof StoreFullError) return refuse("store_full", 409);
+    // The page as it was could not be read exactly (writePage): nothing of the page was written, and the studio says so.
+    if (error instanceof UnknownReplyError) {
+      console.error("reading a store page as it was before saving it failed", error);
+      return refuse("page_not_written", 503);
+    }
     console.error("changing a store's pages failed", error);
     return refuse("server_error", 500);
   }

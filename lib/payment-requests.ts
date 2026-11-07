@@ -140,8 +140,20 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
     if (!due.length) break;
     for (const { sid, id } of due) {
       if (Date.now() >= deadline) return counts;
-      const store = await storeForId(sid).catch(() => null);
-      const request = store ? await requestOf(store, id).catch(() => null) : null;
+      // Rule 24: a read that fails (a Redis timeout) is an unknown answer, never
+      // "gone". The reminder stays on the list, moved later so this run does not
+      // loop on it, and is tried again; only a confirmed null drops it.
+      let store: Store | null;
+      let request: Awaited<ReturnType<typeof requestOf>>;
+      try {
+        store = await storeForId(sid);
+        request = store ? await requestOf(store, id) : null;
+      } catch (error) {
+        console.error(`payment request reminder ${sid}|${id}: store or request could not be read; tried again later`, error);
+        await delayReminder(sid, id, now + RETRY_MS);
+        counts.skipped += 1;
+        continue;
+      }
       if (!store || !request) {
         await dropReminder(sid, id);
         counts.skipped += 1;

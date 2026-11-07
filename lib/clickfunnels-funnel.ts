@@ -43,6 +43,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Listing, type Store, appendSitePages, ensureStatsId, setProductExtras, setProductFunnel, storeForId, storeRef } from "@/lib/store";
 import { idsOfKind, readListings, readProduct } from "@/lib/catalog";
 import { offerableAfterPaying } from "@/lib/bundles";
@@ -164,10 +165,18 @@ function runKey(name: string, pages: Checked[]): string {
   return digest(["run", name, pages.map((c) => [c.page.role, c.page.product, c.page.bumps, pageKeyOf(c.page), c.page.draft.offer])]);
 }
 
+/**
+ * The ledger's fields, read only in their exact shape (lib/redis-reply.ts, CX-123 rule 24): one reply for the one
+ * command, a list of exactly one slot per field, each a string or nil. Anything else is unknown, never "never made"
+ * (which would make an import already saved a second time): it throws UnknownReplyError, so the plan and the save
+ * stop before anything is made (sweep APP2 finding 5).
+ */
 async function readLedger(sid: string, fields: string[]): Promise<(string | null)[]> {
   if (!fields.length || !isRedisConfigured()) return fields.map(() => null);
-  const [found] = await redisPipeline([["HMGET", ledgerKey(sid), ...fields]]);
-  return fields.map((_, i) => (Array.isArray(found) && typeof found[i] === "string" ? (found[i] as string) : null));
+  const replies = repliesFor(await redisPipeline([["HMGET", ledgerKey(sid), ...fields]]), 1);
+  const slots = replies ? repliesFor(replies[0], fields.length) : null;
+  if (!slots || slots.some((slot) => slot !== null && typeof slot !== "string")) throw new UnknownReplyError("the ClickFunnels import ledger");
+  return slots as (string | null)[];
 }
 
 /** A run that stopped after making its funnel of pages: that funnel's id, to use again rather than make a second. */

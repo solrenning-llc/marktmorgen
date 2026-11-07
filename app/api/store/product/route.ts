@@ -305,14 +305,15 @@ export async function POST(request: NextRequest) {
           if (found) {
             if (!preparedCourse || JSON.stringify(found) !== JSON.stringify(preparedCourse)) return false;
             course = found;
-            // Its survey answers go too (285 [SX1]), here, before the product goes: a failure keeps the product for another try.
-            await dropCourseSurvey(found.id, store);
             await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
           } else {
             if (preparedCourse) return false;
-            await dropCourseSurvey(going.course.id, store);
             await dropCommentsAfterCourseGone(going.course.id, store);
           }
+          // Its survey answers go too (285 [SX1]), here, before the product goes, and last: one step, tried again, with
+          // their room given back inside it, so a failure in the larger drops above never loses them. Any failure keeps
+          // the product for another try; a save that fails after this check finds them gone, and dropping again changes nothing.
+          await dropCourseSurvey(going.course.id, store);
           return true;
         } catch {
           return false;

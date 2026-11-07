@@ -235,10 +235,15 @@ export async function POST(request: NextRequest) {
 
       if (action === "disable") {
         if (lessonCount(course) > 0) return Response.json({ ok: false, error: "not_empty" }, { status: 400 });
-        // Its survey answers go in the same try as its comments (285 [SX1]): 503 on failure, the course kept for another try.
+        try {
+          await dropComments(course.id, [], store);
+        } catch {
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+        // Its survey answers after its comments (285 [SX1]): one step, tried again, their room given back inside it,
+        // so a failure above never loses them. 503 on failure, the course kept for another try; dropping again changes nothing.
         try {
           await dropCourseSurvey(course.id, store);
-          await dropComments(course.id, [], store);
         } catch {
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }

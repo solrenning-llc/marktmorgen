@@ -14,7 +14,8 @@
  * (never less than what may be kept) and the caller is told.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataStore, TAKE_DATA, dataKey, giveData, monthOf, needData } from "@/lib/store-data";
+import { contentRoomFor } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import {
   MAX_COURSE_ANSWERS,
@@ -31,6 +32,42 @@ const surveyKey = (course: string) => `nl:course:${course}:survey`;
 const SURVEY_SLOT = (course: string) => `cs:${course}`;
 
 const unreadable = () => new Error("Course survey answers could not be read. Try again.");
+
+/** The data room's own steps (TAKE_DATA) for a course's slot, grown or shrunk by `bytes`, inside a script whose KEYS[1] is the room. */
+const SURVEY_ROOM = `local function surveyRoom(limit, month, slot, bytes)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, '1', month, 'a', slot, bytes}
+${TAKE_DATA}
+end`;
+
+/**
+ * Runs a script that takes answers out with their room (DROP_SURVEY_ANSWER,
+ * DROP_ALL_SURVEY_ANSWERS) and answers how many went. A store with no room to
+ * count in, a room that cannot be counted, or a reply that is not exactly the
+ * script's throws UnknownReply: nothing is taken for none.
+ */
+async function dropWithRoom(script: string, courseId: string, room: DataStore, extra: string[], what: string, tries: number): Promise<number> {
+  const key = dataKey(room);
+  if (!key) throw new UnknownReply(what);
+  let reply: unknown;
+  for (let attempt = 1; ; attempt += 1) {
+    const now = Date.now();
+    try {
+      [reply] = exactReplies(
+        await redisPipeline([["EVAL", script, 2, key, surveyKey(courseId), contentRoomFor(room, now / 1000), monthOf(now), SURVEY_SLOT(courseId), SURVEY_ROOM_BYTES, ...extra]]),
+        1,
+        what,
+      );
+      break;
+    } catch (error) {
+      // A try that ran before the failure already gave back what it took out: the next finds nothing and gives nothing.
+      if (error instanceof UnknownReply || attempt >= tries) throw error;
+    }
+  }
+  const [state, , gone] = exactReplies(reply, 3, what);
+  if (state !== 1 || typeof gone !== "number" || !Number.isSafeInteger(gone) || gone < 0) throw new UnknownReply(what);
+  return gone;
+}
 
 /**
  * Keeps one student's answer. KEYS: the course's answers; ARGV: the student's
@@ -62,17 +99,41 @@ redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
 return 2`;
 
 /**
- * Takes a whole course's answers away, when the course goes. KEYS: the
- * course's answers. Answers how many there were, all gone.
+ * Takes a whole course's answers away, when the course goes, and gives back
+ * their room in the same step, so a give-back is never lost after the answers
+ * went and dropping again always leaves the room level. KEYS: the store's
+ * data room, the course's answers; ARGV: the room's limit, this month, the
+ * course's slot, the bytes each answer is charged at. The room's step comes
+ * first: when it cannot be made ({-1, total}) nothing is deleted. Answers
+ * {1, total, how many went}. Modelled by lib/redis-memory.ts.
  */
-export const DROP_ALL_SURVEY_ANSWERS = `-- marktmorgen:course-survey-drop-all:v1
-local count = redis.call("HLEN", KEYS[1])
-redis.call("DEL", KEYS[1])
-return count`;
+export const DROP_ALL_SURVEY_ANSWERS = `-- marktmorgen:course-survey-drop-all:v2
+${SURVEY_ROOM}
+local count = redis.call("HLEN", KEYS[2])
+local each = tonumber(ARGV[4])
+if not each or each < 0 then return {-1, 0, 0} end
+local taken = surveyRoom(ARGV[1], ARGV[2], ARGV[3], -count * each)
+if taken[1] ~= 1 then return {taken[1], taken[2], 0} end
+redis.call("DEL", KEYS[2])
+return {1, taken[2], count}`;
 
-/** Takes one student's answer out. KEYS: the course's answers; ARGV: the student's key. Answers 1 when one went, 0 when there was none. */
-export const DROP_SURVEY_ANSWER = `-- marktmorgen:course-survey-drop:v1
-return redis.call("HDEL", KEYS[1], ARGV[1])`;
+/**
+ * Takes one student's answer out and gives back its room in the same step.
+ * KEYS: the store's data room, the course's answers; ARGV: the room's limit,
+ * this month, the course's slot, the bytes an answer is charged at, the
+ * student's key. The room's step comes first: when it cannot be made
+ * ({-1, total, 0}) nothing is taken out. Answers {1, total, 1} when one went,
+ * {1, 0, 0} when there was none. Modelled by lib/redis-memory.ts.
+ */
+export const DROP_SURVEY_ANSWER = `-- marktmorgen:course-survey-drop:v2
+${SURVEY_ROOM}
+local each = tonumber(ARGV[4])
+if not each or each < 0 then return {-1, 0, 0} end
+if redis.call("HEXISTS", KEYS[2], ARGV[5]) == 0 then return {1, 0, 0} end
+local taken = surveyRoom(ARGV[1], ARGV[2], ARGV[3], -each)
+if taken[1] ~= 1 then return {taken[1], taken[2], 0} end
+redis.call("HDEL", KEYS[2], ARGV[5])
+return {1, taken[2], 1}`;
 
 /**
  * Reads every answer of a course, only while there are no more than were
@@ -169,16 +230,15 @@ export async function answerSurvey(input: {
 }
 
 /**
- * Takes a student's answer out; true when one went, and its room came back.
- * A reply that is not exactly 0 or 1 throws UnknownReply, and nothing comes back.
+ * Takes a student's answer out; true when one went, its room back in the
+ * same step. A reply that is not exactly the script's throws UnknownReply.
  */
 export async function removeMyAnswer(courseId: string, who: string, room: DataStore): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const [gone] = exactReplies(await redisPipeline([["EVAL", DROP_SURVEY_ANSWER, 1, surveyKey(courseId), who]]), 1, "a course survey answer's removal");
-  if (gone === 0) return false;
-  if (gone !== 1) throw new UnknownReply("a course survey answer's removal");
-  await giveData(room, [{ slot: SURVEY_SLOT(courseId), bytes: SURVEY_ROOM_BYTES }]);
-  return true;
+  const what = "a course survey answer's removal";
+  const gone = await dropWithRoom(DROP_SURVEY_ANSWER, courseId, room, [who], what, 1);
+  if (gone !== 0 && gone !== 1) throw new UnknownReply(what);
+  return gone === 1;
 }
 
 /**
@@ -214,38 +274,28 @@ export async function answerOfPerson(courseId: string, who: string): Promise<Sur
 
 /**
  * Deletes one person's answer in a course (lib/person-erasure.ts) and gives
- * back its room once confirmed gone. Answers how many went (0 or 1); a reply
- * that is not exactly that throws UnknownReply, with nothing given back.
+ * back its room in the same step. Answers how many went (0 or 1); a reply
+ * that is not exactly the script's throws UnknownReply.
  */
-export async function forgetSurveyPerson(courseId: string, who: string, room?: DataStore): Promise<number> {
+export async function forgetSurveyPerson(courseId: string, who: string, room: DataStore): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const what = "the deletion of a person's course survey answer";
-  const [gone] = exactReplies(await redisPipeline([["EVAL", DROP_SURVEY_ANSWER, 1, surveyKey(courseId), who]]), 1, what);
+  const gone = await dropWithRoom(DROP_SURVEY_ANSWER, courseId, room, [who], what, 1);
   if (gone !== 0 && gone !== 1) throw new UnknownReply(what);
-  if (room && gone === 1) await giveData(room, [{ slot: SURVEY_SLOT(courseId), bytes: SURVEY_ROOM_BYTES }]);
   return gone;
 }
 
 /**
  * Deletes every answer of a course, when the course goes (a product removed:
  * app/api/store/product; a course turned off: app/api/store/course), and gives
- * back the room of each answer confirmed gone. Tried again up to `tries` times
- * when Redis fails; a reply that is not exactly a count throws UnknownReply,
- * with nothing given back. Answers how many went.
+ * back their room in the same script (DROP_ALL_SURVEY_ANSWERS). Tried again up
+ * to `tries` times when Redis fails: a try that ran before the failure has
+ * already given back what it deleted, so the next finds nothing and gives
+ * nothing. A room that cannot be counted deletes nothing, and a reply that is
+ * not exactly what the script answers throws UnknownReply. Answers how many went.
  */
 export async function dropCourseSurvey(courseId: string, room: DataStore, tries = 3): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const what = "the deletion of a course's survey answers";
-  let gone: unknown;
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      [gone] = exactReplies(await redisPipeline([["EVAL", DROP_ALL_SURVEY_ANSWERS, 1, surveyKey(courseId)]]), 1, what);
-      break;
-    } catch (error) {
-      if (error instanceof UnknownReply || attempt >= tries) throw error;
-    }
-  }
-  if (typeof gone !== "number" || !Number.isSafeInteger(gone) || gone < 0) throw new UnknownReply(what);
-  if (gone > 0) await giveData(room, [{ slot: SURVEY_SLOT(courseId), bytes: SURVEY_ROOM_BYTES * gone }]);
-  return gone;
+  // No room to count it in means no answer could have been kept (answerSurvey takes its room first): still unknown, never zero.
+  return dropWithRoom(DROP_ALL_SURVEY_ANSWERS, courseId, room, [], "the deletion of a course's survey answers", tries);
 }

@@ -1,7 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import { countDay } from "@/lib/day-visit";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
-import { isResting } from "@/lib/traffic";
+import { isResting, takePublicRequest } from "@/lib/traffic";
 import { forVisitor } from "@/lib/visitor";
 import { activeIntro } from "@/lib/intro-price";
 import { salePrice } from "@/lib/store-sale";
@@ -135,7 +135,10 @@ export default async function CoursePage({ params, searchParams }: Params) {
   // that, only whether one is kept, no comment read. Unreadable is said, never taken for none.
   const surveyLearner = access.learner && !access.learner.owner && (access.learner.scope === "all" || access.learner.scope.includes(course.id)) ? access.learner : null;
   const surveyWho = surveyLearner ? emailKey(surveyLearner.email) : "";
-  const myAnswer: SurveyAnswer | "kept" | null | "unread" = await (surveyWho && finished
+  // A view with the access open was counted where the page rests (isResting, above); any other browser pays a
+  // buyer request of the window before the read, and a refused one reads nothing: said as unread, never as none.
+  const surveyPaid = !surveyWho || open || (await takePublicRequest(store, "buyer"));
+  const myAnswer: SurveyAnswer | "kept" | null | "unread" = !surveyPaid ? "unread" : await (surveyWho && finished
     ? readMyAnswer(course.id, surveyWho)
     : surveyWho ? hasAnswer(course.id, surveyWho).then((kept) => (kept ? ("kept" as const) : null)) : Promise.resolve(null)
   ).catch(() => "unread" as const);

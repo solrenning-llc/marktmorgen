@@ -610,12 +610,12 @@ export function figureCost(allowances: Record<AllowanceKind, number>, kind: Allo
  */
 export const REQUEST_COMMANDS = 1 + SHARE_COMMANDS_PER_REQUEST;
 
-/** What one request costs: its call, CPU, memory, database commands and the bytes it moves through the database. */
-/** What a course page view adds for the survey when finishing (285 [SX1]): one command and at most one answer's bytes. */
+/** What a course page view adds for the survey when finishing (285 [SX1]): one command, at most one answer's bytes, its key and the command. */
 export function surveyPageCost(): number {
   return SURVEY_PAGE_COMMANDS * COMMAND + SURVEY_PAGE_BYTES * DB_BYTE;
 }
 
+/** What one request costs: its call, CPU, memory, database commands and the bytes it moves through the database. */
 export function request(shape: keyof typeof SHAPES, commands: number, bytes = 0): number {
   const { seconds, cpu } = SHAPES[shape];
   return CALL + cpu * CPU_SECOND + seconds * MEMORY_SECOND + commands * COMMAND + bytes * DB_BYTE;
@@ -1081,7 +1081,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
       // A course page drawn for a student with the course in their pass reads one more thing (285 [SX1]): whether a survey answer is kept, or their own once finished. Every request of the window is priced at it.
       { file: "lib/course-survey-rules.ts", names: ["SURVEY_PAGE_COMMANDS", "SURVEY_PAGE_BYTES"] },
-      { file: "app/[handle]/course/[product]/page.tsx", names: ["hasAnswer(course.id, surveyWho)", "readMyAnswer(course.id, surveyWho)"] },
+      // A browser whose access is not open pays a buyer request of this window before that read (counted, so within `limit`).
+      { file: "app/[handle]/course/[product]/page.tsx", names: ["takePublicRequest(store, \"buyer\")", "hasAnswer(course.id, surveyWho)", "readMyAnswer(course.id, surveyWho)"] },
       // A collection's products paid before they are read, and a license check before it reads the product (4 November 2026).
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },

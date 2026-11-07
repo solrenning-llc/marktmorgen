@@ -376,15 +376,26 @@ export class MemoryRedis {
           this.run(["HSET", answers, who, value]);
           return 2;
         }
-        if (key.startsWith("-- marktmorgen:course-survey-drop-all:v1\n") && args[0] === "1" && args.length === 2) {
-          const [, answers] = args;
+        // The room's step first (TAKE_DATA, as storeData), then the delete, in one step: nothing deleted when the room cannot be counted.
+        if (key.startsWith("-- marktmorgen:course-survey-drop-all:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, room, answers, limit, month, slot, rawEach] = args;
           const count = Number(this.run(["HLEN", answers]));
+          const each = Number(rawEach);
+          if (!Number.isFinite(each) || each < 0) return [-1, 0, 0];
+          const taken = this.storeData([room, limit, "1", month, "a", slot, String(-count * each)]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return [Array.isArray(taken) ? taken[0] : -1, Array.isArray(taken) ? taken[1] : 0, 0];
           this.run(["DEL", answers]);
-          return count;
+          return [1, taken[1], count];
         }
-        if (key.startsWith("-- marktmorgen:course-survey-drop:v1\n") && args[0] === "1" && args.length === 3) {
-          const [, answers, who] = args;
-          return this.run(["HDEL", answers, who]);
+        if (key.startsWith("-- marktmorgen:course-survey-drop:v2\n") && args[0] === "2" && args.length === 8) {
+          const [, room, answers, limit, month, slot, rawEach, who] = args;
+          const each = Number(rawEach);
+          if (!Number.isFinite(each) || each < 0) return [-1, 0, 0];
+          if (this.run(["HEXISTS", answers, who]) === 0) return [1, 0, 0];
+          const taken = this.storeData([room, limit, "1", month, "a", slot, String(-each)]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return [Array.isArray(taken) ? taken[0] : -1, Array.isArray(taken) ? taken[1] : 0, 0];
+          this.run(["HDEL", answers, who]);
+          return [1, taken[1], 1];
         }
         if (key.startsWith("-- marktmorgen:course-survey-read:v1\n") && args[0] === "1" && args.length === 3) {
           const [, answers, most] = args;

@@ -49,7 +49,11 @@ export const SURVEY_ENTRY_MAX_BYTES = WHO_BYTES + RECORD_FRAME_BYTES + 3 * MAX_S
  * (tests/plan-cost-registry.ts, surveyPageCost).
  */
 export const SURVEY_PAGE_COMMANDS = 1;
-export const SURVEY_PAGE_BYTES = SURVEY_ENTRY_MAX_BYTES;
+/** `nl:course:<id>:survey`, the key that command names: a course id is a UUID's 32 hex digits (lib/course.ts newCourseId). */
+const SURVEY_KEY_BYTES = "nl:course:".length + 32 + ":survey".length;
+/** The command's name at its longest (HEXISTS), and the quotes, commas and brackets of the request and its reply. */
+const PAGE_COMMAND_FRAME_BYTES = 32;
+export const SURVEY_PAGE_BYTES = SURVEY_ENTRY_MAX_BYTES + SURVEY_KEY_BYTES + PAGE_COMMAND_FRAME_BYTES;
 /**
  * What the store's data room (lib/store-data.ts) is charged for one answer,
  * whatever its size: its field in the course's hash. Charged before it is

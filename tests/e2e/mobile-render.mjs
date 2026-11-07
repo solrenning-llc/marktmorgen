@@ -7,6 +7,24 @@ const {chromium}=require("playwright-core");
 const label=process.env.MOBILE_RENDER_LABEL??"candidate";
 const version=process.env.MOBILE_RENDER_SHA??"unknown";
 const port=3177,LOCAL="http://127.0.0.1:"+port;
+async function waitUntilControlSettles(page,control){
+ // Playwright scrolls an off-screen locator as part of click(). That scroll is
+ // preparation, not the disclosure interaction this lab measures. Finish it
+ // first, then observe the same on-screen box for consecutive animation frames.
+ await control.scrollIntoViewIfNeeded();
+ const node=await control.elementHandle();if(!node)throw Error("Mobile render control disappeared");
+ try{
+  const ready=await page.waitForFunction(element=>{
+   const rect=element.getBoundingClientRect();
+   const box=[scrollX,scrollY,rect.top,rect.right,rect.bottom,rect.left].join(":");
+   const visible=rect.top>=0&&rect.left>=0&&rect.bottom<=innerHeight&&rect.right<=innerWidth;
+   const state=element.__mobileRenderReady??={box:"",same:0};
+   state.same=visible&&state.box===box?state.same+1:0;state.box=box;
+   if(state.same<2)return false;delete element.__mobileRenderReady;return true;
+  },node,{polling:"raf"}); // requestAnimationFrame polling: no sleep or widened timeout.
+  await ready.dispose();
+ }finally{await node.dispose();}
+}
 // 281 [SF1]: creators' pages too. The demo store is seeded into the same stand-in services the end-to-end run
 // uses (tests/e2e/services.mjs: Redis, Stripe and the rest answered locally, nothing real), so its store page and a
 // product page are measured under the same phone, network and thresholds as the platform's own pages.
@@ -72,6 +90,7 @@ try{
    const browserWork=[];
    const control=page.locator("main summary,main button[aria-expanded]").first();
    if(await control.count())for(let interaction=0;interaction<3;interaction++){
+    await waitUntilControlSettles(page,control);
     const start=await metrics();
     await control.click();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     const end=await metrics();
@@ -103,7 +122,7 @@ try{
     // where the link points and where it is checked below.
     const plan=page.locator("[data-home-plan]");
     if(!(await plan.innerText()).includes("$69 a month"))throw Error("Home plan price mismatch");
-    if(await plan.getByRole("link",{name:"Start free",exact:true}).getAttribute("href")!=="/signin")throw Error("Home plan start lost");
+    if(await plan.getByRole("link",{name:"Start your store",exact:true}).getAttribute("href")!=="/signin")throw Error("Home plan start lost");
     if(await page.getByRole("link",{name:"Compare Store, Studio and Scale",exact:true}).getAttribute("href")!=="/pricing#plans")throw Error("Compare plans link lost");
    }
    if(path==="/pricing"&&sample===1){

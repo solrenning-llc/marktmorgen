@@ -36,7 +36,14 @@ export async function POST(request: NextRequest) {
 
     if (action === "remove") {
       if (!store.domain) return Response.json({ ok: true });
-      if (!(await disconnectDomain(store.domain.name, [store.handle, ...store.previousHandles]))) return fail("unavailable", 502);
+      const removed = await disconnectDomain(store.domain.name, [store.handle, ...store.previousHandles]);
+      if (removed === "unavailable") return fail("unavailable", 502);
+      if (removed === "unfinished") {
+        // Vercel has already dropped it, so it no longer serves the store: it is not said to be live any more (emails,
+        // the sitemap and affiliate links read liveAt), and it stays on the store so the next press finishes it.
+        if (store.domain.liveAt) await setDomain(ref, { ...store.domain, liveAt: "" });
+        return fail("unfinished", 502);
+      }
       await setDomain(ref, null);
       const name = store.domain.name;
       after(() => noticeCreator(store, { kind: "domain-removed", name }));

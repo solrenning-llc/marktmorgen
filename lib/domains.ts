@@ -347,19 +347,26 @@ export async function verifyDomain(name: string): Promise<void> {
   await vercel("POST", `/v9/projects/${vercelProject()}/domains/${name}/verify`);
 }
 
+/**
+ * What taking a domain off came to: "removed"; "unavailable" when nothing was changed (Vercel did not drop it);
+ * "unfinished" when Vercel has already dropped it, so it no longer serves the store, but letting its key go here
+ * could not be confirmed (review L1 on #2859): never said as "nothing was changed", and the next press finishes it.
+ */
+export type DisconnectResult = "removed" | "unavailable" | "unfinished";
+
 /** Takes a domain off a store. The marktmorgen.com address carries on as before. */
-export async function disconnectDomain(name: string, handles: string[]): Promise<boolean> {
+export async function disconnectDomain(name: string, handles: string[]): Promise<DisconnectResult> {
   // A claim that lapsed and was taken by another store is theirs now: only
   // this store's side of it is let go of. Who holds it is read exactly: one
   // that cannot be read throws before Vercel is asked or anything deleted.
   const raw = await domainHolder(name);
   const holder = raw === null ? "" : raw.replace(/^\?/, "");
-  if (holder && !handles.includes(holder)) return true;
+  if (holder && !handles.includes(holder)) return "removed";
   const removed = await vercel("DELETE", `/v9/projects/${vercelProject()}/domains/${name}`);
-  if (removed.status !== 200 && removed.status !== 404) return false;
+  if (removed.status !== 200 && removed.status !== 404) return "unavailable";
   // The key is deleted only while it holds what was read; a let-go not known to be done is not said as done, and
   // the next press finds Vercel's side already gone (404) and lets the key go again.
   const letGo = raw === null || (await letGoOf(name, raw));
   cache.delete(name);
-  return letGo;
+  return letGo ? "removed" : "unfinished";
 }

@@ -1,0 +1,13 @@
+  FAIL  store A context stays in the tax-registration link (active)
+        expected "/studio/tax?store=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        got      "/studio/tax"
+  FAIL  store A context stays in the tax-registration link (pending)
+        expected "/studio/tax?store=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        got      "/studio/tax"
+  FAIL  store A context stays in the tax-registration link (unknown)
+        expected "/studio/tax?store=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        got      "/studio/tax"
+  ok    outside a store context the destination remains usable
+  ok    disconnected store has no registration link
+
+5 checks, 3 failing.

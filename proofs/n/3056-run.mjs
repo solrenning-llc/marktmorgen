@@ -1,0 +1,11 @@
+import { build } from 'esbuild';
+import { resolve,join } from 'node:path';
+import { writeFileSync,readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { testAliases,testEnvironment } from './tests/test-config.mjs';
+const file=process.argv[2],root=process.cwd();
+const aliases=testAliases(file==='n-3056-store-pin.proof.tsx'?'wg15-tax-link.test.ts':file,root,join(root,'tests'));
+const r=await build({entryPoints:[join(root,'tests',file)],bundle:true,platform:'node',format:'cjs',jsx:'automatic',outfile:join(root,'n-case.cjs'),alias:aliases,metafile:true,logLevel:'silent',banner:{js:"globalThis.fetch=async()=>{throw Error('N3056: external network prohibited')};"}});
+writeFileSync('n-metafile.json',JSON.stringify(r.metafile));
+const child=spawnSync(process.execPath,['--max-old-space-size=512','n-case.cjs'],{cwd:root,env:testEnvironment({...process.env}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});
+process.stdout.write(child.stdout||'');process.stderr.write(child.stderr||'');if(child.error)throw child.error;process.exitCode=child.status===0?0:1;

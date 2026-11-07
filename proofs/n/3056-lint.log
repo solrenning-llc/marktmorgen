@@ -1,0 +1,1 @@
+Pages directory cannot be found at /workspace/scratch/d28fe5e80a85/n-review-3056/pages or /workspace/scratch/d28fe5e80a85/n-review-3056/src/pages. If using a custom path, please configure with the `no-html-link-for-pages` rule in your eslint config file.

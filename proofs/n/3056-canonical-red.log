@@ -1,0 +1,16 @@
+
+Connected: one link to the page of tax registrations, whatever Stripe said
+  FAIL  active: linked, in the same tab, its words naming where it goes
+        expected [true,true,true]
+        got      [false,false,false]
+  FAIL  pending: linked, in the same tab, its words naming where it goes
+        expected [true,true,true]
+        got      [false,false,false]
+  FAIL  unknown: linked, in the same tab, its words naming where it goes
+        expected [true,true,true]
+        got      [false,false,false]
+
+Not connected: no link (nothing to read yet)
+  ok    no link
+
+4 checks, 3 failing.

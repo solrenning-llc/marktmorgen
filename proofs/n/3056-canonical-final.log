@@ -1,0 +1,10 @@
+
+Connected: one link to the page of tax registrations, whatever Stripe said
+  ok    active: linked, in the same tab, its words naming where it goes
+  ok    pending: linked, in the same tab, its words naming where it goes
+  ok    unknown: linked, in the same tab, its words naming where it goes
+
+Not connected: no link (nothing to read yet)
+  ok    no link
+
+4 checks, all passing.

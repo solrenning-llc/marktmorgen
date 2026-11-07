@@ -336,7 +336,9 @@ async function main(): Promise<void> {
   is("the promise is what the page does: no 'at any time' while a closed lesson has no form", /at any time/.test(LESSON_RATING_WORDS.en.note), false);
   is("and it says deleting one's data removes it", /delete your data/.test(LESSON_RATING_WORDS.en.note), true);
   is("and that removing the lesson or the course removes it", /removes this lesson or course/.test(LESSON_RATING_WORDS.en.note), true);
-  is("German says the rating and comment (plural) are deleted", /Sie werden gelöscht/.test(LESSON_RATING_WORDS.de.note), true);
+  // Changed assertion (rule 23, second pre-review L6): "Sie werden gelöscht" reads as "you are deleted"; the sentence
+  // now names what is deleted, still in the plural.
+  is("German names what is deleted, in the plural: the rating and the comment", /Bewertung und Kommentar werden gelöscht, wenn/.test(LESSON_RATING_WORDS.de.note) && !/Sie werden gelöscht/.test(LESSON_RATING_WORDS.de.note), true);
   is("an unknown language speaks English", lessonRatingWords("xx").title, LESSON_RATING_WORDS.en.title);
 
   done();

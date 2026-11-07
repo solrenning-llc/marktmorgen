@@ -263,6 +263,27 @@ test("lessons that opened for the student this week are news; a module open sinc
   assert.equal(late.send, false);
 });
 
+test("lessons whose drip day came this week but that a required quiz still holds shut are not 'opened for you'", () => {
+  const quizzed = course("c1", [
+    { lessons: [lesson("a", { quiz: { questions: 3, passPercent: 80, attempts: 3, required: true } })] },
+    { drip: 7, lessons: [lesson("b"), lesson("c")] },
+  ]);
+  const base = { course: quizzed, joinedSeconds: NOW - 10 * DAY, done: new Set(["a"]), doneBefore: new Set(["a"]) };
+  // Quiz not passed: the drip day changed nothing the student can open, so nothing is news.
+  assert.equal(weeklyProgress(input({ courses: [week(base)] })).send, false);
+  // With other news, the course says 0 opened and names the quiz that holds them.
+  const withNews = weeklyProgress(input({ courses: [week({ ...base, doneBefore: new Set() })] }));
+  assert.equal(withNews.send, true);
+  if (!withNews.send) return;
+  assert.equal(withNews.courses[0].opened, 0);
+  assert.deepEqual(withNews.courses[0].heldBy, { id: "a", title: "Lesson a" });
+  // Quiz passed: the same two lessons did open for them this week.
+  const passed = weeklyProgress(input({ courses: [week({ ...base, passed: new Set(["a"]) })] }));
+  assert.equal(passed.send, true);
+  if (!passed.send) return;
+  assert.equal(passed.courses[0].opened, 2);
+});
+
 test("one email for every course of the store, the ones with news only, and long lists are cut with a count", () => {
   const many = Array.from({ length: MAX_DONE_LISTED + 3 }, (_, i) => lesson(`l${i}`));
   const big = course("c2", [{ lessons: many }]);

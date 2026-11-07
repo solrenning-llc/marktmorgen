@@ -21,7 +21,7 @@ import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consen
 import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -231,24 +231,36 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       // the list, and the creator's postal address.
       const withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.winback.address } };
       const rendered = render(withAddress, mail.subject, mail.body, unsub);
-      const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
-        from: fromLine(withAddress),
-        to: email,
-        subject: rendered.subject,
-        text: rendered.text,
-        replyTo: store.email,
-        headers: rendered.headers,
-        idempotencyKey: `nimbus-wb:${account}:${subId}`,
-      });
-      if (ok) {
+      // The email is taken from the store's figure inside sendEmailOutcome, before the request (unchanged).
+      let outcome: SendOutcome;
+      try {
+        outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
+          from: fromLine(withAddress),
+          to: email,
+          subject: rendered.subject,
+          text: rendered.text,
+          replyTo: store.email,
+          headers: rendered.headers,
+          idempotencyKey: `nimbus-wb:${account}:${subId}`,
+        });
+      } catch (error) {
+        // Thrown on the way: it may have gone (rule 30, as 283 [HG2]).
+        outcome = "uncertain";
+        console.error("sending a come-back offer failed; its marks are kept", store.handle, error);
+      }
+      if (outcome === "sent") {
         sent += 1;
         await redisPipeline([["INCR", countKey(statsId)]]);
-      } else {
-        // Not sent: tried again on the next run, inside the same window.
+      } else if (outcome === "refused") {
+        // Refused for certain: tried again on the next run, inside the same window.
         // Only our own claims are let go (Revisor 1 on #2719); the offer's link is this run's alone.
         await releaseMark(sentKey(account, subId), claim);
         await releaseMark(onceKey(statsId, email, product.id), onceValue);
         await redisPipeline([["DEL", linkKey(token)]]);
+      } else {
+        // Not known whether it went (a timeout, a server error, a network error): both marks are kept, so the offer
+        // is never sent twice, and so is its link, which the email may already carry.
+        console.error("a come-back offer's answer is not known; its marks are kept, so it is not sent again", store.handle);
       }
     } catch (error) {
       console.error("sending a come-back offer failed", store.handle, error);

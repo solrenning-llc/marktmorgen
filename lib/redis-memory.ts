@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 /**
  * A Redis that lives in memory, for testing the parts of this codebase whose
@@ -131,6 +132,18 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", book, json]);
           return 1;
+        }
+        // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
+        if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
+          const target = args[1];
+          const out: number[] = [];
+          for (let i = 2; i < args.length; i += 3) {
+            const current = this.run(["HGET", target, args[i]]);
+            const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+            if (seen === args[i + 1]) this.run(["HSET", target, args[i], args[i + 2]]);
+            out.push(seen === args[i + 1] ? 1 : 0);
+          }
+          return out;
         }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {

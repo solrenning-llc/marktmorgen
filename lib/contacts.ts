@@ -593,6 +593,8 @@ const sha1 = (value: string) => createHash("sha1").update(value).digest("hex");
 
 /** Sets each field only if it still holds what was read (by its SHA-1, "" for none); one step on the Redis side. */
 const CAS_HSET = [
+  // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
+  "-- marktmorgen:contact-cas-hset:v1",
   "local out = {}",
   "for i = 1, #ARGV, 3 do",
   '  local cur = redis.call("HGET", KEYS[1], ARGV[i])',
@@ -610,12 +612,13 @@ const CAS_HSET = [
 
 /**
  * Writes each field that still holds what was read; says which were written.
- * Upstash runs the script; where a Redis does not (the local stand-ins), the
- * same check is made as a read just before the write, which keeps the rule
- * and only narrows the gap rather than closing it. A field that already holds
- * what was to be written counts as written: the script ran and only its
- * answer was lost, and reporting it as lost would leave that write out of
- * what its caller answers (and of an undo).
+ * The check and the write are one step, the script's, and never anything else:
+ * when it fails or its answer is unknown, nothing is written here. A read and
+ * then a plain HSET would not be one step, so an unsubscribe made between them
+ * would be written over and the person written to again (Codex G, #3116).
+ * When every field already holds what was to be written, the script ran and
+ * only its answer was lost: written, and answered so (an undo needs it). Any
+ * other read-back is unknown and throws UnknownReplyError, never "not written".
  */
 async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
   try {
@@ -628,15 +631,11 @@ async function casWrite(key: string, writes: { email: string; value: string; was
     // Read back only in its exact shape (CX-123 rule 24): one text or nothing for each. Anything else is unknown and
     // throws, never "not written": a caller that undoes what it wrote alongside (tokensFor's token record) must not.
     const read = fieldsOf((await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]))[0], writes.length, "a contact write's read-back");
-    // A field that already holds what was to be written was written (the script ran and its answer was lost): not written again, never reported as lost.
-    const landed = writes.map((w, i) => read[i] === w.value);
-    const same = writes.map((w, i) => !landed[i] && (typeof read[i] === "string" ? sha1(read[i] as string) : "") === w.was);
-    const pairs = writes.flatMap((w, i) => (same[i] ? [w.email, w.value] : []));
-    if (pairs.length) {
-      const [set] = await redisPipeline([["HSET", key, ...pairs]]);
-      if (countOf(set) === null) throw new UnknownReplyError("a contact write");
-    }
-    return writes.map((_, i) => landed[i] || same[i]);
+    // Every field holding what was to be written: the script ran and its answer was lost; written, never reported as lost.
+    if (writes.every((w, i) => read[i] === w.value)) return writes.map(() => true);
+    // Anything else: whether the script ran is not known, and nothing is written without its check (an unsubscribe
+    // made since this read would be written over). The caller answers "not known" and tries again later.
+    throw new UnknownReplyError("a contact write");
   }
 }
 

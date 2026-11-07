@@ -76,7 +76,7 @@ async function main(): Promise<void> {
   is("a link that is not there: not one we know", [unknown.includes(UNKNOWN), unknown.includes(UNREAD)], [true, false]);
 
   part("Healthy control");
-  await redis.pipeline([["SET", linkKey(TOKEN), JSON.stringify({ s: "s1", id: "p1", d: "example.com", n: "Harbor Kitchen" })]]);
+  await redis.pipeline([["SET", linkKey(TOKEN), JSON.stringify({ s: "s1", id: "p1", d: "harbor-kitchen.test", n: "Harbor Kitchen" })]]);
   const healthy = await page();
   is("the store and the stop buttons", [healthy.includes("Stop emails from Harbor Kitchen"), healthy.includes(UNKNOWN), healthy.includes(UNREAD)], [true, false, false]);
 

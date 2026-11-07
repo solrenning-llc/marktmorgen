@@ -8,19 +8,10 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { is, part, done } from "./check";
-import * as alarmModule from "../scripts/main_red_alarm.mjs";
 import {
-  LABEL, TITLE, REQUIRED, decide, unreported, openBody, failureComment, greenComment, closable,
-  type Run,
+  LABEL, TITLE, REQUIRED, decide, earlierNeeded, alarm as alarmRun, unreported, openBody, failureComment, greenComment, closable,
+  type Run, type State, type Api,
 } from "../scripts/main_red_alarm.mjs";
-
-type Api = (method: string, path: string, body?: unknown, absentIsNull?: boolean) => Promise<unknown>;
-type State = { file: string, name: string, state: string, run: Run | null, earlier: Run | null };
-// Read through the namespace so a missing export is a failing check, not a build error.
-const later = alarmModule as unknown as {
-  alarm?: (input: { api: Api, trigger: unknown, log?: (line: string) => void }) => Promise<unknown>,
-  earlierNeeded?: (states: State[]) => string[],
-};
 
 const read = (path: string) => readFileSync(path, "utf8");
 const ALARM = ".github/workflows/main-red-alarm.yml";
@@ -149,16 +140,16 @@ const restGreen = () => allGreen().filter((_, i) => i !== PC);
   const d = decide({ runs, trigger: a, head: HEAD });
   is("A red, main already at B with its run still going: open, with A's run", [d.action, d.red.map((r) => r.id)], ["open", [a.id]]);
   is("and the state on the current head is still running, the evidence being the earlier head",
-    [d.states[PC].state, (d.states[PC] as unknown as State).earlier?.id ?? null], ["running", a.id]);
+    [d.states[PC].state, d.states[PC].earlier?.id ?? null], ["running", a.id]);
 }
 {
   const a = run(PC, "failure", { head_sha: OLD });
-  const b = run(PC, "cancelled", { head_sha: MID });
-  is("A red, B cancelled by push C, C not started: open, with A's run",
+  const b = run(PC, stopped, { head_sha: MID });
+  is("A red, B canceled by push C, C not started: open, with A's run",
     [decide({ runs: [...restGreen(), b], trigger: a, head: HEAD }).action, decide({ runs: [...restGreen(), b], trigger: a, head: HEAD }).red.map((r) => r.id)], ["open", [a.id]]);
-  is("A red, B cancelled by push C, C queued: open",
+  is("A red, B canceled by push C, C queued: open",
     decide({ runs: [...restGreen(), a, b, run(PC, null, { status: "queued" })], trigger: restGreen()[0], head: HEAD }).action, "open");
-  is("A red, B cancelled, C cancelled too: open", action([...restGreen(), a, b, run(PC, "cancelled")]), "open");
+  is("A red, B canceled, C canceled too: open", action([...restGreen(), a, b, run(PC, stopped)]), "open");
   is("A red, then green on the current head: close (the current head decides)", action([...restGreen(), a, b, run(PC, "success")]), "close");
   is("A red, then red on the current head too: open, reporting the current head's run only",
     decide({ runs: [...restGreen(), a, b, run(PC, "failure")], trigger: a, head: HEAD }).red.map((r) => r.head_sha), [HEAD]);
@@ -192,9 +183,8 @@ is("closing still needs all nine green on the current head, never on an earlier 
       decide({ runs: [...restGreen(), lag, listedRunning, run(PC, null)], trigger: restGreen()[0], head: HEAD }).action], ["open", "open"]);
 }
 {
-  const states = decide({ runs: [...allGreen().slice(2), run(0, "failure"), run(1, null)], trigger: allGreen()[0], head: HEAD }).states as unknown as State[];
-  is("earlier heads are read only for workflows neither green nor red on the current head",
-    later.earlierNeeded ? later.earlierNeeded(states) : "earlierNeeded missing", [REQUIRED[1].file]);
+  const states: State[] = decide({ runs: [...allGreen().slice(2), run(0, "failure"), run(1, null)], trigger: allGreen()[0], head: HEAD }).states;
+  is("earlier heads are read only for workflows neither green nor red on the current head", earlierNeeded(states), [REQUIRED[1].file]);
 }
 
 part("the texts");
@@ -223,11 +213,6 @@ is("it says it changes no price, limit, commission, flag, gate or prohibition", 
 
 async function endToEnd() {
   part("the whole run, against a synthetic GitHub (no network)");
-  if (!later.alarm) {
-    is("alarm() is exported, so the whole run can be tested without the network", false, true);
-    return;
-  }
-  const alarmRun = later.alarm;
   const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown }) => {
     const reads: string[] = [];
     const writes: { method: string, path: string, body: unknown }[] = [];
@@ -267,13 +252,13 @@ async function endToEnd() {
     is("a real-shaped red: the label and the issue are created", gh.writes.map((w) => `${w.method} ${w.path}`), ["POST labels", "POST issues"]);
   }
   {
-    // product-checks on main: 100 cancelled runs on later heads, then A's failure on page 2.
+    // product-checks on main: 100 canceled runs on later heads, then A's failure on page 2.
     const a = run(PC, "failure", { head_sha: OLD, id: 5_000 });
-    const cancelled = Array.from({ length: 100 }, (_, i) => run(PC, "cancelled", { head_sha: MID, id: 6_000 + 100 - i }));
-    const gh = github({ head: HEAD, headRuns: [...restGreen(), run(PC, null)], older: { "product-checks.yml": [cancelled, [a]] } });
+    const canceledRuns = Array.from({ length: 100 }, (_, i) => run(PC, stopped, { head_sha: MID, id: 6_000 + 100 - i }));
+    const gh = github({ head: HEAD, headRuns: [...restGreen(), run(PC, null)], older: { "product-checks.yml": [canceledRuns, [a]] } });
     await alarmRun({ api: gh.api, trigger: restGreen()[0], log: quiet });
     const created = gh.writes.find((w) => w.path === "issues");
-    is("A red behind 100 cancelled runs, the trigger being another workflow's green: the issue opens with A's run",
+    is("A red behind 100 canceled runs, the trigger being another workflow's green: the issue opens with A's run",
       [Boolean(created), String((created?.body as { body?: string } | undefined)?.body ?? "").includes(a.html_url)], [true, true]);
     is("only the workflow without a result on the current head is read on earlier heads, page by page",
       gh.reads.filter((p) => p.startsWith("actions/workflows/")),

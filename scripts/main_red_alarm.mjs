@@ -2,25 +2,39 @@
  * MV (owner, 6 November 2026, AGENTS.md): the main-vermelho alarm.
  *
  * .github/workflows/main-red-alarm.yml runs this after each of the nine required workflows
- * completes on main. The run that woke it is only a wake-up: the decision is taken from every
- * run of the nine workflows on main's CURRENT head, so a wake-up that GitHub's concurrency drops
+ * completes on main. The run that woke it is only a wake-up: the decision is taken from the runs of
+ * the nine workflows on main, read again each time, so a wake-up that GitHub's concurrency drops
  * while another is waiting loses nothing.
  *
- * - open: some required workflow's latest counted run on the current head, from a push or the
- *   daily schedule, ended in failure or timed_out. The issue labeled main-vermelho is opened
- *   (or the open one gets a comment naming each red run not yet named in it).
- * - close: all nine have a completed success as their latest counted run on the current head.
- *   Every open main-vermelho issue the alarm opened gets "MAIN VERDE" with the head and is closed;
- *   one opened by hand (a failure proven another way) is left to the PR that fixes it.
- * - none: anything else (a run still going, a workflow without a run, an unexpected conclusion).
+ * A run belongs to a workflow by its file (`path`), never by its `name`: the nine set
+ * `run-name: PV8 source ${{ github.sha }}`, and that run-name is what the API returns as a run's name.
  *
- * Never counted, either way: canceled, skipped, neutral and stale runs, runs of another head
- * (an older main), of another branch, of another file, or of any other event (pull_request,
- * merge_group, workflow_dispatch...). An unreadable reply from GitHub is never green or red:
- * the script throws and the run fails, visible in Actions.
+ * - open: for some required workflow, either its latest counted run on main's CURRENT head ended in
+ *   failure or timed_out, or the current head has no result for it yet (running, queued, canceled,
+ *   missing) and its latest completed counted run on an EARLIER main head ended in failure or
+ *   timed_out. Pushes to main cancel each other's runs (cancel-in-progress on the main-push group),
+ *   so with merges closer together than CI lasts a red on head A would otherwise be lost: its run
+ *   completes after main moved to B, or is canceled. The issue labeled main-vermelho is opened (or
+ *   the open one gets a comment naming each red run not yet named in it).
+ * - close: all nine have a completed success as their latest counted run on the current head; an
+ *   earlier head never closes. Every open main-vermelho issue the alarm opened gets "MAIN VERDE"
+ *   with the head and is closed; one opened by hand (a failure proven another way) is left to the
+ *   PR that fixes it.
+ * - none: anything else (a run still going with no red behind it, a workflow without a run, an
+ *   unexpected conclusion).
  *
- * tests/main-red-alarm.test.ts holds the decision on synthetic runs; this file makes no call
- * unless it is run directly.
+ * Never counted, either way: canceled, skipped, neutral and stale runs, runs of another branch, of
+ * another file, or of any other event (pull_request, merge_group, workflow_dispatch...). An
+ * unreadable reply from GitHub is never green or red: the script throws and the run fails, visible
+ * in Actions.
+ *
+ * Limit: a push to main with [skip ci] (or [ci skip], [no ci], [skip actions], [actions skip])
+ * starts none of the nine, so nothing wakes the alarm on that head and all nine stay missing there.
+ * An open issue then stays open until the nine pass on a later head, or the daily schedule runs
+ * them on that head and they pass.
+ *
+ * tests/main-red-alarm.test.ts holds the decision on synthetic runs and the whole run against a
+ * synthetic GitHub; this file makes no call unless it is run directly.
  */
 import { readFileSync } from "node:fs";
 
@@ -45,11 +59,14 @@ const RED = new Set(["failure", "timed_out"]);
 /** Results that are evidence of nothing: they never open and never close. */
 const IGNORED = new Set(["cancelled", "skipped", "neutral", "stale"]);
 const SHA = /^[0-9a-f]{40}$/;
+/** Pages of 100 runs read per listing before the script gives up and fails, visibly. */
+const MAX_PAGES = 10;
 
 /**
  * @typedef {{ id: number, name: string, path: string, event: string, head_branch: string | null,
  *   head_sha: string, status: string, conclusion: string | null, html_url: string,
  *   updated_at: string }} Run
+ * @typedef {{ file: string, name: string, state: string, run: Run | null, earlier: Run | null }} State
  */
 
 /** @param {unknown} run @returns {Run} */
@@ -65,21 +82,35 @@ function checked(run) {
   return /** @type {Run} */ (r);
 }
 
+/** Whether a run is evidence about the workflow in `file` on main (any head). @param {Run} r @param {string} file */
+function evidenceFor(r, file) {
+  return r.path === file && r.head_branch === "main" && COUNTED_EVENTS.has(r.event)
+    && !(r.status === "completed" && r.conclusion !== null && IGNORED.has(r.conclusion));
+}
+
+/** @param {Run[]} runs */
+const newest = (runs) => runs.reduce((a, b) => (a && a.id > b.id ? a : b), /** @type {Run | null} */ (null));
+
 /**
- * @param {{ runs: unknown[], trigger: unknown, head: string }} input
- * @returns {{ action: "open" | "close" | "none", red: Run[], states: { name: string, state: string, run: Run | null }[] }}
+ * @param {{ runs: unknown[], trigger: unknown, head: string }} input  runs of the current head and,
+ *   for the workflows earlierNeeded() names, of earlier main heads
+ * @returns {{ action: "open" | "close" | "none", red: Run[], states: State[] }}
  */
 export function decide({ runs, trigger, head }) {
   if (typeof head !== "string" || !SHA.test(head)) throw new Error("unreadable main head: " + String(head));
   if (!Array.isArray(runs)) throw new Error("unreadable run list");
   const woke = checked(trigger);
+  // One entry per run: the same run can come from two listings, one taken while it still ran.
+  const byId = new Map();
+  for (const r of runs.map(checked)) {
+    if (byId.get(r.id)?.status !== "completed") byId.set(r.id, r);
+  }
   // The trigger's own completed result is newer than a listing that may still show it running.
-  const all = [...runs.map(checked).filter((r) => r.id !== woke.id), woke];
+  byId.set(woke.id, woke);
+  const all = /** @type {Run[]} */ ([...byId.values()]);
   const states = REQUIRED.map(({ file, name }) => {
-    const counted = all.filter((r) => r.name === name && r.path === file && r.head_sha === head
-      && r.head_branch === "main" && COUNTED_EVENTS.has(r.event)
-      && !(r.status === "completed" && r.conclusion !== null && IGNORED.has(r.conclusion)));
-    const latest = counted.reduce((a, b) => (a && a.id > b.id ? a : b), /** @type {Run | null} */ (null));
+    const mine = all.filter((r) => evidenceFor(r, file));
+    const latest = newest(mine.filter((r) => r.head_sha === head));
     let state = "missing";
     if (latest) {
       if (latest.status !== "completed") state = "running";
@@ -87,11 +118,20 @@ export function decide({ runs, trigger, head }) {
       else if (latest.conclusion !== null && RED.has(latest.conclusion)) state = "red";
       else state = "unknown";
     }
-    return { name, state, run: latest };
+    // No result on the current head yet: the latest completed result on an earlier head stands.
+    const prior = state === "green" || state === "red" ? null
+      : newest(mine.filter((r) => r.head_sha !== head && r.status === "completed"));
+    const earlier = prior && prior.conclusion !== null && RED.has(prior.conclusion) ? prior : null;
+    return { file, name, state, run: latest, earlier };
   });
-  const red = states.filter((s) => s.state === "red").map((s) => /** @type {Run} */ (s.run));
+  const red = states.flatMap((s) => (s.state === "red" ? [/** @type {Run} */ (s.run)] : s.earlier ? [s.earlier] : []));
   const action = red.length ? "open" : states.every((s) => s.state === "green") ? "close" : "none";
   return { action, red, states };
+}
+
+/** The workflow files whose earlier main heads must be read: neither green nor red on the current head. @param {State[]} states */
+export function earlierNeeded(states) {
+  return states.filter((s) => s.state !== "green" && s.state !== "red").map((s) => s.file);
 }
 
 /** Red runs whose link is not yet in the issue's body or comments. @param {Run[]} red @param {string[]} texts */
@@ -99,13 +139,16 @@ export function unreported(red, texts) {
   return red.filter((r) => !texts.some((t) => t.includes(r.html_url)));
 }
 
+/** The workflow's own name (a run's `name` is its run-name, "PV8 source <sha>"). @param {Run} r */
+const workflowName = (r) => REQUIRED.find((w) => w.file === r.path)?.name ?? r.path;
+
 /** @param {Run} r */
-const line = (r) => `- **${r.name}** (${r.event}, ${r.conclusion}, ${r.updated_at}): ${r.html_url}\n  head_sha \`${r.head_sha}\``;
+const line = (r) => `- **${workflowName(r)}** (${r.event}, ${r.conclusion}, ${r.updated_at}): ${r.html_url}\n  head_sha \`${r.head_sha}\``;
 
 /** @param {Run[]} red @param {string} head */
 export function openBody(red, head) {
   return [
-    `O CI do próprio main falhou no head atual \`${head}\`.`,
+    `O CI do próprio main falhou. Head atual do main: \`${head}\`. Cada execução abaixo traz o próprio head; uma falha num head anterior conta enquanto o head atual não tiver resultado daquele workflow.`,
     "",
     ...red.map(line),
     "",
@@ -133,28 +176,18 @@ export function greenComment(head) {
   return `MAIN VERDE: os 9 workflows obrigatórios passaram no head atual do main, \`${head}\`.`;
 }
 
-async function main() {
-  const token = process.env.GITHUB_TOKEN;
-  const repo = process.env.GITHUB_REPOSITORY;
-  const base = (process.env.GITHUB_API_URL || "https://api.github.com") + "/repos/" + repo + "/";
-  if (!token || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("missing GITHUB_TOKEN or GITHUB_REPOSITORY");
-  const event = JSON.parse(readFileSync(String(process.env.GITHUB_EVENT_PATH), "utf8"));
-  const trigger = event?.workflow_run;
+/**
+ * @typedef {(method: string, path: string, body?: unknown, absentIsNull?: boolean) => Promise<any>} Api
+ */
 
-  /** @param {string} method @param {string} path @param {unknown} [body] @param {boolean} [absentIsNull] */
-  async function api(method, path, body, absentIsNull = false) {
-    const reply = await fetch(base + path, {
-      method,
-      headers: { authorization: "Bearer " + token, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (absentIsNull && reply.status === 404) return null;
-    if (!reply.ok) throw new Error(`${method} ${path}: HTTP ${reply.status} ${(await reply.text()).slice(0, 300)}`);
-    return reply.status === 204 ? null : reply.json();
-  }
-
+/**
+ * One run of the alarm: read main, decide, then open, comment or close.
+ * @param {{ api: Api, trigger: unknown, log?: (line: string) => void }} input
+ */
+export async function alarm({ api, trigger, log = console.log }) {
   const ref = await api("GET", "git/ref/heads/main");
   const head = ref?.object?.sha;
+  if (typeof head !== "string" || !SHA.test(head)) throw new Error("unreadable main head: " + String(head));
   const runs = [];
   for (let page = 1; ; page += 1) {
     const listing = await api("GET", `actions/runs?branch=main&head_sha=${head}&per_page=100&page=${page}`);
@@ -164,11 +197,27 @@ async function main() {
       if (runs.length !== listing.total_count) throw new Error(`run listing changed: ${runs.length} of ${listing.total_count}`);
       break;
     }
-    if (page >= 10) throw new Error("run listing too long");
+    if (page >= MAX_PAGES) throw new Error("run listing too long");
+  }
+  // Earlier main heads, only for the workflows with no result on the current head, newest first,
+  // until the first completed counted run on an earlier head (the latest one) is found.
+  for (const file of earlierNeeded(decide({ runs, trigger, head }).states)) {
+    const workflow = file.slice(file.lastIndexOf("/") + 1);
+    for (let page = 1; ; page += 1) {
+      const listing = await api("GET", `actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100&page=${page}`);
+      if (!Number.isSafeInteger(listing?.total_count) || !Array.isArray(listing?.workflow_runs)) throw new Error("unreadable earlier run listing");
+      const found = listing.workflow_runs.map(checked);
+      runs.push(...found);
+      if (found.some((r) => evidenceFor(r, file) && r.head_sha !== head && r.status === "completed")) break;
+      if (found.length < 100) break;
+      if (page >= MAX_PAGES) throw new Error(`earlier run listing too long: ${workflow}`);
+    }
   }
   const decision = decide({ runs, trigger, head });
-  console.log(`head ${head}: ${decision.action}`);
-  for (const s of decision.states) console.log(`  ${s.name}: ${s.state}${s.run ? " " + s.run.html_url : ""}`);
+  log(`head ${head}: ${decision.action}`);
+  for (const s of decision.states) {
+    log(`  ${s.name}: ${s.state}${s.run ? " " + s.run.html_url : ""}${s.earlier ? `; earlier head red ${s.earlier.html_url}` : ""}`);
+  }
 
   const listed = await api("GET", `issues?labels=${LABEL}&state=open&per_page=100`);
   if (!Array.isArray(listed)) throw new Error("unreadable issue listing");
@@ -181,8 +230,8 @@ async function main() {
         await api("POST", "labels", { name: LABEL, color: "b60205", description: "O CI do próprio main falhou (AGENTS.md, MV)" });
       }
       const created = await api("POST", "issues", { title: TITLE, body: openBody(decision.red, head), labels: [LABEL] });
-      console.log(`opened #${created?.number}`);
-      return;
+      log(`opened #${created?.number}`);
+      return decision;
     }
     const issue = open[0];
     const texts = [String(issue.body ?? "")];
@@ -195,15 +244,38 @@ async function main() {
     }
     const fresh = unreported(decision.red, texts);
     if (fresh.length) await api("POST", `issues/${issue.number}/comments`, { body: failureComment(fresh) });
-    console.log(`#${issue.number}: ${fresh.length} new red run(s)`);
+    log(`#${issue.number}: ${fresh.length} new red run(s)`);
   } else if (decision.action === "close") {
-    for (const issue of open.filter((i) => !closable(open).includes(i))) console.log(`#${issue.number} was opened by hand: left open`);
+    for (const issue of open.filter((i) => !closable(open).includes(i))) log(`#${issue.number} was opened by hand: left open`);
     for (const issue of closable(open)) {
       await api("POST", `issues/${issue.number}/comments`, { body: greenComment(head) });
       await api("PATCH", `issues/${issue.number}`, { state: "closed", state_reason: "completed" });
-      console.log(`closed #${issue.number}`);
+      log(`closed #${issue.number}`);
     }
   }
+  return decision;
+}
+
+async function main() {
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  const base = (process.env.GITHUB_API_URL || "https://api.github.com") + "/repos/" + repo + "/";
+  if (!token || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error("missing GITHUB_TOKEN or GITHUB_REPOSITORY");
+  const event = JSON.parse(readFileSync(String(process.env.GITHUB_EVENT_PATH), "utf8"));
+
+  /** @type {Api} */
+  async function api(method, path, body, absentIsNull = false) {
+    const reply = await fetch(base + path, {
+      method,
+      headers: { authorization: "Bearer " + token, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...(body ? { "content-type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (absentIsNull && reply.status === 404) return null;
+    if (!reply.ok) throw new Error(`${method} ${path}: HTTP ${reply.status} ${(await reply.text()).slice(0, 300)}`);
+    return reply.status === 204 ? null : reply.json();
+  }
+
+  await alarm({ api, trigger: event?.workflow_run });
 }
 
 if (process.argv[1]?.endsWith("main_red_alarm.mjs")) {

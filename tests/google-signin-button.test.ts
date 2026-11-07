@@ -29,4 +29,9 @@ is("the guide records that the owner checked steps 2 through 7", guide.includes(
 is("the guide records the renamed project", guide.includes('agora com o nome "Marktmorgen"'), true);
 is("the opening state no longer says that nothing was done in Google Cloud", guide.includes("Nada foi feito no Google Cloud"), false);
 is("it says that no agent acted there", guide.includes("Nenhum agente fez nada no Google Cloud"), true);
+// Codex E2's LOW on #2671 (docs/reviews/e2-2671-a1ba.md): no official source gives this flow's price, so the guide
+// never says it is not charged per call; it says the price is unknown and not checked in an official source.
+is("the guide never says the OAuth flow is not charged per call", /não cobrado por chamada/i.test(guide), false);
+is("it says Google's price for this flow is unknown", guide.includes("**desconhecido, não conferido em fonte oficial**"), true);
+is("and the setup's price step says the same", guide.includes("1. **Preço:** desconhecido, não conferido em fonte oficial"), true);
 done();

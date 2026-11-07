@@ -163,6 +163,13 @@ async function main() {
     part(`This payment's own charge says what was given back as ${label}`);
     await triedAgain(key, true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount_refunded: value }) }) }, 1);
   }
+  // Codex G's focal on #3097 (5815090132, proof g3097-refunded-overcharge): more given back than the charge took is
+  // not a reading of this charge; settling "none" on it would leave the member's unused time never given back.
+  part("This payment's own charge says more was given back than it took");
+  await triedAgain("rover", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount_refunded: 1001 }) }) }, 1);
+  part("This payment's own charge says what it took in no readable way");
+  await triedAgain("ramt", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, amount: "1000" }) }) }, 1);
+
   part("This payment's charge is not expanded (only its id)");
   await triedAgain("chargeid", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: "ch_closeown1" }) }, 1);
 

@@ -57,7 +57,7 @@ import {
 import { storeBase } from "@/lib/purchase-email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -227,7 +227,9 @@ export async function listPitches(store: Store): Promise<Pitch[]> {
   const pitches: Pitch[] = [];
   for (let i = 1; i < all.length; i += 2) {
     const pitch = parsePitch(all[i]);
-    if (!pitch) throw new UnknownReplyError("a store's pitches");
+    // Every writer keeps when a pitch was made, and when a sent or stopped one went out (Codex Q on #2870): one kept
+    // without them would count as written long ago and let the same business be written to again before its wait.
+    if (!pitch || !(pitch.createdAt > 0) || (pitch.status !== "draft" && !(pitch.sentAt > 0))) throw new UnknownReplyError("a store's pitches");
     pitches.push(pitch);
   }
   return pitches.sort((a, b) => b.createdAt - a.createdAt);
@@ -500,12 +502,18 @@ export async function readStopLink(token: string): Promise<{ domain: string; sto
 export async function stopFromLink(token: string, everyone: boolean, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
   const link = await readLink(token);
   if (!link) return false;
-  const [raw] = await redisPipeline([["HGET", key(link.s, "pitches"), link.id]]);
+  // Read and written exactly (CX-123 rule 24; J and Codex Q on #2870): the pitch is nil or a string, and the write
+  // answers one count for each command. Anything else throws, so the stop is never said done on a write whose answer
+  // is not known (the route then answers done=0, and pressing again only adds what may already be there).
+  const raw = repliesFor(await redisPipeline([["HGET", key(link.s, "pitches"), link.id]]), 1)?.[0];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("the pitch a stop link names");
   const pitch = parsePitch(raw);
-  await redisPipeline([
+  const writes: (string | number)[][] = [
     ["SADD", key(link.s, "stop"), link.d],
     ...(everyone ? [["SADD", STOP_ALL, link.d]] : []),
     ...(pitch && pitch.status !== "stopped" ? [["HSET", key(link.s, "pitches"), link.id, JSON.stringify({ ...pitch, status: "stopped", sentAt: pitch.sentAt || now } satisfies Pitch)]] : []),
-  ]);
+  ];
+  const receipt = repliesFor(await redisPipeline(writes), writes.length);
+  if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("a business's stop");
   return true;
 }

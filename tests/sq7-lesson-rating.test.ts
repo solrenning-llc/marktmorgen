@@ -54,7 +54,7 @@ import {
 import { LESSON_RATING_WORDS, lessonRatingWords } from "@/lib/buyer-words/lesson-rating";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { emailKey } from "@/lib/learn";
-import { dataUsed } from "@/lib/store-data";
+import { dataKey, dataUsed } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { PERSON_DATA } from "@/lib/person-data";
 import { closingOf, countedInRoom } from "@/lib/data-families";
@@ -263,6 +263,73 @@ async function main(): Promise<void> {
     true,
   );
   is("removing a lesson or a module drops their ratings beside their comments", /dropLessonComments\(course\.id, gone, store\)[^\n]*\n\s*await dropLessonRatings\(course\.id, gone, store\)/.test(courseRoute), true);
+
+  part("Every deletion gives back its room in the same step: a give-back is never lost after the ratings went");
+  // As 285 [SX1] does for a course's survey: a give-back sent on its own (giveData) never throws, so when it failed after
+  // the ratings were deleted the room stayed charged for them forever, and no later try could find them to give it back.
+  redis.clear();
+  const level = await used();
+  const roomKey = dataKey(ROOM)!;
+  const realOwn = redis.pipeline.bind(redis);
+  const giveDown = (sent: (string | number)[][][]) =>
+    (async (commands: (string | number)[][]) => {
+      sent.push(commands);
+      // The room's own script on its own fails, as giveData's would: silently.
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:"))) throw new Error("down");
+      return realOwn(commands);
+    }) as typeof redis.pipeline;
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ben, score: 2, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ben, score: 5, note: "" });
+  const sentOwn: (string | number)[][][] = [];
+  redis.pipeline = giveDown(sentOwn);
+  const ownGone = await removeMyRating(COURSE, L1, ana, ROOM).catch((error: unknown) => error);
+  redis.pipeline = realOwn;
+  is("removing one's own is one command, the room's give-back inside it", [ownGone, sentOwn.length, sentOwn.flat().length], [true, 1, 1]);
+  const sentPerson: (string | number)[][][] = [];
+  redis.pipeline = giveDown(sentPerson);
+  const personGone = await forgetLessonRatingsPerson(COURSE, ben, ROOM).catch((error: unknown) => error);
+  redis.pipeline = realOwn;
+  // One read of the course's rated lessons, then one script for every lesson of it.
+  is("deleting a person is one read and one command, the room's give-back inside it", [personGone, sentPerson.length, sentPerson.flat().length], [2, 2, 2]);
+  is("and the room is level once they are gone", [await lessonRatingCount(COURSE, L1), await lessonRatingCount(COURSE, L2), await used()], [0, 0, level]);
+  is("the lessons left the index", redis.run(["SCARD", `nl:lr:${COURSE}:ls`]), 0);
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ben, score: 3, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ana, score: 1, note: "" });
+  const sentLessons: (string | number)[][][] = [];
+  redis.pipeline = giveDown(sentLessons);
+  const lessonsGone = await dropLessonRatings(COURSE, [L1, L2], ROOM).catch((error: unknown) => error);
+  redis.pipeline = realOwn;
+  is("dropping removed lessons is one command, the room's give-back inside it", [lessonsGone, sentLessons.length, sentLessons.flat().length], [3, 1, 1]);
+  is("and the room is level, the index empty", [await used(), redis.run(["SCARD", `nl:lr:${COURSE}:ls`])], [level, 0]);
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ben, score: 3, note: "" });
+  const sentCourse: (string | number)[][][] = [];
+  redis.pipeline = giveDown(sentCourse);
+  const courseGone = await dropCourseRatings(COURSE, ROOM).catch((error: unknown) => error);
+  redis.pipeline = realOwn;
+  is("dropping a course gives every rating's room back inside its drops", [courseGone, await used(), sentCourse.flat().every((c) => !String(c[1]).startsWith("-- marktmorgen:store-data:"))], [2, level, true]);
+
+  // A room that cannot be read takes nothing out, and says so: never a deletion whose room is lost.
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L1, who: ana, score: 4, note: "" });
+  await rateLesson({ room: ROOM, courseId: COURSE, lessonId: L2, who: ben, score: 3, note: "" });
+  const heldTotal = redis.run(["HGET", roomKey, "#"]);
+  redis.run(["HSET", roomKey, "#", "not a count"]);
+  const unreadOwn = await removeMyRating(COURSE, L1, ana, ROOM).catch(() => "unknown");
+  const unreadPerson = await forgetLessonRatingsPerson(COURSE, ben, ROOM).catch(() => "unknown");
+  const unreadLessons = await dropLessonRatings(COURSE, [L1, L2], ROOM).catch(() => "unknown");
+  const unreadCourse = await dropCourseRatings(COURSE, ROOM).catch(() => "unknown");
+  redis.run(["HSET", roomKey, "#", String(heldTotal)]);
+  is(
+    "a room that cannot be read deletes nothing and says so",
+    [unreadOwn, unreadPerson, unreadLessons, unreadCourse, await lessonRatingCount(COURSE, L1), await lessonRatingCount(COURSE, L2), redis.run(["SCARD", `nl:lr:${COURSE}:ls`])],
+    ["unknown", "unknown", "unknown", "unknown", 1, 1, 2],
+  );
+  is("a store with no room key to count in deletes nothing either", [await removeMyRating(COURSE, L1, ana, {} as typeof ROOM).catch(() => "unknown"), await lessonRatingCount(COURSE, L1)], ["unknown", 1]);
+  await dropCourseRatings(COURSE, ROOM);
+  is("and level again after", [await used(), redis.run(["SCARD", `nl:lr:${COURSE}:ls`])], [level, 0]);
+  redis.clear();
 
   part("Deleting a person is priced at every lesson its ratings are kept under, a removed one too");
   redis.clear();

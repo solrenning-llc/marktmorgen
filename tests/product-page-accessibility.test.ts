@@ -158,10 +158,21 @@ async function main(): Promise<void> {
   const boxes = css.match(/\.st-measure :where\(p\.flex, p\.grid, p\.st-note, p\.rounded-2xl\)\s*\{([^}]*)\}/);
   is("a p that is a box or a row (flex, grid, a dashed note, a rounded notice) keeps its width", /max-width:\s*none/.test(boxes?.[1] ?? ""), true);
   is("and that rule comes after the cap", css.indexOf(boxes?.[0] ?? "\u0000") > capAt, true);
-  const noteWords = css.match(/\.st-measure \.st-note\s*\{([^}]*)\}/)?.[1] ?? "";
+  const noteWords = css.match(/\.st-measure p\.st-note\s*\{([^}]*)\}/)?.[1] ?? "";
   const notice = css.match(/\.st-measure p\.rounded-2xl\s*\{([^}]*)\}/)?.[1] ?? "";
   is("a note box's words are capped by its own padding, the box at full width", /padding-inline-end:\s*max\(1\.25rem,\s*calc\(100% - 34ch - 1\.25rem\)\)/.test(noteWords), true);
   is("and so are a rounded notice's (the package and the chosen time)", /padding-inline-end:\s*max\(1rem,\s*calc\(100% - 34ch - 1rem\)\)/.test(notice), true);
+
+  // Claude 5's focal return on #2907 (6704971308), confirmed open by Claude 2 (6707750064).
+  part("1.4.8, LOW: the note's end padding is on a p only, so a centered div.st-note stays in the middle");
+  is("no end padding on every .st-note inside the cap", /\.st-measure \.st-note\s*\{/.test(css), false);
+  is("the end padding sits on p.st-note, as on p.rounded-2xl", /\.st-measure p\.st-note\s*\{[^}]*padding-inline-end:\s*max\(1\.25rem,\s*calc\(100% - 34ch - 1\.25rem\)\)/.test(css), true);
+
+  part("1.4.11, LOW: the reader's own chat bubble keeps a visible edge on the card");
+  const dmMine = css.match(/\.cm-dm-mine\s*\{([^}]*)\}/)?.[1] ?? "";
+  const chatMine = css.match(/\.st-chat-mine\s*\{([^}]*)\}/)?.[1] ?? "";
+  is("the community DM bubble's border is drawn in the accent text color, never transparent", [/border-color:\s*transparent/.test(dmMine), /border-color:\s*var\(--st-accent-text\)/.test(dmMine)], [false, true]);
+  is("the store chat's own bubble has the same 1px edge", /border:\s*1px solid var\(--st-accent-text\)/.test(chatMine), true);
 
   part("1.4.6, LOW 1: text in the creator's color keeps 7:1 on the soft accent and on the band too");
   let soft = 99, band = 99;

@@ -88,7 +88,7 @@ const en = {
   linkNotices: {
     sent: {
       title: "Check your inbox",
-      body: "If that address has something that opens this community, a link to come in is on its way. It works for one hour.",
+      body: "If that address has something that opens this community, we tried to email it a link to come in. The link works for one hour. If nothing arrives in a few minutes, check your spam folder, then ask again.",
     },
     email: { title: "That address does not look right", body: "Check it and try again." },
     limited: { title: "Too many requests", body: "Wait a little, then ask again." },
@@ -657,7 +657,7 @@ const es: CommunityWords = {
   linkNotices: {
     sent: {
       title: "Revisa tu bandeja de entrada",
-      body: "Si esa dirección tiene algo que abre esta comunidad, va de camino un enlace para entrar. Funciona durante una hora.",
+      body: "Si esa dirección tiene algo que abre esta comunidad, intentamos enviarle por email un enlace para entrar. El enlace funciona durante una hora. Si no llega nada en unos minutos, revisa la carpeta de spam y luego vuelve a pedirlo.",
     },
     email: { title: "Esa dirección no parece correcta", body: "Revísala y vuelve a intentarlo." },
     limited: { title: "Demasiadas solicitudes", body: "Espera un poco y vuelve a pedirlo." },
@@ -1205,7 +1205,7 @@ const fr: CommunityWords = {
   linkNotices: {
     sent: {
       title: "Vérifiez votre boîte de réception",
-      body: "Si cette adresse possède quelque chose qui ouvre cette communauté, un lien pour entrer est en route. Il fonctionne pendant une heure.",
+      body: "Si cette adresse possède quelque chose qui ouvre cette communauté, nous avons essayé de lui envoyer par e-mail un lien pour entrer. Le lien fonctionne pendant une heure. Si rien n'arrive d'ici quelques minutes, regardez dans vos spams, puis redemandez-le.",
     },
     email: { title: "Cette adresse ne semble pas correcte", body: "Vérifiez-la et réessayez." },
     limited: { title: "Trop de demandes", body: "Patientez un peu, puis redemandez." },
@@ -1753,7 +1753,7 @@ const de: CommunityWords = {
   linkNotices: {
     sent: {
       title: "Sehen Sie in Ihrem Posteingang nach",
-      body: "Wenn zu dieser Adresse etwas gehört, das diese Community öffnet, ist ein Link zum Eintreten unterwegs. Er gilt eine Stunde lang.",
+      body: "Wenn zu dieser Adresse etwas gehört, das diese Community öffnet, haben wir versucht, ihr einen Link zum Eintreten per E-Mail zu senden. Der Link gilt eine Stunde lang. Wenn in ein paar Minuten nichts ankommt, sehen Sie im Spam-Ordner nach und fragen Sie dann erneut.",
     },
     email: { title: "Diese Adresse scheint nicht zu stimmen", body: "Prüfen Sie sie und versuchen Sie es erneut." },
     limited: { title: "Zu viele Anfragen", body: "Warten Sie ein wenig und fragen Sie dann erneut." },
@@ -2301,7 +2301,7 @@ const it: CommunityWords = {
   linkNotices: {
     sent: {
       title: "Controlla la tua casella di posta",
-      body: "Se a quell'indirizzo corrisponde qualcosa che apre questa community, è in arrivo un link per entrare. Funziona per un'ora.",
+      body: "Se a quell'indirizzo corrisponde qualcosa che apre questa community, abbiamo provato a inviargli via email un link per entrare. Il link funziona per un'ora. Se tra qualche minuto non arriva nulla, controlla la cartella spam, poi richiedilo.",
     },
     email: { title: "Quell'indirizzo non sembra corretto", body: "Controllalo e riprova." },
     limited: { title: "Troppe richieste", body: "Aspetta un po', poi chiedi di nuovo." },
@@ -2849,7 +2849,7 @@ const nl: CommunityWords = {
   linkNotices: {
     sent: {
       title: "Kijk in je inbox",
-      body: "Als bij dat adres iets hoort dat deze community opent, is er een link onderweg om binnen te komen. Hij werkt een uur.",
+      body: "Als bij dat adres iets hoort dat deze community opent, hebben we geprobeerd er een link naartoe te mailen om binnen te komen. De link werkt een uur. Komt er binnen een paar minuten niets aan, kijk dan in je spammap en vraag het daarna opnieuw.",
     },
     email: { title: "Dat adres lijkt niet te kloppen", body: "Controleer het en probeer het opnieuw." },
     limited: { title: "Te veel verzoeken", body: "Wacht even en vraag het dan opnieuw." },
@@ -3397,7 +3397,7 @@ const pt: CommunityWords = {
   linkNotices: {
     sent: {
       title: "Verifique a sua caixa de entrada",
-      body: "Se esse endereço tiver algo que abre esta comunidade, vai a caminho uma ligação para entrar. Funciona durante uma hora.",
+      body: "Se esse endereço tiver algo que abre esta comunidade, tentámos enviar-lhe por email uma ligação para entrar. A ligação funciona durante uma hora. Se nada chegar dentro de alguns minutos, veja a pasta de spam e depois volte a pedir.",
     },
     email: { title: "Esse endereço não parece correto", body: "Verifique-o e tente novamente." },
     limited: { title: "Demasiados pedidos", body: "Aguarde um pouco e volte a pedir." },

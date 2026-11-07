@@ -37,6 +37,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { orderWrite } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
 import { sendEmail } from "@/lib/email";
+import { afterAnswer } from "@/lib/after-answer";
 import { withinLimit } from "@/lib/request-guard";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
@@ -128,7 +129,12 @@ export type LinkResult = "sent" | "email" | "limited" | "error";
 
 /**
  * Emails an address the page with its own feed, if it holds the product.
- * "sent" either way, so the form tells nobody who bought what.
+ * "sent" either way, and at once, right after the limits: whether it holds
+ * the product is asked, and its feed made and emailed, only after the answer
+ * is sent (lib/after-answer.ts), so neither the answer's words nor its time
+ * tell them apart, and an email that could not go out, or a feed that could
+ * not be made, is said only in the server's log. The form tells nobody who
+ * bought what.
  */
 export async function sendFeedLink(input: { store: Store; product: Listing; email: string; ip: string; base: string; from: string }): Promise<LinkResult> {
   const raw = input.email.trim();
@@ -136,26 +142,41 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
   const { store, product } = input;
   if (!(await withinStore("podcast-link-ip", `${store.handle}:${input.ip}`, 10, 3_600, store, "buyer"))) return "limited";
   if (!(await withinLimit("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600))) return "limited";
-  if (!(await mayListen(store, product.id, raw))) return "sent";
+  // From here the answer is "sent" whatever happens, and at once: the right to listen, the feed and its email are all after it.
+  afterAnswer("sending a podcast feed link", () => sendFeedEmail(store, product, raw, input.base, input.from));
+  return "sent";
+}
+
+/**
+ * The feed's email itself, for an address that may listen; nothing for one
+ * that may not. The feed is not removed when the email fails: it is the
+ * address's one lasting feed, which apps already subscribed to keep using,
+ * and asking again sends the same one.
+ */
+async function sendFeedEmail(store: Store, product: Listing, raw: string, base: string, from: string): Promise<void> {
+  if (!(await mayListen(store, product.id, raw))) return;
   const token = await feedToken(store, product.id, raw);
-  if (!token) return "error";
+  if (!token) {
+    console.error("a podcast feed could not be made for a link request");
+    return;
+  }
   // In the store's language (lib/buyer-words/courses.ts).
   const w = coursesWords(store.language);
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
-    from: input.from,
+    from,
     to: normaliseEmail(raw),
     subject: w.podcastSubject(product.title).slice(0, 200),
     text: [
       w.podcastLead(product.title, store.name),
       "",
-      `${input.base}/podcast/${product.id}?t=${token}`,
+      `${base}/podcast/${product.id}?t=${token}`,
       "",
       w.podcastBody,
       "",
       w.sentBy(store.name),
     ].join("\n"),
   });
-  return sent ? "sent" : "error";
+  if (!sent) console.error("a podcast feed link was not sent");
 }
 
 /**

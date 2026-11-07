@@ -49,6 +49,7 @@ import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
+import { afterAnswer } from "@/lib/after-answer";
 import { communityWords } from "@/lib/buyer-words/community";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -473,9 +474,15 @@ async function within(key: string, limit: number): Promise<boolean | null> {
 export type LinkRequest = "sent" | "email" | "limited" | "error";
 
 /**
- * Emails a way in, when the address holds a ticket. "sent" either way: only
- * whoever reads the inbox learns whether it did, so the form cannot be used
- * to find out who bought what, or to fill a stranger's inbox.
+ * Emails a way in, when the address holds a ticket. "sent" either way, and
+ * at once, right after the limits and the community's own settings, for an
+ * address that holds one and one that does not: whether it holds one is
+ * asked, and its link made and emailed, only after the answer is sent
+ * (lib/after-answer.ts), so neither the answer's words nor its time tell
+ * them apart, and an email that could not go out is said only in the
+ * server's log. Only whoever reads the inbox learns whether it held one, so
+ * the form cannot be used to find out who bought what, or to fill a
+ * stranger's inbox.
  */
 export async function requestCommunityLink(input: {
   store: Store;
@@ -498,21 +505,40 @@ export async function requestCommunityLink(input: {
 
   const config = await readConfig(id);
   if (!config) return "error";
+  // From here the answer is "sent" whatever happens, and at once: the member's
+  // record, the ticket, the link and its email are all after it.
+  afterAnswer("sending a community link", () => sendCommunityLink(store, id, config, raw, origin));
+  return "sent";
+}
+
+/** The link itself, for an address that holds a ticket and was not taken off; nothing for one that does not. */
+async function sendCommunityLink(store: Store, id: string, config: CommunityConfig, raw: string, origin: string): Promise<void> {
   const member = await readMember(id, memberKey(raw));
-  if (member?.removed) return "sent";
-  if (!(await holdsTicket(store, config, raw))) return "sent";
+  if (member?.removed) return;
+  if (!(await holdsTicket(store, config, raw))) return;
 
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]);
-  const link = `${origin}/api/store/community/open?token=${token}`;
-  const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
-    from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
-    to: normaliseEmail(raw),
-    subject: communityWords(store.language).linkSubject(config.name).slice(0, 200),
-    text: communityWords(store.language).linkBody(config.name, link, store.name),
-  });
-  return sent ? "sent" : "error";
+  let sent = false;
+  try {
+    await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]);
+    const link = `${origin}/api/store/community/open?token=${token}`;
+    sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
+      from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
+      to: normaliseEmail(raw),
+      subject: communityWords(store.language).linkSubject(config.name).slice(0, 200),
+      text: communityWords(store.language).linkBody(config.name, link, store.name),
+    });
+  } finally {
+    // A link whose email did not go out opens nothing: it is removed at once,
+    // not left for the hour. When the send's outcome was unknown, an email that
+    // did arrive then holds a link that no longer opens, and asking again sends
+    // a new one. Removal is best effort: the hour's expiry still ends it.
+    if (!sent) {
+      await redisPipeline([["DEL", linkKey(token)]]).catch((error) => console.error("removing an unsent community link failed", error));
+    }
+  }
+  if (!sent) console.error("a community link was not sent");
 }
 
 /**

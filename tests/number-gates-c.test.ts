@@ -41,6 +41,7 @@ import { requestOrdersLink } from "@/lib/buyer-orders";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setAffiliateSetting, setCommunity, setLanguage, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
+import { afterTasks } from "./next-server-after-world";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -447,8 +448,14 @@ async function main(): Promise<void> {
 
   part("Opening an emailed link: opens it cannot count answer 503, no pass given (app/api/store/community/open/route.ts)");
   {
+    // The link and its email run after the answer (lib/after-answer.ts): what earlier answers left is run first, then
+    // this one's, as Next runs them once each answer is sent (changed 07/11/2026 with the access-link timing fix).
+    const drain = async () => { while (afterTasks.length) await (afterTasks.shift() as () => Promise<unknown>)(); };
+    await drain();
     const sent = mails.length;
-    if ((await requestCommunityLink({ store: club, email: MEMBER, ip: ip(), origin: ORIGIN })) !== "sent" || mails.length - sent !== 1) throw new Error("no community link");
+    if ((await requestCommunityLink({ store: club, email: MEMBER, ip: ip(), origin: ORIGIN })) !== "sent") throw new Error("no community link");
+    await drain();
+    if (mails.length - sent !== 1) throw new Error("no community link");
     const token = mails.at(-1)!.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
     const openIt = () => openRoute(new NextRequest(`https://marktmorgen.com/api/store/community/open?token=${token}`, { headers: { Host: "marktmorgen.com" } }));
     const isOpen = (commands: Command[]) =>

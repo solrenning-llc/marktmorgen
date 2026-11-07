@@ -18,6 +18,7 @@ import { libraryOwner, rememberBuyers, requestLibraryLink, storesBoughtFrom } fr
 import { grantImported } from "@/lib/imported-purchases";
 import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { afterTasks } from "./next-server-after-world";
 import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -32,6 +33,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
+
+/** Runs what the answers left for after them, as Next does once each answer is sent (lib/after-answer.ts). */
+async function drain(): Promise<void> {
+  while (afterTasks.length) await (afterTasks.shift() as () => Promise<unknown>)();
+}
 
 async function main(): Promise<void> {
   redis.clear();
@@ -60,9 +66,14 @@ async function main(): Promise<void> {
   is("kept in its quarter's set, which ends three years and at most a quarter on", [quarter !== "", ttl >= 3 * 365 * 86_400 - 86_400, ttl <= PERSON_RECORD_MONTHS * 31 * 86_400], [true, true, true]);
 
   part("Signing in by email");
-  is("an address that bought nothing: the same answer, and no email", [await requestLibraryLink({ email: "nobody@example.com", ip: "203.0.113.1", origin: "https://marktmorgen.com" }), sent.length], ["sent", 0]);
+  // The stores, the link and the email run after the answer since 07/11/2026 (the access-link timing fix): drained before each look.
+  const nobody = await requestLibraryLink({ email: "nobody@example.com", ip: "203.0.113.1", origin: "https://marktmorgen.com" });
+  await drain();
+  is("an address that bought nothing: the same answer, and no email", [nobody, sent.length], ["sent", 0]);
   is("not an address", await requestLibraryLink({ email: "nope", ip: "203.0.113.1", origin: "https://marktmorgen.com" }), "email");
-  is("a buyer: a link to their library", [await requestLibraryLink({ email: "BUYER@example.com", ip: "203.0.113.1", origin: "https://marktmorgen.com" }), sent.at(-1)?.to, sent.at(-1)?.text.includes("from 2 stores")], ["sent", "buyer@example.com", true]);
+  const asked = await requestLibraryLink({ email: "BUYER@example.com", ip: "203.0.113.1", origin: "https://marktmorgen.com" });
+  await drain();
+  is("a buyer: a link to their library", [asked, sent.at(-1)?.to, sent.at(-1)?.text.includes("from 2 stores")], ["sent", "buyer@example.com", true]);
   const token = sent.at(-1)?.text.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
   is("the link opens it for that address, and a made-up one for nobody", [await libraryOwner(token), await libraryOwner("0".repeat(64))], ["buyer@example.com", null]);
   for (let i = 0; i < 6; i += 1) await requestLibraryLink({ email: "buyer@example.com", ip: `203.0.113.${10 + i}`, origin: "https://marktmorgen.com" });

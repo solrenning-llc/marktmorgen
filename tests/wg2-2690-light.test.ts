@@ -21,6 +21,10 @@ is("the off-sale price's payment is never the \"from\"", lowestPaymentOnSale(pla
 is("a price on sale with no payment set adds nothing", lowestPaymentOnSale(plan, [option({ id: "p1", offSale: true }), option({ id: "p4" }), option({ id: "p3" })]), 1500);
 is("no price on sale with a payment: nothing to say", lowestPaymentOnSale(plan, [option({ id: "p1", offSale: true }), option({ id: "p4" })]), null);
 is("a plan without payments per price: nothing to say", lowestPaymentOnSale({ ...plan, options: undefined }, [option({ id: "p1" })]), null);
+// Claude 5's focal return on #2690: a price on sale that delivers nothing (no file, link, course, podcast or shipping) is
+// never offered (offeredOptions, planFor gives it no plan), so its payment is never the "from" either.
+is("a price on sale that delivers nothing is not the \"from\"", lowestPaymentOnSale(plan, [option({ id: "p1", link: null }), option({ id: "p2" })]), 1000);
+is("unless the product itself delivers (a course, a podcast, shipping)", lowestPaymentOnSale(plan, [option({ id: "p1", link: null }), option({ id: "p2" })], true), 500);
 const extras = readFileSync("components/checkout-extras.tsx", "utf8");
 is("the plan line reads it", /lowestPaymentOnSale\(current, product\.options\)/.test(extras), true);
 is("and no longer prints the plan's own lowest", extras.includes("from ${formatMoney(current.amountCents, currency)} each"), false);

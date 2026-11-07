@@ -140,9 +140,12 @@ export class TakedownNoticeUnsent extends Error {
  *
  * Written before the content is touched, so a press after a step failed (above all the notice to the creator)
  * finishes what is left instead of taking "already down" for "done". A notice once sent is never sent again.
+ * `at` is when this takedown began: the notice's idempotency key carries it, so every retry of one takedown uses the
+ * same key, while content published again and taken down again under the same notice is a new takedown with a new
+ * key, whose notice the provider never answers with the first one's receipt.
  */
 const noticeKey = (report: string, part: string) => reportKey(`${report}:n:${part}`);
-type Steps = { what: string; howLong: string; noted: boolean; counted: boolean; sent: boolean };
+type Steps = { what: string; howLong: string; at: string; noted: boolean; counted: boolean; sent: boolean };
 
 async function readSteps(key: string): Promise<Steps | null> {
   const [raw] = await redisPipeline([["GET", key]]);
@@ -151,11 +154,11 @@ async function readSteps(key: string): Promise<Steps | null> {
   if (typeof raw !== "string") throw new Error("a takedown's steps could not be read");
   const value: unknown = JSON.parse(raw);
   const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  if (!v || typeof v.what !== "string" || !v.what || typeof v.howLong !== "string" ||
+  if (!v || typeof v.what !== "string" || !v.what || typeof v.howLong !== "string" || typeof v.at !== "string" || !/^\d+$/.test(v.at) ||
       typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean") {
     throw new Error("a takedown's steps could not be read");
   }
-  return { what: v.what, howLong: v.howLong, noted: v.noted, counted: v.counted, sent: v.sent };
+  return { what: v.what, howLong: v.howLong, at: v.at, noted: v.noted, counted: v.counted, sent: v.sent };
 }
 
 async function writeSteps(key: string, steps: Steps): Promise<void> {
@@ -253,7 +256,7 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
   const up = await stillUp(store, action, origin);
   let steps: Steps;
   if (up) {
-    steps = { ...up, noted: false, counted: false, sent: false };
+    steps = { ...up, at: String(Date.now()), noted: false, counted: false, sent: false };
     await writeSteps(key, steps);
     if (!(await apply(ref, store, action))) {
       await redisPipeline([["DEL", key]]).catch(() => {});
@@ -305,8 +308,9 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
       "",
       `Our policy: ${origin}/copyright. Stores that are the subject of repeated valid notices are switched off.`,
     ].join("\n"),
-    // The same key on every try, so a notice the provider took is never sent twice.
-    idempotencyKey: `takedown-${report.id}-${part}`,
+    // The same key on every try of this takedown, so a notice the provider took is never sent twice; a later
+    // takedown of the same content under the same notice has its own `at`, so its notice is a new email.
+    idempotencyKey: `takedown-${report.id}-${part}-${steps.at}`,
   }).catch(() => false);
   if (!sent) throw new TakedownNoticeUnsent();
   await writeSteps(key, { ...steps, sent: true });

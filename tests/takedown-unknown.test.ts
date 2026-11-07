@@ -159,7 +159,8 @@ async function main(): Promise<void> {
   const again = await answer({ type: "link", id: linkId });
   is("pressed again: the notice goes out, and it says Done", [again.status, again.done], [200, 'The link "My mixtape" (https://soundcloud.com/someone/a-track)']);
   is("one email, to the creator, about the link", [sent.length, [sent[0]?.to].flat(), sent[0]?.text.includes("My mixtape"), sent[0]?.text.includes("counter-notice")], [1, [owner], true, true]);
-  is("under the same idempotency key every try used", [...new Set([...tried, sent[0]?.key])], [linkKey]);
+  const linkKeys = [...new Set([...tried, sent[0]?.key])];
+  is("under the same idempotency key every try used, this takedown's own", [linkKeys.length, linkKeys[0]?.startsWith(`${linkKey}-`)], [1, true]);
   is("nothing written or counted twice", [await strikes(), JSON.stringify(await steps()) === JSON.stringify(stepsBefore)], [2, true]);
   const third = await answer({ type: "link", id: linkId });
   is("pressed a third time, after the notice went out: nothing to do, nothing sent", [third.status, third.error, sent.length], [409, "nothing", 1]);
@@ -179,7 +180,8 @@ async function main(): Promise<void> {
   senderDown = false;
   is("not Done, and the store stays off", [off.status, off.error, Boolean((await store()).suspended)], [500, "notice_unsent", true]);
   const offAgain = await answer({ type: "store", on: true });
-  is("pressed again: the notice goes out once, under the same key", [offAgain.status, sent.length, [...new Set(tried)]], [200, 1, [`takedown-${report.id}-store-`]]);
+  const offKeys = [...new Set(tried)];
+  is("pressed again: the notice goes out once, under the same key", [offAgain.status, sent.length, offKeys.length, offKeys[0]?.startsWith(`takedown-${report.id}-store--`)], [200, 1, 1, true]);
   const offThird = await answer({ type: "store", on: true });
   is("and then nothing more", [offThird.status, sent.length], [409, 1]);
 

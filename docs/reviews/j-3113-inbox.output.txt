@@ -1,0 +1,651 @@
+
+## head
+J_3113_FOCAL head r24-inbox-exact.test.ts TARGET 3b6a5cd32d8dfbdff7425f026d8a8de48329fd3c
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+✔ forgetInboxPerson: a object ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (34.216492ms)
+✔ forgetInboxPerson: a text ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (6.63484ms)
+✔ forgetInboxPerson: a missing ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (4.52189ms)
+✔ forgetInboxPerson: a cut short MGET reply is not "not theirs" (3.799648ms)
+✔ forgetInboxPerson: a object MGET reply is not "not theirs" (3.140403ms)
+✔ forgetInboxPerson: a missing MGET reply is not "not theirs" (2.515776ms)
+✔ readInbox: a cut short MGET reply never drops live conversations from the index (5.318535ms)
+✔ readInbox: a object MGET reply never drops live conversations from the index (13.388478ms)
+✔ readInbox: a missing MGET reply never drops live conversations from the index (9.171132ms)
+✔ readInbox: a object ZREVRANGE reply is not an empty inbox (3.576845ms)
+✔ readInbox: a text ZREVRANGE reply is not an empty inbox (2.190536ms)
+✔ readInbox: a missing ZREVRANGE reply is not an empty inbox (2.202515ms)
+✔ forgetInboxPerson: a cut short DEL/ZREM reply is not "deleted" (2.828164ms)
+✔ forgetInboxPerson: a text DEL/ZREM reply is not "deleted" (2.517261ms)
+✔ forgetInboxPerson: a missing DEL/ZREM reply is not "deleted" (2.606436ms)
+✔ readInbox and forgetInboxPerson still read a well-formed inbox and erase only that person (4.697391ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 115.372841
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 812
+J_CHILD_EXIT 0
+
+
+## old
+J_3113_FOCAL old-modules r24-inbox-exact.test.ts TARGET 3b6a5cd32d8dfbdff7425f026d8a8de48329fd3c
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+✖ forgetInboxPerson: a object ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (33.919659ms)
+✖ forgetInboxPerson: a text ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (5.556241ms)
+✖ forgetInboxPerson: a missing ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (3.973564ms)
+✖ forgetInboxPerson: a cut short MGET reply is not "not theirs" (3.681956ms)
+✖ forgetInboxPerson: a object MGET reply is not "not theirs" (4.370997ms)
+✖ forgetInboxPerson: a missing MGET reply is not "not theirs" (3.026226ms)
+✖ readInbox: a cut short MGET reply never drops live conversations from the index (3.125634ms)
+✖ readInbox: a object MGET reply never drops live conversations from the index (13.20557ms)
+✖ readInbox: a missing MGET reply never drops live conversations from the index (7.582689ms)
+✖ readInbox: a object ZREVRANGE reply is not an empty inbox (4.022782ms)
+✖ readInbox: a text ZREVRANGE reply is not an empty inbox (3.234114ms)
+✖ readInbox: a missing ZREVRANGE reply is not an empty inbox (3.649988ms)
+✖ forgetInboxPerson: a cut short DEL/ZREM reply is not "deleted" (4.081407ms)
+✖ forgetInboxPerson: a text DEL/ZREM reply is not "deleted" (2.952729ms)
+✖ forgetInboxPerson: a missing DEL/ZREM reply is not "deleted" (2.291851ms)
+✔ readInbox and forgetInboxPerson still read a well-formed inbox and erase only that person (3.137656ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 1
+ℹ fail 15
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 115.252582
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50364:29
+✖ forgetInboxPerson: a object ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (33.919659ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 0 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50368:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50364:29
+✖ forgetInboxPerson: a text ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (5.556241ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 0 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50368:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50364:29
+✖ forgetInboxPerson: a missing ZREVRANGE reply is not "no conversations" (erasure never reported done with 0) (3.973564ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 0 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50368:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50372:29
+✖ forgetInboxPerson: a cut short MGET reply is not "not theirs" (3.681956ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 0 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50376:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50372:29
+✖ forgetInboxPerson: a object MGET reply is not "not theirs" (4.370997ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 0 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50376:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50372:29
+✖ forgetInboxPerson: a missing MGET reply is not "not theirs" (3.026226ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 0 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50376:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50380:29
+✖ readInbox: a cut short MGET reply never drops live conversations from the index (3.125634ms)
+  AssertionError [ERR_ASSERTION]: live buyer conversations were removed from the creator's inbox index
+
+  0 !== 2
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50383:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50380:29
+✖ readInbox: a object MGET reply never drops live conversations from the index (13.20557ms)
+  AssertionError [ERR_ASSERTION]: live buyer conversations were removed from the creator's inbox index
+
+  0 !== 2
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50383:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50380:29
+✖ readInbox: a missing MGET reply never drops live conversations from the index (7.582689ms)
+  AssertionError [ERR_ASSERTION]: live buyer conversations were removed from the creator's inbox index
+
+  0 !== 2
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50383:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50387:29
+✖ readInbox: a object ZREVRANGE reply is not an empty inbox (4.022782ms)
+  AssertionError [ERR_ASSERTION]: an unknown index read was shown as an inbox with no conversations
+
+  0 !== 'threw'
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50390:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 'threw',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50387:29
+✖ readInbox: a text ZREVRANGE reply is not an empty inbox (3.234114ms)
+  AssertionError [ERR_ASSERTION]: an unknown index read was shown as an inbox with no conversations
+
+  0 !== 'threw'
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50390:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 'threw',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50387:29
+✖ readInbox: a missing ZREVRANGE reply is not an empty inbox (3.649988ms)
+  AssertionError [ERR_ASSERTION]: an unknown index read was shown as an inbox with no conversations
+
+  0 !== 'threw'
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50390:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 'threw',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50394:29
+✖ forgetInboxPerson: a cut short DEL/ZREM reply is not "deleted" (4.081407ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 1 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50398:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50394:29
+✖ forgetInboxPerson: a text DEL/ZREM reply is not "deleted" (2.952729ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 1 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50398:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at ../../../../dev/shm/j3113-focal-AW8XkB/proof.cjs:50394:29
+✖ forgetInboxPerson: a missing DEL/ZREM reply is not "deleted" (2.291851ms)
+  AssertionError [ERR_ASSERTION]: erasure answered 1 while 1 of the person's conversations are still kept
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-AW8XkB/proof.cjs:50398:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 812
+J_CHILD_EXIT 1
+
+
+## partial
+J_3113_FOCAL head j-3113-partial-erase.proof.ts TARGET 3b6a5cd32d8dfbdff7425f026d8a8de48329fd3c
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+J_PARTIAL_ERASE {"partial":false,"injected":0,"first":1,"retainedBeforeRetry":false,"tokenBeforeRetry":null,"retry":0,"retained":false,"visitorStillReadable":false,"index":["ben.r24@example.test"]}
+✔ J partial deletion recovery; partial=false (30.968967ms)
+J_PARTIAL_ERASE {"partial":true,"injected":1,"first":"threw","retainedBeforeRetry":true,"tokenBeforeRetry":"r24inbox","retry":0,"retained":true,"visitorStillReadable":true,"index":["ben.r24@example.test"]}
+✖ J partial deletion recovery; partial=true (8.485486ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 46.061218
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j3113-focal-l772FX/proof.cjs:50418:64
+✖ J partial deletion recovery; partial=true (8.485486ms)
+  AssertionError [ERR_ASSERTION]: healthy retry must not finish with the original conversation retained after partial DEL/ZREM
+
+  true !== false
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-l772FX/proof.cjs:50451:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 127
+J_CHILD_EXIT 1
+
+
+## partial-old
+J_3113_FOCAL old-modules j-3113-partial-erase.proof.ts TARGET 3b6a5cd32d8dfbdff7425f026d8a8de48329fd3c
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+J_PARTIAL_ERASE {"partial":false,"injected":0,"first":1,"retainedBeforeRetry":false,"tokenBeforeRetry":null,"retry":0,"retained":false,"visitorStillReadable":false,"index":["ben.r24@example.test"]}
+✔ J partial deletion recovery; partial=false (32.553121ms)
+J_PARTIAL_ERASE {"partial":true,"injected":1,"first":"threw","retainedBeforeRetry":true,"tokenBeforeRetry":"r24inbox","retry":0,"retained":true,"visitorStillReadable":true,"index":["ben.r24@example.test"]}
+✖ J partial deletion recovery; partial=true (10.346552ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 50.825747
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j3113-focal-QkkGO6/proof.cjs:50391:64
+✖ J partial deletion recovery; partial=true (10.346552ms)
+  AssertionError [ERR_ASSERTION]: healthy retry must not finish with the original conversation retained after partial DEL/ZREM
+
+  true !== false
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-QkkGO6/proof.cjs:50424:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 127
+J_CHILD_EXIT 1
+
+
+## partial-initial
+J_3113_FOCAL head j-3113-partial-erase.proof.ts TARGET 3b6a5cd32d8dfbdff7425f026d8a8de48329fd3c
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+J_PARTIAL_ERASE {"partial":false,"injected":0,"first":1,"retainedBeforeRetry":false,"tokenBeforeRetry":null,"retry":0,"retained":false,"index":["ben.r24@example.test"]}
+✔ J partial deletion recovery; partial=false (40.375026ms)
+J_PARTIAL_ERASE {"partial":true,"injected":1,"first":"threw","retainedBeforeRetry":true,"tokenBeforeRetry":"r24inbox","retry":0,"retained":true,"index":["ben.r24@example.test"]}
+✖ J partial deletion recovery; partial=true (6.338622ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.956401
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j3113-focal-yPZLQI/proof.cjs:50390:64
+✖ J partial deletion recovery; partial=true (6.338622ms)
+  AssertionError [ERR_ASSERTION]: healthy retry must not finish with the original conversation retained after partial DEL/ZREM
+
+  true !== false
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-yPZLQI/proof.cjs:50421:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 123
+J_CHILD_EXIT 1
+
+
+## partial-old-initial
+J_3113_FOCAL old-modules j-3113-partial-erase.proof.ts TARGET 3b6a5cd32d8dfbdff7425f026d8a8de48329fd3c
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+J_PARTIAL_ERASE {"partial":false,"injected":0,"first":1,"retainedBeforeRetry":false,"tokenBeforeRetry":null,"retry":0,"retained":false,"index":["ben.r24@example.test"]}
+✔ J partial deletion recovery; partial=false (28.972904ms)
+J_PARTIAL_ERASE {"partial":true,"injected":1,"first":"threw","retainedBeforeRetry":true,"tokenBeforeRetry":"r24inbox","retry":0,"retained":true,"index":["ben.r24@example.test"]}
+✖ J partial deletion recovery; partial=true (5.833241ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41.361467
+
+✖ failing tests:
+
+test at ../../../../dev/shm/j3113-focal-CSljjm/proof.cjs:50363:64
+✖ J partial deletion recovery; partial=true (5.833241ms)
+  AssertionError [ERR_ASSERTION]: healthy retry must not finish with the original conversation retained after partial DEL/ZREM
+
+  true !== false
+
+      at TestContext.<anonymous> (/dev/shm/j3113-focal-CSljjm/proof.cjs:50394:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 123
+J_CHILD_EXIT 1
+
+
+## inbox
+J_3113_FOCAL head inbox.test.ts TARGET 3b6a5cd32d8dfbdff7425f026d8a8de48329fd3c
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+The rules
+  ok    off until set, saved replies read strictly
+  ok    a message keeps its lines, nothing else that is not text
+  ok    addresses, links and phone numbers are taken out before the writing help
+  ok    open conversations first, then the newest
+
+A store, its chat off
+  ok    closed while off
+
+A visitor starts a conversation
+  ok    open once on
+  ok    an address is needed, and a few words
+  ok    started, with a token only the visitor holds
+  ok    the owner told, with a link to answer in the studio
+
+Marked funded incoming messages need the paid resource month
+  ok    a new funded conversation without actual approval stays closed
+  ok    a funded follow-up without actual approval is not written
+  ok    existing conversations and messages remain readable and unchanged
+  ok    refused incoming work consumes no inbox allowance or supplier email
+  ok    a second message within the half hour: not told again
+
+Read with the token only
+  ok    their messages
+  ok    a wrong token opens nothing
+
+The studio
+  ok    one conversation, two unread, waiting
+  ok    the studio never sees the token
+  ok    read once opened
+
+The answer
+  ok    kept and emailed to the visitor alone, in Spanish, with the link back
+  ok    in their chat, without who on the team wrote it
+
+Closed, opened again, given to someone
+  ok    closed
+  ok    writing again opens it
+  ok    only someone who may answer
+  ok    given to the helper
+  ok    the helper is the one told now
+
+The contact form files its messages too
+  ok    sent as before
+  ok    and in the inbox
+
+A suggested answer
+  ok    written, and counted as one job
+  ok    from the store's questions and answers and the conversation
+  ok    never the visitor's address, name or phone number
+
+Not without end
+  ok    five from one connection in an hour, then no more
+
+32 checks, all passing.
+HTTP_MOCK_CALLS 10
+MEMORY_REDIS_RUN 388
+J_CHILD_EXIT 0
+
+
+## checked
+J_3113_FOCAL head inbox-checked.test.ts TARGET 3b6a5cd32d8dfbdff7425f026d8a8de48329fd3c
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+The words
+  ok    the time it last checked, in the creator's own clock
+  ok    and once the automatic checks stop, the owner's sentence
+
+How it behaves
+  ok    the first time said is when the server read the list, not when the browser drew it
+  ok    a check that answered moves the time; one that did not says so and keeps the last one
+  ok    the time is there to read but never announced each minute; only a check someone asked for, a failure and the pause are read out, politely
+  ok    the reading is unchanged: once a minute, while in view, 30 times at the most; paused and said right after the last one
+
+6 checks, all passing.
+HTTP_MOCK_CALLS 0
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0
+
+
+## types
+{
+  "scope": "direct roots plus imported types; imported dependency bodies not separately checked",
+  "roots": [
+    "lib/inbox.ts",
+    "tests/r24-inbox-exact.test.ts",
+    "tests/j-3113-partial-erase.proof.ts"
+  ],
+  "sources": 877,
+  "options": {
+    "target": "ES2017",
+    "strict": true,
+    "moduleResolution": "Bundler"
+  },
+  "diagnostics": []
+}
+
+
+## lint
+
+/workspace/scratch/72485b6ecfa0/j-review-3113-inbox/tests/j-3113-partial-erase.proof.ts
+  31:16  warning  'withReplyFor' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 1 problem (0 errors, 1 warning)
+
+
+
+## own-lint
+
+/workspace/scratch/72485b6ecfa0/j-review-3113-inbox/tests/j-3113-partial-erase.proof.ts
+  31:16  warning  'withReplyFor' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 1 problem (0 errors, 1 warning)
+
+
+
+## scanner
+Public data check: 4323 tracked files; 0 file(s) require correction.
+
+
+## diff
+
+## Initial probe source before visitorThread extension
+/**
+ * Rule 24 (synthetic): an unknown or off-shape Redis reply in the inbox is
+ * never read as "nothing there" or "gone". A person's erasure never answers
+ * done while their conversations stay kept, and the creator's inbox index
+ * never drops a conversation that still exists.
+ */
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+import { fileContact, forgetInboxPerson, readInbox, tokenHandle } from "@/lib/inbox";
+import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
+import { store as redis } from "./redis-stub";
+import { paidPeriod } from "./billing-period-fixture";
+
+const OWNER = "owner.r24@example.test";
+const ANA = "ana.r24@example.test";
+const BEN = "ben.r24@example.test";
+
+async function setup() {
+  redis.clear();
+  await claimHandle(OWNER, "r24inbox", "R24 Inbox", "");
+  await ensureStatsId(OWNER);
+  await setSubscription(OWNER, { customerId: "cus_R24Inbox01", subscriptionId: "sub_R24Inbox01", active: true, tier: "pro", trialEnds: 0, period: paidPeriod() });
+  const store = (await storeForEmail(OWNER))!;
+  assert.equal(await fileContact({ store, email: ANA, name: "Ana", text: "Hello, a question about the course." }), true);
+  assert.equal(await fileContact({ store, email: BEN, name: "Ben", text: "Hello, do you do collaborations?" }), true);
+  assert.equal((await readInbox(store.statsId)).length, 2);
+  return store.statsId!;
+}
+
+/** Replaces the reply of the first pipeline whose first command is `op`. */
+async function withReplyFor<T>(op: string, reply: unknown[], run: () => Promise<T>): Promise<T> {
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === op ? [...reply] : original(commands))) as typeof redis.pipeline;
+  try {
+    return await run();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+
+for (const partial of [false,true]) test("J partial deletion recovery; partial="+partial, async()=>{
+ const statsId=await setup();
+ const ana=(await readInbox(statsId)).find(c=>c.email===ANA)!;
+ const key=`nl:inbox:${statsId}:c:${ana.id}`;
+ const before=JSON.parse(String(redis.run(["GET",key]))) as {token:string};
+ const original=redis.pipeline.bind(redis);
+ let injected=0;
+ redis.pipeline=async(commands)=>{
+  if(partial && commands[0]?.[0]==="DEL" && commands[1]?.[0]==="ZREM") {
+   injected++;
+   // Redis pipeline may execute the later ZREM even when DEL errors. The REST
+   // wrapper then throws on that DEL error. No DEL dispatched in this fixture.
+   await original([commands[1]]);
+   throw new Error("synthetic DEL failed, later ZREM applied");
+  }
+  return original(commands);
+ };
+ let first:unknown;
+ try {first=await forgetInboxPerson(statsId,ANA);}catch {first="threw";}finally{redis.pipeline=original;}
+ const retainedBeforeRetry=redis.run(["GET",key])!==null;
+ const tokenBeforeRetry=await tokenHandle(before.token);
+ const retry=await forgetInboxPerson(statsId,ANA);
+ const retained=redis.run(["GET",key])!==null;
+ console.log('J_PARTIAL_ERASE',JSON.stringify({partial,injected,first,retainedBeforeRetry,tokenBeforeRetry,retry,retained,index:(await readInbox(statsId)).map(c=>c.email)}));
+ assert.equal(injected,partial?1:0);
+ assert.equal(first,partial?"threw":1);
+ assert.equal(retry,0);
+ assert.equal(retained,false,"healthy retry must not finish with the original conversation retained after partial DEL/ZREM");
+});
+
+## Explicit exit status
+{"head": 0, "old": 1, "partial": 1, "partial-old": 1, "inbox": 0, "checked": 0, "types": 0, "lint": 0, "scanner": 0, "diff": 0, "own-lint": 0}

@@ -25,6 +25,15 @@ import { DEFAULT_LOOK, type FontId, type LookPaint, contrast, lookColours, mix, 
 import { photoUrl } from "@/lib/photo-limits";
 import { SITE_URL } from "@/lib/site-url";
 
+/**
+ * How many times one email's logo is costed as fetched (tests/plan-cost-registry.ts, line email-logo): the reader's
+ * app, their mail provider's picture proxy, a second device and a forward, each taken as a fetch the CDN did not
+ * keep. A review ceiling, not a measurement: the logo is drawn at most once an email, only in emails counted against
+ * the store's figures before they are sent (lib/mail.ts, lib/email.ts), and its address is kept for a year
+ * everywhere, so a reader's app fetches it again only from a new device.
+ */
+export const EMAIL_LOGO_READS = 4;
+
 /** What every word in an email reads at, at least (WCAG 1.4.6). */
 export const EMAIL_TEXT_RATIO = 7;
 

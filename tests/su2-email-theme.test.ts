@@ -10,6 +10,7 @@
  * the check cannot agree with the code by sharing its mistake.
  */
 import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { render } from "@/lib/mail";
 import * as emailThemeModule from "@/lib/email-theme";
 import { emailColourNotes, emailColourNotice, emailTheme } from "@/lib/email-theme";
@@ -160,27 +161,38 @@ part("The logo is the store's own photo, served from where it already is, with i
 
 part("The logo's reads are a costed line with a ceiling before anything is sent (MR; review rv34 of #3030 at ac244fff, MEDIUM)");
 {
-  // Every store email may carry the logo, on by default, and each reader's app may fetch it from the CDN: up to
-  // MAX_PHOTO_BYTES each time. Priced here independently of the registry: the CDN's request (US$2 a million) and its
-  // Fast Data Transfer of the photo (US$0.15 a GB, docs/ses-callback-cost-2026-11-05.md), which the line must cover
-  // at least, for every email of every figure a plan sends, each fetched EMAIL_LOGO_READS times.
+  // Every email render draws may carry the logo, on by default, and each reader's app may fetch it from the CDN: up
+  // to MAX_PHOTO_BYTES each time. Priced here independently of the registry: the CDN's request (US$2 a million) and
+  // its Fast Data Transfer of the photo (US$0.15 a GB, docs/ses-callback-cost-2026-11-05.md), which the line must
+  // cover at least, for every monthly email and store email a plan sends (the two figures render's emails are taken
+  // from; access emails are written without it, held below), each fetched EMAIL_LOGO_READS times.
   const reads = (emailThemeModule as Record<string, unknown>).EMAIL_LOGO_READS;
   is("the reads one email's logo is costed at are a whole number of at least one", typeof reads === "number" && Number.isSafeInteger(reads) && reads >= 1, true);
   const perRead = 2 / 1_000_000 + MAX_PHOTO_BYTES * (0.15 / 1e9);
   const line = COST_LINES.find((l) => l.id === "email-logo");
   is("the registry has a line for the logo in store emails", Boolean(line), true);
   for (const tier of ["creator", "pro", "scale"] as const) {
-    const emails = monthlyEmails(tier) + STORE_ALLOWANCES[tier].email + STORE_ALLOWANCES[tier].transactional;
+    const emails = monthlyEmails(tier) + STORE_ALLOWANCES[tier].email;
     const floor = emails * (typeof reads === "number" ? reads : 1) * perRead;
     is(`${tier}: the line prices every email's logo at every read, at least`, line ? line.monthlyUsd(tier) >= floor && floor > 0 : false, true);
   }
   is("the line names where the emails are counted before sending and where the logo is drawn",
     line ? ["lib/mail.ts", "lib/email-theme.ts", "lib/photo-limits.ts", "lib/store-allowance-rules.ts"].every((f) => line.sources.some((s) => s.file === f)) : false, true);
-  const trialEmails = TRIAL_MONTHLY_EMAILS + NON_PAYING_ALLOWANCES.trial.email + NON_PAYING_ALLOWANCES.trial.transactional;
+  const trialEmails = TRIAL_MONTHLY_EMAILS + NON_PAYING_ALLOWANCES.trial.email;
   const trialFloor = trialEmails * (typeof reads === "number" ? reads : 1) * perRead;
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   const nonPaying = registry.slice(registry.indexOf("export function nonPayingWorst"), registry.indexOf("export type AddOnLine"));
   is("a trial's emails carry the logo too, and its worst window prices them", nonPaying.includes("EMAIL_LOGO_EMAIL") && nonPayingWorst() > trialFloor, true);
+  // No email render draws is sent as an access email (the figure the line leaves out): after each render, the next
+  // figure named is never "transactional".
+  const renderers = ["lib/community-event-mail.ts", "lib/community-mail.ts", "lib/member-nudge.ts", "lib/product-updates.ts", "lib/review-requests.ts", "lib/winback-send.ts", "lib/yearly-ask.ts", "lib/welcome-offer-send.ts", "lib/waitlist.ts", "app/api/store/mail/route.ts", "lib/mail.ts"];
+  const sentAsAccess = renderers.filter((file) => {
+    const code = readFileSync(file, "utf8");
+    return [...code.matchAll(/\brender\(/g)].some((m) => /^kind: "transactional"/.test(code.slice(m.index).match(/kind: "[a-z]+"/)?.[0] ?? ""));
+  });
+  is("no email render draws is sent as an access email", sentAsAccess, []);
+  const importers = execSync("grep -rlE 'import \\{[^}]*\\brender\\b[^}]*\\} from \"@/lib/mail\"' lib app || true", { encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+  is("and that is every file that draws one", importers.length > 0 && importers.every((f) => renderers.includes(f)), true);
   const one = render(storeWith({ theme: "bold" }, PHOTO), "New loaf", BODY, "tok").html;
   is("one email draws the logo once, never more, whatever its theme", [...one.matchAll(/\/api\/photo\//g)].length, 1);
 }

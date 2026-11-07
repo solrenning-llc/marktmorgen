@@ -1277,6 +1277,8 @@ export async function sendDueSteps(
           // a growing delay; and at most MAX_WAITS_PER_RUN times a run (lib/flow-retry.ts).
           const reason: WaitReason = result.stopped === "allowance" || result.stopped === "day" || result.stopped === "sender" || result.stopped === "paused" || result.stopped === "portion" ? result.stopped : "retry";
           const why =
+            // Its poll (lib/mail-poll-votes.ts): the list keeps the most polls at once, or the poll's saving could not be confirmed.
+            result.stopped === "poll_full" ? "Waiting: your list keeps the most polls at once, so this email's poll cannot start a new round yet. It goes out by itself once a poll leaves the count." : result.stopped === "poll_failed" ? "Waiting: whether this email's poll was saved could not be confirmed. It is tried again by itself." :
             result.stopped === "allowance" ? "Waiting: this month's emails ran out. It goes out when the month turns." : result.stopped === "day" || result.stopped === "portion" || result.stopped === "sender" ? "Waiting for room to send; it goes out by itself." : result.stopped === "paused" ? "Waiting: email to your list is paused for now." : "Waiting to be tried again later; it was not sent.";
           const window = allowanceWindow(store, now * 1000);
           waiting = await waitOrStop(flow.id, group, index, rest.map((email) => ({ email, reason, note: why })), now, { windowEnd: window ? Math.floor(window.end / 1000) : null, pauseUntil: result.pause?.until ?? null });

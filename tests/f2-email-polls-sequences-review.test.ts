@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   const response = await pollPost(new NextRequest(`https://marktmorgen.com/api/mail/poll${new URL(link).search}`, { method: "POST", body: new URLSearchParams({ do: "vote" }), headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "198.51.100.40" } }));
   is("dee answered", new URL(response.headers.get("location") ?? "https://x/").searchParams.get("done"), "recorded");
   const html = renderToStaticMarkup(await MailPollResults({ listId: list2, subjects: new Map([[stepCampaign(flow2, step), "Lesson poll"]]) }));
-  is("one answer: the round under its step, no count, no share", [html.includes("Lesson poll"), html.includes("Totals show once 5 people have answered."), /\(\d+%\)/.test(html)], [true, true, false]);
+  is("one answer: the round under its step, no count, no share", [html.includes("Lesson poll"), html.includes("Totals show after the poll closes, if at least 5 readers answered."), /\(\d+%\)/.test(html)], [true, true, false]);
 
   part("Renamed in the middle of a round: answers still count");
   await upsertContact(list2, "eve@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);

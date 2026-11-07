@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   is("the answers are links with their own words", ["A video course", "A printable guide", "A template pack"].every((answer) => new RegExp(`<a href="[^"]*/poll\\?[^"]*"[^>]*>${answer}</a>`).test(anaMail.html)), true);
   is("as buttons at least 44 px tall (12 px padding around a 25.6 px line)", /<a href="[^"]*\/poll\?[^"]*" style="display:inline-block;padding:12px 22px/.test(anaMail.html), true);
   is("the question is a heading", anaMail.html.includes(">What should I make next?</h2>"), true);
-  is("the email says who sees what, truly", anaMail.html.includes("only once at least 5 people have answered, never who picked what"), true);
+  is("the email says who sees what, truly", anaMail.html.includes("after the poll closes and only if at least 5 readers answered, never with names"), true);
   is("no pixel and no raw poll line", [/<img/i.test(anaMail.html), anaMail.html.includes("@poll"), anaMail.text.includes("@poll")], [false, false, false]);
   is("the text version lists each answer with its link", anaLinks.every((link, i) => anaMail.text.includes(`${["A video course", "A printable guide", "A template pack"][i]}: ${link}`)), true);
   is("sending recorded no answer", (await total()), 0);
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
 
   part("The studio shows totals only");
   const html = renderToStaticMarkup(await MailPollResults({ listId, subjects: new Map([[created.broadcast.id, "Help me choose"]]) }));
-  is("the question and the subject; two answers are too few to show", [html.includes("What should I make next?"), html.includes("Help me choose"), html.includes("A video course: 2"), html.includes("Totals show once 5 people have answered")], [true, true, false, true]);
+  is("the question and the subject; two answers are too few to show", [html.includes("What should I make next?"), html.includes("Help me choose"), html.includes("A video course: 2"), html.includes("Totals show after the poll closes, if at least 5 readers answered")], [true, true, false, true]);
   is("never who answered", [html.includes("ana"), html.includes("ben@"), html.includes(voterOf(listId, "ana@example.com") as string)], [false, false, false]);
 
   part("Privacy: copied, erased with the person and with the store");

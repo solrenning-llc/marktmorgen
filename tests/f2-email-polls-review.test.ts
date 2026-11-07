@@ -10,7 +10,7 @@
  *     deleted while it is kept: a new one past the cap is refused, with its
  *     reason in the studio, and a poll whose time is over leaves the count
  *     by itself.
- *   - A poll that could not be written down says so, not that the email
+ *   - A poll whose saving could not be confirmed says so, not that the email
  *     service asked to slow down.
  *   - The store's public request is taken before the poll is read: a store
  *     whose requests are refused reads nothing of the poll.
@@ -72,22 +72,28 @@ async function main(): Promise<void> {
   part("The email and the page say exactly when totals show");
   is("five answers at the least", POLL_MIN_SHOWN, 5);
   is("in every language, the number is said", Object.keys(LANGUAGES).every((code) => pollWords(code).emailNote("Shop").includes("5") && pollWords(code).privacy("Shop").includes("5")), true);
-  is("in English, plainly", pollWords("en").privacy("Shop"), "Shop sees only how many people picked each answer, and only once at least 5 people have answered, never who picked what.");
+  is("in English, plainly", pollWords("en").privacy("Shop"), "Shop sees only totals, after the poll closes and only if at least 5 readers answered, never with names.");
 
   part("Totals hidden below the least, shown from it");
   const pollId = hex24(1);
   is("a poll opened", await openPoll(listId, store.handle, pollId, poll, now), "ok");
-  const voters = ["a1", "a2", "a3", "a4", "a5"].map((name) => voteLinks(listId, store.handle, pollId, `${name}@example.com`, 2)!);
+  const voters = ["a1", "a2", "a3", "a4", "a5"].map((name) => voteLinks(listId, store.sid, pollId, `${name}@example.com`, 2)!);
   is("one answer", await press(voters[0][0]), "recorded");
   let results = (await pollResults(listId))!;
   is("one answer shows no total and no count", [results[0].shown, results[0].total, results[0].answers.map((a) => a.count)], [false, null, [null, null]]);
   let html = renderToStaticMarkup(await MailPollResults({ listId, subjects: new Map() }));
-  is("the studio says when totals show, and no count or share", [html.includes("Totals show once 5 people have answered."), /\(\d+%\)/.test(html), html.includes("Monday:")], [true, false, false]);
+  is("the studio says when totals show, and no count or share", [html.includes("Totals show after the poll closes, if at least 5 readers answered."), /\(\d+%\)/.test(html), html.includes("Monday:")], [true, false, false]);
   for (const links of voters.slice(1)) await press(links[1]);
   results = (await pollResults(listId))!;
-  is("five answers show", [results[0].shown, results[0].total, results[0].answers.map((a) => a.count)], [true, 5, [1, 4]]);
+  is("five answers, still open: still hidden (tests/f2-email-polls-review-2.test.ts)", [results[0].shown, results[0].total], [false, null]);
+  const record = `nl:mpoll:${listId}:${pollId}`;
+  const [rawRecord] = (await redis.pipeline([["GET", record]])) as [string];
+  await redis.pipeline([["SET", record, JSON.stringify({ ...(JSON.parse(rawRecord) as Record<string, unknown>), closes: now - 1 }), "KEEPTTL"]]);
+  results = (await pollResults(listId))!;
+  is("five answers, closed: shown", [results[0].shown, results[0].total, results[0].answers.map((a) => a.count)], [true, 5, [1, 4]]);
   html = renderToStaticMarkup(await MailPollResults({ listId, subjects: new Map() }));
   is("and the studio draws them", [html.includes("Monday: 1 (20%)"), html.includes("Friday: 4 (80%)")], [true, true]);
+  await redis.pipeline([["SET", record, rawRecord, "KEEPTTL"]]);
 
   part("The cap: never a kept poll deleted; a new one refused, with its reason");
   for (let i = 2; i <= MAX_POLLS_KEPT; i += 1) is(`poll ${i} opened`, await openPoll(listId, store.handle, hex24(i), poll, now), "ok");
@@ -135,13 +141,13 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const paused = (await advanceBroadcast(shaky.broadcast.id, storeForHandle, Date.now() + 60_000))!;
   redis.pipeline = pipe;
-  is("it says its poll could not be written down, not that the service asked to slow down", [paused.note.includes("poll could not be written down"), paused.note.includes("slow down")], [true, false]);
+  is("it says whether its poll was saved could not be confirmed, not that the service asked to slow down", [paused.note.includes("poll was saved could not be confirmed"), paused.note.includes("slow down")], [true, false]);
 
   part("The store's public request comes before anything of the poll is read");
   const [open] = (await redis.pipeline([["ZREVRANGE", `nl:mpoll:ix:${list2}`, 0, 0]])) as [string[]];
-  const ballot = voteLinks(list2, fresh.handle, open[0], "ana@example.com", 2)![0];
-  is("the link names its store, signed", new URL(ballot).searchParams.get("h"), fresh.handle);
-  is("another store's name breaks the signature", await press(ballot.replace(`h=${fresh.handle}`, "h=poll-other")), "status 404");
+  const ballot = voteLinks(list2, fresh.sid, open[0], "ana@example.com", 2)![0];
+  is("the link names its store by its id, signed", new URL(ballot).searchParams.get("i"), fresh.sid);
+  is("another store's id breaks the signature", await press(ballot.replace(`i=${fresh.sid}`, `i=${"0".repeat(32)}`)), "status 404");
   // The store's window of requests is used up: every count comes back past any limit.
   const touched: string[] = [];
   redis.pipeline = (async (commands: (string | number)[][]) => {

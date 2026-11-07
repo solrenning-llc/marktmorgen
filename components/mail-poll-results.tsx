@@ -20,7 +20,7 @@ export async function MailPollResults({ listId, subjects }: { listId: string | n
     <section aria-labelledby="poll-results-title" className="card mt-8 p-6 sm:p-8">
       <h2 id="poll-results-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Poll results</h2>
       <p className="mt-2 max-w-2xl text-sm text-ink-soft">
-        {`Totals only: who picked what is never shown, to you or to anyone, and totals show once ${POLL_MIN_SHOWN} people have answered, so a total never says what one of a few picked. Each reader answers once, from their own email, and can take their answer back. A poll takes answers for ${POLL_OPEN_DAYS} days after its email goes out; its totals stay here ${POLL_KEEP_DAYS} days more.`}
+        {`Totals only, never with names, to you or to anyone. A poll's totals show after it closes, when no answer can move them, and only if at least ${POLL_MIN_SHOWN} readers answered; answers from you and your team are not counted. Each reader answers once, from their own email, and can take their answer back. A poll takes answers for ${POLL_OPEN_DAYS} days after its email goes out; its totals stay here ${POLL_KEEP_DAYS} days more.`}
       </p>
       <p className="mt-2 max-w-2xl text-sm text-ink-soft">
         {`A poll in a sequence email is counted in rounds of ${SEQUENCE_POLL_ROUND_DAYS} days. Each round takes answers until ${POLL_OPEN_DAYS} days after its last day, and its totals stay here ${SEQUENCE_POLL_KEEP_DAYS} days more. If you change the poll's words, a new count starts.`}
@@ -55,14 +55,14 @@ export async function MailPollResults({ listId, subjects }: { listId: string | n
                   ))}
                 </ul>
               ) : (
-                // Below the fewest shown, nothing of the count is drawn: not a total, not a share, not a bar.
+                // Open, or below the fewest shown: nothing of the count is drawn, not a total, not a share, not a bar.
                 <>
                   <ul className="mt-2 list-disc pl-5 text-sm">
                     {poll.answers.map((answer, i) => (
                       <li key={i} className="[overflow-wrap:anywhere]">{answer.text}</li>
                     ))}
                   </ul>
-                  <p className="mt-2 text-sm text-ink-soft">{`Totals show once ${POLL_MIN_SHOWN} people have answered.`}</p>
+                  <p className="mt-2 text-sm text-ink-soft">{`Totals show after the poll closes, if at least ${POLL_MIN_SHOWN} readers answered.`}</p>
                 </>
               )}
             </li>

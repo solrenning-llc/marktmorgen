@@ -159,7 +159,7 @@ async function main(): Promise<void> {
 
   part("The studio: the round's totals under the step's subject");
   const html = renderToStaticMarkup(await MailPollResults({ listId: list, subjects: new Map([[campaign, "Your first week"]]) }));
-  is("the question, the step and the totals", [html.includes("Which lesson helped most?"), html.includes("Your first week"), html.includes("Totals show once 5 people have answered."), html.includes("sequence")], [true, true, true, true]);
+  is("the question, the step and the totals", [html.includes("Which lesson helped most?"), html.includes("Your first week"), html.includes("Totals show after the poll closes, if at least 5 readers answered."), html.includes("sequence")], [true, true, true, true]);
   is("never who answered", [html.includes("ana"), html.includes("ben@")], [false, false]);
 
   part("Privacy: the person's answers go with them");

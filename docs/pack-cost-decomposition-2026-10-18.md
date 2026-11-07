@@ -132,10 +132,10 @@ Credits do what larger packs do without asking the buyer to guess which resource
 
 | List emails | At Resend's $0.90 (today): price, per 1,000 | At SES's $0.23, SES only: price, per 1,000 | Net at SES |
 | --- | --- | --- | --- |
-| 2,500 | $64, $25.60 | $29, $11.60 | 60.65% |
-| 10,000 | $199, $19.90 | $64, $6.40 | 60.37% |
-| 25,000 | $469, $18.76 | $131, $5.24 | 60.15% |
-| 100,000 | $1,822, $18.22 | $470, $4.70 | 60.04% |
+| 2,500 | $64, $25.60 | $30, $12.00 | 60.60% |
+| 10,000 | $199, $19.90 | $67, $6.70 | 60.29% |
+| 25,000 | $469, $18.76 | $140, $5.60 | 60.15% |
+| 100,000 | $1,822, $18.22 | $506, $5.06 | 60.04% |
 
 What must be built: the pack's emails sent with `only: "amazon"` and held, not handed to Resend, while Amazon is down or out of its day; the pack's figure counting only what SES took; no attachments on list emails, or their $0.12 a GB counted; and the page saying pack emails can wait. The order pack's access and store emails must not wait (a buyer is owed their access), so they stay at Resend's rate.
 
@@ -151,15 +151,15 @@ No other unit cost can be lowered from its own page: visits, the database and AI
 | Option 2: 100,000 in a prepaid pack | $18.22 | 26.99× |
 | Option 3: from a $250 prepaid credit | $19.39 | 28.73× |
 | Option 3: from a $1,000 prepaid credit | $18.35 | 27.19× |
-| Option 4: 2,500 in a prepaid pack, SES only | $11.60 | 17.19× |
-| Options 3 and 4: from a $250 prepaid credit, SES only | $4.86 | 7.20× |
-| Options 3 and 4: from a $1,000 prepaid credit, SES only | $4.60 | 6.81× |
+| Option 4: 2,500 in a prepaid pack, SES only | $12.00 | 17.78× |
+| Options 3 and 4: from a $250 prepaid credit, SES only | $5.24 | 7.76× |
+| Options 3 and 4: from a $1,000 prepaid credit, SES only | $4.96 | 7.35× |
 
 ## The one structural option that does the most
 
 **Prepaid credits bought in larger amounts (option 3).** It is the only option that lowers factors 3 and 4 for every resource at once while staying prepaid, as the owner's rule requires (bought before use, stopping at zero), and with no bet by the buyer on one resource (option 2). At $250 a credit buys list email at $19.39 a thousand, at $1,000 $18.35, against $25.60 in the proposal's pack; every other resource falls the same way (table above). Its floor is factors 1 and 2, about 19.81× a unit's cost, which no structure removes while the 60% rule and the receiving model stand.
 
-For email specifically the larger lever is the supplier, not the structure: sending what a credit buys through Amazon SES alone (option 4) takes the $1,000 credit's rate to $4.60 a thousand. Even so it stays 6.81× HighLevel's rate: a creator who sends a lot of email will still compare it with ClickFunnels' and Kajabi's allowances.
+For email specifically the larger lever is the supplier, not the structure: sending what a credit buys through Amazon SES alone (option 4) takes the $1,000 credit's rate to $4.96 a thousand. Even so it stays 7.35× HighLevel's rate: a creator who sends a lot of email will still compare it with ClickFunnels' and Kajabi's allowances.
 
 ## What this does not decide
 

@@ -455,7 +455,10 @@ async function main(): Promise<void> {
   };
   const second = await applyGive(store, target, { change: "give", to, emails: ["twin@example.org", "solo@example.org"], expect: 2 }, async () => ({ ok: true }));
   redis.pipeline = twin;
-  is("the click whose write found the gift already there is not counted for it; the one it gave is", [second.kind === "done" ? [second.done.changed, second.done.already] : second.kind, await dayCount()], [[["solo@example.org"], ["twin@example.org"]], 1]);
+  // Changed assertion (rule 23, coordinator on the second pre-review, LEVE 2): only an HSETNX answered exactly 0 may give
+  // the day back, and grantImported says false for that 0 and for an unknown answer alike, so the day stays taken for
+  // both until it hands over its exact answers (lib/imported-purchases.ts, held for #2576).
+  is("the click whose write found the gift already there is said as already given; the day stays taken (its 0 is not seen exactly)", [second.kind === "done" ? [second.done.changed, second.done.already] : second.kind, await dayCount()], [[["solo@example.org"], ["twin@example.org"]], 2]);
   await redisPipeline([["HDEL", twinKey, to], ["HDEL", importedKey(store.statsId!, "solo@example.org"), to]]);
   for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
   // An HSETNX answered in no known shape (neither 0 nor 1) may have written: the day stays taken (unknown fails closed).

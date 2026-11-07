@@ -577,10 +577,10 @@ export async function applyGive(store: Store, find: FindGive, ask: GiveAsk, pay:
       // The writes may or may not have landed: what reads back decides, person by person, and the day stays taken.
       console.error("giving a course in bulk failed", error);
     }
-    // A grant this write did not make (its HSETNX did not answer 1: another member's gift, or a second click's, was
-    // there first) gave nothing here, so it is not counted in the day; the one that did make it is.
-    const unwritten = wrote ? wrote.filter((made) => !made).length : 0;
-    if (unwritten > 0) await giveBackMany(day, unwritten);
+    // Past this point the day stays taken for every grant. Only an HSETNX answered exactly 0 wrote nothing, and
+    // grantImported says false both for that 0 and for an answer of no known shape (which may have written), so
+    // nothing is given back on its word: unknown fails closed. Giving back the exact 0s needs grantImported to
+    // hand over its exact answers (lib/imported-purchases.ts, held for #2576).
   } else if (statsId) {
     try {
       await takeGivenMany(statsId, sorted.targets, target.productId, STUDIO_GIVE_PREFIX, store);

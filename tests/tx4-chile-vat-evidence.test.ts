@@ -22,3 +22,7 @@ test("Chile public evidence cannot fill or fund the complete compliance ceiling"
   assert.equal(line.reserveReviewed, false);
   assert.equal(allocateEntireLlcFixedCosts(CURRENT_LLC_FIXED_COST_CEILINGS), null);
 });
+test("Chile evidence says no registration threshold was found and the statute was not read", () => {
+  const doc = readFileSync(path, "utf8");
+  for (const text of ["No monetary registration threshold was identified in the sources read", "must not be gated on a sales counter", "Statute not read"]) assert.ok(doc.includes(text), text);
+});

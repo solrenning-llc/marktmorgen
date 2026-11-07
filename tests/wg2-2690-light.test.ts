@@ -26,7 +26,7 @@ is("a plan without payments per price: nothing to say", lowestPaymentOnSale({ ..
 is("a price on sale that delivers nothing is not the \"from\"", lowestPaymentOnSale(plan, [option({ id: "p1", link: null }), option({ id: "p2" })]), 1000);
 is("unless the product itself delivers (a course, a podcast, shipping)", lowestPaymentOnSale(plan, [option({ id: "p1", link: null }), option({ id: "p2" })], true), 500);
 const extras = readFileSync("components/checkout-extras.tsx", "utf8");
-is("the plan line reads it", /lowestPaymentOnSale\(current, product\.options\)/.test(extras), true);
+is("the plan line reads it, with what the product itself delivers", /lowestPaymentOnSale\(current, product\.options, Boolean\(product\.course \|\| product\.podcast \|\| product\.shipping\)\)/.test(extras), true);
 is("and no longer prints the plan's own lowest", extras.includes("from ${formatMoney(current.amountCents, currency)} each"), false);
 
 part("The count says who it counts");

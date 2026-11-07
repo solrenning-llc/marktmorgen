@@ -559,8 +559,8 @@ function PlanBlock({
     );
   }
   if (current) {
-    // Only a price on sale can be the "from" (Claude 5 on #2690).
-    const from = several ? lowestPaymentOnSale(current, product.options) : null;
+    // Only a price a buyer is offered can be the "from" (Claude 5 on #2690): on sale and delivering something.
+    const from = several ? lowestPaymentOnSale(current, product.options, Boolean(product.course || product.podcast || product.shipping)) : null;
     return (
       <p className="text-sm text-ink-soft">
         <span className={`font-semibold ${paused ? "text-ink-soft" : "text-ink"}`}>

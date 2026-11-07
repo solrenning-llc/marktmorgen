@@ -380,10 +380,12 @@ export function activePlan(product: Listing): Plan | null {
  * on sale only: what "from $X each" may name. Null when no price on sale has
  * a payment set (Claude 5 on #2690: an off-sale price's payment is never it).
  */
-export function lowestPaymentOnSale(plan: Plan, options: ProductOption[]): number | null {
+export function lowestPaymentOnSale(plan: Plan, options: ProductOption[], opens = false): number | null {
   const each: number[] = [];
   for (const option of options) {
-    if (option.offSale) continue;
+    // The same prices a plan covers and a buyer is offered (offeredOptions, Claude 5 on #2690): on sale, and delivering
+    // something (its file or link, or the product's course, podcast or shipping).
+    if (option.offSale || !optionDelivers(option, opens)) continue;
     const cents = plan.options?.[option.id];
     if (typeof cents === "number" && Number.isSafeInteger(cents) && cents > 0) each.push(cents);
   }

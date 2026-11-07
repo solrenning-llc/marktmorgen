@@ -48,6 +48,6 @@ export async function proposeDescription(store: Store, keyId: string, args: Reco
     if (error instanceof DataRoomError) return answer({ error: "The store has no room for this proposal right now." }, true);
     if (error instanceof BookBusy) return answer({ error: "Another change is being made to the proposals right now. Try again in a moment." }, true);
     console.error("proposing a description failed", error);
-    return answer({ error: "The proposal could not be kept just now. Try again in a moment." }, true);
+    return answer({ error: "The proposal could not be prepared just now. Try again in a moment." }, true);
   }
 }

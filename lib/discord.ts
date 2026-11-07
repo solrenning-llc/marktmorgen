@@ -205,10 +205,12 @@ export async function removeMember(serverId: string, userId: string, reason: str
 
 /**
  * The bot leaves the server: the creator disconnected it. Roles already given stay as they are. True only on
- * Discord's exact answer that it is out: a 2xx, or 404 when it was no longer there; anything else (no answer,
- * a refusal, a 5xx) is false, and the bot may still be in the server.
+ * Discord's exact answer that it is out: a 2xx, or 404 with Discord's code 10004 (Unknown Guild) when it was no
+ * longer there; anything else (no answer, a refusal, a 5xx, a 404 without that code, such as a proxy's page) is
+ * false, and the bot may still be in the server (independent review of #2994).
  */
 export async function leaveServer(serverId: string): Promise<boolean> {
   const answer = await call(`/users/@me/guilds/${serverId}`, { method: "DELETE" }).catch(() => null);
-  return Boolean(answer && ((answer.status >= 200 && answer.status < 300) || answer.status === 404));
+  if (answer && answer.status >= 200 && answer.status < 300) return true;
+  return answer?.status === 404 && Number((answer.data as { code?: unknown } | null)?.code) === 10004;
 }

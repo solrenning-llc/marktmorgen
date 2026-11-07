@@ -1,7 +1,7 @@
 /**
  * Sweep app1, finding 8: "Disconnect the server" in the studio
  * (app/api/store/discord/route.ts). The creator hears "Disconnected" only once
- * Discord confirmed the bot left (an exact answer: 2xx, or 404 when it was no
+ * Discord confirmed the bot left (an exact answer: 2xx, or 404 with code 10004 when it was no
  * longer there); before that nothing kept for the server is forgotten, so a
  * failed leave answers an honest error ("server", 502) and the creator can
  * press again. And the connected server read in another shape is not "no

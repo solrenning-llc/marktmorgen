@@ -10,12 +10,14 @@
  * Now: one read of the people asked for (HMGET), one partner lock, one read of the store and at most one HGETALL for
  * the whole batch, checked against the cap at once; and the batch takes, before each part, the studio requests that
  * part costs at its worst size (lib/affiliates.ts bulkUnits), so what every command and byte measured here costs, at
- * a studio request's shape and the prices of tests/plan-cost-registry.ts, is inside the studio requests taken.
+ * a studio request's shape and the prices of tests/plan-cost-registry.ts, is inside the studio requests taken. Each
+ * part is taken at its worst before it is read and given back, once read, down to its measured size rounded up, so
+ * the store keeps paying only for what was really read (coordinator's decision of 2026-11-07).
  */
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { AFFILIATE_RECORD_MAX_BYTES, MAX_NOTE_LENGTH, readAffiliate } from "@/lib/affiliates";
+import { AFFILIATE_RECORD_MAX_BYTES, MAX_NOTE_LENGTH, bulkUnits, readAffiliate } from "@/lib/affiliates";
 import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { allowanceUsed } from "@/lib/store-allowance";
@@ -114,6 +116,9 @@ async function main(): Promise<void> {
     is(`${label}: at most one read of the whole program`, seen.hgetall <= 1, true);
     is(`${label}: at most one partner lock taken`, seen.lockTakes <= 1, true);
     is(`${label}: every command and byte inside the studio requests taken first`, request("studio", seen.commands, seen.bytes) <= units * UNIT_COST.studio, true);
+    // Taken at the worst before each read, then given back down to what was really read (coordinator, 2026-11-07):
+    // at most what was measured, rounded up once for each part the batch holds for (four).
+    is(`${label}: no more kept than what was measured, rounded up`, units <= bulkUnits(seen.commands, seen.bytes) + 4, true);
     return { status: response.status, answer };
   };
   const rateOf = async (n: number) => (await readAffiliate(await store(), id(n)))?.rate;

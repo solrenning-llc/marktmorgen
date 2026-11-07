@@ -35,3 +35,43 @@ second. An unavailable view is never retried by the proposed correction.
 
 The product branch remains unchanged at the above head while this RED is
 preserved on the existing `codex/h-email-sync-disconnect-red` branch.
+
+## Local correction
+
+`viewAfterWrite` attempts the existing display read once. If it fails, it
+projects only the configuration already written, retains unknown history as
+`log: null`, and marks a connection status not established by the action as
+unavailable. Successful connect/test retain their confirmed cleared problem;
+the negative target test retains its confirmed problem. No new Redis command,
+provider request, allowance, price, flag or retention is introduced.
+
+The generic removal notice now also runs when the previous label was unknown;
+known absence still produces no duplicate notice. The Last sends warning is
+neutral about whether a connection exists. Non-string/non-null config and
+problem cells throw as unknown rather than becoming absence.
+
+Validation on the local correction:
+
+- Same native proof: 36/36 permanent checks plus 7/7 route checks; 43 synthetic
+  pipeline commands, matching RED. Actual notice delivery remains stubbed.
+- Official test aliases/environment and esbuild, full reachable graph:
+  `email-sync-exact-view` RED 36/10 failures -> GREEN 36/36;
+  `email-disconnect-idempotent` RED fails the new unknown-label notice
+  assertion -> GREEN node:test 1/1. Existing auth, origin, size, admission,
+  legacy-id, absent-connection and confirmed deletion controls remain present.
+- Linked `l10b-email-sync` 18/18, `email-platform-faq` 16/16,
+  `sg2-l8-watch-resync` 16/16.
+- Strict semantic/syntactic diagnostics for five changed TS/TSX roots,
+  795 imported source files, actual dependency types: 0 diagnostics.
+  This is scoped verification, not a global tsc/build. The first directed
+  pass found TS7022 on the new notice-counter assertion; an explicit number
+  annotation resolved it without changing the assertion.
+- ESLint on six changed code/test/launcher paths, max-warnings 0: clean.
+  One unused launcher counter was removed before the final lint pass.
+- Public-data scanner: 4,153 tracked paths, 0 corrections; diff-check clean.
+
+Dependencies were restored from the existing npm cache using offline install,
+without lifecycle scripts or a lockfile change. Test processes use 512 MiB;
+the directed compiler uses 1 GiB, bounded to the five roots. No global build,
+browser, native Redis, real provider, customer data or deployed action was run.
+Independent focal review and nine NEW final checks remain mandatory.

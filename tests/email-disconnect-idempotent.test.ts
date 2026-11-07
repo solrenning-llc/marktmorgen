@@ -94,12 +94,14 @@ test("actual email withdrawal preserves missing legacy identifiers and retained 
    return pipeline(commands);
   };
   try{
+   const noticesBefore:number=afterTasks.length;
    const response=await POST(request("disconnect"));
    assert.equal(response.status,200,`disconnect remains successful when view read ${failAt} is unknown`);
    const body=await response.json();
    assert.equal(body.ok,true);
    assert.equal(body.view.connected,null);
    assert.equal(await redis.run(["EXISTS",cfg]),0,"the saved key is removed despite the unknown view");
+   assert.equal(afterTasks.length,noticesBefore+1,"a completed removal notifies even when its old label is unknown");
    if(failAt===2)assert.equal(body.view.log,null,"an unread follow-up view stays explicitly unknown");
   }finally{
    redis.pipeline=pipeline;

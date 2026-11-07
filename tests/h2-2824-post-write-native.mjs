@@ -65,10 +65,10 @@ setPlatformHooksForTests({resolve:async()=>[{address:'93.184.216.34',family:4}],
 globalThis.h2RouteStore={statsId:'routeexact2824',handle:'routeexact',email:'route@example.test',catalog:{items:[]}};
 const cfg='nl:esync:cfg:routeexact2824';
 const pipeline=redis.pipeline.bind(redis);
-let failViews=false,reads=0,routeChecks=0,routeFailures=0;
+let failViews=false,routeChecks=0,routeFailures=0;
 redis.pipeline=async cs=>{
  if(cs.length===3&&cs[0][0]==='GET'&&cs[0][1]===cfg&&cs[2][0]==='LRANGE'){
-  reads++;if(failViews&&redis.run(['EXISTS',cfg]))return [redis.run(['GET',cfg])];
+  if(failViews&&redis.run(['EXISTS',cfg]))return [redis.run(['GET',cfg])];
  }
  return pipeline(cs);
 };

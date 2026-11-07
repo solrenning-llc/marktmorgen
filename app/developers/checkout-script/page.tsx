@@ -135,8 +135,9 @@ marktmorgen:purchase  back from paying (on document); detail is
         </p>
         <p>
           It draws the overlay as the browser&apos;s own modal dialog, with a close button. While it is open, the keyboard stays in the card and
-          its close button, and the rest of your page cannot be reached. Once the card has loaded, the focus goes into it. The close button
-          shows a ring of its own when it has the focus. Escape, the close button or a click beside the card closes it and gives the focus back
+          its close button, and the rest of your page cannot be reached. Once the card has loaded, the focus goes into it, unless the person
+          has already moved it, for example to the close button. That button shows a ring of its own when it has the focus. Escape, the close
+          button or a click beside the card closes it and gives the focus back
           to the link. A page that still has version 1 keeps working as before, without holding the keyboard in the dialog. It adds one global, {c("window.Marktmorgen")}, with {c("version")}, {c("purchase")} and {c("close()")}, and does nothing if it
           is on the page twice.
         </p>

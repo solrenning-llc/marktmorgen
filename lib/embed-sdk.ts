@@ -97,7 +97,7 @@ export function loaderSource(origin = SITE_URL): string {
     'var box=d.createElement("dialog"),frame=d.createElement("iframe"),x=d.createElement("button"),name=(a.textContent||"").trim().slice(0,80)||"Checkout";',
     'box.setAttribute("role","dialog");box.setAttribute("aria-modal","true");box.setAttribute("aria-label",name);',
     'box.style.cssText="position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0;padding:72px 16px 16px;background:rgba(17,14,36,.6)";',
-    'frame.src=u.href;frame.title=name;frame.referrerPolicy="origin";frame.onload=function(){try{frame.contentWindow.focus()}catch(x){}};',
+    'frame.src=u.href;frame.title=name;frame.referrerPolicy="origin";frame.onload=function(){frame.onload=null;var f=d.activeElement;if(f===frame||f===box)try{frame.contentWindow.focus()}catch(x){}};',
     'frame.style.cssText="display:block;width:100%;max-width:400px;height:420px;max-height:calc(100vh - 96px);border:0;border-radius:24px;background:transparent";',
     'x.type="button";x.setAttribute("aria-label","Close");x.textContent="\\u00d7";',
     'x.style.cssText="position:absolute;top:16px;right:16px;width:44px;height:44px;border:0;border-radius:999px;background:#fff;color:#15112e;font:600 26px/1 system-ui,sans-serif;cursor:pointer";',

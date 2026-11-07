@@ -14,6 +14,8 @@ const en = {
   membersLabel: "For members",
   forHolders: "For people who have one of these:",
   lockedLead: "Its words are for people who have one of the products below.",
+  previewHeading: "The start of this email",
+  ownerPreviewNote: (parts: number) => `Everyone can read its first ${parts === 1 ? "part" : `${parts} parts`}. The rest is only for you and people who have one of these products.`,
   /** Some of its products are still in the store, but their listing did not read: no "below" over a list that is not whole. */
   lockedLeadSome: "Its words are for people who have one of the products the creator chose.",
   notAllShown: "We couldn't show every one of them just now. Reload the page in a moment.",
@@ -40,6 +42,7 @@ const en = {
   } as Record<string, { title: string; body: string }>,
   linkSubject: (subject: string) => `Read “${subject}”`,
   linkGone: "This link has expired or was already used too many times. Open the email's page and ask for a new one.",
+  linkBusy: "We couldn't open this link just now. Try it again in a moment.",
   linkBody: (subject: string, link: string, store: string) =>
     [
       `Here is your way to read “${subject}”:`,
@@ -66,6 +69,8 @@ const es: LetterWords = {
   membersLabel: "Para miembros",
   forHolders: "Para quienes tienen uno de estos:",
   lockedLead: "Su texto es para quienes tienen uno de los productos de abajo.",
+  previewHeading: "El comienzo de este email",
+  ownerPreviewNote: (parts) => `Todos pueden leer ${parts === 1 ? "su primera parte" : `sus primeras ${parts} partes`}. El resto es solo para ti y para quienes tienen uno de estos productos.`,
   lockedLeadSome: "Su texto es para quienes tienen uno de los productos que eligió quien lo creó.",
   notAllShown: "No pudimos mostrarlos todos ahora mismo. Vuelve a cargar la página en un momento.",
   ownerNote: "Solo tú y quienes tienen uno de estos productos pueden leer el texto de abajo.",
@@ -88,6 +93,7 @@ const es: LetterWords = {
   },
   linkSubject: (subject) => `Lee «${subject}»`,
   linkGone: "Este enlace caducó o ya se usó demasiadas veces. Abre la página del email y pide uno nuevo.",
+  linkBusy: "No pudimos abrir este enlace ahora. Vuelve a intentarlo en un momento.",
   linkBody: (subject, link, store) =>
     [
       `Este es tu acceso para leer «${subject}»:`,
@@ -112,6 +118,8 @@ const fr: LetterWords = {
   membersLabel: "Pour les membres",
   forHolders: "Pour les personnes qui ont l'un de ceux-ci :",
   lockedLead: "Son texte est réservé aux personnes qui ont l'un des produits ci-dessous.",
+  previewHeading: "Le début de cet e-mail",
+  ownerPreviewNote: (parts) => `Tout le monde peut lire ${parts === 1 ? "sa première partie" : `ses ${parts} premières parties`}. La suite est réservée à vous et aux personnes qui ont l'un de ces produits.`,
   lockedLeadSome: "Son texte est réservé aux personnes qui ont l'un des produits choisis par son auteur.",
   notAllShown: "Nous n'avons pas pu tous les afficher pour l'instant. Rechargez la page dans un instant.",
   ownerNote: "Seuls vous et les personnes qui ont l'un de ces produits pouvez lire le texte ci-dessous.",
@@ -134,6 +142,7 @@ const fr: LetterWords = {
   },
   linkSubject: (subject) => `Lire « ${subject} »`,
   linkGone: "Ce lien a expiré ou a déjà été utilisé trop de fois. Ouvrez la page de l'e-mail et demandez-en un nouveau.",
+  linkBusy: "Nous n'avons pas pu ouvrir ce lien pour le moment. Réessayez dans un instant.",
   linkBody: (subject, link, store) =>
     [
       `Voici votre accès pour lire « ${subject} » :`,
@@ -158,6 +167,8 @@ const de: LetterWords = {
   membersLabel: "Für Mitglieder",
   forHolders: "Für alle, die eines davon haben:",
   lockedLead: "Der Text ist für alle, die eines der Produkte unten haben.",
+  previewHeading: "Der Anfang dieser E-Mail",
+  ownerPreviewNote: (parts) => `Alle können ${parts === 1 ? "den ersten Teil" : `die ersten ${parts} Teile`} lesen. Der Rest ist nur für Sie und alle, die eines dieser Produkte haben.`,
   lockedLeadSome: "Der Text ist für alle, die eines der Produkte haben, die der Shop ausgewählt hat.",
   notAllShown: "Wir konnten gerade nicht alle anzeigen. Laden Sie die Seite gleich noch einmal.",
   ownerNote: "Nur Sie und alle, die eines dieser Produkte haben, können den Text unten lesen.",
@@ -180,6 +191,7 @@ const de: LetterWords = {
   },
   linkSubject: (subject) => `„${subject}“ lesen`,
   linkGone: "Dieser Link ist abgelaufen oder wurde schon zu oft benutzt. Öffnen Sie die Seite der E-Mail und fordern Sie einen neuen an.",
+  linkBusy: "Wir konnten diesen Link gerade nicht öffnen. Versuchen Sie es gleich noch einmal.",
   linkBody: (subject, link, store) =>
     [
       `So lesen Sie „${subject}“:`,
@@ -204,6 +216,8 @@ const it: LetterWords = {
   membersLabel: "Per i membri",
   forHolders: "Per chi ha uno di questi:",
   lockedLead: "Il testo è per chi ha uno dei prodotti qui sotto.",
+  previewHeading: "L'inizio di questa email",
+  ownerPreviewNote: (parts) => `Tutti possono leggere ${parts === 1 ? "la prima parte" : `le prime ${parts} parti`}. Il resto è solo per te e per chi ha uno di questi prodotti.`,
   lockedLeadSome: "Il suo testo è per chi ha uno dei prodotti scelti da chi l'ha scritta.",
   notAllShown: "Non siamo riusciti a mostrarli tutti in questo momento. Ricarica la pagina tra un momento.",
   ownerNote: "Solo tu e chi ha uno di questi prodotti potete leggere il testo qui sotto.",
@@ -226,6 +240,7 @@ const it: LetterWords = {
   },
   linkSubject: (subject) => `Leggi «${subject}»`,
   linkGone: "Questo link è scaduto o è già stato usato troppe volte. Apri la pagina dell'email e chiedine uno nuovo.",
+  linkBusy: "Non siamo riusciti ad aprire questo link in questo momento. Riprova tra un attimo.",
   linkBody: (subject, link, store) =>
     [
       `Ecco come leggere «${subject}»:`,
@@ -250,6 +265,8 @@ const nl: LetterWords = {
   membersLabel: "Voor leden",
   forHolders: "Voor wie een van deze heeft:",
   lockedLead: "De tekst is voor wie een van de producten hieronder heeft.",
+  previewHeading: "Het begin van deze e-mail",
+  ownerPreviewNote: (parts) => `Iedereen kan ${parts === 1 ? "het eerste deel" : `de eerste ${parts} delen`} lezen. De rest is alleen voor jou en wie een van deze producten heeft.`,
   lockedLeadSome: "De tekst is voor wie een van de producten heeft die de maker koos.",
   notAllShown: "We konden ze nu niet allemaal tonen. Laad de pagina zo opnieuw.",
   ownerNote: "Alleen jij en wie een van deze producten heeft, kunnen de tekst hieronder lezen.",
@@ -272,6 +289,7 @@ const nl: LetterWords = {
   },
   linkSubject: (subject) => `Lees ‘${subject}’`,
   linkGone: "Deze link is verlopen of al te vaak gebruikt. Open de pagina van de e-mail en vraag een nieuwe aan.",
+  linkBusy: "We konden deze link nu niet openen. Probeer het zo meteen opnieuw.",
   linkBody: (subject, link, store) =>
     [
       `Zo lees je ‘${subject}’:`,
@@ -296,6 +314,8 @@ const pt: LetterWords = {
   membersLabel: "Para membros",
   forHolders: "Para quem tem um destes:",
   lockedLead: "O texto é para quem tem um dos produtos abaixo.",
+  previewHeading: "O começo deste e-mail",
+  ownerPreviewNote: (parts) => `Todos podem ler ${parts === 1 ? "a primeira parte" : `as primeiras ${parts} partes`}. O resto é só para você e para quem tem um destes produtos.`,
   lockedLeadSome: "O texto é para quem tem um dos produtos que o criador escolheu.",
   notAllShown: "Não conseguimos mostrar todos agora. Recarregue a página daqui a pouco.",
   ownerNote: "Só você e quem tem um destes produtos podem ler o texto abaixo.",
@@ -318,6 +338,7 @@ const pt: LetterWords = {
   },
   linkSubject: (subject) => `Leia “${subject}”`,
   linkGone: "Este link expirou ou já foi usado vezes demais. Abra a página do email e peça um novo.",
+  linkBusy: "Não conseguimos abrir este link agora. Tente de novo em um instante.",
   linkBody: (subject, link, store) =>
     [
       `Aqui está seu acesso para ler “${subject}”:`,

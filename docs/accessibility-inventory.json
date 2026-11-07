@@ -931,6 +931,18 @@
       "parameters": []
     },
     {
+      "source": "app/status/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/status",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/add/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/add",
+      "parameters": []
+    },
+    {
       "source": "app/studio/affiliates/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/affiliates",
@@ -964,6 +976,12 @@
       "source": "app/studio/calendar/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/calendar",
+      "parameters": []
+    },
+    {
+      "source": "app/studio/card/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/card",
       "parameters": []
     },
     {
@@ -1232,6 +1250,7 @@
   ],
   "componentSources": [
     "components/ad-spend-editor.tsx",
+    "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",
     "components/affiliate-click.tsx",
     "components/affiliate-commission-history.tsx",
@@ -1272,6 +1291,7 @@
     "components/call-editor.tsx",
     "components/campaign-results.tsx",
     "components/cart-deal-editor.tsx",
+    "components/cart-link-builder.tsx",
     "components/certificate-actions.tsx",
     "components/certificate-validity.tsx",
     "components/chat-summary-editor.tsx",
@@ -1305,6 +1325,8 @@
     "components/course-toggle.tsx",
     "components/course-work-studio.tsx",
     "components/cover-maker.tsx",
+    "components/creator-card-editor.tsx",
+    "components/creator-card-view.tsx",
     "components/creator-research-form.tsx",
     "components/creator-showcase.tsx",
     "components/custom-range.tsx",
@@ -1323,6 +1345,7 @@
     "components/dispute-purchase-review.tsx",
     "components/domain-editor.tsx",
     "components/dunning-editor.tsx",
+    "components/email-code-form.tsx",
     "components/email-field.tsx",
     "components/email-input.tsx",
     "components/email-studio.tsx",
@@ -1336,6 +1359,7 @@
     "components/fair-price-editor.tsx",
     "components/faq-editor.tsx",
     "components/faq-from-inbox.tsx",
+    "components/feature-captures.tsx",
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
@@ -1591,6 +1615,7 @@
     "app/api/affiliate/route.ts",
     "app/api/auth/callback/route.ts",
     "app/api/auth/code/route.ts",
+    "app/api/auth/email-code/route.ts",
     "app/api/auth/google/route.ts",
     "app/api/auth/join/route.ts",
     "app/api/auth/lost/confirm/route.ts",
@@ -2006,6 +2031,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 136
+    "pageTemplates": 139
   }
 }

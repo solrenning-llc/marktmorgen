@@ -33,7 +33,7 @@ import { isVideoRoom, roomLabel, roomOf, videoRoomNote } from "@/lib/call-rooms"
 import { SITE_URL } from "@/lib/site-url";
 import { StoreTracking } from "@/components/store-tracking";
 import { ClearCart } from "@/components/store-cart";
-import { confirmStock } from "@/lib/stock";
+import { confirmCartStock, confirmStock } from "@/lib/stock";
 import { finishPlan } from "@/lib/plans";
 import { cookies, headers } from "next/headers";
 import { clientAddress } from "@/lib/request-guard";
@@ -535,6 +535,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // A limited product's unit becomes a sale the moment its buyer is back.
   if (order.state === "paid" && sessionId && order.product.stock !== null) {
     await confirmStock(store, order.product, sessionId).catch((error) => console.error("confirming stock failed", error));
+  }
+  // So does each limited product of a cart after its first (lib/stock.ts; 513 [PF1], unit 3). A box at checkout never offers a limited one.
+  if (order.state === "paid" && sessionId && order.bumps.some((added) => added.product.stock !== null)) {
+    await confirmCartStock(store, order.bumps.map((added) => added.product), sessionId).catch((error) => console.error("confirming a cart's stock failed", error));
   }
 
   // A sale through an affiliate's link is written down for them, once,

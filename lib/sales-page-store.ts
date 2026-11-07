@@ -339,11 +339,19 @@ export async function dropPage(statsId: string | null, productId: string, room: 
   if (!statsId || !isRedisConfigured()) return [];
   const held = await readPage(statsId, productId).catch(() => ({ ...EMPTY_PAGE, blocks: [] }));
   const shown = picturePaths(held);
-  await redisPipeline([["DEL", pageKey(statsId, productId), versionsKey(statsId, productId)], ...usesCommands(statsId, productId, sectionsOn(held), [])]);
-  await giveData(room, [{ slot: PAGE_SLOT(productId), bytes: 0, set: true }, { slot: VERSIONS_SLOT(productId), bytes: 0, set: true }]);
+  // A failed page step does not keep its campaigns' landings: they are still tried below, and the failure is said
+  // after them (Claude 5 on #1947). The page's room is given back only once its records are confirmed sent.
+  let pageFailed: { error: unknown } | null = null;
+  try {
+    await redisPipeline([["DEL", pageKey(statsId, productId), versionsKey(statsId, productId)], ...usesCommands(statsId, productId, sectionsOn(held), [])]);
+    await giveData(room, [{ slot: PAGE_SLOT(productId), bytes: 0, set: true }, { slot: VERSIONS_SLOT(productId), bytes: 0, set: true }]);
+  } catch (error) {
+    pageFailed = { error };
+  }
   // Its campaigns' landings are its page's words: they go with it (lib/campaign-landing-store.ts). Their room is
   // given back only by the step that drops them, so one not confirmed stays counted.
   const landings = await dropLandings(statsId, productId, room).then(() => null, (error: unknown) => ({ error }));
+  if (pageFailed) throw new PageDropIncomplete([], pageFailed.error);
   // A test's counts stay until they expire, counted on their own.
   if (held.test) await noteData(room, [endedTest(Date.now())]);
   const pictures = await releasePictures(statsId, productId, shown);

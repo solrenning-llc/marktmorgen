@@ -29,7 +29,7 @@ import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { PageDropIncomplete, dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
+import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
 import { finishLandingsDrop } from "@/lib/campaign-landing-store";
 
 /** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
@@ -329,13 +329,15 @@ export async function POST(request: NextRequest) {
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
         if (going.note) await dropThanksNote(removed.store.statsId, id, removed.store).catch(() => {});
-        // Its page of blocks, and the reviews of a product nobody can buy any more.
-        if (going.page) {
+        // Its page of blocks, and the reviews of a product nobody can buy any more. Dropped whether or not the
+        // product still shows a page: one emptied first keeps its versions and its campaigns' landings, which are
+        // kept by the product, not by its page (Claude 5 on #1947).
+        {
           // And the pictures on that page (lib/sales-page-store.ts).
-          // Landings not confirmed gone are said to the caller (cleanupPending), never a removal finished: the same
-          // removal asked again finishes them (finishLandingsDrop below), and a closed store's walk erases them.
+          // Anything not confirmed gone is said to the caller (cleanupPending), never a removal finished: the same
+          // removal asked again finishes its landings (finishLandingsDrop below), and a closed store's walk erases them.
           const pictures = await dropPage(removed.store.statsId, id, removed.store).catch((error: unknown) => {
-            if (error instanceof PageDropIncomplete) cleanupPending = true;
+            cleanupPending = true;
             return picturesOfFailedDrop(error);
           });
           had.push(...pictures.map((pathname) => ({ pathname })));

@@ -35,6 +35,19 @@ async function main(): Promise<void> {
   subscriptions = { object: "list", data: [], has_more: false };
   customers = { object: "list" };
   is("the customers without their list", await ask(), "threw");
+
+  // Claude 5's LEVE on #2685: a page cut short (has_more not false) is not the whole list, so "not kept" cannot be read
+  // from it; a live membership found on the page read is still kept.
+  part("A page cut short is not the whole list");
+  customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
+  subscriptions = { object: "list", data: [], has_more: true };
+  is("subscriptions with more not read: unknown", await ask(), "threw");
+  subscriptions = { object: "list", data: [], has_more: false };
+  customers = { object: "list", data: Array.from({ length: 10 }, (_, i) => ({ id: `cus_kept00000${i}` })), has_more: true };
+  is("customers with more not read: unknown", await ask(), "threw");
+  customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
+  subscriptions = { object: "list", data: [{ status: "active", metadata: { product: "club000001" } }], has_more: true };
+  is("a live membership on the page read is kept, more pages or not", await ask(), true);
   done();
 }
 

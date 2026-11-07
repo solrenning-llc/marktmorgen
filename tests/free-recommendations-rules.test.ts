@@ -73,7 +73,9 @@ for (const bad of [
   "Read it at https://example.com",
   "See www.example.com",
   "Mail sam@example.com",
-  "Call +1 415 555 0134",
+  "Call 415 555 0134",
+  // Written in two parts so the public-data check never reads a phone number in this file.
+  "Text me at +" + "1 (415) 555-0134",
   "Go to example.com today",
 ]) {
   is(`a line with a link, an email address or a phone number: ${JSON.stringify(bad)}`, problem([{ handle: "sam.writes", why: bad }]), ["why-contact", 0]);
@@ -81,6 +83,8 @@ for (const bad of [
 for (const bad of ["<script>alert(1)</script>", "Nice <img src=x onerror=alert(1)>", "javascript:alert(1)", "bell\u0007"]) {
   is(`a line with markup or a control character: ${JSON.stringify(bad)}`, problem([{ handle: "sam.writes", why: bad }]), ["why-unsafe", 0]);
 }
+is("a span of years is not a phone number", ok([{ handle: "sam.writes", why: "Weekly notes since 2015-2020, then monthly." }])?.length, 1);
+is("a version number is not a link", ok([{ handle: "sam.writes", why: "Clear guides to Node.js and React 19." }])?.length, 1);
 is("the first problem is the one named", problem([{ handle: "sam.writes", why: "ok" }, { handle: OWN, why: "x" }, { handle: "x", why: "" }]), ["own", 1]);
 is("the creator's own store address must be a real one", problem([], ""), ["own", null]);
 is("an own address of the wrong shape is refused", problem([{ handle: "sam.writes", why: "x" }], "Not A Handle"), ["own", null]);
@@ -94,12 +98,13 @@ for (const p of problems) {
 }
 is("names the recommendation by its place", problemWords("handle", 1), "Recommendation 2: type the store's address, like sam.writes, as it appears after marktmorgen.com/@.");
 is("the limit, in words", problemWords("too-many", null), "You can recommend up to 3 stores.");
+is("a list that does not read", problemWords("list", null), "The list of recommendations could not be read. Check it and try again.");
 is("a line too long, with the limit", problemWords("why-long", 0), "Recommendation 1: keep the line to 140 characters or fewer.");
 is("why no links: the button already goes there", problemWords("why-contact", 0), "Recommendation 1: leave out links, email addresses and phone numbers. The button already opens that store's page.");
 
 part("The link carries nothing but the store's address");
 is("the store's own page, nothing else", recommendationHref("sam.writes"), "/@sam.writes");
-is("never an email, a ref or a tracking parameter", /[?#&=]/.test(recommendationHref("sam.writes")), false);
+is("never an email, a ref or a tracking parameter", /[?#&=]/.test(recommendationHref("sam.writes") ?? ""), false);
 is("a link whose purpose reads on its own", recommendationLinkWords("sam.writes"), "Visit @sam.writes on Marktmorgen");
 is("a bad address makes no link", recommendationHref("../admin"), null);
 

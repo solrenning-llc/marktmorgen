@@ -147,13 +147,25 @@ export function readSesEvent(message: string): SesEvent | null {
   }
   if (!v || typeof v !== "object") return null;
   const type = typeof v.eventType === "string" ? v.eventType : typeof v.notificationType === "string" ? v.notificationType : "";
-  const addresses = (list: unknown): string[] =>
-    Array.isArray(list)
-      ? list
-          .map((r) => typeof r === "string" ? r : (r && typeof r === "object" ? (r as { emailAddress?: unknown }).emailAddress : null))
-          .filter((a): a is string => typeof a === "string" && a.length > 0 && a.length <= 320)
-          .slice(0, 50)
-      : [];
+  const addresses = (list: unknown): string[] | null => {
+    if (!Array.isArray(list) || list.length === 0 || list.length > 50) return null;
+    const result: string[] = [];
+    for (const recipient of list) {
+      const address = typeof recipient === "string"
+        ? recipient
+        : recipient && typeof recipient === "object" && Object.hasOwn(recipient, "emailAddress")
+          ? (recipient as { emailAddress?: unknown }).emailAddress
+          : null;
+      if (typeof address !== "string" || address.length === 0 || address.length > 320) return null;
+      result.push(address);
+    }
+    return result;
+  };
+  const knownRecipients = (list: unknown): string[] => {
+    const result = addresses(list);
+    if (!result) throw new Error("Amazon SES reported an unreadable recipient list");
+    return result;
+  };
   const tags: Record<string, string> = {};
   const raw = v.mail?.tags;
   if (raw && typeof raw === "object") {
@@ -169,9 +181,9 @@ export function readSesEvent(message: string): SesEvent | null {
     : type === "Delivery" ? v.delivery?.timestamp : type === "DeliveryDelay" ? v.deliveryDelay?.timestamp : undefined;
   const at = typeof stamp === "string" ? Date.parse(stamp) : NaN;
   const occurred = Number.isSafeInteger(at) ? { occurredAt: at } : {};
-  if (type === "Bounce") return { kind: "bounced", permanent: v.bounce?.bounceType === "Permanent", recipients: addresses(v.bounce?.bouncedRecipients), tags, messageId, ...occurred };
-  if (type === "Complaint") return { kind: "complained", permanent: false, recipients: addresses(v.complaint?.complainedRecipients), tags, messageId, ...occurred };
-  if (type === "Delivery") return { kind: "delivered", permanent: false, recipients: addresses(v.delivery?.recipients), tags, messageId, ...occurred };
-  if (type === "DeliveryDelay") return { kind: "delayed", permanent: false, recipients: addresses(v.deliveryDelay?.delayedRecipients), tags, messageId, ...occurred };
+  if (type === "Bounce") return { kind: "bounced", permanent: v.bounce?.bounceType === "Permanent", recipients: knownRecipients(v.bounce?.bouncedRecipients), tags, messageId, ...occurred };
+  if (type === "Complaint") return { kind: "complained", permanent: false, recipients: knownRecipients(v.complaint?.complainedRecipients), tags, messageId, ...occurred };
+  if (type === "Delivery") return { kind: "delivered", permanent: false, recipients: knownRecipients(v.delivery?.recipients), tags, messageId, ...occurred };
+  if (type === "DeliveryDelay") return { kind: "delayed", permanent: false, recipients: knownRecipients(v.deliveryDelay?.delayedRecipients), tags, messageId, ...occurred };
   return null;
 }

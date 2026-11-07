@@ -1156,6 +1156,9 @@ export const COST_LINES: CostLine[] = [
       { file: "app/l/[code]/route.ts", names: ["admitShortLinkOpen(code,", "payShortLinkOpen(store, code, admission)"] },
       { file: "lib/short-link-open.ts", names: ["takePublicRequest(store, \"public\", now, SHORT_LINK_OPEN_UNITS)", "[\"DECR\", admission.key]"] },
       { file: "lib/short-link-open-rules.ts", names: ["SHORT_LINK_OPEN_UNITS", "SHORT_LINK_COUNT_COMMANDS", "SHORT_LINK_READ_COMMANDS", "SHORT_LINK_REFUND_COMMANDS", "SHORT_LINK_OPENS_PER_ADDRESS"] },
+      // A funnel's own address (no-store) takes one before its funnels are read and a collection's units before its product
+      // steps' listings (Claude 5, 7 November 2026); MAX_FUNNEL_PAGES held inside MAX_COLLECTION_PRODUCTS in tests/plan-cost-registry.test.ts.
+      { file: "app/[handle]/go/[funnel]/route.ts", names: ["takePublicRequest(store, \"public\", now)", "takePublicRequest(store, \"public\", now, collectionUnits(productSteps))"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
       // An affiliate's own page and the store's map read in proportion to the store: counted first, paid before they read (4 November 2026).

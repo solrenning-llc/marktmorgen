@@ -119,10 +119,16 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/page.tsx", "utf8");
   const css = readFileSync("app/globals.css", "utf8");
   is("the store front's layout is marked, so its rules reach only it", /data-store-layout=""/.test(page), true);
-  const footer = rule(css, /\[data-store-layout\] \.st-footer-link/);
+  const footer = rule(css, /\[data-store-layout\] \.st-footer-link:not\(summary, figcaption > \*\)/);
   is("its standalone links (blog, \"Get it again\", affiliates, report, delete, the search's \"Show every product\") are 2.75rem tall", [/display:\s*inline-flex/.test(footer), /min-height:\s*2\.75rem/.test(footer)], [true, true]);
+  // Claude 5's review of #2987 (LOW 2): a summary drawn as such a link (the presale's "Or join the waitlist") keeps
+  // its disclosure triangle, and a link inside a quote's caption breaks with its sentence.
+  const waitlist = rule(css, /\[data-store-layout\] summary\.st-footer-link/);
+  is("a summary drawn as such a link stays a list item, 44 px tall by its padding", [/display:/.test(waitlist), /min-height:\s*2\.75rem/.test(waitlist), /calc\(\(2\.75rem - 1lh\) \/ 2\)/.test(waitlist)], [false, true, true]);
   const news = rule(css, /\.st-announce a/);
-  is("the creator's line of news, as a link, is 2.75rem tall without growing the band", [/display:\s*inline-flex/.test(news), /min-height:\s*2\.75rem/.test(news), /margin-block:\s*-0\.75rem/.test(news)], [true, true, true]);
+  // LOW 3: the arrow after the news stays at the end of its sentence, with its space, not a flex item of its own.
+  is("the creator's line of news, as a link, is 2.75rem tall without growing the band", [/display:\s*inline-block/.test(news), /min-height:\s*2\.75rem/.test(news), /margin-block:\s*-0\.75rem/.test(news)], [true, true, true]);
+  is("and its words and arrow flow as one sentence (no flex)", /display:\s*inline-flex/.test(news), false);
   // In CSS, not as min-h-11 on the summary: tests/tap-targets.test.ts asks such a box to center with flex, which would
   // take away the summary's disclosure triangle.
   const question = rule(css, /\.st-faq > summary/);
@@ -141,6 +147,11 @@ async function main(): Promise<void> {
   // A question keeps up to MAX_FAQ_Q (150) characters, and its summary is the whole width of the card.
   is("and the FAQ's questions, which can be 150 characters long", /\bsummary\b/.test(measure?.[1] ?? ""), true);
   is("but not the cards themselves (li), so the grid keeps its columns", /\bli\b/.test(measure?.[1] ?? "li"), false);
+  // Claude 5's review of #2987 (MEDIUM 1): a p that is a box, not running text (the promotion band p.st-card, the
+  // community card p > a.st-card, the search's p.flex and the cart's total p.flex), keeps the column's whole width.
+  const boxes = css.match(/\[data-store-layout\] :where\(p\.flex, p\.grid, p\.st-card, p:has\(> \.st-card\)\)\s*\{([^}]*)\}/);
+  is("a p that is a box (flex, grid, a card or holding one) is not capped", /max-width:\s*none/.test(boxes?.[1] ?? ""), true);
+  is("and that rule comes after the cap, so it wins at the same weight", css.indexOf(boxes?.[0] ?? "\u0000") > css.indexOf(measure?.[0] ?? "\u0000"), true);
   // 1ch is the width of "0". Characters counted line by line in Chromium by tests/e2e/store-front-audit.mjs at 56ch
   // (build of 06bca7d8d, Geist): a real sentence reached 81 a line (the full store at 200%), words of narrow letters
   // only (i, l, t, f, j, r, s) 126 (the edge store at 1280 px). A line scales with the cap.

@@ -9,10 +9,14 @@
  *   - the exact reply ("OK" or null for the SET, a whole number of at least
  *     1 for the INCR) is read as before: within the limit, yes; past it, no;
  *   - any other reply (a missing or extra part, a count as text, null, 0,
- *     true, a fraction, a negative number, an object) is refused;
+ *     true, a fraction, a negative number, an object) is never room:
+ *     withinLimit throws UnknownReplyError, so its caller says it could not
+ *     check rather than "too many" (tests/limit-unknown.test.ts), and
+ *     withinMonth refuses;
  *   - a pipeline that throws still lets the request through, as before.
  */
 import { withinLimit, withinMonth } from "@/lib/request-guard";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -55,14 +59,23 @@ async function main(): Promise<void> {
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 
-  for (const [name, call] of [
-    ["withinLimit", () => withinLimit("shape-test", "who", 5, 60)],
-    ["withinMonth", () => withinMonth("shape-test", "who", 5, "2026-11")],
+  /** What a counter answered, with an unknown count (UnknownReplyError) said as "unknown". */
+  const read = async (call: () => Promise<boolean>): Promise<boolean | "unknown"> => {
+    try {
+      return await call();
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return "unknown";
+      throw error;
+    }
+  };
+  for (const [name, call, refused] of [
+    ["withinLimit", () => read(() => withinLimit("shape-test", "who", 5, 60)), "unknown"],
+    ["withinMonth", () => read(() => withinMonth("shape-test", "who", 5, "2026-11")), false],
   ] as const) {
     part(`${name}: only the exact reply is read`);
     for (const [label, value] of MALFORMED) {
       reply = value;
-      is(`${name}, ${label}: refused, never room`, await call(), false);
+      is(`${name}, ${label}: ${refused === "unknown" ? "unknown" : "refused"}, never room`, await call(), refused);
     }
     reply = ["OK", 1];
     is(`${name}: the first of the window (SET "OK", count 1) is within`, await call(), true);

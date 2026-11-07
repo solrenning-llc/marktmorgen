@@ -1,0 +1,350 @@
+EXPLICIT STATUS
+{
+  "additive": 0,
+  "permanent-old": 1,
+  "permanent": 0,
+  "types": 0,
+  "lint": 0,
+  "scanner": 0,
+  "diff": 0,
+  "english": 0
+}
+ACTUAL TYPES CONFIG
+{"extends": "/workspace/scratch/72485b6ecfa0/j-review-2934-return-9ec/tsconfig.json", "compilerOptions": {"incremental": false, "plugins": [], "types": ["node"], "typeRoots": ["/workspace/scratch/72485b6ecfa0/j-review-2934-return-9ec/node_modules/@types"]}, "include": ["/workspace/scratch/72485b6ecfa0/j-review-2934-return-9ec/lib/physical-legal.ts", "/workspace/scratch/72485b6ecfa0/j-review-2934-return-9ec/tests/sz2-physical-legal.test.ts", "/workspace/scratch/72485b6ecfa0/j-review-2934-return-9ec/tests/j-2934-focal.proof.ts"], "exclude": ["node_modules"]}
+
+--- additive ---
+J_FOCAL head j-2934-focal.proof.ts EXACT_TARGET 9ec04bb427f34b4934cb171993f724dc7be59b34
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+SPARSE_HISTORY {"length":2,"missing":true,"got":"unreadable"}
+SPARSE_AFTER_RECORD "unreadable"
+✔ healthy sequential history stays complete (5.04736ms)
+✔ same-second changes retain the applied minimum (0.682899ms)
+✔ new explicit unknown contract refuses a malformed dense history (0.467108ms)
+✔ site suffix refused and exact site retained (1.585893ms)
+✔ a missing history slot cannot certify a filtered subset complete (1.085062ms)
+✔ recording must not turn a missing slot into known history (0.454226ms)
+✔ an entirely missing slot is unknown rather than empty history (0.481006ms)
+✔ reading history does not mutate the original entries (0.35015ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.805606
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0
+
+--- permanent-old ---
+J_FOCAL old-module sz2-physical-legal.test.ts EXACT_TARGET 9ec04bb427f34b4934cb171993f724dc7be59b34
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+GPSR: the area and a complete record
+  ok    the area is the 27 EU states plus Iceland, Liechtenstein and Norway
+  ok    Germany, France and Norway are in it
+  ok    the US, the UK and Switzerland are not
+  ok    a stored record reads back, country upper-cased
+  ok    an EU manufacturer with type, picture and a stated 'no warnings' has no gaps
+  ok    so no country is closed
+
+GPSR: what is missing
+  ok    no record at all lists every gap
+  ok    no picture is a gap (art. 19(c))
+  ok    a manufacturer outside the area needs an EU responsible person
+  ok    its EU/EEA countries close, the rest keep selling
+  ok    a responsible person outside the area does not count
+  ok    an EU responsible person with a web contact page closes the gap
+  ok    a responsible person without postal and electronic address is a gap
+  ok    empty warnings without the 'none' statement is a gap: never inferred
+  ok    warnings text closes it
+  ok    an electronic address that is neither email nor https is a gap
+  ok    http (not https) is not a contact page
+  ok    a field with a control character is dropped, so it becomes a gap
+  ok    whitespace is folded
+  ok    an unknown country is a gap
+  ok    garbage from storage reads as no record
+
+California Proposition 65 text (the creator's, checked, never written by the code)
+  ok    only when the product ships to the US
+  ok    empty is fine: nothing is shown
+  ok    WARNING: with the site
+  ok    CA WARNING: is accepted
+  ok    CALIFORNIA WARNING: is accepted
+  ok    no signal word first
+  ok    the signal word in lower case is not the signal word
+  ok    no P65Warnings site
+  ok    too long
+  ok    a control character
+
+Unit price (computed from the price charged, never typed)
+  ok    250 g at 2.49 is 9.96 per kilogram
+  ok    0.75 L at 12.99 is 17.32 per liter
+  ok    a decimal comma reads the same
+  ok    33 cl at 1.99 is 6.03 per liter (6.0303..., rounded)
+  ok    half a cent rounds up: 2 kg at 0.01
+  ok    1 kg at 5.00 is the selling price itself
+  ok    150 cm² at 3.00 is 200.00 per square meter
+  ok    2.5 m at 10.00 is 4.00 per meter
+  ok    500 cm³ at 1.00 is 2,000.00 per cubic meter
+  ok    zero quantity is not a quantity
+  ok    more than three decimals is refused
+  ok    an unknown unit is refused
+  ok    a negative amount is refused
+  ok    no quantity, no unit price
+  ok    an absurd result is refused rather than shown wrong
+  ok    the unit is written out for screen readers (3.1.4)
+  ok    liter
+
+Prior lowest price (98/6/EC art. 6a; CJEU C-330/23)
+  ok    the same price again adds no step
+  ok    the lowest price of the 30 days before, not the price the day before
+  ok    the sale price itself (from the start) is not part of its prior price
+  ok    a later sale, 45 days in: the 800 ended before its window
+  ok    a window that starts before the first price is flagged incomplete
+  ok    no price before the start: nothing to show
+  ok    an empty history: nothing to show
+  ok    the window is 30 days
+  ok    kept for the window plus the longest sale, so a running sale still finds its prior price
+  ok    on the last day of a long sale its prior price is unchanged
+  ok    steps that ended before the kept period are dropped
+  ok    a clock that goes back never reorders, never drops a price and never stamps one later than any time seen
+  ok    the history never holds more than its cap
+  ok    merging keeps the lower price, so the prior price is never higher than the truth
+  ok    the current price is never merged away
+  ok    a non-integer or negative price is not recorded
+
+Prior lowest price: same-second changes keep their real time (review J5809017387, MEDIUM)
+  ok    no step is stamped later than the clock that recorded it
+  ok    two prices in the same second both stay, in the order applied
+  ok    a sale a second later finds the 20 applied before it, not the 500
+  ok    a sale in the same second counts the prices it replaced in that second
+  ok    the healthy sequential case is unchanged
+
+Prior lowest price: an unreadable history is never a complete subset (review J5809017387, LOW)
+  ok    one unreadable step makes the whole history unreadable, not a complete 1000
+  ok    a history that is not a list is unreadable
+  ok    a step that is not a record is unreadable
+  ok    recording onto an unreadable history keeps it as it came, never filtered
+  ok    so it still reads as unreadable afterward
+
+Prior lowest price: a missing slot is unreadable, never a crash, a subset or an empty history (review J5813414204, LOW)
+  FAIL  a list with a missing slot is unreadable, not a crash
+        expected "unreadable"
+        got      "threw"
+  FAIL  a list whose first slot is missing is unreadable
+        expected "unreadable"
+        got      "threw"
+  FAIL  a list of only a missing slot is unreadable, not an empty history
+        expected "unreadable"
+        got      null
+  FAIL  recording onto a list with a missing slot keeps it as it came
+        expected [2,true,false]
+        got      "threw"
+  FAIL  so it still reads as unreadable afterward
+        expected "unreadable"
+        got      "threw"
+  ok    control: the same real step, dense, still reads as a complete 1000
+  ok    control: an empty list is still a known empty history
+  ok    control: recording onto the dense list still adds the step
+  ok    reading and recording never change the list given
+
+Types: the module compiles under the repository's strict settings (review J5813414204, LOW, TS4104)
+  FAIL  lib/physical-legal.ts has no type errors (strict, ES2017, bundler)
+        expected []
+        got      ["TS4104 The type 'readonly PriceStep[]' is 'readonly' and cannot be assigned to the mutable type 'PriceStep[]'."]
+
+Proposition 65: the site is named on its own (review J5809017387, LOW)
+  ok    a longer hostname that only starts with the site does not name it
+  ok    the site inside another word does not name it
+  ok    the site as a path on another host does not name it
+  ok    the site with a hyphenated suffix does not name it
+  ok    the site with https and a path names it
+  ok    the site in parentheses names it
+  ok    the site followed by a comma names it
+
+91 checks, 6 failing.
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 1
+
+--- permanent ---
+J_FOCAL head sz2-physical-legal.test.ts EXACT_TARGET 9ec04bb427f34b4934cb171993f724dc7be59b34
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+GPSR: the area and a complete record
+  ok    the area is the 27 EU states plus Iceland, Liechtenstein and Norway
+  ok    Germany, France and Norway are in it
+  ok    the US, the UK and Switzerland are not
+  ok    a stored record reads back, country upper-cased
+  ok    an EU manufacturer with type, picture and a stated 'no warnings' has no gaps
+  ok    so no country is closed
+
+GPSR: what is missing
+  ok    no record at all lists every gap
+  ok    no picture is a gap (art. 19(c))
+  ok    a manufacturer outside the area needs an EU responsible person
+  ok    its EU/EEA countries close, the rest keep selling
+  ok    a responsible person outside the area does not count
+  ok    an EU responsible person with a web contact page closes the gap
+  ok    a responsible person without postal and electronic address is a gap
+  ok    empty warnings without the 'none' statement is a gap: never inferred
+  ok    warnings text closes it
+  ok    an electronic address that is neither email nor https is a gap
+  ok    http (not https) is not a contact page
+  ok    a field with a control character is dropped, so it becomes a gap
+  ok    whitespace is folded
+  ok    an unknown country is a gap
+  ok    garbage from storage reads as no record
+
+California Proposition 65 text (the creator's, checked, never written by the code)
+  ok    only when the product ships to the US
+  ok    empty is fine: nothing is shown
+  ok    WARNING: with the site
+  ok    CA WARNING: is accepted
+  ok    CALIFORNIA WARNING: is accepted
+  ok    no signal word first
+  ok    the signal word in lower case is not the signal word
+  ok    no P65Warnings site
+  ok    too long
+  ok    a control character
+
+Unit price (computed from the price charged, never typed)
+  ok    250 g at 2.49 is 9.96 per kilogram
+  ok    0.75 L at 12.99 is 17.32 per liter
+  ok    a decimal comma reads the same
+  ok    33 cl at 1.99 is 6.03 per liter (6.0303..., rounded)
+  ok    half a cent rounds up: 2 kg at 0.01
+  ok    1 kg at 5.00 is the selling price itself
+  ok    150 cm² at 3.00 is 200.00 per square meter
+  ok    2.5 m at 10.00 is 4.00 per meter
+  ok    500 cm³ at 1.00 is 2,000.00 per cubic meter
+  ok    zero quantity is not a quantity
+  ok    more than three decimals is refused
+  ok    an unknown unit is refused
+  ok    a negative amount is refused
+  ok    no quantity, no unit price
+  ok    an absurd result is refused rather than shown wrong
+  ok    the unit is written out for screen readers (3.1.4)
+  ok    liter
+
+Prior lowest price (98/6/EC art. 6a; CJEU C-330/23)
+  ok    the same price again adds no step
+  ok    the lowest price of the 30 days before, not the price the day before
+  ok    the sale price itself (from the start) is not part of its prior price
+  ok    a later sale, 45 days in: the 800 ended before its window
+  ok    a window that starts before the first price is flagged incomplete
+  ok    no price before the start: nothing to show
+  ok    an empty history: nothing to show
+  ok    the window is 30 days
+  ok    kept for the window plus the longest sale, so a running sale still finds its prior price
+  ok    on the last day of a long sale its prior price is unchanged
+  ok    steps that ended before the kept period are dropped
+  ok    a clock that goes back never reorders, never drops a price and never stamps one later than any time seen
+  ok    the history never holds more than its cap
+  ok    merging keeps the lower price, so the prior price is never higher than the truth
+  ok    the current price is never merged away
+  ok    a non-integer or negative price is not recorded
+
+Prior lowest price: same-second changes keep their real time (review J5809017387, MEDIUM)
+  ok    no step is stamped later than the clock that recorded it
+  ok    two prices in the same second both stay, in the order applied
+  ok    a sale a second later finds the 20 applied before it, not the 500
+  ok    a sale in the same second counts the prices it replaced in that second
+  ok    the healthy sequential case is unchanged
+
+Prior lowest price: an unreadable history is never a complete subset (review J5809017387, LOW)
+  ok    one unreadable step makes the whole history unreadable, not a complete 1000
+  ok    a history that is not a list is unreadable
+  ok    a step that is not a record is unreadable
+  ok    recording onto an unreadable history keeps it as it came, never filtered
+  ok    so it still reads as unreadable afterward
+
+Prior lowest price: a missing slot is unreadable, never a crash, a subset or an empty history (review J5813414204, LOW)
+  ok    a list with a missing slot is unreadable, not a crash
+  ok    a list whose first slot is missing is unreadable
+  ok    a list of only a missing slot is unreadable, not an empty history
+  ok    recording onto a list with a missing slot keeps it as it came
+  ok    so it still reads as unreadable afterward
+  ok    control: the same real step, dense, still reads as a complete 1000
+  ok    control: an empty list is still a known empty history
+  ok    control: recording onto the dense list still adds the step
+  ok    reading and recording never change the list given
+
+Types: the module compiles under the repository's strict settings (review J5813414204, LOW, TS4104)
+  ok    lib/physical-legal.ts has no type errors (strict, ES2017, bundler)
+
+Proposition 65: the site is named on its own (review J5809017387, LOW)
+  ok    a longer hostname that only starts with the site does not name it
+  ok    the site inside another word does not name it
+  ok    the site as a path on another host does not name it
+  ok    the site with a hyphenated suffix does not name it
+  ok    the site with https and a path names it
+  ok    the site in parentheses names it
+  ok    the site followed by a comma names it
+
+91 checks, all passing.
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0
+
+--- types ---
+
+--- lint ---
+
+--- scanner ---
+Public data check: 4135 tracked files; 0 file(s) require correction.
+
+--- diff ---
+
+--- english ---
+J_FOCAL head platform-us-english.test.ts EXACT_TARGET 9ec04bb427f34b4934cb171993f724dc7be59b34
+NETWORK_NEGATIVE_CONTROLS_PASS_BEFORE_GRAPH
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+MEMORY_REDIS_RUN 0
+J_CHILD_EXIT 0

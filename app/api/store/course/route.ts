@@ -77,7 +77,11 @@ export async function GET(request: NextRequest) {
   }
   if (request.nextUrl.searchParams.get("quiz") === "1") {
     try {
-      return Response.json({ ok: true, quiz: await readQuizFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
+      const quiz = await readQuizFor(course.id, lessonId);
+      // The outline says there is a quiz but its record is confirmed absent (GET nil): its questions cannot be shown,
+      // so the studio opens a fresh one to save over it, as for a record that does not read.
+      if (!quiz && findLesson(course, lessonId)?.lesson.quiz) return Response.json({ ok: true, quiz: null, unread: true }, { headers: { "Cache-Control": "no-store" } });
+      return Response.json({ ok: true, quiz }, { headers: { "Cache-Control": "no-store" } });
     } catch (error) {
       // A saved quiz that does not read: the studio opens a fresh one to save over it, and says why.
       if (error instanceof QuizRecordUnreadError) return Response.json({ ok: true, quiz: null, unread: true }, { headers: { "Cache-Control": "no-store" } });

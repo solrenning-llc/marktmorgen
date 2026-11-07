@@ -1,0 +1,23 @@
+✔ a figure is taken whole or refused, and a refused use takes nothing (14.069871ms)
+✔ after a partial first period, the grace window and the real next period share one allowance (3.061333ms)
+✔ a paying store whose billing month is not known is let in to nothing (0.518626ms)
+✔ stores that pay nothing share the month's places, which grow with the stores that pay (7.225614ms)
+✔ an email counted against a store's figure is not sent past it, and the provider is never asked (9239.394235ms)
+✔ the studio counts a page as several requests, and never shuts the owner out of paying, leaving or taking their data (29.98615ms)
+✔ a store's public side rests at its requests as at its visits, and what buyers have goes on to the whole figure (19.877107ms)
+✔ a plan's figures are published from the same numbers (0.786723ms)
+✔ the billing month is written down with the plan, forgotten when it stops, and the stores that pay are kept in line (5.762684ms)
+✔ the daily job writes a store down again when only its billing month moved (3.203126ms)
+✔ funded store-metered emails require paid proof before counters or provider dispatch (3.452394ms)
+✔ funded owner platform calls refuse without approval while consent reduction and disconnect remain available (13.34648ms)
+✔ marked paid webhook attempts need their cohort without blocking general maintenance allowances (3.617175ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9360.115867
+N2451_MEMORY_RUN 1057
+an email was not sent: the store's transactional figure (used)

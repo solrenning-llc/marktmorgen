@@ -1,0 +1,416 @@
+
+Every provider needs a confirmed envelope and every destination
+  ok    mailchimp: malformed envelope 
+  ok    mailchimp: malformed envelope {
+  ok    mailchimp: malformed envelope null
+  ok    mailchimp: malformed envelope []
+  ok    mailchimp: malformed envelope {}
+  ok    mailchimp: malformed envelope {"lists":null,"total_items":0}
+  ok    mailchimp: malformed envelope {"lists":{},"total_items":0}
+  ok    mailchimp: malformed envelope {"lists":"empty","total_items":0}
+  ok    mailchimp: no partial page after invalid row null
+  ok    mailchimp: no partial page after invalid row []
+  ok    mailchimp: no partial page after invalid row "target"
+  ok    mailchimp: no partial page after invalid row 7
+  ok    mailchimp: no partial page after invalid row {}
+  ok    mailchimp: no partial page after invalid row {"id":""}
+  ok    mailchimp: no partial page after invalid row {"id":{}}
+  ok    mailchimp: no partial page after invalid row {"id":"wrong/path"}
+  ok    mailchimp: no partial page after invalid row {"id":1.5}
+  ok    mailchimp: no partial page after invalid row {"id":9007199254740992}
+  ok    mailchimp: explicit empty list remains valid
+  ok    mailchimp: existing names, numeric ids and fallback names
+  ok    mailchimp: exactly one bounded GET, no new request
+  ok    mailchimp: truncating a complete response would lose absence evidence
+  ok    mailchimp: a complete page at the unchanged cap retains order
+  ok    mailchimp: unconfirmed pagination refuses the whole page {}
+  ok    mailchimp: unconfirmed pagination refuses the whole page {"total_items":2}
+  ok    mailchimp: unconfirmed pagination refuses the whole page {"total_items":"1"}
+  ok    mailchimp: unconfirmed pagination refuses the whole page {"total_items":-1}
+  ok    mailchimp: unconfirmed pagination refuses the whole page {"total_items":1.5}
+  ok    mailchimp: permanent malformed evidence makes no temporary promise
+  ok    mailchimp: invalid evidence past picker cap still refuses page
+  ok    mailchimp: refused key retains existing classification
+  ok    mailchimp: server failure retains existing classification
+  ok    kit: malformed envelope 
+  ok    kit: malformed envelope {
+  ok    kit: malformed envelope null
+  ok    kit: malformed envelope []
+  ok    kit: malformed envelope {}
+  ok    kit: malformed envelope {"forms":null,"pagination":{"has_previous_page":false,"has_next_page":false}}
+  ok    kit: malformed envelope {"forms":{},"pagination":{"has_previous_page":false,"has_next_page":false}}
+  ok    kit: malformed envelope {"forms":"empty","pagination":{"has_previous_page":false,"has_next_page":false}}
+  ok    kit: no partial page after invalid row null
+  ok    kit: no partial page after invalid row []
+  ok    kit: no partial page after invalid row "target"
+  ok    kit: no partial page after invalid row 7
+  ok    kit: no partial page after invalid row {}
+  ok    kit: no partial page after invalid row {"id":""}
+  ok    kit: no partial page after invalid row {"id":{}}
+  ok    kit: no partial page after invalid row {"id":"wrong/path"}
+  ok    kit: no partial page after invalid row {"id":1.5}
+  ok    kit: no partial page after invalid row {"id":9007199254740992}
+  ok    kit: explicit empty list remains valid
+  ok    kit: existing names, numeric ids and fallback names
+  ok    kit: exactly one bounded GET, no new request
+  ok    kit: truncating a complete response would lose absence evidence
+  ok    kit: a complete page at the unchanged cap retains order
+  ok    kit: unconfirmed pagination refuses the whole page {}
+  ok    kit: unconfirmed pagination refuses the whole page {"pagination":null}
+  ok    kit: unconfirmed pagination refuses the whole page {"pagination":{"has_previous_page":false,"has_next_page":true}}
+  ok    kit: unconfirmed pagination refuses the whole page {"pagination":{"has_previous_page":true,"has_next_page":false}}
+  ok    kit: unconfirmed pagination refuses the whole page {"pagination":{"has_previous_page":false,"has_next_page":"false"}}
+  ok    kit: permanent malformed evidence makes no temporary promise
+  ok    kit: invalid evidence past picker cap still refuses page
+  ok    kit: refused key retains existing classification
+  ok    kit: server failure retains existing classification
+  ok    beehiiv: malformed envelope 
+  ok    beehiiv: malformed envelope {
+  ok    beehiiv: malformed envelope null
+  ok    beehiiv: malformed envelope []
+  ok    beehiiv: malformed envelope {}
+  ok    beehiiv: malformed envelope {"data":null,"page":1,"total_pages":0,"total_results":0}
+  ok    beehiiv: malformed envelope {"data":{},"page":1,"total_pages":0,"total_results":0}
+  ok    beehiiv: malformed envelope {"data":"empty","page":1,"total_pages":0,"total_results":0}
+  ok    beehiiv: no partial page after invalid row null
+  ok    beehiiv: no partial page after invalid row []
+  ok    beehiiv: no partial page after invalid row "target"
+  ok    beehiiv: no partial page after invalid row 7
+  ok    beehiiv: no partial page after invalid row {}
+  ok    beehiiv: no partial page after invalid row {"id":""}
+  ok    beehiiv: no partial page after invalid row {"id":{}}
+  ok    beehiiv: no partial page after invalid row {"id":"wrong/path"}
+  ok    beehiiv: no partial page after invalid row {"id":1.5}
+  ok    beehiiv: no partial page after invalid row {"id":9007199254740992}
+  ok    beehiiv: explicit empty list remains valid
+  ok    beehiiv: existing names, numeric ids and fallback names
+  ok    beehiiv: exactly one bounded GET, no new request
+  ok    beehiiv: truncating a complete response would lose absence evidence
+  ok    beehiiv: a complete page at the unchanged cap retains order
+  ok    beehiiv: unconfirmed pagination refuses the whole page {}
+  ok    beehiiv: unconfirmed pagination refuses the whole page {"page":1,"total_pages":2,"total_results":2}
+  ok    beehiiv: unconfirmed pagination refuses the whole page {"page":2,"total_pages":2,"total_results":1}
+  ok    beehiiv: unconfirmed pagination refuses the whole page {"page":1,"total_pages":1,"total_results":"1"}
+  ok    beehiiv: unconfirmed pagination refuses the whole page {"page":1,"total_pages":1,"total_results":2}
+  ok    beehiiv: permanent malformed evidence makes no temporary promise
+  ok    beehiiv: invalid evidence past picker cap still refuses page
+  ok    beehiiv: refused key retains existing classification
+  ok    beehiiv: server failure retains existing classification
+  ok    mailerlite: malformed envelope 
+  ok    mailerlite: malformed envelope {
+  ok    mailerlite: malformed envelope null
+  ok    mailerlite: malformed envelope []
+  ok    mailerlite: malformed envelope {}
+  ok    mailerlite: malformed envelope {"data":null,"links":{"prev":null,"next":null},"meta":{"current_page":1,"last_page":1,"total":0}}
+  ok    mailerlite: malformed envelope {"data":{},"links":{"prev":null,"next":null},"meta":{"current_page":1,"last_page":1,"total":0}}
+  ok    mailerlite: malformed envelope {"data":"empty","links":{"prev":null,"next":null},"meta":{"current_page":1,"last_page":1,"total":0}}
+  ok    mailerlite: no partial page after invalid row null
+  ok    mailerlite: no partial page after invalid row []
+  ok    mailerlite: no partial page after invalid row "target"
+  ok    mailerlite: no partial page after invalid row 7
+  ok    mailerlite: no partial page after invalid row {}
+  ok    mailerlite: no partial page after invalid row {"id":""}
+  ok    mailerlite: no partial page after invalid row {"id":{}}
+  ok    mailerlite: no partial page after invalid row {"id":"wrong/path"}
+  ok    mailerlite: no partial page after invalid row {"id":1.5}
+  ok    mailerlite: no partial page after invalid row {"id":9007199254740992}
+  ok    mailerlite: explicit empty list remains valid
+  ok    mailerlite: existing names, numeric ids and fallback names
+  ok    mailerlite: exactly one bounded GET, no new request
+  ok    mailerlite: truncating a complete response would lose absence evidence
+  ok    mailerlite: a complete page at the unchanged cap retains order
+  ok    mailerlite: unconfirmed pagination refuses the whole page {}
+  ok    mailerlite: unconfirmed pagination refuses the whole page {"links":{"prev":null,"next":"https://connect.mailerlite.com/api/groups?page=2"},"meta":{"current_page":1,"last_page":2,"total":2}}
+  ok    mailerlite: unconfirmed pagination refuses the whole page {"links":{"prev":null,"next":null},"meta":{"current_page":1,"last_page":2,"total":1}}
+  ok    mailerlite: unconfirmed pagination refuses the whole page {"links":{"prev":null,"next":null},"meta":{"current_page":2,"last_page":2,"total":1}}
+  ok    mailerlite: unconfirmed pagination refuses the whole page {"links":{"prev":null,"next":null},"meta":{"current_page":1,"last_page":1,"total":2}}
+  ok    mailerlite: permanent malformed evidence makes no temporary promise
+  ok    mailerlite: invalid evidence past picker cap still refuses page
+  ok    mailerlite: refused key retains existing classification
+  ok    mailerlite: server failure retains existing classification
+
+Real reconnect must preserve confirmed settings after a malformed list
+  ok    malformed reconnect reports failure
+  ok    malformed reconnect preserves sealed settings and cached state byte for byte
+  ok    malformed reconnect preserves real store buyer-consent reference
+  ok    only existing ping and target GETs, no POST or retry
+  ok    malformed reconnect reports failure
+  ok    malformed reconnect preserves sealed settings and cached state byte for byte
+  ok    malformed reconnect preserves real store buyer-consent reference
+  ok    only existing ping and target GETs, no POST or retry
+  ok    confirmed reconnect still succeeds and retains selection
+
+C5 pagination: real callers never turn a first page into known absence
+  ok    mailchimp/connect: partial or malformed evidence is unavailable
+  ok    mailchimp/connect: no false absence or temporary promise
+  ok    mailchimp/connect: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/connect: real buyer-consent reference retained
+  ok    mailchimp/connect: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/testConnection: partial or malformed evidence is unavailable
+  ok    mailchimp/testConnection: no false absence or temporary promise
+  ok    mailchimp/testConnection: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/testConnection: real buyer-consent reference retained
+  ok    mailchimp/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/saveSettings: partial or malformed evidence is unavailable
+  ok    mailchimp/saveSettings: no false absence or temporary promise
+  ok    mailchimp/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/saveSettings: real buyer-consent reference retained
+  ok    mailchimp/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/refreshTargets: partial or malformed evidence is unavailable
+  ok    mailchimp/refreshTargets: no false absence or temporary promise
+  ok    mailchimp/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/refreshTargets: real buyer-consent reference retained
+  ok    mailchimp/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/connect: partial or malformed evidence is unavailable
+  ok    mailchimp/connect: no false absence or temporary promise
+  ok    mailchimp/connect: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/connect: real buyer-consent reference retained
+  ok    mailchimp/connect: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/testConnection: partial or malformed evidence is unavailable
+  ok    mailchimp/testConnection: no false absence or temporary promise
+  ok    mailchimp/testConnection: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/testConnection: real buyer-consent reference retained
+  ok    mailchimp/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/saveSettings: partial or malformed evidence is unavailable
+  ok    mailchimp/saveSettings: no false absence or temporary promise
+  ok    mailchimp/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/saveSettings: real buyer-consent reference retained
+  ok    mailchimp/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/refreshTargets: partial or malformed evidence is unavailable
+  ok    mailchimp/refreshTargets: no false absence or temporary promise
+  ok    mailchimp/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/refreshTargets: real buyer-consent reference retained
+  ok    mailchimp/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/connect: partial or malformed evidence is unavailable
+  ok    mailchimp/connect: no false absence or temporary promise
+  ok    mailchimp/connect: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/connect: real buyer-consent reference retained
+  ok    mailchimp/connect: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/testConnection: partial or malformed evidence is unavailable
+  ok    mailchimp/testConnection: no false absence or temporary promise
+  ok    mailchimp/testConnection: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/testConnection: real buyer-consent reference retained
+  ok    mailchimp/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/saveSettings: partial or malformed evidence is unavailable
+  ok    mailchimp/saveSettings: no false absence or temporary promise
+  ok    mailchimp/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/saveSettings: real buyer-consent reference retained
+  ok    mailchimp/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp/refreshTargets: partial or malformed evidence is unavailable
+  ok    mailchimp/refreshTargets: no false absence or temporary promise
+  ok    mailchimp/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    mailchimp/refreshTargets: real buyer-consent reference retained
+  ok    mailchimp/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    mailchimp: complete selected destination still tests successfully
+  ok    mailchimp: a complete empty account can prove known absence
+  ok    mailchimp: a complete page still allows a real destination change
+  ok    kit/connect: partial or malformed evidence is unavailable
+  ok    kit/connect: no false absence or temporary promise
+  ok    kit/connect: settings, tags and previous problem remain byte-identical
+  ok    kit/connect: real buyer-consent reference retained
+  ok    kit/connect: only existing bounded GETs, no new page, POST or retry
+  ok    kit/testConnection: partial or malformed evidence is unavailable
+  ok    kit/testConnection: no false absence or temporary promise
+  ok    kit/testConnection: settings, tags and previous problem remain byte-identical
+  ok    kit/testConnection: real buyer-consent reference retained
+  ok    kit/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    kit/saveSettings: partial or malformed evidence is unavailable
+  ok    kit/saveSettings: no false absence or temporary promise
+  ok    kit/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    kit/saveSettings: real buyer-consent reference retained
+  ok    kit/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    kit/refreshTargets: partial or malformed evidence is unavailable
+  ok    kit/refreshTargets: no false absence or temporary promise
+  ok    kit/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    kit/refreshTargets: real buyer-consent reference retained
+  ok    kit/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    kit/connect: partial or malformed evidence is unavailable
+  ok    kit/connect: no false absence or temporary promise
+  ok    kit/connect: settings, tags and previous problem remain byte-identical
+  ok    kit/connect: real buyer-consent reference retained
+  ok    kit/connect: only existing bounded GETs, no new page, POST or retry
+  ok    kit/testConnection: partial or malformed evidence is unavailable
+  ok    kit/testConnection: no false absence or temporary promise
+  ok    kit/testConnection: settings, tags and previous problem remain byte-identical
+  ok    kit/testConnection: real buyer-consent reference retained
+  ok    kit/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    kit/saveSettings: partial or malformed evidence is unavailable
+  ok    kit/saveSettings: no false absence or temporary promise
+  ok    kit/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    kit/saveSettings: real buyer-consent reference retained
+  ok    kit/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    kit/refreshTargets: partial or malformed evidence is unavailable
+  ok    kit/refreshTargets: no false absence or temporary promise
+  ok    kit/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    kit/refreshTargets: real buyer-consent reference retained
+  ok    kit/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    kit/connect: partial or malformed evidence is unavailable
+  ok    kit/connect: no false absence or temporary promise
+  ok    kit/connect: settings, tags and previous problem remain byte-identical
+  ok    kit/connect: real buyer-consent reference retained
+  ok    kit/connect: only existing bounded GETs, no new page, POST or retry
+  ok    kit/testConnection: partial or malformed evidence is unavailable
+  ok    kit/testConnection: no false absence or temporary promise
+  ok    kit/testConnection: settings, tags and previous problem remain byte-identical
+  ok    kit/testConnection: real buyer-consent reference retained
+  ok    kit/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    kit/saveSettings: partial or malformed evidence is unavailable
+  ok    kit/saveSettings: no false absence or temporary promise
+  ok    kit/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    kit/saveSettings: real buyer-consent reference retained
+  ok    kit/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    kit/refreshTargets: partial or malformed evidence is unavailable
+  ok    kit/refreshTargets: no false absence or temporary promise
+  ok    kit/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    kit/refreshTargets: real buyer-consent reference retained
+  ok    kit/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    kit: complete selected destination still tests successfully
+  ok    kit: a complete empty account can prove known absence
+  ok    kit: a complete page still allows a real destination change
+  ok    beehiiv/connect: partial or malformed evidence is unavailable
+  ok    beehiiv/connect: no false absence or temporary promise
+  ok    beehiiv/connect: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/connect: real buyer-consent reference retained
+  ok    beehiiv/connect: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/testConnection: partial or malformed evidence is unavailable
+  ok    beehiiv/testConnection: no false absence or temporary promise
+  ok    beehiiv/testConnection: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/testConnection: real buyer-consent reference retained
+  ok    beehiiv/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/saveSettings: partial or malformed evidence is unavailable
+  ok    beehiiv/saveSettings: no false absence or temporary promise
+  ok    beehiiv/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/saveSettings: real buyer-consent reference retained
+  ok    beehiiv/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/refreshTargets: partial or malformed evidence is unavailable
+  ok    beehiiv/refreshTargets: no false absence or temporary promise
+  ok    beehiiv/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/refreshTargets: real buyer-consent reference retained
+  ok    beehiiv/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/connect: partial or malformed evidence is unavailable
+  ok    beehiiv/connect: no false absence or temporary promise
+  ok    beehiiv/connect: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/connect: real buyer-consent reference retained
+  ok    beehiiv/connect: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/testConnection: partial or malformed evidence is unavailable
+  ok    beehiiv/testConnection: no false absence or temporary promise
+  ok    beehiiv/testConnection: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/testConnection: real buyer-consent reference retained
+  ok    beehiiv/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/saveSettings: partial or malformed evidence is unavailable
+  ok    beehiiv/saveSettings: no false absence or temporary promise
+  ok    beehiiv/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/saveSettings: real buyer-consent reference retained
+  ok    beehiiv/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/refreshTargets: partial or malformed evidence is unavailable
+  ok    beehiiv/refreshTargets: no false absence or temporary promise
+  ok    beehiiv/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/refreshTargets: real buyer-consent reference retained
+  ok    beehiiv/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/connect: partial or malformed evidence is unavailable
+  ok    beehiiv/connect: no false absence or temporary promise
+  ok    beehiiv/connect: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/connect: real buyer-consent reference retained
+  ok    beehiiv/connect: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/testConnection: partial or malformed evidence is unavailable
+  ok    beehiiv/testConnection: no false absence or temporary promise
+  ok    beehiiv/testConnection: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/testConnection: real buyer-consent reference retained
+  ok    beehiiv/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/saveSettings: partial or malformed evidence is unavailable
+  ok    beehiiv/saveSettings: no false absence or temporary promise
+  ok    beehiiv/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/saveSettings: real buyer-consent reference retained
+  ok    beehiiv/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv/refreshTargets: partial or malformed evidence is unavailable
+  ok    beehiiv/refreshTargets: no false absence or temporary promise
+  ok    beehiiv/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    beehiiv/refreshTargets: real buyer-consent reference retained
+  ok    beehiiv/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    beehiiv: complete selected destination still tests successfully
+  ok    beehiiv: a complete empty account can prove known absence
+  ok    beehiiv: a complete page still allows a real destination change
+  ok    mailerlite/connect: partial or malformed evidence is unavailable
+  ok    mailerlite/connect: no false absence or temporary promise
+  ok    mailerlite/connect: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/connect: real buyer-consent reference retained
+  ok    mailerlite/connect: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/testConnection: partial or malformed evidence is unavailable
+  ok    mailerlite/testConnection: no false absence or temporary promise
+  ok    mailerlite/testConnection: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/testConnection: real buyer-consent reference retained
+  ok    mailerlite/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/saveSettings: partial or malformed evidence is unavailable
+  ok    mailerlite/saveSettings: no false absence or temporary promise
+  ok    mailerlite/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/saveSettings: real buyer-consent reference retained
+  ok    mailerlite/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/refreshTargets: partial or malformed evidence is unavailable
+  ok    mailerlite/refreshTargets: no false absence or temporary promise
+  ok    mailerlite/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/refreshTargets: real buyer-consent reference retained
+  ok    mailerlite/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/connect: partial or malformed evidence is unavailable
+  ok    mailerlite/connect: no false absence or temporary promise
+  ok    mailerlite/connect: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/connect: real buyer-consent reference retained
+  ok    mailerlite/connect: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/testConnection: partial or malformed evidence is unavailable
+  ok    mailerlite/testConnection: no false absence or temporary promise
+  ok    mailerlite/testConnection: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/testConnection: real buyer-consent reference retained
+  ok    mailerlite/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/saveSettings: partial or malformed evidence is unavailable
+  ok    mailerlite/saveSettings: no false absence or temporary promise
+  ok    mailerlite/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/saveSettings: real buyer-consent reference retained
+  ok    mailerlite/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/refreshTargets: partial or malformed evidence is unavailable
+  ok    mailerlite/refreshTargets: no false absence or temporary promise
+  ok    mailerlite/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/refreshTargets: real buyer-consent reference retained
+  ok    mailerlite/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/connect: partial or malformed evidence is unavailable
+  ok    mailerlite/connect: no false absence or temporary promise
+  ok    mailerlite/connect: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/connect: real buyer-consent reference retained
+  ok    mailerlite/connect: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/testConnection: partial or malformed evidence is unavailable
+  ok    mailerlite/testConnection: no false absence or temporary promise
+  ok    mailerlite/testConnection: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/testConnection: real buyer-consent reference retained
+  ok    mailerlite/testConnection: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/saveSettings: partial or malformed evidence is unavailable
+  ok    mailerlite/saveSettings: no false absence or temporary promise
+  ok    mailerlite/saveSettings: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/saveSettings: real buyer-consent reference retained
+  ok    mailerlite/saveSettings: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite/refreshTargets: partial or malformed evidence is unavailable
+  ok    mailerlite/refreshTargets: no false absence or temporary promise
+  ok    mailerlite/refreshTargets: settings, tags and previous problem remain byte-identical
+  ok    mailerlite/refreshTargets: real buyer-consent reference retained
+  ok    mailerlite/refreshTargets: only existing bounded GETs, no new page, POST or retry
+  ok    mailerlite: complete selected destination still tests successfully
+  ok    mailerlite: a complete empty account can prove known absence
+  ok    mailerlite: a complete page still allows a real destination change
+
+C5 LOW A: a confirmed larger account is our one-page limitation, not a provider fault
+  ok    mailchimp: known additional destinations are explained as our one-page limitation
+  ok    mailchimp: the refusal explains an action and promises no change
+  ok    mailchimp: a permanent one-page limitation does not request an automatic retry
+  ok    mailchimp: explaining the refusal adds no page or productive write
+  ok    kit: known additional destinations are explained as our one-page limitation
+  ok    kit: the refusal explains an action and promises no change
+  ok    kit: a permanent one-page limitation does not request an automatic retry
+  ok    kit: explaining the refusal adds no page or productive write
+  ok    beehiiv: known additional destinations are explained as our one-page limitation
+  ok    beehiiv: the refusal explains an action and promises no change
+  ok    beehiiv: a permanent one-page limitation does not request an automatic retry
+  ok    beehiiv: explaining the refusal adds no page or productive write
+  ok    mailerlite: known additional destinations are explained as our one-page limitation
+  ok    mailerlite: the refusal explains an action and promises no change
+  ok    mailerlite: a permanent one-page limitation does not request an automatic retry
+  ok    mailerlite: explaining the refusal adds no page or productive write
+
+405 checks, all passing.
+N2451_MEMORY_RUN 938

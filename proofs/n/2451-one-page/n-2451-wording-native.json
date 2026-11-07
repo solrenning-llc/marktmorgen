@@ -1,0 +1,16 @@
+{
+  "main": "278effa5348b97d9db50c8a6d447804efeb9be41",
+  "main_tree": "f029ebdb34dc177049452ec57f3f3044809c25cf",
+  "final_tree": "410fa6c77749004039b0f09a082aeafedc2f512d",
+  "own_blobs": {
+    "lib/email-platforms.ts": "d07af5d13e9f0b21c6e43f8347216baa23068350",
+    "lib/email-platform-faq.ts": "85156d909f0b482364f012ac26d91b682396919b",
+    "tests/email-platform-target-evidence.test.ts": "4878246c4a038a0f459c5db8ace8266f9b635594",
+    "tests/email-platform-faq.test.ts": "0a9bd81a84c4cfb3618e9eba137f86f926c4d94a",
+    "tests/email-platform-target-world.ts": "e186894b8ff755cb50a5060f2d3fc456220eb761",
+    "tests/test-config.mjs": "f427f0356130fa4d348d05191da021df58d35bb9"
+  },
+  "main_blobs": 4270,
+  "materialized_tracked": 2452,
+  "changed_diff_exit": 0
+}

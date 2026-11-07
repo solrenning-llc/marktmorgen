@@ -18,7 +18,15 @@
  *     email the studio sends (app/api/store/mail/route.ts), the email's page
  *     on the web (app/[handle]/letters/[letter]) and the studio's
  *     "As it is sent" preview (components/mail-designer.tsx);
- *   - an unknown folder, an empty one, or one of the wrong shape draws none.
+ *   - an unknown folder, an empty one, or one of the wrong shape draws none;
+ *   - after the owner's address changes (moveAccount, lib/store.ts), the
+ *     pictures already in the store's emails are still its own: the record
+ *     keeps the folders it had (imageFolders, at most MAX_IMAGE_FOLDERS), and
+ *     the broadcast, the [Test] email, the email's page and the preview draw
+ *     them still, beside the ones kept in the new folder; another store's
+ *     stays its description. A record whose earlier folders are not exactly
+ *     a short list of folders keeps only the current one, never every one,
+ *     and a move left half done is still settled (settleDoubledStore).
  */
 import { createElement, type Context } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -27,7 +35,8 @@ import { pictureLine, pictureUrl } from "@/lib/mail-picture-rules";
 import * as pictureRules from "@/lib/mail-picture-rules";
 import { bodyHtml, render } from "@/lib/mail";
 import { advanceBroadcast, type Broadcast } from "@/lib/broadcasts";
-import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, imageFolder, setMailSettings, setSubscription, storeForEmail, storeForHandle, storeRef } from "@/lib/store";
+import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, imageFolder, moveAccount, setMailSettings, setSubscription, settleDoubledStore, storeForEmail, storeForHandle, storeRef } from "@/lib/store";
+import * as storeLib from "@/lib/store";
 import { upsertContact } from "@/lib/contacts";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { publishLetter } from "@/lib/letters";
@@ -43,6 +52,19 @@ import { installSesMailFixture } from "./ses-mail-fixture";
 
 const OWNER = "pictures@example.com";
 const OTHER = "someone-else@example.com";
+const MOVED = "pictures-moved@example.com";
+/** The key a store's record is kept under in the stand-in, found by the owner written in it. */
+const recordKeyOf = (email: string) =>
+  redis.keys().find((key) => {
+    try {
+      const raw = redis.run(["GET", key]);
+      if (typeof raw !== "string" || !raw.startsWith("{")) return false;
+      const value = JSON.parse(raw) as { email?: unknown; handle?: unknown };
+      return value.email === email && value.handle === "oven-notes";
+    } catch {
+      return false;
+    }
+  });
 const imgs = (html: string) => [...html.matchAll(/<img src="([^"]+)"/g)].map((m) => m[1]);
 
 async function main(): Promise<void> {
@@ -127,6 +149,91 @@ async function main(): Promise<void> {
     const unknown = renderToStaticMarkup(createElement(designer.MailBodyEditor, { body, onChange: () => {} }));
     is("with no folder told, none is", drawn(unknown), []);
   }
+
+  part("After the owner's address changes: the pictures already posted are still the store's own");
+  const pictureFolders = (storeLib as Record<string, unknown>).pictureFolders as ((store: storeLib.Store) => Promise<string[]>) | undefined;
+  const maxFolders = (storeLib as Record<string, unknown>).MAX_IMAGE_FOLDERS as number | undefined;
+  is("the store says which folders are its own", typeof pictureFolders, "function");
+  is("with a small ceiling", maxFolders, 10);
+  const fromKey = recordKeyOf(OWNER);
+  is("the record is found (control)", typeof fromKey, "string");
+  const moved = await moveAccount(OWNER, MOVED);
+  is("the account moved", moved.ok, true);
+  const after = (await storeForEmail(MOVED))!;
+  const now = await imageFolder(storeRef(after));
+  is("new pictures go to another folder now (control)", now !== own, true);
+  is("the record keeps the folder it had", (after as storeLib.Store & { imageFolders?: string[] }).imageFolders, [own]);
+  const folders = pictureFolders ? await pictureFolders(after) : [now];
+  is("its own folders: the current first, then the one before", folders, [now, own]);
+  const fresh = pictureUrl(now, `${"d".repeat(31)}3.jpg`);
+  const later = `${body}\n\n${pictureLine("The new loaf", fresh)}`;
+
+  const again = installSesMailFixture();
+  again.configure();
+  await again.setReady(true, { max24: 50_000, rate: 100 });
+  const id2 = "444444444444444444444444";
+  const key2 = `nl:mail:bc:${id2}`;
+  await redis.pipeline([["SET", key2, JSON.stringify({ ...broadcast, id: id2, body: later })], ["RPUSH", `${key2}:to`, "reader@example.com"], ["SADD", "nl:mail:queue", id2]]);
+  await advanceBroadcast(id2, storeForHandle, Date.now() + 20_000);
+  is("a broadcast went", again.ses.length, 1);
+  is("drawing the picture posted before the move and the one after, not another store's", imgs(again.ses[0]?.html ?? ""), [mine, fresh]);
+  is("another store's is still its description", (again.ses[0]?.html ?? "").includes("[Their cake]"), true);
+
+  const session2 = await openSession(MOVED);
+  const tested2 = await mailRoute(new NextRequest("https://marktmorgen.com/api/store/mail", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session2}` }, body: JSON.stringify({ action: "test", subject: "New loaf", body: later }) }));
+  is("the [Test] email went", [tested2.status, again.ses.length], [200, 2]);
+  is("with both of the store's own pictures, not another store's", imgs(again.ses[1]?.html ?? ""), [mine, fresh]);
+  again.restore();
+
+  cookieValues.clear();
+  const page2 = renderToStaticMarkup(await LetterPage({ params: Promise.resolve({ handle: `@${store.handle}`, letter: letterId }), searchParams: Promise.resolve({}) }));
+  is("the email's page still draws the picture it was sent with", imgs(page2).filter((src) => src.includes("/api/image/")), [mine]);
+
+  if (MailPictures) {
+    const drawn = (html: string) => [...new Set(imgs(html).filter((src) => src.startsWith("https://")))];
+    const preview2 = renderToStaticMarkup(createElement(MailPictures.Provider, { value: folders as unknown as string }, createElement(designer.MailBodyEditor, { body: later, onChange: () => {} })));
+    is("the preview, told the store's folders, draws both and not another store's", drawn(preview2), [mine, fresh]);
+  }
+  if (ownPicturesOnly) {
+    const rule = ownPicturesOnly as unknown as (body: string, folder?: string | readonly string[]) => string;
+    is("the rule takes the store's folders", [rule(later, folders).includes(mine), rule(later, folders).includes(fresh), rule(later, folders).includes(notMine)], [true, true, false]);
+    is("and an empty list keeps none", rule(later, []).includes(mine), false);
+    is("nor a list of wrong shapes", rule(later, ["*", `${own}/`, ""]).includes(mine), false);
+  }
+
+  part("A record whose earlier folders are not exactly a short list of folders keeps only the current one");
+  const toKey = recordKeyOf(MOVED)!;
+  const kept = redis.run(["GET", toKey]) as string;
+  const wrongs: unknown[] = ["all", "*", [own, "not-a-folder"], [own.toUpperCase()], Array.from({ length: 11 }, (_, i) => own.slice(0, 23) + (i % 10)), { 0: own }, [[own]], [own, own], [now]];
+  for (const wrong of wrongs) {
+    redis.run(["SET", toKey, JSON.stringify({ ...JSON.parse(kept), imageFolders: wrong })]);
+    const read = (await storeForEmail(MOVED))!;
+    is(`${JSON.stringify(wrong).slice(0, 40)}: only the current folder`, pictureFolders ? await pictureFolders(read) : null, [now]);
+  }
+  redis.run(["SET", toKey, kept]);
+
+  part("A move left half done is settled as before (lib/move-repair.ts)");
+  // The old address still holds the record as it was before the move, the handle already points to the new one.
+  const before = JSON.parse(kept) as Record<string, unknown>;
+  delete before.imageFolders;
+  redis.run(["SET", fromKey!, JSON.stringify({ ...before, email: OWNER })]);
+  is("the address that keeps it is the new one", await settleDoubledStore(OWNER, MOVED), MOVED);
+  is("the copy at the old address is gone", redis.run(["GET", fromKey!]), null);
+  is("the folders it had are kept", ((await storeForEmail(MOVED)) as storeLib.Store & { imageFolders?: string[] }).imageFolders, [own]);
+
+  part("Moved again and again: at most the ceiling, the latest first");
+  let at = MOVED;
+  const seen: string[] = [now];
+  for (let i = 0; i < 11; i++) {
+    const next = `pictures-moved-${i}@example.com`;
+    is(`move ${i + 1}`, (await moveAccount(at, next)).ok, true);
+    at = next;
+    seen.unshift(await imageFolder(at));
+  }
+  const last = (await storeForEmail(at))! as storeLib.Store & { imageFolders?: string[] };
+  is("the record keeps ten", last.imageFolders?.length, 10);
+  is("the latest ones, newest first", last.imageFolders, seen.slice(1, 11));
+  is("the current folder is never among them", last.imageFolders?.includes(seen[0]), false);
 
   done();
 }

@@ -241,16 +241,26 @@ export async function markBrokenMove(from: string, to: string): Promise<string> 
   return op;
 }
 
+/**
+ * A broken move's record, read exactly (SG2 rule 24; Claude 5 on #2271): null only when there is none. A reply cut
+ * short or of another kind, or a record that does not read as one, throws UnknownReplyError, never "no broken move":
+ * a new move then never starts over a broken one (markMoving), nor writes over its record.
+ */
 export async function readBrokenMove(email: string): Promise<{ from: string; to: string; copy?: string } | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", await brokenKey(email)]]);
+  const replies = repliesFor(await redisPipeline([["GET", await brokenKey(email)]]), 1);
+  if (!replies) throw new UnknownReplyError("a broken move's record");
+  const [raw] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a broken move's record");
+  let value: { from?: unknown; to?: unknown; copy?: unknown } | null;
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { from?: unknown; to?: unknown; copy?: unknown }) : null;
-    if (!value || typeof value.from !== "string" || typeof value.to !== "string") return null;
-    return typeof value.copy === "string" && /^[0-9a-f]{64}$/.test(value.copy) ? { from: value.from, to: value.to, copy: value.copy } : { from: value.from, to: value.to };
+    value = JSON.parse(raw) as { from?: unknown; to?: unknown; copy?: unknown } | null;
   } catch {
-    return null;
+    throw new UnknownReplyError("a broken move's record");
   }
+  if (!value || typeof value !== "object" || typeof value.from !== "string" || typeof value.to !== "string") throw new UnknownReplyError("a broken move's record");
+  return typeof value.copy === "string" && /^[0-9a-f]{64}$/.test(value.copy) ? { from: value.from, to: value.to, copy: value.copy } : { from: value.from, to: value.to };
 }
 
 /**

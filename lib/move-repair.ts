@@ -21,7 +21,9 @@ import { settleDoubledStore, storeForEmail } from "@/lib/store";
 
 /** True when this address holds no broken move any more (repaired now, or there was none). */
 export async function repairMove(email: string): Promise<boolean> {
-  const broken = await readBrokenMove(email);
+  // A record that cannot be read exactly is not "no broken move": it is not repaired, and the callers refuse.
+  const broken = await readBrokenMove(email).catch((error: unknown) => (console.error("reading a broken move failed", error), undefined));
+  if (broken === undefined) return false;
   if (!broken) return true;
   const { from, to, copy } = broken;
   try {

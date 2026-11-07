@@ -26,7 +26,7 @@ import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-const CM = "cmidx";
+const CM = "c1dec0de0000000000000000000c1dec";
 const COURSE = "0123456789abcdef0123456789abcdef";
 const LESSON = "lesson000001";
 const product = { id: "prod1", title: "Field notes" } as unknown as Listing;

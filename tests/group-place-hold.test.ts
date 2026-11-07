@@ -12,6 +12,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccoun
 import { readListing } from "@/lib/catalog";
 import { placesTaken, settleGroup, startGroup, takePlace } from "@/lib/group-buy";
 import { importedFor } from "@/lib/imported-purchases";
+import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -155,6 +156,47 @@ async function main(): Promise<void> {
   is("two places, taken", [await take(await full.link("eve@example.com")), await take(await full.link("fay@example.com"))], ["taken", "taken"]);
   is("a third address is told full", await take(await full.link("gus@example.com")), "full");
   is("the list still holds the two places only, two counted", [await members(full.id), await placesTaken(full.id)], [{ length: 4, held: ["eve@example.com", "fay@example.com"] }, 2]);
+
+  // Upstash runs each command of a pipeline on its own: the script giving the record back can fail while the DECR
+  // beside it lands, and the whole call then throws (lib/redis.ts). The run must still say "full", never leave the
+  // address a record that later reads as a place it was never given (Claude 6 on #2872).
+  const isDropOf = (id: string) => (c: Command) => c[0] === "EVAL" && c[3] === `nl:grp:${id}:m`;
+  /** The give-back script fails, the rest of its pipeline lands; `always` fails it alone too (the retry). */
+  const failDrop = (id: string, always: boolean) => {
+    redis.pipeline = (async (commands: Command[]) => {
+      const drop = commands.some(isDropOf(id));
+      if (!drop || (!always && commands.length === 1)) return real(commands);
+      await real(commands.filter((c) => !isDropOf(id)(c)));
+      throw new Error("Redis error: ERR script failed");
+    }) as typeof redis.pipeline;
+  };
+
+  part("Full, and the give-back script fails while its DECR lands: the run retries the script alone");
+  const failed = await paidGroup(2);
+  is("two places, taken", [await take(await failed.link("hal@example.com")), await take(await failed.link("ivy@example.com"))], ["taken", "taken"]);
+  const thirdLink = await failed.link("jo@example.com");
+  failDrop(failed.id, false);
+  const third = await take(thirdLink);
+  restore();
+  is("the third address is told full, nothing handed over", [third, await owns("jo@example.com")], ["full", []]);
+  is("its record given back on the retry, two places counted", [await members(failed.id), await placesTaken(failed.id)], [{ length: 4, held: ["hal@example.com", "ivy@example.com"] }, 2]);
+  is("opened again it is full again, never 'already'", await take(thirdLink), "full");
+
+  part("Full, and the give-back script fails every time: the record left over never reads as a place");
+  const stuck = await paidGroup(2);
+  is("two places, taken", [await take(await stuck.link("kai@example.com")), await take(await stuck.link("lu@example.com"))], ["taken", "taken"]);
+  const stuckLink = await stuck.link("max@example.com");
+  failDrop(stuck.id, true);
+  const stuckFirst = await take(stuckLink);
+  restore();
+  is("the third address is told full, nothing handed over", [stuckFirst, await owns("max@example.com")], ["full", []]);
+  is("opened again it is 'pending', never 'already', and nothing is handed over", [await take(stuckLink), await owns("max@example.com")], ["pending", []]);
+  is("no place counted past the two paid for", await placesTaken(stuck.id), 2);
+  is(
+    "the page says 'not confirmed' in every buyer language, never 'expired' nor 'the place is yours'",
+    Object.values(GIVING_WORDS).every((w) => Boolean(w.groupNotices.unconfirmed?.title && w.groupNotices.unconfirmed?.body) && w.groupNotices.unconfirmed.title !== w.groupNotices.expired.title),
+    true,
+  );
   done();
 }
 

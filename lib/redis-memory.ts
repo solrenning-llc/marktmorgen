@@ -1075,10 +1075,18 @@ export class MemoryRedis {
         else this.until.delete(key);
         return "OK";
       }
-      case "EXPIRE":
+      case "EXPIRE": {
         if (!this.data.has(key)) return 0;
-        this.until.set(key, this.now() + Number(args[0]) * 1000);
+        // Redis 7's options: NX only where there is no end, XX only where there is one, GT and LT only to a later or
+        // an earlier end (a key with no end counts as never ending), as tests/redis-memory-arity.test.ts holds.
+        const option = String(args[1] ?? "").toUpperCase();
+        const ends = this.until.get(key);
+        const next = this.now() + Number(args[0]) * 1000;
+        if ((option === "NX" && ends !== undefined) || (option === "XX" && ends === undefined) ||
+            (option === "GT" && (ends === undefined || next <= ends)) || (option === "LT" && ends !== undefined && next >= ends)) return 0;
+        this.until.set(key, next);
         return 1;
+      }
       case "TTL": {
         if (!this.data.has(key)) return -2;
         const ends = this.until.get(key);
@@ -1149,7 +1157,11 @@ export class MemoryRedis {
       case "DEL": {
         // DEL takes several keys.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        // A key's end goes with it, so a key made again has none (as Redis 7).
+        for (const one of [key, ...args]) {
+          this.until.delete(one);
+          if (this.data.delete(one)) gone += 1;
+        }
         return gone;
       }
       case "EXISTS":

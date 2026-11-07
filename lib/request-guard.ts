@@ -154,10 +154,7 @@ export async function essentialLimitState(scope: string, who: string, limit: num
   let reply: unknown;
   try {
     const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCR", key],
-    ]);
+    reply = await redisPipeline(countInWindow(key, windowSeconds));
   } catch {
     return "unknown";
   }
@@ -176,10 +173,7 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   let reply: unknown;
   try {
     const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCR", key],
-    ]);
+    reply = await redisPipeline(countInWindow(key, windowSeconds));
   } catch {
     // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
     return true;
@@ -191,8 +185,8 @@ export async function withinLimit(scope: string, who: string, limit: number, win
 
 /**
  * Takes `n` at once from withinLimit's counter, in one step on the server
- * (second pre-review of 279 [H3-4] unit 2): the window started as withinLimit
- * starts it (SET NX EX), given its end when a count has none, a count below
+ * (second pre-review of 279 [H3-4] unit 2): the window started with the same
+ * length withinLimit gives it (SET NX EX), given its end when a count has none, a count below
  * zero counted from zero, then INCRBY, and past `limit` the same DECRBY,
  * all before anything else runs on the key. So a window that ends between
  * two requests can never make the key again with no end and below zero, and
@@ -289,7 +283,25 @@ function onlyReply(reply: unknown): unknown {
   return only && Object.hasOwn(only, "value") ? only.value : undefined;
 }
 
-/** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
+/**
+ * One more on a counter whose window starts with its first count: INCR, then
+ * EXPIRE NX (review of #2819). These were SET NX EX and then INCR, in one
+ * Upstash pipeline that is not one step: a window that ended between the two
+ * let the INCR make the key again with no end, and the client was held for
+ * ever. Now the end is given after the count, only where there is none (NX:
+ * a window is never made longer), so a count is never left without one, and
+ * one left so by the earlier code gets it at the next request. A window that
+ * ends between the two leaves nothing. The same two commands, so the same
+ * cost and the same counts.
+ */
+function countInWindow(key: string, windowSeconds: number): (string | number)[][] {
+  return [
+    ["INCR", key],
+    ["EXPIRE", key, windowSeconds, "NX"],
+  ];
+}
+
+/** Whether a returned INCR + EXPIRE NX reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
 function countWithin(reply: unknown, limit: number): boolean {
   try {
     const count = counterReply(reply);
@@ -300,19 +312,19 @@ function countWithin(reply: unknown, limit: number): boolean {
 }
 
 /**
- * The count of a SET NX + INCR pipeline, only in its exact shape: two
- * replies, the SET's "OK" or null, and the INCR's own whole number of at
- * least 1; null for anything else. Read by the replies' own data fields,
- * as withinEssentialLimit does, so a getter cannot answer for them.
+ * The count of an INCR + EXPIRE NX pipeline (countInWindow), only in its
+ * exact shape: two replies, the INCR's own whole number of at least 1, and
+ * the EXPIRE's 1 or 0; null for anything else. Read by the replies' own data
+ * fields, as withinEssentialLimit does, so a getter cannot answer for them.
  */
 function counterReply(reply: unknown): number | null {
   if (!Array.isArray(reply)) return null;
   const length = Object.getOwnPropertyDescriptor(reply, "length");
   if (!length || !Object.hasOwn(length, "value") || length.value !== 2) return null;
-  const set = Object.getOwnPropertyDescriptor(reply, "0");
-  const count = Object.getOwnPropertyDescriptor(reply, "1");
-  if (!set || !Object.hasOwn(set, "value") || (set.value !== null && set.value !== "OK")) return null;
+  const count = Object.getOwnPropertyDescriptor(reply, "0");
+  const ends = Object.getOwnPropertyDescriptor(reply, "1");
   if (!count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < 1) return null;
+  if (!ends || !Object.hasOwn(ends, "value") || (ends.value !== 0 && ends.value !== 1)) return null;
   return count.value as number;
 }
 
@@ -336,10 +348,7 @@ export async function withinMonth(scope: string, who: string, limit: number, win
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", 32 * 86_400, "NX"],
-      ["INCR", key],
-    ]);
+    reply = await redisPipeline(countInWindow(key, 32 * 86_400));
   } catch {
     return true;
   }

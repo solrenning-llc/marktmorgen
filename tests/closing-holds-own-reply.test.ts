@@ -35,6 +35,8 @@ const reads: string[] = [];
 let lists: Record<string, Record<string, unknown>[]> = {};
 /** What Stripe's search of the store's subscriptions answers. */
 let found: Record<string, unknown>[] = [];
+/** A whole reply given as it is, in place of a list: for GET /invoices by status, and for the search ("search"). */
+const asIs = new Map<string, unknown>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -48,6 +50,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   reads.push(path);
   if (path === `/subscriptions/${MEMBER}`) return json(reply);
+  if (path === "/invoices" && asIs.has(url.searchParams.get("status") ?? "")) return json(asIs.get(url.searchParams.get("status") ?? ""));
+  if (path === "/subscriptions/search" && asIs.has("search")) return json(asIs.get("search"));
   if (path === "/invoices") return json({ object: "list", data: lists[url.searchParams.get("status") ?? ""] ?? [], has_more: false });
   if (path === "/subscriptions/search") return json({ object: "search_result", data: found, has_more: false, next_page: null });
   return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
@@ -59,6 +63,7 @@ async function setup() {
   reads.length = 0;
   lists = {};
   found = [];
+  asIs.clear();
   const email = "closing-own-reply@example.com";
   await claimHandle(email, "closing-own-reply", "Closing own reply", "");
   await setStripeAccount(email, ACCOUNT, true);
@@ -218,6 +223,31 @@ async function main() {
     is(`(${what}) its draft is kept as a draft`, [writes.includes(`POST /invoices/${ownDraft.id}`), await redis.run(["HGET", workKey(folder), `d:${MEMBER}`])], [true, ownDraft.id]);
     is(`(${what}) its last payment is written down`, typeof paid === "string" && (JSON.parse(paid) as { inv?: string }).inv, ownPaid.id);
     is(`(${what}) it is held and leaves the line`, [paused(), (await fields(folder)).includes(`f:${MEMBER}`), counts.failed], [true, false, 0]);
+  }
+
+  // Claude 6 on #3098, same class: a 200 whose JSON body is null, a string, a number or an object with no rows is not
+  // a list, and never an empty one: the member's open invoices would stay unvoided, its drafts would go on and its
+  // last payment would not be written down, with the member counted held.
+  const notLists = [["null", null], ["a string", "in_OwnOpen00001"], ["a number", 7], ["an object with no data", { object: "list", has_more: false }]] as const;
+  part("An invoice list answered with something that is not a list never counts the member held");
+  for (const status of ["open", "draft", "paid"] as const) {
+    for (const [label, body] of notLists) {
+      const { store, folder } = await setup();
+      lists = { open: [ownOpen], draft: [ownDraft], paid: [ownPaid] };
+      asIs.set(status, body);
+      reply = member;
+      const counts = await retryHolds(store, ENDED_AT, Date.now() + 10_000);
+      notHeld(`the ${status} invoices answered with ${label}`, { counts, keys: await fields(folder) });
+    }
+  }
+
+  part("The store's search answered with something that is not a list is never its last page");
+  for (const [label, body] of notLists) {
+    const { store, folder } = await setup();
+    await redis.pipeline([["HDEL", workKey(folder), `f:${MEMBER}`, `m:${MEMBER}`]]);
+    asIs.set("search", body);
+    const result = await holdCharges(store, ENDED_AT, Date.now() + 10_000).catch(() => null);
+    is(`a search answered with ${label}: the hold is not done, and nothing is written`, [result?.done === true, writes], [false, []]);
   }
 
   part("A subscription the store's search found that is not of the handle searched is never held");

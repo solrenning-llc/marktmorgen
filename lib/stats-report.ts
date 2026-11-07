@@ -620,3 +620,8 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
     headers: { "List-Unsubscribe": `<${stopUrl}>` },
   }).catch(() => false);
 }
+
+/** Lets this week's claim go, when the numbers could not be read, so a later run tries again (as releaseMonth does for the month). */
+export async function releaseWeek(handle: string, now = Date.now()): Promise<void> {
+  if (isRedisConfigured()) await redisPipeline([["DEL", sentKey(weekOf(now), handle)]]);
+}

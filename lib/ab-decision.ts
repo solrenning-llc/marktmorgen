@@ -8,12 +8,15 @@
  * It extends the headline test's rule (lib/headline-test-rules.ts) without
  * changing it:
  *
- *   - Money is net of refunds. A version wins by the money it kept per
- *     visitor: paid minus refunded. Opened checkouts, clicks and opens never
- *     decide.
+ *   - Money is net of refunds and of disputes that take the money (the
+ *     states in DISPUTE_TAKES, lib/retained-revenue.ts: on Stripe a dispute
+ *     is not a refund). A version wins by the money it kept per visitor:
+ *     paid minus refunded minus disputed. Opened checkouts, clicks and opens
+ *     never decide.
  *   - The same minimums for each version: MIN_VIEWS visitors and MIN_SALES
- *     sales that were not refunded at all (a sale with a partial refund keeps
- *     its net money but does not count toward the minimum).
+ *     sales that were neither refunded nor disputed at all (a sale with a
+ *     partial refund keeps its net money but does not count toward the
+ *     minimum).
  *   - The same refund wait: no winner before the test has run REFUND_DAYS.
  *   - The same line, valid however often the result is read: the asymptotic
  *     confidence sequence of the headline test (boundary), worked out for
@@ -49,15 +52,24 @@ export type AbVersion = {
   id: string;
   /** Visitors who were shown this version and counted. */
   visitors: number;
-  /** Orders paid, before refunds. */
+  /** Orders paid, before refunds and disputes. */
   paidOrders: number;
-  /** Money paid, before refunds, in the currency's smallest unit. */
+  /** Money paid, before refunds and disputes, in the currency's smallest unit. */
   paidCents: number;
-  /** Orders with any refund (full or partial). */
+  /** Orders with any refund (full or partial) and no dispute counted in disputedOrders. */
   refundedOrders: number;
-  /** Money refunded, in the smallest unit. */
+  /** Money refunded on those orders, in the smallest unit. */
   refundedCents: number;
-  /** The sum, over every paid order, of the square of what it kept after refunds. */
+  /**
+   * Orders with a dispute that takes the money (DISPUTE_TAKES in
+   * lib/retained-revenue.ts). Such an order counts here, not in
+   * refundedOrders. Required: a store whose disputes could not be read has no
+   * figures to give, never 0.
+   */
+  disputedOrders: number;
+  /** Money those orders did not keep (the disputed amount and any refund on them), in the smallest unit. */
+  disputedCents: number;
+  /** The sum, over every paid order, of the square of what it kept after refunds and disputes. */
   netSquares: number;
   /** ISO currency code of every figure above, lower case. */
   currency: string;
@@ -79,11 +91,14 @@ export type AbFigure = {
   visitors: number;
   paidOrders: number;
   refundedOrders: number;
+  disputedOrders: number;
+  /** Orders neither refunded nor disputed. */
   keptOrders: number;
   paidCents: number;
   refundedCents: number;
+  disputedCents: number;
   netCents: number;
-  /** Money kept after refunds per 100 visitors, rounded to the smallest unit. */
+  /** Money kept after refunds and disputes per 100 visitors, rounded to the smallest unit. */
   netPer100Cents: number;
   currency: string;
 };
@@ -152,12 +167,14 @@ function list(items: string[]): string {
 
 function readable(version: AbVersion): boolean {
   if (!version || typeof version !== "object") return false;
-  const { visitors, paidOrders, paidCents, refundedOrders, refundedCents, netSquares } = version;
-  if (![visitors, paidOrders, paidCents, refundedOrders, refundedCents, netSquares].every(whole)) return false;
-  if (paidOrders > visitors || refundedOrders > paidOrders || refundedCents > paidCents) return false;
-  if (paidOrders === 0 && paidCents !== 0) return false;
-  if (paidCents > 0 && paidOrders === 0) return false;
-  const net = paidCents - refundedCents;
+  const { visitors, paidOrders, paidCents, refundedOrders, refundedCents, disputedOrders, disputedCents, netSquares } = version;
+  if (![visitors, paidOrders, paidCents, refundedOrders, refundedCents, disputedOrders, disputedCents, netSquares].every(whole)) return false;
+  if (paidOrders > visitors || refundedOrders + disputedOrders > paidOrders || refundedCents + disputedCents > paidCents) return false;
+  // Orders and their money go together: orders with no money, or money with no orders, cannot be true.
+  if ((paidOrders === 0) !== (paidCents === 0)) return false;
+  if ((refundedOrders === 0) !== (refundedCents === 0)) return false;
+  if ((disputedOrders === 0) !== (disputedCents === 0)) return false;
+  const net = paidCents - refundedCents - disputedCents;
   // Each order keeps a non-negative amount, so: no money, no squares; and
   // net² / orders ≤ squares ≤ net² (Cauchy–Schwarz and non-negative parts).
   if (net === 0) return netSquares === 0;
@@ -206,16 +223,18 @@ export function abDecision(input: AbInput): AbVerdict {
   }
 
   const figures: AbFigure[] = versions.map((version) => {
-    const netCents = version.paidCents - version.refundedCents;
+    const netCents = version.paidCents - version.refundedCents - version.disputedCents;
     return {
       id: version.id,
       label: label(version.id),
       visitors: version.visitors,
       paidOrders: version.paidOrders,
       refundedOrders: version.refundedOrders,
-      keptOrders: version.paidOrders - version.refundedOrders,
+      disputedOrders: version.disputedOrders,
+      keptOrders: version.paidOrders - version.refundedOrders - version.disputedOrders,
       paidCents: version.paidCents,
       refundedCents: version.refundedCents,
+      disputedCents: version.disputedCents,
       netCents,
       netPer100Cents: version.visitors > 0 ? Math.round((netCents * 100) / version.visitors) : 0,
       currency: version.currency,
@@ -243,7 +262,7 @@ export function abDecision(input: AbInput): AbVerdict {
     });
     return none(
       "too_few",
-      `No clear winner yet: there is not enough data. Each version needs at least ${MIN_VIEWS} visitors and ${MIN_SALES} sales that were not refunded. ${needs.join(" ")}`,
+      `No clear winner yet: there is not enough data. Each version needs at least ${MIN_VIEWS} visitors and ${MIN_SALES} sales that were not refunded or disputed. ${needs.join(" ")}`,
       { short },
     );
   }
@@ -273,7 +292,7 @@ export function abDecision(input: AbInput): AbVerdict {
     );
   }
 
-  // 4. The leader, net of refunds, per visitor (exact comparison: net·visitors cross-multiplied).
+  // 4. The leader, net of refunds and disputes, per visitor (exact comparison: net·visitors cross-multiplied).
   const ahead = (i: number, j: number) => figures[i].netCents * figures[j].visitors - figures[j].netCents * figures[i].visitors;
   let best = 0;
   for (let i = 1; i < k; i += 1) if (ahead(i, best) > 0) best = i;
@@ -282,7 +301,7 @@ export function abDecision(input: AbInput): AbVerdict {
     const ids = [figures[best].id, ...tied].sort();
     return none(
       "tie",
-      `No clear winner yet. ${list(ids.map(label))} brought exactly the same money per 100 visitors after refunds: ${per100(figures[best])}.`,
+      `No clear winner yet. ${list(ids.map(label))} brought exactly the same money per 100 visitors after refunds and disputes: ${per100(figures[best])}.`,
       { tied: ids },
     );
   }
@@ -309,7 +328,7 @@ export function abDecision(input: AbInput): AbVerdict {
     const stricter = k > 2 ? ` With ${k} versions, each lead must be larger than with 2, so that a false winner stays at most ${FALSE_WINNER * 100}% likely.` : "";
     return none(
       "too_close",
-      `No clear winner yet. ${label(figures[best].id)} is ahead after refunds, but its lead over ${list(close.map(label))} is still small enough to be chance.${stricter}`,
+      `No clear winner yet. ${label(figures[best].id)} is ahead after refunds and disputes, but its lead over ${list(close.map(label))} is still small enough to be chance.${stricter}`,
       { comparisons, close },
     );
   }
@@ -321,6 +340,6 @@ export function abDecision(input: AbInput): AbVerdict {
     reason: "clear_lead",
     figures,
     comparisons,
-    words: `${label(figures[best].id)} is the winner. After refunds, it brought the most money per 100 visitors: ${per100(figures[best])}, against ${list(others)}. Its lead over every other version is large enough that chance alone is unlikely: the rule allows at most a ${FALSE_WINNER * 100}% chance of a false winner over the whole test. This shows what happened during the test. It is not a promise of future sales.`,
+    words: `${label(figures[best].id)} is the winner. After refunds and disputes, it brought the most money per 100 visitors: ${per100(figures[best])}, against ${list(others)}. Its lead over every other version is large enough that chance alone is unlikely: the rule allows at most a ${FALSE_WINNER * 100}% chance of a false winner over the whole test. This shows what happened during the test. It is not a promise of future sales.`,
   };
 }

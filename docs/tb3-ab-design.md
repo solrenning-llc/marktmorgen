@@ -44,9 +44,9 @@ Code: `lib/headline-test.ts` (counting, server), `lib/headline-test-rules.ts`
 
 | Question | Two versions today | Two to four versions (TB3) |
 | --- | --- | --- |
-| Measure | Gross money per visitor (paid product) | **Money kept after refunds** per visitor; checkouts, clicks and opens never decide a paid test |
-| Minimum per version | 200 views, 10 paid sales | 200 visitors, **10 sales not refunded at all** (a partial refund keeps its net money but does not count toward the 10) |
-| Wait | 14 days from start | 14 days from start, and refunds subtracted (section 5) |
+| Measure | Gross money per visitor (paid product) | **Money kept after refunds and disputes** per visitor; checkouts, clicks and opens never decide a paid test |
+| Minimum per version | 200 views, 10 paid sales | 200 visitors, **10 sales neither refunded nor disputed at all** (a partial refund keeps its net money but does not count toward the 10) |
+| Wait | 14 days from start | 14 days from start, and refunds and disputes subtracted (section 5) |
 | Line | `boundary(views)` at 5% | Same curve per pair, at **5% ÷ number of pairs**: 1, 3, 6 pairs |
 | Leader | Larger of two | Must clear the line against **every** other version |
 | Split check | Chi-square, 1 degree of freedom | Chi-square, k − 1 degrees of freedom, p < 0.001 (10.828, 13.816, 16.266) |
@@ -97,17 +97,31 @@ kept sales against 45 (4,000 visitors each, $50 each) wins with two versions and
 is "too close" with four. A creator with little traffic should test two versions;
 the studio will say so before a test of four starts (section 9).
 
-## 5. Refunds
+## 5. Refunds and disputes
 
-- Money kept per version = money paid − money refunded, in the store's currency.
+- Money kept per version = money paid − money refunded − money disputed, in the
+  store's currency. A dispute counts when it is in a state that takes the money
+  (`DISPUTE_TAKES` in `lib/retained-revenue.ts`: `needs_response`,
+  `under_review`, `lost`), the same set the kept-money report reads. On Stripe a
+  dispute is not a refund, so it never reaches the refunded figures by itself.
+- An order with such a dispute counts in `disputedOrders`, not in
+  `refundedOrders`, and everything it did not keep (the disputed amount and any
+  refund given on it) counts in `disputedCents`. A disputed order is not a kept
+  sale toward the minimum.
 - Spread (variance) uses the sum of the squares of what each order kept
   (`netSquares`). A later unit keeps it atomically: when an order of P is
   refunded R, the square changes from P² to (P − R)² in the same Lua script that
-  moves the money, under a mark per refund so it is applied once.
-- The rule refuses figures that cannot be true: more refunded than paid, more
-  refunded orders than paid orders, more orders than visitors, squares that
-  cannot come from the money (Cauchy–Schwarz bounds). Unknown is never zero
-  (CX-123 rule 24).
+  moves the money, under a mark per refund so it is applied once; when an order
+  is disputed, the same script moves its money to the disputed figures and its
+  square to the kept remainder, under a mark per dispute. A dispute the creator
+  wins later (`won`) gives the money back through the same script, once.
+- The rule refuses figures that cannot be true: more refunded and disputed than
+  paid (orders or money), more orders than visitors, orders with no money or
+  money with no orders (paid, refunded or disputed), squares that cannot come
+  from the money (Cauchy–Schwarz bounds). The dispute figures are required: when
+  a store's disputes cannot be read, the caller has no figures to give and
+  nothing is decided; they are never passed as 0. Unknown is never zero (CX-123
+  rule 24).
 - **Refund window before a result is final.** No winner before the test has run
   `REFUND_DAYS` (14). A later unit should also decide only on visitors and orders
   older than the window (a "matured" slice: counts kept per day, decided up to
@@ -119,7 +133,7 @@ the studio will say so before a test of four starts (section 9).
 ## 6. Ties, uncertainty and the reasons shown
 
 `abDecision` returns `winner` or `no_clear_winner_yet`, always with a reason and
-the figures to show (visitors, paid, refunded, kept, money kept per 100 visitors):
+the figures to show (visitors, paid, refunded, disputed, kept, money kept per 100 visitors):
 
 | Reason | When | Plain words (start) |
 | --- | --- | --- |
@@ -129,8 +143,8 @@ the figures to show (visitors, paid, refunded, kept, money kept per 100 visitors
 | `split` | Visitors not split as expected | "No clear winner yet: visitors were not split between the versions as expected" |
 | `refund_window` | Under 14 days | "No clear winner yet: the test must run for 14 days so refunds can be counted." |
 | `tie` | Exactly equal money per visitor at the top | "No clear winner yet. Version A and Version B brought exactly the same money…" |
-| `too_close` | The leader does not clear the line against some version | "No clear winner yet. Version B is ahead after refunds, but its lead over … is still small enough to be chance." |
-| `clear_lead` | Winner | "Version B is the winner. After refunds, it brought the most money per 100 visitors…" ending "It is not a promise of future sales." |
+| `too_close` | The leader does not clear the line against some version | "No clear winner yet. Version B is ahead after refunds and disputes, but its lead over … is still small enough to be chance." |
+| `clear_lead` | Winner | "Version B is the winner. After refunds and disputes, it brought the most money per 100 visitors…" ending "It is not a promise of future sales." |
 
 ## 7. Stopping rules
 
@@ -159,8 +173,8 @@ not multiply the sends allowed by the plan.
 No new read or write happens in unit 1 (MR rule: no new reads in unit 1).
 
 - **Storage.** One hash per test, as today. Four versions × (visitors, checkouts,
-  paid orders, paid money, refunded orders, refunded money, net squares) + start
-  ≈ 29 fields, about 600–800 bytes. Today's reserve per test is
+  paid orders, paid money, refunded orders, refunded money, disputed orders,
+  disputed money, net squares) + start ≈ 37 fields, about 750–1,000 bytes. Today's reserve per test is
   `AB_RECORD_BYTES` = 1,024 (`lib/sales-page-store.ts`), taken from the plan's
   storage already counted; measure the four-version record in a test and keep or
   raise it there, inside the plan's own storage, never as extra storage.
@@ -173,6 +187,13 @@ No new read or write happens in unit 1 (MR rule: no new reads in unit 1).
   budget (time, three pages per store). It must be entered in
   `tests/plan-cost-registry.ts` and `tests/store-data-registry.ts` in the same PR
   (CX-123 rule 26), with a mark per refund (`nl:ab:refund:<refund id>`, 40 days).
+- **Disputes (new).** Read beside the refunds, in the same sweep and budget:
+  the Stripe dispute list, only the states in `DISPUTE_TAKES`, with a mark per
+  dispute (`nl:ab:dispute:<dispute id>`, 40 days) so it is applied once, and
+  entered in the same two registries in the same PR. A store whose disputes
+  were not read in full gets no result (`invalid`), never 0 disputes. PayPal
+  disputes are not read today (as in `lib/retained-revenue.ts`), so a test on a
+  store that sells through PayPal must say so or not decide.
 - **Model calls.** None. The rule is arithmetic.
 - **Matured slice (section 5).** Day buckets per version would add about 4 × 7
   fields per day kept; capped at the test's 400-day expiry it needs a measured
@@ -186,10 +207,10 @@ Unit 1 has no screen: 0 → 0 steps and decisions. For the screen that will show
 - Every reason is said in words, first, before any number; never only by color,
   icon or position (WCAG 1.4.1). "Winner" and "No clear winner yet" are text.
 - Figures in a real table with column headers: visitors, paid orders, refunded,
-  kept, money kept per 100 visitors. Money through `formatMoney`, in the store's
+  disputed, kept, money kept per 100 visitors. Money through `formatMoney`, in the store's
   currency, never mixed.
 - Short sentences in plain American English (AX274 3.1.5). Terms explained in
-  place: "kept sales" = sales not refunded; "per 100 visitors".
+  place: "kept sales" = sales not refunded or disputed; "per 100 visitors".
 - No promise, no earnings claim (NE1): the winner sentence always ends with "This
   shows what happened during the test. It is not a promise of future sales."
 - The chance of a false winner is said once, as a limit of the rule, never as a

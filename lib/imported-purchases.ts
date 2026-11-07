@@ -191,7 +191,14 @@ export async function grantImported(
   ]);
   // An order's grant (no room given) is counted at what it really adds (lib/order-data.ts).
   const answers = room ? await redisPipeline(writes) : await orderWrite({ sid, statsId }, writes);
-  return answers.map((a) => Number(a) === 1);
+  // A grant refused for certain (HSETNX answered exactly 0: the address already holds the product) gives back
+  // what it took from the room; any other answer keeps it, so the room is never below what is held (Claude 5 on #2576).
+  const list = Array.isArray(answers) && answers.length === grants.length ? answers : null;
+  if (room && list) {
+    const back = grants.reduce((sum, g, i) => (list[i] === 0 ? sum + grantBytes(g.productId, { at: atSeconds, job, items: g.items, option: g.option }, g.email) : sum), 0);
+    if (back > 0) await giveData(room, [{ slot: IMPORTED_SLOT, bytes: back }]);
+  }
+  return grants.map((_, i) => list?.[i] === 1);
 }
 
 /**

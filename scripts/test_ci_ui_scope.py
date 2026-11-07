@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ci_ui_scope import (GitTree, Uncertain, changed_paths, reachable,  # noqa: E402
                          suites_unaffected, unaffected_between)
 from ci_documentation_scope import requires_suite  # noqa: E402
+import ci_ui_scope as ui  # noqa: E402
 
 A, B = "a" * 40, "b" * 40
 
@@ -103,6 +104,11 @@ class Graph(unittest.TestCase):
         cases = {
             "computed import": {"lib/a.ts": "const m = await import(name);"},
             "computed require": {"lib/a.ts": "const m = require(name);"},
+            # Codex G on #3037: a page or a component it re-exports may import a library
+            # file whose name is computed; the graph cannot see it, so it must not skip.
+            "computed import in a page": {"app/page.tsx": "const leaf = 'b';\nexport default (await import(`../lib/${leaf}.ts`)).b;"},
+            "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
+                                               "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "unresolved import": {"app/page.tsx": 'import "@/lib/missing";'},
             "leaving the repository": {"app/page.tsx": 'import "../../outside";'},
             "absolute specifier": {"app/page.tsx": 'import "/etc/x";'},
@@ -116,6 +122,24 @@ class Graph(unittest.TestCase):
                 broken = dict(BASE, **replacement)
                 with self.assertRaises(Uncertain):
                     unaffected(["lib/b.ts"], broken)
+
+    def test_only_the_reviewed_bundlers_may_import_a_computed_name(self):
+        # The four end-to-end runners load bundles built from files they name in strings,
+        # which the graph follows; any other computed import anywhere is uncertain. A new
+        # one has to be reviewed and added by name, never exempted by folder.
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        found = set()
+        for top in ("app", "components", "public", "styles", "tests/e2e", "tooling", ".github", "lib"):
+            for folder, _, names in os.walk(os.path.join(here, top)):
+                for name in names:
+                    path = os.path.relpath(os.path.join(folder, name), here)
+                    if not path.endswith(ui.TEXT):
+                        continue
+                    with open(os.path.join(here, path), encoding="utf8") as handle:
+                        code = "\n".join(ui.code_lines(handle.read()))
+                    if ui.COMPUTED.search(code):
+                        found.add(path)
+        self.assertEqual(found, set(ui.REVIEWED_COMPUTED))
 
     def test_unreadable_file_raises(self):
         files = list(BASE) + ["lib/ghost.ts"]

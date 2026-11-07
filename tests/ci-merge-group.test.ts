@@ -79,7 +79,7 @@ for (const name of WORKFLOWS) {
   const on = triggers(read(name));
   const group = /\n {2}group: (.*)\n/.exec(on)?.[1] ?? "";
   is(`${name}: the group holds the ref and the event`, [group.includes("${{ github.ref }}"), group.endsWith("-${{ github.event_name }}")], [true, true]);
-  is(`${name}: in-progress runs are cancelled only outside merge_group`,
+  is(`${name}: in-progress runs are canceled only outside merge_group`,
     /\n {2}cancel-in-progress: (.*)\n/.exec(on)?.[1], "${{ github.event_name != 'merge_group' }}");
 }
 

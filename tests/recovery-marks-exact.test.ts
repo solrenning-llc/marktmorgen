@@ -110,7 +110,7 @@ const markOf = async (id: string) => (await redis.pipeline([["GET", `nl:recover:
 async function refuses(when: (c: Commands) => boolean, answer: (c: Commands, real: Pipe) => Promise<unknown[]>, label: string, noList = false) {
   const kept = await shop();
   // A store with no contact list: the fourth read is then a one-key EXISTS, read as exactly 0 or 1.
-  const store = noList ? { ...kept, listId: undefined } : kept;
+  const store = noList ? { ...kept, listId: null } : kept;
   const { id, email } = fresh();
   const before = sent.length;
   await assert.rejects(intercept(when, answer, () => remindAbandoned(store, left(id, email))), UnknownReplyError, `${label}: must be unknown`);
@@ -176,7 +176,7 @@ test("with no contact list, the fourth read (a one-key EXISTS) of any other shap
 
 test("control: with no contact list, healthy marks send once", async () => {
   const kept = await shop();
-  const store = { ...kept, listId: undefined };
+  const store = { ...kept, listId: null };
   const { id, email } = fresh();
   const before = sent.length;
   await remindAbandoned(store, left(id, email));

@@ -8,7 +8,8 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
-import { MAX_QUESTIONS, heldBack, passedQuizzes, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
+import { MAX_QUESTIONS, QuizRecordUnreadError, type Quiz, heldBack, passedQuizzes, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
@@ -50,7 +51,17 @@ export async function POST(request: NextRequest) {
   const who = emailKey(access.learner.email);
   // A lesson a required quiz still holds shut cannot be answered from here either.
   if (heldBack(course, await passedQuizzes(course.id, who)).has(lessonId)) return away(base);
-  const quiz = await readQuizFor(course.id, lessonId);
+  const unavailable = () => new Response("Quiz submissions are temporarily unavailable. Please try again later.", { status: 503, headers: { "Cache-Control": "no-store" } });
+  let quiz: Quiz | null;
+  try {
+    quiz = await readQuizFor(course.id, lessonId);
+  } catch (error) {
+    // A quiz that does not read is never marked: back to the lesson, which says it could not be opened.
+    if (error instanceof QuizRecordUnreadError) return away(`${base}/${lessonId}#quiz`);
+    // Not known whether there is a quiz: nothing is marked or counted, and trying again may read it.
+    if (error instanceof UnknownReplyError) return unavailable();
+    throw error;
+  }
   if (!quiz || !found.lesson.quiz) return away(`${base}/${lessonId}`);
 
   let result: Awaited<ReturnType<typeof submitQuiz>>;
@@ -64,7 +75,7 @@ export async function POST(request: NextRequest) {
     throw error;
   }
   if (!result.ok && result.reason === "usage_limit") return new Response("This store has reached its monthly quiz submission allowance. It resets at the start of the next UTC month.", { status: 429, headers: { "Cache-Control": "no-store" } });
-  if (!result.ok && result.reason === "unavailable") return new Response("Quiz submissions are temporarily unavailable. Please try again later.", { status: 503, headers: { "Cache-Control": "no-store" } });
+  if (!result.ok && result.reason === "unavailable") return unavailable();
   // Too soon after the last try, or questions that are no longer this try's:
   // nothing was counted, and the lesson says why.
   if (!result.ok && result.reason === "wait") return away(`${base}/${lessonId}#quiz`);

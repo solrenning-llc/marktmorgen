@@ -35,7 +35,8 @@ import { type TaskDrop, applyTaskDrop, readTaskDrop, readTaskFor, review, saveTa
 import { readTask } from "@/lib/assignment-rules";
 import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
-import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { QuizRecordUnreadError, type Quiz, dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
 import { readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
@@ -75,7 +76,15 @@ export async function GET(request: NextRequest) {
     return Response.json({ ok: true, task: await readTaskFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
   }
   if (request.nextUrl.searchParams.get("quiz") === "1") {
-    return Response.json({ ok: true, quiz: await readQuizFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
+    try {
+      return Response.json({ ok: true, quiz: await readQuizFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
+    } catch (error) {
+      // A saved quiz that does not read: the studio opens a fresh one to save over it, and says why.
+      if (error instanceof QuizRecordUnreadError) return Response.json({ ok: true, quiz: null, unread: true }, { headers: { "Cache-Control": "no-store" } });
+      // A reply of another shape: not known, so the studio says to try again and changes nothing.
+      if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+      throw error;
+    }
   }
   return Response.json({ ok: true, text: await readBody(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
 }
@@ -296,8 +305,18 @@ export async function POST(request: NextRequest) {
           return Response.json({ ok: true, course: result.course });
         }
         const hadQuiz = !!findLesson(course, lessonId)?.lesson.quiz;
-        const existingQuiz = hadQuiz ? await readQuizFor(course.id, lessonId) : null;
-        if (hadQuiz && !existingQuiz) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        // A saved quiz that does not read is saved over, as a new quiz (no legacy setting carried from it); a reply
+        // that is not known changes nothing.
+        let existingQuiz: Quiz | null = null;
+        let unreadQuiz = false;
+        try {
+          existingQuiz = hadQuiz ? await readQuizFor(course.id, lessonId) : null;
+        } catch (error) {
+          if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+          if (!(error instanceof QuizRecordUnreadError)) throw error;
+          unreadQuiz = true;
+        }
+        if (hadQuiz && !existingQuiz && !unreadQuiz) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         const read = readQuiz(body.quiz, existingQuiz);
         if (!read.ok) {
           // Which question, and what is wrong with it, so the studio can say so.

@@ -82,6 +82,8 @@ export function QuizEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  // The saved quiz is there but could not be read (lib/quiz.ts QuizRecordUnreadError): a fresh one is opened to save over it.
+  const [unread, setUnread] = useState(false);
   const [draftCount, setDraftCount] = useState<number>(DEFAULT_QUIZ_DRAFT);
   // The quiz as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
   const [opened, setOpened] = useState("");
@@ -89,6 +91,7 @@ export function QuizEditor({
 
   async function open() {
     setError(null);
+    setUnread(false);
     if (!setup) {
       const fresh = { passPercent: String(DEFAULT_PASS_PERCENT), attempts: String(DEFAULT_ATTEMPTS), required: false, draw: "", shuffle: false, waitMinutes: "", questions: [blankQuestion()] };
       setDraft(fresh);
@@ -98,7 +101,15 @@ export function QuizEditor({
     setLoading(true);
     try {
       const response = await fetch(`/api/store/course?id=${productId}&lessonId=${lessonId}&quiz=1`, { cache: "no-store" });
-      const data = (await response.json()) as { ok?: boolean; quiz?: Quiz | null };
+      const data = (await response.json()) as { ok?: boolean; quiz?: Quiz | null; unread?: boolean };
+      if (data.ok && data.unread === true) {
+        // Its questions cannot be shown; the outline's own settings are kept, and a new quiz has a finite try limit.
+        const fresh = { passPercent: String(setup.passPercent), attempts: String(setup.attempts || DEFAULT_ATTEMPTS), required: setup.required, draw: "", shuffle: false, waitMinutes: "", questions: [blankQuestion()] };
+        setUnread(true);
+        setDraft(fresh);
+        setOpened(JSON.stringify(fresh));
+        return;
+      }
       const quiz = data.ok ? data.quiz : null;
       if (!quiz) {
         setError("The quiz could not be read just now. Close this and open it again before changing it.");
@@ -196,11 +207,17 @@ export function QuizEditor({
         if (saved) {
           toast("Quiz saved.");
           setDraft(null);
+          setUnread(false);
         }
       }}
     >
       <p className="field-label">Quiz</p>
-      {!setup || setup.usagePolicy ? <p className="mt-2 text-sm text-ink-soft">{`This quiz shares a limit of ${QUIZ_MONTHLY_SUBMISSIONS.toLocaleString("en-US")} submissions per store per UTC month with other new quizzes. Restoring tries or deleting a quiz does not restore the monthly allowance. Reserved submissions may count even if a response fails.`}</p> : null}
+      {unread ? (
+        <p className="notice notice-warn mt-2 text-sm" role="status">
+          The questions saved on this lesson could not be read, so they are not shown here. Students see the lesson without its quiz until you write the questions again and save. Saving replaces the old quiz.
+        </p>
+      ) : null}
+      {!setup || setup.usagePolicy || unread ? <p className="mt-2 text-sm text-ink-soft">{`This quiz shares a limit of ${QUIZ_MONTHLY_SUBMISSIONS.toLocaleString("en-US")} submissions per store per UTC month with other new quizzes. Restoring tries or deleting a quiz does not restore the monthly allowance. Reserved submissions may count even if a response fails.`}</p> : null}
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="field-label">Pass mark (%)</span>
@@ -447,7 +464,7 @@ export function QuizEditor({
         <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm">
           {busy ? "Saving…" : "Save the quiz"}
         </button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft(null); setError(null); }}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft(null); setError(null); setUnread(false); }}>
           Cancel
         </button>
         {setup ? (

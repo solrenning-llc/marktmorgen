@@ -17,7 +17,10 @@ is("the FAQ editor asks too, with its own measure of unsaved answers", faq.inclu
 is("and takes its rows as they were saved, compared against what was saved until the page brings the new list", faq.includes("setRows(expected.map((item, key) => ({ ...item, key })));") && faq.includes("setBase(expected);") && faq.includes("!== JSON.stringify(base);"), true);
 const quiz = readFileSync("components/quiz-editor.tsx", "utf8");
 is("the quiz editor asks only while a quiz is open and differs from what was opened, never while saving", quiz.includes("useLeaveGuard(draft !== null && JSON.stringify(draft) !== opened && !busy);"), true);
-is("both ways of opening a quiz keep what was opened", (quiz.match(/setOpened\(JSON\.stringify\((fresh|read)\)\);/g) ?? []).length, 2);
+// Regra 23 (Claude 5, quiz-read-exact): 2 -> 3, a third way of opening (a fresh quiz over a saved one that could not be
+// read) also keeps what was opened; every setDraft of an opened quiz is matched by its setOpened.
+is("every way of opening a quiz keeps what was opened", (quiz.match(/setOpened\(JSON\.stringify\((fresh|read)\)\);/g) ?? []).length, 3);
+is("and no opened quiz is set without it", (quiz.match(/setDraft\((fresh|read)\);/g) ?? []).length, 3);
 const product = readFileSync("components/product-editor.tsx", "utf8");
 is("the product form asks only while it is open and differs from what was opened, never while saving", product.includes("useLeaveGuard((adding || editingId !== null) && JSON.stringify(draft) !== JSON.stringify(opened) && !busy);"), true);
 is("adding, editing and a long description read late all move what was opened with the form", [product.includes("setDraft(EMPTY);\n    setOpened(EMPTY);"), product.includes("setDraft(form);\n    setOpened(form);"), product.includes("setOpened((current) => ({ ...current, about: read }));")], [true, true, true]);

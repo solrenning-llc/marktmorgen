@@ -13,7 +13,7 @@ import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, lessonVideo } from "@/lib/learn";
-import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor, studentQuiz } from "@/lib/quiz";
+import { type Attempt, attemptOf, heldBack, passedQuizzes, quizShownFor, studentQuiz } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -116,17 +116,19 @@ export default async function LessonPage({ params, searchParams }: Params) {
   if (blocker && !lesson.preview) redirect(`${base}/${blocker}?held=1#${findLesson(course, blocker)?.lesson.task ? "task" : "quiz"}`);
 
   const query = await searchParams;
-  const [body, video, quiz, attempt, task, work] = await Promise.all([
+  const [body, video, shownQuiz, attempt, task, work] = await Promise.all([
     lesson.hasBody ? readBody(course.id, lesson.id) : Promise.resolve(""),
     // A store with no plan that can be charged plays video for the hours
     // it has, and is paused past them (lib/plan-standing.ts).
     lesson.video ? lessonVideo(lesson.video, videoLimitFor(store), windowId(store), store) : Promise.resolve(null),
-    lesson.quiz ? readQuizFor(course.id, lesson.id) : Promise.resolve(null),
+    // A quiz record that does not read leaves the lesson open without it, said so below (lib/quiz.ts quizShownFor).
+    lesson.quiz ? quizShownFor(course.id, lesson.id) : Promise.resolve({ quiz: null, unread: false }),
     lesson.quiz && student ? attemptOf(course.id, lesson.id, who) : Promise.resolve<Attempt | null>(null),
     // An assignment, and what this student handed in for it (lib/assignment.ts).
     lesson.task ? readTaskFor(course.id, lesson.id) : Promise.resolve(null),
     lesson.task && student ? submissionOf(course.id, lesson.id, who) : Promise.resolve<Submission | null>(null),
   ]);
+  const { quiz, unread: quizUnread } = shownQuiz;
   const quizMode = access.state === "open" && access.learner.owner ? "owner" : student && open ? "student" : "visitor";
   // A student sees only the questions their try draws from a bank (lib/quiz.ts).
   const asked = quiz && attempt && quizMode === "student" ? studentQuiz(quiz, course.id, lesson.id, who, attempt) : null;
@@ -309,8 +311,15 @@ export default async function LessonPage({ params, searchParams }: Params) {
               </div>
             ) : null}
 
-            {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !task ? (
+            {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !quizUnread && !task ? (
               <p className="st-muted mt-6">{w.emptyLesson}</p>
+            ) : null}
+
+            {quizUnread ? (
+              <p id="quiz" className="st-note mt-6 text-sm" role="status">
+                {w.quizUnread}
+                {lesson.quiz?.required && !passed.has(lesson.id) && quizMode === "student" ? ` ${w.quizUnreadHeld}` : null}
+              </p>
             ) : null}
 
             {quiz ? (

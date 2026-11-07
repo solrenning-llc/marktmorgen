@@ -31,6 +31,7 @@ import { reserveQuizSubmission } from "@/lib/quiz-usage";
 import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rules";
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
@@ -85,6 +86,22 @@ function bankOf(value: Record<string, unknown>, total: number): Pick<Quiz, "draw
   const draw = wholeIn(value.draw, 1, Math.max(1, total - 1));
   const wait = wholeIn(value.waitMinutes, 1, MAX_WAIT_MINUTES);
   return { ...(draw !== null ? { draw } : {}), ...(value.shuffle === true ? { shuffle: true } : {}), ...(wait !== null ? { waitMinutes: wait } : {}) };
+}
+
+/**
+ * Whether a stored quiz's settings read as saveQuiz wrote them: a bank setting
+ * that is there is within its bounds (bankOf drops it otherwise, which would
+ * silently show every question or no wait), and the switches are switches.
+ * Absent stays absent, as a quiz saved before the setting existed.
+ */
+function storedSettings(value: Record<string, unknown>, total: number): boolean {
+  const absent = (raw: unknown) => raw === undefined || raw === null;
+  return (
+    (absent(value.draw) || wholeIn(value.draw, 1, Math.max(1, total - 1)) !== null) &&
+    (absent(value.waitMinutes) || wholeIn(value.waitMinutes, 1, MAX_WAIT_MINUTES) !== null) &&
+    (value.shuffle === undefined || typeof value.shuffle === "boolean") &&
+    (value.required === undefined || typeof value.required === "boolean")
+  );
 }
 
 /** The part of a quiz the lesson carries, so the outline needs no second read. */
@@ -157,7 +174,7 @@ export function parseQuiz(raw: unknown): Quiz | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
-    if (!Array.isArray(value.questions)) return null;
+    if (!value || typeof value !== "object" || !Array.isArray(value.questions)) return null;
     const questions: Question[] = [];
     for (const raw of value.questions) {
       const question = parseQuestion(raw);
@@ -165,10 +182,14 @@ export function parseQuiz(raw: unknown): Quiz | null {
       if (questions.length < MAX_QUESTIONS) questions.push(question);
     }
     const attempts = wholeIn(value.attempts, 0, MAX_ATTEMPTS);
-    if (questions.length === 0 || attempts === null || (value.usagePolicy !== undefined && value.usagePolicy !== QUIZ_USAGE_POLICY)) return null;
+    // The pass mark is always saved (readQuiz refuses a quiz without one): one that is missing or out of bounds is a
+    // record that does not read, never the default 70%, which would pass or fail students on a mark nobody set.
+    const passPercent = wholeIn(value.passPercent, MIN_PASS_PERCENT, MAX_PASS_PERCENT);
+    if (questions.length === 0 || attempts === null || passPercent === null || (value.usagePolicy !== undefined && value.usagePolicy !== QUIZ_USAGE_POLICY)) return null;
+    if (!storedSettings(value, questions.length)) return null;
     return {
       ...(value.usagePolicy === QUIZ_USAGE_POLICY ? { usagePolicy: QUIZ_USAGE_POLICY } : {}),
-      passPercent: wholeIn(value.passPercent, MIN_PASS_PERCENT, MAX_PASS_PERCENT) ?? DEFAULT_PASS_PERCENT,
+      passPercent,
       attempts,
       required: value.required === true,
       questions,
@@ -364,10 +385,51 @@ const triesKey = (courseId: string, lessonId: string, who: string) => `nl:course
 const resultKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:quiz:${lessonId}:result:${who}`;
 const passedKey = (courseId: string, who: string) => `nl:course:${courseId}:passed:${who}`;
 
+/**
+ * A lesson's quiz record is there, but does not read as saveQuiz wrote it. It stays where it is: it is not "no quiz"
+ * (the lesson would open past a required quiz with nothing said) and not a quiz with defaults filled in. A page shows
+ * the lesson without it and says so (quizShownFor); the studio can save a quiz over it.
+ */
+export class QuizRecordUnreadError extends Error {
+  constructor() {
+    super("A lesson's quiz record is there but does not read");
+    this.name = "QuizRecordUnreadError";
+  }
+}
+
+/** One GET of a lesson's quiz record, in its exact shape: the string kept, null for an explicit nil; anything else throws. */
+async function storedQuizRaw(courseId: string, lessonId: string): Promise<string | null> {
+  const raw = repliesFor(await redisPipeline([["GET", quizKey(courseId, lessonId)]]), 1)?.[0];
+  if (raw === null || typeof raw === "string") return raw;
+  throw new UnknownReplyError("a lesson's quiz");
+}
+
+/**
+ * A lesson's quiz, read exactly (CX-123 rule 24; Claude 5 on #2858, the sibling of readTaskFor): null only for an
+ * explicit nil. A reply cut short or of another shape throws UnknownReplyError; a record that is there but does not
+ * read (parseQuiz) throws QuizRecordUnreadError.
+ */
 export async function readQuizFor(courseId: string, lessonId: string): Promise<Quiz | null> {
   if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) return null;
-  const [raw] = await redisPipeline([["GET", quizKey(courseId, lessonId)]]);
-  return parseQuiz(raw);
+  const raw = await storedQuizRaw(courseId, lessonId);
+  if (raw === null) return null;
+  const quiz = parseQuiz(raw);
+  if (!quiz) throw new QuizRecordUnreadError();
+  return quiz;
+}
+
+/**
+ * A lesson's quiz for a page that shows the rest of the lesson anyway: a record that does not read is `unread`, so the
+ * lesson still opens, without the quiz, and says so; it never takes the whole lesson down for good. An unknown reply
+ * still throws: it is not known whether there is a quiz, and trying again may read it.
+ */
+export async function quizShownFor(courseId: string, lessonId: string): Promise<{ quiz: Quiz | null; unread: boolean }> {
+  try {
+    return { quiz: await readQuizFor(courseId, lessonId), unread: false };
+  } catch (error) {
+    if (error instanceof QuizRecordUnreadError) return { quiz: null, unread: true };
+    throw error;
+  }
 }
 
 /**
@@ -381,7 +443,9 @@ const kept = (raw: unknown) => (typeof raw === "string" && raw ? dataBytes([raw]
 
 export async function saveQuiz(courseId: string, lessonId: string, quiz: Quiz, room: DataStore): Promise<void> {
   const json = JSON.stringify(quiz);
-  const [before] = await redisPipeline([["GET", quizKey(courseId, lessonId)]]);
+  // What is replaced, read exactly: an unknown reply charges nothing and writes nothing (it would count the old
+  // record as empty and never give its room back). A record that does not read is still replaced, by its bytes.
+  const before = await storedQuizRaw(courseId, lessonId);
   const grown = dataBytes([json], 1) - kept(before);
   if (grown > 0) await needData(room, [{ slot: QUIZZES_SLOT(courseId), bytes: grown }]);
   await redisPipeline([["SET", quizKey(courseId, lessonId), json]]);

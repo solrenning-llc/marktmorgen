@@ -25,7 +25,7 @@ import { readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { readAbout } from "@/lib/product-about";
 import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
-import { readQuizFor } from "@/lib/quiz";
+import { quizShownFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
 import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";
 import { countSections, readSectionsExact } from "@/lib/saved-block-store";
@@ -579,8 +579,10 @@ export async function readLessonTool(store: Store, id: string, lessonId: string,
   const course = listing?.course ? await readCourse(listing.course.id) : null;
   const found = course ? findLesson(course, lessonId) : null;
   if (!listing || !course || !found) return null;
-  const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);
-  return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz, task };
+  const [text, shown, task] = await Promise.all([readBody(course.id, lessonId), quizShownFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);
+  // A saved quiz that does not read is said as such, never as a lesson with no quiz.
+  const unread = shown.unread ? { quiz_unread: "This lesson's quiz is saved but could not be read. Open the lesson in the studio and save its quiz again to replace it." } : {};
+  return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz: shown.quiz, ...unread, task };
 }
 
 /**

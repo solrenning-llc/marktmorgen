@@ -1,5 +1,5 @@
 /** A damaged stored question must not disappear before a quiz is graded. */
-import { gradeQuiz, MAX_QUESTIONS, parseQuiz, readQuizFor, type Question } from "@/lib/quiz";
+import { gradeQuiz, MAX_QUESTIONS, parseQuiz, QuizRecordUnreadError, readQuizFor, type Question } from "@/lib/quiz";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -33,7 +33,9 @@ async function main() {
       is("a broken question before a valid one also refuses the record", parseQuiz(JSON.stringify({ ...record, questions: [bad, one] })), null);
       await original([["SET", key, JSON.stringify({ ...record, questions: [one, bad] })]]);
       reads = 0;
-      const kept = await readQuizFor("a".repeat(32), "lesson000001");
+      // Regra 23 (Claude 5, quiz-read-exact): a damaged record now throws QuizRecordUnreadError rather than reading as
+      // null ("no quiz"); the assertion is unchanged (no shorter passing quiz) and the error is named, never swallowed.
+      const kept = await readQuizFor("a".repeat(32), "lesson000001").catch((error: unknown) => (error instanceof QuizRecordUnreadError ? null : Promise.reject(error)));
       is("the real stored reader never supplies a shorter passing quiz", kept ? gradeQuiz(kept, answers).passed : null, null);
       is("validation adds no read or automatic retry", reads, 1);
     }

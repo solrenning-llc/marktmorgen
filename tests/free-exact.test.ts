@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { MAX_CLAIM_USES, listAsCsv, listSize, spendClaim } from "@/lib/free";
 import { agreedKey, leadsKey, unsubKey } from "@/lib/contacts";
+import { personKey } from "@/lib/person-key";
 import type { Store } from "@/lib/store";
 import { storeExport } from "@/lib/store-export";
 import { POST as download } from "@/app/api/store/free/download/route";
@@ -190,6 +191,43 @@ async function main() {
   }, false);
   is("their answers unreadable throws", await outcome(() => listAsCsv(shopWithFields, false)), "Error");
   restore();
+
+  // Second review of #2862 (Claude 3, LEVE): only a THROWN read threw; a GET/HGETALL reply lost or in another shape was
+  // read as "no fields" / "no answers", and a CSV missing the store's own column (or its values) was handed over.
+  part("The store's own fields read in another shape: no CSV missing their column or their values");
+  await original([["HSET", "nl:crm:v:stats-exact-1:f1abcd", personKey("stats-exact-1", "ann@example.com"), "Acme"]]);
+  const withFields = (await listAsCsv(shopWithFields, false)).trimEnd().split("\r\n");
+  is("control: the header ends with the Company column", withFields[0].endsWith(',"Company"'), true);
+  is("control: ann's row ends with Acme", withFields.some((row) => row.startsWith('"ann@example.com"') && row.endsWith(',"Acme"')), true);
+  await original([["SET", "nl:crm:fields:stats-exact-none", JSON.stringify([])]]);
+  is("control: a stored empty field list is a CSV with no field column", (await listAsCsv({ ...shopWithFields, statsId: "stats-exact-none" } as Store, false)).split("\r\n")[0].endsWith('"imported_at"'), true);
+  is("control: no field list stored is a CSV with no field column", (await listAsCsv({ ...shopWithFields, statsId: "stats-exact-unset" } as Store, false)).split("\r\n")[0].endsWith('"imported_at"'), true);
+  const fieldShapes: [string, () => unknown][] = [
+    ["no reply", () => []],
+    ["a reply without result (undefined)", () => [undefined]],
+    ["QUEUED", () => ["QUEUED"]],
+    ["a number", () => [42]],
+    ["text that is not JSON", () => ["[{bad"]],
+    ["JSON that is not a list", () => [JSON.stringify({ id: "f1abcd" })]],
+  ];
+  for (const [label, reply] of fieldShapes) {
+    replyFor((c) => c[0]?.[0] === "GET" && String(c[0][1]).startsWith("nl:crm:fields:"), reply, false);
+    is(`the field list as ${label}: throws`, await outcome(() => listAsCsv(shopWithFields, false)), "UnknownReplyError");
+    restore();
+  }
+  const answerShapes: [string, () => unknown][] = [
+    ["no reply", () => []],
+    ["a reply without result (undefined)", () => [undefined]],
+    ["QUEUED", () => ["QUEUED"]],
+    ["null", () => [null]],
+    ["an odd-length list", () => [["ann-key"]]],
+    ["a list holding a number", () => [["ann-key", 7]]],
+  ];
+  for (const [label, reply] of answerShapes) {
+    replyFor((c) => c[0]?.[0] === "HGETALL", reply, false);
+    is(`the answers as ${label}: throws`, await outcome(() => listAsCsv(shopWithFields, false)), "UnknownReplyError");
+    restore();
+  }
 
   part("The store export writes the contacts part as unread, never as a complete CSV");
   replyFor((c) => c[0]?.[0] === "HSCAN", () => [null], false);

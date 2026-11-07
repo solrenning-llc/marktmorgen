@@ -65,6 +65,7 @@ import { AI_PLANS_WORDS, aiAllowanceWords } from "@/lib/ai-rules";
 import { SHARE_LIMITS, bytesWords } from "@/lib/funnel-share-rules";
 import { MAX_SECTION_BLOCKS } from "@/lib/saved-blocks";
 import { SAMPLE_VIEWS } from "@/lib/funnel-diagnosis";
+import { FUNNEL_TYPES } from "@/lib/funnel-types";
 import { healthRuleWords, rampRuleWords } from "@/lib/mail-health-rules";
 import { workflowLimitWords } from "@/lib/flow-limits";
 import { pipelineLimitWords, PIPELINES_BY_TIER, MAX_CRM_FIELDS, MAX_STAGES, MAX_DEALS } from "@/lib/crm-rules";
@@ -90,6 +91,20 @@ const PRO_EMAILS = PRO_MONTHLY_EMAILS.toLocaleString("en-US");
 const TRIAL_EMAILS = TRIAL_MONTHLY_EMAILS.toLocaleString("en-US");
 
 const WORKING = { label: "Working today", tone: "live" as const };
+
+/**
+ * The kinds of funnel to start from, as the Funnels page says them (530
+ * [FT3]): counted and named from the list the studio offers
+ * (lib/funnel-types.ts), so the page never names a kind the studio does not
+ * have, nor a wrong count.
+ */
+const COUNT_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+const FUNNEL_KINDS_TITLE = `${COUNT_WORDS[FUNNEL_TYPES.length] ?? String(FUNNEL_TYPES.length)} ${FUNNEL_TYPES.length === 1 ? "kind" : "kinds"} to start from`;
+const FUNNEL_KINDS_WORDS = (() => {
+  const names = FUNNEL_TYPES.map((type) => type.label.toLowerCase());
+  const listed = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names.join("");
+  return listed.charAt(0).toUpperCase() + listed.slice(1);
+})();
 
 /* ------------------------------------------------------------ features ---- */
 
@@ -1261,7 +1276,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "lock", title: "Only for the buyer who paid", body: "The offers show only in the browser that paid, within an hour of paying." },
           { icon: "mail", title: "A confirmation for each", body: "Every offer taken is delivered on the thank-you page and gets its own confirmation email." },
           { icon: "layout", title: "Pages in order", body: "Your own pages and your products' pages, up to 20 in a row, from one address: marktmorgen.com/@you/go/launch, or yourdomain.com/go/launch.", href: "/platform/sales-pages" },
-          { icon: "list", title: "Eight kinds to start from", body: "Lead magnet, video training, challenge, product launch, book, small first purchase, application and quiz: pick one, choose your products for its steps, and the funnel is made with the pages it needs, empty and hidden until you write them, and the form it asks." },
+          { icon: "list", title: FUNNEL_KINDS_TITLE, body: `${FUNNEL_KINDS_WORDS}: pick one, choose your products for its steps, and the funnel is made with the pages it needs, empty and hidden until you write them, and the form it asks.` },
           { icon: "copy", title: "Copy and share a funnel", body: `Make a copy inside your store or in another of your own stores, or share a funnel with another Marktmorgen creator by a link or a file. They preview it, choose their own products for its steps and get it as a draft, with a list of what to fill in. Only the words and the shape go: never your pictures, files, buyers, contacts, form answers, reviews, prices or numbers, and not your about text, guarantee, videos or deadlines. A link can be revoked at any time and works for 7, 30 or 90 days or a year. Share links at once: ${SHARE_LIMITS.creator.shares} on Store, ${SHARE_LIMITS.pro.shares} on Studio, ${SHARE_LIMITS.scale.shares} on Scale.` },
           // 242 [CF5], unit 2: every campaign, counted and named from the campaigns themselves.
           startersFeature(),

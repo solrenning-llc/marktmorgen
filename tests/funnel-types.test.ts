@@ -39,7 +39,8 @@ async function main(): Promise<void> {
     is(`${type.id}: each slot once, within a funnel's length, every page's button leads to a slot it has`, [
       new Set(keys).size === keys.length,
       steps > 0 && steps <= MAX_FUNNEL_PAGES,
-      targets.every((t) => type.slots.some((s) => s.kind === "target" && s.key === t)),
+      // A page's own target is a call, or one of the funnel's products (530 [FT3]).
+      targets.every((t) => type.slots.some((s) => (s.kind === "target" || s.kind === "product") && s.key === t)),
     ], [true, true, true]);
     is(`${type.id}: its pages at addresses a page may have, with blocks a store's page may hold`, pagesOf(type).every((p) => SLUG_PATTERN.test(p.slug) && slugProblem(p.slug, []) === null && p.blocks.every((k) => SITE_KINDS.includes(k)) && p.blocks[0] === "hero"), true);
   }

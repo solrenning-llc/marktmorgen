@@ -38,7 +38,11 @@ export type PageSlot = {
   title: string;
   slug: string;
   blocks: BlockKind[];
-  /** Where its buttons lead, when that is a product chosen for the funnel rather than its next step. */
+  /**
+   * Where its buttons lead when the page is opened on its own: a call, or a
+   * product chosen for the funnel. Inside the funnel they lead to its next
+   * step (app/[handle]/[slug]/page.tsx).
+   */
   target?: string;
   /**
    * A form the page asks, made with it (lib/forms.ts): questions anyone asks
@@ -114,6 +118,22 @@ export const FUNNEL_TYPES: FunnelType[] = [
       { kind: "product", key: "starter", label: "A low-priced first product", wants: "paid" },
       { kind: "product", key: "main", label: "Your main product", wants: "paid" },
       thanks,
+    ],
+  },
+  {
+    // 530 [FT3]. One page between a post or an ad and one of the creator's
+    // products: a title, a short video in the players the store already has,
+    // and one button. The button leads to the product's page, where its
+    // checkout is: as the funnel's next step, and through the page's own
+    // target when someone opens the page on its own. It asks nothing, so it
+    // has no form. Listed after the first five kinds, which the site's
+    // picture of funnels shows (components/feature-visuals.tsx).
+    id: "bridge",
+    label: "Bridge page",
+    hint: "One page between a post or an ad and one of your products: a title, a short video of you and one button to that product's page, where its checkout is. No form.",
+    slots: [
+      { kind: "page", key: "bridge", title: "A word from me", slug: "a-word-from-me", blocks: ["hero", "video", "cta"], target: "product" },
+      { kind: "product", key: "product", label: "The product the page leads to", wants: "any" },
     ],
   },
   {

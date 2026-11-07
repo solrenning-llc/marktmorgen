@@ -44,6 +44,8 @@ import { claimUpload, dropStream } from "@/lib/stream";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { noteIfFinished } from "@/lib/course-finish";
 import { applyTemplate, templateById } from "@/lib/course-templates";
+import { copyCourseInto } from "@/lib/course-copy";
+import { copiedWords } from "@/lib/course-copy-rules";
 
 const OPS = new Set([
   "outline",
@@ -99,7 +101,9 @@ export async function GET(request: NextRequest) {
  * verdict, feedback }` approves a student's work or asks for another try;
  * `{ action: "template", id, template }` gives a new course one of the ready
  * structures (lib/course-templates.ts) by its id, applied here to the course
- * as it is kept, in one write.
+ * as it is kept, in one write; `{ action: "copy", id, from }` gives a new
+ * course the modules, lessons and text of another course of the same store,
+ * `from` being that course's product (lib/course-copy.ts).
  *
  * `id` is always the product's, and the course is found through the
  * creator's own store, so nothing here can reach anyone else's course.
@@ -231,6 +235,24 @@ export async function POST(request: NextRequest) {
         await saveCourse(next, store);
         if (community) await courseChanged(community, product, course, next).catch(() => {});
       };
+
+      // Another course of this store copied into this new one (294 [SQ5]): its studio
+      // requests taken before each read, the product off the store before the first write.
+      if (action === "copy") {
+        const copied = await copyCourseInto(store, id, course, text(body.from, 40), {
+          hide: async () => {
+            if (product.hidden) return { undo: async () => {} };
+            const hidden = await setProductHidden(ref, id, true);
+            return hidden.ok ? { undo: async () => void (await setProductHidden(ref, id, false)) } : null;
+          },
+          save,
+        });
+        if (!copied.ok) return Response.json({ ok: false, error: copied.error, ...(copied.message ? { message: copied.message } : {}) }, { status: copied.status });
+        const lessons = lessonCount(copied.course);
+        if (lessons !== courseInfo.lessons) await setCourseLessons(ref, id, lessons);
+        await registerDrip(store, product, copied.course);
+        return Response.json({ ok: true, course: copied.course, hidden: true, units: copied.units, words: copiedWords(copied) });
+      }
 
       if (action === "disable") {
         if (lessonCount(course) > 0) return Response.json({ ok: false, error: "not_empty" }, { status: 400 });

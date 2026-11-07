@@ -25,8 +25,8 @@ import {
   StudentAccess,
   WithdrawCertificate,
 } from "@/components/course-editor";
-import { readListing } from "@/lib/catalog";
-import { templateById } from "@/lib/course-templates";
+import { idsOfKind, readCards, readListing } from "@/lib/catalog";
+import { templateById, templateFits } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -71,6 +71,11 @@ export default async function StudioCoursePage({
   const course = await readCourse(product.course.id);
   if (!course) redirect(studioPath(store));
   const folder = await storeFolder(view.ref);
+  // The store's other courses, by name, to copy into a new one (294 [SQ5]): read only for a course still exactly
+  // as it was made, and only when there is another, in the one command of the cards (lib/catalog.ts readCards).
+  const others = templateFits(course).ok ? idsOfKind(store, "course").filter((other) => other !== product.id) : [];
+  const cards = others.length ? await readCards(store).catch(() => null) : null;
+  const copyFrom = cards ? others.flatMap((other) => (cards.get(other)?.title ? [{ id: other, title: cards.get(other)!.title }] : [])) : [];
   // Where each lesson video kept by the video service stands (lib/stream.ts).
   const videoPaths = lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : []));
   const streams = await streamStates(videoPaths).catch(() => ({}));
@@ -193,6 +198,7 @@ export default async function StudioCoursePage({
         <CourseEditor
           productId={product.id}
           initialTemplate={initialTemplate?.id ?? null}
+          copyFrom={copyFrom}
           openFirst={typeof query.lesson === "string" && lessonsInOrder(course).some(({ lesson }) => lesson.id === query.lesson) ? query.lesson : null}
           initial={course}
           folder={folder}

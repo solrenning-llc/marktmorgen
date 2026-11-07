@@ -35,6 +35,7 @@ import { LINK_PROBLEMS, type LinkProblem } from "@/lib/product-link";
 import { useStudioHref } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { CourseTemplatePicker } from "@/components/course-template-picker";
+import { CourseCopyPicker } from "@/components/course-copy-picker";
 import { FIT_WORDS, exampleTitlesLeft, exampleTitlesWords, quizLessonsWaiting, quizWaitingWords, templateFits, type CourseTemplate } from "@/lib/course-templates";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
@@ -232,8 +233,11 @@ export function CourseEditor({
   openFirst = null,
   look = null,
   language = "en",
+  copyFrom = [],
 }: {
   productId: string;
+  /** The store's other courses, by product id and name, to copy into this one while it is new (294 [SQ5]). */
+  copyFrom?: { id: string; title: string }[];
   /** The store's look, so a lesson's text is previewed as students see it. */
   look?: StoreLook | null;
   /** The store's language, so the preview is marked as the lesson page is. */
@@ -301,6 +305,25 @@ export function CourseEditor({
     <div className="mt-8 space-y-6">
       {error ? (
         <p className="notice notice-error" role="alert">{error}</p>
+      ) : null}
+
+      {/* Another course of the store copied into this one (294 [SQ5]): only while it is exactly as it was made, like the structures below. */}
+      {!skipTemplates && copyFrom.length > 0 && templateFits(course).ok && templateFits(initial).ok ? (
+        <CourseCopyPicker
+          productId={productId}
+          courses={copyFrom}
+          busy={busy}
+          onCopied={(kept, words) => {
+            setCourse(kept);
+            setSkipTemplates(true);
+            toast(words);
+            // The picker goes away with the focus in it: the focus moves to the first module's name, at the top of the copy.
+            const first = kept.modules[0];
+            requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`section[aria-labelledby="module-${first?.id}-heading"] input`)?.focus());
+            // The product is now hidden, and the certificate and the sale line further down are drawn by the server.
+            router.refresh();
+          }}
+        />
       ) : null}
 
       {/* Both the course as this page holds it and as the server last drew it: a certificate or a start date set further down changes only the second. */}

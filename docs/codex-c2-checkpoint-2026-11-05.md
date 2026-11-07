@@ -1,3 +1,49 @@
+# C2 financial focal return2963 — 2026-11-07 02:59 Fortaleza
+
+Newest section supersedes older “no candidate/residual HIGH open” statuses below.
+Nominal author request6702487252 existed since01:53 and was recovered in this
+run; the previous checkpoint state was stale, not evidence of no candidate.
+
+- #2963 EXACT4c79292a12fcea3ea0fbc447f2b4e9e909a9168c: focal review
+  **5810436313** CLOSES residual HIGH5807688707, no new focal HIGH/MEDIUM
+  demonstrated in528c..4c. Claim6703043779 before source/delta/tests, channel
+  reservation1df92f1b21aa45d509f62e112cee471b1f089e23 before execution.
+- SAME original b0317404 proof blobd4a229ebb54ce6994c90527598131d4f645c1497
+  byte-verified local/remote: prior25/8fail+17controls -> final25/25. Canonical
+  final source on prior production18/6fail -> head18/18 (includes HGETnull,
+  healthy, six unknown envelopes and healthy retry); soon4/4, linked32+32+17=81.
+- New exact reader uses same singleHGET; null remains confirmed absence,
+  unknown envelope/unparseable entry throws into existing left/job-retention.
+  repliesFor snapshots own nonProxy data slots. No newcommand/key/retry/TTL/
+  paid IO. Claim release stays existing owned-token finally. Loose readPreorder
+  for other two callers is NOT closed. No whole MR/cost certification.
+- Directed strict TS3roots/imports exit0, scopedlint0/syntax/diff0. Official
+  detector directed3/0. FULLscanner4107/1 NOTGREEN: inherited synthetic fixture
+  tests/preorder-checkout-unknown.test.ts inparent2846, already originalreview.
+  Did not edit it/relabel as PII. No hostedCI/bundles/globalTS/browser/nativeRedis/
+  charge/provider or merge approval claimed.
+- Harness corrections: beforeExit counter did not emit because oldcheck calls
+  process.exit; observer ONLY changed toexit. Firstauthor fixture used twoRedis
+  instances, healthycontrols failed; alias corrected to one pertest. NOTproduct
+  RED. Qualified immutableproof25/8->25/25 valid before fixturecorrection and not
+  replayed thereafter. Qualified MemoryRedis.run counts122+111+1248=1481,
+  excludes failedharnessattempts, not entire-session cost/command aggregate.
+  Remaining10000-command guard BEFOREdispatch/512MiB/120s/256KiB/0externalfetch.
+- Fresh adapter/logs LOCALONLY /tmp/c2-2963-focal.mjs,
+  /tmp/c2-2963-focal-qualified.log and /tmp/c2-2963-focal-remaining.log. Original
+  b031 proof/launcher remain durably remote unchanged. Productworktree local
+  /workspace/scratch/c2-resume.LpgUL6/focal-2963; no authorfile/ref/CI touched.
+- #2846 PRIMARY7cd/WIP3d838 NOTpromoted; next requires Claude4 NOMINAL
+  composition/base direction now that2963focal closed. No inferred loop/branch
+  permission. Own2695dc/C5MED+WG16 and2692PRIMARY35e6/displayA3 unchanged;
+  recovery8c2 bothD2/H2 preserved.2956LOW/APIleads unchanged; no replay.
+- #3047 second5810348397 already delivered, no repeat. C4-0226: wait FILA
+  LIGADA, no direct merge; enqueued != merged. C4 only coordination. Three own
+  products, single enabled continuity/schedule preserved, no new automation.
+  Serial0agents, no provider/main integration/pushproduct/retry/cancel/merge.
+
+---
+
 # C2 second independent review 3047 — 2026-11-07 02:37 Fortaleza
 
 Newest status supersedes affected historical instructions; exact full suffix below

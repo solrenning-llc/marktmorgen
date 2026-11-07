@@ -228,6 +228,7 @@ function centralAliases(file,root,here){
  }
  if(["contract-admission-ack.test.ts","contract-funding.test.ts","contract-resource-window.test.ts","contract-routes.test.ts","restart-activation-ack.test.ts","restart-recovery-ack.test.ts","restart-result-ack.test.ts","restart-submission-ack.test.ts"].includes(file))aliases['@/lib/llc-fixed-costs']=join(here,'llc-fixed-approved-policy.ts');
  if(file==='file-download-refusals.test.ts')aliases['@/lib/studio-route']=join(here,'file-download-refusals-world.ts');
+ if(file==='link-set-exact-lot2-erasure.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='ai-counter-admission.test.ts')for(const name of ['redis','store-request','ai'])aliases['@/lib/'+name]=join(here,'ai-counter-admission-world.ts');
  if(file==='visitor-ai-counter-response.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}
  if(file==='visitor-ai-counter-admission.test.ts'){for(const name of ['redis','store','store-checkout','catalog','product-about','sales-page-store','answers','store-guide','sales-page'])aliases['@/lib/'+name]=join(here,'visitor-ai-counter-admission-world.ts');aliases['@/components/store-product']=join(here,'visitor-ai-counter-admission-world.ts');}

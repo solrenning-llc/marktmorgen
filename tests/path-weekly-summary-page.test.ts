@@ -148,3 +148,29 @@ test("the actual weekly card uses a singular rest day when the existing streak h
   assert.match(summary, /1 rest day left this week\./);
   assert.doesNotMatch(summary, /1 rest days left this week\./);
 });
+
+test("the current streak survives a time-zone move while the saved week is unavailable", async t => {
+  const days = ["2026-11-05", "2026-11-06"];
+  const now = "2026-11-06T01:00:00Z";
+  configure(days, "Asia/Tokyo");
+  const tokyo = await pageAt(t, now), tokyoSummary = card(tokyo);
+  assert.match(tokyoSummary, /2 saved check-in days this week/);
+  assert.match(tokyoSummary, /Current streak: 2 check-in days\./);
+  assert.equal((tokyo.match(/Current streak:/g) ?? []).length, 1);
+
+  configure(days, "America/Los_Angeles");
+  const html = await pageAt(t, now), summary = card(html);
+  assert.match(summary, /Your saved check-in days could not be read for this week\./);
+  assert.doesNotMatch(summary, /Current streak:|saved check-in days this week|No check-in days/);
+  assert.match(html, /Current streak: 1 check-in day\. 2 rest days left this week\./);
+  assert.equal((html.match(/Current streak:/g) ?? []).length, 1);
+  assert.ok(html.indexOf("Current streak:") < html.indexOf('aria-labelledby="path-weekly-title"'), "the fallback stays in progress, outside the unavailable weekly card");
+  assert.deepEqual(savedCheckins(), days);
+  assert.deepEqual(calls, { cookies: 1, studioView: 1, readPath: 1, visitPath: 1, allowanceUsed: 1, readGrowth: 0, readBoard: 0, chargeStudio: 0 });
+
+  for (const mode of ["returning", "absent", "read-failed", "visit-failed"] as const) {
+    configure(days, "America/Los_Angeles", mode);
+    const view = await pageAt(t, now);
+    assert.doesNotMatch(view, /Current streak:|check-in days? in your current streak/);
+  }
+});

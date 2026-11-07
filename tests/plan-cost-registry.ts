@@ -1169,6 +1169,8 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
       // The totals of every store take a page of each other store's studio, as the Terms say (C4-4, owner's decision of 4 November 2026, C4-18).
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
+      // A draft product's page previewed by its owner or team is a studio page, taken before its records are read (601 [KB22] U7, 6 November 2026).
+      { file: "app/[handle]/p/[product]/page.tsx", names: ["countStudio(found.store, null, STUDIO_PAGE_UNITS)", "previewsDrafts"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
   },

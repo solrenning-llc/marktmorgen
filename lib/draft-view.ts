@@ -1,6 +1,7 @@
 import { emailForSession } from "@/lib/auth";
 import type { Store } from "@/lib/store";
 import { roleIn, teamTwoStepBlocks } from "@/lib/team";
+import { can } from "@/lib/team-roles";
 
 /**
  * Whether the person whose session this is may see a store's drafts
@@ -28,6 +29,31 @@ export async function seesDrafts(store: Store, session: string | undefined): Pro
     return !(await teamTwoStepBlocks(store, email, role, session));
   } catch (error) {
     console.error("reading who may see a draft failed", error);
+    return false;
+  }
+}
+
+/**
+ * Whether this session may preview a draft product's own page as a buyer
+ * would see it (app/[handle]/p/[product]/page.tsx, 601 [KB22] U7): the
+ * store's owner, or a team member whose role may edit products
+ * (lib/team-roles.ts, "products"), signed in and past the team's two-step
+ * rule, as seesDrafts reads them. A support member, who may not edit
+ * products, is not shown it. There is no link to share: the studio's own
+ * session is the only key.
+ *
+ * Anything not known is a no.
+ */
+export async function previewsDrafts(store: Store, session: string | undefined): Promise<boolean> {
+  if (!session) return false;
+  try {
+    const email = await emailForSession(session);
+    if (!email) return false;
+    const role = await roleIn(store, email);
+    if (!role || !can(role, "products")) return false;
+    return !(await teamTwoStepBlocks(store, email, role, session));
+  } catch (error) {
+    console.error("reading who may preview a draft failed", error);
     return false;
   }
 }

@@ -77,6 +77,11 @@ import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
 import { ProductAbout } from "@/components/product-about-view";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { previewsDrafts } from "@/lib/draft-view";
+import { countStudio } from "@/lib/studio-route";
+import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { DraftPreviewBar, DraftPreviewBuy, DraftPreviewRefused } from "@/components/draft-preview-bar";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -103,7 +108,7 @@ type Params = {
  * limited quantity and checkout. A page that sold the same thing on
  * different terms would be a page nobody could trust.
  */
-const load = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string } | null> => {
+const find = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string } | null> => {
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) return null;
   const asked = normaliseHandle(decoded);
@@ -111,8 +116,28 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   if (!store) return null;
   // The id alone, or the title's words with the id at the end (lib/product-slug.ts).
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
+  return product ? { store, product, asked } : null;
+});
+
+const load = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string } | null> => {
+  const found = await find(raw, id);
   // A draft has no page until the creator publishes it.
-  return product && !product.hidden ? { store, product, asked } : null;
+  return found && !found.product.hidden ? found : null;
+});
+
+/**
+ * A draft, for the one person who may preview it here: its store's owner or
+ * a team member who may edit products, on the studio's own session
+ * (lib/draft-view.ts, previewsDrafts; 601 [KB22] U7). Anyone else, and
+ * anything not known, gets null, and the page answers as for an id that
+ * does not exist. No link is made for it: the session is the only key, so
+ * there is nothing to guess, share or revoke, and publishing it ends the
+ * preview at once.
+ */
+const draftFor = cache(async (raw: string, id: string): Promise<{ store: Store; product: Listing; asked: string } | null> => {
+  const found = await find(raw, id);
+  if (!found || !found.product.hidden) return null;
+  return (await previewsDrafts(found.store, (await cookies()).get(SESSION_COOKIE)?.value)) ? found : null;
 });
 
 async function pageOf(store: Store, product: Listing): Promise<SalesPage> {
@@ -143,7 +168,13 @@ async function shownVersion(store: Store, productId: string, page: SalesPage, so
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
   const found = await load(handle, id);
-  if (!found) return { title: "Not found — Marktmorgen" };
+  if (!found) {
+    // A draft's preview is never indexed or followed, has no canonical
+    // address and no card for a shared link, and reads nothing more to say so.
+    const draft = await draftFor(handle, id);
+    if (!draft) return { title: "Not found — Marktmorgen" };
+    return { title: `Preview: ${draft.product.title} — ${draft.store.name}`, robots: { index: false, follow: false, nocache: true } };
+  }
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
   const description =
@@ -242,7 +273,7 @@ function productData(store: Store, product: Listing, description: string, soldOu
 
 export default async function ProductPage({ params, searchParams }: Params) {
   const { handle, product: id } = await params;
-  const found = await load(handle, id);
+  const found = (await load(handle, id)) ?? (await draftFor(handle, id));
   if (!found) {
     // A product taken off leaves its link leading to the store, not to nothing.
     const decoded = decodeURIComponent(handle);
@@ -251,6 +282,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
     notFound();
   }
   const { product, asked } = found;
+  // A draft drawn for its owner or team to look at before publishing (draftFor): drawn as a
+  // buyer would see it, but never sold, counted, indexed or emailed from.
+  const preview = product.hidden === true;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = await forVisitor(found.store);
   const { w, money, num } = speech(store);
@@ -263,11 +297,21 @@ export default async function ProductPage({ params, searchParams }: Params) {
   }
   if (asked !== store.handle && !reachedOn) permanentRedirect(productPath(store, product));
 
-  // As the store page does: a store with no plan a visit can be charged to
-  // rests once it has had its month's visits (lib/traffic.ts).
-  if (await isResting(store)) return <StoreResting store={store} />;
-  // Switched off after notices about its content (lib/takedown.ts).
-  if (store.suspended) return <StoreResting store={store} suspended />;
+  if (preview) {
+    // Switched off after notices about its content (lib/takedown.ts): not drawn for anyone.
+    if (store.suspended) return <StoreResting store={store} suspended />;
+    // Not a visit and not one of the store's public requests: a page of the studio, paid in
+    // its requests (tests/plan-cost-registry.ts, line studio) before anything of the draft
+    // past its listing is read. Refused, nothing more is read.
+    const admitted = await countStudio(found.store, null, STUDIO_PAGE_UNITS);
+    if (!admitted.ok) return <DraftPreviewRefused message={admitted.message} />;
+  } else {
+    // As the store page does: a store with no plan a visit can be charged to
+    // rests once it has had its month's visits (lib/traffic.ts).
+    if (await isResting(store)) return <StoreResting store={store} />;
+    // Switched off after notices about its content (lib/takedown.ts).
+    if (store.suspended) return <StoreResting store={store} suspended />;
+  }
 
   const selling = canSell(store);
   // Coming soon: a waitlist where the buy box would be (lib/waitlist.ts).
@@ -278,7 +322,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const query = searchParams ? await searchParams : {};
   const giftProblem = typeof query.gift === "string" ? query.gift : "";
   // A cart, where two or more products could go in one (lib/cart-rules.ts).
-  const cartOn = selling && offersCart(store);
+  const cartOn = !preview && selling && offersCart(store);
   const cartNotice = query.cart === "changed" || query.cart === "error" || query.cart === "consent" ? query.cart : null;
   const groupProblem = typeof query.group === "string" ? query.group : "";
   // Sent back because the box to start access at once was not checked (lib/digital-consent.ts): said beside it.
@@ -295,7 +339,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const rehearsal = selling && sellsInTestMode(store);
   // Opened as a step of a funnel of pages (lib/page-funnel.ts): counted for it,
   // and a paid step says how to go on without buying.
-  const here = await funnelHere(store, funnelMark(query.f), "product", product.id).catch(() => null);
+  const here = preview ? null : await funnelHere(store, funnelMark(query.f), "product", product.id).catch(() => null);
   const skip =
     here?.next && !isFree(product) ? (
       <p className="mt-4 text-center text-sm">
@@ -319,8 +363,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
   ]);
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
-  const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
-  if (store.look.sold && stale(soldCounts)) after(() => refreshSoldCounts(store, readAllTimeSales).then(() => undefined));
+  // A preview shows the first version of a page under test, and counts nothing for it.
+  const page = preview ? (runningTest(savedPage) ? asVersion(savedPage, "a") : savedPage) : await shownVersion(store, product.id, savedPage, product.priceCents > 0);
+  if (!preview && store.look.sold && stale(soldCounts)) after(() => refreshSoldCounts(store, readAllTimeSales).then(() => undefined));
   const soldCount = soldCounts?.byProduct[product.id];
   const sold = soldCount && soldCount >= SHOWN_FROM ? w.bought(num(soldCount)) : null;
   const soldLine = sold ? <p className="st-sold mt-2 text-sm font-semibold">{sold}</p> : null;
@@ -419,7 +464,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
           {remaining === 0 ? w.soldOut : w.left(remaining, num(remaining))}
         </p>
       ) : null}
-      {product.preview > 0 && product.file && previewable(product.file) ? (
+      {!preview && product.preview > 0 && product.file && previewable(product.file) ? (
         /* The first pages only, as a file of their own (lib/pdf-preview.ts). */
         <p className="mb-4 text-sm font-semibold">
           <a href={`/api/store/preview?handle=${encodeURIComponent(store.handle)}&product=${encodeURIComponent(product.id)}`} rel="nofollow" className="underline underline-offset-4" style={{ color: "var(--st-text)" }}>
@@ -427,6 +472,11 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
+      {preview ? (
+        // Drawn, never pressed: no checkout, cart, question, reminder, gift or group from a draft.
+        <DraftPreviewBuy {...pageAction(store, product, remaining, selling, related, soon, preorder)} />
+      ) : (
+      <>
       <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
       {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
@@ -459,6 +509,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </p>
       ) : null}
       {skip}
+      </>
+      )}
     </>
   );
 
@@ -478,7 +530,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   // The creator's other products, from what the store record already holds.
   // What the buyers of this one also bought, counted from the store's own sales (lib/also-bought.ts).
-  const pairs = soldCounts?.together[product.id] ?? [];
+  // A preview reads none of the store's other products: it shows this one.
+  const pairs = preview ? [] : soldCounts?.together[product.id] ?? [];
   const pairedListings = pairs.length ? await readListings(store, pairs.map(([id]) => id)).catch(() => []) : [];
   const alsoBought = pairs
     .flatMap(([id, count]) => {
@@ -487,7 +540,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     })
     .slice(0, ALSO_BOUGHT_COUNT);
   // What the creator picked to go with this one (lib/store-collections.ts): published, in their order.
-  const pairIds = (product.pairs ?? []).filter((id) => id !== product.id);
+  const pairIds = preview ? [] : (product.pairs ?? []).filter((id) => id !== product.id);
   const pairListings = pairIds.length ? await readListings(store, pairIds).catch(() => []) : [];
   const paired = pairIds.flatMap((id) => {
     const other = pairListings.find((p) => p.id === id);
@@ -499,7 +552,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && p.stock !== null).map(async (p) => ((await stockLeft(store, p).catch(() => 0)) === 0 ? p.id : null)))).filter((id) => id !== null));
   const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id) && !pairedOut.has(p.id)).map((p) => p.id));
   const shownElsewhere = [...paired.map((p) => p.id), ...alsoBought.map((item) => item.product.id)];
-  const more = (
+  const more = preview ? null : (
     <>
       <GoesWellWith store={store} title={product.title} items={paired} cartIds={pairedCart} />
       <AlsoBought store={store} title={product.title} items={alsoBought.filter((item) => !paired.some((p) => p.id === item.product.id))} />
@@ -513,7 +566,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
         {w.everythingFrom(store.name)}
       </a>
-      <StoreTracking store={store} presence product={product.id} />
+      {preview ? null : <StoreTracking store={store} presence product={product.id} />}
       {here ? <FunnelBeacon handle={store.handle} funnel={here.funnel.id} kind="product" id={product.id} /> : null}
       {cartOn ? <CartButton handle={store.handle} lang={store.language} remind={assistReminderShown(store) ? store.name : ""} notice={cartNotice} restore={typeof query.restore === "string" ? readCartIds(query.restore.slice(0, 400).split(",")) : []} /> : null}
     </div>
@@ -523,22 +576,28 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // and for the bar held at the bottom of a phone's screen (components/sticky-buy.tsx).
   const { action, label } = pageAction(store, product, remaining, selling, related, soon, preorder);
   const sticky =
-    action.kind === "none" ? null : (
+    preview || action.kind === "none" ? null : (
       <StickyBuy target={free ? "get" : "buy"} label={label} price={<PriceTag store={store} product={product} />} />
     );
 
   // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
-  const recent = await recentSales(store);
+  const recent = preview ? [] : await recentSales(store);
   const shell = (children: ReactNode, wide: boolean) => (
     <div
       lang={speech(store).lang.locale}
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
-      <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
-      {faq ? <JsonLd data={faq} /> : null}
-      <ExitOfferSlot store={store} except={product.id} />
+      {preview ? (
+        <DraftPreviewBar />
+      ) : (
+        <>
+          <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
+          <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
+          {faq ? <JsonLd data={faq} /> : null}
+          <ExitOfferSlot store={store} except={product.id} />
+        </>
+      )}
       {page.blocks.some((block) => block.kind === "pictures" && block.items.length > 0) ? <PictureViewer lang={store.language} /> : null}
       <main id="content" className={`relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
         {children}
@@ -613,6 +672,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
     photo: store.photoId ? photoUrl(store.photoId) : null,
     action,
     defaultLabel: label,
+    // In a preview the page's buttons are drawn, never pressed, and its forms take nothing, as in the studio's editor.
+    preview,
     // For a countdown's first numbers: the same on the server and in the browser.
     now: saleClock(),
     lang: store.language,
@@ -676,7 +737,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       </div>
       {free ? buySection : null}
       <PageSections blocks={rest} ctx={ctx} style={page.style} reviewsFor={reviewsPart} />
-      <PageDepth token={readToken(store.statsId, product.id)} product={product.id} ask={store.askWhyNot && !free ? whyNotWords(store.language) : null} />
+      {preview ? null : <PageDepth token={readToken(store.statsId, product.id)} product={product.id} ask={store.askWhyNot && !free ? whyNotWords(store.language) : null} />}
       {free ? null : buySection}
       {payments}
       {!placed && anyReviews ? <section className="sp-section">{reviewsPart(w.reviews)}</section> : null}

@@ -2351,16 +2351,22 @@ export function ProductEditor({
                     Edit
                   </button>
                   {product.hidden ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        run({ action: "visibility", id: product.id, hidden: false }, () => {}, "Published. It is on your store now.")
-                      }
-                      className="font-bold text-violet-deep underline underline-offset-4 transition hover:text-violet-ink disabled:opacity-40"
-                    >
-                      Publish it
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          run({ action: "visibility", id: product.id, hidden: false }, () => {}, "Published. It is on your store now.")
+                        }
+                        className="font-bold text-violet-deep underline underline-offset-4 transition hover:text-violet-ink disabled:opacity-40"
+                      >
+                        Publish it
+                      </button>
+                      {/* Its page as a buyer will see it, for the team only, under a Preview notice (601 [KB22] U7). */}
+                      <a href={`/@${handle}/p/${productSegment(product)}`} target="_blank" rel="noopener noreferrer" className={quiet}>
+                        Preview its page
+                      <NewTab /></a>
+                    </>
                   ) : (
                     <>
                       <a href={`/@${handle}/p/${productSegment(product)}`} target="_blank" rel="noopener noreferrer" className={quiet}>

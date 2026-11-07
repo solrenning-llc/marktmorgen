@@ -1,0 +1,161 @@
+/**
+ * 426 [BX2], unit 1: Claude 2's second money review of #2941 at fd4cd750
+ * (comment 6702630564), each finding as a check on the rule
+ * (lib/earnings-by-month.ts) or on the design the reading unit follows
+ * (docs/bx2-earnings-design.md). Synthetic records only.
+ *
+ *   HIGH 1    a PayPal sale counted twice, once as "Stripe";
+ *   MEDIUM 1  a reading without a whole kind (or without any list) was "read";
+ *   MEDIUM 2  only subscription_cycle invoices: a paid upgrade disappeared;
+ *   MEDIUM 3  PayPal's readers are not exact as they are (partial refunds never
+ *             recorded, oldest-first cut, unreadable record dropped, unknown
+ *             turned into 0, usd, now);
+ *   MEDIUM 4  money given back (a dispute won, a refund that failed) had no way
+ *             to be recorded in the month it came back;
+ *   MEDIUM 5  a zone more than 14 hours ahead of UTC broke the month's floor;
+ *   LOW 1     a record in year 10000, a reading outside four-digit years;
+ *   LOW 2     the words of the number (tax collected from buyers).
+ */
+import { readFileSync } from "node:fs";
+import {
+  earningsByMonth,
+  earningsMonths,
+  monthFloor,
+  readingSince,
+  type EarningsInput,
+  type ListReading,
+  type MoneyKind,
+  type ProviderReading,
+} from "@/lib/earnings-by-month";
+import { done, is, part } from "./check";
+
+const AT = Date.UTC(2026, 10, 6, 12);
+const SINCE = monthFloor("2025-12");
+const utc = (y: number, m: number, d: number, h = 12) => Date.UTC(y, m - 1, d, h);
+type Ev = { id?: string; at: number; cents: number; currency: string };
+const list = (kind: MoneyKind, events: Ev[]): ListReading => ({ kind, events, since: SINCE, complete: true, reachedBack: null });
+const input = (over: Partial<EarningsInput> = {}): EarningsInput => ({ at: AT, timeZone: "UTC", providers: [], manual: [], ...over });
+type Out = ReturnType<typeof earningsByMonth>;
+const month = (out: Out, key: string) => out!.months.find((m) => m.month === key)!;
+const source = (out: Out, key: string, name: string) => month(out, key).sources.find((s) => s.source === name)! as {
+  state: string;
+  why?: string;
+  lines?: { netCents: number; [field: string]: unknown }[];
+  leftOut?: string[];
+  partly?: string[];
+};
+/** Every kind a Stripe reading is read for, empty and complete, apart from those given. */
+const fullStripe = (given: ListReading[], notRead: MoneyKind[] = []): ProviderReading => ({
+  source: "stripe",
+  lists: [...given, ...(["sale", "renewal", "refund", "dispute", "reinstated"] as MoneyKind[]).filter((k) => !given.some((l) => l.kind === k) && !notRead.includes(k)).map((k) => list(k, []))],
+  ...(notRead.length ? { notRead } : {}),
+});
+const fullPayPal = (given: ListReading[]): ProviderReading => ({
+  source: "paypal",
+  lists: [...given, ...(["sale", "refund"] as MoneyKind[]).filter((k) => !given.some((l) => l.kind === k)).map((k) => list(k, []))],
+  notRead: ["dispute"],
+});
+const doc = readFileSync("docs/bx2-earnings-design.md", "utf8");
+
+part("HIGH 1: a PayPal sale is never counted twice, and never as Stripe");
+{
+  // readPaidSales (lib/stats.ts) adds the store's PayPal sales as rows of id `paypal:<order>`: a Stripe source built from it.
+  // Money given back is said left out here, so the check reads the same on the rule before and after its new kind.
+  const doubled = earningsByMonth(input({ providers: [
+    fullStripe([list("sale", [{ id: "paypal:ORDER1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])], ["reinstated"]),
+    fullPayPal([list("sale", [{ id: "paypal:sale:ORDER1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])]),
+  ] }));
+  is("a PayPal record given as Stripe makes Stripe unknown", [source(doubled, "2026-10", "stripe").state, source(doubled, "2026-10", "stripe").why], ["unknown", "invalid"]);
+  is("and October has no total, never US$ 40", month(doubled, "2026-10").totals, null);
+  const bare = earningsByMonth(input({ providers: [fullPayPal([list("sale", [{ id: "ORDER2", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])])] }));
+  is("a PayPal record whose id does not say PayPal: unknown", source(bare, "2026-10", "paypal").state, "unknown");
+  const noId = earningsByMonth(input({ providers: [fullStripe([list("sale", [{ at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])], ["reinstated"])] }));
+  is("a provider record with no id cannot be checked for twice: unknown", source(noId, "2026-10", "stripe").state, "unknown");
+  const once = earningsByMonth(input({ providers: [
+    fullStripe([list("sale", [{ id: "stripe:cs_1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])], ["reinstated"]),
+    fullPayPal([list("sale", [{ id: "paypal:sale:ORDER1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])]),
+  ] }));
+  is("control: a Stripe sale and a PayPal sale, each in its own source, are both read", month(once, "2026-10").totals?.map((l) => l.netCents), [4000]);
+  is("the design never takes readPaidSales (which adds PayPal) as the Stripe reading", /\|\s*Checkouts, extras\s*\|\s*`readPaidSales`/.test(doc), false);
+  is("and says why", doc.includes("adds the store's PayPal sales"), true);
+}
+
+part("MEDIUM 1: every kind a source has is read, said unread or said left out");
+{
+  const none = earningsByMonth(input({ providers: [{ source: "stripe", lists: [] }] }));
+  is("Stripe with no list at all: unknown, never a confirmed zero", source(none, "2026-10", "stripe").state, "unknown");
+  is("and no total", month(none, "2026-10").totals, null);
+  const salesOnly = earningsByMonth(input({ providers: [{ source: "stripe", lists: [list("sale", [{ id: "stripe:cs_1", at: utc(2026, 10, 3), cents: 5000, currency: "usd" }])] }] }));
+  is("Stripe with sales only (refunds, disputes never read): unknown", source(salesOnly, "2026-10", "stripe").state, "unknown");
+  is("and October is not given as after refunds and disputes", month(salesOnly, "2026-10").totals, null);
+  const noRefunds = earningsByMonth(input({ providers: [{ source: "paypal", lists: [list("sale", [{ id: "paypal:sale:O1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])], notRead: ["dispute"] }] }));
+  is("PayPal with no refund list: unknown, refunds never a confirmed zero", source(noRefunds, "2026-10", "paypal").state, "unknown");
+  const both = earningsByMonth(input({ providers: [{ ...fullPayPal([]), notRead: ["dispute", "refund"] }] }));
+  is("a kind both read and said not read: unknown", source(both, "2026-10", "paypal").state, "unknown");
+  const odd = earningsByMonth(input({ providers: [{ ...fullPayPal([]), notRead: ["dispute", "chargeback" as MoneyKind] }] }));
+  is("a kind said not read that the rule does not know: unknown, never ignored", source(odd, "2026-10", "paypal").state, "unknown");
+  const declared = earningsByMonth(input({ providers: [fullStripe([], ["reinstated"])] }));
+  is("control: a kind said not read is read as left out", [source(declared, "2026-10", "stripe").state, source(declared, "2026-10", "stripe").leftOut], ["read", ["reinstated"]]);
+  const all = earningsByMonth(input({ providers: [fullStripe([])] }));
+  is("control: every kind read with nothing in it is a confirmed zero", [source(all, "2026-10", "stripe").state, month(all, "2026-10").totals], ["read", []]);
+}
+
+part("MEDIUM 2: every paid invoice of a membership counts, not only a period renewal");
+is("the design reads upgrade and other invoices (subscription_update), not only subscription_cycle", doc.includes("`subscription_update`"), true);
+is("and leaves out only the first invoice a checkout already counted (subscription_create)", doc.includes("`subscription_create`"), true);
+
+part("MEDIUM 3: PayPal refunds are full refunds only, said on every PayPal month");
+{
+  const out = earningsByMonth(input({ providers: [fullPayPal([list("sale", [{ id: "paypal:sale:O1", at: utc(2026, 10, 3), cents: 2000, currency: "usd" }])])] }));
+  is("PayPal's refunds are read only in part", source(out, "2026-10", "paypal").partly, ["refund"]);
+  is("the month says so", month(out, "2026-10").partly, [{ source: "paypal", kinds: ["refund"] }]);
+  const s = earningsByMonth(input({ providers: [fullStripe([])] }));
+  is("control: Stripe's refunds are read in full", source(s, "2026-10", "stripe").partly, []);
+  is("the design no longer says PayPal's readers are reused as they are", doc.includes("reused as they are"), false);
+  is("it says partial refunds are not recorded", doc.includes("partial refunds"), true);
+  is("it says each PayPal list is read newest first", doc.includes("newest first, so a cut loses only the oldest"), true);
+  is("it says an unreadable record or a missing amount, currency or time makes the list unread", doc.includes("never 0, `usd` or now"), true);
+}
+
+part("MEDIUM 4: money given back is its own amount, in the month it came back");
+{
+  const out = earningsByMonth(input({ providers: [fullStripe([
+    list("sale", [{ id: "stripe:cs_1", at: utc(2026, 9, 20), cents: 1500, currency: "usd" }]),
+    list("dispute", [{ id: "stripe:du_1", at: utc(2026, 10, 10), cents: 1500, currency: "usd" }]),
+    list("reinstated", [{ id: "stripe:du_1:back", at: utc(2026, 11, 2), cents: 1500, currency: "usd" }]),
+  ])] }));
+  const net = (m: string) => {
+    const s = source(out, m, "stripe");
+    return s.state === "read" ? s.lines?.[0]?.netCents : `unknown (${s.why})`;
+  };
+  is("October keeps the money the bank took", net("2026-10"), -1500);
+  is("November shows the money given back", net("2026-11"), 1500);
+  is("as its own column", source(out, "2026-11", "stripe").lines?.[0]?.reinstatedCents, 1500);
+  is("the design keeps a dispute in the month the bank took it, whatever its outcome", doc.includes("whatever happens to it later"), true);
+}
+
+part("MEDIUM 5: a zone where a month begins before its floor gives nothing");
+{
+  for (const zone of ["+23:00", "+14:01"]) {
+    is(`${zone}: no months`, earningsMonths(AT, zone), []);
+    is(`${zone}: no reading start`, Number.isNaN(readingSince(AT, zone)), true);
+    is(`${zone}: nothing, never a month called read too soon`, earningsByMonth(input({ timeZone: zone, providers: [fullStripe([])] })), null);
+  }
+  for (const zone of ["Pacific/Kiritimati", "Etc/GMT-14", "+14:00", "-23:00", "Pacific/Pago_Pago"]) {
+    is(`control: ${zone} has its twelve months`, earningsMonths(AT, zone).length, 12);
+  }
+}
+
+part("LOW 1: year 10000 and years not of four digits (already closed with Codex J's Date-range siblings)");
+{
+  const far = earningsByMonth(input({ providers: [fullStripe([list("sale", [{ id: "stripe:cs_far", at: Date.UTC(10000, 0, 1), cents: 100, currency: "usd" }])])] }));
+  is("a record in year 10000 makes its source unknown in every month", far!.months.every((m) => m.sources[0].state === "unknown"), true);
+  for (const [what, at] of [["year 10000", Date.UTC(10000, 0, 15)], ["year 999", Date.UTC(999, 5, 15)]] as const) {
+    is(`${what}: nothing, not an exception`, (() => { try { return earningsByMonth(input({ at })); } catch (error) { return `threw: ${(error as Error).message}`; } })(), null);
+  }
+}
+
+part("LOW 2: what a sale's amount holds");
+is("the design says sales include tax collected from buyers on top", doc.includes("tax collected from buyers"), true);
+
+done();

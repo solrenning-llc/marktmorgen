@@ -92,7 +92,13 @@ const commandsOf: Record<string, string[]> = {
 };
 const storage = section("### 4.2");
 const families = [...storage.matchAll(/^\| `(nl:[^`]+)` \| (string|hash|set)\b[^|]*\| ([A-Z, ]+) \| (yes|no) \|/gm)].map((m) => ({ key: m[1], type: m[2], commands: m[3].split(",").map((c) => c.trim()), person: m[4] === "yes" }));
-is("a key-family table with each family's type, commands and whether it holds a person", families.length >= 6, true);
+is("a key-family table with each family's type, commands and whether it holds a person", families.map((f) => f.key).sort(), [
+  "nl:course:<course>:watch:<lessonId>:<emailKey>",
+  "nl:course:<course>:watchidx:<emailKey>",
+  "nl:watchbeat:pace:<course>:<lessonId>:<emailKey>",
+  "nl:watchbeat:pool:<folder>:<month>",
+  "nl:watchbeat:student:<folder>:<month>:<emailKey>",
+]);
 is("every command is a command of its family's type", families.filter((f) => f.commands.some((c) => !commandsOf[f.type].includes(c))).map((f) => f.key), []);
 is("the bitmap is one string per student and lesson, read with BITCOUNT", families.some((f) => f.key === "nl:course:<course>:watch:<lessonId>:<emailKey>" && f.type === "string" && f.commands.includes("SETBIT") && f.commands.includes("BITCOUNT")), true);
 is("SETBIT only on a string", families.filter((f) => f.commands.includes("SETBIT") && f.type !== "string").map((f) => f.key), []);
@@ -140,7 +146,7 @@ is("existing coverage, the cost and the privacy of the change are stated", [flat
 is("unit 2 tests a replaced video", section("## 7.").includes("replaced video"), true);
 
 part("Focal return finding 2 (LEVE): no cap that can never refuse");
-is("no per-lesson cap family, field or reply", [families.some((f) => f.key.includes("watchcap")), /per-lesson cap/.test(flat), /`\["cap"\]`/.test(flat), /2 \* buckets` accepted writes/.test(flat)], [false, false, false, false]);
+is("no per-lesson cap family, field or reply", [families.some((f) => f.key.includes("watchcap")), /per-lesson cap/.test(flat.replace("No per-lesson cap is kept", "")), /`\["cap"\]`/.test(flat), /2 \* buckets` accepted writes/.test(flat)], [false, false, false, false]);
 is("the document says why no cap is needed", flat.includes("No per-lesson cap is kept"), true);
 
 part("Focal return finding 3 (LEVE): the token expires in the middle of a lesson");

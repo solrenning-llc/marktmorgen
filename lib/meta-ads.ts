@@ -196,16 +196,23 @@ async function call(method: "GET" | "DELETE", path: string, params: Record<strin
 
 // ---- Reading what is kept ----------------------------------------------------------
 
-function parseConnection(raw: unknown): Connection | null {
+const wholeAccount = (a: unknown): a is MetaAccount => Boolean(a && typeof (a as MetaAccount).id === "string" && typeof (a as MetaAccount).currency === "string");
+
+/**
+ * A kept connection, or null. With `whole`, every ad account in it must be in the shape this code writes, so what the
+ * studio is shown is never a list with one left out, nor "choose an account" for one that could not be read.
+ */
+function parseConnection(raw: unknown, whole = false): Connection | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const v = JSON.parse(raw) as Partial<Connection>;
     if (typeof v.user !== "string" || typeof v.token !== "string" || !Array.isArray(v.accounts)) return null;
+    if (whole && !v.accounts.every(wholeAccount)) return null;
     return {
       user: v.user,
       token: v.token,
       expires: Number(v.expires) || 0,
-      accounts: v.accounts.filter((a): a is MetaAccount => Boolean(a && typeof a.id === "string" && typeof a.currency === "string")).map((a) => ({ id: a.id, name: String(a.name ?? ""), currency: a.currency.toLowerCase() })),
+      accounts: v.accounts.filter(wholeAccount).map((a) => ({ id: a.id, name: String(a.name ?? ""), currency: a.currency.toLowerCase() })),
       account: typeof v.account === "string" ? v.account : "",
       connectedAt: Number(v.connectedAt) || 0,
       by: typeof v.by === "string" ? v.by : "",
@@ -222,6 +229,7 @@ function parseRead(raw: unknown): MetaRead | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const v = JSON.parse(raw) as Partial<MetaRead>;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
     return {
       day: typeof v.day === "string" ? v.day : "",
       at: Number(v.at) || 0,
@@ -266,15 +274,22 @@ export async function metaView(statsId: string | null, currency: string): Promis
   if (!isMetaConfigured()) return null;
   const empty: MetaAdsView = { connected: false, accounts: [], account: null, currency, read: null, broken: "", expires: 0, by: "" };
   if (!statsId || !isRedisConfigured()) return empty;
-  const [rawConn, rawRead] = await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]);
-  const c = parseConnection(rawConn);
-  if (!c) return empty;
+  // Read exactly (CX-123 rule 24): "not connected" only for a confirmed nil, the last read null only for one; a reply
+  // or a kept record in another shape throws, so the studio is never told "not connected", "choose an account" or
+  // "read for the first time within the hour" about a connection it could not read (the Meta route answers 503).
+  const replies = repliesFor(await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]), 2);
+  if (!replies) throw new UnknownReplyError("the studio's Meta connection");
+  const [rawConn, rawRead] = replies;
+  if (rawConn === null) return empty;
+  const c = parseConnection(rawConn, true);
+  const read = rawRead === null ? null : parseRead(rawRead);
+  if (!c || (rawRead !== null && !read)) throw new UnknownReplyError("the studio's Meta connection");
   return {
     connected: true,
     accounts: c.accounts,
     account: c.accounts.find((a) => a.id === c.account) ?? null,
     currency,
-    read: parseRead(rawRead),
+    read,
     broken: c.broken,
     expires: c.expires,
     by: c.by,
@@ -372,7 +387,10 @@ export async function finishMeta(input: {
     await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "accounts" };
   }
-  const before = await readConnection(input.statsId);
+  // The connection it replaces read exactly (CX-123 rule 24): an unknown reply throws before anything is written, so
+  // a connection it could not read is never overwritten with the old person's token kept and the old account's lines
+  // counted under the new one. Only a confirmed nil is "nothing to replace".
+  const before = await exactConnection(input.statsId);
   const connection: Connection = {
     user,
     token: seal(token, context(input.statsId)),
@@ -397,7 +415,7 @@ export async function finishMeta(input: {
     await redisPipeline([["SREM", userKey(before.user), input.statsId]]).catch(() => {});
   }
   // Lines of an account no longer read go.
-  if (before && before.account !== connection.account) await redisPipeline([["DEL", linesKey(input.statsId)]]);
+  if (before && before.account !== connection.account) confirmDeleted(await redisPipeline([["DEL", linesKey(input.statsId)]]), 1, "the lines of an account no longer read");
   const view = (await metaView(input.statsId, input.currency)) as MetaAdsView;
   return { ok: true, view, account: view.account };
 }

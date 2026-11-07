@@ -14,7 +14,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type AdSpend, MAX_SPEND_ENTRIES, readSpend } from "@/lib/ad-spend-rules";
 import { metaLines } from "@/lib/meta-ads";
 
@@ -33,25 +33,51 @@ export function parseSpends(raw: unknown): AdSpend[] | null {
 
 /** Every typed entry of a hash, whole or not at all (as parseSpends), before the list is cut to the newest. */
 function parseAllSpends(raw: unknown): AdSpend[] | null {
+  const split = splitSpends(raw);
+  return split && !split.unreadable.length ? split.spends : null;
+}
+
+/**
+ * A hash reply split into the entries that read and the fields whose entry does not (a field this code does not write,
+ * or a value in another shape); null when the reply itself is not a hash's fields and values, so nothing is known.
+ */
+function splitSpends(raw: unknown): { spends: AdSpend[]; unreadable: string[] } | null {
   if (!Array.isArray(raw) || raw.length % 2 !== 0) return null;
-  const out: AdSpend[] = [];
+  const spends: AdSpend[] = [];
+  const unreadable: string[] = [];
   for (let i = 0; i + 1 < raw.length; i += 2) {
     const [field, text] = [raw[i], raw[i + 1]];
-    if (typeof field !== "string" || !ID.test(field) || typeof text !== "string") return null;
-    let value: unknown;
-    try {
-      value = JSON.parse(text);
-    } catch {
-      return null;
-    }
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    // Read back through the same rule it was written by, with no "now": a kept entry is never refused for its age.
-    const v = value as Record<string, unknown>;
-    const read = readSpend({ channel: v.channel, campaign: v.campaign, cents: v.cents, from: v.from, to: v.to }, Number.MAX_SAFE_INTEGER);
-    if (!read.ok) return null;
-    out.push({ id: field, ...read.spend });
+    if (typeof field !== "string" || typeof text !== "string") return null;
+    const spend = ID.test(field) ? entryOf(text) : null;
+    if (spend) spends.push({ id: field, ...spend });
+    else unreadable.push(field);
   }
-  return out.sort(byDay);
+  return { spends: spends.sort(byDay), unreadable };
+}
+
+/** One kept value read back through the same rule it was written by, with no "now": never refused for its age. */
+function entryOf(text: string): Omit<AdSpend, "id"> | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  const read = readSpend({ channel: v.channel, campaign: v.campaign, cents: v.cents, from: v.from, to: v.to }, Number.MAX_SAFE_INTEGER);
+  return read.ok ? read.spend : null;
+}
+
+/**
+ * Thrown where the typed entries' hash read whole but some of its entries did not: how many, so the editor can offer
+ * to remove exactly those by their keys (removeUnreadableSpends). Their amounts are unknown and never guessed.
+ */
+export class UnreadableSpendsError extends UnknownReplyError {
+  constructor(readonly count: number) {
+    super("the ad spend typed");
+    this.name = "UnreadableSpendsError";
+  }
 }
 
 const byDay = (a: AdSpend, b: AdSpend) => a.from.localeCompare(b.from) || a.id.localeCompare(b.id);
@@ -63,9 +89,16 @@ async function typedSpends(statsId: string): Promise<AdSpend[]> {
 
 /** Every typed entry kept, read exactly, before the list is cut to the newest. */
 async function keptSpends(statsId: string): Promise<AdSpend[]> {
-  const spends = parseAllSpends(stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId)]]), 1)?.[0]));
-  if (!spends) throw new UnknownReplyError("the ad spend typed");
-  return spends;
+  const split = await splitKept(statsId);
+  if (split.unreadable.length) throw new UnreadableSpendsError(split.unreadable.length);
+  return split.spends;
+}
+
+/** The typed entries' hash read exactly, split into what reads and what does not; a reply in another shape throws. */
+async function splitKept(statsId: string): Promise<{ spends: AdSpend[]; unreadable: string[] }> {
+  const split = splitSpends(stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId)]]), 1)?.[0]));
+  if (!split) throw new UnknownReplyError("the ad spend typed");
+  return split;
 }
 
 /** What spend was read: every line known, or the typed ones with Meta's unread (`metaUnread`), never Meta's as 0. */
@@ -143,6 +176,22 @@ export async function addSpend(
     const meta = await metaLines(statsId).catch(() => null);
     return { ok: true, spends: [...keep, ...(meta ?? [])], metaUnread: !meta };
   }
+}
+
+/**
+ * Removes the typed entries that cannot be read, by their keys, never by a guessed amount: the hash is read exactly
+ * at that moment and only the fields whose entry does not read are deleted, with a confirmed HDEL. Every entry that
+ * reads stays. A hash read in another shape, or an HDEL answered in no known shape, throws (UnknownReplyError).
+ * Entries are written once under a fresh random key, so a field that does not read now is never one being saved.
+ */
+export async function removeUnreadableSpends(statsId: string): Promise<SpendRead> {
+  if (!isRedisConfigured()) return { spends: [], metaUnread: false };
+  const { unreadable } = await splitKept(statsId);
+  if (unreadable.length) {
+    const removed = repliesFor(await redisPipeline([["HDEL", key(statsId), ...unreadable]]), 1);
+    if (!removed || countOf(removed[0]) === null) throw new UnknownReplyError("removing the unreadable ad spend entries");
+  }
+  return readSpendLines(statsId);
 }
 
 export async function removeSpend(statsId: string, id: unknown): Promise<SpendRead> {

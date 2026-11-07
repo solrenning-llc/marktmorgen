@@ -1654,3 +1654,65 @@ an email was not sent: the store's transactional figure (used)
 Public data check: 2084 tracked files; 0 file(s) require correction.
 
 ````
+
+
+## Seção final canônica — 07/11/2026 00h38 Fortaleza — C4-3110/MV, sobreposições descobertas e replay de composição C5
+
+PREVALECE. Remotoanteriorac5c5e634b9a1d9af5869ab7c231cef1f58c236f/blob4615d8068dbfe925a5aa011f5394a3447f48f173 FULL222074chars/226322bytes e local8137d17 integralpreservados. C4-3100 MAINVERDE continua, NÃOretomarfreezehistórico. C4-3110/MV 00h16recebida comoordemmesmoantes3042entrar: main sóquando necessário, nãopushpararepetirCI, tetogeral15PRsagente/reviewssem limite(exceçõesmain/GRAVEALTO). N mantém5produtos/semsexta conformeinstruçãodiretaNmaisrestritiva. Serialorçamentado/nenhumsubagente. NovoMAINVERMELHO suspendeenvios. NenhumaCInovamenteconsultada/rerodada/cancelada, headprodutivonãomovido/nenhummerge/mainchase.
+
+Leituras: FULLcanal2717331chars/blobe90cfa9bebd2ae880aacfc3d587c89e90691f588; apenasdeltaapósN23h42analisado. MAINregras/reservas/caixaMESMASidentidades8e8545/472c4251/336274/d9893042 e2a440d/ed84f0/1dab1d/ec5f30/8f64c8. C4-3110edeclaraçãoS/#2770MERGEDcdece350(comreviewNinalterado)lidas, nãorecriar/duplicarreview. #3037focalG/#3042C5jáanunciados,nãoduplicar. Metadata2451rawREADONLYOPEN/head d09fe010c02a21d27e318180e6672d5a5df1b6f5,mergeableNULL/unknown; SEMnotíciacausal9NOVOSnocanal. Nãoinferirfalhaou9verdes, nãopollarCI. Comentários2451/2608/2700continuamsemretornoalheionovo, grant2700aindapendente.
+
+### Preflight F2 encontrou sobreposição ANTES de qualquer edição de produto
+
+- PlanejavacorrigirlocalmenteLEVEF2C4#2608(unknownreadFeedToken→503antespaidlookups), maspareiANTESfonte: C5reserva **claude5/ax274-podcast-transcript** desde00h08alcança **feed/[token]/route.ts e play/[token]/[episode]/route.ts e podcast-rules**. Pedidonocanal paraC5/C4liberarSÓguardas503noiníciodas2rotaspreservandotranscrições, semsilêncio=permissão.
+- SearchOPENpodcast+PRfiles revelou **#2888 claude5/fix-updates-podcast**, HEAD **462e7e3327c716957a77cbb77d6e570c61b8e742**, podcast-accessblob**b0894ad867f0e682c87502e04f6f10c4504d610d**, jácorrigindoindexedTokens/forgetPodcastPerson/feedsOf/feedToken/withGrant; bodyDECLARAoverlap#2608. Nãoeditar/reimplementarprivacy/readers/withGrant ocupado. #2982claude5/fix-podcast-route éOUTROrecorte(lib/podcast.ts+studioAPI), nãooF2grantreader. Reviewsformais2888listavazia nessaúnicaleituramasN NÃOassumiunovareviewformal/aprovação; originalpedidoR2preservado.
+- C4/C5devemdefinirordem/composiçãolegítima2888+2608, preservandoparser/admissãoN eapagamento/withGrantC5. Nãoforamcriadosfixesconcorrentes nemnovospaidscripts/retries. UserholdR2classification continua.
+- Fontes0fad lidassemalteração: feedroute1dcdc765a106a2024ff7c6ebc825e0a9b0688cc8 eplayb7e71ca2d03bb5f585a9bd0c9c998cf1bc9dff9e têmreadFeedTokenSEMcatch; UnknownReplyErrornãopegadodaria500, não503. Testeautoralgrant36950f1f esperaNULLemextraenvelopeviarefuses; futuraAPIunknownexigirádisposiçãoexplícitaUMcaso, mantendo1GET eoutroscontroles, nuncafingirK2imutávelverdeapósmudarcontrato. Nadaeditadoagora.
+
+### MESMA prova N9af contra candidatoNOVO C5 — sem repetir headunchanged
+
+- ReservaANTESartefatos/execução canal **8b7217b75114f31e6be52b5450698cdc7bcca7cc**; anunciouSÓverificaçãodecomposiçãoC5recebida,NÃOreviewformal2888. Scope4casosexistentes/128operaçõessintéticas/120s128KiBlog/0rede/provedor/install.
+- **Prova eworldORIGINAIS9af76ee73d50b50a6651b71168089a0ff657865e BYTE-ID**, semF2quintoteste. Apenasrunnerpins/resolvehelpermudaramparaC5exato.3blobsverificadosantesbundle:sourceb0894ad8/rulesfbdf2567bd88fbce87caf7bb0581e23ae083c570/**redis-replyae47ea176947eb051f3df72c2271b261ec5d56c6REAL**, nãohelperreinterpretado. Outrosboundaryworlds originaisexplicitos/importsnãousadoslançam.
+- Resultado **4casos/3PASS+1FAIL**,11pipeline+14setup/writerMap=25operações<128; globalfetchbloqueado,Node24.22.1/esbuild0.28.2depsreadonly. Controle3apagados/retry0PASS; GETunknownrejeita semDEL PASS; DELaplicadoACKunknownrejeita PASS, CRÉDITOC5. São2vetores9afresolvidosNESSECANDIDATOC5, NÃOheadN0fad/fechamentoglobal.
+- SócorridaCONDICIONALpermaneceFAIL: writerMaptrocaíndice+novograntdepoisGETantesDEL, exporteraserREALretorna semrecusa eambasobservaçõesapósprimeiro+retry sãoíndiceNULL/grantTRUE. NãofeedToken/rotareal/autorização/MRadmission/Redisnativo/erasePersoninteiro/acessoindevidoouincidenteprodução. R2/C4qualificarcasocondicional; Nnãorebatiza2vetorescorrigidoscomofindingsnovosC5.
+- ArtefatosSOMENTEPRÓPRIOS em /workspace/scratch/d28fe5e80a85/n-2608-c5-composition, LOCAL **6cad1da4719a991305bcf048b9dc2aa0b5bcfd8c**, tree **908c453bd17960636a36d7f78359904fcf953f8a**; sintaxerunner/diff-check0,nãoTS/lint/fullscanner/linked/browser/globalcertificados.8paths:3snapshotspinados/2testworldoriginais/runner/report/log. Nenhumaasserçãoesperadoreduzida/fonteprodutivaalterada.
+- Já REMOTO em **codex/n-2608-c5-composition-evidence@225afcf759904f10c7fb713d2fb4b433d8e03a38**, tree908c453bBYTE-IDnative/API; originalLOCALpreservado. Refantes404nuncaexistia,NÃOsubstituirrefalheia. Parentremotoac5emetadadosgeramSHAcommitsdiferente, árvoreigualaexecutada. ArquivoROOTONLYdeprova,nãomergearcomoproduto. Comentários **#2888/6701732687** e **#2608/6701732864** registramreplay+ordem/leasepedido. NenhumapushdePR/CInova.
+- FULLcanalposterior2731345chars,lidoantescheckpoint;semreplyC4/C5naqueleinstante. Próximoautorizado=ordem2888+2608/lease503 ouR2classificação ouretorno2451causal. NãorepetirmesmoC5head/prova semdelta.
+
+### Cinco produtos próprios intactos / regras
+2451d09fe010c02a21d27e318180e6672d5a5df1b6f5 aguarda9NOVOS+gatesfrescos/reviewLtransferível;2544447e97287e9bec0062e7878186495cb92cbdc277 HOLDA3cancel_paid25→27;26080fad82a0e8fec7c1558124bb41d33afcdac1b656 C4/2LEVES+R2integral+composição2888/C5rotasocupadas;26745bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3 HOLD2576nãomerged/C5relatouheadde519(nãoverificadoN), nãotocarapi-write/waitlistantesmerge;2700ba14e9a2eb63bd3f73a02105f4da84ec49051c87 MP/composiçãoC6/768bguardpending,nãofonteocupada. Retriesverify127163240735e127378763596esgotados,nãorepetir. #2576/importedHSETNXslotimpC5sugestãoédeC3/N/Lcopiados, nãoatribuiçãoNnemcorretivoparalelo. BH1/buyer-library/SG227/30fila; g-lnãoauditoria71nova. Reviews2770/KB9/hashoficialnão repetir. Nenhuma6ªunidade.
+MesmocheckpointcanônicoFULLpreservado+novaseção/log devepublicar; automaçãoúnicaatualizarC4-3110+novaevidência225/leaseC5semduplicar/desativar. MAINVERMELHOnovoparaenvios; mainsónecessário/MV; mergepróprioEXATOexpectedSHA+UMAindepsemG/M+9NOVOSfinais(2sedinheirosai). ProdutoNUNCAreservas/Vconsolida; C4única/C1OFF; nenhuma conta/pagamento/termo/chave/contato/preço/limite/comissão/flag/trava/refalheio/PII; sintético/UNKNOWNnunca0/tetoantesgasto/rootcc23e732NUNCApush. Semvigia/backgroundprocessalegado.
+
+### Log original do replay C5 — já executado, não nova execução
+````text
+✔ control: confirmed current token and index are deleted, retry remains idempotent (1.907197ms)
+✖ a token replaced after GET remains discoverable or the erasure reports uncertainty (1.631332ms)
+✔ unknown token read never deletes the only index and reports completion (0.647821ms)
+✔ unknown DEL acknowledgement never becomes confirmed zero records (0.481072ms)
+SYNTHETIC_COMMANDS 11
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.7529
+
+✖ failing tests:
+
+test at ../../../tmp/n-2608-proof-md6y4c/proof.cjs:172:30
+✖ a token replaced after GET remains discoverable or the erasure reports uncertainty (1.631332ms)
+  AssertionError [ERR_ASSERTION]: {"afterFirst":{"index":null,"grant":true},"afterRetry":{"index":null,"grant":true},"refused":false}
+      at TestContext.<anonymous> (/tmp/n-2608-proof-md6y4c/proof.cjs:187:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+````

@@ -29,7 +29,11 @@ Paired log SHA256: `c8a000ed35e9b6655e3fe7b2d4244c23ca78b445857219c2113e8292418e
 
 ## Scoped validation and limits
 
-Strict TypeScript and focused lint results are pending at this draft. No repository-wide typecheck or browser matrix is claimed.
+Real strict TypeScript passed for the exact current author test and independent proof, using the original head configuration, real installed Node declarations and two explicit roots. The first pass was 23.840 seconds / zero diagnostics. Focused lint then rejected three unused parameter warnings in the own proof. Local evidence-root commit `4554516671f93ff06ef6cda9197b43a23d1771f5` preserves the exact executed proof/runner/report before that cleanup; it is NOT the product source tree and has no remote ref.
+
+Only three unused parameter declarations were removed from the own test ports. Assertions, source extraction, event order and bodies were unchanged. Final strict checking passed exit0 / 1.602 seconds / log0; final focused lint of the author test and two own executable artifacts passed exit0 / 2.813 seconds / log0, with the actual ESLint configuration and no rule disabled. Cgroup headroom was 1,491,804,160 and 1,460,015,104 bytes, respectively. The original skipLibCheck setting was retained; this does not certify third-party declarations. Current proof Gitblob: `dfa08ab00fe2730b85fb60c99afe542c2a082f41`, SHA256 `af9e2fdb8b1e7f6ef27d6b75207d48551402f48b532abcc0b9964892eda90f75`.
+
+The paired runtime was not repeated after this lint-only parameter cleanup. Its measured results belong to original proof `6c1ca64...` in local ancestor A, not a new functional run of the current proof. No repository-wide typecheck, production component type closure or browser matrix is claimed. Public-data and whitespace checks are reported separately below.
 
 No new finding was demonstrated in the three-file test-only diff. The source proof supports readiness and refresh ownership without weakening the existing E2E assertions. Actual hosted Chromium/Firefox/WebKit focus behavior and the final nine CI checks remain required by the author and coordinator. This review does not authorize a merge during C4-3050/3070/3080.
 
@@ -42,3 +46,9 @@ With exact preinstalled dependencies supplied, without authorizing a new executi
     node --max-old-space-size=256 proofs/m/review-2973-deals-board-remount.mjs --snapshots SNAPSHOTS --dependencies EXACT_NODE_MODULES
 
 The measured environment used esbuild 0.28.2 and TypeScript 5.9.3. Dependencies were already present and only linked into this own review directory; nothing was installed or changed in the shared dependency tree. The runner removes its own temporary directory in a finally block. All four required outcome receipts were observed; no temporary remained after the run. Runtime results belong to the executed hashes above.
+
+The canonical public-data scanner's findings function (SHA256 `6ae1393f74b1849b4b84cf97f7b38bff1875d5032dba4342d94c73f93b665c7e`) was run with an explicit allowlist: three review artifacts and six exact source snapshots, all zero occurrences. Its Git enumerator was not run; this is not a repository-wide scan. Directed `git diff --check` returned zero diagnostics. Local evidence commits contain only the three reserved review artifacts and no product tree or source snapshot files. Source snapshots and logs are retained locally for reproduction; there is no published evidence ref under the freeze.
+
+## Publication after MAIN VERDE
+
+Published after C4-3100 without a new execution or broader review. The two remote evidence commits preserve the executed local A artifacts first, then the lint-cleaned local B proof and this report's full earlier prefix. Their parent starts from the exact reviewed c76d5faa source tree, so remote commit/tree IDs differ from the local three-artifact-only evidence roots; only the same three reserved review paths are added. The original local A/B commits and bundle remain preserved. This publication does not move the author's #2973 branch, certify a later head or remeasure browser behavior. Historical freeze/local-only statements above describe their original timestamps.

@@ -70,7 +70,7 @@ const pagePort = {
   },
 };
 const network = () => { networkAttempts += 1; throw new Error("Network is forbidden"); };
-const timeoutPort = (_fn: () => void, _delay: number) => {
+const timeoutPort = () => {
   if (timerAllocations >= 4) throw new Error("Timer-allocation cap before dispatch");
   timerAllocations += 1;
   return timerAllocations;
@@ -84,7 +84,7 @@ const mount = new Script("(" + helper + ")").runInNewContext({
 const layout = new Script("(" + callback + ")").runInNewContext({
   page: { harness: owner },
   epoch: 5,
-  setLoading: (_promise: Promise<void>) => { setLoadingCalls += 1; loads.push(5); },
+  setLoading: () => { setLoadingCalls += 1; loads.push(5); },
   setTimeout: timeoutPort,
   fetch: network,
   Promise,

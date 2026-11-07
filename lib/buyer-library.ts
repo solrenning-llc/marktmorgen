@@ -41,6 +41,7 @@ import { storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -70,8 +71,12 @@ export async function storesKnownFor(email: string): Promise<string[]> {
 /** Forgets that this address bought from or joined the store with this id (lib/person-erasure.ts): in every quarter it can be in. */
 export async function forgetLibraryPerson(sid: string, email: string): Promise<number> {
   if (!STORE_ID.test(sid) || !isRedisConfigured()) return 0;
-  const replies = await redisPipeline([...libraryKeys(email), ...joinedKeys(email)].map((key) => ["SREM", key, sid]));
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const commands = [...libraryKeys(email), ...joinedKeys(email)].map((key) => ["SREM", key, sid]);
+  // One SREM of one member per quarter: each answers 0 or 1, and nothing else counts (CX-123 rule 24). Any other
+  // answer throws, so the erasure is said as not finished while the note may still be kept.
+  const counts = repliesFor(await redisPipeline(commands), commands.length)?.map(countOf);
+  if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of a person's library notes");
+  return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }
 
 /**

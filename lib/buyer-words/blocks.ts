@@ -82,7 +82,7 @@ const en = {
   searchNone: (q: string) => `Nothing here for “${q}”. Try another word, or see every product.`,
   searchClear: "Show every product",
   /** Beside search results: how they are ordered (EU 2011/83/EU Art. 6a(1)(a)). Only the creator's own order, never paid. */
-  searchOrder: (store: string) => `Shown in the order ${store} set for its products. Nobody can pay to be listed higher.`,
+  searchOrder: (store: string) => `Shown in the order ${store} set. Nobody can pay to be listed higher.`,
   searchSlow: "Too many searches for now. Try again in a few minutes.",
   /** The store's own questions and answers (lib/store-faq.ts). */
   storeFaqTitle: "Questions, answered",

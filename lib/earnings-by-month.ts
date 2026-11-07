@@ -23,7 +23,9 @@
  * read, said unread nor said left out (EXPECTED_KINDS: a missing refund list
  * is never a confirmed zero). Only kinds a provider's reading truly cannot
  * hold may be said left out (MAY_LEAVE_OUT: disputes and money given back);
- * a sale, renewal or refund said left out makes the source unknown. A record
+ * a sale, renewal or refund said left out makes the source unknown, and so
+ * does a list of money given back beside disputes said left out (the money
+ * back would be added without the debit it gives back). A record
  * whose id holds another provider's prefix ("stripe:paypal:…") is not its
  * source's own, and the same id in two sources makes each month it lands in
  * unknown for those sources. Kinds read only in part are said (PARTLY_READ:
@@ -113,7 +115,9 @@ export const EXPECTED_KINDS: Readonly<Record<"stripe" | "paypal", readonly Money
  * month a total, said beside it (pre-review of #2941 at 925ae7d9ec): Stripe's
  * disputes and money given back, PayPal's disputes. Money in (sales, renewals)
  * and refunds may never be left out: a reading that says so is unknown, never
- * a total "after refunds" without them, and never a confirmed zero.
+ * a total "after refunds" without them, and never a confirmed zero. Disputes
+ * said left out take money given back with them: a reading that lists it
+ * beside them is unknown (Claude 2 on #2941 at b9fa7aa7).
  */
 export const MAY_LEAVE_OUT: Readonly<Record<"stripe" | "paypal", readonly MoneyKind[]>> = {
   stripe: ["dispute", "reinstated"],
@@ -363,6 +367,9 @@ function providerMonths(provider: ProviderReading, months: string[], format: Int
   const listed = new Set(provider.lists.map((list) => (list && typeof list === "object" ? list.kind : undefined)));
   if (notRead.some((kind) => listed.has(kind))) return unknownEverywhere(source, months, "invalid");
   if (!EXPECTED_KINDS[source].every((kind) => listed.has(kind) || notRead.includes(kind))) return unknownEverywhere(source, months, "invalid");
+  // Money given back is only what a dispute took coming back: beside disputes not read, a list of it (even empty)
+  // would add money whose debit was never taken off, so the reading is refused, never trimmed (Claude 2 on #2941 at b9fa7aa7).
+  if (notRead.includes("dispute") && listed.has("reinstated")) return unknownEverywhere(source, months, "invalid");
   const prefix = `${source}:`;
   let unread = false;
   for (const list of provider.lists) {

@@ -9,6 +9,7 @@
  */
 import { readAllTasks } from "@/lib/crm";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { AGENDA_ROW_MARKUP_BYTES, type AgendaDayGroup, agendaForDays, agendaReadUnits, daysAround, personAddresses } from "@/lib/person-agenda";
 import { sentBytes, sentUnits } from "@/lib/sent-bytes";
 import type { DueTask } from "@/lib/person-tasks";
@@ -22,8 +23,11 @@ import { countStudio, studioPath } from "@/lib/studio-route";
  */
 export async function tasksKept(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["HLEN", `nl:crm:tasks:${statsId}`]]);
-  return Number(n) || 0;
+  // Exactly one whole count, or unknown: never "no tasks" from a reply that is not one (CX-123 rule 24).
+  const replies = repliesFor(await redisPipeline([["HLEN", `nl:crm:tasks:${statsId}`]]), 1);
+  const n = replies ? countOf(replies[0]) : null;
+  if (n === null) throw new UnknownReplyError("the tasks count");
+  return n;
 }
 
 /**

@@ -378,10 +378,15 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   const withCourse = [...result.keys()]
     .map((id) => courses.find((p) => p.id === id))
     .filter((p): p is Listing => Boolean(p?.course));
+  // Each answer in its exact shape (CX-123 rule 24): 0 keeps the course, 1 shuts it, anything else (null, a reply
+  // missing from the pipeline, a string, 2) is unknown and never opens it. Unknown is thrown, not read as "shut", so
+  // the page says it did not load (app/error.tsx) rather than telling a buyer they have no access.
   if (withCourse.length) {
-    const flags = await redisPipeline(withCourse.map((p) => ["SISMEMBER", blockedKey(p.course!.id), emailKey(email)]));
+    const flags = repliesFor(await redisPipeline(withCourse.map((p) => ["SISMEMBER", blockedKey(p.course!.id), emailKey(email)])), withCourse.length);
+    const known = flags?.map(countOf) ?? null;
+    if (!known || known.some((flag) => flag === null || flag > 1)) throw new UnknownReplyError("whether a student was taken off a course");
     withCourse.forEach((p, i) => {
-      if (flags[i] === 1 || flags[i] === "1") result.delete(p.id);
+      if (known[i] === 1) result.delete(p.id);
     });
   }
   return { paid: result, ended: asked.ended, refunded: asked.refunded };
@@ -555,8 +560,8 @@ export type Student = {
 };
 
 /** Everyone who has opened the course, with how far they got. */
-export async function studentsOf(course: Course, limit = 500): Promise<{ students: Student[]; total: number }> {
-  if (!isRedisConfigured()) return { students: [], total: 0 };
+export async function studentsOf(course: Course, limit = 500): Promise<{ students: Student[]; total: number; blockedKnown: boolean }> {
+  if (!isRedisConfigured()) return { students: [], total: 0, blockedKnown: true };
   const [raw, blockedRaw] = await redisPipeline([
     ["HGETALL", studentsKey(course.id)],
     ["SMEMBERS", blockedKey(course.id)],
@@ -579,8 +584,13 @@ export async function studentsOf(course: Course, limit = 500): Promise<{ student
   const done = shown.length
     ? await redisPipeline(shown.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]))
     : [];
-  const blocked = new Set(Array.isArray(blockedRaw) ? (blockedRaw as string[]) : []);
+  // The blocked list in its exact shape (CX-123 rule 24): an unknown one is never "nobody blocked". It is said as
+  // unknown (blockedKnown false), and nothing is sent to the course's students from it (sendDripEmails).
+  const blockedList = stringList(blockedRaw);
+  if (!blockedList) console.error("reading a course's blocked students: an answer in another shape");
+  const blocked = new Set(blockedList ?? []);
   return {
+    blockedKnown: blockedList !== null,
     total: rows.length,
     students: shown.map((row, i) => ({
       email: row.e,
@@ -890,7 +900,10 @@ export async function sendDripEmails(
     const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);
     if (dripping.length === 0) continue;
     counts.courses += 1;
-    const { students } = await studentsOf(course, 5000);
+    const { students, blockedKnown } = await studentsOf(course, 5000);
+    // Who was taken off the course not read in its exact shape: none of its emails now, so none reaches a removed
+    // student; the claims are not taken, and a later pass inside the three days sends them.
+    if (!blockedKnown) continue;
     for (const student of students) {
       if (student.blocked) continue;
       for (const unit of dripping) {

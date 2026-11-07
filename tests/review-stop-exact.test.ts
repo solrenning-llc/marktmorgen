@@ -225,7 +225,7 @@ test("the stop page says the last press was not saved when the route answered do
 
 test("control: no such sentence without done=0, nor once the stop is saved", async () => {
   const token = await stopToken(unique("page saved"));
-  for (const query of [{ v: token }, { v: token, done: "1" }]) assert.ok(!(await page(query)).includes(notSaved()), `no failure said for ${JSON.stringify(query)}`);
+  for (const query of [{ v: token }, { v: token, done: "1" }] as Record<string, string>[]) assert.ok(!(await page(query)).includes(notSaved()), `no failure said for ${JSON.stringify(query)}`);
   assert.equal(await stopReviewRequests(token), true);
   const html = await page({ v: token, done: "0" });
   assert.ok(!html.includes(notSaved()), "a stop already saved is not said to have failed");

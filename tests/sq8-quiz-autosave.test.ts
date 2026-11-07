@@ -93,8 +93,8 @@ is("…nothing kept, nothing to mark", sentKept(null, NOW), null);
 
 part("Putting the picks back exactly");
 const picks: [string, string][] = [["q_aaaaaaaa", "1"], ["q_bbbbbbbb", "0"], ["q_bbbbbbbb", "2"]];
-is("a kept pick is ticked", pickedIn(picks, "q_bbbbbbbb", "2"), true);
-is("a choice not kept is unticked, even if the last try had it", pickedIn(picks, "q_bbbbbbbb", "1"), false);
+is("a kept pick is checked", pickedIn(picks, "q_bbbbbbbb", "2"), true);
+is("a choice not kept is cleared, even if the last try had it", pickedIn(picks, "q_bbbbbbbb", "1"), false);
 is("a question with nothing kept stays empty", pickedIn(picks, "q_cccccccc", "0"), false);
 
 part("Said in every language of the store");

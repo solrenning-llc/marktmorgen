@@ -2,6 +2,8 @@ import type { Attempt, Quiz } from "@/lib/quiz";
 import { questionsPerTry, triesLeft } from "@/lib/quiz";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
+import { QuizAutosave } from "@/components/quiz-autosave";
+import { quizFit, quizKeepKey } from "@/lib/quiz-autosave";
 
 /**
  * A lesson's quiz, as a student meets it: the questions to answer, and after
@@ -15,6 +17,10 @@ import type { LanguageCode } from "@/lib/store-language";
  * With a question bank (630 [HN6](7)) `quiz` holds only the questions this
  * student's try draws, and a student who must wait between tries sees how
  * long, with the form shut, so the wait never shows the next questions.
+ *
+ * A student's picks are kept in their own browser while they answer and put
+ * back when they return (297 [SQ8], components/quiz-autosave.tsx), keyed by
+ * the store, course and lesson in `hidden`; without those nothing is kept.
  *
  * Said in the store's `language` (lib/buyer-words/courses.ts), English
  * unless given.
@@ -83,6 +89,8 @@ export function LessonQuiz({
         quiz.waitMinutes ? w.bankWait(w.span(quiz.waitMinutes)) : null,
       ].filter((line): line is string => Boolean(line))
     : [];
+  const keepKey =
+    mode === "student" && hidden.handle && hidden.product && hidden.lesson ? quizKeepKey(hidden.handle, hidden.product, hidden.lesson) : null;
 
   return (
     <section id="quiz" className="mt-8 scroll-mt-6 rounded-2xl px-5 py-5 sm:px-6" style={{ border: "1px solid var(--st-line-strong)" }} aria-labelledby="quiz-title">
@@ -186,6 +194,16 @@ export function LessonQuiz({
             </button>
             {left !== null ? <span className="st-muted text-sm">{w.triesLeft(left)}</span> : null}
           </div>
+        ) : null}
+        {keepKey ? (
+          <QuizAutosave
+            keepKey={keepKey}
+            fit={quizFit(quiz.questions)}
+            open={canAnswer}
+            marked={justMarked}
+            // Only the four sentences cross to the browser: the rest of the words hold functions, which cannot.
+            words={{ quizKeepNote: w.quizKeepNote, quizKeepBack: w.quizKeepBack, quizKeepClear: w.quizKeepClear, quizKeepCleared: w.quizKeepCleared }}
+          />
         ) : null}
       </form>
     </section>

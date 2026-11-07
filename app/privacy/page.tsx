@@ -1178,7 +1178,13 @@ export default function PrivacyPage() {
           </strong>{" "}
           For each student and quiz we keep how many tries they used, their
           last answers, their best mark and whether they passed, with their
-          course progress. A certificate keeps the name exactly as the student
+          course progress. While a student answers, the choices they have
+          picked but not yet sent are kept only in their own browser&apos;s
+          storage, under <code>mm-quiz:</code> followed by the store, course
+          and lesson, so leaving the page loses nothing; we never receive them.
+          They are removed once the try is marked, when the questions change,
+          when the quiz closes for them, after 30 days, or when the student
+          presses &ldquo;Clear these answers&rdquo;. A certificate keeps the name exactly as the student
           typed it, the course title, the creator&apos;s name, the
           student&apos;s email address and when it was issued or withdrawn.
           Its page shows the name, the course, the creator and the date to

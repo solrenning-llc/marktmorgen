@@ -19,6 +19,11 @@
  *     address did not read said it had expired (libraryOwner); and asking
  *     for a link said "on its way" with nothing sent when no store read
  *     (requestLibraryLink).
+ *   - Since Codex J's focal return on #2910: a store whose address or id
+ *     answered out of shape (no reply, a number), or whose record behind it
+ *     did not read, was taken for a store that is not there by the tolerant
+ *     readers of lib/store.ts. The card, the sign-up form, the library and
+ *     the link request now read that key exactly first (lib/store-exact.ts).
  *
  * Each unknown case is checked against a control where the same thing is
  * truly absent, which keeps its old answer. Synthetic store; one reply
@@ -111,6 +116,24 @@ async function main(): Promise<void> {
   is("never says the product is no longer on sale", storeUnread.includes("no longer on sale"), false);
   is("says it could not be loaded just now", storeUnread.includes("could not be loaded just now"), true);
 
+  part("The card: a store whose address or record answered out of shape");
+  const handleRead = getOf("nl:store:handle:");
+  inject = { when: handleRead, reply: () => [null] };
+  is("control: an address confirmed free says the product is no longer on sale", (await card("emblibunknown", fromHead)).includes("This product is no longer on sale."), true);
+  inject = null;
+  for (const [name, when, reply] of [
+    ["no reply for its address", handleRead, () => []],
+    ["a number for its address", handleRead, () => [7]],
+    ["a list for its address", handleRead, () => [["x"]]],
+    ["no reply for its record", getOf("nl:store:owner:"), () => []],
+  ] as const) {
+    inject = { when, reply };
+    const shown = await card("emblibunknown", fromHead);
+    inject = null;
+    is(`${name}: never says the product is no longer on sale`, shown.includes("no longer on sale"), false);
+    is(`${name}: says it could not be loaded just now`, shown.includes("could not be loaded just now"), true);
+  }
+
   part("The card: a product that could not be read");
   inject = { when: getOf(`nl:catalog:${store.catalog.id}:l:${ownRecord}`), reply: failed };
   const productUnread = await card("emblibunknown", ownRecord);
@@ -154,6 +177,17 @@ async function main(): Promise<void> {
   inject = null;
   is("never says the list is not taking sign-ups", joinUnread.includes("not taking sign-ups"), false);
   is("says it could not be loaded just now", joinUnread.includes("could not be loaded just now"), true);
+  for (const [name, when, reply] of [
+    ["no reply for its address", getOf("nl:store:handle:"), () => []],
+    ["a number for its address", getOf("nl:store:handle:"), () => [7]],
+    ["no reply for its record", getOf("nl:store:owner:"), () => []],
+  ] as const) {
+    inject = { when, reply };
+    const shown = await join("emblibunknown");
+    inject = null;
+    is(`${name}: never says the list is not taking sign-ups`, shown.includes("not taking sign-ups"), false);
+    is(`${name}: says it could not be loaded just now`, shown.includes("could not be loaded just now"), true);
+  }
 
   part("The library");
   const buyer = "embed-library-buyer@example.test";
@@ -212,6 +246,24 @@ async function main(): Promise<void> {
   inject = null;
   is("a store whose record could not be read: never says a link is on its way", unreadAsk, "error");
   is("a store whose record could not be read: and makes no link", made.length, 1);
+  for (const [name, when, reply, ip] of [
+    ["no reply for its id", getOf("nl:store:id:"), () => [], "203.0.113.24"],
+    ["a number for its id", getOf("nl:store:id:"), () => [7], "203.0.113.25"],
+    ["no reply for its record", getOf("nl:store:owner:"), () => [], "203.0.113.26"],
+  ] as const) {
+    inject = { when, reply };
+    const result = await ask(buyer, ip);
+    inject = null;
+    is(`a store with ${name}: never says a link is on its way`, result, "error");
+    is(`a store with ${name}: and makes no link`, made.length, 1);
+  }
+  // Another buyer of the same store, so the address's own hourly limit is not what answers.
+  const second = "embed-library-second@example.test";
+  await real(personWrite("nl:lib:", "nimbus-lib", second, store.sid));
+  inject = { when: getOf("nl:store:id:"), reply: () => [null] };
+  const goneAsk = await ask(second, "203.0.113.27");
+  inject = null;
+  is("control: a store confirmed gone: the same answer as for an address that bought nothing, and no link", [goneAsk, made.length], ["sent", 1]);
   delete process.env.RESEND_API_KEY;
   redis.pipeline = watched;
 
@@ -220,6 +272,24 @@ async function main(): Promise<void> {
   inject = null;
   is("a store whose record could not be read: never says nothing is listed", storeGone.includes("Nothing is listed for this address"), false);
   is("a store whose record could not be read: says one store could not be read just now", storeGone.includes("1 store could not be read just now"), true);
+
+  part("The library: a store whose id or record answered out of shape");
+  inject = { when: getOf("nl:store:id:"), reply: () => [null] };
+  const confirmedGone = await library();
+  inject = null;
+  is("control: a store confirmed gone is left out, and nothing is listed", confirmedGone.includes("Nothing is listed for this address"), true);
+  is("control: a store confirmed gone is not said to be unread", confirmedGone.includes("could not be read just now"), false);
+  for (const [name, when, reply] of [
+    ["no reply for its id", getOf("nl:store:id:"), () => []],
+    ["a number for its id", getOf("nl:store:id:"), () => [7]],
+    ["no reply for its record", getOf("nl:store:owner:"), () => []],
+  ] as const) {
+    inject = { when, reply };
+    const shown = await library();
+    inject = null;
+    is(`${name}: never says nothing is listed`, shown.includes("Nothing is listed for this address"), false);
+    is(`${name}: says one store could not be read just now`, shown.includes("1 store could not be read just now"), true);
+  }
 
   done();
 }

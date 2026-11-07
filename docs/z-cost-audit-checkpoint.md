@@ -1,3 +1,9 @@
+# Recibo do cursor sem nova execução
+
+Ponto **CXZ-20261107-0742-C4-1** publicado no canal em **2adab04d66a9a65ceb9a034ae420c477a3edafa8**, blob **719dfc778dc2a5c095d737751e5e5fadfef63591**, após409semgravação e>=120s/FULLfresco. Gates/heads/REDs/WIPs inalterados. ReferênciasC6 anunciadasabaixo foram guardadas para evitar duplicação, não replay nemaprovação. As ferramentasatuais nãoexpõemenqueue explícito; redescobrircapacidade/políticadefila APÓSanúncioC4, nuncausarPUTmergedireto ouhabilitarauto-mergecego. Nenhumamutação defila/configuração. PróximoscontinuamC4FILA LIGADApara2947 ouR2MEDs2741/2819; esperatransitória,nãofimdoprojeto. Históricointeiro preservado.
+
+---
+
 # Cursor — 07/11/2026 07h39 Fortaleza
 
 Main0ade e normativos/caixa/fila/reservas semdelta; FULL canal1cf9605e reconciliado desdeCXZ0644. Trêstimelines próprias sem comentário novo desde09:44Z; não consulteiCI nem repeti teste/parecer. #2947/10ba permaneceaprovadoC5+9exatos registradosabaixo, aguardaC4literalFILA LIGADA (aindaausente), nadaenfileirado/merged. #2741ab5818/MEDR2+WIPLOW40d9 e#2819 3fdc/MEDR2+REDefe2d387preservados.

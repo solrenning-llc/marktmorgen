@@ -149,7 +149,7 @@ async function main(): Promise<void> {
   is("but not the cards themselves (li), so the grid keeps its columns", /\bli\b/.test(measure?.[1] ?? "li"), false);
   // Claude 5's review of #2987 (MEDIUM 1): a p that is a box, not running text (the promotion band p.st-card, the
   // community card p > a.st-card, the search's p.flex and the cart's total p.flex), keeps the column's whole width.
-  const boxes = css.match(/\[data-store-layout\] :where\(p\.flex, p\.grid, p\.st-card, p:has\(> \.st-card\)\)\s*\{([^}]*)\}/);
+  const boxes = css.match(/\[data-store-layout\] :where\(p\.flex, p\.grid, p\.st-card, p:has\(> \.st-card\), p\.st-note\)\s*\{([^}]*)\}/);
   is("a p that is a box (flex, grid, a card or holding one) is not capped", /max-width:\s*none/.test(boxes?.[1] ?? ""), true);
   is("and that rule comes after the cap, so it wins at the same weight", css.indexOf(boxes?.[0] ?? "\u0000") > css.indexOf(measure?.[0] ?? "\u0000"), true);
   // Rule 30 from Claude 5's review of #2907: Tailwind v4 puts its utilities in a layer, and a rule in no layer beats any
@@ -166,7 +166,11 @@ async function main(): Promise<void> {
   is("so a real sentence stays at or under 80 characters a line", at(81) <= 80, true);
   is("and so do words of the narrowest letters", at(126) <= 80, true);
   is("while a real sentence keeps at least 45 characters a line, so the cap does not chop ordinary reading", at(81) >= 45, true);
-  is("a centered line, and a note box, stay centered under the cap", /\[data-store-layout\] :where\([^)]*\.text-center > p[^)]*\.st-note[^)]*\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
+  is("a centered line stays centered under the cap", /\[data-store-layout\] :where\(p\.text-center, \.text-center > p\)\s*\{[^}]*margin-inline:\s*auto/.test(css), true);
+  // Rule 30 from Claude 5's and Claude 2's returns on #2907/#2987: a note box (dashed) keeps the column's width as on the
+  // product page, its words capped by its own end padding, not a 34ch box set apart in the middle.
+  is("a note box keeps the column's width, as on the product page", /\bp\.st-note\b/.test(boxes?.[0] ?? ""), true);
+  is("its words are capped by its own end padding", /\[data-store-layout\] p\.st-note\s*\{[^}]*padding-inline-end:\s*max\(1\.25rem,\s*calc\(100% - 34ch - 1\.25rem\)\)/.test(css), true);
   // Narrower glyphs still exist (an apostrophe is 0.27ch in Geist; a hair space is narrower): no width holds 80 of
   // any glyph without chopping ordinary sentences, so that case and its alternative are recorded, as AX274 asks.
   const programme = readFileSync("docs/accessibility-programme.md", "utf8");

@@ -147,6 +147,39 @@ async function main(): Promise<void> {
   is("inside the product page it stays an h2", [within.includes("<h2 "), within.includes("<h1 ")], [true, false]);
   is("the reviews page asks for the h1", /<ReviewsSection[\s\S]*?level=\{1\}/.test(reviewsPage), true);
 
+  // Claude 5's second review of #2907 (6704784993).
+  part("1.4.8, MEDIUM: the 34ch cap is on words, never on a p drawn as a box or a row, and a utility still wins over it");
+  const capAt = css.search(/\.st-measure :where\(p, dd/);
+  const layerOpen = css.lastIndexOf("@layer components {", capAt);
+  const layerClose = layerOpen < 0 ? -1 : css.indexOf("\n}\n", layerOpen);
+  // Tailwind v4 puts its utilities in @layer utilities; a rule in no layer beats any layer, so a block's own max-w-*,
+  // mx-* or ml-* would lose to the cap. In @layer components, the utility wins again.
+  is("the cap and its centering sit in @layer components, so a block's own utility still wins", layerOpen >= 0 && layerClose > capAt && layerClose > css.search(/\.st-measure :where\(p\.text-center/), true);
+  const boxes = css.match(/\.st-measure :where\(p\.flex, p\.grid, p\.st-note, p\.rounded-2xl\)\s*\{([^}]*)\}/);
+  is("a p that is a box or a row (flex, grid, a dashed note, a rounded notice) keeps its width", /max-width:\s*none/.test(boxes?.[1] ?? ""), true);
+  is("and that rule comes after the cap", css.indexOf(boxes?.[0] ?? "\u0000") > capAt, true);
+  const noteWords = css.match(/\.st-measure \.st-note\s*\{([^}]*)\}/)?.[1] ?? "";
+  const notice = css.match(/\.st-measure p\.rounded-2xl\s*\{([^}]*)\}/)?.[1] ?? "";
+  is("a note box's words are capped by its own padding, the box at full width", /padding-inline-end:\s*max\(1\.25rem,\s*calc\(100% - 34ch - 1\.25rem\)\)/.test(noteWords), true);
+  is("and so are a rounded notice's (the package and the chosen time)", /padding-inline-end:\s*max\(1rem,\s*calc\(100% - 34ch - 1rem\)\)/.test(notice), true);
+
+  part("1.4.6, LOW 1: text in the creator's color keeps 7:1 on the soft accent and on the band too");
+  let soft = 99, band = 99;
+  for (const theme of THEMES) {
+    for (const accent of accents) {
+      const c = lookColours({ theme: theme.id, accent });
+      soft = Math.min(soft, contrast(c.accentText, c.accentSoft));
+      band = Math.min(band, contrast(c.accentText, c.band));
+    }
+  }
+  is("on the soft accent (the buyer's own chat bubble, an icon's disc, a picked pill)", soft >= 7, true);
+  is("on the band", band >= 7, true);
+
+  part("2.5.5, LOW 2: the cart panel's own controls are 44 px");
+  const cart = readFileSync("components/store-cart.tsx", "utf8");
+  is("each line's remove button is 44 × 44 px", /className="grid h-11 w-11 place-items-center rounded-full"/.test(cart), true);
+  is("the panel's Close is 44 px tall", /className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold" onClick=\{\(\) => setOpen\(false\)\}/.test(cart), true);
+
   done();
 }
 

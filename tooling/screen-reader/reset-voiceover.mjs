@@ -41,7 +41,7 @@ export async function resetVoiceOverRunner(options={}){
  const found=pids();
  // A verified zombie has exited and cannot speak or handle events; it is not a live reader.
  // Keep it in the identity inventory, never signal it, and never treat an unknown state as stopped.
- const initial=found.map(owned);
+ const initial=found.map(pid=>owned(pid));
  // Ask the application to end its session before force-stopping a stuck process.
  // Guidepup 0.36.4 uses the same graceful-first lifecycle. A separate running
  // query avoids compiling a quit tell-block for an already closed application.

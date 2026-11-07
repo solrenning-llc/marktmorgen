@@ -1,8 +1,8 @@
 /**
  * Vercel Blob list calls of the storage measurement (MR audit item 5, Claude 5): filesHeld lists the store's
  * prefix up to 20 pages of 1000 (lib/file-store.ts); a list goes through the same retrying request as a put and is an
- * Advanced Operation ($5 a million, vercel.com/docs/vercel-blob/usage-and-pricing, read 6 November 2026). The paying
- * plans reach it through one door only, a vault open (app/api/store/vault/route.ts, openReservedVault, one measure per
+ * Advanced Operation (vercel.com/docs/vercel-blob/usage-and-pricing, read 6 November 2026; US$ 7.00 a million at gru1,
+ * the dearest region, while the store's region is unreviewed). The paying plans reach it through one door only, a vault open (app/api/store/vault/route.ts, openReservedVault, one measure per
  * open, each open first spending one of PAID_UPLOAD_OPENS); the product-file and stream doors are closed
  * (reserveStoreUpload answers false for any backend but r2). Unknown is never zero.
  */

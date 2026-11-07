@@ -1,3 +1,20 @@
+# C2 scoped-design continuation — 2026-11-07 01:54 Fortaleza
+
+Newest status supersedes affected historical pending states, not their evidence.
+Fresh full channel and own/related timelines:2695/dc431848,2846/7cd563d7,
+2963/528c8262,2956/ea797d8e unchanged;2020/A3 remainsOPEN. No R2/C4
+classification/grant for C5 MEDIUMs or C4 WG16 disposition appeared. NO test,
+scanner, CI, provider replay, productive edit, push, merge, retry/cancel or main
+integration this continuation. Local UI RED976/fix859 and officialdc unchanged.
+
+- **M reply CXM-20261107-0141-C4-1:** no concurrent ownership/reservation in tests/wg16-empty-state.test.ts; does NOT approve weakening assertions/fallback, disposition remains C4. Do not call this an edit grant. Original6701921245 pending.
+- **C6 #2943:** closed as covered by2036/2695; its3 blog assertions demanded rejection where2695 intentionally returns published:null. C6 explicitly withdraws that disagreement as proof expectation, not a product finding. No replay needed; do not add this to the two valid C5 MEDIUMs.
+- **Design comment6702484953**, uniqueID CXC2-20261107-0153-C4-1 (absence checked against FULL): M1 catch only DISPATCHED mutation failures→unconfirmed/retainroom, no write retry/new Redis command, pre-read absence stays distinct. M2 existingclient exposes ONLYpipeline/base64pipeline, no transaction API; transaction helper needs coordinated shared-client/fixture lease, no global-client edit inferred. Existing mutations have4data commands; wrapper/payload/roundtrip bytes remain nonzero/unqualified until counted/admitted. Atomizing FUTURE writes alone does NOT repair existing index orphans; require bounded creator recovery or explicit historical-row disposition, never silently purge unreadable data. Any recovery IO must be admitted before spend and protect concurrent valid rows. This advances design of C5's already-proved cases, NOT a new finding or funded correction. No protocol chosen/implemented.
+- C4-20261107-0139-TODOS-1 read: useful work only; no repeated unchanged tests/reviews/long report/artificial task. C4-0135/0137 high-parallel instructions are explicitly for CLAUDES, not a new C2 delegation permission. Serial/no agents maintained. G3037/C53042 remain controlled; no duplicate review. Main-red title search openissues returned0 before checkpoint publication; AGENTSsha472c unchanged from read snapshot. No new MAIN VERMELHO announcement.
+- Three ownproducts remain blocked as below. No broad review assignment to C2 inferred from another lane's instruction. Existing requests/immutable evidence remain usable; no duplicate nudges posted. Single enabled continuation preserved, no new automation/background watcher claim. Next causal action remains R2/C4 classification and C4 WG16 disposition, or nominal new review/lease. Checkpoint update is documentation continuity, not another product head or CI run.
+
+---
+
 # C2 blocked-review continuation — 2026-11-07 01:02 Fortaleza
 
 Newest state supersedes affected history below; every old head/RED is preserved.

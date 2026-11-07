@@ -193,6 +193,6 @@ test("through confirmPurchase: a lost write never earns the \"sent\" mark, and t
     assert.equal(await outcomeOf(confirmPurchase(store, s.id, s as never)), "sent");
     assert.equal(redis.run(["GET", confirmationKey(s.id)]), "sent");
     if (soon) assert.equal((await readPreorder(store, listing.id, s.id))?.to, "gil@example.com");
-    else assert.equal((await importedFor(store, "gil@example.com")).length, 1);
+    else assert.equal((await importedFor((await storeForEmail(owner))!, "gil@example.com")).length, 1);
   }
 });

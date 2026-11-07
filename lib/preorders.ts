@@ -270,18 +270,33 @@ function readSession(store: Store, session: Session): { id: string; productId: s
   return { id, productId: meta.product, email, at: typeof session.created === "number" ? session.created : now(), pi: typeof pi === "string" && INTENT_ID.test(pi) ? pi : "" };
 }
 
-/** Writes a paid pre-order down, once. Returns it as it is kept. */
+/**
+ * Writes a paid pre-order down, once. Returns it as it is kept, read exactly (Claude 5's review of #2963; CX-123
+ * rule 24): the HSETNX answers 1 (written, and the HGET reads back exactly what was written) or 0 (already there,
+ * and the HGET reads back this same order: its buyer and its payment); the EXPIRE answers 1 and each SET "OK", so a
+ * refund finds it (the payment's pointer) and the refunds job reads the store (its "any" mark). Anything else throws
+ * UnknownReplyError: no receipt and no hand-over, so the confirmation is not marked sent and the next try writes it
+ * down again. No command is added.
+ */
 async function recordPreorder(store: Store, read: NonNullable<ReturnType<typeof readSession>>): Promise<Preorder> {
   const sid = store.statsId as string;
   const entry: Preorder = { to: read.email, at: read.at, pi: read.pi };
-  const [, kept] = await redisPipeline([
-    ["HSETNX", entriesKey(sid, read.productId), read.id, JSON.stringify(entry)],
+  const written = JSON.stringify(entry);
+  const commands: (string | number)[][] = [
+    ["HSETNX", entriesKey(sid, read.productId), read.id, written],
     ["HGET", entriesKey(sid, read.productId), read.id],
     keep(sid, read.productId),
     ...(read.pi ? [["SET", piKey(read.pi), `${sid}|${read.productId}|${read.id}`, "EX", KEPT_SECONDS]] : []),
     ["SET", anyKey(sid), "1"],
-  ]);
-  return parsePreorder(kept) ?? entry;
+  ];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies) throw new UnknownReplyError("a pre-order's write");
+  const [set, kept, expired, ...marks] = replies;
+  if ((set !== 0 && set !== 1) || expired !== 1 || !marks.every((m) => m === "OK")) throw new UnknownReplyError("a pre-order's write");
+  if (typeof kept !== "string") throw new UnknownReplyError("a pre-order's entry");
+  const found = parsePreorder(kept);
+  if (!found || (set === 1 && kept !== written) || found.to !== entry.to || found.pi !== entry.pi) throw new UnknownReplyError("a pre-order's entry");
+  return found;
 }
 
 /** What hands a pre-order over needs from the pages around it, passed in so this file imports none of them. */

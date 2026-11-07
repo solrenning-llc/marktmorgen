@@ -104,6 +104,20 @@ async function main(): Promise<void> {
   is("nothing to press inside the quote: no link, button or form", /<(a|button|form|input)\b/.test(html), false);
   is("the subject and the sender are shown", [html.includes("Your order from Lantern Press: Bookbinding at Home"), html.includes("Lantern Press")], [true, true]);
 
+  part("The panel is honest about the price and about sending (review of 7 November 2026)");
+  // A real paid order of a shipped product: Stripe's amount_total carries the shipping (and any tax added on top); the example shows the listed price.
+  const paidShipped = confirmationFor(store, { ...exampleSession(store, shipped, NOW), amount_total: 3900 + 500 } as never, NOW, [], [shipped], null, null);
+  is("why: the real email shows $44 for a $39 product shipped at $5, the example $39", [paidShipped?.text.includes("$44"), parcel.includes("$39")], [true, true]);
+  const sendingHtml = renderToStaticMarkup(createElement(PurchaseEmailPreview, { preview: plain!, productTitle: listing.title, sending: true }));
+  const offHtml = renderToStaticMarkup(createElement(PurchaseEmailPreview, { preview: plain!, productTitle: listing.title, sending: false }));
+  is("the price is said to be before shipping or any tax added at checkout", sendingHtml.includes("The price is your listed price, before shipping or any tax added at checkout."), true);
+  const NOT_SENT = "Email is not set up yet, so buyers do not get this email today.";
+  is("while email is not set up, the panel says buyers do not get it today, and only then", [offHtml.includes(NOT_SENT), sendingHtml.includes(NOT_SENT)], [true, false]);
+  // Plain words (AX274, 3.1.5): every sentence of the panel's own words, outside the quoted email, is short.
+  const ownWords = sendingHtml.replace(/<pre[\s\S]*?<\/pre>/, "\n").replace(/<dl[\s\S]*?<\/dl>/, "\n").replace(/<[^>]+>/g, "\n").replace(/&#x27;|&apos;/g, "'");
+  const longest = Math.max(...ownWords.split(/[.!?:]\s|\n/).map((piece) => piece.trim().split(/\s+/).filter(Boolean).length));
+  is("no sentence of the panel's own words is longer than 20 words", longest <= 20 ? "short" : `${longest} words`, "short");
+
   done();
 }
 

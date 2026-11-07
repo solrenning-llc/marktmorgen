@@ -11,18 +11,31 @@
  *     rendered with each inherited name and must equal the render with none;
  *   - bookingNotice (lib/buyer-words/booking.ts) returns null for them;
  *   - every page that looks a notice table up by the raw address key does so
- *     only behind Object.hasOwn on the same table and key.
+ *     only behind Object.hasOwn on the same table and key;
+ *   - the word tables those pages read (requests, agreements, Discord, move)
+ *     really do inherit these names in every language, so the guard is what
+ *     stands between them and the page;
+ *   - a sweep of every page file under app/ finds no other lookup by a key
+ *     from the address without the guard, except the ones listed by name in
+ *     NOT_HERE with the reason (another pull request owns the line, the key
+ *     is already narrowed, or the family is the next unit).
  *
  * Synthetic only; nothing is read from Redis or sent.
  */
 import { strict as assert } from "node:assert";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ReviewForm } from "@/components/review-form";
 import { LessonComments } from "@/components/lesson-comments";
 import { BOOKING_WORDS, bookingNotice } from "@/lib/buyer-words/booking";
+import { agreementWords } from "@/lib/buyer-words/agreements";
+import { discordWords } from "@/lib/buyer-words/discord";
+import { moveWords } from "@/lib/buyer-words/move";
+import { requestWords } from "@/lib/buyer-words/requests";
+import { LANGUAGE_CODES } from "@/lib/store-language";
 
 const INHERITED = ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf", "isPrototypeOf"];
 
@@ -135,6 +148,14 @@ const LOOKUPS: [string, string, string][] = [
   ["app/[handle]/free/page.tsx", "ww.notices", "query.welcome"],
   ["app/[handle]/affiliates/page.tsx", "a.notices", "status"],
   ["app/[handle]/join/page.tsx", "w.notices", "status"],
+  ["app/[handle]/pay/[request]/page.tsx", "w.notices", "query.notice"],
+  ["app/[handle]/sign/[agreement]/page.tsx", "w.notices", "query.notice"],
+  ["app/[handle]/review/page.tsx", "REVIEW_NOTICES", "status"],
+  ["app/affiliate/page.tsx", "STATUS", "query.status"],
+  ["app/studio/discord/page.tsx", "NOTICES", "query.discord"],
+  ["app/[handle]/discord/page.tsx", "w.notices", "status"],
+  ["app/[handle]/move/[product]/page.tsx", "m.notices", "status"],
+  ["app/privacy/delete/page.tsx", "STATUS", "statusKey"],
 ];
 
 for (const [path, table, key] of LOOKUPS) {
@@ -148,3 +169,109 @@ for (const [path, table, key] of LOOKUPS) {
     assert.ok(guarded >= 1 && raw <= guarded, `${raw} lookups, ${guarded} guarded`);
   });
 }
+
+/** The guarded read the pages above use, run on the tables they read. */
+const pick = (table: object, key: string): unknown => (Object.hasOwn(table, key) ? (table as Record<string, unknown>)[key] : undefined);
+
+const TABLES: [string, (language: string) => object][] = [
+  ["requestWords().notices (pay)", (l) => requestWords(l).notices],
+  ["agreementWords().notices (sign)", (l) => agreementWords(l).notices],
+  ["discordWords().notices (store Discord page)", (l) => discordWords(l).notices],
+  ["moveWords().notices (move)", (l) => moveWords(l).notices],
+];
+
+for (const [name, of] of TABLES) {
+  test(`${name}: every own key is a notice with words, in every language (control)`, () => {
+    for (const language of LANGUAGE_CODES) {
+      const table = of(language);
+      const keys = Object.keys(table);
+      assert.ok(keys.length > 0, `${language}: no notices`);
+      for (const key of keys) {
+        const notice = pick(table, key) as { title?: unknown };
+        assert.ok(notice && typeof notice.title === "string" && notice.title.length > 0, `${language}.${key}`);
+      }
+    }
+  });
+  test(`${name}: an inherited name reads as something unguarded and as nothing guarded`, () => {
+    for (const language of LANGUAGE_CODES) {
+      const table = of(language);
+      for (const inherited of INHERITED) {
+        assert.notEqual((table as Record<string, unknown>)[inherited], undefined, `${language}: ${inherited} is not inherited here`);
+        assert.equal(pick(table, inherited), undefined, `${language}: ${inherited}`);
+      }
+    }
+  });
+}
+
+/**
+ * Lookups by a key from the address that the sweep below allows, each with
+ * its reason. A key is `${file} ${table}[${key}]`; an inline key
+ * (`typeof query.x === "string" ? query.x : ""`) is written as query.x. When
+ * an entry is no longer found, the sweep fails so the list stays true.
+ */
+const NOT_HERE: Record<string, string> = {
+  // Owned by another open pull request: that line is theirs.
+  "app/[handle]/group/[group]/page.tsx g.groupNotices[status]": "#2654 (Claude 4) and claude5/fix-places-totals own this line",
+  "app/studio/refund/page.tsx REFUND_DONE[query.done]": "#2849 (Claude 2, KB9 u3) owns app/studio/refund/page.tsx",
+  // Not a key typed into the address.
+  "app/[handle]/affiliates/page.tsx lw.status[status]": "an inner `status` (line.status, a LeadStatus) shadows ?status=",
+  "app/embed/[handle]/join/page.tsx w.notices[status]": "status is already one of STATUSES or empty",
+  "app/[handle]/thanks/page.tsx t.upsellNotes[query.upsell]": "read only after Object.hasOwn(UPSELL_NOTES, query.upsell)",
+  // Same fault with the key written inline; the next unit (community family overlaps #3020).
+  "app/[handle]/community/page.tsx notices[word]": "next unit: community family",
+  "app/[handle]/community/page.tsx linkNotices(store.language)[query.link]": "next unit: community family",
+  "app/[handle]/community/post/[post]/page.tsx notices[query.n]": "next unit: community family",
+  "app/[handle]/community/you/page.tsx NOTICES[query.n]": "next unit: community family",
+  "app/[handle]/community/search/page.tsx communityNotices(store.language)[query.n]": "next unit: community family",
+  "app/[handle]/community/events/page.tsx communityNotices(store.language)[query.n]": "next unit: community family",
+  "app/[handle]/community/events/[event]/page.tsx communityNotices(store.language)[query.n]": "next unit: community family",
+  "app/[handle]/community/messages/page.tsx communityNotices(store.language)[query.n]": "next unit: community family",
+  "app/[handle]/community/messages/[pair]/page.tsx NOTICES[query.n]": "next unit: community family",
+  "app/[handle]/page.tsx w.notices[query.status]": "next unit: inline keys on the store home page",
+  "app/[handle]/course/[product]/page.tsx w.linkNotices[query.link]": "next unit: inline keys on the course page",
+  "app/[handle]/course/[product]/page.tsx w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[query.cert]": "next unit: inline keys on the course page",
+};
+
+function pageFiles(dir: string, into: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) pageFiles(path, into);
+    else if (/^page\.tsx?$/.test(name)) into.push(path);
+  }
+  return into;
+}
+
+/** `table[key]` lookups in a page where the key came from the address, with no Object.hasOwn(table, key) in the file. */
+function unguarded(path: string, text: string): string[] {
+  // Helpers that read one value from the address: `const get = (name: string) => ... query[name] ...`.
+  const getters = [...text.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*\([^)]*\)\s*=>[^\n]*\bquery\[/g)].map((m) => m[1]);
+  const source = ["\\bquery\\.[A-Za-z_$]", ...getters.map((g) => `\\b${escape(g)}\\(`)].join("|");
+  // Names that hold a value from the address: `const status = typeof query.status === "string" ? ... : ""`.
+  const named = [...text.matchAll(new RegExp(`\\b(?:const|let)\\s+([A-Za-z_$][\\w$]*)\\s*(?::[^=]+)?=\\s*[^;\\n]*(?:${source})`, "g"))].map((m) => m[1]);
+  const inline = `typeof (query\\.[A-Za-z_$][\\w$]*) === "string" \\? query\\.[A-Za-z_$][\\w$]* : ""`;
+  const keys = [inline, "query\\.[A-Za-z_$][\\w$]*", ...named.map(escape)].join("|");
+  const table = "(?:[A-Za-z_$][\\w$]*\\.)*[A-Za-z_$][\\w$]*(?:\\([^()\\n]*\\))?";
+  const lookup = new RegExp(`(?<![\\w$.\\]])(${table})\\[(?:${keys})(?: as [^\\]]+)?\\]`, "g");
+  const found: string[] = [];
+  for (const m of text.matchAll(lookup)) {
+    const name = m[1];
+    if (name === "query" || name === "params") continue;
+    const key = m[2] ?? m[0].slice(name.length + 1).replace(/ as [^\]]+\]$|\]$/, "");
+    if (new RegExp(`Object\\.hasOwn\\(${escape(name)}, ${escape(key)}\\)`).test(text)) continue;
+    found.push(`${path} ${name}[${key}]`);
+  }
+  return found;
+}
+
+test("the sweep still finds a lookup it must find (control)", () => {
+  const sample = 'const query = await searchParams;\nconst status = typeof query.status === "string" ? query.status : "";\nconst a = w.notices[status] ?? null;\nconst b = T(x)[typeof query.n === "string" ? query.n : ""];\nconst c = Object.hasOwn(OK, status) ? OK[status] : null;';
+  assert.deepEqual(unguarded("x/page.tsx", sample), ["x/page.tsx w.notices[status]", "x/page.tsx T(x)[query.n]"]);
+});
+
+test("no page under app/ reads a table by a key from the address without Object.hasOwn, outside NOT_HERE", () => {
+  const found = pageFiles("app").flatMap((path) => unguarded(path, readFileSync(path, "utf8")));
+  const unexpected = [...new Set(found)].filter((one) => !Object.hasOwn(NOT_HERE, one));
+  assert.deepEqual(unexpected, [], "guard these with Object.hasOwn (or list them in NOT_HERE with the reason)");
+  const stale = Object.keys(NOT_HERE).filter((one) => !found.includes(one));
+  assert.deepEqual(stale, [], "these are no longer found: take them out of NOT_HERE");
+});

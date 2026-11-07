@@ -209,6 +209,34 @@ async function main() {
     is("the email registry allows this file only the store's figure", /"lib\/discount-schedule-notice\.ts": STORE/.test(registry), true);
     is("Claude 4's weekly-report file is not touched for it", lib.includes("stats-report"), false);
 
+    part("A send whose reply was lost is never sent again on the retry (rv39 finding on #3027)");
+    // sendEmail answers false both when nothing went and when the outcome is
+    // unknown (a lost reply). The retry an hour later must not send the same
+    // email a second time: one stable key per store and code.
+    const { installSesMailFixture } = await import("./ses-mail-fixture");
+    const mailWorld = installSesMailFixture();
+    try {
+      mailWorld.configure();
+      await mailWorld.setReady(true, { max24: 50_000, rate: 100 });
+      const lostEntry = { id: "promo_LOST", code: "LOST", start, end, tries: 3, failed: true };
+      mailWorld.setSesOutcome("lost");
+      const firstTry = await notice.tellActivationFailed(shop as never, lostEntry, start + 900);
+      is("control: the first try reaches the provider once, and a lost reply is not read as sent", [mailWorld.calls.ses, firstTry], [1, false]);
+      mailWorld.setSesOutcome("ok");
+      await notice.tellActivationFailed(shop as never, lostEntry, start + 900 + NOTICE_RETRY_SECONDS);
+      await notice.tellActivationFailed(shop as never, lostEntry, start + 900 + 2 * NOTICE_RETRY_SECONDS);
+      is("the retries never send the same email again", [mailWorld.calls.ses, mailWorld.calls.resend], [1, 0]);
+      let before = mailWorld.calls.ses;
+      const otherTry = await notice.tellActivationFailed(shop as never, { ...lostEntry, id: "promo_OTHER", code: "OTHER" }, start + 900);
+      is("another code's email still goes, once", [mailWorld.calls.ses - before, otherTry], [1, true]);
+      const otherShop = { ...shop, statsId: "f".repeat(32), sid: "a".repeat(32), email: "other@example.test" };
+      before = mailWorld.calls.ses;
+      const otherShopTry = await notice.tellActivationFailed(otherShop as never, lostEntry, start + 900);
+      is("the same code id at another store still goes, once", [mailWorld.calls.ses - before, otherShopTry], [1, true]);
+    } finally {
+      mailWorld.restore();
+    }
+
     part("The studio's list: Stripe's first page, said plainly when there are more");
     const { readCodePage, listCodes, MAX_CODES } = await import("@/lib/discount");
     const row = (i: number) => ({ id: `promo_row${i}`, code: `ROW${i}`, active: true, times_redeemed: 0, promotion: { coupon: { percent_off: 10, duration: "once" } } });

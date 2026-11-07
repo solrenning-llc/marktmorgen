@@ -126,6 +126,7 @@ async function main(): Promise<void> {
   // with them unused, so a 429 can never stand in for the 503.
   const freshSaveWindows = () => redis.pipeline(redis.keys().filter((k) => /^nl:rlm?:import-cf-save/.test(k)).map((k) => ["DEL", k]));
   const runShapes: [string, string][] = [
+    ["an empty string (never written)", ""],
     ["not JSON", "not json"],
     ["JSON null", "null"],
     ["a list", "[]"],
@@ -147,6 +148,15 @@ async function main(): Promise<void> {
     await freshSaveWindows();
     is(`route save: ${what} answers 503 'unavailable'`, await withLedgerReply(runAs(entry), async () => answer(await post({ action: "save", ...input }))), [503, "unavailable"]);
   }
+  // The sibling in the same reply (rule 30): a page entry is the id of the page made, never an empty string.
+  const pageAs = (entry: string) => async (commands: (string | number)[][]) => {
+    const replies = (await exactPipeline(commands)) as unknown[];
+    const slots = [...(replies[0] as (string | null)[])];
+    slots[1] = entry;
+    return [slots];
+  };
+  is("plan: an empty page entry throws UnknownReplyError", await withLedgerReply(pageAs(""), () => thrown(async () => planFunnelImport((await storeForEmail(OWNER))!, input))), "UnknownReplyError");
+  is("save: an empty page entry throws UnknownReplyError", await withLedgerReply(pageAs(""), () => thrown(async () => saveFunnelImport((await storeForEmail(OWNER))!, input))), "UnknownReplyError");
   is("no funnel, page or form was made by any of them", await counts(), [2, 2, 1]);
   await freshSaveWindows();
   is("control: the exact 'done' entry still reads as saved", ((await withLedgerReply(runAs(savedRun), async () => (await post({ action: "save", ...input })).json())) as { again?: boolean }).again, true);

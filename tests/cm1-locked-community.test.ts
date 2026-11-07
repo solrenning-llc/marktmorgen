@@ -13,7 +13,12 @@
  *   - a member who holds one of the products sees the space as before
  *     (holdsAnyOf), with nothing to unlock;
  *   - an access answer that is unknown (Stripe down, or the kept answer not
- *     read) draws the locked view, never the content, and never fails the page.
+ *     read) never shows the content and never offers to sell the product
+ *     again: the space is said as not checked just now (review of #3007, M1);
+ *     asked for directly, it is never answered as kept for other buyers;
+ *   - a product whose stock or keys cannot be read is unknown, never "not
+ *     available" (L1), and a space's view whose save was not confirmed is
+ *     never answered as saved (L2).
  */
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
@@ -30,6 +35,9 @@ import { mintPass, passCookieName } from "@/lib/learn";
 import { productSegment } from "@/lib/product-slug";
 import { MAX_UNLOCK_PRODUCTS, lockedOf, unlockCandidates, unlocksOf } from "@/lib/community-locked";
 import { collectionUnits } from "@/lib/page-read-rules";
+import { readListings } from "@/lib/catalog";
+import { productsBuyableNow } from "@/lib/mail-product-sellable";
+import type { Listing } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { cookieValues } from "./meeting-withdrawal-page-world";
 import { paidPeriod } from "./billing-period-fixture";
@@ -101,12 +109,12 @@ async function main(): Promise<void> {
   await createPost(id, { space: general, author: CREATOR, title: "Hello everyone", text: "OPEN-GENERAL-TEXT", img: null, kind: "post", poll: null }, store);
   if ((await readMember(id, memberKey(INSIDER)))?.n !== "Ivy Insider") throw new Error("no insider");
 
-  async function draw(as: string): Promise<string> {
+  async function draw(as: string, query: Record<string, string> = {}): Promise<string> {
     cookieValues.clear();
     store = (await storeForEmail(OWNER))!;
     cookieValues.set(passCookieName(store), await mintPass(store, as, "all"));
     try {
-      const page = await CommunityPage({ params: Promise.resolve({ handle: "@lockedclub" }), searchParams: Promise.resolve({}) });
+      const page = await CommunityPage({ params: Promise.resolve({ handle: "@lockedclub" }), searchParams: Promise.resolve(query) });
       return renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {}, replace() {}, prefetch() {} } as never }, page));
     } catch (error) {
       return `PAGE_FAILED ${String(error)}`;
@@ -135,10 +143,15 @@ async function main(): Promise<void> {
   is("the inner post and its author are there", [html.includes("PRIVATE-INNER-TEXT"), html.includes("Ivy Insider")], [true, true]);
   is("and nothing to unlock for it", lockedPart(html).includes("Inner circle"), false);
 
-  part("An unknown access answer draws the locked view, never the content");
+  part("An unknown access answer: never the content, never an offer to buy, said as not checked (review of #3007, M1)");
+  const uncheckedPart = (html: string) => html.match(/<section[^>]*id="cm-unchecked"[\s\S]*?<\/section>/)?.[0] ?? "";
+  const NOT_CHECKED = "We couldn&#x27;t check your access to these spaces just now. Reload the page to try again.";
   stripe = "down";
   html = await draw(STRANGER);
-  is("Stripe down: the page is drawn, locked, with nothing from inside", [html.startsWith("PAGE_FAILED"), lockedPart(html).includes("Inner circle"), nothingInside(html)], [false, true, []]);
+  is("Stripe down: the page is drawn, with nothing from inside", [html.startsWith("PAGE_FAILED"), nothingInside(html)], [false, []]);
+  is("Stripe down: no offer to buy the product, and the space is not called locked", [html.includes("Unlock with"), lockedPart(html).includes("Inner circle")], [false, false]);
+  is("Stripe down: the space is said as not checked just now", [uncheckedPart(html).includes("Inner circle"), uncheckedPart(html).includes(NOT_CHECKED)], [true, true]);
+  is("Stripe down: a Hidden space still shows no sign of itself", [html.includes("Secret room"), html.includes(secret)], [false, false]);
   stripe = "empty";
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -147,12 +160,33 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   try {
     html = await draw(OUTSIDER);
-    is("the kept answer not read: the page is drawn, locked, with nothing from inside", [html.startsWith("PAGE_FAILED"), lockedPart(html).includes("Inner circle"), nothingInside(html)], [false, true, []]);
+    is("the kept answer not read: drawn, nothing from inside, no offer to buy", [html.startsWith("PAGE_FAILED"), nothingInside(html), html.includes("Unlock with")], [false, [], false]);
+    is("and the space is said as not checked", uncheckedPart(html).includes("Inner circle"), true);
     html = await draw(INSIDER);
-    is("even for a member who holds the product: locked, never the content", [html.startsWith("PAGE_FAILED"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
+    is("a member who holds the product: never the content", [html.startsWith("PAGE_FAILED"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
+    is("and never asked to buy it again, nor told it is locked", [html.includes("Unlock with Guide"), html.includes(guideHref), lockedPart(html).includes("Inner circle")], [false, false, false]);
+    is("but told their access could not be checked just now", [uncheckedPart(html).includes("Inner circle"), uncheckedPart(html).includes(NOT_CHECKED)], [true, true]);
+    html = await draw(INSIDER, { space: inner });
+    is("asked for directly: never answered as kept for other buyers, never the content", [html.includes("spacelocked"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
   } finally {
     redis.pipeline = original;
   }
+  html = await draw(INSIDER);
+  is("control: read again, the member who holds it sees it", [html.includes("PRIVATE-INNER-TEXT"), uncheckedPart(html)], [true, ""]);
+
+  part("A product whose stock cannot be read is unknown, never 'not available' (review of #3007, L1)");
+  store = (await storeForEmail(OWNER))!;
+  const [guideListing] = await readListings(store, [guide]);
+  const limited: Listing = { ...guideListing, stock: 5 };
+  const already = { soon: new Set<string>(), listings: new Map<string, Listing>() };
+  is("control: its stock read, it is on sale", (await productsBuyableNow(store, [limited], Date.now(), already)).has(guide), true);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HGETALL" && String(c[1]).startsWith("nl:stock:"))) throw new Error("synthetic lost reply");
+    return original(commands);
+  }) as typeof redis.pipeline;
+  const stockUnread = await productsBuyableNow(store, [limited], Date.now(), already).then((ids) => (ids.has(guide) ? "on sale" : "left out"), () => "unknown");
+  redis.pipeline = original;
+  is("its stock not read: unknown (the locked space then says so), never left out as not on sale", stockUnread, "unknown");
 
   part("Only a product on sale now is named");
   await setStripeAccount(OWNER, "acct_1TestLocked0001", false);
@@ -172,6 +206,15 @@ async function main(): Promise<void> {
   is("Draft room made Hidden", await choose({ id: later, view: "hidden" }), [200, true]);
   is("an unknown space, or a view that is neither, is refused", [await choose({ id: newItemId(), view: "locked" }), await choose({ id: secret, view: "open" })], [[404, false], [400, false]]);
   is("nobody signed in is refused", await choose({ id: secret, view: "hidden" }, ""), [401, false]);
+  // Review of #3007, L2: the save's own answer is read; one not confirmed is never answered as saved.
+  const keep = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await keep(commands);
+    return reply.map((r, i) => (commands[i][0] === "SET" && String(commands[i][1]).endsWith(":cfg") ? null : r));
+  }) as typeof redis.pipeline;
+  const unconfirmed = await choose({ id: secret, view: "locked" });
+  redis.pipeline = keep;
+  is("a save whose answer is not OK: an error, never saved", unconfirmed, [500, false]);
   html = await draw(OUTSIDER);
   is("the page follows: Secret room locked with nothing from inside, Draft room gone", [lockedPart(html).includes("Secret room"), lockedPart(html).includes("Draft room"), nothingInside(html)], [true, false, []]);
 

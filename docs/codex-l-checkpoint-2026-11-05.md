@@ -658,3 +658,8 @@ Ownership blocks product edits: active reservation explicitly releases imported-
 Mandatory main instruction/reservation/inbox SHAs unchanged. C4-3110 makes MV effective as coordinator order (15 PR cap, integrate main only when necessary, no push solely to retry); C4-3120 is about #3037/#3042, not an L assignment. No new MAIN VERMELHO found. C1 off.
 
 Full channel3d344e5825227dda5b34a1d94cf287b428a97c12 verified 2,881,162 bytes via Base64 round-trip and Git SHA. Append attempt on fresh verified f08ab9c8 (2,889,254 bytes) received 409 and DID NOT WRITE. Coordinator request is already durable in PR6702084665; channel will be retried only after >=120s and full fresh verification. No head update, retry, cancellation, source edit, new test run, new GREEN or extra unit.
+
+
+### Channel contention receipt
+
+Second append attempt also returned 409 after the required 121,002 ms wait and fresh FULL validation (blob a25ebd28822817e22dc3d9cb546861ef19bfd91a; 2,892,740 bytes). Neither channel attempt wrote. Stop retries this pass to avoid contention; PR comment6702084665 remains the durable coordinator/proof request. No product/source/CI changes. Await nominal C4 sequencing/permission and C5 proof. Next append must reread/verify FULL, preserve all new content, and never use either rejected snapshot.

@@ -383,12 +383,16 @@ export async function withCartStockHolds<T extends { id: string }>(
     }
     if (!refusal) break;
     if (refusal.reason !== "soldout") return refusal;
+    // Stripe is asked about the lapsed holds once a click (Claude 5's review of #1732): a second round that still finds
+    // them (their settling write was refused while reads answer) is told to press again, so a click never waits more
+    // than one wave of MAX_CHECKS × CHECK_MS (CART_STOCK_STRIPE_WAIT_MS). Never "Sold out" on that guess.
+    if (round > 0) return { ok: false, reason: "busy" };
     // The holds that ran out are asked about now, with no lock held, every product at once, so the next count is right.
     const settled = await Promise.all(unsettled.map((product) => stockLeft(store, product).catch(() => null)));
     // Freed: every product refused had nothing but such holds, and each has a unit back now; otherwise it is sold out.
     const freed = unsettled.length === refusal.ids.length && settled.every((left) => left !== null && left > 0);
     if (!freed) return refusal;
-    if (round > 0 || limited.length > RECOUNT_MOST) return { ok: false, reason: "busy" };
+    if (limited.length > RECOUNT_MOST) return { ok: false, reason: "busy" };
   }
   let value: T;
   const opening = watchCheckoutOpening(() => open(true));

@@ -9,6 +9,11 @@
  *   - The creator's export says its products' pages could not be read, in a note, and writes no page as absent.
  *   - The store copy and the demo seed let the error go on (no catch turns it into an empty page), so neither writes
  *     an empty page over a real one.
+ *   - Review of #2853 (Claude 4 team, L1): a page the store record already keeps back (from = -1) or schedules for later
+ *     is not there with an unknown read either; its unpublished title is never shown.
+ *   - Review of #2853 (Claude 6, findings 1 and 2): the export's note on pages is the one text #2831 writes, and the
+ *     products' descriptions and thank-you notes (the same pattern next to the pages, rule 30) are never written as
+ *     "" or null when their read fails: each is left out and said once.
  */
 import { readFileSync } from "node:fs";
 import { renderToReadableStream } from "react-dom/server";
@@ -26,6 +31,9 @@ const OWNER = "page-show-b2@example.com";
 const ORIGIN = "https://marktmorgen.com";
 const SITE = "eeeeeeeeee";
 const BARE = "dddddddddd";
+const SECRET = "ffffffffff";
+const SOON = "cccccccccc";
+const UNREAD_LATER = "could not be read just now. Download the file again in a few minutes.";
 type Mode = "no reply" | "not a page";
 
 /** A page drawn to HTML, as a browser gets it; or the error it threw, named, so a page that fails says so. */
@@ -54,9 +62,13 @@ async function main(): Promise<void> {
   const pages = [
     { id: SITE, slug: "about", title: "About", nav: true, target: "", from: 0 },
     { id: BARE, slug: "later", title: "Later", nav: false, target: "", from: 0 },
+    { id: SECRET, slug: "secret", title: "Secret launch: 70% off", nav: false, target: "", from: -1 },
+    { id: SOON, slug: "soon", title: "Soon: early bird", nav: false, target: "", from: 4000000000 },
   ];
   if (!(await setSitePages(OWNER, pages)).ok) throw new Error("setup");
   await writePage(statsId, siteKey(SITE), parsePage({ blocks: [hero("hero0004", "About us")] }), shop);
+  await writePage(statsId, siteKey(SECRET), parsePage({ blocks: [hero("hero0005", "Kept back")], hidden: true, showFrom: 0 }), shop);
+  await writePage(statsId, siteKey(SOON), parsePage({ blocks: [hero("hero0006", "Out later")], hidden: true, showFrom: 4000000000 }), shop);
   const now = (await storeForEmail(OWNER))!;
 
   /** Runs the task while Redis answers every page read in the given unknown shape. */
@@ -75,7 +87,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const exported = async () => JSON.parse(await new Response(storeExport(now, 1000)).text()) as { products: Record<string, unknown>[]; pagesNote?: string };
+  const exported = async () => JSON.parse(await new Response(storeExport(now, 1000)).text()) as { products: Record<string, unknown>[]; pagesNote?: string; aboutsNote?: string; thanksNote?: string };
   const siteParams = { params: Promise.resolve({ handle: "@pageshowb", slug: "about" }), searchParams: Promise.resolve({}) };
   const bareParams = { params: Promise.resolve({ handle: "@pageshowb", slug: "later" }), searchParams: Promise.resolve({}) };
 
@@ -104,9 +116,47 @@ async function main(): Promise<void> {
     is(`${mode}: its title says not available, not an empty page's title`, String(meta.title).startsWith("Not available right now."), true);
 
     const out = await unknown(mode, exported);
-    is(`${mode}: the export notes that the products' pages could not be read`, typeof out.pagesNote === "string" && /could not be read/.test(out.pagesNote), true);
+    is(`${mode}: the export notes that the products' pages could not be read, in #2831's words`, out.pagesNote, `The products' sales pages ${UNREAD_LATER}`);
     is(`${mode}: and writes no product's page as absent`, out.products.some((product) => "page" in product), false);
     is(`${mode}: the products themselves are still written`, out.products.length, 1);
+  }
+
+  for (const [slug, title] of [["secret", "Secret launch"], ["soon", "Soon: early bird"]] as const) {
+    const kept = { params: Promise.resolve({ handle: "@pageshowb", slug }), searchParams: Promise.resolve({}) };
+    part(`A store page the store record keeps back (${slug}), review of #2853 L1`);
+    answering(new Request(`${ORIGIN}/@pageshowb/${slug}`));
+    is(`${slug}: with a known read, it is not there`, await html(() => StoreOwnPage(kept)), "thrown Error");
+    for (const mode of ["no reply", "not a page"] as const) {
+      const page = await unknown(mode, () => html(() => StoreOwnPage(kept)));
+      is(`${slug}, ${mode}: it is still not there`, page, "thrown Error");
+      is(`${slug}, ${mode}: its unpublished title is not shown`, page.includes(title), false);
+      const meta = await unknown(mode, () => siteMeta(kept));
+      is(`${slug}, ${mode}: its title says not found, never its own title`, meta.title, "Not found — Marktmorgen");
+    }
+  }
+
+  /** The export while one part's MGET fails, the way an unknown reply makes the read throw. */
+  async function failing(prefix: string) {
+    const original = redis.pipeline;
+    redis.pipeline = async (commands) => {
+      if (commands.some((command) => command[0] === "MGET" && String(command[1]).startsWith(prefix))) throw new TypeError("fetch failed");
+      return original.call(redis, commands);
+    };
+    try {
+      return await exported();
+    } finally {
+      redis.pipeline = original;
+    }
+  }
+  for (const [part_, prefix, field, note, said] of [
+    ["descriptions", "nl:product:about:", "about", "aboutsNote", "long descriptions"],
+    ["thank-you notes", "nl:product:note:", "thanks", "thanksNote", "thank-you notes"],
+  ] as const) {
+    part(`The products' ${part_} cannot be read (rule 30, next to the pages; review of #2853 finding 2)`);
+    const out = await failing(prefix);
+    is(`${part_}: the export says so once, in #2831's words`, out[note], `The products' ${said} ${UNREAD_LATER}`);
+    is(`${part_}: and writes none as "" or null`, out.products.some((product) => field in product), false);
+    is(`${part_}: the products and their pages are still written`, out.products.length === 1 && "page" in out.products[0]!, true);
   }
 
   part("The store copy and the demo seed let an unknown page read go on, so they never write an empty page over it");

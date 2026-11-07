@@ -7,12 +7,17 @@ on:
   pull_request:
   push:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 permissions:
   contents: read
   actions: read
 concurrency:
   group: public-accessibility-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: true
+  # A merge group's ref is its own (gh-readonly-queue/main/pr-N-…), so with the event
+  # in the group it never shares a group with a pull request or another merge group;
+  # its runs are never cancelled here either, so a queued change cannot lose its checks.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 jobs:
   documentation-scope:
     name: Documentation scope (accessibility-public-matrix)
@@ -29,6 +34,7 @@ jobs:
         run: |
           python3 scripts/test_ci_documentation_scope.py
           python3 scripts/test_ci_full_tree_proof.py
+          python3 scripts/test_ci_ui_scope.py
       - name: Compare actual PR trees; uncertainty keeps full coverage
         id: scope
         env:
@@ -38,6 +44,8 @@ jobs:
           CI_TOKEN: ${{ github.token }}
           CI_BASE: ${{ github.event.pull_request.base.sha }}
           CI_HEAD: ${{ github.event.pull_request.head.sha }}
+          # Browser-only suite: a pull request that cannot reach it skips (scripts/ci_ui_scope.py).
+          CI_SUITE: ui
         run: python3 scripts/ci_documentation_scope.py
   public-matrix:
     needs: documentation-scope
@@ -78,7 +86,8 @@ jobs:
 
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
-    # passes only when every job above passed, or was skipped for a documentation-only change.
+    # passes only when every job above passed, or was skipped because the scope proved, on a
+    # pull request, a documentation-only change or one that cannot reach this suite.
     name: All checks (accessibility-public-matrix)
     needs: [documentation-scope, public-matrix]
     if: ${{ always() }}
@@ -88,7 +97,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Read every job's result; a skip counts only for a documentation-only change
+      - name: Read every job's result; a skip counts only when the scope proved it safe
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |

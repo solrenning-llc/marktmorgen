@@ -21,6 +21,7 @@
  * is charged in another currency even then.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite, releaseOrderData } from "@/lib/order-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
@@ -50,8 +51,11 @@ async function tidy(store: Store & { callsId: string }, now: number): Promise<vo
 /** How many series of the store have a session not yet over at `now` (their last session ends after it). */
 export async function runningSeries(store: Pick<Store, "callsId">, now = Date.now()): Promise<number> {
   if (!store.callsId) return 0;
-  const [count] = await redisPipeline([["ZCOUNT", seriesOpenKey(store.callsId), `(${now}`, "+inf"]]);
-  return Number(count) || 0;
+  // ZCOUNT's own count only (CX-123 rule 24): an unknown answer throws, never "none running", so the currency
+  // and tax routes answer unavailable instead of changing the terms a running series was booked in.
+  const count = countOf(repliesFor(await redisPipeline([["ZCOUNT", seriesOpenKey(store.callsId), `(${now}`, "+inf"]]), 1)?.[0]);
+  if (count === null) throw new UnknownReplyError("the running series of calls");
+  return count;
 }
 
 /**

@@ -1,4 +1,5 @@
 import { type NextRequest, after } from "next/server";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { StoreFullError, chargesBelow, pricedProducts, setCurrency } from "@/lib/store";
 import { readProducts } from "@/lib/catalog";
 import { currencyRule, isCurrency } from "@/lib/money";
@@ -85,6 +86,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
     console.error("changing the store currency failed", error);
+    // A count read in no shape Redis gives (lib/call-series-open.ts, runningSeries): nothing changed, try again.
+    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

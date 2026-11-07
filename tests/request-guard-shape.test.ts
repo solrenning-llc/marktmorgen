@@ -12,7 +12,7 @@
  *     true, a fraction, a negative number, an object) is refused;
  *   - a pipeline that throws still lets the request through, as before.
  */
-import { withinLimit, withinMonth } from "@/lib/request-guard";
+import { essentialLimitState, withinLimit, withinMonth } from "@/lib/request-guard";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -74,6 +74,44 @@ async function main(): Promise<void> {
     is(`${name}: Redis that cannot be asked still lets the request through, as before`, await call(), true);
     reply = null;
     is(`${name}: the real counter still counts`, await call(), true);
+  }
+
+  // A count that never ends (review of #2819): SET NX EX and then INCR went as two commands of a pipeline, which
+  // Upstash does not run as one step. When the window ended between them, the INCR made the key again with no end,
+  // and the client was held for ever. The count is now given its end after the INCR, where it has none.
+  const counters = async () => (await redis.keys()).filter((k: string) => /^nl:rlm?:ttl-/.test(k));
+  const counted: [string, () => Promise<unknown>][] = [
+    ["withinLimit", () => withinLimit("ttl-limit", "who", 5, 60)],
+    ["withinEssentialLimit", () => essentialLimitState("ttl-essential", "who", 5, 60)],
+    ["withinMonth", () => withinMonth("ttl-month", "who", 5, "2026-11")],
+  ];
+  for (const [name, call] of counted) {
+    part(`${name}: no count is ever left without an end`);
+    for (const key of await counters()) redis.run(["DEL", key]);
+    // The window ends right after the pipeline's first command, as Redis drops a key when its time is up.
+    const sends = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!commands.some((c) => /^nl:rlm?:ttl-/.test(String(c[1])))) return sends(commands);
+      const answers: unknown[] = [];
+      for (const [i, command] of commands.entries()) {
+        answers.push(...(await sends([command])));
+        if (i === 0) for (const key of await counters()) redis.run(["DEL", key]);
+      }
+      return answers;
+    }) as typeof redis.pipeline;
+    await call();
+    redis.pipeline = sends;
+    is(`${name}: a window that ends between the commands leaves no count without an end`, (await counters()).map((k: string) => Number(redis.run(["TTL", k])) > 0), (await counters()).map(() => true));
+    // A count the earlier code left with no end gets one at the next request, and still counts on from where it was.
+    for (const key of await counters()) redis.run(["DEL", key]);
+    await call();
+    const [key] = await counters();
+    redis.run(["SET", key, "3"]);
+    is(`${name}: a count with no end left from before is given one, and counts on`, [await call(), redis.run(["GET", key]), Number(redis.run(["TTL", key])) > 0], [name === "withinEssentialLimit" ? "within" : true, "4", true]);
+    // Never a later end for a count that has one: the window still starts with its first request.
+    redis.run(["EXPIRE", key, 10]);
+    await call();
+    is(`${name}: a count that has an end keeps it`, Number(redis.run(["TTL", key])) <= 10, true);
   }
   done();
 }

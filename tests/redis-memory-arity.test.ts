@@ -113,6 +113,16 @@ const SCENARIOS:{name:string;steps:Step[]}[]=[
  {name:"a count left below zero with no end is counted from zero and given the window",steps:[[["SET","c","-25"],"reply"],[took("c",1),"ends"],[["GET","c"],"reply"],[["TTL","c"],"reply"]]},
  {name:"a count with no end is given the window",steps:[[["SET","c","5"],"reply"],[took("c",1),"ends"],[["GET","c"],"reply"],[["TTL","c"],"reply"]]},
  {name:"a count that is not a number is never room",steps:[[["SET","c","abc","EX",60],"reply"],[took("c",1),"error"],[["GET","c"],"reply"]]},
+ // withinLimit's count (lib/request-guard.ts, review of #2819): INCR then EXPIRE NX, so a count is given its end
+ // where it has none, and never a later one where it has.
+ {name:"a count's end: EXPIRE NX gives one only where there is none",steps:[
+  [["INCR","n"],"reply"],[["EXPIRE","n",60,"NX"],"reply"],[["TTL","n"],"reply"],
+  [["INCR","n"],"reply"],[["EXPIRE","n",120,"NX"],"reply"],[["TTL","n"],"reply"],
+  [["SET","p","3"],"reply"],[["INCR","p"],"reply"],[["EXPIRE","p",60,"NX"],"reply"],[["TTL","p"],"reply"],
+  [["EXPIRE","gone",60,"NX"],"reply"],[["EXISTS","gone"],"reply"],
+ ]},
+ // A key deleted (or whose time was up) and made again by INCR has no end: the old one is gone with it.
+ {name:"a key made again after DEL has no end",steps:[[["SET","d","1","EX",60],"reply"],[["DEL","d"],"reply"],[["INCR","d"],"reply"],[["TTL","d"],"reply"]]},
  {name:"given back only in the same window, never below zero, never made anew",steps:[
   [took("c",30),"ends"],
   [["EVAL",GIVE_BACK_MANY,1,"c",5,ENDS],"reply"],[["GET","c"],"reply"],
@@ -141,6 +151,8 @@ const EXPECTED:Record<string,unknown[]>={
  "a count left below zero with no end is counted from zero and given the window":["OK",true,"1",86400],
  "a count with no end is given the window":["OK",true,"6",86400],
  "a count that is not a number is never room":["OK",true,"abc"],
+ "a count's end: EXPIRE NX gives one only where there is none":[1,1,60,2,0,60,"OK",4,1,60,0,0],
+ "a key made again after DEL has no end":["OK",1,1,-1],
  "given back only in the same window, never below zero, never made anew":[true,1,"25",0,0,"25",0,0],
 };
 for(const {name,steps} of SCENARIOS)test(`the in-memory TAKE_MANY and GIVE_BACK_MANY: ${name}`,async()=>{

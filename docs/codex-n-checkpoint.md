@@ -1804,3 +1804,39 @@ Evidência/runner/logs/snapshots/report adicionados preservandotodosarquivosante
 -2608/0fad intacto; C5novareserva04h59access-link-uniform finalsendFeedLink preservalinhaswithinEssentialLimit/readFeedToken N. ClassificaçãoR2/leasecomposição2888/racecondicional ainda conformehistórico; nãoeditarpor silêncio.
 
 Cincoown/semsexta, BH1/buyer-library/SG227/30fila. PróximocausalP/R2focal2700oucorreçãonominal2544(A3/recortesantes),2576legítimoparaliberar2674,C5focal2451,classificação/lease2608. Nenhumaatividadefuturafictícia; todasretentativasconsumidaspreservadas. CheckpointcanônicoFULLmesmoramo/canalantesencerramento.
+
+
+## Retomada autoritativa 07/11/2026 06h38 Fortaleza —2700 ALTO legacy proposto corrigido
+
+SOMENTE Claude4 coordena, C1 não destinatário. Checkpoint356384f3/b312 FULL248849 lido PRIMEIRO e prefixo integral preservado. Main0ade0faf/normativos/caixa/reservas iguais; somente delta AV12 apósN0543. C4-0226: NENHUM MERGE DIRETO; literal FILA LIGADA ainda não observado. MAINVERDE3100/MV3110 vigentes, main-vermelho0 antes dos envios. Cincoown/semsexta, SERIAL/0subagentes; nenhum CIpoll/retry/merge/enqueue/mainchase/fonte ou ref alheio/reserva documental.
+
+### Novo2700 final e contrato
+
+MESMO #2700/codex/n-mail-click-read-shape agora **d99a892c0c02151128b02e0b5df1c46b99993594**, tree **e30f61cefaa20a6c94556793e3bc7162fcd678f1**. UM update NORMAL expectedcaa4 reúne correção e testes; pai RED3c7d. Fonte mail-clicks **481ae7b3147aa8a86fb4162ee418c88207e9f02a**; teste real **9473f1dd072a4c4aba6e7b0d693082e828ce16d5**; privacidade **a3b63a1db9111e5ce64a75055f2f39e909dabead**. Native fulltree/API/readback idênticos. Dependency person-erasure362bb2c9 e mirror723d75b4 BYTE-IDcaa4, sem C6atomicidade/readUnsubToken/FORGET_TRIES/callers s.store transplantados. Nenhuma integração main.
+
+C5 **6704714655** FECHOU independentemente MP5807733168 no caller REAL erasePerson. P9378direto permanece teste de bypass/contrato futuro, NÃO GREEN e NÃO reexecutado nesta rodada. C5 abriu novo ALTO: Lead anterior22set sem t fica indeletável após after. C6 confirmou05h53. RESERVA e disposiçãoANTESedit **CXN-20261107-0626-C5-1/CAS6c912178** após409 e >=120s/FULLfresco; nenhum código escrito antes do claim bem-sucedido.
+
+rememberLinkKeys só admite UNSUB_TOKEN. ObjetoJSONlegível sem t válido não pode ter marker: forgetClicksPerson apaga somente usedKey e deixa contacts prosseguir. Mantém recusa transporte/envelope/tipo de célula/JSONilegível/nãoobjeto/reciboDELdesconhecido. Sem readback/retry/incremento/roundtrip/chave/TTL/custo/admissão novo. C5 contacts.ts ocupado e INTACTO. Disposição explícita REGRA23 dos três antigos vetores missing/badtype/badvalue: agora controles de ausência confirmada, preservando DELEXATO e marker estranho intacto; antigas42cb/4ee preservadas, não alegar teste antigo byte-idêntico. Quatro casos de Lead legacy anexados ao teste real; três testes C6 originais mantidos.
+
+### RED público e execuções reais
+
+RED IMUTÁVEL **codex/n-2700-legacy-token-red@3c7d26b59fe6d3c1e50cc57b335b1f18fbc49512/tree629a1e5f740c95b17c582a71375f9ce157d6205a**, pai caa4, publicado ANTESfonte. MESMOS7 reais: 3PASS/4FAIL→7/7 (missing/null/número/malformed, três tentativas erasePerson por variante exigem oktrue,rownull,setapagado). MESMOS28privacidade:25PASS/3FAIL→28/28. MESMO handoffC6/ad0d 27/27. Ligados branch7+personerasure32+mirror5+mail-links13=57PASS; 62focais/handoff+57ligados. P9378direto NÃO reexecutado.
+
+MemoryRedis.run incluindo nested, teto20000 contado ANTESdispatch por processo/120s/512MiB/256KiB/externalfetchbloqueado: realRED685/GREEN1345; privacyRED76/GREEN85; handoff274; branch0/personerasure3312/mirror45/mail-links0. Launcher grant-run existente/canonicalaliasesBA14/Node24.22.1/EXITobserver; sem afrouxar asserção/prazo. Mail-links inicialmente faltou materialização de test/mail-revenue/email-studio/broadcasts: SETUP, não REDproduto; somente suíte incompleta repetida após blobs exatos até13/13. Nenhuma instalação de dependências.
+
+Strict4raízes/1030sources/0diagnósticos; lint3pathsEXIT0 com aviso conhecido pagesdirectory ausente no checkout parcial preservado; scannerOFICIAL **2194rastreados materializados/0**, PARCIAL de baseline3808blobs, nãofullrepo/build/browser/nativeRedis/AAA/MRglobal. Todos arquivos baseline materializados hashconferidos fora5paths próprios,0mismatches; native changedpathdiff0. BlobSDKsemcredenciais exercita fallback antesrede, NÃO exclusão real de blob/provedor.
+
+### Prova durável e pendências
+
+MESMO root-only **codex/n-2700-orchestrator-replay-local@29a155dc297a73fff5aa2a7b143f28508a5d2fd8**, tree **0088313ce68919c281664782bf25177b647cedbb**, pai dcdbd339; originais808/dcdb mantidos+17arquivos/43319chars, report docs/reviews/n-2700-legacy-token.md blob1dddf510c77c0dc3a50d7ce21b9e80c77e89a70f relido EXATO. Logs/snapshots de antes/nativeJSON permanentes; NUNCAmergear árvore root-only no produto.
+
+**C5 focal pedido6705101994**, corpoPR atualizado HOLD. Novo ALTO proposto corrigido, NÃOautofechado. NOVE agregadores NOVOS exatos d99 ainda NÃOverificados; semCIpoll/rerun. LEVE recontagem após supressão continua aberto; nãoadicionado GET/HSET sem custo/admissão. C5 ocupa forgetContactPerson/JSONilegível: interação com after exige coordenação antes de afirmar fechamento desse vetor ou erasure universal. Revisão aplicável semG/M+9exatos+expectedSHA só permite enfileirar APÓS C4literalFILA LIGADA.
+
+### Outros quatro heads intactos
+
+2451/33577e2d3f61f616718fd35247db1dfbee5be5cd aguarda focalC5/6702423562+9NOVOS; RED523056ec/389→389+65 anteriores não repetidos; retry127163240735ESGOTADO. C5 composição H2c2fda98d+#2451+#2972 relatou389verde; N recebe porLEITURA, nãoexecução N/nãoinferir focal próprio. H2nova receita2refs agora relatada executada43/43, Nnãoexecutou36/43.
+2544/447e97287e9bec0062e7878186495cb92cbdc277 HOLDA3cancel_paid25→27 e C5novoALTO6704301038/latenteMorder-confirmation ainda recebidos/nãoexecutados/nãocorrigidos; reconciliação6703360303 jápedida, nãoinferir grant.
+2608/0fad82a0e8fec7c1558124bb41d33afcdac1b656/tree7425d7e7: R2EXEC/classificação erasure+lease/composiçãoC5#2888 pendentes; provas9af/739/34e/225imutáveis, C5ocupa podcast/feed/play/rules. Retry127378763596CONSUMIDO. Não novo replay.
+2674/5bcd2e6597dd85d97fbe6fcd4bd5d2c2a08cd1e3 bloqueado2576 legítimo, G5811084011 getterMEDaberto; nãoapi-write/waitlistantesmerge, helper2784/scanner2773main/REDspreservados,2421674inválido. C5siblings/links reservados respeitados.
+
+BH1/buyer-library/SG227/30 emfila, semsexta. Reviews2770/2820/KB9/hashoficial concluídos não duplicados; g-lb800 sóreconciliação71nomesC5, nãoauditoriaN. Próximo causal: C5focal2700, A3recorte2544,2576legítimo,focal2451,classificação/lease2608 oureviewnominal livre. Sintético/UNKNOWNnunca0/tetoANTESgasto; nenhum preço/limite/comissão/flag/gate/conta/pagamento/termo/chave/contato/PII. Rootcc23e732 NUNCApush. Continuidade habilitada; espera temporária não significa projeto concluído.

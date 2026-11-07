@@ -12,6 +12,13 @@
  * enough); taking a product out of the cart, putting a cart back from a link
  * and another tab's change tell nothing; the page-view and checkout-start
  * calls already there are unchanged; the privacy policy says it.
+ *
+ * After the privacy pre-review: the choice is read again right before every
+ * step and every checkout start, and another tab's change of the choice moves
+ * this page (a "Turn off" in tab B stopped nothing in tab A); the yes covers
+ * only the platforms the banner named; Google is given the page without its
+ * query; a page restored from the back/forward cache reads the cart again;
+ * the banner names only the platforms these steps go to.
  */
 import { readFileSync } from "node:fs";
 import { NO_PIXELS } from "@/lib/pixels";
@@ -19,12 +26,15 @@ import {
   CART_CHANGED_EVENT,
   CART_KEY_PREFIX,
   STEP_EVENT_NAMES,
-  STEPS_MARK_VALUE,
+  STEPS_MARK_VERSION,
   addedToCart,
   cartIdsOf,
+  pageLocationOf,
   stepCalls,
   stepsAllowed,
   stepsMarkKey,
+  stepsMarkValue,
+  stepsWords,
 } from "@/lib/pixel-steps";
 import { done, is, part } from "./check";
 
@@ -52,6 +62,14 @@ is(
 is("only the pixels the creator added", stepCalls({ ...NO_PIXELS, google: "G-ABC1234567" }, { type: "view", productId: "p1" }).map(([kind]) => kind), ["google"]);
 is("no pixel: nothing", stepCalls(NO_PIXELS, { type: "cart", productId: "p1" }), []);
 is("TikTok, Pinterest and X: not told these steps", stepCalls({ ...NO_PIXELS, tiktok: all.tiktok, pinterest: all.pinterest, x: "o1abc" }, { type: "view", productId: "p1" }), []);
+is(
+  "Google is given the page without its query or fragment",
+  stepCalls({ ...NO_PIXELS, google: all.google }, { type: "view", productId: "p1" }, "https://shop.test/s/p/p1"),
+  [["google", ["event", "view_item", { items: [{ item_id: "p1" }], page_location: "https://shop.test/s/p/p1" }]]],
+);
+is("a page without a known place: no page_location", stepCalls({ ...NO_PIXELS, google: all.google }, { type: "view", productId: "p1" })[0][1], ["event", "view_item", { items: [{ item_id: "p1" }] }]);
+is("the page's place: no query (?code=, ?site=, ?return=), no fragment", pageLocationOf("https://shop.test/s/p/p1?code=123456&site=a&return=%2Fx#top"), "https://shop.test/s/p/p1");
+is("only a web page's place", [pageLocationOf("javascript:alert(1)"), pageLocationOf("not a url"), pageLocationOf("")], [undefined, undefined, undefined]);
 is("an empty or odd product id: nothing", [stepCalls(all, { type: "view", productId: "" }), stepCalls(all, { type: "cart", productId: "a b<" })], [[], []]);
 
 part("Names from each platform's list of standard events");
@@ -64,16 +82,25 @@ is("Google", Object.values(STEP_EVENT_NAMES.google).every((name) => googleRecomm
 is("Reddit", Object.values(STEP_EVENT_NAMES.reddit).every((name) => redditStandard.includes(name)), true);
 is("every call uses the table's name", stepCalls(all, { type: "cart", productId: "p1" }).every(([kind, args]) => args[1] === STEP_EVENT_NAMES[kind].cart), true);
 
-part("Only with the visitor's own yes to these words");
-const mark = STEPS_MARK_VALUE;
-is("pressed Allow on these words: told", stepsAllowed("on", "yes", mark), true);
-is("a yes from before these words: not told", stepsAllowed("on", "yes", null), false);
-is("an old or odd mark: not told", stepsAllowed("on", "yes", "0"), false);
-is("allowed only because the country does not ask first: not told", stepsAllowed("on", null, mark), false);
-is("said no: not told", stepsAllowed("off", "no", mark), false);
-is("still asking: not told", stepsAllowed("ask", null, mark), false);
-is("not read yet: not told", stepsAllowed("unknown", "yes", mark), false);
+part("Only with the visitor's own yes to these words, for the platforms they named");
+const mark = stepsMarkValue(all);
+is("the mark keeps the platforms the banner named", mark, `${STEPS_MARK_VERSION}:meta,google,reddit`);
+is("no platform these steps go to: no mark", stepsMarkValue({ ...NO_PIXELS, tiktok: all.tiktok, pinterest: all.pinterest, x: "o1abc" }), null);
+is("pressed Allow on these words: told, to those platforms", stepsAllowed("on", "yes", mark), ["meta", "google", "reddit"]);
+is("a platform added after the yes: not told until a new Allow", stepsAllowed("on", "yes", stepsMarkValue({ ...NO_PIXELS, meta: all.meta })), ["meta"]);
+is("a yes from before these words: not told", stepsAllowed("on", "yes", null), []);
+is("an old or odd mark: not told", [stepsAllowed("on", "yes", "0"), stepsAllowed("on", "yes", "1"), stepsAllowed("on", "yes", "0:meta"), stepsAllowed("on", "yes", `${STEPS_MARK_VERSION}:`)], [[], [], [], []]);
+is("an unknown name in the mark is dropped", stepsAllowed("on", "yes", `${STEPS_MARK_VERSION}:meta,tiktok,evil,meta`), ["meta"]);
+is("allowed only because the country does not ask first: not told", stepsAllowed("on", null, mark), []);
+is("said no: not told", stepsAllowed("off", "no", mark), []);
+is("still asking: not told", stepsAllowed("ask", null, mark), []);
+is("not read yet: not told", stepsAllowed("unknown", "yes", mark), []);
 is("the mark is kept per store", stepsMarkKey("shop-a") !== stepsMarkKey("shop-b"), true);
+
+part("The banner names only the platforms these steps go to");
+is("Meta, Google and Reddit", stepsWords(all, "Shop"), "Shop also tells Meta, Google and Reddit which products you open and add to your cart.");
+is("Google alone", stepsWords({ ...NO_PIXELS, google: all.google, tiktok: all.tiktok }, "Shop"), "Shop also tells Google which products you open and add to your cart.");
+is("TikTok, Pinterest and X only: not said", stepsWords({ ...NO_PIXELS, tiktok: all.tiktok, pinterest: all.pinterest, x: "o1abc" }, "Shop"), "");
 
 part("What counts as putting a product in the cart");
 is("a new id", addedToCart(["a"], ["a", "b"]), ["b"]);
@@ -93,11 +120,20 @@ is("the same change event", cart.includes(`const CHANGED = "${CART_CHANGED_EVENT
 const pixels = readFileSync("components/store-pixels.tsx", "utf8");
 const steps = readFileSync("lib/pixel-steps.ts", "utf8");
 part("The page");
-is("the steps start only behind the check", /if \(stepsAllowed\(state, readChoice\(handle\), readMark\(handle\)\)\)/.test(pixels), true);
+const flat = pixels.replace(/\s+/g, " ");
+is("the choice is read again from storage right before a step", flat.includes("const stepsNow = () => stepsAllowed(pixelChoiceState(readChoice(handle), askFirst, gpcOn()), readChoice(handle), readMark(handle));"), true);
+const sends = pixels.match(/sendStep\(w, /g) ?? [];
+is("every step sent is checked at that moment", sends.length >= 2 && (pixels.match(/sendStep\(w, pixels, [^\n]*, stepsNow\(\)\)/g) ?? []).length === sends.length, true);
+is("only to the platforms the yes named", /function sendStep\(w: PixelWindow, pixels: Pixels, step: Step, allowed: StepKind\[\]\)/.test(pixels) && pixels.includes("if (!allowed.includes(kind)) continue;"), true);
+is("a checkout start is checked at that moment too", /const onSubmit = \(e: SubmitEvent\) => \{\s*if \(!stillOn\(\)\) return;/.test(pixels), true);
+is("still on: the choice read again", flat.includes("const stillOn = () => pixelChoiceState(readChoice(handle), askFirst, gpcOn()) === \"on\";"), true);
+is("another tab's choice moves this page", /if \(e\.key === null \|\| e\.key === consentKey\(handle\) \|\| e\.key === stepsMarkKey\(handle\)\) setState\(pixelChoiceState\(readChoice\(handle\), askFirst, gpcOn\(\)\)\)/.test(pixels) && pixels.includes('window.addEventListener("storage", onChoice)'), true);
 is("the cart is read on its own change event, never on another tab's", pixels.includes("window.addEventListener(CART_CHANGED_EVENT, onCart)"), true);
 is("another tab only moves what was there", /addEventListener\("storage", onOtherTab\)/.test(pixels) && !/onOtherTab[\s\S]{0,200}sendStep/.test(pixels.slice(pixels.indexOf("const onOtherTab"))), true);
-is("Allow keeps the mark; No and Turn off remove it", (pixels.match(/writeMark\(handle, true\)/g) ?? []).length === 1 && (pixels.match(/writeMark\(handle, false\)/g) ?? []).length >= 3, true);
-is("the banner names the two steps", pixels.includes("which products you open and put in your cart"), true);
+is("a page back from the back/forward cache reads the cart again", /const onShow = \(e: PageTransitionEvent\) => \{\s*if \(e\.persisted\) before = readCart\(handle\);/.test(pixels) && pixels.includes('window.addEventListener("pageshow", onShow)'), true);
+is("Google is given the page without its query", pixels.includes("pageLocationOf(location.href)"), true);
+is("Allow keeps the mark with the platforms named; No and Turn off remove it", (pixels.match(/stepsMarkValue\(pixels\)/g) ?? []).length === 1 && (pixels.match(/writeMark\(handle, null\)/g) ?? []).length >= 3, true);
+is("the banner says these steps with stepsWords", pixels.includes("stepsWords(pixels, storeName)") && !pixels.includes("tells them which products"), true);
 is("page views and checkout starts unchanged", ['w.fbq("track", "PageView")', 'w.gtag("config", id)', 'w.fbq("track", "InitiateCheckout")', 'w.gtag("event", "begin_checkout")', 'ttq.track("InitiateCheckout")', 'w.rdt("track", "PageVisit")'].every((call) => pixels.includes(call)), true);
 is("no new script and no identifier", !/https?:\/\//.test(steps) && !["email", "phone", "externalId", "value:", "currency"].some((word) => steps.includes(word)), true);
 const tracking = readFileSync("components/store-tracking.tsx", "utf8");
@@ -108,5 +144,7 @@ const privacy = readFileSync("app/privacy/page.tsx", "utf8");
 const ads = privacy.slice(privacy.indexOf('<p id="ads">'), privacy.indexOf('<p id="ads-server">'));
 is("which products were opened and put in the cart, to Meta, Google and Reddit", /Meta, Google and Reddit are also told which products a visitor opens and puts in the cart/.test(ads.replace(/\s+/g, " ")), true);
 is("only after Allow on those words", /only after the visitor pressed Allow/.test(ads.replace(/\s+/g, " ")), true);
+is("never says nothing about the visitor goes", /nothing about the visitor/.test(ads.replace(/\s+/g, " ")), false);
+is("says what is not sent", /no name, email, amount or anything the visitor typed/.test(ads.replace(/\s+/g, " ")), true);
 
 done();

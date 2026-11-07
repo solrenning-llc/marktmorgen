@@ -20,6 +20,17 @@
  *     read exactly as "sent"; no mark, or any other value, keeps it open;
  *   - LEVE 4: the creator's note says to refund from the PayPal account for a
  *     PayPal order, and from the Stripe account otherwise.
+ *
+ * Claude 5's focal return on 2a23961f, two more MEDIUM findings:
+ *
+ *   - D: the day of payment is the latest calendar day anywhere on Earth at
+ *     that moment (UTC+14), so a buyer east of UTC who paid late in the UTC
+ *     day keeps all 14 of their own days, and the weekend move reads that day;
+ *   - E: a pre-order handed over (it comes back on the list as brought over,
+ *     job "pre:") is a contract made here: the function stays offered for 14
+ *     days from its payment, and its confirmation is never taken as known
+ *     (the hand-over email carries no art. 8(7) lines), so the yes does not
+ *     close it either.
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -28,9 +39,11 @@ import { NextRequest } from "next/server";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { afterTasks } from "./next-server-after-world";
-import { ordersLinkFor, type Purchase } from "@/lib/buyer-orders";
+import { OrdersMeter, ordersLinkFor, purchasesFor, type Purchase } from "@/lib/buyer-orders";
+import { readListing } from "@/lib/catalog";
+import { confirmPreorder } from "@/lib/preorders";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { withdraw, withdrawalKey, withdrawalStanding } from "@/lib/withdrawal";
+import { windowOf, withConfirmations, withdraw, withdrawalKey, withdrawalStanding } from "@/lib/withdrawal";
 import { submittedInTime, withdrawalWindow, type WithdrawalFacts } from "@/lib/withdrawal-rules";
 import { WITHDRAWAL_WORDS } from "@/lib/buyer-words/withdrawal";
 import { openConversation, readInbox } from "@/lib/inbox";
@@ -250,5 +263,70 @@ test("LEVE 4: the creator's note names the account the order was paid into", asy
   for (const code of LANGUAGES) {
     const words = WITHDRAWAL_WORDS[code].creatorNote as (...args: unknown[]) => string;
     assert.ok(words("P", "o", "w", "PayPal").includes("PayPal") && !words("P", "o", "w", "PayPal").includes("Stripe"), `${code}: PayPal named`);
+  }
+});
+
+test("D: the day of payment is the latest calendar day anywhere on Earth", () => {
+  // Paid Tuesday November 3 at 23:30 UTC: already Wednesday November 4 in Helsinki (UTC+2) and anywhere up to UTC+14.
+  // Day 14 after Wednesday November 4 is Wednesday November 18; open to its end anywhere on Earth, 11:59:59 UTC on November 19.
+  const p = at(2026, 11, 3, 23, 30);
+  const end = at(2026, 11, 19, 11, 59, 59);
+  assert.equal(withdrawalWindow(sale(p), at(2026, 11, 18, 15)).open, true, "open at 15:00 UTC on November 18 (17:00 in Helsinki, still its 14th day)");
+  assert.equal(withdrawalWindow(sale(p), at(2026, 11, 18, 23, 59, 59)).open, true, "open at the end of the last day, in UTC");
+  assert.deepEqual(withdrawalWindow(sale(p), end), { open: true, until: end }, "open at the end instant");
+  assert.deepEqual(withdrawalWindow(sale(p), end + 1), { open: false, why: "ended" }, "closed one second after it");
+  // Paid Friday November 6 at 22:00 UTC: already Saturday November 7 east of UTC+2. Day 14 is Saturday November 21, moved
+  // to Monday November 23 (counted from the UTC day, it would be Friday November 20 and end on November 21).
+  const f = at(2026, 11, 6, 22);
+  assert.deepEqual(withdrawalWindow(sale(f), at(2026, 11, 23, 12)), { open: true, until: at(2026, 11, 24, 11, 59, 59) }, "the weekend move reads the latest day");
+  assert.deepEqual(withdrawalWindow(sale(f), at(2026, 11, 24, 12)), { open: false, why: "ended" });
+});
+
+/** A paid checkout of a pre-order, as Stripe gives it to lib/preorders.ts (confirmPreorder). */
+const preorderSession = (id: string, product: string, created: number, metadata: Record<string, string> = {}) => ({
+  ...paid(id, product, created, { preorder: "yes", ...metadata }),
+  payment_intent: `pi_test${id.padEnd(16, "0")}`,
+});
+const deps = { base: `${ORIGIN}/@mara`, from: "Mara <orders@example.com>", ordersLink: async () => null, recordStart: async () => {} };
+
+test("E: a pre-order handed over (bought after its release) keeps the function for 14 days from its payment", async () => {
+  // Every clock at a fixed time: paid Monday November 9, 2026 at 08:00 UTC (the latest day anywhere is still November 9),
+  // read a day later. Day 14 is Monday November 23; open to 11:59:59 UTC on November 24.
+  Date.now = () => at(2026, 11, 10, 8) * 1000;
+  try {
+    const { product, token } = await shop();
+    const session = preorderSession("preout", product, at(2026, 11, 9, 8));
+    sessions = [session];
+    let store = (await storeForEmail(OWNER)) as Store;
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given", "precondition: already released, handed over at payment");
+    store = (await storeForEmail(OWNER)) as Store;
+    const meter = new OrdersMeter(store);
+    const listed = await withConfirmations(await purchasesFor(store, BUYER, meter), meter);
+    const pre = listed.find((p) => p.preorder?.given);
+    assert.ok(pre, `precondition: on the list as handed over: ${JSON.stringify(listed.map((p) => [p.kind, p.preorder]))}`);
+    assert.deepEqual(windowOf(pre!), { open: true, until: at(2026, 11, 24, 11, 59, 59) }, "a contract made here: 14 days from its payment");
+    assert.ok((await render({ token })).includes(`ref=${pre!.reference}`), "and the page offers it");
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("E: a pre-order handed over with the yes stays offered: its confirmation is never taken as known", async () => {
+  Date.now = () => at(2026, 11, 10, 8) * 1000;
+  try {
+    const { product } = await shop();
+    const session = preorderSession("preyes", product, at(2026, 11, 9, 8), { dc: `yes:2026-10-30.2:d:${at(2026, 11, 9, 8)}` });
+    sessions = [session];
+    let store = (await storeForEmail(OWNER)) as Store;
+    assert.equal(await confirmPreorder(store, session, (await readListing(store, product))!, deps), "given");
+    // What confirmPreorderOnce writes for a hand-over, whether or not its email went (lib/purchase-email.ts): proves no art. 8(7) confirmation.
+    await redis.pipeline([["SET", `nl:confirm:${session.id}`, "sent"]]);
+    store = (await storeForEmail(OWNER)) as Store;
+    const meter = new OrdersMeter(store);
+    const pre = (await withConfirmations(await purchasesFor(store, BUYER, meter), meter)).find((p) => p.preorder?.given);
+    assert.ok(pre && pre.confirmed !== true, "never confirmed for a pre-order");
+    assert.deepEqual(windowOf(pre!), { open: true, until: at(2026, 11, 24, 11, 59, 59) }, "the 14 days stay");
+  } finally {
+    Date.now = realNow;
   }
 });

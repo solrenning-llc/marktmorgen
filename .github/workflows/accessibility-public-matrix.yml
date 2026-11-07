@@ -15,8 +15,8 @@ permissions:
 concurrency:
   group: public-accessibility-${{ github.ref }}-${{ github.event_name }}
   # A merge group's ref is its own (gh-readonly-queue/main/pr-N-…), so with the event
-  # in the group it never shares a group with a pull request or another merge group;
-  # its runs are never cancelled here either, so a queued change cannot lose its checks.
+  # in the group it never shares one with a pull request or another merge group, and a
+  # queued change never has its checks cancelled.
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 jobs:
   documentation-scope:

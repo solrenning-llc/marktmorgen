@@ -53,7 +53,8 @@ export async function POST(request: NextRequest) {
   const done = UPDATE_STOP.test(update)
     ? await stopUpdates(update)
     : REVIEW_STOP.test(review)
-    ? await stopReviewRequests(review)
+    // A stop whose write cannot be confirmed is not done (CX-123 rule 24): null, answered below.
+    ? await stopReviewRequests(review).catch(() => null)
     : COMMUNITY_UNSUB.test(community)
     ? await stopAnnouncements(community)
     : STOP_TOKEN.test(reminder)

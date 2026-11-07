@@ -41,6 +41,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
@@ -394,12 +395,16 @@ function queuedOf(store: Store, flow: Pick<Flow, "id">, emails: string[]): (stri
   return out;
 }
 
-/** Confirms a pipeline of deletions was answered in full; anything else is not an erasure. */
+/**
+ * Confirms a pipeline of deletions (DEL and ZREM only) was answered in full, each reply the count its command
+ * answers, a whole number from zero up (countOf); anything else, a null included, is not an erasure (Codex M on
+ * #3083, CX-123 rule 24) and throws, so the workflow stays listed and its runs findable.
+ */
 async function erase(commands: (string | number)[][]): Promise<void> {
   for (let i = 0; i < commands.length; i += 500) {
     const chunk = commands.slice(i, i + 500);
-    const reply = await redisPipeline(chunk);
-    if (!Array.isArray(reply) || reply.length !== chunk.length) throw new FlowWriteUnconfirmed();
+    const replies = repliesFor(await redisPipeline(chunk), chunk.length);
+    if (!replies || replies.some((reply) => countOf(reply) === null)) throw new FlowWriteUnconfirmed();
   }
 }
 

@@ -10,8 +10,10 @@
  * - a two-step login that was read is drawn whole, so the reset notice's
  *   "press Cancel under Two-step login" always has its Cancel button, and it
  *   never says "There is no recovery address" when the address was unread.
- * The page still renders; with an address and nothing kept, they read as off
- * and none as before.
+ * Nor does the rest of the page: the "Keep a way back in" step is listed only
+ * when its tick is known, and the app's code is not offered while two-step
+ * login is unread. The page still renders; with an address and nothing kept,
+ * they read as off and none as before.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -73,6 +75,11 @@ is("off, address unread: no turn-on that asks for an address that may exist", [o
 const onKnown = render(createElement(Manager, { ...base, on: true, reset: 0, recoveryUnknown: false }));
 const offKnown = render(createElement(Manager, { ...base, on: false, reset: 0, recoveryUnknown: false }));
 is("control, address read as none: said, and the turn-on asks for one", [onKnown.includes("There is no recovery address"), offKnown.includes("Turn on two-step login"), offKnown.includes('id="two-step-backup"')], [true, true, true]);
+
+part("nor anywhere else on the page");
+const recoveryStep = /\.\.\.\(([^\n]*)\n\s*\? \[\{ key: "recovery"/.exec(page)?.[1] ?? "";
+is("'Keep a way back in' is listed only when its check mark is known: the address read, or a passkey", recoveryStep, 'role === "owner" && (recoveryRead !== null || passkeys.length > 0)');
+is("the app's code is offered only when two-step login was read", /\{store && twoStepRead !== null && showAppCodeInvite\(/.test(page), true);
 
 part("with no email, they still read as off and none");
 is("no email still reads as off and none", [page.includes('Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" })'), page.includes(': Promise.resolve(""),')], [true, true]);

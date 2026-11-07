@@ -1196,8 +1196,8 @@ export default async function StudioPage({
               },
             ]
           : []),
-        // A way back in that needs no email, for the day the sign-in inbox is lost (lib/recovery-address.ts).
-        ...(role === "owner"
+        // A way back in that needs no email, for the day the sign-in inbox is lost (lib/recovery-address.ts); listed only when its tick is known.
+        ...(role === "owner" && (recoveryRead !== null || passkeys.length > 0)
           ? [{ key: "recovery", title: "Keep a way back in", hint: "A recovery address or a passkey: if you ever cannot open your email, either lets you straight back in.", done: Boolean(recoveryShown) || passkeys.length > 0, href: "#account-recovery" }]
           : []),
         { key: "share", title: "Share your address", hint: "Put it in your bio. This checks itself off when your first visitor arrives.", done: (numbers?.totals.d30.visitors ?? 0) > 0, href: "#details" },
@@ -1268,7 +1268,7 @@ export default async function StudioPage({
         ) : null}
 
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
-        {store && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
+        {store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}

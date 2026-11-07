@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     ["a number", () => [42]],
     ["an object", () => [{ id: ID }]],
     ["a record that does not parse", () => ["{not json"]],
-    ["a record of the wrong shape", () => [JSON.stringify({ id: ID, sid: store.sid })]],
+    ["a record the parser refuses (no store id)", () => [JSON.stringify({ id: ID })]],
   ];
   for (const [what, reply] of shapes) {
     await real([["ZADD", DUE, String(now - 1000), entry]]);

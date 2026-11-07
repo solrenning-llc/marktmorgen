@@ -39,7 +39,7 @@ import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { type Store, saleHandles, storeForId } from "@/lib/store";
 import { type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
-import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, requestOf } from "@/lib/payment-request-store";
+import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, reminderRequestOf, requestOf } from "@/lib/payment-request-store";
 
 /** A reminder that could not go is tried again a day later, never sooner. */
 const RETRY_MS = 86_400_000;
@@ -130,8 +130,9 @@ export async function remindNow(store: Store, id: string, now = Date.now()): Pro
 /**
  * The daily job's part: every reminder now due is sent, once, to a request
  * still open, of a store that can still take its payment. Bounded by the
- * deadline and a batch at a time; a reminder that cannot go is dropped and
- * the next one, if any, waits its day.
+ * deadline and a batch at a time; a reminder whose store or request is
+ * confirmed gone is dropped, one that could not be read just now is put off a
+ * day, and the next one, if any, waits its day.
  */
 export async function sendDueReminders(deadline: number, now = Date.now()): Promise<{ sent: number; skipped: number }> {
   const counts = { sent: 0, skipped: 0 };
@@ -141,12 +142,13 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
     for (const { sid, id } of due) {
       if (Date.now() >= deadline) return counts;
       // Dropped only when the store or the request is confirmed gone: one that could not be read just now (a thrown
-      // read) is put off a day and tried again, never dropped for good (rule 24).
+      // read, or the request's record in an unknown shape) is put off a day and tried again, never dropped for good
+      // (rule 24).
       let store: Store | null;
       let request: PaymentRequest | null;
       try {
         store = await storeForId(sid);
-        request = store ? await requestOf(store, id) : null;
+        request = store ? await reminderRequestOf(store, id) : null;
       } catch (error) {
         console.error("reading a payment request for its reminder failed", error);
         await delayReminder(sid, id, now + RETRY_MS);

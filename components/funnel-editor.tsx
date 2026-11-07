@@ -13,6 +13,7 @@ import {
   MAX_STEP_TEXT_LENGTH,
 } from "@/lib/funnel";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { randomLetters } from "@/lib/random-letters";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { commonPath, commonPathWords } from "@/lib/funnel-starter";
 
@@ -55,12 +56,7 @@ const typedPrice = (price: string, currency: Currency) => {
 };
 
 function newId(): string {
-  const letters = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let out = "";
-  const bytes = new Uint8Array(8);
-  crypto.getRandomValues(bytes);
-  for (const b of bytes) out += letters[b % letters.length];
-  return out;
+  return randomLetters("abcdefghijklmnopqrstuvwxyz0123456789", 8);
 }
 
 function toDrafts(funnel: Funnel | null, currency: Currency): Draft[] {

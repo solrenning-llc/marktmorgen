@@ -1,5 +1,5 @@
 /**
- * A deleted store's webhooks and API keys whose forgetting failed (added
+ * A deleted store's webhooks, API keys and assistant notes whose forgetting failed (added
  * 5 November 2026, review of #2556, LEVE 3 of Reviewer 1): never left to a
  * log line. The store's delete (app/api/store/stores) puts it in line, and
  * the daily closing job (app/api/cron/closing) tries it again, at most
@@ -25,23 +25,27 @@
  * for each endpoint it names: the MAX_ENDPOINTS configured and up to
  * MAX_ENDPOINTS told on each of the last three days, lib/webhooks.ts, so
  * 4 × MAX_ENDPOINTS) and revokeAllKeys (4 + MAX_KEYS: the list read, each key's
- * lookup, and the list, its holds and its uses deleted), plus at most four for
+ * lookup, and the list, its holds and its uses deleted) and forgetMemory (its
+ * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026), plus at most four for
  * the line itself: FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
  * a deleted store, at most FORGET_PER_RUN stores a day, and only for a delete
  * whose first try failed (held in tests/sg2-unknown-replies.test.ts).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, stringList } from "@/lib/redis-reply";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { MAX_KEYS, revokeAllKeys } from "@/lib/api-keys";
+import { MEMORY_FORGET_COMMANDS, forgetMemory } from "@/lib/assistant-memory-store";
 
 /** Tries in all, the first one at the delete included: a week of daily runs and one more. */
 export const FORGET_TRIES = 8;
 /** Stores tried again in one run of the closing job. */
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
-export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + 4;
+export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + MEMORY_FORGET_COMMANDS + 4;
+/** Redis commands one monthly owner-report read sends; company cost, not a store allowance. */
+export const STORE_FORGET_MONTH_READ_COMMANDS = 4;
 /** How long a month's counts are kept: past the next yearly look at them. */
 const MONTH_SECONDS = 400 * 86_400;
 
@@ -85,11 +89,17 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
   if (n === 1) await redisPipeline([["HINCRBY", monthKey(monthOf(now)), "queued", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
 }
 
-/** What one try does: the two forgets, each safe to run again (lib/webhooks.ts, lib/api-keys.ts). */
+/**
+ * What one try does: the forgets, each safe to run again (lib/webhooks.ts,
+ * lib/api-keys.ts, lib/assistant-memory-store.ts). The assistant's notes give
+ * their room back to the store's data room, which outlives the store.
+ */
 export type ForgetWork = (statsId: string | null, sid: string) => Promise<void>;
 const forgetBoth: ForgetWork = async (statsId, sid) => {
   await forgetStoreWebhooks(statsId);
   await revokeAllKeys(sid);
+  // A deleted store has no plan: its room is given back as a store without one.
+  await forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
 };
 
 /**
@@ -125,7 +135,7 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
     } catch (error) {
       const tries = (entry?.tries ?? FORGET_TRIES - 1) + 1;
       const gaveUp = !known || tries >= FORGET_TRIES;
-      console.error(gaveUp ? "forgetting a deleted store's webhooks and keys was given up" : "forgetting a deleted store's webhooks and keys failed again", error);
+      console.error(gaveUp ? "forgetting a deleted store's webhooks, keys and assistant notes was given up" : "forgetting a deleted store's webhooks, keys and assistant notes failed again", error);
       const kept = JSON.stringify({ tries, first: entry?.first ?? now, last: now });
       // Given up: out of the daily line, into the kept ones, counted for the month.
       await redisPipeline(
@@ -145,16 +155,28 @@ export type StoreForgetMonth = { month: string; queued: number; done: number; ga
 
 export async function storeForgetMonth(month: string): Promise<StoreForgetMonth | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
-  const [counts, waiting, given] = await redisPipeline([["HGETALL", monthKey(month)], ["HLEN", QUEUE], ["HLEN", KEPT]]);
+  const commands = [["HGETALL", monthKey(month)], ["HLEN", monthKey(month)], ["HLEN", QUEUE], ["HLEN", KEPT]];
+  let raw: unknown;
+  try {
+    raw = await redisPipeline(commands);
+  } catch {
+    return null;
+  }
+  const replies = repliesFor(raw, STORE_FORGET_MONTH_READ_COMMANDS);
+  if (!replies) return null;
+  const [counts, countFields, waiting, given] = replies;
   const flat = stringList(counts);
+  const fields = countOf(countFields);
   const waitingNow = countOf(waiting);
   const keptNow = countOf(given);
-  if (!flat || flat.length % 2 !== 0 || waitingNow === null || keptNow === null) return null;
+  if (!flat || fields === null || flat.length !== fields * 2 || waitingNow === null || keptNow === null) return null;
   const read: Record<string, number> = { queued: 0, done: 0, gaveUp: 0 };
+  const seen = new Set<string>();
   for (let i = 0; i < flat.length; i += 2) {
-    if (!Object.hasOwn(read, flat[i])) continue;
+    if (!Object.hasOwn(read, flat[i]) || seen.has(flat[i])) return null;
     const n = /^(0|[1-9][0-9]*)$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
     if (!Number.isSafeInteger(n)) return null;
+    seen.add(flat[i]);
     read[flat[i]] = n;
   }
   return { month, queued: read.queued, done: read.done, gaveUp: read.gaveUp, waitingNow, keptNow };

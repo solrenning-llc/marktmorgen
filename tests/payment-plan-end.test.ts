@@ -121,6 +121,16 @@ async function main(): Promise<void> {
   updateReplies.sub_plan00000011 = { id: "sub_someoneElse0002", cancel_at: addPeriods(ANCHOR, "month", 3) };
   is("an update answered for another subscription is not settled", await unsettled(finishPlan(ACCOUNT, "cs_test_plan00000011")), true);
   delete updateReplies.sub_plan00000011;
+  // Codex S's review of #3086: the subscription's own id is not proof that the end was written.
+  for (const [i, [name, cancelAt]] of ([["no end", undefined], ["an end of zero", 0], ["an end as text", "1800000000"]] as const).entries()) {
+    const n = String(20 + i);
+    const id = `sub_plan000000${n}x`;
+    sessions[`cs_test_plan000000${n}x`] = checkout(`cs_test_plan000000${n}x`, { kind: "plan", plan_payments: "3", plan_interval: "month" }, { subscription: id });
+    subscriptions[id] = { id, status: "active", billing_cycle_anchor: ANCHOR };
+    updateReplies[id] = cancelAt === undefined ? { id } : { id, cancel_at: cancelAt };
+    is(`an update answered with its own id and ${name} is not settled`, await unsettled(finishPlan(ACCOUNT, `cs_test_plan000000${n}x`)), true);
+    delete updateReplies[id];
+  }
   await rememberPlan(ACCOUNT, "cs_test_plan00000008");
   const third = await settlePlans();
   const fourth = await settlePlans();

@@ -34,7 +34,7 @@ async function shop(handle: string): Promise<{ store: Store; product: string }> 
   const claimed = await claimHandle(owner, handle, "Cart soon shop", "");
   if (!claimed.ok) throw new Error("fixture could not claim store");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_CartSoonUnknown01", true);
+  await setStripeAccount(owner, "acct_1TestCartSoon1", true);
   await setSubscription(owner, { customerId: `cus_${handle}00001`, subscriptionId: `sub_${handle}00001`, active: true, tier: "creator", period: paidPeriod() });
   const made = await addProduct(owner, "Soon guide", "A synthetic guide", "19", null);
   if (!made.ok) throw new Error("fixture could not add product");

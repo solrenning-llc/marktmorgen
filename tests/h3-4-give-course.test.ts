@@ -186,9 +186,9 @@ async function main(): Promise<void> {
     [applied.status, applied.body.changed?.sort(), applied.body.already, applied.body.student, applied.body.removed, applied.body.unread, applied.body.unknown, applied.body.failed],
     [200, ["ana@example.com", "cy@example.com", "zed@example.com"], ["ben@example.com"], undefined, ["dee@example.com"], [], [], []],
   );
-  is("cy, whose row gave no access, now opens it", (await paidCourses(store, "cy@example.com")).has(cake.product.id), true);
   store = (await storeForEmail(owner))!;
   is("written as the studio's gift, and the store reads its given courses", [await given("ana@example.com"), store.pastBuyers], [[STUDIO_GIVE_JOB], true]);
+  is("cy, whose row gave no access, now opens it", (await paidCourses(store, "cy@example.com")).has(cake.product.id), true);
   is("the course opens for them, as one brought over does", [(await paidCourses(store, "ana@example.com")).has(cake.product.id), (await paidCourses(store, "zed@example.com")).has(cake.product.id)], [true, true]);
   is("ben keeps what the import gave him, untouched", await given("ben@example.com"), ["0123456789abcdef01234567"]);
   const created = (await redis.keys()).filter((key: string) => !keysBefore.has(key));

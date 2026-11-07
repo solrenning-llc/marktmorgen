@@ -194,7 +194,8 @@ export type GiveChange = "give" | "takeback";
  * Studio requests taken before anything is read, on a review and on a
  * confirmation alike, at the most the reading can take: one HGET a person
  * (what the store gave them of that course) and, for every hundred people,
- * the two commands that read whether they study it or were taken off it.
+ * two commands (one reads whether they were taken off it; a second is kept
+ * as room, so the figure never moves).
  * Twenty commands to a studio request (tests/plan-cost-registry.ts,
  * UNIT_COST.studio); at least one.
  */
@@ -235,15 +236,14 @@ export const GIVE_REFUSALS: Record<GiveRefusal, string> = {
  * What giving or taking back would do, read now, with nothing written.
  *   changes   would get it (give), or would have it taken back (takeback)
  *   already   has it given here already (give); was not given it here (takeback)
- *   student   already studies it (give)
  *   removed   was taken off that course (give): giving it would not open it
  *   otherWay  has it from a sale, an import or a gift, not the studio's to take back (takeback)
  *   unread    their record could not be read: left as they are
  */
-export type GiveReview = { changes: number; already: number; student: number; removed: number; otherWay: number; unread: number };
+export type GiveReview = { changes: number; already: number; removed: number; otherWay: number; unread: number };
 
 /** What it did, person by person: as the review, and `unknown` (written, not read back) and `failed` (read back as before). */
-export type GiveDone = { asked: number; changed: string[]; already: string[]; student: string[]; removed: string[]; otherWay: string[]; unread: string[]; unknown: string[]; failed: string[] };
+export type GiveDone = { asked: number; changed: string[]; already: string[]; removed: string[]; otherWay: string[]; unread: string[]; unknown: string[]; failed: string[] };
 
 /** The lines a review shows before the creator confirms. */
 export function giveReviewLines(review: GiveReview, change: GiveChange, title: string): string[] {
@@ -251,7 +251,6 @@ export function giveReviewLines(review: GiveReview, change: GiveChange, title: s
   return [
     giving ? `${count(review.changes, "person", "people")} will get ${title}, with no payment.` : `${count(review.changes, "person", "people")} will no longer have ${title}.`,
     review.already ? (giving ? `${count(review.already, "person already has", "people already have")} it given: left as they are.` : `${count(review.already, "person was", "people were")} not given it here: left as they are.`) : "",
-    review.student ? `${count(review.student, "person already studies", "people already study")} it: left as they are.` : "",
     review.removed ? `${count(review.removed, "person was", "people were")} taken off it: left as they are. Give their access back from that course's students.` : "",
     review.otherWay ? `${count(review.otherWay, "person has", "people have")} it another way (a sale, an import or a gift): not taken back here.` : "",
     review.unread ? `${count(review.unread, "person's record", "people's records")} could not be read just now: left as they are.` : "",
@@ -264,12 +263,11 @@ export function giveSummary(result: GiveDone, change: GiveChange, title: string)
   const giving = change === "give";
   const changed = result.changed.length;
   const head = changed === 0 ? "Nothing was changed." : giving ? `${title} given to ${count(changed, "person", "people")}.` : `${title} taken back from ${count(changed, "person", "people")}.`;
-  const left = result.already.length + result.student.length + result.removed.length + result.otherWay.length + result.unread.length + result.unknown.length + result.failed.length;
+  const left = result.already.length + result.removed.length + result.otherWay.length + result.unread.length + result.unknown.length + result.failed.length;
   if (left === 0) return { short: head, words: head };
   const n = (list: string[]) => list.length;
   const why = [
     n(result.already) ? (giving ? `${count(n(result.already), "person already had", "people already had")} it given` : `${count(n(result.already), "person was", "people were")} not given it here`) : "",
-    n(result.student) ? `${count(n(result.student), "person already studies", "people already study")} it` : "",
     n(result.removed) ? `${count(n(result.removed), "person was", "people were")} taken off it; give their access back from that course's students` : "",
     n(result.otherWay) ? `${count(n(result.otherWay), "person has", "people have")} it another way (a sale, an import or a gift), which is not taken back here` : "",
     n(result.unread) ? `${count(n(result.unread), "person's record", "people's records")} could not be read, so nothing was changed for them` : "",

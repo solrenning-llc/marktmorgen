@@ -256,7 +256,6 @@ export function StudentsBulk({
       asked: counted(a.asked),
       changed: list(a.changed),
       already: list(a.already),
-      student: list(a.student),
       removed: list(a.removed),
       otherWay: list(a.otherWay),
       unread: list(a.unread),
@@ -377,7 +376,6 @@ export function StudentsBulk({
       ? ([
           ["Changed", result.done.changed],
           [result.change === "give" ? "Already given it" : "Not given it here", result.done.already],
-          ["Already studies it", result.done.student],
           ["Taken off that course", result.done.removed],
           ["Has it another way", result.done.otherWay],
           ["Record could not be read, not changed", result.done.unread],

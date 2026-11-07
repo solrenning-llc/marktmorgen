@@ -444,11 +444,38 @@ export function readGiveAsk(raw: Record<string, unknown>): { ok: true; ask: Give
 export type GiveTarget = { productId: string; courseId: string };
 /** One person's gift as read: absent from the answer is unknown, never "nothing given". */
 const grantOf = <T>(map: Map<string, T>, email: string): T | "unknown" => (map.has(email) ? (map.get(email) as T) : "unknown");
-type Sorted = { targets: string[]; already: string[]; student: string[]; removed: string[]; otherWay: string[]; unread: string[] };
+type Sorted = { targets: string[]; already: string[]; removed: string[]; otherWay: string[]; unread: string[] };
 
-/** Who it would act on now, and why the rest would be left, read exactly; nothing read but the course's own records and each person's gift of it. */
+/** Whether each address was taken off a course, read exactly: true or false, or absent (unknown) when the answer is not in its shape. */
+async function blockedMany(courseId: string, emails: readonly string[]): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  for (let from = 0; from < emails.length; from += ACCESS_READ_BATCH) {
+    const batch = emails.slice(from, from + ACCESS_READ_BATCH);
+    let flags: unknown[] | null = null;
+    try {
+      const replies = repliesFor(await redisPipeline([["SMISMEMBER", blockedKey(courseId), ...batch.map(emailKey)]]), 1);
+      flags = replies ? repliesFor(replies[0], batch.length) : null;
+    } catch (error) {
+      console.error("reading who was taken off a course failed", error);
+    }
+    batch.forEach((email, i) => {
+      const flag = flags ? flags[i] : undefined;
+      if (flag === 0 || flag === 1) out.set(email, flag === 1);
+    });
+  }
+  return out;
+}
+
+/**
+ * Who it would act on now, and why the rest would be left, read exactly:
+ * nothing read but who was taken off the course and each person's gift of
+ * it. A student's row in the course is no access (a refund, an ended
+ * membership or a gift taken back leave it), so it decides nothing; and
+ * whether someone bought the course is Stripe's to say, one call a person,
+ * so it is not asked: a gift to someone who bought it only adds the gift.
+ */
 async function sortGive(store: Store, target: GiveTarget, ask: GiveAsk): Promise<Sorted> {
-  const sorted: Sorted = { targets: [], already: [], student: [], removed: [], otherWay: [], unread: [] };
+  const sorted: Sorted = { targets: [], already: [], removed: [], otherWay: [], unread: [] };
   if (ask.change === "takeback") {
     if (!store.statsId) return { ...sorted, already: [...ask.emails] };
     const now = await givenMany(store.statsId, ask.emails, target.productId);
@@ -461,14 +488,13 @@ async function sortGive(store: Store, target: GiveTarget, ask: GiveAsk): Promise
     }
     return sorted;
   }
-  const states = await accessStates(target.courseId, ask.emails);
-  const open = ask.emails.filter((email) => states.get(email) === "none");
+  const blocked = await blockedMany(target.courseId, ask.emails);
+  const open = ask.emails.filter((email) => blocked.get(email) === false);
   const grants = store.statsId && open.length ? await givenMany(store.statsId, open, target.productId) : new Map<string, null>();
   for (const email of ask.emails) {
-    const state = states.get(email) ?? "unknown";
-    if (state === "unknown") sorted.unread.push(email);
-    else if (state === "active") sorted.student.push(email);
-    else if (state === "removed") sorted.removed.push(email);
+    const off = blocked.get(email);
+    if (off === undefined) sorted.unread.push(email);
+    else if (off) sorted.removed.push(email);
     else {
       const grant = store.statsId ? grantOf(grants, email) : null;
       if (grant === "unknown") sorted.unread.push(email);
@@ -479,7 +505,7 @@ async function sortGive(store: Store, target: GiveTarget, ask: GiveAsk): Promise
   return sorted;
 }
 
-const giveReviewOf = (s: Sorted): GiveReview => ({ changes: s.targets.length, already: s.already.length, student: s.student.length, removed: s.removed.length, otherWay: s.otherWay.length, unread: s.unread.length });
+const giveReviewOf = (s: Sorted): GiveReview => ({ changes: s.targets.length, already: s.already.length, removed: s.removed.length, otherWay: s.otherWay.length, unread: s.unread.length });
 
 /** What it would do, with nothing written; its reads taken first. */
 export async function reviewGive(store: Store, target: GiveTarget, ask: GiveAsk, pay: PayStudio): Promise<{ kind: "review"; review: GiveReview } | Refused> {
@@ -506,7 +532,7 @@ export async function applyGive(store: Store, target: GiveTarget, ask: GiveAsk, 
   if (!readPaid.ok) return { kind: "refused", reason: readPaid.reason, message: readPaid.message };
   const sorted = await sortGive(store, target, ask);
   if (ask.expect !== sorted.targets.length) return { kind: "stale", review: giveReviewOf(sorted) };
-  const result: GiveDone = { asked: ask.emails.length, changed: [], already: sorted.already, student: sorted.student, removed: sorted.removed, otherWay: sorted.otherWay, unread: sorted.unread, unknown: [], failed: [] };
+  const result: GiveDone = { asked: ask.emails.length, changed: [], already: sorted.already, removed: sorted.removed, otherWay: sorted.otherWay, unread: sorted.unread, unknown: [], failed: [] };
   if (!sorted.targets.length) return { kind: "done", done: result };
   const writePaid = await pay(giveWriteUnits(sorted.targets.length, ask.change));
   if (!writePaid.ok) return { kind: "refused", reason: writePaid.reason, message: writePaid.message };

@@ -187,6 +187,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
+import { type AiCrawlers, parseAiCrawlers } from "@/lib/ai-crawlers";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -770,6 +771,13 @@ export type Store = {
    */
   pastBuyers: boolean;
   /**
+   * Whether the robots.txt of the store's own domain asks the AI crawlers
+   * named in lib/ai-crawlers.ts to stay out (601 [KB22] U8, added 6 November
+   * 2026). "open" until the creator closes it; read exactly, so a value that
+   * is not "open" reads closed (parseAiCrawlers).
+   */
+  aiCrawlers: AiCrawlers;
+  /**
    * The creator's own PayPal Business account, connected through PayPal's
    * onboarding for platforms (lib/paypal-sales.ts), so buyers can pay it
    * directly. Null when PayPal is not connected.
@@ -1072,6 +1080,8 @@ function parseStore(raw: unknown): Store | null {
       recentSales: value.recentSales === true,
       // Stores written before imports existed brought nobody over.
       pastBuyers: value.pastBuyers === true,
+      // Stores written before the switch are open to AI crawlers, as their robots.txt always was.
+      aiCrawlers: parseAiCrawlers(value.aiCrawlers),
       // Stores written before PayPal selling existed sell through Stripe only.
       paypalSeller: parsePayPalSeller(value.paypalSeller),
     };
@@ -1386,6 +1396,7 @@ async function freshStore(fields: {
     askWhyNot: false,
     recentSales: false,
     pastBuyers: false,
+    aiCrawlers: "open",
     paypalSeller: null,
   };
 }
@@ -2926,6 +2937,11 @@ export async function setEmailSyncRef(email: string, ref: EmailSyncRef | null): 
     const emailSync = parseEmailSyncRef(ref);
     return JSON.stringify(emailSync) === JSON.stringify(store.emailSync) ? null : { emailSync };
   });
+}
+
+/** Whether the robots.txt of the store's own domain asks AI crawlers to stay out (lib/ai-crawlers.ts). */
+export async function setAiCrawlers(email: string, aiCrawlers: AiCrawlers): Promise<Store | null> {
+  return patchStore(email, (store) => (store.aiCrawlers === aiCrawlers ? null : { aiCrawlers }));
 }
 
 /** Whether the store shows its latest real purchases (lib/recent-sales.ts). */

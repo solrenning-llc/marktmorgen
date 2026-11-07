@@ -1334,7 +1334,7 @@ export default async function StudioPage({
             ) : null}
             {/* 98 [D2-COMPLIANCE-REVIEW] unit 1: pictures with no description, and what every store gets (lib/store-access-check.ts). */}
             {may("products") ? <StoreAccessCheck check={accessCheck(store)} /> : null}
-            {may("products") && accessCheck(store) ? <StoreSearchCheck check={searchCheck(store)} /> : null}
+            {may("products") && accessCheck(store) ? <StoreSearchCheck check={searchCheck(store)} canChangeAi={may("settings")} /> : null}
             <StudioTools
               tools={[
                 // 491 [PP2]: payments, the domain, email and checkout, read now, each with where to fix it.

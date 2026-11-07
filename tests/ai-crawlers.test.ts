@@ -23,6 +23,7 @@
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setAiCrawlers, storeForEmail, type Store } from "@/lib/store";
 import { AI_CRAWLERS, AI_CRAWLERS_LISTED, parseAiCrawlers } from "@/lib/ai-crawlers";
@@ -141,12 +142,12 @@ async function main(): Promise<void> {
   is("the marktmorgen.com address is not covered", /marktmorgen\.com/.test(w.address), true);
   is("a change can take up to a day", /up to a day/.test(w.delay), true);
   is("no promise words", /guarantee|fully|100%|block all|every AI/i.test(all), false);
-  const openSwitch = renderToStaticMarkup(AiCrawlersSwitch({ open: true, ownDomain: true }));
-  const closedSwitch = renderToStaticMarkup(AiCrawlersSwitch({ open: false, ownDomain: true }));
+  const openSwitch = renderToStaticMarkup(createElement(AiCrawlersSwitch, { open: true, ownDomain: true }));
+  const closedSwitch = renderToStaticMarkup(createElement(AiCrawlersSwitch, { open: false, ownDomain: true }));
   is("one plain action each way", [openSwitch.includes("Ask AI crawlers to stay out"), closedSwitch.includes("Let AI crawlers in again")], [true, true]);
   is("the names asked are listed", AI_CRAWLERS.every((c) => openSwitch.includes(c.agent)), true);
   is("a heading and a stated state", [openSwitch.includes("<h3"), openSwitch.includes('data-ai-crawlers="open"'), closedSwitch.includes('data-ai-crawlers="closed"')], [true, true, true]);
-  const noDomain = renderToStaticMarkup(AiCrawlersSwitch({ open: false, ownDomain: false }));
+  const noDomain = renderToStaticMarkup(createElement(AiCrawlersSwitch, { open: false, ownDomain: false }));
   is("closed with no live domain: said it is not in use, and can be undone", [noDomain.includes(w.noDomain), noDomain.includes("Let AI crawlers in again")], [true, true]);
   const panel = (aiCrawlers: "open" | "closed", ownDomain: boolean, canChangeAi: boolean) =>
     renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: true, suspended: false, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain, aiCrawlers }, canChangeAi }));

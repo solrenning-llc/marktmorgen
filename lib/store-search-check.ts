@@ -20,6 +20,7 @@
 import { KIND, STORE_PAGE_SIZE, visibleCount } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { canUseDomain } from "@/lib/domains";
+import type { AiCrawlers } from "@/lib/ai-crawlers";
 
 export type SearchCheck = {
   /** The line under the store's name, which is its search description. */
@@ -38,6 +39,8 @@ export type SearchCheck = {
   summaries: { missing: string[]; unchecked: number };
   /** Whether the store is on a domain of its own that is live. */
   ownDomain: boolean;
+  /** Whether its own domain's robots.txt asks AI crawlers to stay out (Store.aiCrawlers, lib/ai-crawlers.ts). */
+  aiCrawlers: AiCrawlers;
 };
 
 export function searchCheck(store: Store): SearchCheck {
@@ -63,6 +66,7 @@ export function searchCheck(store: Store): SearchCheck {
     summaries: { missing, unchecked },
     // Named as the store's address only when it is live and the plan allows it, as the store page does.
     ownDomain: Boolean(store.domain?.liveAt) && canUseDomain(store),
+    aiCrawlers: store.aiCrawlers,
   };
 }
 
@@ -89,3 +93,20 @@ export const AGENTS_GET: readonly string[] = [
   "Each product page tells them its name, its price while it can be bought, its picture when it has one, and its rating when it has enough reviews to show one.",
   "Your own AI assistant, such as Claude or ChatGPT, can read your store's numbers, products and pages with an API key you make in your studio.",
 ];
+
+/**
+ * What AI agents get, as the studio says it: AGENTS_GET while the store is
+ * open to AI crawlers; closed (601 [KB22] U8), the first line says what the
+ * robots rules now ask, and where they do not reach, instead of calling the
+ * store open to them. The other lines hold either way: they are what any
+ * reader that does come is given, and the creator's own assistant.
+ */
+export function agentsGet(check: Pick<SearchCheck, "aiCrawlers" | "ownDomain">): readonly string[] {
+  if (check.aiCrawlers === "open") return AGENTS_GET;
+  return [
+    check.ownDomain
+      ? "On your own domain, the AI crawlers we name are asked to stay out of your store. Your store's address on marktmorgen.com still lets them in."
+      : "You asked AI crawlers to stay out, which works on a domain of your own. You have none live now, so your store's address on marktmorgen.com still lets them in.",
+    ...AGENTS_GET.slice(1),
+  ];
+}

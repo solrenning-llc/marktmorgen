@@ -102,6 +102,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/affiliates/paypal": row("money", never(MONEY)),
   "POST store/agreements": row("buyers", execute),
   "POST store/ai": row("pages", draft, "The writing help: its text comes back to the creator, nothing is saved by it."),
+  "POST store/ai-crawlers": row("settings", draft, "Whether the store's own domain asks AI crawlers to stay out (lib/ai-crawlers.ts); one switch, undone by switching it back."),
   "POST store/announcement": row("pages", draft),
   "POST store/answers": row("pages", draft),
   "POST store/api-keys": row("access", never(ACCESS)),

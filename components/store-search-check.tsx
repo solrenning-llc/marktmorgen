@@ -1,15 +1,19 @@
 import Link from "next/link";
 import { Icon } from "@/components/icons";
-import { AGENTS_GET, type SearchCheck, SEARCH_DONE_FOR_YOU } from "@/lib/store-search-check";
+import { AiCrawlersSwitch } from "@/components/ai-crawlers-switch";
+import { agentsGet, type SearchCheck, SEARCH_DONE_FOR_YOU } from "@/lib/store-search-check";
 
 /**
  * "Can people find your store?" in the studio (248 [ST1], lib/store-search-check.ts):
  * the store's search description, whether it is shown to search engines at
  * all, and the products on its first page with no summary, each with where
  * to fix it. It never changes the creator's words and promises no place in
- * search results.
+ * search results. With the settings permission (canChangeAi), it holds the
+ * switch that asks AI crawlers to stay out of the store's own domain (601
+ * [KB22] U8), shown only where it does something: a live domain of its own,
+ * or a closed choice to undo.
  */
-export function StoreSearchCheck({ check }: { check: SearchCheck }) {
+export function StoreSearchCheck({ check, canChangeAi = false }: { check: SearchCheck; canChangeAi?: boolean }) {
   const { summaries } = check;
   return (
     <section aria-labelledby="search-check-title" className="card mt-8 p-6 sm:p-8">
@@ -87,13 +91,14 @@ export function StoreSearchCheck({ check }: { check: SearchCheck }) {
 
       <h3 className="mt-6 font-semibold text-ink">What AI agents get from your store</h3>
       <ul className="mt-2 space-y-2" data-agents-get>
-        {AGENTS_GET.map((line) => (
+        {agentsGet(check).map((line) => (
           <li key={line} className="flex items-start gap-2 text-sm text-ink-soft">
             <Icon name="check" size={16} className="mt-0.5 shrink-0 text-violet-deep" />
             <span>{line}</span>
           </li>
         ))}
       </ul>
+      {canChangeAi && (check.ownDomain || check.aiCrawlers === "closed") ? <AiCrawlersSwitch open={check.aiCrawlers === "open"} ownDomain={check.ownDomain} /> : null}
       {check.agents.noPicture.length ? (
         <div className="mt-4 rounded-2xl bg-paper p-4 ring-1 ring-line" data-agents-no-picture={check.agents.noPicture.length}>
           <h4 className="font-semibold text-ink">

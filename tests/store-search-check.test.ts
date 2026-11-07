@@ -44,11 +44,11 @@ async function main(): Promise<void> {
   is("an own domain counts only when live and allowed by the plan", searchCheck({ ...stored, domain: null }).ownDomain, false);
 
   part("What the studio shows");
-  const shown = renderToStaticMarkup(StoreSearchCheck({ check: { description: false, indexed: true, suspended: false, agents: { noPicture: ["Bread & Co"] }, summaries: { missing: ["Bread & Co"], unchecked: 0 }, ownDomain: false } }));
+  const shown = renderToStaticMarkup(StoreSearchCheck({ check: { description: false, indexed: true, suspended: false, agents: { noPicture: ["Bread & Co"] }, summaries: { missing: ["Bread & Co"], unchecked: 0 }, ownDomain: false, aiCrawlers: "open" } }));
   is("a heading, the missing description with where to write it, the product named with where to fix it", [shown.includes("Can people find your store?"), shown.includes('href="#details"'), shown.includes("Bread &amp; Co"), shown.includes('href="#products"')], [true, true, true, true]);
   is("never a promise about results", [/rank|top of google|first page of google|guarantee/i.test(shown), shown.includes("nobody can promise that")], [false, true]);
-  const fine = renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: true, suspended: false, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain: false } }));
-  is("a suspended store is told why, not told to add a product", renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: false, suspended: true, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain: false } })).includes('data-search-indexed="suspended"'), true);
+  const fine = renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: true, suspended: false, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain: false, aiCrawlers: "open" } }));
+  is("a suspended store is told why, not told to add a product", renderToStaticMarkup(StoreSearchCheck({ check: { description: true, indexed: false, suspended: true, agents: { noPicture: [] }, summaries: { missing: [], unchecked: 0 }, ownDomain: false, aiCrawlers: "open" } })).includes('data-search-indexed="suspended"'), true);
   is("all done: said so", [fine.includes('data-search-description="yes"'), fine.includes('data-search-summaries="done"')], [true, true]);
 
   part("What is done for every store is what the code does");

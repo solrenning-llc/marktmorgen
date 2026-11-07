@@ -30,6 +30,7 @@ import { POSTS_PER_PAGE, postSegment, publishedPosts, publishedTotal } from "@/l
 import { type SitemapSize, sitemapUnits } from "@/lib/public-read-rules";
 import { takePublicRequest } from "@/lib/traffic";
 import { SITE_URL } from "@/lib/site-url";
+import { aiCrawlerGroups } from "@/lib/ai-crawlers";
 import type { Store } from "@/lib/store";
 
 /** The most posts listed: far past what a store's blog holds. */
@@ -124,7 +125,12 @@ export function sitemapXml(entries: SitemapEntry[]): string {
 /**
  * The rules a creator's domain gives crawlers: everything public may be
  * read, nothing that belongs to one buyer, and where the map is. A store
- * switched off after notices asks not to be read at all.
+ * switched off after notices asks not to be read at all. A store whose
+ * creator closed it to AI crawlers (Store.aiCrawlers, 601 [KB22] U8) also
+ * asks each one named in lib/ai-crawlers.ts to stay out, in a group of its
+ * own; the group for every other crawler is the same either way, so search
+ * engines read the store as before. Open, the rules are byte for byte what
+ * they were before the switch.
  */
 export function storeRobots(store: Store): string {
   const root = storeRoot(store);
@@ -139,6 +145,7 @@ export function storeRobots(store: Store): string {
     "Disallow: /course",
     "Disallow: /community",
     "",
+    ...(store.aiCrawlers === "open" ? [] : aiCrawlerGroups()),
     `Sitemap: ${root}/sitemap.xml`,
     "",
   ].join("\n");

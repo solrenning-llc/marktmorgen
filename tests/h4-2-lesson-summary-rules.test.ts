@@ -137,6 +137,7 @@ async function main() {
     ["de", "Begrenzte Zeit, um einen Preis zu setzen."],
     ["de", "Begrenzte Plätze in der Lektion."],
     ["de", "Sei schnell und setze einen Preis."],
+    ["de", "Seien Sie schnell beim Preis."],
     ["de", "Beeil dich mit dem Preis."],
     ["de", "Letzte Chance für deinen Preis."],
     ["de", "Nur heute: setze einen Preis."],

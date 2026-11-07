@@ -71,7 +71,7 @@ export function transcriptOf(raw: unknown): { ok: true; text: string; bytes: num
       .trim();
     if (words && words !== said[said.length - 1]) said.push(words);
   }
-  const text = said.join(" ");
+  const text = said.join(" ").normalize("NFC");
   if (!text) return { ok: false, reason: "format" };
   const bytes = new TextEncoder().encode(text).length;
   if (bytes > MAX_TRANSCRIPT_BYTES) return { ok: false, reason: "too_long" };
@@ -81,13 +81,19 @@ export function transcriptOf(raw: unknown): { ok: true; text: string; bytes: num
 
 const VERSION = /^t1:[0-9a-f]{64}$/;
 
-/** The lesson's version for its summary: "t1:" and the SHA-256 of its transcript. */
-export async function summaryVersion(transcript: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(transcript));
+/**
+ * The lesson's version for its summary: "t1:" and the SHA-256 of its title
+ * and transcript, both in NFC, kept apart so they cannot trade characters.
+ * A new title or new words ask for a new summary; the same words typed in
+ * another Unicode form do not.
+ */
+export async function summaryVersion(title: string, transcript: string): Promise<string> {
+  const both = JSON.stringify([String(title).normalize("NFC"), String(transcript).normalize("NFC")]);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(both));
   return `t1:${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export type SummaryProblem = "empty" | "too_long" | "markup" | "link" | "pressure" | "not_in_lesson" | "long_sentence";
+export type SummaryProblem = "empty" | "too_long" | "markup" | "link" | "pressure" | "promise" | "not_in_lesson" | "long_sentence";
 
 /** What the studio says when a summary is refused, in plain words. */
 export const SUMMARY_REASONS: Record<SummaryProblem, string> = {
@@ -96,14 +102,92 @@ export const SUMMARY_REASONS: Record<SummaryProblem, string> = {
   markup: "A summary is plain text. Take out the < and > signs.",
   link: "A summary can't have a link or an email address. Students find those in the lesson itself.",
   pressure: "A summary can't push students to hurry or say time is running out when the lesson doesn't say that.",
+  promise: "A summary can't promise a result, like more sales or more money, when the lesson doesn't promise it.",
   not_in_lesson: "The summary says something the lesson doesn't: a number, a site, an offer or a deal. Keep only what the lesson says.",
   long_sentence: `Each sentence can have up to ${MAX_SENTENCE_WORDS} words, so it's easy to read. Split the long one in two.`,
 };
 
 const LINK = /https?:\/\/|\bwww\.|[^\s@<>()]+@[^\s@<>()]+\.[a-z]{2,}/i;
-/** Pressure a summary may repeat only when the lesson itself says it, in every language a store speaks. */
-const PRESSURE =
-  /(?<![\p{L}\p{N}])(hurry|last chance|limited time|act now|don'?t miss|miss out|only today|ends soon|while (?:it|they) lasts?|before it'?s gone|running out|few left|countdown|date prisa|[uú]ltima oportunidad|d[eé]p[eê]chez-vous|derni[eè]re chance|beeil dich|letzte chance|affrettati|ultima occasione|schiet op|laatste kans|apresse-se|[uú]ltima oportunidade)(?![\p{L}\p{N}])/giu;
+/**
+ * Text as it is compared, never as it is kept: NFC, lower case, curly
+ * apostrophes and quotes made straight, spaces made one. So "Don’t miss"
+ * reads as "don't miss", and a phrase the lesson says reads the same in both.
+ */
+const folded = (text: string) =>
+  text
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[‘’‚‛ʼ′＇]/g, "'")
+    .replace(/[“”„‟«»″]/g, '"')
+    .replace(/\s+/g, " ");
+
+/**
+ * Pressure a summary may repeat only when the lesson says it: the same
+ * concepts in every language a store speaks (don't miss it, limited time or
+ * places, hurry, last chance, today only, now or never), written as
+ * phrases, never as a lone word that also means something plain (Spanish
+ * "corre" also says a program runs, German "schnell" is just "fast", Italian
+ * "non perdere tempo" is "don't waste time").
+ */
+const PRESSURE_PHRASES: Record<"en" | "es" | "fr" | "de" | "it" | "nl" | "pt", string[]> = {
+  en: [
+    "don'?t miss", "do not miss", "miss out", "limited (?:time|spots?|places?|seats?|spaces?)", "few left", "spots? left", "running out",
+    "while (?:it|they)(?:'s| is| are)? (?:lasts?|open|available)", "while supplies last", "before it'?s gone", "hurry", "act (?:now|fast)",
+    "be quick", "don'?t wait", "last chance", "only today", "today only", "ends (?:soon|today|tonight)", "now or never", "countdown",
+  ],
+  es: [
+    "no te (?:lo |la )?pierdas", "(?:por )?tiempo limitado", "(?:plazas|cupos|lugares) limitad[oa]s", "date prisa", "ap[uú]rate",
+    "¡ ?corre", "corre ya", "corre antes", "[uú]ltima (?:oportunidad|ocasi[oó]n)", "s[oó]lo hoy", "termina (?:pronto|hoy)", "ahora o nunca",
+  ],
+  fr: [
+    "ne (?:manquez|ratez) pas", "à ne pas manquer", "dur[ée]e limit[ée]e", "temps limit[ée]", "places limit[ée]es", "d[ée]p[êe]chez-vous",
+    "d[ée]p[êe]che-toi", "fai(?:te)?s vite", "derni[èe]re (?:chance|occasion)", "aujourd'hui seulement", "seulement aujourd'hui",
+    "se termine bient[ôo]t", "maintenant ou jamais",
+  ],
+  de: [
+    "nicht verpassen", "verpasse nicht", "verpassen sie nicht", "begrenzte (?:zeit|pl[äa]tze)", "nur f[üu]r kurze zeit", "nur noch wenige",
+    "beeil dich", "beeilen sie sich", "sei(?:en sie)? schnell", "schnell zugreifen", "jetzt zugreifen", "letzte (?:chance|gelegenheit)",
+    "nur heute", "endet (?:bald|heute)", "jetzt oder nie",
+  ],
+  it: [
+    "(?:da )?non perder(?:e|lo|la|ti|telo)(?! tempo)", "tempo limitato", "posti limitati", "affrettat[ie](?:vi)?", "sbrigati", "fai presto",
+    "ultima (?:occasione|possibilit[àa]|chance)", "solo oggi", "termina presto", "scade oggi", "(?:ora|adesso) o mai pi[ùu]",
+  ],
+  nl: [
+    "mis (?:het|dit) niet", "niet missen", "beperkte (?:tijd|plaatsen)", "schiet op", "wees snel", "haast je", "laatste kans",
+    "alleen (?:nog )?vandaag", "eindigt binnenkort", "nu of nooit",
+  ],
+  pt: [
+    "n[ãa]o percas?(?! tempo)", "tempo limitado", "(?:vagas|lugares) limitad[oa]s", "apresse-se", "corra (?:para|j[áa]|antes)", "n[ãa]o demore",
+    "[úu]ltima (?:oportunidade|chance)", "s[óo] hoje", "apenas hoje", "termina (?:em breve|hoje)", "agora ou nunca",
+  ],
+};
+const phrases = (list: string[]) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${list.join("|")})(?![\\p{L}\\p{N}])`, "gu");
+const PRESSURE = phrases(Object.values(PRESSURE_PHRASES).flat());
+
+/**
+ * A result promised, in English: more money or sales, a guarantee. In the
+ * other store languages, and for promises phrased otherwise, the barrier is
+ * the creator's approval, which every summary needs before it is shown.
+ */
+const PROMISE = phrases([
+  "you(?:'ll| will) (?:double|triple|earn|make|grow|increase|boost|get rich|sell out|quit your job)",
+  "(?:double|triple) your", "guarantee(?:d|s)?", "get rich", "passive income", "risk-free",
+]);
+
+/**
+ * Numbers written in English words: refused when the lesson does not say
+ * them, as heldToFacts refuses digits. "one" is left out, being as often a
+ * pronoun as a count. Other languages: the creator's approval is the barrier.
+ */
+const NUMBER_WORDS = phrases([
+  "zero", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+  "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+  "hundreds?", "thousands?", "millions?", "billions?", "dozens?", "percent",
+]);
+
+/** Whether each phrase of `find` in the summary is one the lesson itself says. */
+const saidByLesson = (find: RegExp, summary: string, lesson: string) => [...summary.matchAll(find)].every((match) => lesson.includes(match[0]));
 
 /**
  * A summary as it may be kept, or why not. Spaces inside a line become one
@@ -128,10 +212,12 @@ export function checkSummary(raw: unknown, transcript: string): { ok: true; text
   if (sentences.some((sentence) => sentence.split(/\s+/).filter(Boolean).length > MAX_SENTENCE_WORDS)) return { ok: false, reason: "long_sentence" };
   const lesson = typeof transcript === "string" ? transcript : "";
   if (!lesson.trim()) return { ok: false, reason: "not_in_lesson" };
-  const said = lesson.toLowerCase();
-  for (const match of text.matchAll(PRESSURE)) {
-    if (!said.includes(match[0].toLowerCase())) return { ok: false, reason: "pressure" };
-  }
+  const mine = folded(text);
+  const said = folded(lesson);
+  if (!saidByLesson(PRESSURE, mine, said)) return { ok: false, reason: "pressure" };
+  if (!saidByLesson(PROMISE, mine, said)) return { ok: false, reason: "promise" };
+  const lessonWords = new Set(said.match(/[\p{L}\p{N}']+/gu) ?? []);
+  if ([...mine.matchAll(NUMBER_WORDS)].some((match) => !lessonWords.has(match[0]))) return { ok: false, reason: "not_in_lesson" };
   if (!heldToFacts(text, lesson)) return { ok: false, reason: "not_in_lesson" };
   return { ok: true, text };
 }
@@ -202,15 +288,20 @@ export type SummaryAction =
   | { kind: "off" }
   | { kind: "on" };
 
-export type SummaryRefusal = SummaryProblem | "same_version" | "stale" | "off" | "none" | "version" | "time";
+export type SummaryRefusal = SummaryProblem | "same_version" | "stale" | "off" | "none" | "version" | "time" | "unknown";
 
 /**
  * What one action makes of a lesson's summary. A summary written or edited
  * is a draft; only the creator's approval, for the lesson's current
  * version, makes it shown. Turning it back on asks for approval again.
+ * Given the record as read (readLessonSummary): an unreadable one takes no
+ * action at all.
  */
-export function editSummary(current: LessonSummary | null, action: SummaryAction, at: number): { ok: true; summary: LessonSummary } | { ok: false; reason: SummaryRefusal } {
+export function editSummary(read: SummaryRead, action: SummaryAction, at: number): { ok: true; summary: LessonSummary } | { ok: false; reason: SummaryRefusal } {
+  // A record that could not be read is never written over, whatever the action: it might be a summary someone approved.
+  if (read.state === "unknown") return { ok: false, reason: "unknown" };
   if (!Number.isSafeInteger(at) || at < 0) return { ok: false, reason: "time" };
+  const current = read.state === "ok" ? read.summary : null;
   switch (action.kind) {
     case "generated": {
       if (!VERSION.test(action.version)) return { ok: false, reason: "version" };

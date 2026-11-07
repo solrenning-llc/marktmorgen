@@ -326,7 +326,11 @@ export async function maySeeSpace(
   const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
-  return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v));
+  // An answer that could not be read is a no: the space stays shut (locked or hidden), never opened on a guess.
+  return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v)).catch((error) => {
+    console.error("checking a community space's access failed", error);
+    return false;
+  });
 }
 
 /**

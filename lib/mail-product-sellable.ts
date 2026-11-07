@@ -42,7 +42,7 @@
  */
 import type { Listing, Store } from "@/lib/store";
 import { offeredItems } from "@/lib/bundles";
-import { bundleReady } from "@/lib/bundle-rules";
+import { bundleReady, deliverableItems } from "@/lib/bundle-rules";
 import { hasDateOnSale } from "@/lib/call-on-sale";
 import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { canGiveProduct } from "@/lib/free";
@@ -56,8 +56,20 @@ import { saleOff } from "@/lib/store-sale";
 import { isFree } from "@/lib/store-field-rules";
 import type { PriceFacts } from "@/lib/mail-product-price";
 
-/** The ids of `products` a buyer can get from `store` now. `now` is in milliseconds. */
-export async function productsBuyableNow(store: Store, products: readonly Listing[], now = Date.now()): Promise<Set<string>> {
+/**
+ * What a caller reading in rounds has read already (lib/community-locked.ts):
+ * the products coming soon, read once, and every listing it read, the
+ * bundles' items among them, so nothing is read again here. An id missing
+ * from `listings` was read and is gone from the store.
+ */
+export type AlreadyRead = { soon: ReadonlySet<string>; listings: ReadonlyMap<string, Listing> };
+
+/**
+ * The ids of `products` a buyer can get from `store` now. `now` is in
+ * milliseconds. With `known`, neither the pre-orders nor the bundles' items
+ * are read: they are taken from it.
+ */
+export async function productsBuyableNow(store: Store, products: readonly Listing[], now = Date.now(), known?: AlreadyRead): Promise<Set<string>> {
   // A suspended store's pages rest (lib/takedown.ts): nothing of it is shown.
   if (store.suspended) return new Set();
   // What the store itself refuses, before anything is read.
@@ -68,15 +80,19 @@ export async function productsBuyableNow(store: Store, products: readonly Listin
       !(p.call && !hasDateOnSale(p.call, now)),
   );
   if (open.length === 0) return new Set();
-  let soon: Set<string>;
+  let soon: ReadonlySet<string>;
   try {
-    soon = (await soonState(store)).soon;
+    soon = known ? known.soon : (await soonState(store)).soon;
   } catch {
     return new Set();
   }
   const ready = open.filter((p) => !soon.has(p.id));
   const bundles = ready.filter((p) => p.bundle);
-  const inside = bundles.length ? await offeredItems(store, bundles).catch(() => new Map<string, Listing[]>()) : new Map<string, Listing[]>();
+  const inside = !bundles.length
+    ? new Map<string, Listing[]>()
+    : known
+      ? new Map(bundles.map((p) => [p.id, deliverableItems(p, [...bundles, ...known.listings.values()])]))
+      : await offeredItems(store, bundles).catch(() => new Map<string, Listing[]>());
   const kept = await Promise.all(
     ready.map(async (p) => {
       if (p.bundle && !bundleReady(p, inside.get(p.id)?.length ?? 0)) return null;

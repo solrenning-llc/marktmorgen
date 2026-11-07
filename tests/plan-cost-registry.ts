@@ -1101,6 +1101,14 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
       { file: "lib/community-walk.ts", names: ["walkUnits(", "indexedWords(", "INDEXED_WORDS_BYTES"] },
+      // A member's locked spaces read their products as a collection page reads its cards, paid before they are read (542 [CM1], 6 November 2026);
+      // read in rounds since 7 November 2026, each round paying what its first reads add; nothing is read twice (the pre-orders once, every
+      // listing and bundle item kept and handed on, never read again in a later round), so the rounds pay and read what one read of them would.
+      { file: "lib/community-locked.ts", names: ["MAX_UNLOCK_PRODUCTS = MAX_COLLECTION_PRODUCTS", "units <= 0 || (await take(units))", "pay(collectionUnits(read.size + ids.length) - collectionUnits(read.size))", "pay(bundleItemUnits(items.size + fresh.length) - bundleItemUnits(items.size))", "ids.filter((id) => !asked.has(id))", "soon ??= (await soonState(store)).soon", "productsBuyableNow(store, listings, Date.now(), { soon, listings: known })"] },
+      { file: "lib/mail-product-sellable.ts", names: ["known ? known.soon : (await soonState(store)).soon", "deliverableItems(p, [...bundles, ...known.listings.values()])"] },
+      { file: "app/[handle]/community/page.tsx", names: ["takePublicRequest(store, \"buyer\", undefined, units)"] },
+      // The studio's "View as a member" reads them the same way, paid in studio requests before it reads.
+      { file: "app/studio/community/page.tsx", names: ["unlocksOf(store, config, (units) => countStudio(store, null, units)"] },
       { file: "lib/traffic.ts", names: ["countRequest", "takePublicRequest", "requestsKey"] },
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).

@@ -107,6 +107,15 @@ export type Space = {
    * opens the right to start a conversation, never the right to take part.
    */
   level: number;
+  /**
+   * For a space kept for some buyers: whether a member without one of those
+   * products sees it in the list, locked, with its name, its one line and the
+   * way to buy in (542 [CM1], "Visible and locked"), instead of no sign of it
+   * ("Hidden", the default, and every space made before there was a choice).
+   * Never its posts, comments, members or any count: that is still only
+   * maySeeSpace's to open (lib/community-access.ts, lib/community-locked.ts).
+   */
+  shown?: true;
 };
 
 export type CommunityConfig = {
@@ -288,6 +297,8 @@ function parseConfig(raw: unknown): CommunityConfig | null {
         only: ids(entry.only, 50).filter((p) => p.length <= 40),
         // Spaces made before there were levels need none.
         level: Number.isInteger(entry.level) && entry.level >= 2 && entry.level <= 9 ? entry.level : 0,
+        // And before a kept space could be shown locked: hidden, as it always was.
+        ...(entry.shown === true ? { shown: true as const } : {}),
       });
       if (spaces.length >= MAX_SPACES) break;
     }

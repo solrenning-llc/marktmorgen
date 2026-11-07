@@ -18,7 +18,11 @@
  *     unknown reply): the creator is sent back with `discord=unchecked`, never a bare 500; the new server is not
  *     saved, the old one stays connected with its roles and members, and the bot is not removed from it (LOW of the
  *     independent review on #2976);
- *   - the studio page has an honest, plain words notice for `unchecked`, shown as an error (role="alert").
+ *   - forgetting the old server ran in Redis but its reply was lost: the kept server is read again; read as exactly
+ *     none, the forget happened, so the switch finishes (the bot leaves the old server, the new one is saved) instead
+ *     of telling the creator "Nothing was changed"; if that read fails too, the creator is sent back with
+ *     `discord=unconfirmed`, which says the outcome is unknown (LEVE of Claude 4's focal return on #2976);
+ *   - the studio page has honest, plain words notices for `unchecked` and `unconfirmed`, shown as errors (role="alert").
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -52,7 +56,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 type Commands = (string | number)[][];
-type Read = "healthy" | "none" | "shape" | "thrown" | "forget";
+type Read = "healthy" | "none" | "shape" | "thrown" | "forget" | "forget-lost" | "forget-lost-unread";
 
 async function scenario(read: Read) {
   redis.clear();
@@ -95,6 +99,20 @@ async function scenario(read: Read) {
         used = true;
         throw new Error("synthetic Redis failure");
       }
+      return real(commands);
+    }) as typeof redis.pipeline;
+  }
+  if (read === "forget-lost" || read === "forget-lost-unread") {
+    // forgetServer's last pipeline (DEL of the server, roles, members and address links) runs in Redis, then its reply
+    // is lost. With "forget-lost-unread", every later read of the kept server fails too.
+    let deleted = false;
+    redis.pipeline = (async (commands: Commands) => {
+      if (!deleted && commands[0]?.[0] === "DEL" && String(commands[0][1]).startsWith("nl:dc:srv:")) {
+        deleted = true;
+        await real(commands);
+        throw new Error("synthetic lost reply");
+      }
+      if (deleted && read === "forget-lost-unread" && commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:dc:srv:")) throw new Error("synthetic Redis failure");
       return real(commands);
     }) as typeof redis.pipeline;
   }
@@ -147,11 +165,26 @@ async function main() {
   is("forget: the bot was not removed from the old server", forget.left, false);
   is("forget: the old server's roles and member kept", [forget.roles, forget.members], [[["prod1", [ROLE]]], [ANA]]);
 
-  part("5. The studio says so plainly, as an error");
+  part("5. Forgetting the old server ran but its reply was lost: the switch finishes, never \"Nothing was changed\"");
+  const lost = await scenario("forget-lost");
+  is("forget-lost: the creator is never told \"Nothing was changed\"", lost.status === "unchecked", false);
+  is("forget-lost: the old server was forgotten, so the new one is saved and the switch reported as connected", [lost.status, lost.server], ["connected", NEW]);
+  is("forget-lost: the bot left the old server", lost.left, true);
+  is("forget-lost: the old server's roles and members are gone", [lost.roles, lost.members], [[], []]);
+
+  part("6. Forgetting ran, its reply was lost, and the kept server cannot be read again: the outcome is said to be unknown");
+  const unread = await scenario("forget-lost-unread");
+  is("forget-lost-unread: the creator is told the outcome is unknown, never \"Nothing was changed\" or \"connected\"", unread.status, "unconfirmed");
+  is("forget-lost-unread: the new server was not saved", unread.server, null);
+
+  part("7. The studio says so plainly, as an error");
   const page = readFileSync(join(process.cwd(), "app/studio/discord/page.tsx"), "utf8");
   const line = page.split("\n").find((l) => /^\s*unchecked:/.test(l)) ?? "";
   is("the notice for unchecked is an error", /tone: "error"/.test(line), true);
   is("the notice says nothing was changed and to try again", /could not check[^"]*Nothing was changed; try again/.test(line), true);
+  const unsure = page.split("\n").find((l) => /^\s*unconfirmed:/.test(l)) ?? "";
+  is("the notice for unconfirmed is an error", /tone: "error"/.test(unsure), true);
+  is("the notice for unconfirmed never says nothing was changed, and says what to do", /could not tell/.test(unsure) && /Reload this page/.test(unsure) && !/Nothing was changed/.test(unsure), true);
 
   done();
 }

@@ -673,6 +673,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:hg:once:@lib/anniversary-send.ts": short("A buyer written to on a purchase's anniversary", "own", 30, KEY, MAIL("anniversary")),
   "nl:hg:count:@lib/anniversary-send.ts": short("Anniversary emails counted a month", "day", 62, 128),
   "nl:hg:cursor@lib/anniversary-send.ts": company("Where the anniversary job stopped", "One key, the company's job."),
+  "nl:hg:scan:@lib/anniversary-send.ts": { what: "Where a store's reading of its purchases of a year ago stopped: two times and one checkout's id, never an address", parts: [capped(KEY, "One a store, kept SCAN_DAYS after its last run.")] },
   "nl:hgd:made:@lib/store-dates-send.ts": { what: "A store date's email made for a year", parts: [capped(MAX_STORE_DATES * MARK, "At most one a date of the store a year, each kept 40 days: never more than the store's dates at one time.", src("lib/store-dates-rules.ts", "MAX_STORE_DATES"))] },
   "nl:hgd:last:@lib/store-dates-send.ts": { what: "What happened to each store date's email the last time it was due, for the studio", parts: [capped(KEY + MAX_STORE_DATES * (ENTRY_BYTES + 128), "One hash a store, a field of under 128 bytes for each of its dates.", src("lib/store-dates-rules.ts", "MAX_STORE_DATES"))] },
   "nl:hgd:cursor@lib/store-dates-send.ts": company("Where the store dates job stopped", "One key, the company's job."),

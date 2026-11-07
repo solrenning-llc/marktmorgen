@@ -2042,6 +2042,7 @@ export default async function StudioPage({
                     suggestedAddress={store.mail?.address || store.nudge.address || store.winback.address || store.recovery.address || ""}
                     sent={await anniversariesThisMonth(store).catch(() => 0)}
                     connected={Boolean(current?.stripeAccountId)}
+                    emailInPlan={allowanceFor(store, "email") > 0}
                   />
                 ) : null}
 

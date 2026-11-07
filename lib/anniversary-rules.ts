@@ -33,8 +33,13 @@ export const MAX_ANNIVERSARY_ADDRESS = 300;
 export const NO_ANNIVERSARY: Anniversary = { on: false, message: "", address: "" };
 
 const DAY_SECONDS = 86_400;
-/** How wide the window read each day is: a day the job did not run is caught the next. */
+/** How wide the window a store's first run reads is; later runs go on from where the last stopped (lib/anniversary-send.ts). */
 export const ANNIVERSARY_WINDOW_DAYS = 2;
+/**
+ * How late an anniversary email may still go: on a busy day some go on the following days, and a purchase
+ * older than this before a run is no longer read, so its email is not sent (lib/anniversary-send.ts).
+ */
+export const ANNIVERSARY_LATE_DAYS = 7;
 
 /** The creator's words as kept: line breaks kept as "\n", every other control character taken out, cut to the bound. */
 function cleanMessage(raw: unknown): string {

@@ -8,8 +8,9 @@
  * "unavailable" (and noindex) for almost every visitor, with no end: 50 of 600 visits saw the list.
  *
  * Now:
- *   - a save drops the kept page only when the store would be listed before or after it (lib/directory-index.ts,
- *     rememberListing): a store that is not listed and stays so changes nothing the directory shows;
+ *   - a save drops the kept page only when the store would be listed after it or was in the listed set before it,
+ *     read from the SREM reply (lib/directory-index.ts, rememberListing): a store that is not listed and stays so
+ *     changes nothing the directory shows;
  *   - each full build also keeps the last good page with the sid of each row (nl:dir:last). A visit that misses the
  *     kept page while the claim is held is shown that last page, filtered by one SMISMEMBER of its sids against the
  *     listed set, so a store whose creator has just taken it out is gone at once. Nothing is kept from it. Only with

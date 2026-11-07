@@ -2896,10 +2896,7 @@ export async function setAffiliateSetting(
   email: string,
   setting: AffiliateSetting,
 ): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" }> {
-  // The store as it was, so a save that cannot change the directory does not drop its page (lib/directory-index.ts).
-  let before = null as Store | null;
   const next = await patchStore(email, (store) => {
-    before = store;
     const known = new Set(productIds(store));
     const parsed = parseAffiliateSetting(setting);
     const rates = Object.fromEntries(Object.entries(parsed.rates).filter(([id]) => known.has(id)));
@@ -2907,10 +2904,9 @@ export async function setAffiliateSetting(
   });
   // Whether this creator's program is listed in the affiliate directory, kept
   // in step on the save rather than reconstructed by walking every store
-  // (lib/directory-index.ts); a save that can change the directory, listed
-  // before or after it, also drops the directory's kept rows.
+  // (lib/directory-index.ts); the save also drops the directory's kept rows.
   if (next) {
-    await rememberListing(next, before).catch((error) => console.error("remembering a directory listing failed", error));
+    await rememberListing(next).catch((error) => console.error("remembering a directory listing failed", error));
   }
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }

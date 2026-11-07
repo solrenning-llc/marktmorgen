@@ -82,15 +82,32 @@ export function wouldList(store: Store): boolean {
  * stops matching the consents behind it.
  *
  * The kept page is dropped only when the save can change it: the store would
- * be listed after the save, or was before it (`before`, the store as it was;
- * unknown counts as listed). A store that is not listed and stays so changes
- * nothing the directory shows, so its saves never drop the page (Claude 6 on
- * #3062: any account could otherwise drop it in a loop).
+ * be listed after the save, or was in the listed set before it. The state
+ * before is read from the set itself, the reply of the SREM that takes it out
+ * (1: it was there; 0: it was not), since the page is built from that set; a
+ * reply in any other shape counts as listed, drops the page and is said
+ * (UnknownReplyError), as is an SREM that failed. A store that is not listed
+ * and stays so changes nothing the directory shows, so its saves never drop
+ * the page (Claude 6 on #3062: any account could otherwise drop it in a loop).
+ * The commands are the same or fewer: SADD + DEL, or SREM alone, or SREM + DEL.
  */
-export async function rememberListing(store: Store, before?: Store | null): Promise<void> {
+export async function rememberListing(store: Store): Promise<void> {
   if (!store.sid || !isRedisConfigured()) return;
-  const shown = wouldList(store) || before === undefined || before === null || wouldList(before);
-  await redisPipeline([[wouldList(store) ? "SADD" : "SREM", LISTED, store.sid], ...(shown ? [["DEL", DIRECTORY_CACHE]] : [])]);
+  if (wouldList(store)) {
+    await redisPipeline([["SADD", LISTED, store.sid], ["DEL", DIRECTORY_CACHE]]);
+    return;
+  }
+  let removed: unknown = null;
+  try {
+    const replies = repliesFor(await redisPipeline([["SREM", LISTED, store.sid]]), 1);
+    removed = replies ? replies[0] : null;
+  } catch (error) {
+    await redisPipeline([["DEL", DIRECTORY_CACHE]]);
+    throw error;
+  }
+  if (removed === 0) return;
+  await redisPipeline([["DEL", DIRECTORY_CACHE]]);
+  if (removed !== 1) throw new UnknownReplyError("the directory's SREM");
 }
 
 /** Takes a store out, whatever it had said. For a store being deleted. */

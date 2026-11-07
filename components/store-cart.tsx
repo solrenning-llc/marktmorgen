@@ -295,6 +295,12 @@ export function CartButton({
           // what the read before it said.
           if (!open) {
             setFailedFor(null);
+            if (closed) {
+              // After "not taking orders", nothing read before it is shown again: no old lines and no checkout form
+              // until a read answers (each product counts as not checked yet).
+              setLines(null);
+              setChecked(null);
+            }
             setClosed(false);
           }
           setOpen(!open);

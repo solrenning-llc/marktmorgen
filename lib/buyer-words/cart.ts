@@ -155,7 +155,7 @@ const fr: CartWords = {
       ? "Nous n'avons pas pu vérifier 1 produit de votre panier pour le moment, vous ne pouvez donc pas encore payer."
       : `Nous n'avons pas pu vérifier ${count} produits de votre panier pour le moment, vous ne pouvez donc pas encore payer.`,
   retry: "Réessayer",
-  storeClosed: "Cette boutique ne prend pas de commandes pour le moment : rien dans votre panier ne peut être payé ici. Rien n’a été débité.",
+  storeClosed: `Cette boutique ne prend pas de commandes pour le moment${S}: rien dans votre panier ne peut être payé ici. Rien n'a été débité.`,
   note: "Vous payez une seule fois, sur la page sécurisée de Stripe. Chaque produit est remis exactement comme s'il était acheté seul.",
   empty: "Votre panier est vide.",
   gone: `Pas disponible dans un panier pour l'instant${S}: achetez-le depuis sa propre page.`,
@@ -391,7 +391,7 @@ const pt: CartWords = {
       ? "Não foi possível verificar 1 produto do seu carrinho agora, por isso ainda não é possível pagar."
       : `Não foi possível verificar ${count} produtos do seu carrinho agora, por isso ainda não é possível pagar.`,
   retry: "Tentar novamente",
-  storeClosed: "Esta loja não está aceitando pedidos agora, então nada no seu carrinho pode ser pago aqui. Nada foi cobrado.",
+  storeClosed: "Esta loja não está a aceitar pedidos agora, por isso nada no seu carrinho pode ser pago aqui. Nada foi cobrado.",
   note: "Paga uma única vez, na página segura da Stripe. Cada produto é entregue exatamente como se o comprasse em separado.",
   empty: "O seu carrinho está vazio.",
   gone: "Não está disponível num carrinho neste momento: compre-o na sua própria página.",

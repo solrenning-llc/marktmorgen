@@ -119,10 +119,13 @@ async function main(): Promise<void> {
   const MailPictures = (designer as Record<string, unknown>).MailPictures as Context<string> | undefined;
   is("the studio tells the preview which folder is the store's", typeof MailPictures, "object");
   if (MailPictures) {
+    // The preview draws the email's own absolute addresses; the small pictures beside "Add a picture"
+    // (components/mail-picture-button.tsx) are the studio's own way to tell the lines apart, not the email.
+    const drawn = (html: string) => [...new Set(imgs(html).filter((src) => src.startsWith("https://")))];
     const preview = renderToStaticMarkup(createElement(MailPictures.Provider, { value: own }, createElement(designer.MailBodyEditor, { body, onChange: () => {} })));
-    is("its own picture is drawn, the other is not", imgs(preview).filter((src) => src.includes("/api/image/")), [mine]);
+    is("its own picture is drawn, the other is not", drawn(preview), [mine]);
     const unknown = renderToStaticMarkup(createElement(designer.MailBodyEditor, { body, onChange: () => {} }));
-    is("with no folder told, none is", imgs(unknown).filter((src) => src.includes("/api/image/")), []);
+    is("with no folder told, none is", drawn(unknown), []);
   }
 
   done();

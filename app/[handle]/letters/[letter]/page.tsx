@@ -3,7 +3,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { normaliseHandle, storeForPage } from "@/lib/store";
+import { imageFolder, normaliseHandle, storeForPage, storeRef } from "@/lib/store";
 import { storeRoot } from "@/lib/store-sitemap";
 import { speech } from "@/lib/buyer-words";
 import { letterWords } from "@/lib/buyer-words/letters";
@@ -88,6 +88,8 @@ export default async function LetterPage({ params, searchParams }: Params) {
   const pagePath = `/@${store.handle}/letters/${letter.id}`;
   // Only the start chosen for everyone, and only to somebody who cannot read the whole email.
   const preview = kept ? previewOf(letter) : "";
+  // The email as it went to the list: only the pictures kept in the store's own folder (lib/mail-picture-rules.ts).
+  const pictures = await imageFolder(storeRef(store));
   return (
     <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
       <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
@@ -102,7 +104,7 @@ export default async function LetterPage({ params, searchParams }: Params) {
             <section aria-labelledby="letter-start" className="mt-6">
               <h2 id="letter-start" className="text-sm font-semibold">{w.previewHeading}</h2>
               {/* The same drawing as the whole email (lib/mail-body.ts), of its first parts only. */}
-              <div className="mt-2 rounded-2xl bg-white p-6 text-[15px] leading-relaxed text-stone-900 [overflow-wrap:anywhere] sm:p-8" dangerouslySetInnerHTML={{ __html: bodyHtml(preview, undefined, store.look.accent) }} />
+              <div className="mt-2 rounded-2xl bg-white p-6 text-[15px] leading-relaxed text-stone-900 [overflow-wrap:anywhere] sm:p-8" dangerouslySetInnerHTML={{ __html: bodyHtml(preview, undefined, store.look.accent, pictures) }} />
             </section>
           ) : null}
           {kept ? (
@@ -130,7 +132,7 @@ export default async function LetterPage({ params, searchParams }: Params) {
           ) : null}
           {readable ? (
             /* The email's own drawing (lib/mail-body.ts): every word escaped, only its headings, lists, links, buttons and pictures. */
-            <div className="mt-6 rounded-2xl bg-white p-6 text-[15px] leading-relaxed text-stone-900 [overflow-wrap:anywhere] sm:p-8" dangerouslySetInnerHTML={{ __html: bodyHtml(letter.body, undefined, store.look.accent) }} />
+            <div className="mt-6 rounded-2xl bg-white p-6 text-[15px] leading-relaxed text-stone-900 [overflow-wrap:anywhere] sm:p-8" dangerouslySetInnerHTML={{ __html: bodyHtml(letter.body, undefined, store.look.accent, pictures) }} />
           ) : null}
         </article>
         {kept && !readable && !gone && reader.state === "unknown" ? (

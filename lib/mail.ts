@@ -25,7 +25,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { calendarWindow, windowId } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { admitNonPaying } from "@/lib/free-pool";
-import type { Store } from "@/lib/store";
+import { type Store, imageFolder, storeRef } from "@/lib/store";
 import { creatorAddress } from "@/lib/mail-from";
 import { type MailTag, taggedLink } from "@/lib/mail-links";
 import { rememberLinkKeys } from "@/lib/mail-clicks";
@@ -411,6 +411,13 @@ export function render(
   tag?: MailTag,
   /** The reader's link key, when they allowed their link use to be seen (lib/mail-clicks.ts): their links carry it, and the foot says how to stop it. */
   readerKey?: string,
+  /**
+   * The store's own picture folder (imageFolder in lib/store.ts), given only
+   * for an email to its list, where "Add a picture" is: only a picture kept
+   * there is drawn. Left out, as for every other email a store sends, each
+   * picture is its description (lib/mail-picture-rules.ts ownPicturesOnly).
+   */
+  pictures?: string,
 ): Rendered {
   const fromName = store.mail?.fromName || store.name;
   const address = store.mail?.address ?? "";
@@ -428,7 +435,7 @@ export function render(
   const stopCounting = counting ? `${SITE_URL}/unsubscribe?l=${token}` : "";
   const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><body style="margin:0;padding:0;background:#f7f5f0">
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
-<div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, store.look ? lookColours(store.look).accent : undefined)}</div>
+<div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, store.look ? lookColours(store.look).accent : undefined, pictures)}</div>
 <div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">
 <p style="margin:0 0 8px">${escape(why)}</p>
 <p style="margin:0 0 8px"><a href="${escape(unsub)}" style="color:#57534e;text-decoration:underline">${escape(label)}</a> ${escape(after)}</p>
@@ -523,6 +530,8 @@ export async function sendTo(
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
   const tags = healthTags(store, true, tag?.campaign);
+  // An email to the list may show the pictures kept in the store's own folder, and no other.
+  const pictures = await imageFolder(storeRef(store));
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
     if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };
@@ -544,7 +553,7 @@ export async function sendTo(
       .filter((email) => tokens.has(email))
       .map((email) => {
         const token = tokens.get(email)!;
-        const r = render(store, subject, body, token, undefined, tag, counting?.has(email) ? keys.get(token) : undefined);
+        const r = render(store, subject, body, token, undefined, tag, counting?.has(email) ? keys.get(token) : undefined, pictures);
         return { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags };
       });
     if (messages.length) await paced();

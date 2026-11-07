@@ -25,7 +25,7 @@
  * Pure and browser-safe: the designer draws its preview with the same
  * function that draws the email.
  */
-import { MAX_MAIL_PICTURES, readPicture, withoutPictures } from "@/lib/mail-picture-rules";
+import { MAX_MAIL_PICTURES, ownPicturesOnly, readPicture, withoutPictures } from "@/lib/mail-picture-rules";
 import { contrast, lookColours } from "@/lib/store-look";
 
 export const MAX_MAIL_HEADING = 120;
@@ -160,12 +160,16 @@ function buttonColours(accent: string): { fill: string; ink: string } {
  * The creator's text as HTML: headings, paragraphs, lists, links, buttons,
  * lines across and the pictures kept for it, nothing else. `accent` is the
  * starting colour of a button, adjusted only when its text cannot reach 7:1.
+ * `folder` is the sending store's own picture folder, given only for an
+ * email to its list: only a picture kept there is drawn, any other is its
+ * description (lib/mail-picture-rules.ts ownPicturesOnly); with no folder,
+ * none is drawn.
  */
-export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95"): string {
+export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95", folder?: string): string {
   const colors = buttonColours(accent);
   const out: string[] = [];
   let pictures = 0;
-  for (const block of parseMailBlocks(body)) {
+  for (const block of parseMailBlocks(ownPicturesOnly(body, folder))) {
     switch (block.kind) {
       case "heading":
         out.push(`<h2 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;color:#1c1917">${escape(block.text)}</h2>`);

@@ -18,6 +18,12 @@ import { readPicture } from "@/lib/mail-picture-rules";
 
 /** The store's colour for a button in its emails (lib/store-look.ts), for the preview to draw what is sent. */
 export const MailAccent = createContext("#4c1d95");
+/**
+ * The store's own picture folder (imageFolder in lib/store.ts), for the
+ * preview to draw only the pictures an email to the list shows; with none
+ * given, it draws none (lib/mail-picture-rules.ts ownPicturesOnly).
+ */
+export const MailPictures = createContext("");
 
 const ADDABLE: { kind: MailBlock["kind"]; label: string }[] = [
   { kind: "heading", label: "Heading" },
@@ -65,6 +71,7 @@ export function MailBodyEditor({
   boxRef?: (el: HTMLTextAreaElement | null) => void;
 }) {
   const accent = useContext(MailAccent);
+  const pictures = useContext(MailPictures);
   const [mode, setMode] = useState<"write" | "design">("write");
   const [blocks, setBlocks] = useState<MailBlock[]>(() => parseMailBlocks(body));
   const [written, setWritten] = useState(body);
@@ -127,7 +134,7 @@ export function MailBodyEditor({
           className="mx-auto rounded-2xl bg-white p-5 text-[16px] leading-[1.6] text-[#1c1917] [overflow-wrap:anywhere]"
           style={phone ? { maxWidth: 390 } : undefined}
           // Drawn by the same function that draws the email: everything in it is escaped (lib/mail-body.ts).
-          dangerouslySetInnerHTML={{ __html: bodyHtml(body, undefined, accent) || "<p style=\"color:#57534e\">Nothing yet.</p>" }}
+          dangerouslySetInnerHTML={{ __html: bodyHtml(body, undefined, accent, pictures) || "<p style=\"color:#57534e\">Nothing yet.</p>" }}
         />
       </div>
     </div>

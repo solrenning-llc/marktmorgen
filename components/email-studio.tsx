@@ -18,7 +18,7 @@ import { RFM_GROUPS, type RfmGroup } from "@/lib/rfm-rules";
 import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
 import { confirmedRecipientCount, confirmedDraftId, draftRemovalAnswer, confirmedMailCopy, keptWaitHours, mailAnswer, type MailAnswer } from "@/lib/mail-response";
 import { toast } from "@/components/toast";
-import { MailAccent, MailBodyEditor } from "@/components/mail-designer";
+import { MailAccent, MailBodyEditor, MailPictures } from "@/components/mail-designer";
 import { flowConfigurationIssues } from "@/lib/flow-review";
 import type { Flow, FlowCounts, FlowStep } from "@/lib/flows";
 import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
@@ -366,6 +366,8 @@ export function EmailStudio(props: {
   preset?: { who: Who };
   /** The store's colour for a button in its emails (lib/store-look.ts), so the designer's preview is what is sent. */
   accent?: string;
+  /** The store's own picture folder (imageFolder in lib/store.ts), so the preview draws only the pictures that are sent. */
+  pictures?: string;
 }) {
   const ready = props.mail !== null;
   const [libraryEmail, setLibraryEmail] = useState(props.initialTemplate);
@@ -413,6 +415,7 @@ export function EmailStudio(props: {
   const onWriteUnconfirmed = () => setUncertainList(props.flows);
   return (
     <MailAccent.Provider value={props.accent ?? "#4c1d95"}>
+    <MailPictures.Provider value={props.pictures ?? ""}>
     <div className="mt-8 grid items-start gap-x-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       <div className="min-w-0">
         {ready ? (
@@ -520,6 +523,7 @@ export function EmailStudio(props: {
         ) : null}
       </div>
     </div>
+    </MailPictures.Provider>
     </MailAccent.Provider>
   );
 }

@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { done, is } from "./check";
 
 const designer = readFileSync("components/mail-designer.tsx", "utf8");
-is("one preview, drawn by the email's own function", (designer.match(/bodyHtml\(body, undefined, accent\)/g) ?? []).length, 1);
+is("one preview, drawn by the email's own function", (designer.match(/bodyHtml\(body, undefined, accent, pictures\)/g) ?? []).length, 1);
 is("shown in Write as well as in Design", (designer.match(/\{preview\}/g) ?? []).length, 3);
 is("in Write it sits beside the text on a wide screen and is folded on a narrow one", designer.includes('<div className="hidden xl:block">{preview}</div>') && designer.includes('<details className="xl:hidden">') && designer.includes("See it as it is sent</summary>"), true);
 is("it is inert: out of the outline, the Tab order and clicks that would leave the draft, and says why", /inert\s+className="mx-auto/.test(designer) && designer.includes("Nothing in it can be pressed here."), true);

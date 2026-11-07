@@ -6,7 +6,8 @@
  *     picture; one from anywhere else, a WebP, or a line with words around
  *     it stays text;
  *   - the description is made safe, and shown to readers without pictures;
- *   - an email shows six at most; the rest stay text;
+ *   - an email to the list, given its store's folder, shows six at most; the
+ *     rest stay text (which emails and folders: tests/mail-pictures-owner.test.ts);
  *   - only a JPEG of a sensible size and weight is kept.
  */
 import { MAX_MAIL_PICTURES, MAX_MAIL_PICTURE_BYTES, pictureCount, pictureLine, pictureUrl, readPicture, withoutPictures } from "@/lib/mail-picture-rules";
@@ -35,14 +36,14 @@ async function main(): Promise<void> {
 
   part("In the email");
   const body = `Hello,\n\n![The loaf](${url(1)})\nIt rose.\n\n![](${url(2)})\n\n![x](https://example.com/a.jpg)`;
-  const html = bodyHtml(body);
+  const html = bodyHtml(body, undefined, undefined, FOLDER);
   is("each kept picture is drawn, at the width an email shows", (html.match(/<img /g) ?? []).length, 2);
   is("with its description, escaped", html.includes(`alt="The loaf"`) && html.includes(`src="${url(1)}"`), true);
   is("one from elsewhere stays text", html.includes("<img src=\"https://example.com"), false);
   is("the words after a picture stay a paragraph", html.includes(">It rose.</p>"), true);
   is("readers without pictures get the description, and nothing for one without", withoutPictures(body), `Hello,\n\n[The loaf]\nIt rose.\n\n\n![x](https://example.com/a.jpg)`);
   const many = Array.from({ length: MAX_MAIL_PICTURES + 2 }, (_, i) => pictureLine(`P${i}`, url(i + 1))).join("\n\n");
-  is(`${MAX_MAIL_PICTURES} at most are drawn`, [pictureCount(many), (bodyHtml(many).match(/<img /g) ?? []).length], [MAX_MAIL_PICTURES + 2, MAX_MAIL_PICTURES]);
+  is(`${MAX_MAIL_PICTURES} at most are drawn`, [pictureCount(many), (bodyHtml(many, undefined, undefined, FOLDER).match(/<img /g) ?? []).length], [MAX_MAIL_PICTURES + 2, MAX_MAIL_PICTURES]);
   const store = { handle: "bakery", name: "Oven Notes", language: "en", mail: { fromName: "Oven Notes", address: "1 Main St" } } as unknown as Store;
   const sent = render(store, "New loaf", body, "tok");
   is("the email's text version carries the description, not the address", [sent.text.includes("[The loaf]"), sent.text.includes(url(1))], [true, false]);

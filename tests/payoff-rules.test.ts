@@ -4,8 +4,9 @@
  * The buyer pays exactly the payments still to come, with no interest and
  * no fee, and only when every fact agrees: a payment owed, a payment about
  * to be taken, a plan not yet given its end, money given back, a discount,
- * an amount that does not match or a count that does not match the dates
- * all refuse, and a fact that is missing refuses too.
+ * an amount that does not match or a count that does not match the dates,
+ * a paused collection, a schedule or an update waiting on Stripe, and a
+ * customer balance all refuse, and a fact that is missing refuses too.
  */
 import { PAYOFF_QUIET_SECONDS, STRIPE_MAX_CHARGE, payoffQuote, payoffWords, type PayoffFacts } from "@/lib/payoff-rules";
 import { addPeriods } from "@/lib/plans";
@@ -34,6 +35,11 @@ const facts = (extra: Partial<PayoffFacts> = {}): PayoffFacts => ({
   paidInvoices: 2,
   openInvoices: 0,
   givenBack: false,
+  taxBehavior: "exclusive",
+  paused: false,
+  scheduled: false,
+  pendingUpdate: false,
+  customerBalanceCents: 0,
   nowSeconds: at(1) + 10 * DAY,
   ...extra,
 });
@@ -117,6 +123,16 @@ part("Refused when the amount cannot be sure");
   is("Stripe's largest single charge", STRIPE_MAX_CHARGE, 99_999_999);
 }
 
+part("Refused while Stripe could charge something else, or charge it differently");
+{
+  is("collection paused refuses", reason(facts({ paused: true })), "paused");
+  is("a subscription schedule refuses", reason(facts({ scheduled: true })), "scheduled");
+  is("an update waiting on a payment refuses", reason(facts({ pendingUpdate: true })), "update_pending");
+  is("a credit the customer holds refuses", reason(facts({ customerBalanceCents: -500 })), "customer_balance");
+  is("an amount the customer owes on the next invoice refuses", reason(facts({ customerBalanceCents: 500 })), "customer_balance");
+  is("a payment owed still comes first", reason(facts({ paused: true, openInvoices: 1 })), "owing");
+}
+
 part("A missing or malformed fact refuses");
 {
   const bad: Array<[string, Partial<PayoffFacts>]> = [
@@ -143,6 +159,14 @@ part("A missing or malformed fact refuses");
     ["a trial end not whole", { trialEnd: Number.NaN }],
     ["no item", { itemCount: 0 }],
     ["a quantity of zero", { quantity: 0 }],
+    ["a tax behavior not known", { taxBehavior: "unknown" }],
+    ["a tax behavior Stripe may add later", { taxBehavior: "unspecified" as PayoffFacts["taxBehavior"] }],
+    ["no tax behavior", { taxBehavior: undefined as unknown as PayoffFacts["taxBehavior"] }],
+    ["a pause not known", { paused: null }],
+    ["a schedule not known", { scheduled: null }],
+    ["a pending update not known", { pendingUpdate: null }],
+    ["a customer balance not known", { customerBalanceCents: Number.NaN }],
+    ["a customer balance not whole", { customerBalanceCents: 1.5 }],
   ];
   for (const [what, extra] of bad) is(`${what}: refused`, reason(facts(extra)), "unknown");
   is("a status Stripe may add later is not taken as good", reason(facts({ status: "paused" })), "unknown");
@@ -155,14 +179,31 @@ part("The words the buyer confirms");
 {
   const q = payoffQuote(facts());
   if (!q.ok) throw new Error("expected a quote");
-  is("the total, the payments left, and no interest or fee", payoffWords(q, false), "Pay the 2 payments left now: $220 in all, the same as those payments, with no interest or fee. No more payments are taken after this.");
-  is("tax is said when the payments carry it", payoffWords(q, true), "Pay the 2 payments left now: $220 in all, the same as those payments, with no interest or fee, plus any tax, worked out when you pay. No more payments are taken after this.");
-  const one = payoffQuote(facts({ currentPeriodStart: at(2), paidInvoices: 3, latestInvoice: { status: "paid", subtotalCents: 11_000, taxCents: 0, periodStart: at(2) }, nowSeconds: at(2) + 5 * DAY }));
+  // Changed (TB7 pre-review): was payoffWords(q, false) with no tax words; the
+  // words now follow the price's tax behavior, and an exclusive price says tax
+  // may be added even when the latest invoice carried none.
+  is("the total, the payments left, no interest or fee, and tax on top", payoffWords(q), "Pay the 2 payments left now: $220 in all, the same as those payments, with no interest or fee, plus any tax, worked out when you pay. No more payments are taken after this.");
+  const inclusive = payoffQuote(facts({ taxBehavior: "inclusive" }));
+  if (!inclusive.ok) throw new Error("expected a quote");
+  // Changed (TB7 pre-review): was "tax is said when the payments carry it",
+  // payoffWords(q, true) with "plus any tax"; a price with tax included now
+  // says so and never says tax is added on top.
+  is("a price with tax included says so, never tax on top", payoffWords(inclusive), "Pay the 2 payments left now: $220 in all, the same as those payments, with no interest or fee, tax included. No more payments are taken after this.");
+  const inclusiveTaxed = payoffQuote(facts({ taxBehavior: "inclusive", latestInvoice: { status: "paid", subtotalCents: 11_000, taxCents: 1_000, periodStart: at(1) } }));
+  is("tax inside the price is not said as added", inclusiveTaxed.ok ? payoffWords(inclusiveTaxed).includes("plus any tax") : inclusiveTaxed.reason, false);
+  const one = payoffQuote(facts({ taxBehavior: "inclusive", currentPeriodStart: at(2), paidInvoices: 3, latestInvoice: { status: "paid", subtotalCents: 11_000, taxCents: 0, periodStart: at(2) }, nowSeconds: at(2) + 5 * DAY }));
   if (!one.ok) throw new Error("expected a quote");
-  is("one payment left is said as one", payoffWords(one, false), "Pay the last payment now: $110, the same as that payment, with no interest or fee. No more payments are taken after this.");
+  // Changed (TB7 pre-review): was payoffWords(one, false) with no tax words;
+  // the same plan with tax included now ends its clause with "tax included".
+  is("one payment left is said as one", payoffWords(one), "Pay the last payment now: $110, the same as that payment, with no interest or fee, tax included. No more payments are taken after this.");
   const taxed = payoffQuote(facts({ latestInvoice: { status: "paid", subtotalCents: 11_000, taxCents: 990, periodStart: at(1) } }));
-  is("tax on the payments does not change the total quoted before tax", taxed.ok ? [taxed.totalCents, taxed.taxed] : taxed.reason, [22_000, true]);
-  is("no tax on the payments is said as none", q.taxed, false);
+  // Changed (TB7 pre-review): was [22_000, true] for the old taxed flag; the
+  // quote now carries the price's tax behavior instead.
+  is("tax on the payments does not change the total quoted before tax", taxed.ok ? [taxed.totalCents, taxed.taxBehavior] : taxed.reason, [22_000, "exclusive"]);
+  // Changed (TB7 pre-review): was q.taxed false ("no tax on the payments is
+  // said as none"); a zero tax on the latest invoice no longer hides a tax
+  // that may apply to the payoff.
+  is("a latest invoice with no tax still says tax may be added", [q.taxBehavior, payoffWords(q).includes("plus any tax")], ["exclusive", true]);
 }
 
 done();

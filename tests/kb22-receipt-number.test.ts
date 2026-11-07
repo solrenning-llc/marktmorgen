@@ -223,8 +223,9 @@ async function main(): Promise<void> {
   is("the data room names how many expired months a call clears at the most", cleared, 512);
   is("and its script clears no more than that", TAKE_DATA.includes(`#over < ${String(cleared)}`), true);
   is("reading them with one HMGET and removing them with one HDEL, never a command a month", [TAKE_DATA.includes("'HMGET'"), TAKE_DATA.includes("HGET', KEYS[1], '~' .. m")], [true, false]);
-  // Measured with INFO commandstats on a real Redis (review of #3001): 10 commands with no expired month, 12 with any number.
-  is("RECEIPT_NUMBER_COMMANDS covers the most the script can bill", RECEIPT_NUMBER_COMMANDS >= 12, true);
+  // Measured with INFO commandstats on a real Redis (review of #3001): 10 commands with no expired month, 13 with any number
+  // (their read, their removal and the list written back).
+  is("RECEIPT_NUMBER_COMMANDS covers the most the script can bill", RECEIPT_NUMBER_COMMANDS >= 13, true);
 
   part("Its cost: inside the receipt's studio requests");
   const worst = request("step", 40 + RECEIPT_NUMBER_COMMANDS, 200_000 + 2 * RECEIPT_NUMBER_BYTES) + RECEIPT_PDF_MAX_BYTES * ORIGIN_PER_BYTE;

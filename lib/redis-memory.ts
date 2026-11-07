@@ -1682,17 +1682,20 @@ export class MemoryRedis {
     }
     const months = new Set<string>();
     let relist = false;
-    let cleared = 0;
+    // Every month that is over, up to DATA_MONTHS_CLEARED_MOST (lib/store-data.ts) a call, read together and
+    // removed together; a month listed twice comes off once.
+    const over: string[] = [];
     for (const m of (room.get("~") ?? "").split(",").filter(Boolean)) {
-      // At most DATA_MONTHS_CLEARED_MOST (lib/store-data.ts) months that are over a call, the oldest first.
-      if (m < month && cleared < 2) {
-        cleared += 1;
-        const held = Number(room.get(`~${m}`) ?? "0") || 0;
-        if (held > 0) total -= held + 64;
-        room.delete(`~${m}`);
+      if (m < month && (over.includes(m) || over.length < 512)) {
+        if (!over.includes(m)) over.push(m);
         relist = true;
       } else months.add(m);
     }
+    for (const m of over) {
+      const held = Number(room.get(`~${m}`) ?? "0") || 0;
+      if (held > 0) total -= held + 64;
+    }
+    for (const m of over) room.delete(`~${m}`);
     if (total < 0) total = 0;
     const keep = () => {
       if (relist) {

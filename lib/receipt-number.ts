@@ -27,7 +27,7 @@
  * is guessed, and the route makes no PDF (503).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { DATA_MONTHS_CLEARED_MOST, type DataStore, TAKE_DATA, dataKey, dataTakenOf, monthOf } from "@/lib/store-data";
+import { DATA_EXPIRED_COMMANDS, type DataStore, TAKE_DATA, dataKey, dataTakenOf, monthOf } from "@/lib/store-data";
 import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { RECEIPT_REFERENCE } from "@/lib/receipt-pdf";
 
@@ -50,14 +50,14 @@ export const RECEIPT_KEYS_BYTES = dataBytes([`nl:rcpt:n:${"x".repeat(32)}`, `nl:
  * The database commands one numbering is billed, at the most (Upstash bills
  * a script's inner commands beside the EVAL): the EVAL, the read of the
  * sale's field, the count's EXISTS, the room's steps (its total, its list of
- * expiring months and two each for the months over it takes off, at most
- * DATA_MONTHS_CLEARED_MOST a call however long the store sat idle, the list
- * written back, the slot read and written, the total written), the INCR and
- * the HSET, with one to spare: 11 + 2 a month taken off, measured with INFO
+ * expiring months, DATA_EXPIRED_COMMANDS for the months over it takes off
+ * however long the store sat idle, the list written back, the slot read and
+ * written, the total written), the INCR and the HSET, with one to spare: 10
+ * with no month over and 13 with any number of them, measured with INFO
  * commandstats on a real Redis (review of #3001). Held inside
  * RECEIPT_PDF_UNITS studio requests by tests/kb22-receipt-number.test.ts.
  */
-export const RECEIPT_NUMBER_COMMANDS = 12 + 2 * DATA_MONTHS_CLEARED_MOST;
+export const RECEIPT_NUMBER_COMMANDS = 12 + DATA_EXPIRED_COMMANDS;
 
 const STORE_ID = /^[A-Za-z0-9_-]{6,80}$/;
 

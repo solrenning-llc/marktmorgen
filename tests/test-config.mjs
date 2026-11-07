@@ -185,6 +185,11 @@ export function testAliases(file,root,here){
   aliases['@/lib/meta-ads']=join(here,'meta-return-provider-world.ts');
   aliases['next/server']=join(here,'next-server-after-world.ts');
  }
+ if(file==='meet-return-counter-admission.test.ts'){
+  for(const name of ['redis','auth','studio-route','store','integration-pause','contract-resource-window','account-notice','team','meet-providers','metered-limits'])aliases['@/lib/'+name]=join(here,'meet-return-counter-world.ts');
+  aliases['@/lib/meet-connect']=join(here,'meet-return-provider-world.ts');
+  aliases['next/server']=join(here,'next-server-after-world.ts');
+ }
  if(file==='form-response-unavailable.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'form-response-unavailable-world.tsx');
   for(const name of ['studio-route','store-request','form-store','catalog','crm','team','pipeline-access','form-opportunity','form-response-pdf'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');

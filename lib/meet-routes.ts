@@ -18,7 +18,7 @@ import type { MeetProvider } from "@/lib/call-setup";
 import { ACCOUNT_NAMES, beginConsent, finishConsent, takeConsent } from "@/lib/meet-connect";
 import { GOOGLE_HOST_SCOPES, ZOOM_REVIEW_QUERY, cameForZoom, hostSyncOn, isConfigured, isZoomReview, offeredProviders } from "@/lib/meet-providers";
 import { hostId } from "@/lib/host-claims";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, essentialLimitState } from "@/lib/request-guard";
 import { originFrom } from "@/lib/request-origin";
 import { ensureStatsId } from "@/lib/store";
 import { integrationPauseWord } from "@/lib/integration-pause";
@@ -143,9 +143,9 @@ async function finishHostConnect(
 export async function finishConnect(request: NextRequest, provider: MeetProvider): Promise<Response> {
   if (!isConfigured(provider)) return notFound();
   const origin = originFrom(request);
-  if (!(await withinLimit("meet-return", clientAddress(request), RETURNS_PER_TEN_MINUTES, 600))) {
-    return away(origin, "/studio?meet=limited");
-  }
+  const admission = await essentialLimitState("meet-return", clientAddress(request), RETURNS_PER_TEN_MINUTES, 600);
+  if (admission === "unknown") return away(origin, `/studio/calendar?cal=error&p=${provider}`);
+  if (admission === "exceeded") return away(origin, `/studio/calendar?cal=limited&p=${provider}`);
   const cookie = request.cookies.get(SESSION_COOKIE)?.value ?? "";
   const email = await emailForSession(cookie);
   if (!email) return away(origin, "/signin?status=expired");

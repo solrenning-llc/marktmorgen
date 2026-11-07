@@ -124,7 +124,7 @@ function main(): void {
 
   part("Not read just now (Codex S and Claude 5 on #2314)");
   const unread = renderToStaticMarkup(createElement(ListHealthUnread));
-  is("says the counts could not be read just now, with no table and no figure", [unread.includes("could not be read just now"), unread.includes("<table"), /\d/.test(UNREAD) || !unread.includes(UNREAD.replace("'", "&#x27;"))], [true, false, false]);
+  is("says the counts could not be read just now, with no table and no figure", [unread.includes("could not be read just now"), unread.includes("<table"), /\d/.test(UNREAD) || !unread.includes(UNREAD.replaceAll("'", "&#x27;"))], [true, false, false]);
   is("never says nothing was sent, or how far a pause is", /Nothing was sent|would pause it|more bounces/.test(unread), false);
 
   part("Words");

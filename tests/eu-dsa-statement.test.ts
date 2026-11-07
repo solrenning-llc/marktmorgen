@@ -18,7 +18,7 @@
  */
 import { readFileSync } from "node:fs";
 import { sectionId } from "@/components/legal-page";
-import { addProduct, addStoreLink, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, addStoreLink, claimHandle, ensureStatsId, setKit, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport, openReport, takeDown } from "@/lib/takedown";
 import { store as redis } from "./redis-stub";
@@ -58,10 +58,11 @@ const SECTIONS = ["3. Selling through a Marktmorgen store", "4. Acceptable use",
 const DURATION: Record<Taken, string> = {
   product: `How long: until you publish it again. Publishing it again while the notice stands may lead us to suspend your store (Terms, section 3, ${ORIGIN}/terms#selling-through-a-marktmorgen-store).`,
   link: "How long: for good. The link and its file are deleted, so there is nothing to put back.",
+  kit: `How long: until you switch it on again. Switching it on again while the notice stands may lead us to suspend your store (Terms, section 3, ${ORIGIN}/terms#selling-through-a-marktmorgen-store).`,
   store: "How long: until we switch your store back on, for example after your answer below.",
 };
 
-type Taken = "product" | "link" | "store";
+type Taken = "product" | "link" | "kit" | "store";
 async function emailFor(kind: "copyright" | "other", handle: string, taken: Taken = "product"): Promise<string> {
   const owner = `${handle}@example.com`;
   await claimHandle(owner, handle, "DSA Shop", "");
@@ -79,8 +80,10 @@ async function emailFor(kind: "copyright" | "other", handle: string, taken: Take
   const opened = await openReport(token);
   if (!opened?.store) throw new Error("opened");
   sent.length = 0;
+  if (taken === "kit") await setKit(owner, { ...(await storeForEmail(owner))!.kit, on: true });
   const store = (await storeForEmail(owner))!;
-  await takeDown(opened.report, store, taken === "product" ? { type: "product", id: made.product.id } : taken === "link" ? { type: "link", id: store.links.find((l) => l.title === "My mixtape")!.id } : { type: "store", on: true }, ORIGIN);
+  if (taken === "kit" && !store.kit.on) throw new Error("the media kit did not switch on");
+  await takeDown(opened.report, store, taken === "product" ? { type: "product", id: made.product.id } : taken === "link" ? { type: "link", id: store.links.find((l) => l.title === "My mixtape")!.id } : taken === "kit" ? { type: "kit" } : { type: "store", on: true }, ORIGIN);
   const mail = sent.find((m) => [m.to].flat().includes(owner));
   if (!mail) throw new Error("no email to the creator");
   is(`${kind}: the email has no HTML part to check apart from its text`, mail.html ?? null, null);
@@ -123,7 +126,7 @@ async function main(): Promise<void> {
     is("(f) no internal complaint system or out-of-court body promised", /complaint-handling|Article 20|Article 21|out-of-court/i.test(text), false);
   }
   part("Art. 17(3)(a), the duration said for each kind of action (Claude 5 on #2928)");
-  for (const taken of ["link", "store"] as const) {
+  for (const taken of ["link", "kit", "store"] as const) {
     const text = await emailFor("other", `dsa${taken}x`, taken);
     is(`${taken}: the duration says what the code does`, text.includes(DURATION[taken]), true);
     is(`${taken}: no other kind's duration`, (Object.keys(DURATION) as Taken[]).filter((k) => k !== taken).some((k) => text.includes(DURATION[k])), false);

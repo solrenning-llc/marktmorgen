@@ -227,7 +227,7 @@ for (const path of ["app/signin/page.tsx", "app/signin/code/page.tsx"]) {
 // finished, never as an expired link; the notice says "now" once.
 test("the code page: no wait left after an unknown reply says the login could not be finished, in plain words", () => {
   const text = readFileSync("app/signin/code/page.tsx", "utf8");
-  assert.match(text, /if \(!email\) redirect\(status === "unknown" \? "\/signin\?status=login-unknown" : "\/signin\?status=expired"\);/);
+  assert.match(text, /if \(!email\) redirect\(\["unknown", "reset-unknown"\]\.includes\(status\) \? "\/signin\?status=login-unknown" : "\/signin\?status=expired"\);/);
   assert.doesNotMatch(text, /shows then\./);
   assert.match(text, /unknown: "Your code could not be checked just now, and nothing was opened\. Wait a moment, then type the code your app shows now\."/);
 });

@@ -60,7 +60,9 @@ export async function POST(request: NextRequest) {
       return response;
     } catch (error) {
       console.error("letting somebody in without two-step login failed", error);
-      return away(`/signin/code?status=${error instanceof UnknownReplyError ? "unknown" : "wrong"}`);
+      // Not read (CX-123 rule 24): nothing was written and nobody was let in. Said in words of its own, since this
+      // person asked to come in without the app and typed no code (Claude 5 on #2896, LIGHT 3).
+      return away(`/signin/code?status=${error instanceof UnknownReplyError ? "reset-unknown" : "wrong"}`);
     }
   }
   let answer: Awaited<ReturnType<typeof finishSignIn>>;

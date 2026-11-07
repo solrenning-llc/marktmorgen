@@ -15,6 +15,7 @@
 
 import { STRIPE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { DEMO_CONNECTED_ACCOUNT, demoKey } from "@/lib/demo-account";
+import { spendStripeCall } from "@/lib/stripe-call-budget";
 
 /** Local tests may point this at a mock on 127.0.0.1; nothing else is taken. */
 const STRIPE_API = /^http:\/\/127\.0\.0\.1:\d+$/.test(
@@ -107,6 +108,9 @@ export async function onAccount(
   }
   const key = keyFor(account);
   if (!key) throw new Error("Selling is not configured");
+  // One of the calls the work in progress paid for, if it set a ceiling
+  // (lib/stripe-call-budget.ts): past it this throws and nothing is sent.
+  spendStripeCall();
 
   // Given up after STRIPE_TIMEOUT_MS (lib/fetch-timeout.ts) as a network
   // failure is: never a StripeError, so a charge that timed out is "no

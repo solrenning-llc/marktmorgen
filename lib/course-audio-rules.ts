@@ -89,10 +89,12 @@ export const FEED_HEAD_BYTES = 8_192;
  * given back (lib/refunds.ts purchaseRefunded). That covers a one-time
  * purchase (no call, or one for the disputes of a charge marked disputed)
  * and a payment plan's usual first invoice (the invoice, its payments and
- * its one payment). Not covered, asked past it: a plan's first invoice whose
- * payment is disputed (one more), one paid in several payments (up to ten,
- * each with its own disputes call), and an address that bought the same
- * course more than once (each purchase asked).
+ * its one payment). Never asked past it (lib/course-audio.ts holds the walk
+ * to these calls, lib/stripe-call-budget.ts): an address that needs more (a
+ * plan's first invoice whose payment is disputed, one paid in several
+ * payments, each with its own disputes call, the same course bought more
+ * than once) is refused with "try again" until the lesson page's kept answer
+ * covers it, never read further on calls nobody paid for.
  */
 export function accessWork(courses: number, listingBytes: number): AudioWork {
   return {

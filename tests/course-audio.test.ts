@@ -49,6 +49,7 @@ import {
   outlineWork,
 } from "@/lib/course-audio-rules";
 import { courseAudioOn, setCourseAudio } from "@/lib/course-audio";
+import { isStripeCallsSpent, spendStripeCall, withStripeCalls } from "@/lib/stripe-call-budget";
 import { GET as feed } from "@/app/api/store/course/audio/feed/[token]/route";
 import { GET as play } from "@/app/api/store/course/audio/play/[token]/[lesson]/route";
 import { requestsIn } from "@/lib/traffic";
@@ -353,6 +354,23 @@ async function main(): Promise<void> {
   is("and Stripe's answer is kept, as the lesson page keeps it", (await redis.pipeline([["EXISTS", paidKey("dee@example.com")]]))[0], 1);
   is("outside the feed, the same buyer is still read in full (the lesson page is not held)", (await paidCourses(store, "ten@example.com")).has(productId), true);
   await setCourseAudio(COURSE_ID, false, store);
+
+  part("The ceiling on Stripe calls itself (lib/stripe-call-budget.ts)");
+  is("outside a ceiling, nothing is counted or refused", (() => { spendStripeCall(); spendStripeCall(); return true; })(), true);
+  const sent: number[] = [];
+  const two = await withStripeCalls(2, async () => {
+    await Promise.all([0, 1, 2, 3].map(async (i) => { try { spendStripeCall(); sent.push(i); } catch { /* refused */ } }));
+    return "read";
+  });
+  is("calls sent together never overdraw, and the refusal is told even when the work caught it", [sent.length, two.ok], [2, false]);
+  is("within the ceiling, the work's answer", await withStripeCalls(2, async () => { spendStripeCall(); return "read"; }), { ok: true, value: "read" });
+  is("no calls at all: one call is refused", (await withStripeCalls(0, async () => { spendStripeCall(); return "read"; })).ok, false);
+  is("a count that is not a whole number of calls refuses before the work runs", [(await withStripeCalls(1.5, async () => "read")).ok, (await withStripeCalls(-1, async () => "read")).ok], [false, false]);
+  let left: Promise<void> = Promise.resolve();
+  await withStripeCalls(5, async () => { left = new Promise((r) => setTimeout(r, 5)).then(() => spendStripeCall()); return null; });
+  is("something the work left running cannot spend after it ended", await left.then(() => "sent", (e: unknown) => (isStripeCallsSpent(e) ? "refused" : "other")), "refused");
+  const nested = await withStripeCalls(1, async () => withStripeCalls(5, async () => { spendStripeCall(); spendStripeCall(); return "read"; }));
+  is("a ceiling inside another spends from it and adds none", [nested.ok, nested.ok && nested.value.ok], [false, false]);
 
   part("What a student's day costs, in the store's public requests");
   const perBuild = 1 + outlineUnits + accessUnits;

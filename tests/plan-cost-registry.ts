@@ -1100,7 +1100,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
       // A course's audio feed and each lesson's audio pay each step before what it reads (298 [H5-1]; COURSE_AUDIO_UNIT_PARTS).
-      { file: "lib/course-audio.ts", names: ["takeBuyerRead(store, 1)", "takeBuyerRead(store, audioUnits(outlineWork(measured, courses.length)))", "takeBuyerRead(store, audioUnits(accessWork(courses.length,", "[\"GETRANGE\", outlineKey(courseId), 0, measured - 1]", "withinLimit(\"course-audio-play\""] },
+      { file: "lib/course-audio.ts", names: ["takeBuyerRead(store, 1)", "takeBuyerRead(store, audioUnits(outlineWork(measured, courses.length)))", "takeBuyerRead(store, audioUnits(accessWork(courses.length,", "withStripeCalls(accessWork(courses.length, listed).stripe", "[\"GETRANGE\", outlineKey(courseId), 0, measured - 1]", "withinLimit(\"course-audio-play\""] },
       { file: "lib/course-audio-rules.ts", names: ["AUDIO_UNIT_COMMANDS", "AUDIO_UNIT_BYTES", "AUDIO_UNIT_SENT", "AUDIO_UNIT_STRIPE", "COURSE_AUDIO_PLAYS_A_DAY"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },

@@ -60,6 +60,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
+import { isStripeCallsSpent } from "@/lib/stripe-call-budget";
 
 type ChargeLike = {
   id?: unknown;
@@ -202,6 +203,9 @@ export async function keptUnlessLost(account: string, payment: unknown): Promise
   try {
     return await disputeLost(account, payment);
   } catch (error) {
+    // A ceiling on Stripe calls met (lib/stripe-call-budget.ts) is not Stripe failing: the answer is
+    // cut short, so nothing reads it as "not lost" and nothing keeps it.
+    if (isStripeCallsSpent(error)) throw error;
     console.error("reading a payment's dispute failed", error);
     return false;
   }
@@ -434,6 +438,7 @@ async function planRefundedInFull(account: string, session: SessionLike): Promis
     );
     return checked.every(Boolean);
   } catch (error) {
+    if (isStripeCallsSpent(error)) throw error;
     console.error("reading a payment plan's first payment failed", error);
     return false;
   }

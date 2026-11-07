@@ -22,6 +22,7 @@ import { passedQuizzes } from "@/lib/quiz";
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { withinLimit } from "@/lib/request-guard";
 import { feedReadAllowed, readFeedToken } from "@/lib/podcast-access";
+import { withStripeCalls } from "@/lib/stripe-call-budget";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
 import { type AudioLesson, COURSE_AUDIO_PLAYS_A_DAY, accessWork, audioLessons, audioUnits, hasLessonAudio, outlineWork } from "@/lib/course-audio-rules";
 
@@ -81,7 +82,12 @@ export type ListenRefused = { ok: false; status: 404 | 410 | 429 | 503; text: st
  *      paidCourses, the lesson page's own answer: a student taken off the
  *      course closes it at once; a Stripe refund or an ended membership
  *      within ten minutes, while Stripe's answer is reused) and
- *      the quizzes it passed.
+ *      the quizzes it passed. Stripe is asked at most the calls this step
+ *      paid for (accessWork's `stripe`, held by lib/stripe-call-budget.ts):
+ *      an address whose purchases need more to be read (a plan's first
+ *      invoice paid in several payments, a course bought more than once) is
+ *      refused with "try again", never let in or kept out on a guess, and
+ *      the answer cut short is not kept for the lesson page.
  *
  * Every request is counted in the asking connection's share of the day too,
  * like every buyer read: only the affiliate book and a community archive's
@@ -127,12 +133,18 @@ export async function openCourseAudio(token: string, door: "feed" | "play", less
     if (!sizes) return later;
 
     // 3. Whether this address may listen, and what it passed.
-    if (!(await takeBuyerRead(store, audioUnits(accessWork(courses.length, sizes.reduce((a, b) => a + b, 0)))))) return resting;
+    const listed = sizes.reduce((a, b) => a + b, 0);
+    if (!(await takeBuyerRead(store, audioUnits(accessWork(courses.length, listed))))) return resting;
     const own = normaliseEmail(grant.e) === normaliseEmail(store.email);
-    const start = own ? Math.floor(now / 1000) - 400 * 86_400 : (await paidCourses(store, grant.e)).get(product.id);
-    if (start === undefined || !Number.isFinite(start)) return { ok: true, store, product, lessons: null };
-    const passed = own ? new Set<string>() : await passedQuizzes(course.id, emailKey(grant.e));
-    return { ok: true, store, product, lessons: audioLessons(course, { start, owner: own, passed }, now / 1000) };
+    // Stripe is asked no more than the calls just paid for: past them the walk stops and the door refuses.
+    const held = await withStripeCalls(accessWork(courses.length, listed).stripe, async () => {
+      const start = own ? Math.floor(now / 1000) - 400 * 86_400 : (await paidCourses(store, grant.e)).get(product.id);
+      if (start === undefined || !Number.isFinite(start)) return null;
+      const passed = own ? new Set<string>() : await passedQuizzes(course.id, emailKey(grant.e));
+      return audioLessons(course, { start, owner: own, passed }, now / 1000);
+    });
+    if (!held.ok) return later;
+    return { ok: true, store, product, lessons: held.value };
   } catch (error) {
     console.error("opening a course's audio feed failed", error);
     return later;

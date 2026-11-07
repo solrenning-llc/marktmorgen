@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     await claimHandle("nx-calendar@example.com", "nxcalendar", "Calendar fixture", "");
     await ensureStatsId("nx-calendar@example.com");
     const shop = (await storeForEmail("nx-calendar@example.com"))!;
-    await original([["SET", `nl:cal:cfg:${shop.statsId}`, JSON.stringify({ handle: shop.handle, feeds: [{ id: feed, url: "https://calendar.example.com/feed.ics" }], token: null, tokenAt: "" })]]);
+    await original([["SET", `nl:cal:cfg:${shop.statsId}`, JSON.stringify({ handle: shop.handle, feeds: [{ id: feed, url: "https://calendar.nx-fixture.dev/feed.ics" }], token: null, tokenAt: "" })]]);
     tries = 0;
     return shop;
   };

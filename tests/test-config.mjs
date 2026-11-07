@@ -1,6 +1,36 @@
+import {existsSync,readFileSync} from 'node:fs';
 import {join} from 'node:path';
-/** One wiring source for the repository runner and local parallel verification. */
+/**
+ * One wiring source for the repository runner and local parallel verification.
+ * A new test that needs aliases declares them in its own file,
+ * tests/aliases/<test file>.json, never by adding a line to the list below:
+ * every pull request appended one at the same place, and two of them conflicted
+ * (Claude 1, C1-20261107-1232-TODOS-3). The file is one object from alias to
+ * target, read after this list, so it may also replace an entry of it:
+ * a target is a path under tests/, or under the repository root when it starts
+ * with "@/", and null takes a default of the list away for that test only.
+ * A target that does not exist, or a file that does not read so, fails the test.
+ */
 export function testAliases(file,root,here){
+ return withOwnAliases(centralAliases(file,root,here),file,root,here);
+}
+function withOwnAliases(aliases,file,root,here){
+ const path=join(here,'aliases',file+'.json');
+ if(!existsSync(path))return aliases;
+ let own;
+ try{own=JSON.parse(readFileSync(path,'utf8'));}catch(error){throw new Error(`tests/aliases/${file}.json does not parse: ${error.message}`);}
+ if(!own||typeof own!=='object'||Array.isArray(own))throw new Error(`tests/aliases/${file}.json is not one object from alias to target`);
+ for(const [name,target] of Object.entries(own)){
+  if(target===null){delete aliases[name];continue;}
+  if(typeof target!=='string'||!target)throw new Error(`tests/aliases/${file}.json: the target of ${name} is not a path or null`);
+  const resolved=target.startsWith('@/')?join(root,target.slice(2)):join(here,target);
+  if(!existsSync(resolved))throw new Error(`tests/aliases/${file}.json: the target of ${name}, ${target}, does not exist`);
+  aliases[name]=resolved;
+ }
+ return aliases;
+}
+/** The list kept from before tests/aliases: add nothing here. */
+function centralAliases(file,root,here){
  const aliases={'@':root,'@/lib/redis':['range-traffic-coverage.test.ts','stats-traffic-coverage.test.ts'].includes(file)?join(root,'lib/redis.ts'):join(here,'redis-stub.ts')};
  if(file==='path-weekly-summary-page.test.ts'){
   for(const name of ['ai','path-wording-source','path-scripts','path-growth-facts','path-board','opening','store-checkout','stripe-connect','path-campaign','studio-route','store-allowance','store-allowance-rules','path-plan','larger-plan','path'])aliases['@/lib/'+name]=join(here,'path-weekly-summary-page-world.tsx');

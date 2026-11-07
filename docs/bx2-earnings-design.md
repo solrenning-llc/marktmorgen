@@ -72,7 +72,10 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
   Only kinds a reading truly cannot hold may be said left out (`MAY_LEAVE_OUT`, pre-review of
   #2941 at 925ae7d9ec): Stripe disputes and money given back, PayPal disputes. Sales, renewals
   and refunds said left out make the source unknown: never a total "after refunds" without them,
-  never a confirmed zero.
+  never a confirmed zero. Disputes said left out take money given back with them: a list of money
+  given back beside them (even an empty one) makes the source unknown, because the money back
+  would be added without the debit it gives back (Claude 2's focal return on #2941 at b9fa7aa7:
+  a sale of 1500, its dispute not read and the 1500 given back read made the year 3000, not 1500).
 - **561 [NE1] (no earnings claims), respected**: no "best month", no growth percentage, no
   projection, no goal celebration, no comparison with other creators, no badge, level or status
   by revenue. The rule's output has no such field (held by a test). The page carries the NE1
@@ -95,8 +98,9 @@ One studio page, "Earnings", for whoever may see the numbers (`can(role, "stats"
 The totals page (app/studio/totals/page.tsx) shows only 7/30/90-day windows from the kept
 `sales` reading; it never reads Stripe itself past `countStudio(store, null, STUDIO_PAGE_UNITS)`.
 No existing reading reaches twelve months, so the screen needs one reading of its own over
-365 days: the same functions with the same page caps, a different `since`
-(`readingSince` in the rule: the first instant any time zone could start the oldest month).
+365 days: the same Stripe lists and Redis keys with the same page caps, read by functions of its
+own (below), from a different `since` (`readingSince` in the rule: the first instant any time
+zone could start the oldest month).
 
 Exactness: every Stripe page goes through the page check of this repository (explicit
 `has_more`, distinct ids, invalid page = failed reading) and every Redis reply through
@@ -179,13 +183,25 @@ source and currency only).
    `tests/bx2-earnings.test.ts` (written first): months in a time zone, sources, currencies,
    refunds and disputes subtracted, per-month completeness, invalid or duplicate records fail
    closed, confirmed zero apart from unknown, no status fields.
-2. **The year reading**: `readEarningsYear(store, now)` in lib/stats.ts reusing
-   `readPaidSales`, `readRenewals`, `readRefunds`, `readDisputes` and the PayPal readers with
-   their page caps, returning each list's `reachedBack`; renewals dated by payment time; it
-   says `reinstated` not read (money given back has no reading of its own yet); kept as
-   a fourth reading kind through `keptReading`, heavy, counted first. Tests: the read never
-   exceeds `SALES_READ_SHAPE` (stub counting pages and commands), unknown read is unknown,
-   registry line updated for the fourth kind.
+2. **The year reading**: `readEarningsYear(store, now)`, with readers of its own, exact, list
+   by list, each read newest first so a cut loses only the oldest records and `reachedBack`
+   proves the months after it, as the table and "Exactness" above say; none of the existing
+   readers is taken as it is. Stripe: the checkout-session and payment-intent lists that
+   `readPaidSales` reads, with the same page caps, but never `readPaidSales` itself (it adds the
+   store's PayPal sales, which would be counted twice, once as Stripe); every paid invoice of the
+   store's memberships and payment plans but `subscription_create`, dated by payment (not
+   `readRenewals`, which keeps only `subscription_cycle`); the refunds; and the disputes that took
+   money, from their own balance transactions (never `DISPUTE_TAKES`), or, while that shape is not
+   confirmed, disputes said not read with the money given back. PayPal: the same keys as
+   `readPayPalSales` and `readPayPalRefundsWithCoverage`, read newest first. In both: a Stripe
+   row or a PayPal record that cannot be read, a page or reply out of shape, or an amount,
+   currency or time missing makes its list unread, never a lower complete number and never 0,
+   `usd` or now. Each record carries its provider's id (`stripe:…`, `paypal:…`). It says
+   `reinstated` not read (money given back has no reading of its own yet) and PayPal its disputes
+   (the rule says PayPal's partial refunds are not recorded, `PARTLY_READ`); kept as a fourth
+   reading kind through `keptReading`, heavy, counted first. Tests: the read never exceeds
+   `SALES_READ_SHAPE` (stub counting pages and commands), unknown read is unknown, registry line
+   updated for the fourth kind.
 3. **Entered by you**: lib/earnings-entries.ts, a capped per-store ledger with audited
    corrections (date, currency, amount, label, who and when), a studio request per save,
    lib/redis-reply.ts on every reply; the storage line in the registry; privacy and terms text

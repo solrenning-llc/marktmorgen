@@ -73,7 +73,11 @@ try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block" });
   const page = await context.newPage();
   page.on("pageerror", (error) => errors.push(String(error)));
-  await page.route("**/*", (route) => {
+  // Only http and https are routed: WebKit sends a blob: URL through request interception too (playwright-core wkPage
+  // _onRequestWillBeSent skips only data: and about:), so a route on every URL answered the picture's own blob: load
+  // (its origin is the page's) with a 404, image.decode() failed in shrink and the send ended before any request
+  // (WebKit job 128304280508 on #2926; the same cause as tests/e2e/shrink-tone.mjs on #2790). A blob: URL never leaves the page.
+  await page.route((url) => url.protocol === "http:" || url.protocol === "https:", (route) => {
     const url = new URL(route.request().url());
     if (url.origin !== "http://localhost:41904") return route.abort();
     // A picture's send is held here, never answered, so it stays "being sent"; nothing is uploaded.

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
@@ -33,8 +34,13 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isSenderConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:monthly:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+  // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+  // own value, so a run never deletes another run's lock.
+  const lock = claimValue();
+  const got = await claimMark("nl:monthly:lock", 120, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
 
   const started = Date.now();
   const out = { looked: 0, sent: 0, posted: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
@@ -94,6 +100,6 @@ export async function GET(request: NextRequest) {
     console.error("monthly emails failed", error);
     return Response.json({ ok: false, error: "failed", ...out }, { status: 500 });
   } finally {
-    await redisPipeline([["DEL", "nl:monthly:lock"]]).catch(() => undefined);
+    await releaseMark("nl:monthly:lock", lock);
   }
 }

@@ -348,6 +348,11 @@ export async function claimWeek(handle: string, now = Date.now()): Promise<boole
   return ok !== null;
 }
 
+/** Lets a week's claim go, when the numbers could not be read, so a later run that week tries again (as releaseMonth). */
+export async function releaseWeek(handle: string, now = Date.now()): Promise<void> {
+  if (isRedisConfigured()) await redisPipeline([["DEL", sentKey(weekOf(now), handle)]]);
+}
+
 const CHANNEL_WORDS: Record<string, string> = {
   direct: "direct or unknown",
   instagram: "Instagram",

@@ -11,8 +11,9 @@
  *     that is not exactly a list of { handle, why } is refused whole, with the
  *     first problem named in plain words (problemWords); it is never cut or
  *     half-read to fit. The store itself, the same store twice, an address no
- *     store can have, and a line with a link, an email address, a phone
- *     number, markup or a control character are refused.
+ *     store can have, and a line with a link, a domain, an email address, a
+ *     phone number, markup, a control character or an invisible format
+ *     character are refused, read after NFKC normalization.
  *   - A recommendation links only to the other store's own page
  *     (recommendationHref): the address and nothing else. It never carries the
  *     reader's email, a referral code or a tracking parameter, and it never
@@ -61,27 +62,43 @@ function normalised(raw: string): string {
   return raw.trim().replace(/^@+/, "").toLowerCase();
 }
 
-/** A link, an email address or a phone number: the button already goes to the store. */
+/**
+ * A link, an email address or a domain: the button already goes to the store.
+ * Read on the line normalized with NFKC, so full-width letters, a full-width
+ * "@" and a full-width dot count as the plain ones; the ideographic full stop
+ * (U+3002), which an address bar reads as a dot, counts as a dot too. A domain
+ * is any label, a dot and an ending of two letters or more, with no list of
+ * endings, so "shop.de" and "evil.tv" are refused. A dot followed by a space,
+ * a digit or a single letter is not one ("3.5", "9 a.m.", "e.g.", "U.S."),
+ * and ".js", which is no ending at all, is let through so "Node.js" reads as
+ * the word it is.
+ */
 const CONTACT = [
   /\bhttps?:\/\//i,
-  /\bwww\./i,
-  /[^\s@]+@[^\s@]+\.[a-z]{2,}/i,
-  /\b[a-z0-9-]+\.(?:com|net|org|io|co|app|me|link|ly|shop|store|xyz|info|biz)\b/i,
+  /\bwww[.\u3002]/i,
+  /[^\s@]+@[^\s@]+[.\u3002][a-z]{2,}/i,
+  /(?:^|[^\p{L}\p{N}_-])[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?[.\u3002](?!js(?![\p{L}\p{N}]))\p{L}{2,}(?![\p{L}\p{N}])/iu,
 ];
 
 /** A run of digits, spaces and dashes long enough to be a phone number: nine digits or more, so a span of years is not one. */
 const hasPhone = (text: string) => (text.match(/\+?\d[\d\s().-]{7,}\d/g) ?? []).some((run) => run.replace(/\D/g, "").length >= 9);
 
-/** Control characters, which no line of words needs. */
-const CONTROL = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/;
+/**
+ * Control characters and invisible format characters (\p{Cf}: zero-width
+ * spaces and joiners, the soft hyphen, U+180E, direction marks and overrides,
+ * the byte-order mark, tag characters), which no line of words needs.
+ */
+const CONTROL = /[\p{Cc}\p{Cf}]/u;
 
 function lineProblem(raw: string): RecommendationProblem | null {
   if (CONTROL.test(raw.replace(/[\n\r\t]/g, " "))) return "why-unsafe";
   const why = raw.replace(/\s+/g, " ").trim();
   if (!why) return "why-empty";
   if ([...why].length > MAX_WHY) return "why-long";
-  if (hasUnsafeText(why) || /[<>]/.test(why)) return "why-unsafe";
-  if (CONTACT.some((pattern) => pattern.test(why)) || hasPhone(why)) return "why-contact";
+  // Checked as a browser or a reader would see it: full-width forms become the plain ones.
+  const plain = why.normalize("NFKC");
+  if (hasUnsafeText(plain) || /[<>]/.test(plain)) return "why-unsafe";
+  if (CONTACT.some((pattern) => pattern.test(plain)) || hasPhone(plain)) return "why-contact";
   return null;
 }
 

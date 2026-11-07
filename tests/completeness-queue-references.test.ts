@@ -7,9 +7,11 @@
  * "linha 6020", which had already moved to 5992, 5984 and 6033. Checked:
  * no complement cites a line number of the queue itself (a line number of
  * another file, named right before it, stays allowed), and every line a
- * complement quotes as "a linha '…'" or "da linha '…'" exists in the queue.
+ * complement quotes as "a linha '…'" or "da linha '…'" exists in the queue;
+ * and each "complemento" kept in docs/completeness-audit/*.json is the same
+ * text as the queue's, so a fix to one is not lost in the other.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 
 const queue = readFileSync("docs/codex-queue.md", "utf8");
@@ -46,5 +48,20 @@ part("Every queue line a complement quotes exists");
 const quoted = complements.flatMap(l => [...l.matchAll(/\b(?:a|da|na) linha '([^']+)'/g)].map(m => m[1]));
 is("each quoted line is found once in the queue, outside the complements",
   quoted.filter(q => rest.split(q).length !== 2), []);
+
+part("Each audit file's complement is the queue's text");
+const audit = "docs/completeness-audit";
+const mirrored: string[] = [];
+const walk = (o: unknown): void => {
+  if (Array.isArray(o)) o.forEach(walk);
+  else if (o && typeof o === "object") for (const [k, v] of Object.entries(o)) {
+    if (k === "complemento" && typeof v === "string" && v.startsWith("Complemento de completude (")) mirrored.push(v);
+    else walk(v);
+  }
+};
+for (const f of readdirSync(audit).filter(f => f.endsWith(".json"))) walk(JSON.parse(readFileSync(`${audit}/${f}`, "utf8")));
+is("the audit files keep complements", mirrored.length > 0, true);
+is("each one is a complement line of the queue, word for word",
+  mirrored.filter(c => !complements.some(l => l.replace(/^- /, "") === c)).map(c => c.slice(0, 120)), []);
 
 done();

@@ -76,15 +76,15 @@ export class PlatformError extends Error {
   /** "key": the key was refused. "target": the audience is gone. "contact": this person cannot be added. */
   readonly kind: "key" | "target" | "contact" | "limit" | "server" | "network";
 
-  constructor(kind: PlatformError["kind"], status: number, message: string) {
+  constructor(kind: PlatformError["kind"], status: number, message: string, private readonly mayRetry = true) {
     super(message);
     this.kind = kind;
     this.status = status;
   }
 
-  /** Worth another try: everything except a person the platform will not take. */
+  /** A contact refusal or confirmed picker limitation cannot be fixed by an automatic retry. */
   get retry(): boolean {
-    return this.kind !== "contact";
+    return this.kind !== "contact" && this.mayRetry;
   }
 }
 
@@ -248,7 +248,16 @@ export async function listTargets(provider: EmailProvider, key: string, deadline
       : provider === "beehiiv"
         ? data.page === 1 && (data.total_pages === 1 || (rows.length === 0 && data.total_pages === 0)) && Number.isSafeInteger(data.total_results) && data.total_results === rows.length
         : links.prev === null && links.next === null && meta.current_page === 1 && meta.last_page === 1 && Number.isSafeInteger(meta.total) && meta.total === rows.length;
-  if (!complete || rows.length > MAX_TARGETS) throw unconfirmed();
+  // A full first page with consistent, explicit continuation describes an
+  // account our picker cannot list completely; it is not a provider failure.
+  const larger = rows.length === MAX_TARGETS && (provider === "mailchimp"
+    ? Number.isSafeInteger(data.total_items) && (data.total_items as number) > MAX_TARGETS
+    : provider === "kit"
+      ? pagination.has_previous_page === false && pagination.has_next_page === true
+      : provider === "beehiiv"
+        ? data.page === 1 && Number.isSafeInteger(data.total_pages) && (data.total_pages as number) > 1 && Number.isSafeInteger(data.total_results) && (data.total_results as number) > MAX_TARGETS
+        : links.prev === null && typeof links.next === "string" && links.next.length > 0 && meta.current_page === 1 && Number.isSafeInteger(meta.last_page) && (meta.last_page as number) > 1 && Number.isSafeInteger(meta.total) && (meta.total as number) > MAX_TARGETS);
+  if ((!complete && !larger) || rows.length > MAX_TARGETS) throw unconfirmed();
   const targets: Target[] = [];
   for (const row of rows) {
     if (!row || typeof row !== "object" || Array.isArray(row)) throw unconfirmed();
@@ -256,8 +265,9 @@ export async function listTargets(provider: EmailProvider, key: string, deadline
     const id = typeof value.id === "number" && Number.isSafeInteger(value.id) ? String(value.id) : typeof value.id === "string" ? value.id : "";
     if (!TARGET_ID.test(id)) throw unconfirmed();
     const name = typeof value.name === "string" ? value.name.replace(/\s+/g, " ").trim().slice(0, 100) : "";
-    if (targets.length < MAX_TARGETS) targets.push({ id, name: name || id });
+    targets.push({ id, name: name || id });
   }
+  if (larger) throw new PlatformError("server", answer.status, `Your ${PROVIDER_NAMES[provider]} account has more destinations than we can list on one page. Nothing was connected or changed. Use an account with fewer destinations.`, false);
   return targets;
 }
 

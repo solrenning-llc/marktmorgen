@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   const allTitles = new Map(store.catalog.items.map((item, n) => [item.id, titles[n]]));
   const hrefOf = (id: string) => `/@kilnworks/p/${productSegment({ id, title: allTitles.get(id) ?? "" })}"`;
   const shown = expected.filter((id) => drawn.includes(hrefOf(id)));
-  is("the moved product is drawn first", shown[0], last);
+  is("the moved product is drawn (its place is held by the order check below)", shown[0], last);
   is("the draft is not drawn", drawn.includes(hrefOf(drafted)), false);
   is("the drawn products follow the creator's order", shown.map((id) => drawn.indexOf(hrefOf(id))).every((at, i, all) => i === 0 || at > all[i - 1]), true);
   is("every match but the draft is drawn", shown.length, expected.length);

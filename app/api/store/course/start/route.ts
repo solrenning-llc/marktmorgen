@@ -13,7 +13,7 @@ import {
   sendCourseLink,
   touchStudent,
 } from "@/lib/learn";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinEssentialLimit } from "@/lib/request-guard";
 import { courseToStart } from "@/lib/order-courses";
 
 /**
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
   // forms that send one: per connection, and per order.
   if (
     !(await withinStore("course-start", `${clientAddress(request)}|${store.handle}`, 10, 3600, store, "buyer")) ||
-    !(await withinLimit("course-start-order", sessionId.slice(0, 220), 5, 3600))
+    !(await withinEssentialLimit("course-start-order", sessionId.slice(0, 220), 5, 3600))
   ) {
     return away(`/@${store.handle}`);
   }

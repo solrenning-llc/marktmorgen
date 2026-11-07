@@ -52,9 +52,13 @@ export const EMAIL_FONTS: Record<FontId, { head: string; body: string }> = {
   bold: { head: "'Bricolage Grotesque','Arial Black','Helvetica Neue',Arial,sans-serif", body: SANS },
 };
 
-/** One place the creator's color is shown differently in emails than they picked it. */
+/**
+ * One place the creator's color is shown differently in emails than on their
+ * store page. Only links can be: an email's button is the store page's own
+ * button, which the studio already explains.
+ */
 export type EmailColourNote = {
-  role: "links" | "buttons";
+  role: "links";
   picked: string;
   sent: string;
   direction: "darker" | "lighter";
@@ -112,9 +116,9 @@ export function emailTheme(look: LookPaint | undefined, store: { name: string; p
   // A button is the store page's own button, whose words already read at 7:1 on it.
   const button = { fill: c.accent, ink: c.onAccent };
 
+  // The button is exactly the store page's, so only the links can differ from it.
   const notes: EmailColourNote[] = [];
   if (link !== picked) notes.push({ role: "links", picked, sent: link, direction: direction(picked, link) });
-  if (button.fill !== picked) notes.push({ role: "buttons", picked, sent: button.fill, direction: direction(picked, button.fill) });
 
   const fonts = EMAIL_FONTS[paint.font ?? "modern"] ?? EMAIL_FONTS.modern;
   const name = store.name.trim() || "Store";
@@ -143,9 +147,7 @@ export function emailColourNotes(look: LookPaint): EmailColourNote[] {
 
 /** The sentence the studio shows under the color, or null when emails use the color as picked. */
 export function emailColourNotice(look: LookPaint): string | null {
-  const notes = emailColourNotes(look);
-  if (notes.length === 0) return null;
-  const parts = notes.map((n) => `${n.direction} on ${n.role} (${n.sent})`);
-  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
-  return `In your emails, your color (${notes[0].picked}) is a little ${list}, so every word can be read. This changes only your emails, never your store page.`;
+  const links = emailColourNotes(look).find((n) => n.role === "links");
+  if (!links) return null;
+  return `In your emails, links use a ${links.direction} shade of your color (${links.sent} instead of ${links.picked}), so they can be read. Buttons use the same shade as your store page, and your store page does not change.`;
 }

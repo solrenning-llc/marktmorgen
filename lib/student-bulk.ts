@@ -18,12 +18,12 @@
  * those of its writes and its read back before the first write
  * (accessChangeUnits), each at its most, in commands and in bytes.
  */
-import { STUDENT_ROW_BYTES } from "@/lib/api-read-rules";
+import { CONTACT_ROW_BYTES, STUDENT_ROW_BYTES } from "@/lib/api-read-rules";
 import { readAddresses, leadsKey, parseContact } from "@/lib/contacts";
-import { type Course } from "@/lib/course";
-import { emailKey, setBlocked, studentPage } from "@/lib/learn";
-import { redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { type Course, lessonsInOrder } from "@/lib/course";
+import { emailKey, setBlocked, studentTimes } from "@/lib/learn";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import {
   ACCESS_READ_BATCH,
@@ -35,8 +35,7 @@ import {
   MAX_STUDENT_ACTION,
   STUDENTS_PER_PAGE,
   type StudentLine,
-  labelUnits,
-  listUnits,
+  readStudentCursor,
 } from "@/lib/student-bulk-rules";
 
 /**
@@ -47,6 +46,8 @@ import {
  */
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
 const blockedKey = (courseId: string) => `nl:course:${courseId}:blocked`;
+/** What a student marked done, filed under their hashed address (lib/learn.ts, doneKey). */
+const doneKey = (courseId: string, personKey: string) => `nl:course:${courseId}:done:${personKey}`;
 
 /** What one studio request pays for in the database (tests/plan-cost-registry.ts, UNIT_COST.studio): twenty commands and fifty kilobytes. */
 export const STUDIO_UNIT_COMMANDS = 20;
@@ -100,12 +101,61 @@ export function accessChangeUnits(n: number): number {
   return studioUnits({ commands: write.commands + back.commands, bytes: write.bytes + back.bytes });
 }
 
+/** A student's address as sent as a field: 254 characters, three bytes each, quoted, with room. */
+const ADDRESS_BYTES = 1_024;
+/** A scan's cursor as it comes back, with its framing. */
+const CURSOR_BYTES = 32;
+
+/** What a page of the studio's list needs known before its cost is: the lessons the course has now, and whether labels are read. */
+export type StudentsPageShape = { lessonIds: readonly string[]; labelled: boolean };
+
 /**
- * One page of a course's students, with each one's labels when `withLabels`:
- * what the page shows (lib/learn.ts, studentPage, read in its exact shape).
- * `charge` is asked for the studio requests the page's rows and labels cost
- * once their number is known and before they are read; when it says no, or
- * the page cannot be read, null, with nothing more read.
+ * What one page of the studio's list of a course's students does through the
+ * database at its most, when the scan answers `scanned` students and the page
+ * shows `shown` of them:
+ *   the scan and the count of students (HSCAN, HLEN), each student's row at
+ *     its largest (STUDENT_ROW_BYTES) with their hashed address;
+ *   whether each shown student was taken off, in one command (SMISMEMBER);
+ *   for each shown student, which of the course's lessons now they marked
+ *     done (SMISMEMBER, each lesson id sent and a flag back): bounded by the
+ *     lessons the course has, never by what was once marked;
+ *   with labels, each shown student's contact at its largest (CONTACT_ROW_BYTES).
+ */
+export function studentsPageWork(scanned: number, shown: number, shape: StudentsPageShape): DbWork {
+  const rows = people(scanned);
+  const page = Math.min(people(shown), rows);
+  const lessonBytes = shape.lessonIds.reduce((sum, id) => sum + Buffer.byteLength(id, "utf8") + NUMBER_BYTES, 0);
+  const scan = { commands: 2, bytes: 2 * KEY_BYTES + CURSOR_BYTES + NUMBER_BYTES + rows * (PERSON_KEY_BYTES + STUDENT_ROW_BYTES) };
+  if (page === 0) return scan;
+  const done = shape.lessonIds.length ? { commands: page, bytes: page * (KEY_BYTES + lessonBytes) } : { commands: 0, bytes: 0 };
+  const labels = shape.labelled ? { commands: 1, bytes: KEY_BYTES + page * (ADDRESS_BYTES + CONTACT_ROW_BYTES) } : { commands: 0, bytes: 0 };
+  return {
+    commands: scan.commands + 1 + done.commands + labels.commands,
+    bytes: scan.bytes + KEY_BYTES + page * (PERSON_KEY_BYTES + NUMBER_BYTES) + done.bytes + labels.bytes,
+  };
+}
+
+/** Studio requests taken before a page of the studio's list is first read: a full page scanned and shown, at its most. */
+export function studentsPageUnits(shape: StudentsPageShape): number {
+  return studioUnits(studentsPageWork(STUDENTS_PER_PAGE, STUDENTS_PER_PAGE, shape));
+}
+
+/**
+ * One page of a course's students for the studio, with each one's labels
+ * when `withLabels` (and the store has a list): at most STUDENTS_PER_PAGE, in
+ * the order of their hashed addresses within each scan.
+ *
+ * What the page costs at its most (studentsPageUnits) is asked of `charge`
+ * before anything is read; when it says no, null, with nothing read. A scan's
+ * COUNT is only a hint, so a scan can answer more students than a page shows
+ * (a small course answers all of them at once): what that answer took past a
+ * full page is asked for next, before anything else is read, and refused, the
+ * page is null. Only the students shown have anything more read, and the
+ * rest of a large answer is the next page (readStudentCursor).
+ *
+ * Every answer is read in its exact shape (CX-123 rule 24): a count, a row,
+ * a flag or a contact of another shape is never read as none; the page, or
+ * that student's labels, is unknown instead.
  */
 export async function studentList(
   store: Store,
@@ -114,18 +164,82 @@ export async function studentList(
   charge: (units: number) => Promise<boolean>,
   withLabels: boolean,
 ): Promise<{ lines: StudentLine[]; total: number; next: string } | null> {
-  const labelled = withLabels && Boolean(store.listId);
-  const page = await studentPage(course, cursor, STUDENTS_PER_PAGE, async (rows) => charge(listUnits(rows) + (labelled ? labelUnits(rows) : 0)));
-  if (!page) return null;
-  // HSCAN may give one student twice across pages, never on one page twice; kept once all the same.
-  const seen = new Set<string>();
-  const students = page.students.filter((s) => !seen.has(s.email) && Boolean(seen.add(s.email)));
-  const labels = labelled ? await labelsOf(store.listId!, students.map((s) => s.email)) : students.map(() => [] as string[]);
+  if (!isRedisConfigured()) return { lines: [], total: 0, next: "0" };
+  const shape: StudentsPageShape = { lessonIds: lessonsInOrder(course).map(({ lesson }) => lesson.id), labelled: withLabels && Boolean(store.listId) };
+  const paid = studentsPageUnits(shape);
+  if (!(await charge(paid))) return null;
+  const [scanFrom, after = ""] = readStudentCursor(cursor).split(".");
+  let reply: unknown;
+  let total: number | null = null;
+  try {
+    const replies = repliesFor(
+      await redisPipeline([
+        ["HSCAN", studentsKey(course.id), scanFrom, "COUNT", STUDENTS_PER_PAGE],
+        ["HLEN", studentsKey(course.id)],
+      ]),
+      2,
+    );
+    if (!replies) return null;
+    reply = replies[0];
+    total = countOf(replies[1]);
+  } catch (error) {
+    console.error("reading a course's students failed", error);
+    return null;
+  }
+  if (total === null || !Array.isArray(reply) || reply.length !== 2 || typeof reply[0] !== "string") return null;
+  const flat = stringList(reply[1]);
+  if (!flat || flat.length % 2 !== 0) return null;
+  const scanned = flat.length / 2;
+  const more = studioUnits(studentsPageWork(scanned, STUDENTS_PER_PAGE, shape)) - paid;
+  if (more > 0 && !(await charge(more))) return null;
+  // Each row its field (the hashed address) and a kept row with its address and whole times; one of another shape
+  // leaves the page unknown, never fewer students. HSCAN may give one student twice; kept once.
+  const byField = new Map<string, { e: string; s: number; l: number }>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const row = studentTimes(flat[i + 1]);
+    if (!/^[0-9a-f]{32}$/.test(flat[i]) || !row || typeof row.e !== "string" || !row.e) return null;
+    byField.set(flat[i], { e: row.e, s: row.s, l: row.l });
+  }
+  const ordered = [...byField.keys()].filter((field) => field > after).sort();
+  const fields = ordered.slice(0, STUDENTS_PER_PAGE);
+  const next = ordered.length > fields.length ? `${scanFrom}.${fields[fields.length - 1]}` : reply[0];
+  const rows = fields.map((field) => byField.get(field)!);
+  if (!rows.length) return { lines: [], total, next };
+
+  const keys = rows.map((row) => emailKey(row.e));
+  const reads: (string | number)[][] = [
+    ["SMISMEMBER", blockedKey(course.id), ...keys],
+    ...(shape.lessonIds.length ? keys.map((key) => ["SMISMEMBER", doneKey(course.id, key), ...shape.lessonIds]) : []),
+  ];
+  let answers: unknown[] | null = null;
+  try {
+    answers = repliesFor(await redisPipeline(reads), reads.length);
+  } catch (error) {
+    console.error("reading a course's students' progress failed", error);
+  }
+  if (!answers) return null;
+  const blocked = flagsOf(answers[0], rows.length);
+  const done = rows.map((_, i) => (shape.lessonIds.length ? flagsOf(answers[1 + i], shape.lessonIds.length) : []));
+  if (!blocked || done.some((flags) => flags === null)) return null;
+  const labels = shape.labelled ? await labelsOf(store.listId!, rows.map((row) => row.e)) : rows.map(() => null);
   return {
-    total: page.total,
-    next: page.next,
-    lines: students.map((s, i) => ({ email: s.email, since: s.since, lastSeen: s.lastSeen, done: s.done, removed: s.blocked, labels: labels[i] })),
+    total,
+    next,
+    lines: rows.map((row, i) => ({
+      email: row.e,
+      since: row.s,
+      lastSeen: row.l,
+      done: (done[i] as number[]).reduce((sum, flag) => sum + flag, 0),
+      removed: blocked[i] === 1,
+      labels: labels[i],
+    })),
   };
+}
+
+/** An SMISMEMBER answer of exactly `n` flags, each 0 or 1; anything else is unknown (null). */
+function flagsOf(reply: unknown, n: number): number[] | null {
+  const flags = repliesFor(reply, n);
+  return flags && flags.every((flag) => flag === 0 || flag === 1) ? (flags as number[]) : null;
 }
 
 /**

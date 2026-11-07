@@ -55,7 +55,24 @@ const day = (seconds: number) => (seconds > 0 ? new Date(seconds * 1000).toLocal
  * came in its place; a refusal is shown next to the step it answers; every
  * target is at least 44 by 44 pixels; nothing changes until a button is pressed.
  */
-export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, canExport }: { productId: string; courseTitle: string; lessons: number; lines: StudentLine[]; canTag: boolean; canExport: boolean }) {
+export function StudentsBulk({
+  productId,
+  courseTitle,
+  lessons,
+  lines,
+  canTag,
+  canExport,
+  labelsShown = canTag,
+}: {
+  productId: string;
+  courseTitle: string;
+  lessons: number;
+  lines: StudentLine[];
+  canTag: boolean;
+  canExport: boolean;
+  /** Whether the page read each student's labels (only when a label is asked for): otherwise no column of them is shown or downloaded. */
+  labelsShown?: boolean;
+}) {
   const [rows, setRows] = useState(lines);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [action, setAction] = useState<Action>("revoke");
@@ -247,7 +264,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
       return;
     }
     setError("");
-    const file = new Blob([studentsCsv(rows.filter((row) => selected.has(row.email)), courseTitle, lessons)], { type: "text/csv;charset=utf-8" });
+    const file = new Blob([studentsCsv(rows.filter((row) => selected.has(row.email)), courseTitle, lessons, canTag && labelsShown)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(file);
     const link = document.createElement("a");
     link.href = url;
@@ -298,7 +315,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
               <th scope="col" className="py-2 pr-3 font-semibold">Progress</th>
               <th scope="col" className="py-2 pr-3 font-semibold">Last here</th>
               <th scope="col" className="py-2 pr-3 font-semibold">Access</th>
-              {canTag ? <th scope="col" className="py-2 font-semibold">Labels</th> : null}
+              {canTag && labelsShown ? <th scope="col" className="py-2 font-semibold">Labels</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -313,7 +330,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
                 <td className="py-2 pr-3">{`${PROGRESS_WORDS[progressOf(row.done, lessons)]} (${Math.min(row.done, lessons)} of ${lessons} lessons)`}</td>
                 <td className="whitespace-nowrap py-2 pr-3">{day(row.lastSeen)}</td>
                 <td className="whitespace-nowrap py-2 pr-3">{row.removed ? "Removed" : "Has access"}</td>
-                {canTag ? <td className="py-2">{row.labels === null ? "Couldn't be read" : row.labels.length ? row.labels.join(", ") : "None"}</td> : null}
+                {canTag && labelsShown ? <td className="py-2">{row.labels === null ? "Couldn't be read" : row.labels.length ? row.labels.join(", ") : "None"}</td> : null}
               </tr>
             ))}
           </tbody>
@@ -382,7 +399,7 @@ export function StudentsBulk({ productId, courseTitle, lessons, lines, canTag, c
             <button type="button" className="btn btn-secondary" aria-disabled={busy || undefined} onClick={download}>
               {`Download the selected as a spreadsheet file (${chosen.length.toLocaleString("en-US")})`}
             </button>
-            <p className="mt-1 text-xs text-ink-soft">A CSV file of the students you selected: email, progress, access and labels. Made on your device, from this page.</p>
+            <p className="mt-1 text-xs text-ink-soft">{`A CSV file of the students you selected: email, progress and access${canTag && labelsShown ? ", and labels" : ""}. Made on your device, from this page.`}</p>
             <p className="mt-2 text-sm text-danger-text" role="alert">
               {placeError("file")}
             </p>

@@ -240,6 +240,11 @@ const HELD_WORDS: Record<EndpointHeld, string> = {
   paused: "Not sent: the API key that added this endpoint is paused.",
   revoked: "Not sent: the API key that added this endpoint was revoked.",
 };
+/** A delivery whose API key's state could not be read: held, never sent on a guess (rule 24). */
+const KEY_UNREAD_WORDS = {
+  retrying: "Not sent yet: the state of the API key that added this endpoint could not be read. It will be tried again.",
+  failed: "Not sent: the state of the API key that added this endpoint could not be read at any try. You can send it again by hand.",
+};
 const KEY_ID_PATTERN = /^[0-9a-f]{12}$/;
 
 /** How long the old secret still signs after it is replaced: one day, then it is gone. */
@@ -471,7 +476,23 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   if (!store) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: "The store could not be found." };
   // Its API key paused or revoked (owner C3-100), read now: nothing is sent, and nothing is counted.
   // A test and a resend ("taken") were checked the same way before they took their delivery.
-  const keyHeld = store === "taken" ? null : await heldNow(store, endpoint);
+  let keyHeld: EndpointHeld | null = null;
+  if (store !== "taken") {
+    try {
+      keyHeld = await heldNow(store, endpoint);
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      // The key's state cannot be read (rule 24): never taken as "not held", so the endpoint is not called and
+      // nothing of the month is taken, as nothing went out. The try is counted and the delivery waits on the
+      // published schedule, so a key that stays unreadable costs at most MAX_ATTEMPTS reads and log lines, never
+      // one at every lease for DELIVERY_SECONDS; after the last try it is failed with the reason, its message
+      // kept, and can be sent again by hand once the key reads (Claude 2 on #3096, comment 6712352850).
+      console.error("WEBHOOK KEY STATE UNREAD: the delivery is held, not sent", delivery.statsId, delivery.id, next.attempts);
+      const retryIn = delivery.type === "test" ? undefined : RETRY_MINUTES[next.attempts - 1];
+      if (retryIn === undefined) return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: KEY_UNREAD_WORDS.failed };
+      return { ...next, state: "retrying", next: now + retryIn * 60_000, lastStatus: 0, lastError: KEY_UNREAD_WORDS.retrying };
+    }
+  }
   if (keyHeld) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: HELD_WORDS[keyHeld] };
   // 232 [CA1] 4b4b2: while the plan's renewal is unpaid or its payment is
   // disputed, nothing is sent and the endpoint is not called. The delivery is
@@ -672,8 +693,16 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
       console.error("WEBHOOK EVENT LOST: its deliveries could not be written and its sent mark could not be taken back", statsId, type, eventId, lost));
     throw error;
   }
+  // Each delivery on its own: one whose first try throws stays on the queue for deliverDue (its lease, or its
+  // place, brings it back), and the endpoints after it are still sent now (Claude 2 on #3096).
   await soon(async () => {
-    for (const id of ids) if (await claim(statsId, id)) await runClaimed(statsId, id);
+    for (const id of ids) {
+      try {
+        if (await claim(statsId, id)) await runClaimed(statsId, id);
+      } catch (error) {
+        console.error("a webhook delivery failed", statsId, id, error);
+      }
+    }
   });
   return ids.length;
 }

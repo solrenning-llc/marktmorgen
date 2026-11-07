@@ -24,6 +24,8 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactElement } from "react";
 import { NextRequest } from "next/server";
 import ReviewsPage, { generateMetadata as reviewsMeta } from "@/app/[handle]/p/[product]/reviews/page";
 import ReviewPage, { generateMetadata as reviewMeta } from "@/app/[handle]/review/page";
@@ -172,6 +174,15 @@ async function main(): Promise<void> {
     const refused = await post();
     is("a review sent for it is not saved and Stripe is not asked", [refused.status, fetched], [303, 0]);
     is("the buyer is sent back to the review page, which says the store is not available", (refused.headers.get("location") ?? "").includes("/@glazeworks/review?") && (refused.headers.get("location") ?? "").includes("status=unavailable"), true);
+    // The review page that answer lands on, drawn as the buyer reads it: the store is not available
+    // AND the review they just wrote was not saved, announced as an alert (not by color alone).
+    const landed = new URL(refused.headers.get("location") ?? "", "https://marktmorgen.com");
+    const landedHtml = renderToStaticMarkup((await open(ReviewPage as never, { handle }, Object.fromEntries(landed.searchParams))) as ReactElement);
+    is("the review page it lands on says the review was not saved", landedHtml.includes(REVIEW_NOTICES.unavailable?.text ?? "missing"), true);
+    is("as an alert, beside the notice that the store is not available", [/<p[^>]*role="alert"[^>]*>This store is not available right now, so your review was not saved\.<\/p>/.test(landedHtml), landedHtml.includes(words.unavailableTitle)], [true, true]);
+    is("and Stripe is still not asked", fetched, 0);
+    const plainHtml = renderToStaticMarkup((await pages.review()) as ReactElement);
+    is("opened without that answer, it says nothing about a review", plainHtml.includes(REVIEW_NOTICES.unavailable?.text ?? "missing"), false);
     fetched = 0;
     const fromThanks = await post("thanks");
     const back = fromThanks.headers.get("location") ?? "";

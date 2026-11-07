@@ -37,6 +37,12 @@
  *   LOW 5     money given back read while the disputes it gives back were
  *             said not read was added: a sale of 1500, its dispute not read and
  *             the 1500 given back read made the year 3000, not 1500.
+ *
+ * Then Codex M's second money review at 857f7251 (review 5811378498):
+ *
+ *   LOW 6     a list of a kind the provider does not have (a PayPal list of
+ *             renewals) was added because the rule knows the kind globally:
+ *             a PayPal sale of 1000 and a "renewal" of 1000 made a read 2000.
  */
 import { readFileSync } from "node:fs";
 import * as rule from "@/lib/earnings-by-month";
@@ -312,6 +318,27 @@ part("FOCAL LOW 5: money given back is never added while the disputes it gives b
   is("control: both said not read, the months are read", [source(both, "2026-11", "stripe").state, month(both, "2026-09").totals?.map((l) => l.netCents)], ["read", [1500]]);
   const read = earningsByMonth(input({ providers: [fullStripe([sale, back, list("dispute", [{ id: "stripe:du_1", at: utc(2026, 10, 10), cents: 1500, currency: "usd" }])])] }));
   is("control: both read, the year is the real 1500", read!.months.reduce((sum, m) => sum + (m.totals ?? []).reduce((t, l) => t + l.netCents, 0), 0), 1500);
+}
+
+
+part("SECOND LOW 6: a list of a kind its provider does not have is refused, never added");
+{
+  // Codex M's proof (m-2941-domain, 24/2 at 857f7251): a PayPal sale of 1000 and a PayPal "renewal" of 1000.
+  const sale = list("sale", [{ id: "paypal:s", at: utc(2026, 10, 10), cents: 1000, currency: "usd" }]);
+  const healthy = earningsByMonth(input({ providers: [fullPayPal([sale])] }));
+  is("control: a healthy PayPal sale is read once", [source(healthy, "2026-10", "paypal").state, month(healthy, "2026-10").totals?.map((l) => l.netCents)], ["read", [1000]]);
+  const renewal = list("renewal", [{ id: "paypal:in", at: utc(2026, 10, 10), cents: 1000, currency: "usd" }]);
+  const wrong = earningsByMonth(input({ providers: [fullPayPal([sale, renewal])] }));
+  is("PayPal has no renewals: the source is refused as invalid", [source(wrong, "2026-10", "paypal").state, source(wrong, "2026-10", "paypal").why], ["unknown", "invalid"]);
+  is("and the unsupported renewal never inflates the total", month(wrong, "2026-10").totals, null);
+  // Rule 30: an empty list, or one said unread, of a kind PayPal does not have is the same off-shape reading.
+  const emptyRenewal = earningsByMonth(input({ providers: [fullPayPal([sale, list("renewal", [])])] }));
+  is("an empty PayPal list of renewals: refused as invalid", [source(emptyRenewal, "2026-10", "paypal").state, source(emptyRenewal, "2026-10", "paypal").why], ["unknown", "invalid"]);
+  const unreadRenewal = earningsByMonth(input({ providers: [fullPayPal([sale, { kind: "renewal", unread: true }])] }));
+  is("a PayPal list of renewals said unread: refused as invalid", [source(unreadRenewal, "2026-10", "paypal").state, source(unreadRenewal, "2026-10", "paypal").why], ["unknown", "invalid"]);
+  // Control: Stripe has renewals, so a Stripe sale and renewal still add up.
+  const stripe = earningsByMonth(input({ providers: [fullStripe([list("sale", [{ id: "stripe:s", at: utc(2026, 10, 10), cents: 1000, currency: "usd" }]), list("renewal", [{ id: "stripe:in", at: utc(2026, 10, 10), cents: 1000, currency: "usd" }])])] }));
+  is("control: Stripe's sale and renewal are read, 2000", [source(stripe, "2026-10", "stripe").state, month(stripe, "2026-10").totals?.map((l) => l.netCents)], ["read", [2000]]);
 }
 
 done();

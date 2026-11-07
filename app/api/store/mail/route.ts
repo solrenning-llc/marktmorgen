@@ -309,7 +309,7 @@ export async function POST(request: NextRequest) {
       const at = typeof body.at === "number" && Number.isSafeInteger(body.at) ? body.at : 0;
       if (!FLOW_ID.test(id) || !at) return fail("unknown", 404);
       const result = await restoreFlowVersion(store, id, at);
-      return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "unknown" || result.reason === "version" ? 404 : result.reason === "history_room" ? 409 : 400);
+      return result.ok ? Response.json({ ok: true, flows: result.flows, kept: result.kept === true }) : fail(result.reason, result.reason === "unknown" || result.reason === "version" ? 404 : result.reason === "history_room" ? 409 : 400);
     }
 
     if (action === "flow-import") {

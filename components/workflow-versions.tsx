@@ -55,7 +55,12 @@ export function WorkflowVersions({ flowId, request, onRestored }: { flowId: stri
     const a = await request({ action: "flow-restore", id: flowId, at: version.at });
     setBusy(false);
     if (!a.ok) return setError(ERRORS[a.error ?? ""] ?? "That version could not be put back just now. Try again in a moment.");
-    setDone(`The version from ${when(version.at)} is in use again. The one it replaced is now at the top of this list, so you can undo this the same way.`);
+    // Said only when a version was kept: putting back what is already in use replaces nothing (Claude 5 on #1927).
+    setDone(
+      a.kept === true
+        ? `The version from ${when(version.at)} is in use again. The one it replaced is now at the top of this list, so you can undo this the same way.`
+        : `The version from ${when(version.at)} is already what this workflow does, so nothing changed and nothing new was kept.`,
+    );
     const again = await request({ action: "flow-versions", id: flowId });
     if (again.ok && Array.isArray(again.versions)) setVersions(again.versions as Version[]);
     onRestored();

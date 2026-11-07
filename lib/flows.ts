@@ -267,7 +267,12 @@ class FlowsChanged extends Error {
 
 async function writeFlows(store: Store, listId: string, flows: Flow[], expected: string | null): Promise<void> {
   const json = JSON.stringify(flows);
-  await needData(store, [{ slot: "wf:defs", bytes: dataBytes([json], 1 + flows.length), set: true }]);
+  const bytes = dataBytes([json], 1 + flows.length);
+  // The room only grows before the write and only shrinks once the write is confirmed: a write refused or not known
+  // never leaves it below what is kept (Claude 5 on #1927).
+  const before = expected === null ? 0 : dataBytes([expected], 1 + listedCount(expected));
+  // What it grows by is added to the room as it is now, never set: a room already counting a longer change stays so.
+  if (bytes > before) await needData(store, [{ slot: "wf:defs", bytes: bytes - before }]);
   let replies: unknown;
   try {
     replies = await redisPipeline([["EVAL", WRITE_FLOWS_IF, 1, flowsKey(listId), expected === null ? "0" : "1", expected ?? "", json]]);
@@ -282,6 +287,18 @@ async function writeFlows(store: Store, listId: string, flows: Flow[], expected:
     throw new FlowsChanged();
   }
   if (replies[0] !== 1) throw new FlowWriteUnconfirmed();
+  // Confirmed: what is kept is this write, so the room is set to it exactly (shrinking too, now that it is known).
+  await needData(store, [{ slot: "wf:defs", bytes, set: true }]).catch(() => undefined);
+}
+
+/** How many workflows a kept list holds, for its room; one that cannot be read counts none. */
+function listedCount(raw: string): number {
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) ? value.length : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Runs a change of the workflows again, read afresh, when they changed under it; past three tries it is unconfirmed. */
@@ -299,7 +316,8 @@ async function changing<T>(run: () => Promise<T>): Promise<T> {
 const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw === "bought" ? raw : undefined);
 
 export type FlowResult =
-  | { ok: true; flows: Flow[] }
+  // `kept`, when putting a version back: whether the version it replaced was kept (false when nothing changed).
+  | { ok: true; flows: Flow[]; kept?: boolean }
   | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | "history_room" | "history_unconfirmed" };
 
 /**
@@ -415,12 +433,14 @@ async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: Sa
   const next = [...flows];
   if (at >= 0) next[at] = flow;
   else next.push(flow);
-  // Putting a version back keeps the one it replaces first: without room for it, nothing is put back.
-  if (opts.restoring && at >= 0 && changesWhatItDoes(flows[at], flow) && !(await keepFlowVersion(store, store.listId, flows[at], flow))) return { ok: false, reason: "history_room" };
+  // Putting a version back keeps the one it replaces first: without room for it, nothing is put back. A version that
+  // is already what the workflow does replaces nothing, and keeps nothing (Claude 5 on #1927).
+  const replaces = Boolean(opts.restoring && at >= 0 && changesWhatItDoes(flows[at], flow));
+  if (replaces && !(await keepFlowVersion(store, store.listId, flows[at], flow))) return { ok: false, reason: "history_room" };
   await writeFlows(store, store.listId, next, listRaw);
   // What it did before this save, kept so it can be put back (lib/flow-versions.ts); never stops the save.
   if (at >= 0 && !opts.restoring) await keepFlowVersion(store, store.listId, flows[at], flow);
-  return { ok: true, flows: next };
+  return opts.restoring ? { ok: true, flows: next, kept: replaces } : { ok: true, flows: next };
 }
 
 export type RestoreResult = FlowResult | { ok: false; reason: "version" };

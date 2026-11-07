@@ -25,7 +25,9 @@ export async function POST(request: NextRequest) {
     }
   }
   // Each save posts a first message, so saving is kept to a few an hour.
-  if (!(await withinEssentialLimit("chat-summary", store.handle, 10, 3600))) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+  // Stopping only deletes the address; the studio guard above already admits that work.
+  const removing = typeof body.url === "string" && body.url.trim().length === 0;
+  if (!removing && !(await withinEssentialLimit("chat-summary", store.handle, 10, 3600))) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   try {
     const withStats = store.statsId ? store : await ensureStatsId(store.email);
     if (!withStats?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });

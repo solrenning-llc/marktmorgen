@@ -5,6 +5,7 @@
  * from the affiliate book the page already reads (lib/affiliates.ts readBook).
  * No read, no write and no call of its own.
  */
+import * as challengeRules from "@/lib/affiliate-challenge-rules";
 import {
   CHALLENGE_MAX_DAYS,
   CHALLENGE_MAX_TITLE,
@@ -17,7 +18,8 @@ import {
   readBoardName,
   readChallenge,
 } from "@/lib/affiliate-challenge-rules";
-import type { Affiliate, Book, Credit, Line, LineStatus, Row } from "@/lib/affiliates";
+import { AFFILIATE_ID_PATTERN, type Affiliate, type Book, type Credit, type Line, type LineStatus, type Row } from "@/lib/affiliates";
+import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { done, is, part } from "./check";
 
 const DAY = 86_400;
@@ -134,6 +136,59 @@ is("too many products", refused({ products: Array.from({ length: 51 }, (_, i) =>
 is("a repeated product is kept once", readChallenge({ ...typed, products: ["p1", "p1", "p2"] }, NOW_MS).ok && (readChallenge({ ...typed, products: ["p1", "p1", "p2"] }, NOW_MS) as { challenge: Challenge }).challenge.products, ["p1", "p2"]);
 is("not an object", [readChallenge(null, NOW_MS).ok, readChallenge("x", NOW_MS).ok, readChallenge([], NOW_MS).ok], [false, false, false]);
 
+part("No money and no promise of earnings, in the title or the prize");
+for (const label of [
+  "$500 cash",
+  "PayPal transfer",
+  "Earn $1,000 guaranteed",
+  "500 USD",
+  "USD 500",
+  "500usd",
+  "1,000 EUR to spend",
+  "\u20ac50 to spend",
+  "\u00a320 voucher",
+  "R$ 100",
+  "Cash prize",
+  "Prize money",
+  "A bank transfer",
+  "Paid by Venmo",
+  "Zelle payment",
+  "One Bitcoin",
+  "A gift card",
+  "50 dollars",
+  "20 bucks",
+  "Guaranteed results",
+  "Everybody earns",
+  "Your earnings doubled",
+  "Higher commission for a month",
+  "Payout of the month",
+]) {
+  is(`a prize that is money or a promise of earnings is refused: ${JSON.stringify(label)}`, refused({ prize: { kind: "product", label } }), "money");
+}
+for (const title of ["Win $500", "Earn $1,000 guaranteed", "500 USD challenge", "Cash race", "PayPal sprint", "Make money in May"]) {
+  is(`a title that is money or a promise of earnings is refused: ${JSON.stringify(title)}`, refused({ title }), "money");
+}
+for (const label of ["Free access to my course", "10% off coupon", "My PHP 8 course, free", "All 5 templates", "Try 2 months of coaching", "A signed copy of my book", "Lifetime access to the community"]) {
+  is(`a neutral prize passes: ${JSON.stringify(label)}`, refused({ prize: { kind: "access", label } }), "accepted");
+}
+for (const title of ["Top 3 sellers win", "Spring push", "Summer sprint 2027", "Transformation challenge"]) {
+  is(`a neutral title passes: ${JSON.stringify(title)}`, refused({ title }), "accepted");
+}
+is("a cash kind is still refused as a kind we do not offer", refused({ prize: { kind: "cash", label: "Free access to my course" } }), "prize");
+
+part("Who the creator left out is kept");
+const left = readChallenge({ ...typed, excluded: ["0123456789ab", "0123456789ab", "ba9876543210"] }, NOW_MS);
+is("the affiliates left out are kept, each once", left.ok ? left.challenge.excluded : left.problem, ["0123456789ab", "ba9876543210"]);
+is("nobody left out reads as no list", readChallenge(typed, NOW_MS).ok && "excluded" in (readChallenge(typed, NOW_MS) as { challenge: Challenge }).challenge, false);
+is("an id that is not an affiliate's is refused", refused({ excluded: ["0123456789ab", "x"] }), "excluded");
+is("an id in capitals is refused", refused({ excluded: ["0123456789AB"] }), "excluded");
+is("a list that is not a list is refused", refused({ excluded: "0123456789ab" }), "excluded");
+is("more than every affiliate a store can have is refused", refused({ excluded: Array.from({ length: challengeRules.CHALLENGE_MAX_EXCLUDED + 1 }, (_, i) => i.toString(16).padStart(12, "0")) }), "excluded");
+is("the most left out is the most affiliates a store can have", challengeRules.CHALLENGE_MAX_EXCLUDED, MAX_AFFILIATES);
+is("the id shape is the book's own", AFFILIATE_ID_PATTERN.test("0123456789ab") && !AFFILIATE_ID_PATTERN.test("x"), true);
+const leftOut = left.ok ? challengeStandings(left.challenge, book([sale("0123456789ab", T0 + 10), sale("cccccccccccc", T0 + 20)], [row("0123456789ab"), row("cccccccccccc")])) : null;
+is("a challenge read back leaves them out of the standings", leftOut && leftOut.ok ? leftOut.standings.map((x) => x.aff) : leftOut, ["cccccccccccc"]);
+
 const c = (read as { ok: true; challenge: Challenge }).challenge;
 
 part("Where a challenge is in time");
@@ -157,7 +212,11 @@ is("another product", counted(sale("a", T0 + 10, { product: "p9" })), []);
 is("the affiliate's own purchase", counted(sale("a", T0 + 10, { self: true, status: "own purchase", commission: 0 })), []);
 is("refunded in full", counted(sale("a", T0 + 10, { refunded: 5000, status: "refunded", commission: 0 })), []);
 is("a lost or held dispute reads as refunded, so it does not count", counted(sale("a", T0 + 10, { refunded: 5000, status: "refunded", commission: 0, how: "code" })), []);
-is("partly refunded: still a sale", counted(sale("a", T0 + 10, { refunded: 1000, status: "partly refunded", commission: 1200 })), [1]);
+// Changed (TB10 pre-review): was "partly refunded: still a sale", [1]. The
+// count is of whole sales only, so a sale refunded in part no longer counts;
+// the page says so (challengeNotes).
+is("partly refunded: not a whole sale, so it does not count", counted(sale("a", T0 + 10, { refunded: 1000, status: "partly refunded", commission: 1200 })), []);
+is("a sale the book calls earned but with money given back does not count", counted(sale("a", T0 + 10, { refunded: 1 })), []);
 is("a free product is not a sale", counted(sale("a", T0 + 10, { base: 0, total: 0, commission: 0 })), []);
 for (const how of ["code", "buyer", "contact"] as const) is(`credited by ${how}: a sale they brought`, counted(sale("a", T0 + 10, { how })), [1]);
 for (const how of ["recurring", "partner", "bonus", "tier2", "lead"] as const) is(`credited as ${how}: not a new sale they brought`, counted(sale("a", T0 + 10, { how })), []);
@@ -264,7 +323,8 @@ is("no sale yet: no place, zero sales", none && none.mine, { place: null, sales:
 part("A name on the board");
 is("tidied", readBoardName("  Bea   R. "), "Bea R.");
 is("letters from any language", readBoardName("José Ñúñez"), "José Ñúñez");
-for (const bad of ["", " ", "x", "bea@example.test", "see www.x.test", "http://x", "a".repeat(31), "<b>", 42, null]) {
+is("a name that only starts like a reserved one is fine", [readBoardName("Youssef"), readBoardName("Anna Affiliate-Smith")], ["Youssef", "Anna Affiliate-Smith"]);
+for (const bad of ["", " ", "x", "bea@example.test", "see www.x.test", "http://x", "a".repeat(31), "<b>", 42, null, "You", "you", " YOU. ", "An affiliate", "an  affiliate", "Affiliate", "Marktmorgen"]) {
   is(`${JSON.stringify(bad)} is refused`, readBoardName(bad), null);
 }
 
@@ -273,6 +333,7 @@ const words = challengeNotes(c, (c.end + 1) * 1000);
 is("after the end, it says places can still change and when to hand out prizes", words.some((w) => w.includes("refund") && w.includes("can still change")), true);
 is("it names the day to wait for", words.some((w) => w.includes(new Date((c.end + CHALLENGE_SETTLE_DAYS * DAY) * 1000).toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }))), true);
 is("it says the prize is the creator's, never Marktmorgen's", challengeNotes(c, NOW_MS).some((w) => w.includes("from you") && w.includes("Marktmorgen does not pay")), true);
+is("it says a sale refunded in part does not count either", challengeNotes(c, NOW_MS).some((w) => w.includes("refunded in whole or in part")), true);
 is("it never promises earnings", challengeNotes(c, NOW_MS).some((w) => /guarantee|you will earn|easy money/i.test(w)), false);
 
 done();

@@ -90,4 +90,11 @@ is("its buyer figure's Blob work and its email pictures are in the share the pay
 part("studio-blob no longer says community pictures and students' files are counted nowhere");
 const studio = COST_LINES.find((line) => line.id === "studio-blob");
 is("it names the creator's community doors and checks as studio requests, and the lines that hold the rest", /creator's own community/.test(studio?.basis ?? "") && /buyer-blob/.test(studio?.basis ?? "") && /mail-picture-blob/.test(studio?.basis ?? ""), true);
+
+part("A door token does not bound refused puts beyond the SDK retry model (C6 LOW 6696572596)");
+for (const line of [buyer, studio]) {
+  const basis = line?.basis ?? "";
+  is(`${line?.id}: the basis discloses refused puts beyond SDK tries as unbounded`, /refused puts[^.]*beyond[^.]*not bounded/i.test(basis), true);
+  is(`${line?.id}: their extra billing and cost stay unknown, never zero`, /Whether those refused puts are billed is unknown/.test(basis) && /additional cost is unknown, never zero/.test(basis), true);
+}
 done();

@@ -38,6 +38,7 @@ import { OFFER_DAYS, ONCE_PER_DAYS, canWinBack, winbackOn } from "@/lib/winback"
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
+import { repliesFor as linkWriteReplies } from "@/lib/redis-reply";
 
 const CURSOR_KEY = "nl:wb:cursor";
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -216,7 +217,18 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 
       const token = randomBytes(20).toString("hex");
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
-      await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))]);
+      const write = [["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))];
+      // A paid email only with a link Redis said it stored (rule 24): a reply short, long or other than exactly "OK" for
+      // the SET sends nothing, lets this run's own marks go, as a refused send does, and deletes the link in case it
+      // landed with its answer lost; the next run, inside the same window, sends the offer once.
+      const saved = linkWriteReplies(await redisPipeline(write), write.length);
+      if (saved?.[0] !== "OK") {
+        console.error("a come-back offer's link was not stored, so no email was sent", store.handle);
+        await releaseMark(sentKey(account, subId), claim);
+        await releaseMark(onceKey(statsId, email, product.id), onceValue);
+        await redisPipeline([["DEL", linkKey(token)]]);
+        continue;
+      }
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
       const mail = winbackEmail({
         storeName: store.name,

@@ -105,7 +105,8 @@ async function main(): Promise<void> {
   is("healthy: the right password opens it", await tryPassword(id, "harbor-2026"), { status: 303, cookie: true, body: "" });
   is("a link nobody made: back to the page that says it ended", await tryPassword("z".repeat(id.length), "harbor-2026"), { status: 303, cookie: false, body: "" });
   const formOdd = await answering("GET", "nl:nlink:", () => [7], () => tryPassword(id, "harbor-2026"));
-  is("an unknown reply: not checked just now, and no cookie", [formOdd.status, formOdd.cookie, formOdd.body.includes("could not be checked just now")], [503, false, true]);
+  // Back to the page's own notice (?unread=1, tests/numbers-link-busy.test.ts), never a bare text/plain 503 (Claude 5 on #2971).
+  is("an unknown reply: not checked just now, and no cookie", [formOdd.status, formOdd.cookie], [303, false]);
   done();
 }
 

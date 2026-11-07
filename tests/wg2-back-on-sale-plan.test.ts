@@ -40,5 +40,8 @@ const editor = readFileSync("components/product-editor.tsx", "utf8");
 is("the editor reads the rule", /planPausedByRestore\(/.test(editor), true);
 is("it offers a way to keep the price off sale", editor.includes("Keep it off sale"), true);
 is("it says the plan will stop, and how to keep it", editor.replace(/\s+/g, " ").includes("so the payment plan will stop for every price. To keep it, first set a payment for this price in the payment plan."), true);
+// Claude 1's LEVE on #2690: the route's planStopped false also means no plan at all, or one paused already, so the
+// studio never tells the creator a payment plan goes on that it cannot see.
+is("after the question, a price back on sale never says a payment plan goes on", editor.includes("The payment plan goes on."), false);
 is("it acts at once when the plan goes on: the question is asked only on the rule", /if \(option\.offSale && planPausedByRestore\(product as Listing, option\.id\)\) \{\s*setRestoringId\(option\.id\);/.test(editor), true);
 done();

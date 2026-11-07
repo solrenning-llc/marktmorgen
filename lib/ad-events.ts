@@ -152,13 +152,33 @@ async function readStored(statsId: string): Promise<Stored> {
   return storedOf(replies[0]);
 }
 
+const KINDS: readonly string[] = ["purchase", "renewal", "lead"] satisfies ConversionKind[];
+
+/**
+ * The platforms' last answers as deliver writes them, { at, kind?, ...answers }:
+ * null when none is kept; any other shape is unknown, never shown as a date.
+ */
+function lastOf(raw: unknown): ServerSetup["last"] {
+  const kept = keptObject(raw, "the platforms' last answers");
+  if (!kept) return null;
+  const exact = Object.entries(kept).every(([key, value]) =>
+    key === "at"
+      ? typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+      : key === "kind"
+        ? typeof value === "string" && KINDS.includes(value)
+        : (SERVER_PLATFORMS as readonly string[]).includes(key) && typeof value === "string",
+  );
+  if (!exact || !("at" in kept)) throw new UnknownReplyError("the platforms' last answers");
+  return kept as ServerSetup["last"];
+}
+
 /** Read exactly: an unknown setup throws, never an empty one (the route answers 503, the studio says so). */
 export async function serverSetup(statsId: string | null): Promise<ServerSetup> {
   if (!statsId || !isRedisConfigured()) return NO_SETUP;
   const replies = repliesFor(await redisPipeline([["GET", configKey(statsId)], ["GET", lastKey(statsId)]]), 2);
   if (!replies) throw new UnknownReplyError("the server conversions' setup");
   const stored = storedOf(replies[0]);
-  const last = keptObject(replies[1], "the platforms' last answers") as ServerSetup["last"];
+  const last = lastOf(replies[1]);
   return {
     on: { meta: Boolean(stored.meta), tiktok: Boolean(stored.tiktok), google: Boolean(stored.google), pinterest: Boolean(stored.pinterest && stored.pinterestAccount) },
     pinterestAccount: stored.pinterestAccount ?? "",

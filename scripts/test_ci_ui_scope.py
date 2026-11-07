@@ -158,6 +158,25 @@ class Graph(WithSyntheticSuite):
             "require.bind": {"app/page.tsx": "const load = require.bind(null);\nexport default load('../lib/' + leaf);"},
             "require by index": {"app/page.tsx": "export default require['call'](null, '../lib/' + leaf);"},
             "require optional method": {"app/page.tsx": "export default require?.call(null, '../lib/' + leaf);"},
+            # Codex G's seventh return on #3037 (review 5814946312): only a direct
+            # require.resolve('<one literal>') is an edge; the resolver reached any other way
+            # (call, apply, bind, an index, an optional call, an alias, ?. or spaces) resolves
+            # a computed name, and a page can read that file with readFileSync.
+            "require.resolve.call": {"app/page.tsx": "import { readFileSync } from 'node:fs';\nexport default readFileSync(require.resolve.call(null, '../lib/' + leaf + '.cjs'), 'utf8');"},
+            "require.resolve.apply": {"app/page.tsx": "import { readFileSync } from 'node:fs';\nexport default readFileSync(require.resolve.apply(null, ['../lib/' + leaf + '.cjs']), 'utf8');"},
+            "require.resolve.bind": {"app/page.tsx": "const find = require.resolve.bind(null);\nexport default find('../lib/' + leaf);"},
+            "require.resolve by index": {"app/page.tsx": "export default require.resolve['call'](null, '../lib/' + leaf);"},
+            "require.resolve optional call": {"app/page.tsx": "export default require.resolve?.('../lib/' + leaf);"},
+            "require.resolve under another name": {"app/page.tsx": "const find = require.resolve;\nexport default find('../lib/' + leaf);"},
+            "require?.resolve": {"app/page.tsx": "export default require?.resolve('../lib/' + leaf);"},
+            "require . resolve with spaces": {"app/page.tsx": "export default require . resolve('../lib/' + leaf);"},
+            "require optional direct call": {"app/page.tsx": "export default require?.('../lib/' + leaf);"},
+            # The same class next door: import.meta.resolve reached indirectly.
+            "import.meta.resolve.call": {"app/page.tsx": "export default import.meta.resolve.call(import.meta, '../lib/' + leaf);"},
+            "import.meta.resolve under another name": {"app/page.tsx": "const find = import.meta.resolve;\nexport default find('../lib/' + leaf);"},
+            "import.meta by index": {"app/page.tsx": "export default import.meta['resolve']('../lib/' + leaf);"},
+            "import.meta destructured": {"app/page.tsx": "const { resolve } = import.meta;\nexport default resolve('../lib/' + leaf);"},
+            "import.meta?.resolve": {"app/page.tsx": "export default import.meta?.resolve('../lib/' + leaf);"},
             "computed import in a component": {"components/c.tsx": "export const c = await import(`../lib/${leaf}.ts`);",
                                                "app/page.tsx": 'import { c } from "@/components/c";\nexport default c;'},
             "unresolved import": {"app/page.tsx": 'import "@/lib/missing";'},
@@ -198,6 +217,19 @@ class Graph(WithSyntheticSuite):
                      "import.meta.resolve('../lib/b')", 'require("playwright-core")[engine]',
                      "new URL('./a.png' , import.meta.url)",
                      "await import('../lib/b', { with: {} })"):
+            with self.subTest(code=code):
+                self.assertFalse(ui.computed(code))
+
+    def test_a_direct_literal_require_resolve_is_a_precise_edge(self):
+        # Codex G's control on #3037 (review 5814946312): the direct literal call stays an
+        # edge of the graph, so the file it names runs the suites and an unrelated one skips.
+        page = dict(BASE, **{"app/page.tsx": BASE["app/page.tsx"] + "\nimport { readFileSync } from 'node:fs';\nexport const raw = readFileSync(require.resolve('../lib/b.ts'), 'utf8');",
+                             "lib/c.ts": "export const c = 1;"})
+        self.assertIn("lib/b.ts", reachable(*tree(page)))
+        self.assertFalse(unaffected(["lib/b.ts"], page))
+        self.assertTrue(unaffected(["lib/c.ts"], page))
+        for code in ("require.resolve ('../lib/b')", "import.meta.url", "import.meta.dirname",
+                     "import.meta.resolve ('../lib/b')", "require('../lib/b')[key]"):
             with self.subTest(code=code):
                 self.assertFalse(ui.computed(code))
 

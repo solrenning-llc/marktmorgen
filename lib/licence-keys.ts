@@ -55,6 +55,8 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { StripeListUnreadable, type StripeRow, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -63,7 +65,7 @@ import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
-import { readListing, sellsAny } from "@/lib/catalog";
+import { hasProduct, readListing, sellsAny } from "@/lib/catalog";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
@@ -351,8 +353,10 @@ export type UploadResult = {
  */
 export async function addKeys(store: Store, product: Listing, keys: string[], origin: string = SITE_URL): Promise<UploadResult> {
   if (!store.statsId || !isRedisConfigured()) throw new Error("keys cannot be stored");
-  const [length] = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  let room = Math.max(0, MAX_POOL_KEYS - (Number(length) || 0));
+  // An unknown count is not an empty pool: the upload is refused rather than let past MAX_POOL_KEYS (CX-123 rule 24).
+  const length = countOf(repliesFor(await redisPipeline([["LLEN", poolKey(store, product)]]), 1)?.[0]);
+  if (length === null) throw new UnknownReplyError("LLEN of a license key pool");
+  let room = Math.max(0, MAX_POOL_KEYS - length);
   let added = 0;
   let known = 0;
   let overflow = 0;
@@ -445,8 +449,11 @@ export async function setRevoked(
   by: "creator" | "refund" = "creator",
 ): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["HGET", infoKey(store, product), key]]);
-  if (typeof raw !== "string") return false;
+  // Only "no such key" is false; a reply in another shape is unknown and throws, so a refund waiting on this
+  // revocation stays unread and is tried again (CX-123 rule 24).
+  const raw = repliesFor(await redisPipeline([["HGET", infoKey(store, product), key]]), 1)?.[0];
+  if (raw === null) return false;
+  if (typeof raw !== "string") throw new UnknownReplyError("HGET of a license key's record");
   let info: Info;
   try {
     info = JSON.parse(raw) as Info;
@@ -460,7 +467,8 @@ export async function setRevoked(
     at: info.at,
     ...(revoked ? { v: Math.floor(Date.now() / 1000), ...(by === "refund" ? { w: "refund" as const } : {}) } : {}),
   };
-  await orderWrite(store, [["HSET", infoKey(store, product), key, JSON.stringify(next)]]);
+  const [written] = await orderWrite(store, [["HSET", infoKey(store, product), key, JSON.stringify(next)]]);
+  if (countOf(written) === null) throw new UnknownReplyError("HSET of a license key's record");
   return true;
 }
 
@@ -509,6 +517,21 @@ const idOf = (value: unknown): string =>
       ? (value as { id: string }).id
       : "";
 
+/** A checkout row is read only with its metadata as Stripe gives it, a plain object; anything else proves nothing. */
+const checkoutLegible = (row: Record<string, unknown>): boolean => plainObject(ownField(row, "metadata"));
+
+/**
+ * The one row of a lookup read with limit 1, in its exact shape (lib/stripe-list.ts): the row, or null only when
+ * the list says for sure there is none (read to its end, every row readable). Anything else is not "none": it throws
+ * StripeListUnreadable, and the refund that needed it stays unread (CX-123 rules 24 and 30).
+ */
+function onlyRow(answer: unknown, legible?: (row: Record<string, unknown>) => boolean): StripeRow | null {
+  const listed = readStripePage(answer, legible);
+  if (listed.rows.length) return listed.rows[0];
+  if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a row that could not be read");
+  return null;
+}
+
 /**
  * The payment plan checkout whose first payment this was, or null: the
  * invoice the payment paid, whichever way the API version names it, then the
@@ -522,8 +545,8 @@ async function planSaleOf(
   let invoice = idOf(pi.invoice);
   if (!invoice) {
     const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": intent, limit: "1" })}`);
-    const row = (Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [])[0];
-    invoice = idOf(row?.invoice);
+    const row = onlyRow(listed);
+    invoice = idOf(row ? ownField(row, "invoice") : undefined);
   }
   if (!/^in_[A-Za-z0-9]{8,255}$/.test(invoice)) return null;
   const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
@@ -531,9 +554,9 @@ async function planSaleOf(
   const subscription = idOf(read.subscription) || idOf(parent?.subscription_details?.subscription);
   if (!/^sub_[A-Za-z0-9]{8,255}$/.test(subscription)) return null;
   const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ subscription, limit: "1" })}`);
-  const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
-  if (!session || typeof session.id !== "string" || idOf(session.invoice) !== invoice) return null;
-  const meta = (session.metadata ?? {}) as Record<string, string>;
+  const session = onlyRow(sessions, checkoutLegible);
+  if (!session || idOf(ownField(session, "invoice")) !== invoice) return null;
+  const meta = ownField(session, "metadata") as Record<string, string>;
   return meta.kind === "plan" ? { session: session.id, meta } : null;
 }
 
@@ -561,8 +584,19 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
-    const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A page in another shape is not "no refunds": the run stops here unsure, so the place stays (CX-123 rule 30).
+    let listed: ReturnType<typeof readStripePage>;
+    try {
+      listed = readStripePage(await onAccount("GET", account, `/refunds?${query}`));
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable)) throw error;
+      console.error("reading a store's refunds for license keys failed", store.handle, error);
+      unsure = true;
+      break;
+    }
+    // A row that cannot be read proves nothing, and keeps the place from moving past it.
+    if (listed.unreadable > 0) unsure = true;
+    const refunds: Record<string, unknown>[] = listed.rows;
     // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
     const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : null;
     if (lost) lostRead = lost;
@@ -595,10 +629,18 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
 
       // Which sale that payment was: a checkout of this store, or an offer.
       const sales: { reference: string; products: string[] }[] = [];
-      const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
-      const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
-      if (session && typeof session.id === "string") {
-        const meta = (session.metadata ?? {}) as Record<string, string>;
+      // A list in another shape is not "no checkout": the refund stays unread and is read again (sweep A3 finding 2).
+      let session: StripeRow | null;
+      try {
+        session = onlyRow(await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`), checkoutLegible);
+      } catch (error) {
+        if (!(error instanceof StripeListUnreadable)) throw error;
+        console.error("reading the checkout of a refunded payment failed", store.handle, error);
+        unsure = true;
+        continue;
+      }
+      if (session) {
+        const meta = ownField(session, "metadata") as Record<string, string>;
         // The product, the one ticked, and every product of a bundle among them.
         if (handles.has(meta.store ?? "")) sales.push({ reference: session.id, products: deliveredIds(meta) });
       } else if (lookups > 0) {
@@ -630,28 +672,49 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
         continue;
       }
 
-      for (const sale of sales) {
-        for (const productId of sale.products) {
-          const product = await readListing(store, productId);
-          if (!product) continue;
-          const [key] = await redisPipeline([["HGET", saleKey(store, product), sale.reference]]);
-          if (typeof key === "string" && key && (await setRevoked(store, product, key, true, "refund"))) revoked += 1;
-          // A buyer still waiting for a key from an empty pool is not given one.
-          await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]);
+      // The refund is marked read only once every key it takes back is revoked for sure: a reply in an unknown shape
+      // throws UnknownReplyError, and the refund stays unread for the next run (sweep A3 finding 2, CX-123 rule 24).
+      let here = 0;
+      try {
+        for (const sale of sales) {
+          for (const productId of sale.products) {
+            const product = await readListing(store, productId);
+            // Only a product the store no longer lists is gone, with no key to revoke. One it still lists whose listing
+            // came back empty (outside the catalog head, its GET answered in an unknown shape) is unknown: the refund
+            // stays unread for the next run (review of #2868, CX-123 rule 24).
+            if (!product && hasProduct(store, productId)) throw new UnknownReplyError("a refunded product's listing");
+            if (!product) continue;
+            const key = repliesFor(await redisPipeline([["HGET", saleKey(store, product), sale.reference]]), 1)?.[0];
+            if (key !== null && typeof key !== "string") throw new UnknownReplyError("HGET of a sale's license key");
+            if (key && (await setRevoked(store, product, key, true, "refund"))) here += 1;
+            // A buyer still waiting for a key from an empty pool is not given one.
+            const dropped = countOf(repliesFor(await redisPipeline([["HDEL", waitingKey(store, product), sale.reference]]), 1)?.[0]);
+            if (dropped === null) throw new UnknownReplyError("HDEL of a buyer waiting for a license key");
+          }
         }
+      } catch (error) {
+        if (!(error instanceof UnknownReplyError)) throw error;
+        console.error("revoking a refunded sale's license key could not be confirmed", store.handle, error);
+        unsure = true;
+        continue;
       }
+      revoked += here;
       await redisPipeline([
         ["SADD", refundSeenKey(store), id],
         ["EXPIRE", refundSeenKey(store), REFUND_LOOKBACK_SECONDS * 2 + 86_400],
       ]);
       newest = Math.max(newest, created);
     }
-    const last = refunds[refunds.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    if (!listed.hasMore) {
       complete = true;
       break;
     }
-    after = last.id;
+    // More to read but no readable row to go on from: the rest is not known.
+    if (!listed.lastId) {
+      unsure = true;
+      break;
+    }
+    after = listed.lastId;
   }
   // Only moved forward past what was read to the end: a run cut short by
   // its deadline, its pages or its lookups starts from the same place next
@@ -701,9 +764,12 @@ export async function checkKey(store: Store, product: Listing, key: string): Pro
 export async function keysOf(store: Store, productIds: string[], email: string): Promise<(IssuedKey & { product: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const replies = await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })]));
+  // An unknown answer is not "no keys": the copy says it could not read them rather than leave them out (CX-123 rule 24).
+  const replies = repliesFor(await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })])), productIds.length);
+  if (!replies) throw new UnknownReplyError("the license keys' records");
   return productIds.flatMap((product, i) => {
-    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("HGETALL of a product's license keys");
     const out: (IssuedKey & { product: string })[] = [];
     for (let k = 0; k + 1 < flat.length; k += 2) {
       const entry = parseInfo(String(flat[k]), flat[k + 1]);
@@ -728,11 +794,17 @@ function senderAddress(): string {
 async function warnIfLow(store: Store, product: Listing): Promise<void> {
   const setup = activeKeys(product);
   if (!setup || setup.source !== "pool") return;
-  const [left] = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  const count = Number(left) || 0;
+  // An unknown count is not an empty pool: no warning is claimed or sent on it, and the next sale reads it again
+  // (sweep A3, MEDIUM). Never thrown: the buyer's key is already given.
+  const count = countOf(repliesFor(await redisPipeline([["LLEN", poolKey(store, product)]]), 1)?.[0]);
+  if (count === null) {
+    console.error("the license key pool could not be counted; no low-pool warning", store.handle, product.id);
+    return;
+  }
   if (count > setup.lowAt) return;
-  const [claimed] = await redisPipeline([["SET", warnedKey(store, product), "1", "NX", "EX", 90 * 86_400]]);
-  if (claimed === null) return;
+  // Sent only on a sure claim: "OK". Null (already warned) or an unknown answer sends nothing.
+  const claimed = repliesFor(await redisPipeline([["SET", warnedKey(store, product), "1", "NX", "EX", 90 * 86_400]]), 1)?.[0];
+  if (claimed !== "OK") return;
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: store.email,

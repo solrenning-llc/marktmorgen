@@ -55,6 +55,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
 import {
   type Account,
@@ -365,28 +366,54 @@ async function giveBack(statsId: string, c: Connection, host = ""): Promise<void
   if (token) await revoke(c.provider, token);
 }
 
+/** Each reply of a pipeline that deletes, confirmed by its own count (DEL, SREM), or UnknownReplyError: never taken as done unseen. */
+function confirmCounts(replies: unknown, commands: number, what: string): void {
+  const answered = repliesFor(replies, commands);
+  if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+}
+
 /**
  * Disconnects: gives the access back to the provider, then forgets it here.
  * Returns the account that was connected, or null when none was.
+ *
+ * Read exactly (CX-123 rule 24): null only for a confirmed none, the slot
+ * answering null. A reply of another shape is unknown and throws, so the
+ * creator is never told an account is gone while its tokens are still kept
+ * (the route answers 500, "try again"). Text kept there that is not a
+ * connection (damaged) is deleted, since the creator asked to end it, and
+ * answered as null: nothing in it can be given back. Every deletion is
+ * confirmed by its own count, or this throws.
  */
 export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<ConnectionView | null> {
   // Under the renewal lock: a renewal under way finishes first, and none can
   // write the connection back after it is gone.
   return withLock(refreshLockKey(statsId, provider, host), 20, 9_000, async () => {
-    const c = await readConnection(statsId, provider, host);
-    if (!c) return null;
+    const read = repliesFor(await redisPipeline([["GET", connKey(statsId, provider, host)]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a meeting connection");
+    if (read[0] === null) return null;
+    const c = parseConnection(read[0], provider);
+    if (!c) {
+      console.error("a damaged meeting connection was deleted without giving its access back", provider, host ? "host" : "store");
+      const gone = host ? [["DEL", connKey(statsId, provider, host)]] : [["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)]];
+      confirmCounts(await redisPipeline(gone), gone.length, "a meeting connection's deletion");
+      return null;
+    }
     // Forgotten here whatever the provider says: a revoke that fails must not
     // leave a connection the creator asked to end.
     await giveBack(statsId, c, host).catch((error) => console.error("giving a meeting connection back failed", error));
     if (host) {
-      await redisPipeline([["DEL", connKey(statsId, provider, host)]]);
+      confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider, host)]]), 1, "a meeting connection's deletion");
       return viewOf(c);
     }
-    await redisPipeline([
-      ["DEL", connKey(statsId, provider)],
-      ["DEL", testKey(statsId, provider)],
-      ["SREM", userKey(provider, c.account.id), statsId],
-    ]);
+    confirmCounts(
+      await redisPipeline([
+        ["DEL", connKey(statsId, provider)],
+        ["DEL", testKey(statsId, provider)],
+        ["SREM", userKey(provider, c.account.id), statsId],
+      ]),
+      3,
+      "a meeting connection's deletion",
+    );
     return viewOf(c);
   });
 }

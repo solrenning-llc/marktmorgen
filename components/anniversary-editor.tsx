@@ -29,6 +29,7 @@ export function AnniversaryEditor({
   sent,
   choices,
   connected,
+  emailInPlan,
 }: {
   setting: Anniversary;
   storeName: string;
@@ -36,6 +37,8 @@ export function AnniversaryEditor({
   sent: number;
   choices: { id: string; title: string }[] | null;
   connected: boolean;
+  /** The plan includes the store's own emails (lib/store-allowance-rules.ts, kind "email"). */
+  emailInPlan: boolean;
 }) {
   const router = useRouter();
   const [on, setOn] = useState(setting.on);
@@ -62,6 +65,8 @@ export function AnniversaryEditor({
     if (refusedChoice === 0) return;
     (productsRef.current?.querySelector<HTMLElement>("input:not([disabled])") ?? productsErrorRef.current)?.focus();
   }, [refusedChoice]);
+  /** A refusal that belongs to the address field, shown under it as well as below the form. */
+  const [addressError, setAddressError] = useState(false);
 
   async function save() {
     if (busy) return;
@@ -74,6 +79,7 @@ export function AnniversaryEditor({
     }
     setBusy(true);
     setError(null);
+    setAddressError(false);
     try {
       const response = await fetch("/api/store/anniversary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on, message, address, products }) });
       const raw: unknown = await response.json();
@@ -94,8 +100,10 @@ export function AnniversaryEditor({
         return;
       }
       const reason = typeof data.error === "string" ? data.error : "";
-      setError(!response.ok && data.ok === false && Object.prototype.hasOwnProperty.call(MESSAGES, reason) ? MESSAGES[reason] : MESSAGES.server_error);
-      if (reason === "products") setRefusedChoice((count) => count + 1);
+      const known = !response.ok && data.ok === false && Object.prototype.hasOwnProperty.call(MESSAGES, reason);
+      setAddressError(known && reason === "address");
+      setError(known ? MESSAGES[reason] : MESSAGES.server_error);
+      if (known && reason === "products") setRefusedChoice((count) => count + 1);
     } catch {
       setError(MESSAGES.server_error);
     } finally {
@@ -108,10 +116,12 @@ export function AnniversaryEditor({
     "It is sent for every product you sell for a one-time price, or only for the products you choose below.",
     "Only to buyers who checked the box to hear from you when they paid, and who are still on your list. Never to somebody who left your list, whose email bounced, or whose purchase was refunded or disputed.",
     "At most once per person for each date. Each email counts toward your store's emails for the month, and none is sent when they are used up.",
+    "At most 100 go out from your store each day. On a busy day the rest go on the following days, up to a week after the date, and the email still gives the day they bought. One that cannot go within a week is not sent.",
+    "The date in the email is the day of the purchase in UTC, so for some buyers it is the day before or after their own.",
     "It carries the reason they get it, a one-click way off your list and your postal address. We never ask a buyer for a birth date: the only date used is the day they bought.",
   ];
   // What a buyer reads, with this store's name and the words typed now (an example product and date).
-  const example = anniversaryEmail({ storeName: storeName || "Your store", title: "Your product", boughtOn: "November 6, 2025", message, link: "Your store's link" });
+  const example = anniversaryEmail({ storeName: storeName || "Your store", title: "Your product", boughtOn: "November 6, 2025 (UTC)", message, link: "Your store's link" });
 
   return (
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="anniversary-title" data-anniversary-editor aria-busy={busy}>
@@ -132,6 +142,11 @@ export function AnniversaryEditor({
       {!connected ? (
         <p className="notice mt-3" role="note">
           Connect your Stripe account first. The date of each purchase is read from your sales there.
+        </p>
+      ) : null}
+      {!emailInPlan ? (
+        <p className="notice mt-3" role="note">
+          Your plan does not include email right now, so these emails cannot go out.
         </p>
       ) : null}
       {noneChosen ? (
@@ -240,7 +255,24 @@ export function AnniversaryEditor({
         </label>
         <label className="block" htmlFor="anniversary-address">
           <span className="field-label">Your postal address, printed at the bottom</span>
-          <input id="anniversary-address" disabled={busy} className="field mt-2" maxLength={MAX_ANNIVERSARY_ADDRESS} value={address} onChange={(event) => setAddress(event.target.value)} />
+          <span id="anniversary-address-help" className="mt-1 block text-sm text-ink-soft">
+            Needed to turn this on. The law in the United States asks every email like this to carry one.
+          </span>
+          <input
+            id="anniversary-address"
+            aria-describedby={addressError ? "anniversary-address-help anniversary-address-error" : "anniversary-address-help"}
+            aria-invalid={addressError || undefined}
+            disabled={busy}
+            className="field mt-2"
+            maxLength={MAX_ANNIVERSARY_ADDRESS}
+            value={address}
+            onChange={(event) => setAddress(event.target.value)}
+          />
+          {addressError ? (
+            <span id="anniversary-address-error" className="mt-1 block text-sm font-semibold text-ink">
+              {MESSAGES.address}
+            </span>
+          ) : null}
         </label>
         <div className="rounded-xl border border-line p-4" aria-labelledby="anniversary-example-title" role="group">
           <h3 id="anniversary-example-title" className="text-sm font-semibold text-ink">

@@ -27,8 +27,10 @@ export type StoreDate = {
   /** The email, as the creator writes it (lib/mail-body.ts), sent as written. */
   message: string;
   /**
-   * When this day was set (milliseconds): a day added after it has already
-   * passed this year waits for next year, never goes out late.
+   * When this day was set (milliseconds): a day added on a later day than
+   * itself waits for next year. A day added on its own day is due that day,
+   * so when the morning's run is already over it goes out at the next run,
+   * the day after (the studio says so).
    */
   since: number;
 };
@@ -41,8 +43,13 @@ export const MAX_DATE_NAME = 60;
 /** The same as an email's subject (lib/mail.ts, MAX_SUBJECT; held in tests/hg2-store-dates.test.ts). */
 export const MAX_DATE_SUBJECT = 150;
 export const MAX_DATE_MESSAGE = 2_000;
-/** How many days a date's email may still be made after its day: a day the job did not run is caught the next. */
-export const STORE_DATE_WINDOW_DAYS = 2;
+/**
+ * How many days, from the start of its day, a date's email may still be made: a run that was missed, or
+ * one that ran out of its emails on a day many stores' dates fall on (January 1, December 25), is caught
+ * by the next ones, which go on from where it stopped (lib/store-dates-send.ts). Past it, the email is not
+ * made that year, and the studio says why.
+ */
+export const STORE_DATE_WINDOW_DAYS = 7;
 
 export const NO_STORE_DATES: StoreDates = { on: false, dates: [] };
 
@@ -54,6 +61,9 @@ const DAY_MS = 86_400_000;
 
 /** The date as a short key, month then day: "1106" for November 6. */
 export const dateKey = (date: Pick<StoreDate, "month" | "day">): string => `${String(date.month).padStart(2, "0")}${String(date.day).padStart(2, "0")}`;
+
+/** The day a date takes in most years: February 29 comes on March 1, so the two can never both be kept. */
+const slotKey = (date: Pick<StoreDate, "month" | "day">): string => (date.month === 2 && date.day === 29 ? "0301" : dateKey(date));
 
 /** A month and day that exist (February 29 included). */
 export function realDay(month: unknown, day: unknown): boolean {
@@ -97,8 +107,8 @@ export function parseStoreDates(raw: unknown): StoreDates {
   const dates: StoreDate[] = [];
   for (const entry of Array.isArray(value.dates) ? value.dates.slice(0, MAX_STORE_DATES * 2) : []) {
     const date = parseDate(entry);
-    if (!date || seen.has(dateKey(date))) continue;
-    seen.add(dateKey(date));
+    if (!date || seen.has(slotKey(date))) continue;
+    seen.add(slotKey(date));
     dates.push(date);
     if (dates.length === MAX_STORE_DATES) break;
   }
@@ -106,7 +116,7 @@ export function parseStoreDates(raw: unknown): StoreDates {
   return { on: value.on === true && dates.length > 0, dates };
 }
 
-export type DatesRefusal = "many" | "date" | "twice" | "name" | "subject" | "message" | "placeholder" | "empty";
+export type DatesRefusal = "many" | "date" | "twice" | "leap" | "name" | "subject" | "message" | "placeholder" | "empty";
 
 /**
  * What the creator sent from the studio, checked whole: every date must be
@@ -119,6 +129,7 @@ export function readStoreDatesInput(raw: unknown, before: StoreDates, now: numbe
   if (list.length > MAX_STORE_DATES) return { ok: false, reason: "many" };
   const kept = new Map(before.dates.map((d) => [dateKey(d), d.since]));
   const seen = new Set<string>();
+  const slots = new Set<string>();
   const dates: StoreDate[] = [];
   for (const [index, entry] of list.entries()) {
     const asked = entry && typeof entry === "object" && !Array.isArray(entry) ? (entry as Record<string, unknown>) : {};
@@ -127,7 +138,11 @@ export function readStoreDatesInput(raw: unknown, before: StoreDates, now: numbe
     if (!realDay(month, day)) return { ok: false, reason: "date", index };
     const key = dateKey({ month: month as number, day: day as number });
     if (seen.has(key)) return { ok: false, reason: "twice", index };
+    // February 29 and March 1 are one day in three years of four: one email for it, never two.
+    const slot = slotKey({ month: month as number, day: day as number });
+    if (slots.has(slot)) return { ok: false, reason: "leap", index };
     seen.add(key);
+    slots.add(slot);
     const name = line(asked.name, MAX_DATE_NAME);
     const subject = line(asked.subject, MAX_DATE_SUBJECT);
     const message = cleanMessage(asked.message);

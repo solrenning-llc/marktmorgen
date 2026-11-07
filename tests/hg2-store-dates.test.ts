@@ -21,7 +21,14 @@
  *     before each batch goes (too few left, none made), at most a set number
  *     made in one run;
  *   - unknown fails closed: a claim whose answer is not known makes nothing;
- *   - what happened each year is kept for the studio, without any address.
+ *   - what happened each year is kept for the studio, without any address;
+ *   - fair across stores: a run that runs out of its emails goes on next time
+ *     from where it stopped, each date stays due until a week after its day,
+ *     and a date not made yet says so in the studio (waiting, or not sent and
+ *     why);
+ *   - February 29 and March 1 are never kept together (one day in most years);
+ *   - a date added on its own day after the run goes out the next run, and
+ *     the studio says so.
  */
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStoreDates, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { forgetContactPerson, stopWriting, tokensFor, unsubscribe, upsertContact } from "@/lib/contacts";
@@ -50,6 +57,9 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StoreDatesEditor } from "@/components/store-dates-editor";
 
 const DAY = 86_400_000;
 const delivery = installSesMailFixture();
@@ -98,6 +108,8 @@ async function main(): Promise<void> {
   is("a day set on that day itself is due", dueYear(date(11, 6, Date.UTC(2026, 10, 6, 8)), Date.UTC(2026, 10, 6, 9)), 2026);
   is("a day set after it passed waits for next year", dueYear(date(11, 6, Date.UTC(2026, 10, 7, 8)), Date.UTC(2026, 10, 7, 9)), null);
   is("and the studio says next year", new Date(nextDay(date(11, 6, Date.UTC(2026, 10, 7, 8)), Date.UTC(2026, 10, 7, 9))).toISOString().slice(0, 10), "2027-11-06");
+  is("a day set on its own day after that morning's run goes out at the next run, the day after", dueYear(date(11, 6, Date.UTC(2026, 10, 6, 10)), Date.UTC(2026, 10, 7, 9)), 2026);
+  is("a date stays due until a week after its day, while it waits its turn", [dueYear(nov6, Date.UTC(2026, 10, 12, 23)), dueYear(nov6, Date.UTC(2026, 10, 13, 0))], [2026, null]);
   is("a day still ahead this year is this year's", new Date(nextDay(date(12, 25), Date.UTC(2026, 10, 7))).toISOString().slice(0, 10), "2026-12-25");
 
   part("Saving checks the whole list and says why");
@@ -111,6 +123,8 @@ async function main(): Promise<void> {
   is("no email", (input([date(3, 14, 0, { message: "  " })]) as { reason: string }).reason, "message");
   is("a template's part still to write", (input([date(3, 14, 0, { message: "Hello ⟦your words⟧" })]) as { reason: string }).reason, "placeholder");
   is("on with nothing", (input([]) as { reason: string }).reason, "empty");
+  is("February 29 and March 1 together: refused, they are one day in most years", input([date(2, 29), date(3, 1)]) as unknown, { ok: false, reason: "leap", index: 1 });
+  is("and never both kept from storage", parseStoreDates({ dates: [date(2, 29), date(3, 1)] }).dates.map(dateKey), ["0229"]);
   const kept = input([date(3, 14), { ...date(4, 1), month: "4", day: "1" }]);
   is("a day kept keeps when it was set; a new one is set now", kept.ok ? kept.value.dates.map((d) => d.since) : null, [111, 999]);
 
@@ -222,6 +236,43 @@ async function main(): Promise<void> {
   is("one made with a limit of one", (await sendStoreDates(deadline(), now, 1)).made, 1);
   is("the other on the next run", (await sendStoreDates(deadline(), now, 1)).made, 1);
   is("then none", (await sendStoreDates(deadline(), now, 1)).made, 0);
+
+  part("Fair when many stores' dates are due at once: each made, or the studio says why");
+  // The reviewer's case: three stores, one email a run, a run a day.
+  const busy = ["mia", "ned", "oli"];
+  for (const handle of busy) {
+    const s = await shop(`${handle}@example.com`, handle);
+    await upsertContact(s.listId as string, `${handle}-fan@example.com`, { agreed: true, explicit: true, source: "free" }, ROOM);
+    await saveStoreDates(`${handle}@example.com`, { on: true, dates: [date(todays.month, todays.day)] }, now - 60_000);
+  }
+  const busyOutcome = async (handle: string) => (await readStoreDateResults((await storeForEmail(`${handle}@example.com`))!)).get(dateKey(todays))?.outcome;
+  is("day 0: one made", (await sendStoreDates(deadline(), now, 1)).made, 1);
+  is("the two not made yet say they wait", (await Promise.all(busy.map(busyOutcome))).sort(), ["made", "waiting", "waiting"]);
+  is("day 1: the next", (await sendStoreDates(deadline(), now + DAY, 1)).made, 1);
+  is("day 2: the last", (await sendStoreDates(deadline(), now + 2 * DAY, 1)).made, 1);
+  is("all three made", await Promise.all(busy.map(busyOutcome)), ["made", "made", "made"]);
+
+  part("Not made within the week: the studio says so and why");
+  const pia = await shop("pia@example.com", "pia");
+  await upsertContact(pia.listId as string, "pip@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await saveStoreDates("pia@example.com", { on: true, dates: [date(todays.month, todays.day)] }, now - 60_000);
+  await sendStoreDates(deadline(), now, 0);
+  const piaNow = (await storeForEmail("pia@example.com"))!;
+  const piaResults = await readStoreDateResults(piaNow);
+  is("waiting is kept for the studio", piaResults.get(dateKey(todays))?.outcome, "waiting");
+  const page = (at: number) =>
+    renderToStaticMarkup(
+      createElement(StoreDatesEditor, {
+        setting: piaNow.storeDates,
+        results: Object.fromEntries([...piaResults].map(([k, r]) => [k, { year: r.year, outcome: r.outcome, total: r.total }])),
+        mailReady: true,
+        emailInPlan: true,
+        now: at,
+      }),
+    );
+  is("inside the week: the studio says it waits its turn", page(now).includes("Waiting its turn"), true);
+  is("past the week: not sent, and why", page(now + 8 * DAY).includes("too many stores&#x27; emails were due at once, and it could not be made within a week"), true);
+  is("the studio says a date added on its own day may go the day after", page(now).includes("A date you add on its own day goes out at the next run"), true);
 
   delivery.restore();
   done();

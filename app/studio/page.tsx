@@ -2044,6 +2044,7 @@ export default async function StudioPage({
                     sent={await anniversariesThisMonth(store).catch(() => 0)}
                     choices={await anniversaryChoices(store).catch(() => null)}
                     connected={Boolean(current?.stripeAccountId)}
+                    emailInPlan={allowanceFor(store, "email") > 0}
                   />
                 ) : null}
 

@@ -24,15 +24,23 @@
  *     ANNIVERSARIES_PER_STORE_RUN a store a run, counted for the studio;
  *   - unknown fails closed: a page of Stripe that is not a list, a charge not
  *     readable, a reply about deleted people that is not whole: nothing sent;
- *   - the marks go with the person (lib/person-erasure.ts).
+ *   - the marks go with the person (lib/person-erasure.ts);
+ *   - an uncertain answer from the sender keeps the once-mark, so the
+ *     daily job never writes twice (only a certain refusal lets it go);
+ *   - the reading of Stripe goes on from where the last run stopped, so a
+ *     store with more checkouts than one run reads still reaches its oldest.
  */
 import { createHash } from "node:crypto";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AnniversaryEditor } from "@/components/anniversary-editor";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setAnniversary, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { stopWriting, unsubscribe, upsertContact, tokensFor } from "@/lib/contacts";
 import { suppressCommand } from "@/lib/suppression";
 import { takeAllowance } from "@/lib/store-allowance";
 import { redisPipeline } from "@/lib/redis";
 import {
+  ANNIVERSARY_LATE_DAYS,
   MAX_ANNIVERSARY_MESSAGE,
   NO_ANNIVERSARY,
   anniversaryEmail,
@@ -49,9 +57,17 @@ import { ROOM } from "./data-room";
 const DAY = 86_400;
 const now = Date.UTC(2026, 10, 6, 12, 0, 0);
 const yearAgo = Math.floor(Date.UTC(2025, 10, 6, 9, 0, 0) / 1000);
+/** The daily job `days` after the first, and a time `days` after the end of the first one's window (Stripe's seconds). */
+const runOn = (days: number) => now + days * DAY * 1000;
+const W0 = anniversaryWindow(now).upTo;
+const afterW0 = (days: number) => Math.floor(W0 + days * DAY);
 
 type Sent = { to: string[]; subject: string; text: string; html?: string; headers?: Record<string, string> };
 const emails: Sent[] = [];
+/** Every email the sender was asked for, taken or not. */
+const asked: string[] = [];
+/** How the sender answers one recipient, when not plainly yes. */
+const senderAnswers = new Map<string, () => Response>();
 const sessions: Record<string, unknown>[] = [];
 let sessionPage: (() => unknown) | null = null;
 const expands: string[] = [];
@@ -59,7 +75,11 @@ const expands: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
-    emails.push(JSON.parse(String(init?.body)) as Sent);
+    const body = JSON.parse(String(init?.body)) as Sent;
+    asked.push(...body.to);
+    const answer = senderAnswers.get(body.to[0] ?? "");
+    if (answer) return answer();
+    emails.push(body);
     return new Response(JSON.stringify({ id: `email_${emails.length}` }));
   }
   const path = url.pathname.replace(/^\/v1/, "");
@@ -69,10 +89,15 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (sessionPage) return answer(sessionPage());
     const gte = Number(url.searchParams.get("created[gte]"));
     const lte = Number(url.searchParams.get("created[lte]"));
-    // Newest first, as Stripe lists them: by time, and the later made first at the same second.
+    // Newest first, as Stripe lists them: by time, and the later made first at the same second; pages of
+    // `limit`, the next one after `starting_after`.
     const found = sessions.map((s, i) => ({ s, i })).filter(({ s }) => Number(s.created) >= gte && Number(s.created) <= lte);
     found.sort((a, b) => Number(b.s.created) - Number(a.s.created) || b.i - a.i);
-    return answer({ object: "list", data: found.map(({ s }) => s), has_more: false });
+    const after = url.searchParams.get("starting_after");
+    const start = after ? found.findIndex(({ s }) => s.id === after) + 1 : 0;
+    const limit = Number(url.searchParams.get("limit") ?? 10);
+    const page = found.slice(start, start + limit);
+    return answer({ object: "list", data: page.map(({ s }) => s), has_more: start + limit < found.length });
   }
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${path}` } }), { status: 404 });
 }) as typeof fetch;
@@ -129,6 +154,16 @@ async function main(): Promise<void> {
   is("no urgency, scarcity, countdown or discount of its own", /hurry|last chance|only \d|left|expires|ends|today only|%|off\b|discount|sale/i.test(`${sample.subject}\n${anniversaryEmail({ storeName: "S", title: "T", boughtOn: "d", message: "", link: "l" }).body}`), false);
   is("without words from the creator, no empty paragraph", anniversaryEmail({ storeName: "S", title: "T", boughtOn: "d", message: "", link: "l" }).body.includes("\n\n\n"), false);
   is("in the store's language", anniversaryEmail({ storeName: "S", title: "T", boughtOn: "6 de noviembre de 2025", message: "", link: "l", language: "es" }).subject, "Un año desde que compraste T");
+
+  part("The studio says what it cannot do");
+  const editor = (emailInPlan: boolean) =>
+    renderToStaticMarkup(createElement(AnniversaryEditor, { setting: NO_ANNIVERSARY, storeName: "Harbor Kitchen", suggestedAddress: "", sent: 0, choices: [], connected: true, emailInPlan }));
+  is("a plan without email: the page says none can go out", editor(false).includes("Your plan does not include email right now, so these emails cannot go out."), true);
+  is("a plan with email: no such notice", editor(true).includes("Your plan does not include email"), false);
+  is("the example gives the date as the UTC day it is", editor(true).includes("November 6, 2025 (UTC)"), true);
+  is("the address field is described by its help", /id="anniversary-address"[^>]*aria-describedby="anniversary-address-help"|aria-describedby="anniversary-address-help"[^>]*id="anniversary-address"/.test(editor(true)), true);
+  is("the studio says busy days can go late, and how late at most", editor(true).includes("up to a week after the date"), true);
+  is("in the figures the job keeps", [editor(true).includes(`At most ${ANNIVERSARIES_PER_STORE_RUN} go out from your store each day`), ANNIVERSARY_LATE_DAYS], [true, 7]);
 
   part("The studio setting is saved only whole");
   const made = await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
@@ -200,7 +235,8 @@ async function main(): Promise<void> {
   is("exactly one email", emails.length, 1);
   is("to the buyer who said yes, is on the list, and kept what they bought", emails[0]?.to, ["dana@example.com"]);
   is("its subject names what they bought first", emails[0]?.subject, "A year since you bought Bread Basics");
-  is("its text gives the purchase's date", emails[0]?.text.includes("A year ago, on November 6, 2025, you bought Bread Basics from Harbor Kitchen."), true);
+  // Rule 23: the date is the UTC calendar day of the purchase, which can differ from the buyer's own, so it says so.
+  is("its text gives the purchase's date, and that it is the UTC day", emails[0]?.text.includes("A year ago, on November 6, 2025 (UTC), you bought Bread Basics from Harbor Kitchen."), true);
   is("its text carries the creator's words", emails[0]?.text.includes("A new chapter on rye is in the course."), true);
   is("and their postal address", emails[0]?.text.includes("1 Main St, Portland, OR 97201"), true);
   is("an HTML part and a text part", [typeof emails[0]?.html === "string" && emails[0]!.html!.includes("<html lang="), typeof emails[0]?.text === "string"], [true, true]);
@@ -214,17 +250,47 @@ async function main(): Promise<void> {
   is("never again, however many runs inside the window", emails.length, 1);
 
   part("Bounded per run");
+  // Rule 23: the runs go forward in time, as the daily job does (they ran at the first day's moment again
+  // before, which a job that goes on from where it stopped has already read past).
   const many = ANNIVERSARIES_PER_STORE_RUN + 3;
   for (let i = 0; i < many; i += 1) {
     const email = `buyer${i}@example.com`;
-    bought(email, meta, { created: yearAgo - DAY });
+    bought(email, meta, { created: afterW0(1.5) });
     await agreed(email);
   }
   const start = emails.length;
-  await sendAnniversaries(Date.now() + 30_000, now);
+  await sendAnniversaries(Date.now() + 30_000, runOn(2));
   is(`at most ${ANNIVERSARIES_PER_STORE_RUN} from one store in one run`, emails.length - start, ANNIVERSARIES_PER_STORE_RUN);
-  await sendAnniversaries(Date.now() + 30_000, now);
-  is("the rest the next run, still inside the window", emails.length - start, many);
+  await sendAnniversaries(Date.now() + 30_000, runOn(3));
+  is("the rest the next run", emails.length - start, many);
+
+  part("An uncertain answer from the sender keeps the mark: never twice");
+  bought("una@example.com", meta, { created: afterW0(3.5) });
+  await agreed("una@example.com");
+  senderAnswers.set("una@example.com", () => new Response(JSON.stringify({ message: "internal" }), { status: 500 }));
+  const unaMark = `nl:hg:once:${store!.statsId}:${createHash("sha256").update("nimbus-hg-once:una@example.com").digest("hex").slice(0, 32)}`;
+  await sendAnniversaries(Date.now() + 30_000, runOn(4));
+  redis.advance(2_000); // a mark let go lapses within a second (lib/claim-mark.ts)
+  is("the sender was asked once", asked.filter((to) => to === "una@example.com").length, 1);
+  is("its once-mark is kept: the email may have gone", redis.keys().includes(unaMark), true);
+  senderAnswers.delete("una@example.com");
+  await sendAnniversaries(Date.now() + 30_000, runOn(5));
+  is("the next day's run does not ask again", asked.filter((to) => to === "una@example.com").length, 1);
+
+  part("The reading goes on from where the last run stopped");
+  // Twenty buyers who said yes, the oldest of the window, under more checkouts than one run reads (all said no).
+  const early: string[] = [];
+  for (let i = 0; i < 20; i += 1) {
+    const email = `early${i}@example.com`;
+    early.push(email);
+    bought(email, meta, { created: afterW0(5.2) + i });
+    await agreed(email);
+  }
+  for (let i = 0; i < 330; i += 1) bought(`late${i}@example.com`, { ...meta, news: "no" }, { created: afterW0(6.5) + i });
+  const readStart = emails.length;
+  await sendAnniversaries(Date.now() + 30_000, runOn(7));
+  await sendAnniversaries(Date.now() + 30_000, runOn(8));
+  is("the oldest of a busy window are reached the next run", emails.slice(readStart).flatMap((e) => e.to).sort(), [...early].sort());
 
   part("The marks go with the person");
   const marks = () => redis.keys().filter((k) => k.startsWith(`nl:hg:once:${store!.statsId}:`)).length;
@@ -232,25 +298,29 @@ async function main(): Promise<void> {
   is("forgetting Dana takes her mark", [await forgetAnniversaryPerson(store!.statsId, "dana@example.com"), marks()], [1, had - 1]);
 
   part("A spent email figure sends nothing and leaves no mark");
-  bought("sam@example.com", meta);
+  bought("sam@example.com", meta, { created: afterW0(8.5) });
   await agreed("sam@example.com");
   const left = await takeAllowance(store!, "email", 1, Date.now());
   if (!left.ok) throw new Error("the figure could not be read");
   // Spend the rest of the figure: the largest bite that still fits, halving until none does.
   for (let bite = left.left; bite >= 1; ) if (!(await takeAllowance(store!, "email", bite, Date.now())).ok) bite = Math.floor(bite / 2);
   const spentStart = emails.length;
-  await sendAnniversaries(Date.now() + 30_000, now);
+  await sendAnniversaries(Date.now() + 30_000, runOn(9));
   is("nothing sent", emails.length - spentStart, 0);
   redis.advance(2_000); // a claim let go lapses within a second (lib/claim-mark.ts)
   const samMark = `nl:hg:once:${store!.statsId}:${createHash("sha256").update("nimbus-hg-once:sam@example.com").digest("hex").slice(0, 32)}`;
-  is("no once-mark kept, so a later run inside the window may send it", redis.keys().includes(samMark), false);
+  is("no once-mark kept", redis.keys().includes(samMark), false);
+  // The figure back (a new month): the next run reads Sam's purchase again and writes.
+  await redisPipeline(redis.keys().filter((k) => k.startsWith("nl:allow:email:")).map((k) => ["DEL", k]));
+  await sendAnniversaries(Date.now() + 30_000, runOn(10));
+  is("so a later run sends it", emails.slice(spentStart).flatMap((e) => e.to), ["sam@example.com"]);
 
   part("Turned off: nothing more");
   await setAnniversary("owner@example.com", { on: false, message: "", address: "1 Main St" });
-  bought("zed@example.com", meta);
+  bought("zed@example.com", meta, { created: afterW0(10.5) });
   await agreed("zed@example.com");
   const offStart = emails.length;
-  await sendAnniversaries(Date.now() + 30_000, now);
+  await sendAnniversaries(Date.now() + 30_000, runOn(11));
   is("nothing sent once off", emails.length - offStart, 0);
 
   done();

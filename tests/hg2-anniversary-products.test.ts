@@ -42,7 +42,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AnniversaryEditor } from "@/components/anniversary-editor";
 
-const DAY = 86_400;
 const now = Date.UTC(2026, 10, 6, 12, 0, 0);
 const yearAgo = Math.floor(Date.UTC(2025, 10, 6, 9, 0, 0) / 1000);
 const OWNER = "owner@example.com";
@@ -101,7 +100,12 @@ async function writeRaw(products: unknown): Promise<void> {
   await redisPipeline([["SET", key, JSON.stringify({ ...record, anniversary })]]);
 }
 
-const run = () => send.sendAnniversaries(Date.now() + 30_000, now);
+/** A daily run, at `at` (by default the test's moment). Each run reads on from where the last one stopped (unit 1). */
+const run = (at = now) => send.sendAnniversaries(Date.now() + 30_000, at);
+const HOUR = 3600;
+/** A purchase a year before the test's moment plus `hours`, read by a run that late (a range not read before). */
+const after = (hours: number) => Math.floor(Date.UTC(2025, 10, 6, 12, 0, 0) / 1000) + hours * HOUR - 1800;
+const runAfter = (hours: number) => run(now + hours * HOUR * 1000);
 const chosen = async () => (await storeForEmail(OWNER))?.anniversary as unknown as { products?: unknown };
 
 async function main(): Promise<void> {
@@ -196,8 +200,12 @@ async function main(): Promise<void> {
   part("Every product again");
   await writeRaw(undefined);
   is("a record from before this unit reads as every product", (await chosen())?.products, "all");
-  await run();
-  is("the course's buyer and the guide's are both written to now", emails.map((e) => e.to[0]).sort(), ["dana@example.com", "eve@example.com", "fay@example.com"]);
+  bought("hal@example.com", course.product.id, after(2));
+  bought("ivy@example.com", guide.product.id, after(2));
+  for (const who of ["hal", "ivy"]) await agreed(`${who}@example.com`);
+  await runAfter(2);
+  is("the course's buyer and the guide's are both written to now", emails.map((e) => e.to[0]).sort(), ["dana@example.com", "hal@example.com", "ivy@example.com"]);
+  is("a purchase already read while it was not chosen is not read again (unit 1 reads on from where it stopped)", emails.some((e) => ["eve@example.com", "fay@example.com"].includes(e.to[0])), false);
 
   part("A deleted product leaves the choice by itself");
   await setAnniversary(OWNER, { ...on, products: [guide.product.id, extra.product.id] });
@@ -205,16 +213,16 @@ async function main(): Promise<void> {
   is("taken out in the same write; the rest kept", (await chosen())?.products, [guide.product.id]);
   await removeProduct(OWNER, guide.product.id);
   is("the last one gone leaves none chosen, never every product", (await chosen())?.products, []);
-  bought("gus@example.com", course.product.id, yearAgo - DAY);
+  bought("gus@example.com", course.product.id, after(3));
   await agreed("gus@example.com");
   const before = emails.length;
   const readNow = listed;
-  await run();
+  await runAfter(3);
   is("nothing sent with none chosen", [emails.length - before, listed - readNow], [0, 0]);
 
   part("The studio's editor says what is true");
   const draw = (setting: rules.Anniversary, choices: { id: string; title: string }[] | null = [], sentThisMonth = 3) =>
-    renderToStaticMarkup(createElement(AnniversaryEditor, { setting, storeName: "Harbor", suggestedAddress: "", sent: sentThisMonth, choices, connected: true }));
+    renderToStaticMarkup(createElement(AnniversaryEditor, { setting, storeName: "Harbor", suggestedAddress: "", sent: sentThisMonth, choices, connected: true, emailInPlan: true }));
   const left = (await chosen()) as rules.Anniversary;
   is("the setting is left on, as the creator set it, with none chosen", [left.on, left.products], [true, []]);
   const emptyOn = draw(left);

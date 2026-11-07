@@ -91,7 +91,7 @@ export async function saveTask(courseId: string, lessonId: string, task: Task, d
 const FILE_BYTES_TEXT = /^(0|[1-9]\d{0,15})$/;
 
 /** What removing an assignment will forget, read in full before anything is deleted (readTaskDrop). */
-export type TaskDrop = { courseId: string; lessonId: string; files: string[]; bytes: number; gone: string[]; freed: number };
+export type TaskDrop = { courseId: string; lessonId: string; files: string[]; sizes: number[]; bytes: number; gone: string[]; freed: number };
 
 /**
  * Reads what removing an assignment will forget: its handed-in files and their sizes, the work handed in, and what
@@ -105,11 +105,13 @@ export async function readTaskDrop(courseId: string, lessonId: string): Promise<
   const pairs = stringList(repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0]);
   if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
   const files: string[] = [];
+  const sizes: number[] = [];
   let bytes = 0;
   for (let i = 0; i < pairs.length; i += 2) {
     const [name, size] = [pairs[i], pairs[i + 1]];
     if (!name || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
     files.push(name);
+    sizes.push(Number(size));
     bytes += Number(size);
   }
   // Each student's own record, found by the list of all the work handed in.
@@ -123,7 +125,27 @@ export async function readTaskDrop(courseId: string, lessonId: string): Promise<
   );
   if (!held || !held.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("an assignment's records");
   const freed = held.reduce((sum: number, raw, i) => sum + recordBytes(raw, i === 0 ? 1 : 3), 0) + files.length * ENTRY_BYTES;
-  return { courseId, lessonId, files, bytes, gone, freed };
+  return { courseId, lessonId, files, sizes, bytes, gone, freed };
+}
+
+/**
+ * The bytes of the files this call took out of a files' hash, one HDEL each, so each reply says whether this call
+ * removed that file (Claude 6 on #3009): a creator's drop, a student's erasure and a hand-in replacing its file can
+ * all remove the same one. Exactly 1: removed here, its bytes are this call's to give back. Exactly 0: another path
+ * removed it first and gave them back; nothing here. Any other reply is unknown (CX-123 rule 24): nothing is given
+ * back for that file, which only refuses sooner, never leaves the store holding more than its room, and it is said in
+ * the log. Never throws: the deletion already happened and its files are still to be deleted.
+ */
+function removedBytes(replies: unknown[] | null, sizes: number[]): number {
+  let bytes = 0;
+  let unknown = 0;
+  sizes.forEach((size, i) => {
+    const reply = replies ? replies[i] : undefined;
+    if (reply === 1) bytes += size;
+    else if (reply !== 0) unknown++;
+  });
+  if (unknown) console.error(`not giving back the room of ${unknown} handed-in file(s)`, new UnknownReplyError("whether a handed-in file left the files' hash"));
+  return bytes;
 }
 
 /**
@@ -131,13 +153,16 @@ export async function readTaskDrop(courseId: string, lessonId: string): Promise<
  * handed in after the reading stays listed, never lost; the work read leaves the lists. Returns the files to delete.
  */
 export async function applyTaskDrop(drop: TaskDrop, room: string | null, data: DataStore): Promise<string[]> {
-  const { courseId, lessonId, files, bytes, gone, freed } = drop;
-  await redisPipeline([
+  const { courseId, lessonId, files, sizes, gone, freed } = drop;
+  const commands = [
     ["DEL", taskKey(courseId, lessonId)],
-    ...(files.length ? [["HDEL", filesKey(courseId, lessonId), ...files]] : []),
+    // One HDEL per file: only a file this call removed has its bytes given back here (removedBytes).
+    ...files.map((file) => ["HDEL", filesKey(courseId, lessonId), file]),
     ...gone.map((member) => ["DEL", subKey(courseId, lessonId, member.slice(lessonId.length + 1))]),
     ...(gone.length ? [["ZREM", waitingKey(courseId), ...gone], ["ZREM", allKey(courseId), ...gone]] : []),
-  ]);
+  ];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const bytes = files.length ? removedBytes(replies?.slice(1, 1 + files.length) ?? null, sizes) : 0;
   if (room && bytes) await releaseBytes(room, bytes);
   if (freed) await giveData(data, [{ slot: TASKS_SLOT(courseId), bytes: freed }]);
   return files;
@@ -277,8 +302,12 @@ export async function releaseBytes(room: string, bytes: number): Promise<boolean
   return true;
 }
 
-/** What handing in did: where the work stands, and the earlier file it replaced, with its size, to delete. */
-export type HandIn = { state: TaskState; replaced: HandedFile | null };
+/**
+ * What handing in did: where the work stands, and the earlier file it replaced, with its size, to delete; and
+ * `freedBytes`, that file's bytes when this hand-in took it out of the files' hash, for the caller to give back to the
+ * store's task room (0 when another path, a drop of the assignment, removed it first and gave them back).
+ */
+export type HandIn = { state: TaskState; replaced: HandedFile | null; freedBytes: number };
 
 /**
  * A student hands their work in, or hands it in again. What they handed in
@@ -323,11 +352,16 @@ export async function handIn(input: {
   if (grown < 0) await giveData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: -grown }]);
   if (!task.review) await finish(courseId, lessonId, who, input.email, input.data);
   const replaced = before?.file && before.file.path !== input.file?.path ? before.file : null;
+  let freedBytes = 0;
   if (replaced) {
-    await redisPipeline([["HDEL", filesKey(courseId, lessonId), replaced.path]]);
-    await giveData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: ENTRY_BYTES }]);
+    // Its entry and its bytes are given back only when this HDEL removed it (removedBytes): a drop racing this
+    // hand-in may have removed it and given them back already.
+    const size = Number(replaced.bytes) || 0;
+    const gone = repliesFor(await redisPipeline([["HDEL", filesKey(courseId, lessonId), replaced.path]]), 1);
+    if (gone?.[0] === 1) await giveData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: ENTRY_BYTES }]);
+    freedBytes = removedBytes(gone, [size]);
   }
-  return { state, replaced };
+  return { state, replaced, freedBytes };
 }
 
 /** The lesson done, for the outline, the progress and the certificate, and the lessons after it open. */
@@ -468,13 +502,15 @@ export async function forgetTasksPerson(courseId: string, lessonIds: string[], w
   if (!handed.length) return { records: 0, files: [] };
   const files = handed.flatMap((h) => (h.sub?.file?.path ? [{ lessonId: h.lessonId, path: h.sub.file.path, bytes: Number(h.sub.file.bytes) || 0 }] : []));
   const members = handed.map((h) => `${h.lessonId}|${who}`);
-  await redisPipeline([
+  const commands = [
     ["DEL", ...handed.map((h) => subKey(courseId, h.lessonId, who))],
     ["ZREM", waitingKey(courseId), ...members],
     ["ZREM", allKey(courseId), ...members],
+    // One HDEL per file: only a file this erasure removed has its bytes given back here (removedBytes).
     ...files.map((f) => ["HDEL", filesKey(courseId, f.lessonId), f.path]),
-  ]);
-  const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
+  ];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const bytes = files.length ? removedBytes(replies?.slice(3) ?? null, files.map((f) => f.bytes)) : 0;
   if (room && bytes) await releaseBytes(room, bytes);
   return { records: handed.length, files: files.map((f) => f.path) };
 }

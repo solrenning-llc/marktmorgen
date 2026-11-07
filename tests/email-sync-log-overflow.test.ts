@@ -148,14 +148,24 @@ test("a job pushed out of the log whose place on the queue reads unknown stays w
   assert.deepEqual((await syncJobsOf(STATS, FIRST)).map((job) => job.id), [id], "and still found");
 });
 
-test("a finished job whose log reads unknown goes back on the queue, still found, rather than lost", async () => {
-  const id = await seed(LOG_SIZE);
-  alter = (b, a) => (b.some((c) => c[0] === "LRANGE" && c[1] === logKey && c[3] === -1) && b.some((c) => c[0] === "ZREM") ? a.map((reply, i) => (b[i]?.[0] === "LRANGE" ? 7 : reply)) : a);
-  await retried();
-  alter = (_b, a) => a;
-  assert.equal(queued(id), true, "back on the queue");
-  assert.deepEqual((await syncJobsOf(STATS, FIRST)).map((job) => job.id), [id], "and still found");
-});
+// Retire reads the whole log before the job leaves the queue and, for a job in the log, once more after (Claude 4 on
+// #2860); either read answering in another shape keeps the job on the queue, or puts it back there.
+for (const [name, newer, read] of [
+  ["out of the log, at the read before it leaves the queue", LOG_SIZE, 1],
+  ["in the log, at the read after it leaves the queue", 0, 2],
+] as [string, number, number][]) {
+  test(`a finished job whose log reads unknown (${name}) stays on the queue, still found, rather than lost`, async () => {
+    const id = await seed(newer);
+    let reads = 0;
+    const wholeLog = (c: (string | number)[]) => c[0] === "LRANGE" && c[1] === logKey && c[2] === 0 && c[3] === -1;
+    alter = (b, a) => (b.some(wholeLog) && (reads += 1) === read ? a.map((reply, i) => (wholeLog(b[i] ?? []) ? 7 : reply)) : a);
+    await retried();
+    alter = (_b, a) => a;
+    assert.equal(reads >= read, true, "the read was reached");
+    assert.equal(queued(id), true, "on the queue");
+    assert.deepEqual((await syncJobsOf(STATS, FIRST)).map((job) => job.id), [id], "and still found");
+  });
+}
 
 /**
  * A reply lost after Redis ran the commands (a timeout, a dropped connection) must never leave a job's record, which

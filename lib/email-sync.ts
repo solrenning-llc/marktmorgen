@@ -436,46 +436,96 @@ async function runClaimed(statsId: string, id: string, budget: number, now = Dat
  * person's copy and erasure find it (Codex Q on #2860): in the store's log, or
  * on the queue while it waits. The log keeps the studio's newest LOG_SIZE, so
  * a job pushed past them leaves it here, and its record goes with it unless it
- * is still waiting. The log is let go of first and the queue read after, so a
- * job finishing meanwhile is either still in the log when retire reads it or
- * already off the queue when this reads it. A place on the queue that does not
- * read, or a deletion that does not answer a count, puts the job back at the
- * end of the log, where it is still found and the next push reads it again.
+ * is still waiting. No job leaves the log before the reply that settles its
+ * record has come back (Claude 4 on #2860): a reply lost after Redis ran the
+ * commands (a timeout, a dropped connection) leaves it in the log, never in
+ * neither place. So where each job is on the queue is read first, with nothing
+ * moved. A finished job's record is deleted, and only once that deletion has
+ * answered a count is the job let go of from the log. A waiting job is let go
+ * of from the log and the queue read again after, so one finishing meanwhile
+ * is either still in the log when retire reads it or already off the queue
+ * when this reads it; one found off the queue then, or whose second read does
+ * not come back or does not read, is put back at the end of the log and, once
+ * off the queue, deleted as a finished one. A reply that does not read leaves
+ * the job in the log, where it is still found and the next push reads it again.
  */
 async function dropOverflow(statsId: string, ids: string[]): Promise<void> {
   const log = logKey(statsId);
-  const replies = repliesFor(
-    await redisPipeline(ids.flatMap((id) => [["LREM", log, 0, id], ["ZSCORE", QUEUE_KEY, `${statsId}|${id}`]])),
-    ids.length * 2,
-  );
-  const gone: string[] = [];
-  const back: string[] = [];
-  ids.forEach((id, i) => {
-    const score = replies ? replies[i * 2 + 1] : undefined;
-    if (score === null) gone.push(id);
-    else if (!((typeof score === "string" || typeof score === "number") && score !== "" && Number.isFinite(Number(score)))) back.push(id);
-  });
-  if (!gone.length && !back.length) return;
-  const commands: (string | number)[][] = [...gone.map((id) => ["DEL", jobKey(id)]), ...(back.length ? [["RPUSH", log, ...back]] : [])];
-  const answered = repliesFor(await redisPipeline(commands), commands.length);
-  const kept = gone.filter((_, i) => countOf(answered?.[i]) === null);
-  if (kept.length) await redisPipeline([["RPUSH", log, ...kept]]);
+  const where = repliesFor(await redisPipeline(ids.map((id) => ["ZSCORE", QUEUE_KEY, `${statsId}|${id}`])), ids.length);
+  if (!where) return;
+  const finished = ids.filter((_, i) => where[i] === null);
+  const waiting = ids.filter((_, i) => isScore(where[i]));
+  if (waiting.length) {
+    let again: unknown[] | null;
+    try {
+      again = repliesFor(await redisPipeline(waiting.flatMap((id) => [["LREM", log, 0, id], ["ZSCORE", QUEUE_KEY, `${statsId}|${id}`]])), waiting.length * 2);
+    } catch (error) {
+      await putBack(log, waiting);
+      throw error;
+    }
+    const back = waiting.filter((_, i) => !isScore(again?.[i * 2 + 1]));
+    if (back.length) await putBack(log, back);
+    finished.push(...waiting.filter((_, i) => again?.[i * 2 + 1] === null));
+  }
+  await forgetFinished(log, finished);
+}
+
+/** A score on the queue, read exactly: a finite number, sent as a number or as its string. */
+function isScore(reply: unknown): boolean {
+  return (typeof reply === "string" || typeof reply === "number") && reply !== "" && Number.isFinite(Number(reply));
+}
+
+/** Puts jobs back at the end of a store's log, throwing when the push does not answer the log's length. */
+async function putBack(log: string, ids: string[]): Promise<void> {
+  if (!countsFor(await redisPipeline([["RPUSH", log, ...ids]]), 1)) throw new UnknownReplyError("a store's email platform job log, putting a job back");
+}
+
+/**
+ * Deletes the records of finished jobs that are in a store's log, and lets
+ * them go from the log only once each deletion answered a count; one whose
+ * deletion does not answer stays in the log, where it is still found.
+ */
+async function forgetFinished(log: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const deleted = repliesFor(await redisPipeline(ids.map((id) => ["DEL", jobKey(id)])), ids.length);
+  const gone = ids.filter((_, i) => countOf(deleted?.[i]) !== null);
+  if (gone.length) await redisPipeline(gone.map((id) => ["LREM", log, 0, id]));
 }
 
 /**
  * Takes a job that is done off the queue, after the commands that write how it
  * went, and deletes its record when it is no longer in the store's log, so no
  * record holding an address is left where neither the log nor the queue finds
- * it (dropOverflow). A log or a deletion that does not read puts the job back
- * on the queue, to be retired again when its lease would have ended, and
- * throws (CX-123 rule 24).
+ * it (dropOverflow). The job leaves the queue only once its record is known to
+ * be in the log or gone (Claude 4 on #2860): the log is read first, with the
+ * job still on the queue under its lease. One out of the log has its record
+ * deleted first and leaves the queue after. One in the log leaves the queue
+ * and the log is read again after, so a push moving it out of the log
+ * meanwhile is seen here or sees it still waiting. A reply that does not come
+ * back or does not read, once the job may be off the queue, puts it back on
+ * the queue, to be retired again when its lease would have ended, and throws
+ * (CX-123 rule 24); before that, the job is still there.
  */
 async function retire(statsId: string, id: string, now: number, first: (string | number)[][] = []): Promise<void> {
   const member = `${statsId}|${id}`;
-  const commands = [...first, ["ZREM", QUEUE_KEY, member], ["LRANGE", logKey(statsId), 0, -1]];
+  const log = logKey(statsId);
+  const commands = [...first, ["LRANGE", log, 0, -1]];
   const logged = stringList(repliesFor(await redisPipeline(commands), commands.length)?.[commands.length - 1]);
-  if (logged?.includes(id)) return;
-  if (logged && countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) return;
+  if (!logged) throw new UnknownReplyError("a store's email platform job log, retiring a job");
+  if (!logged.includes(id)) {
+    if (!countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) throw new UnknownReplyError("the record of an email platform job, retiring it");
+    await redisPipeline([["ZREM", QUEUE_KEY, member]]);
+    return;
+  }
+  try {
+    const again = repliesFor(await redisPipeline([["ZREM", QUEUE_KEY, member], ["LRANGE", log, 0, -1]]), 2);
+    const still = stringList(again?.[1]);
+    if (still?.includes(id)) return;
+    if (still && countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) return;
+  } catch (error) {
+    await redisPipeline([["ZADD", QUEUE_KEY, now + LEASE_MS, member]]);
+    throw error;
+  }
   await redisPipeline([["ZADD", QUEUE_KEY, now + LEASE_MS, member]]);
   throw new UnknownReplyError("a store's email platform job log, retiring a job");
 }
@@ -765,9 +815,11 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
     const id = member.slice(statsId.length + 1);
     if (JOB_ID.test(id)) ids.add(id);
   }
+  // The records go before the queue lets go of them (Claude 4 on #2860), so a batch cut short never leaves one
+  // holding an address off the queue; the log is deleted last.
   const commands: (string | number)[][] = [
-    ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
     ...[...ids].map((id) => ["DEL", jobKey(id)]),
+    ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
     ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), ...(logged ? [logKey(statsId)] : [])],
   ];
   if (!countsFor(await redisPipeline(commands), commands.length)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");

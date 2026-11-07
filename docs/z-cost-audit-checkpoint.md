@@ -1,3 +1,74 @@
+# ESTADO VIGENTE — 06/11/2026 22h45 Fortaleza: C4-3100 MAIN VERDE; quatro envios únicos consolidados
+
+Histórico completo abaixo preservado. **C4-3100 de22h33 encerrou o congelamento**; #2894 legitimamente MERGED5aae97e8a0491952192aa7beefd6741917e6bc28, árvore0c9103257858c729f8b046edd52d06650159f2cf idêntica410e73b6. Coordenação SOMENTE C4/C1OFF. Novo anúncio MAIN VERMELHO suspende novamente envios. Ritmo normal dentro orçamento AV10, execução serial/sem subagentes. Não reativar regras históricas de execução paralela. Canal ACK be5cbd898a73b1b8969d7f0f8725adca59eefb61. Sem preço/limite/comissão/flags/gates/conta/pagamento/provedor/PII. Nenhuma retentativa foi reiniciada/usada, nenhum CI rerun/cancel ou merge por Z.
+
+## Heads próprios VIGENTES — somente estes, nove NOVOS ainda exigidos
+
+1. **#2947 codex/z-community-points-cost-registry@c1fc32985c75c19da75459b1d6b5d60dd5cff511**, treec734ea528d566da9a9be49bb6fe6d1cc8e5f4cd2. RED agora DURÁVEL a2539e9473ef028d1bd637137f9d11273ec96481 e correção849cabf8f1f0719399c66115dbcdd090081d8541 são ancestrais, árvores idênticas deaa/db locais. Main5aae integrado UMAvez/consolidado antes único update_ref CAScc673. Post-main SAME8/8+29+34+24=95/4; tiposstrictES2017/lint/scanner4153/0/diff0. Retorno focalC4pedido noPR6700487659 paraLEVE6697978940; NÃOautofechado. Foto inicial9scopesQUEUED, não9agregadoresverdes. Native localmergecdb907b3, /workspace/scratch/z-points-correction.
+2. **#2819 codex/z-meet-return-counter-admission@3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac**, treef549dfa8820b22d4732c33053c9f72a0cdfc7286. PaisWIP3440322c+main5aae; correçãohost de6695266077 composta noPRmesmo, native1a53d5cd. Quatroblobs próprios idênticosWIP; main inteiro+5linhasaliases originais. NovegruposligadosPASS incluindo46próprios (266checks conforme conjuntoanterior); tipos4raízes/lint5/scanner4155/0/diff0. Retorno focalC4pedido6700501294, aindanãoLIMPO. Foto única34checkruns:9"Documentation scope"SUCCESS e25jobsativos/queued; **escopos NÃO são os9agregadores finais**, não usar como9verdes. REDválido7c7c0b79 preservado, inválido1c118950nuncapromovido.
+3. **#2741 codex/z-chat-counter-admission@ab5818b75c73ae66fffa1365677e46e0a2c3c400**, tree7465cfd5c175a9df7ad972223084d7dfc6157d9c. Pais21e200bb+main5aae; trêsblobs produto/testeBYTE-ID, configmaininteiro+aliasoriginal. Novegrupos308PASS; tipos3raízes/lint4/scanner4154/0/diff0. Review5794737821 preservado só noescopoBYTE-ID/CX122.8. Foto inicial9scopesqueued/inprogress, sem9NOVOS finais. Comentário6700531775. Local/worktree /workspace/scratch/z-chat-main-green.
+4. **#2800 codex/z-ai-counter-receipts@c7cae887ee0439bfc09b4d45d16501c8b85b92da**, tree364b21fc76177bc8c7c6fa48ed0bd6bddeb98051. Pais7b8a2440+main5aae; oitoownblobsBYTE-ID confirmados, mainconfig+aliasesoriginais. Quinzegrupos267PASS (10+8+4+7+30+6+14+8+12+25+82+10+7+20+24); tipos8raízes/lint9/scanner4157/0/diff0. ReviewC46694976802 mantido só noescopoBYTE-ID, não certificação global. Foto inicial9scopesQUEUED. Comentário6700531986. /workspace/scratch/z-ai-main-green. Firefox127885731234/mac127885740971/mac128137530608 continuamCONSUMIDOS.
+
+Todas árvores API foram comparadas com merges nativos antesCAS; um envio porPR, sem push intermediário, rollback/force/mainchase. Nenhum types/globalbuild/nativeRedis/provedor/browsernovocertificado. Teste chat log/tmp/z-chat-main-tests.log; AI/tmp/z-ai-main-tests.log; configstypes /tmp/z-chat-main-types.json e z-ai-main-types.json; runner próprio/tmp/z-points-run.mjs. Primeiro fetch tentou ref inexistente z-ai-counted-ack e não recuperou objetos; corrigido para ref real z-ai-counter-receipts ANTESdeworktree/teste. Erro de recuperação NÃOéRED nem retryCI.
+
+## Prova de revisão2932 agora remota
+
+**codex/z-review-2932-delete-count-return@23be2d1752213531ccbab5cf6c5127eeb2e68520**, tree d5ba153a640f6fe89f523780c1f0b305c090a4ad = bdf329e5 LOCAL. Três artefatos apenas, pai bb01edd1; publicado depois3100 semPR/CI. Comentário6700540889. NÃO repetimos testes nem alteramos fonte/refautora. DoisMoriginais fechados, terceiroM continuaesperandoR2EXEC/classificação; mesma4/1RED+3PASS anterior, não resultado novo.
+
+## Ponto e próximo EXATO
+
+QuatroPRs próprios comrodada nova; **não abrir quintoPR enquanto lote4ativo** (C2-48). Quinta unidade G5/d887a2dc eREDc6aeb4b4 SOMENTELOCAIS aindaNÃOintegrados, nenhum novoPR. Cinco unidades incluindoG5/semsexta. Integração2602WIP intacta. Próximo: novidade de review/CI qualificado; corrigir achados noMESMOPR comREDantes. Merge normal expected_head SOMENTEdepois9agregadores/workflowssuccessNOVOSdoheadexato +pareceraplicávelsemachado (2se dinheiro). NÃOusarcheckscopes/verdeancestral; NÃO reenviarrodada porfalhaalheia, reportarC4. SemsondagemCIemrodadas; watcherúnico>=60s seexecutado, verificarprocessoantes; nãoalegarbackgroundeterno. ApósvagaCI, concluirG5composição/main/validar/publicarpedirindependente; nenhumcost desconhecido virazero. Publicarcheckpointcompleto nesteMESMOramo remoto ePONTOcanal antesencerrar. Remoto anterior7faeba52; novosSHAdoCPserãoobtidos do recibo, nãoadivinhar.
+
+---
+
+# ESTADO LOCAL VIGENTE — 06/11/2026: C4-3080/3090; corretivo próprio #2947 pronto localmente
+
+Histórico integral abaixo preservado. Remoto canônico continua7faeba52; NÃO publicar checkpoint/prova/produto até anúncio literal MAIN VERDE de C4. Esforço Médio/SERIAL/sem subagentes, somente revisões pedidas e correções locais recebidas. Main recuperado dd1756ab102f91dfa43cc53630613b2326e2d34e (#2940); C4-3090 confirma que isso NÃO libera congelamento, falta #2894/410e73b6. Nenhum merge, integração ou operação de CI nesta passagem. Não reiniciar retentativas consumidas. Nenhuma automação criada/desabilitada, nenhum processo em background alegado.
+
+## #2947 — LEVE recebido e corrigido LOCALMENTE
+
+Recebido independente6697978940 no remotoEXATOcc67313f: o cálculo por invocações helper não detectava ZCARD emscore e EXPIRE emtake. Crédito integral ao revisor. Reserva/claim ANTEScódigo publicado no canal307313b408a04b8922a9a878e0e760eacf37ba3f. O cabeçalho21h50 desse append é apenas horário transcrito, não recibo confiável de relógio; não inferir duração dele. Só teste próprio, produto/registros/preços/limites/flags intactos.
+
+**RED SOMENTE LOCAL deaa6e7a21bf81f62f698df62f1473aa43c58a27**, branchcodex/z-community-points-cost-proof-red. Refatoração mantém o guard antigo e acrescenta6mutações de string: ZCARD emscore, EXPIRE emtake, ambos(9comandos), ZSCORE extra, ZINCRBY incondicional e redis.pcall extra. SAME8testes:2controlesPASS+6FAIL("Missing expected exception"). Não muda fonte Lua, não executa Redis/provedor/rede.
+
+**Final SOMENTE LOCAL codex/z-community-points-cost-registry-correction@db08a5e9d98afce9596a7c6d7e54017b979df26e**, treec734ea528d566da9a9be49bb6fe6d1cc8e5f4cd2, /workspace/scratch/z-points-correction. Guard exige lista exata de callsitesZSCORE/ZADD/ZINCRBY e cada ocorrência redis coberta por comando contado; mantém controles originais de dois leitores e escritas mutuamente exclusivas. SAME8/8; ligados29+34+24=87, total95/4. TiposstrictES2017 teste único/imports, ESLint e scanner4133/0 semdiagnósticos, shellEXIT0/diff0; não build/globalCI/nativeLua/fornecedor ouMRglobal. Mutações somente string, dentro6cenários admitidos. Pode requerer ajuste futuro se o Lua mudar legitimamente; não prometo análise geral de Lua. Primeiro gitshow antesfetch não achou objetos: falha de recuperação, NÃORED. Fetch explícito recuperou árvore correta antes do teste. Produto blob b4ffee5aab0dd1b6918477ce9466c6fd8b2e69fb inalterado. PR headcc67313f NUNCA movido. Retorno focal independente ainda necessário após publicação autorizada; não autocertificar fechamento.
+
+## Estado dos demais e próximo EXATO
+
+Timelines próprias2741/2800/2819/2947 conferidas SEMCI: único retorno novo éLEVE2947 acima. #2819 ainda somente6695266077, sem retornoC4 doWIP3440322c. #2741review5794737821 e2800C4/6694976802 preservados, todosheads anteriores intactos. #2897 já temC5/6698122720 nohead e024b47c, não duplicar pedido antigo nominal; nenhuma fonte/diff2897 lida nesta passagem. #2932retorno5808484150/bdflocal eG5d887local continuam intactos,97jápassados NÃO repetidos.
+
+Continuam exatamente5produtos:2741/2800/2819/2947/G5; corretivo2947 éMESMAunidade, não6ª. Sem nova auditoria/unidade grande sob3080. Próximo: retorno focal2947 apósliberação ouparecerC4do2819/nominalnovo; depois MAINVERDE, latestmainUMAvezporPR+correçõesconsolidadas+umpush+9NOVOS e reviews aplicáveis antes mergeNORMALexpectedhead. Sem anúncio, nenhuma integração/push/merge. Ponto exato será postado no canal, comentários permitidos. Bundle local anterior preservado; novosrefs locais devem entrar em bundle incremental adicional antesencerrar.
+
+---
+
+# ESTADO LOCAL VIGENTE — 06/11/2026 20h40 Fortaleza: congelamento C4-3050/3060/3070; retorno #2932; quinta unidade G5 local
+
+Histórico integral abaixo preservado. **NÃO PUBLICAR este checkpoint nem qualquer ramo/evidência/PR enquanto C4 não anunciar MAIN VERDE.** Dono reiterou congelamento nesta conversa. Coordenação somente C4/C1 OFF. Nova ordem: #2940 → #2894; #2931 ficará redundante. Nenhum push, CI retry/rerun/cancel, merge ou integração nesta retomada. Canal e comentários de revisão permitidos. Último checkpoint remoto continua **7faeba52a5000f8a81d8baab947f7e2660c90258**; este topo é LOCAL, não confundir com remoto.
+
+## Retorno #2932 concluído
+
+Claim nominal ANTES de novo diff/fonte/teste publicado no canal **6d98c3842165f38d9b627caed8449b630936e7ea**. Fonte exata **bb01edd1bfdeb96a8adbe860afbbfa7974e5d524**. Dois MÉDIOS originais de Z5807949642 **FECHADOS neste head**: MESMA prova original3/3. AutorRED **1b268b79d815cbcfd55b2e01836cb7e8882e8391** (teste byte-idêntico ao final)16/13falhas+3controles→16/16;127ligados(16+60+35+16), ES2017/tipos3raízes/lint/scanner4137/0/diff verdes.
+
+Novo MÉDIO adjacente em **lib/discord-store.ts:227-228**: cada HDEL/ZREM/DEL só remove1campo/membro/chave, mas countOf aceita2. Prova estendida preserva originais e acrescenta pipeline[2,1,1]sem aplicar: forgetDiscordPerson devolve records1/rolesLeftfalse, member/link ainda guardados. Quatrocasos=3pass+1RED. Retorno formal **5808484150**, NÃO LIMPO pelo novo caso, sem reabrir os dois anteriores. Evidência SOMENTE LOCAL **codex/z-review-2932-delete-count-return@bdf329e5a6b45eafd7b20e48984bcfda9835c050**, tree **d5ba153a640f6fe89f523780c1f0b305c090a4ad**, diretório `/workspace/scratch/z-discord-return`; três caminhos próprios tests/z-2932-discord-exact.proof.ts, proofs/z-2932-discord-exact.mjs, docs/reviews/z-2932-discord-exact.md. Não há esse commit no remoto. Predecessor remoto21926a2f continua só3casos, não a extensão. R2 executar antes de novo fixMED; produto/ref/CI C5 intactos. Nenhum Discord/Redis nativo/pessoa real.
+
+## Quinta unidade G5 #2676 — local, sem PR/push
+
+Reserva prévia54466586 continua; branch **codex/z-assistant-memory-forget-cost-registry**. Fonte facba9a5; quatro fontes alvo iguais no mainc366. **RED LOCAL c6aeb4b462f25de26b3a5bc700cf9e58ccf7c8a8**,8casos/1falha de classificação+7controles. Teste realforgetMemory com Redis/relógio sintéticos: notas55264B,11SET de lock+3EVAL=14dispatches externos/87Brespostas, remoção confirmada. Isto **NÃO é total de comandos faturáveis**: Lua interno e limpeza de meses TAKE_DATA não medidos/fundados,16declarado não certifica invoice.
+
+Retry real com2000linhasválidas/provedorzero/prazovencido:1HGETALL,166893Bresposta,2000left e0work, apesar de FORGET_PER_RUN25/FORGET_TRIES8. É observação de leitura sem teto de página, **não comparação com200000B essencial nem perda/margem certificada**; custofixo global desconhecido, nãozero.
+
+**Final LOCAL d887a2dcf7e19936ce4f6317e0bf3f74c420a1fd**, tree **ccb72fc6566262626e5d84c5a467f82d833eb9cd** em `/workspace/scratch/z-forget.LU8dqj`. Só NOVO tests/store-delete-assistant-cost-registry.test.ts e4entradasNOT_A_COST emtests/plan-cost-registry.ts: MEMORY_FORGET_COMMANDS/FORGET_TRY_COMMANDS/FORGET_TRIES/FORGET_PER_RUN explicitam obrigação da empresa, Lua/bytes/custeio desconhecidos e não aprovam base finita. **É correção de rastreabilidade, não fix do leitor/teto MR.** Final9/9(umcontroleadmissãoantesforgetacrescentado)+57memory+24plan+7data=97/4, lint/scanner4137/0/diff verdes; ES2017final em execução ao gravar este bloco, **não declarar verde até recibo sessão33941**. Verificação anterior ES2017/lint/scanner foi verde; último controledeordemfoiadicionadoapósiníciodessaexecução, porissoexecutadofinaldenovo. Nenhumcoeficiente/preço/limite/produto/dataregistryalterado. Não abrir PR atéMAINVERDE; revisão independente depois.
+
+Recibo FINAL G5 sessão33941: TypeScript ES2017, ESLint e diff-check terminaram EXIT0 depois do último controle de ordem. Portanto final97/4 + tipos/lint/scanner4137/0/diff realmente verdes. A pendência de recibo no parágrafo anterior está resolvida; não repetir só para obter recibo.
+
+## Continuidade e vagas
+
+Cinco unidades próprias mantidas:2741@21e200bb,2800@7b8a2440f2c1a3a1b17c02473299deaeae8be927,2819@3aac5316/WIP3440322c,2947@cc67313f,G5locald887a2dc. **Semsexta**. #2819 retorno C4 ainda ausente; WIP e RED7c7c0b79 intactos. Nenhum CI consultado em rodadas; nenhum head movido. Mainc366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92, inbox/AGENTS/CLAUDE sem delta contrafacba. Vigiaúnica `/tmp/z-channel-watch17.sh`/flock120s, sessão5568; verificarprocessoantesrenovar,semalegarvigiaeterna. Subagentes antigos shutdown; nenhum reativado nem inferidoativo por checkpoint.
+
+Próximo EXATO: obterrecibotiposG5final; postarcanalretorno2932+G5métricas+PONTOLOCAL; observar MAINVERDE pelo canal, não pelos verdes ancestrais. Apósaviso, compor mainUMAvezporPR+correçõespendentes eúnicopush,9NOVOS+revisões/gates antesmergeexpectedhead. Preservar todasretentativasconsumidasabaixo. Publicação destes ramos/provas/checkpoint só depois do congelamento. Nada de conta/pagamento/termo/chave/fornecedor/PII/preço/limite/comissão/flag/trava.
+
+---
+
 # ESTADO VIGENTE — 06/11/2026 19h49 Fortaleza: três provas/reviews publicados; retorno próprio #2819 corrigido em WIP
 
 Toda história abaixo preservada. C4única/C1OFF. Checkpoint remoto anterior26dd553cdf9e2fa4c52ac41be4032daaa390ee52. Rate limit recuperado; falhasGraphQL do update_ref não gravaram. Contents update_file com SHA fresco+FULL íntegro publicou canal **93b623a70b31eb9284d7bacf0adb125c2a36f803** (relatórios/provas/reserva2964/corretivo2819), **612b8cfc12d94ac9f73c5b8b0161c36809912f3a** (erro do harness ANTES de mudar teste) e **a9b6e2e3ab793ef4b6701abf9c65ede0adf53d4e** (unidade2819 pronta). Não repetir appends candidatos3a4/314 que não entraram.

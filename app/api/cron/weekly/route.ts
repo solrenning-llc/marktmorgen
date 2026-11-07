@@ -15,7 +15,7 @@ import { recordSample } from "@/lib/benchmarks";
 import { weeklyMemberToken, weeklyTeam } from "@/lib/stats-report";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
-import { readSalesGoal } from "@/lib/sales-goal";
+import { UNKNOWN_SALES_GOAL_CENTS, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
 
 /**
@@ -77,8 +77,8 @@ export async function GET(request: NextRequest) {
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
       const spends = await readSpends(store.statsId).catch(() => []);
-      const goal = (await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0 }))).cents;
-      const message = data && token ? weeklyMessage(store, data, stopUrl, spends, goal) : null;
+      const goal = (await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS }))).cents;
+      const message = withGoalAvailability(data && token ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
       if (!message) {
         out.quiet += 1;
         continue;

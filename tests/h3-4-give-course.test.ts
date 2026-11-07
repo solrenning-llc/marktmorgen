@@ -43,8 +43,10 @@ import { STUDIO_GIVE_JOB, STUDIO_GIVE_PREFIX, TAKE_IF_SAME, grantImported, impor
 import { paidCourses, setBlocked, touchStudent } from "@/lib/learn";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { redisPipeline } from "@/lib/redis";
-import { takeManyWithin } from "@/lib/request-guard";
+import { takeManyWithin, withinLimit } from "@/lib/request-guard";
+import * as apiWrite from "@/lib/api-write";
 import { GIVES_PER_DAY } from "@/lib/api-write";
+import * as bulkRules from "@/lib/student-bulk-rules";
 import { putMember } from "@/lib/team";
 import { buyerProfile } from "@/lib/buyer-profile";
 import { chargedLine } from "@/lib/buyer-orders";
@@ -377,6 +379,93 @@ async function main(): Promise<void> {
   is("the creator's view of a person says a store's gift is the store's", profile.orders.filter((o) => o.title === "Cake Course").map((o) => o.note), ["store"]);
   is("in plain words", readFileSync("app/studio/people/page.tsx", "utf8").includes('store: "Given by the store"'), true);
   await redisPipeline([["HDEL", importedKey(store.statsId!, "seen@example.org"), to]]);
+
+  part("The day's gifts taken in one step (second pre-review of unit 2, MEDIO and LEVE 1)");
+  // The finding: past the day, the DECRBY that put the take back went in a second request; when the 24-hour window
+  // ended between the two, it made the key again with no end and below zero ("-25"), which the API reads as no count
+  // (refused for good) and which never ends, so the count summed every day until it held the store's gifts for ever.
+  const giftKeys = async () => (await redis.keys()).filter((k: string) => k.startsWith("nl:rl:api-give:"));
+  for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
+  const who = "second-review-store";
+  is("990 of the day used", await takeManyWithin("api-give", who, GIVES_PER_DAY, DAY, 990), true);
+  const relay = redis.pipeline.bind(redis);
+  let sent = 0;
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    const answer = await relay(commands);
+    sent += 1;
+    // The 24-hour window ends right after the first request: the key is gone, as Redis drops it when its time is up.
+    if (sent === 1) for (const key of await giftKeys()) await relay([["DEL", key]]);
+    return answer;
+  };
+  const late = await takeManyWithin("api-give", who, GIVES_PER_DAY, DAY, 25);
+  redis.pipeline = relay;
+  const leftOver = (await giftKeys()).map((key) => [redis.run(["GET", key]), redis.run(["TTL", key])]);
+  is(
+    "25 more past the day: refused in one request, and the window's end leaves no count without an end or below zero",
+    [late, sent, leftOver.every(([value, ttl]) => Number(value) >= 0 && Number(ttl) > 0)],
+    [false, 1, true],
+  );
+  is("the next day the store gives again, through the studio and through the API", [await takeManyWithin("api-give", who, GIVES_PER_DAY, DAY, 1), await withinLimit("api-give", who, GIVES_PER_DAY, DAY)], [true, true]);
+  // A count the earlier code left below zero with no end is mended by the next take: never read as room, and it ends.
+  const [stuck] = await giftKeys();
+  redis.run(["SET", stuck, "-25"]);
+  is("a count left below zero with no end is mended: counted from zero, with the day's end", [await takeManyWithin("api-give", who, GIVES_PER_DAY, DAY, 1), redis.run(["GET", stuck]), Number(redis.run(["TTL", stuck])) > 0], [true, "1", true]);
+  for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
+  // LEVE 1: the API asking between the take and its putting back was refused by a sum that never stood, and kept a place.
+  is("990 used again", await takeManyWithin("api-give", who, GIVES_PER_DAY, DAY, 990), true);
+  let apiBetween: boolean | null = null;
+  sent = 0;
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    const answer = await relay(commands);
+    sent += 1;
+    if (sent === 1) {
+      redis.pipeline = relay;
+      apiBetween = await withinLimit("api-give", who, GIVES_PER_DAY, DAY);
+    }
+    return answer;
+  };
+  const tooMany = await takeManyWithin("api-give", who, GIVES_PER_DAY, DAY, 25);
+  redis.pipeline = relay;
+  const [counted] = await giftKeys();
+  is("the API asking right after a refused take is let through, and the count is the 990 and its one", [tooMany, apiBetween, redis.run(["GET", counted])], [false, true, "991"]);
+  for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
+
+  part("A day's gift given back when nothing was given (second pre-review of unit 2, LEVE 2)");
+  const dayCount = async () => {
+    const keys = await giftKeys();
+    return keys.length ? Number(redis.run(["GET", keys[0]])) : 0;
+  };
+  // A store whose data room is full after the day was taken: nothing given, the day given back.
+  const fullRoom = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands: (string | number)[][]) =>
+    commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:store-data:")
+      ? [[0, 5]]
+      : fullRoom(commands);
+  const fullGive = await applyGive(store, target, { change: "give", to, emails: ["full1@example.org", "full2@example.org"], expect: 2 }, async () => ({ ok: true }));
+  redis.pipeline = fullRoom;
+  is("a full data room: refused, and the day's two given back", [fullGive.kind === "refused" ? fullGive.reason : fullGive.kind, await dayCount()], ["store_full", 0]);
+  // Two clicks at once: the second one's write finds the first's gift (HSETNX answers 0), so it gives nothing and keeps nothing of the day.
+  const twinKey = importedKey(store.statsId!, "twin@example.org");
+  const twin = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HSETNX" && c[1] === twinKey)) await twin([["HSET", twinKey, to, JSON.stringify({ at: now, job: STUDIO_GIVE_JOB, items: null })]]);
+    return twin(commands);
+  };
+  const second = await applyGive(store, target, { change: "give", to, emails: ["twin@example.org", "solo@example.org"], expect: 2 }, async () => ({ ok: true }));
+  redis.pipeline = twin;
+  is("the click whose write found the gift already there is not counted for it; the one it gave is", [second.kind === "done" ? [second.done.changed, second.done.already] : second.kind, await dayCount()], [[["solo@example.org"], ["twin@example.org"]], 1]);
+  await redisPipeline([["HDEL", twinKey, to], ["HDEL", importedKey(store.statsId!, "solo@example.org"), to]]);
+  for (const key of await giftKeys()) await redisPipeline([["DEL", key]]);
+
+  part("The day's gifts said as one count (second pre-review of unit 2, LEVE 3 and LEVE 4)");
+  is("the studio's refusal names the day's figure from GIVES_PER_DAY, never a number typed in", readFileSync("lib/student-bulk-rules.ts", "utf8").includes("(1,000)"), false);
+  is("the API's refusal of a gift says gifts, and that the studio's count too", (apiWrite as Record<string, unknown>).GIFTS_USED_WORDS, "That is as many products as a store may give in a day, through the API and the studio's list of students together (1,000). Try again tomorrow.");
+  is(
+    "the developers page says the studio's gifts count in the same day",
+    readFileSync("app/developers/page.tsx", "utf8").includes("products a day, through the API and the studio's list of students together"),
+    true,
+  );
+  is("the review says whether they bought it is not checked", giveReviewLines({ changes: 1, already: 0, removed: 0, otherWay: 0, unread: 0 }, "give", "Cake Course").includes(String((bulkRules as Record<string, unknown>).BOUGHT_NOT_CHECKED)), true);
 
   part("The screen");
   const studentLines = [line("ana@example.com", now), line("ben@example.com", now)];

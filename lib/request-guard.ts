@@ -199,12 +199,6 @@ function countWithin(reply: unknown, limit: number): boolean {
   }
 }
 
-/**
- * The count of a SET NX + INCR pipeline, only in its exact shape: two
- * replies, the SET's "OK" or null, and the INCR's own whole number of at
- * least 1; null for anything else. Read by the replies' own data fields,
- * as withinEssentialLimit does, so a getter cannot answer for them.
- */
 /** The counter's key for a scope and whoever it counts, hashed: one place, so every reader of a counter reads the same one. */
 async function limitKey(scope: string, who: string): Promise<string> {
   return `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
@@ -247,6 +241,12 @@ export async function essentialTakeBelow(scope: string, who: string, below: numb
   return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= below ? "within" : "unknown";
 }
 
+/**
+ * The count of a SET NX + INCR pipeline, only in its exact shape: two
+ * replies, the SET's "OK" or null, and the INCR's own whole number of at
+ * least 1; null for anything else. Read by the replies' own data fields,
+ * as withinEssentialLimit does, so a getter cannot answer for them.
+ */
 function counterReply(reply: unknown): number | null {
   if (!Array.isArray(reply)) return null;
   const length = Object.getOwnPropertyDescriptor(reply, "length");

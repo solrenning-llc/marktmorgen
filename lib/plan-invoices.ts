@@ -56,7 +56,12 @@ export type PlanInvoice = {
   /** When Stripe made it, in seconds. */
   created: number;
   status: (typeof SHOWN_STATUSES)[number];
+  /** The invoice's total, before any credit on the customer's balance (Stripe's `total`): negative for a credit to that balance. */
   totalCents: number;
+  /** What was paid on it (`amount_paid`): a balance credit Stripe applied is not in it. */
+  paidCents: number;
+  /** What is still owed on it (`amount_remaining`). */
+  remainingCents: number;
   currency: string;
   /** Stripe's hosted page for it, or null when Stripe gave none at its own https host. */
   page: string | null;
@@ -82,6 +87,11 @@ function subscriptionOf(row: Record<string, unknown>): unknown {
   return plainObject(details) ? ownField(details, "subscription") : undefined;
 }
 
+/** A whole number of cents that is not negative, as Stripe gives `amount_paid` and `amount_remaining`. */
+function cents(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function link(value: unknown, pattern: RegExp): string | null {
   return typeof value === "string" && value.length <= 2048 && pattern.test(value) ? value : null;
 }
@@ -90,7 +100,10 @@ function link(value: unknown, pattern: RegExp): string | null {
  * One page of Stripe's invoice list, read in its exact shape (it throws
  * StripeListUnreadable otherwise). A row counts only when it is this
  * customer's and this subscription's, with every field shown in a value
- * Stripe gives; drafts are not invoices yet and are left out.
+ * Stripe gives; drafts are not invoices yet and are left out. What was
+ * paid and what is still owed are read with the total (#2990, Claude 2's
+ * MEDIUM 1): a credit on the customer's balance comes off them, never off
+ * `total`, so a row without them is not shown with a guessed amount.
  */
 export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: PlanInvoice[]; more: boolean; unreadable: number; drafts: number } {
   const read = readStripePage(
@@ -108,6 +121,7 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
         hasOwnField(row, "number") && (number === null || (typeof number === "string" && number.length > 0 && number.length <= 100)) &&
         typeof created === "number" && Number.isSafeInteger(created) && created > 0 &&
         typeof total === "number" && Number.isSafeInteger(total) &&
+        cents(ownField(row, "amount_paid")) && cents(ownField(row, "amount_remaining")) &&
         typeof currency === "string" && /^[a-z]{3}$/.test(currency)
       );
     },
@@ -121,6 +135,8 @@ export function readPlanInvoicePage(page: unknown, owner: Owner): { invoices: Pl
       created: ownField(row, "created") as number,
       status: ownField(row, "status") as PlanInvoice["status"],
       totalCents: ownField(row, "total") as number,
+      paidCents: ownField(row, "amount_paid") as number,
+      remainingCents: ownField(row, "amount_remaining") as number,
       currency: ownField(row, "currency") as string,
       page: link(ownField(row, "hosted_invoice_url"), INVOICE_PAGE),
       pdf: link(ownField(row, "invoice_pdf"), INVOICE_PDF),

@@ -56,6 +56,8 @@ import {
 } from "@/lib/outreach-rules";
 import { storeBase } from "@/lib/purchase-email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
+import { repliesFor } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -171,6 +173,14 @@ export async function readSite(raw: string, reader: PageReader = readPage): Prom
 const key = (statsId: string, part: string) => `nl:outreach:${statsId}:${part}`;
 export const linkKey = (token: string) => `nl:outreach:stoplink:${token}`;
 const STOP_ALL = "nl:outreach:stop:all";
+
+/**
+ * SISMEMBER on a stop list, only in its exact shape (CX-123 rule 24): 1 is
+ * stopped, 0 is not, and anything else (null, "1", true, 2) is null, unknown.
+ */
+function stopOf(reply: unknown): boolean | null {
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
 /** What one pitch leaves in the store's data room for good: its stop link and a domain's place in the stop lists. */
 export const OUTREACH_TRACE_BYTES = 640;
 /** What a pitch weighs at the most, counted in the store's data room while it is kept: its words in any script, its footer, its record. */
@@ -243,6 +253,29 @@ export async function startPitch(
   }
   const email = input.email.trim().toLowerCase();
   if (!isOwnAddress(email, page.hostname)) return { ok: false, reason: "unpublished" };
+  const pageDomain = siteDomain(page.hostname);
+
+  // Asked before the paid window is reserved, so a refusal here reserves nothing: the stop lists for the page's own
+  // domain and the day's count, read only in their exact shape (CX-123 rule 24). A business is "not stopped" only on
+  // an exact 0 from both lists, and the day's count is a whole number, or no key at all (nothing written today: INCR
+  // makes it with the first). Anything else refuses, never "not stopped" or "0 written today".
+  const [sender, pitches, replies] = await Promise.all([
+    readSender(store),
+    listPitches(store),
+    redisPipeline([
+      ["SISMEMBER", key(store.statsId, "stop"), pageDomain],
+      ["GET", key(store.statsId, `day:${dayOf(now)}`)],
+      ["SISMEMBER", STOP_ALL, pageDomain],
+    ]),
+  ]);
+  const answered = repliesFor(replies, 3);
+  const mine = answered ? stopOf(answered[0]) : null;
+  const all = answered ? stopOf(answered[2]) : null;
+  const today = answered ? textCountOf(answered[1]) : null;
+  if (mine === null || all === null || today === null) return { ok: false, reason: "unavailable" };
+  // The country was asked already; a stop is the next thing pitchProblem would refuse for.
+  if (mine || all) return { ok: false, reason: "stopped" };
+
   // New draft work must be funded before even verifying its external page.
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return { ok: false, reason: "unavailable" };
   const reader = options.reader ?? readPage;
@@ -252,25 +285,44 @@ export async function startPitch(
   const address = publishedAddresses(read.html, read.url, new URL(read.url).hostname).find((a) => a.email === email);
   if (!address) return { ok: false, reason: "unpublished" };
   const domain = siteDomain(new URL(read.url).hostname);
-
-  const [sender, pitches, replies] = await Promise.all([
-    readSender(store),
-    listPitches(store),
-    redisPipeline([
-      ["SISMEMBER", key(store.statsId, "stop"), domain],
+  // Read again after the page (Codex G on #2697): a stop asked for, or a pitch counted, while it was read stands, so
+  // the model is never asked on a state read before it. One round trip, with the stop lists of the domain the reader
+  // was sent on to when it is another one, all in the same exact shape.
+  // The same three reads as before the page, in the same order, then the other domain's two when there is one.
+  // Cost (rule MR; Codex G's LEVE on #2697): this round trip is 3 commands, 5 when the reader was sent on to another
+  // domain. It runs once per draft attempt that got past the checks above and read the page, and draft attempts are held
+  // by the store's "ai" limit (AI_PER_MINUTE, app/api/store/outreach/route.ts), not by FINDS_PER_DAY (find only) nor by
+  // PITCHES_PER_DAY (drafts kept, not attempts refused here). The "ai" window is 60 s from its first use, not a clock
+  // minute, so a calendar day can meet 1,441 windows (Codex G on #2697). Ceiling: 6 × 1,441 = 8,646 attempts × 5 =
+  // 43,230 commands a store a day, $0.0865 at Upstash's advertised $0.20 per 100,000
+  // (docs/pack-cost-decomposition-2026-10-18.md), about $2.68 in a 31-day month, on top of the page read each attempt
+  // already makes. Other gates (the month's AI allowance, the paid resource window) can only lower it. The common case
+  // is a handful.
+  const elsewhere: (string | number)[][] = domain === pageDomain ? [] : [["SISMEMBER", key(store.statsId, "stop"), domain], ["SISMEMBER", STOP_ALL, domain]];
+  const fresh = repliesFor(
+    await redisPipeline([
+      ["SISMEMBER", key(store.statsId, "stop"), pageDomain],
       ["GET", key(store.statsId, `day:${dayOf(now)}`)],
-      ["SISMEMBER", STOP_ALL, domain],
+      ["SISMEMBER", STOP_ALL, pageDomain],
+      ...elsewhere,
     ]),
-  ]);
+    3 + elsewhere.length,
+  );
+  if (!fresh) return { ok: false, reason: "unavailable" };
+  const todayNow = textCountOf(fresh[1]);
+  const stops = [fresh[0], fresh[2], ...fresh.slice(3)].map(stopOf);
+  if (todayNow === null || stops.some((stop) => stop === null)) return { ok: false, reason: "unavailable" };
+  if (stops[0] || stops[1]) return { ok: false, reason: "stopped" };
+  const stoppedThere = stops.slice(2).some(Boolean);
   const before = pitches.filter((p) => p.domain === domain && p.status !== "draft");
   const problem = pitchProblem({
     country,
     address,
     isCompany: input.isCompany,
     pageRefuses: refusesProposals(around(pageText(read.html), email)),
-    stopped: Number(replies[0]) === 1 || Number(replies[2]) === 1 || pitches.some((p) => p.domain === domain && p.status === "stopped"),
+    stopped: stoppedThere || pitches.some((p) => p.domain === domain && p.status === "stopped"),
     lastWrittenAt: before.length ? Math.max(...before.map((p) => p.sentAt || p.createdAt)) : null,
-    sentToday: Number(replies[1]) || 0,
+    sentToday: todayNow === "absent" ? 0 : todayNow,
     sender,
     now,
   });
@@ -407,11 +459,18 @@ async function readLink(token: string): Promise<StopLink | null> {
 export async function readStopLink(token: string): Promise<{ domain: string; storeName: string; stopped: boolean; everyone: boolean } | null> {
   const link = await readLink(token);
   if (!link) return null;
-  const [mine, all] = await redisPipeline([
-    ["SISMEMBER", key(link.s, "stop"), link.d],
-    ["SISMEMBER", STOP_ALL, link.d],
-  ]);
-  return { domain: link.d, storeName: link.n, stopped: Number(mine) === 1 || Number(all) === 1, everyone: Number(all) === 1 };
+  const answered = repliesFor(
+    await redisPipeline([
+      ["SISMEMBER", key(link.s, "stop"), link.d],
+      ["SISMEMBER", STOP_ALL, link.d],
+    ]),
+    2,
+  );
+  // A stop is said to hold only on an exact 1 (CX-123 rule 24). An unknown answer is never shown as a stop: the page
+  // then keeps both stop buttons, and pressing one again only adds what is already there (stopFromLink, SADD).
+  const mine = answered ? stopOf(answered[0]) === true : false;
+  const all = answered ? stopOf(answered[1]) === true : false;
+  return { domain: link.d, storeName: link.n, stopped: mine || all, everyone: all };
 }
 
 /**

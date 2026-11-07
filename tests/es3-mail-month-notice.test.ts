@@ -50,18 +50,20 @@ async function main(): Promise<void> {
   const out = mailMonthNotice({ ...studio, used: 7_000 });
   is("level", out?.level, "out");
   is("title", out?.title, "This month's emails are used up");
-  is("what stops and what waits", out?.lines[0], "One-off emails can't go out until the count starts again. Sequence emails wait and go out once it does.");
-  is("when", out?.lines[1], "The count starts again with your next billing month, on December 4 (UTC).");
-  is("no smaller-group advice when none are left", out?.lines.length, 2);
+  is("what stops and what waits", out?.lines[0], "One-off emails can't go out until the count starts again. Sequence emails to your list wait and go out once it does.");
+  // A step that emails the creator is failed, not held, while none are left (lib/flows.ts): never said to wait.
+  is("a step that emails you is said to be skipped, never to wait", out?.lines[1], "A step that emails you is skipped for anyone who reaches it before then.");
+  is("when", out?.lines[2], "The count starts again with your next billing month, on December 4 (UTC).");
+  is("no smaller-group advice when none are left", out?.lines.length, 3);
   is("used past the month is still used up, never negative", mailMonthNotice({ ...studio, used: 7_250 })?.title, "This month's emails are used up");
 
   part("Only the ways on that work today");
   const up = mailMonthNotice({ ...studio, used: 6_000, moveUp: { emails: 10_000 } });
   is("the existing move up, when it is offered", up?.lines[2], "Scale holds up to 10,000 emails a month. \"Need more?\" below shows its price and moves you up.");
-  is("move up offered at 100% too", mailMonthNotice({ ...studio, used: 7_000, moveUp: { emails: 10_000 } })?.lines[2], "Scale holds up to 10,000 emails a month. \"Need more?\" below shows its price and moves you up.");
+  is("move up offered at 100% too", mailMonthNotice({ ...studio, used: 7_000, moveUp: { emails: 10_000 } })?.lines[3], "Scale holds up to 10,000 emails a month. \"Need more?\" below shows its price and moves you up.");
   const scale = { ...studio, allowance: 10_000, biggest: true };
   is("Scale near: largest plan, smaller group", mailMonthNotice({ ...scale, used: 8_000 })?.lines[2], "Scale is the largest plan. To make the rest last, write to a smaller group of your list.");
-  is("Scale out: no plan is invented", mailMonthNotice({ ...scale, used: 10_000 })?.lines[2], "Scale is the largest plan, so no plan holds more emails.");
+  is("Scale out: no plan is invented", mailMonthNotice({ ...scale, used: 10_000 })?.lines[3], "Scale is the largest plan, so no plan holds more emails.");
 
   part("The free trial");
   const trial = { ...studio, allowance: 300, trial: true, reset: "November 20 (UTC)", billing: true };
@@ -71,7 +73,14 @@ async function main(): Promise<void> {
   is("trial near: when the trial ends", trialNear?.lines[1], "The free trial's emails are counted for the whole trial, which ends on November 20 (UTC).");
   const trialOut = mailMonthNotice({ ...trial, used: 300 });
   is("trial out: title", trialOut?.title, "The free trial's emails are used up");
-  is("trial out: sequences wait, no promise of when", trialOut?.lines[0], "One-off emails can't go out now. Sequence emails wait until there are emails again.");
+  is("trial out: sequences wait, no promise of when", trialOut?.lines[0], "One-off emails can't go out now. Sequence emails to your list wait until there are emails again.");
+  is("trial out: a step that emails you is skipped", trialOut?.lines[1], "A step that emails you is skipped for anyone who reaches it before then.");
+  // In the trial the allowance stays the trial's until it ends (lib/mail.ts monthlyAllowance): moving up opens no
+  // email now, so the note never offers it as a way on (#2958 review).
+  const trialUp = { ...trial, moveUp: { emails: 10_000 } };
+  is("trial near with a move up offered: never named", mailMonthNotice({ ...trialUp, used: 240 })?.lines.some((line) => /Scale|Need more/.test(line)), false);
+  is("trial near with a move up: a smaller group instead", mailMonthNotice({ ...trialUp, used: 240 })?.lines[2], "To make the rest last, write to a smaller group of your list.");
+  is("trial out with a move up offered: never named", mailMonthNotice({ ...trialUp, used: 300 })?.lines.some((line) => /Scale|Need more/.test(line)), false);
   is("trial on Scale says nothing of the largest plan", mailMonthNotice({ ...trial, biggest: true, used: 240 })?.lines.some((line) => line.includes("largest")), false);
 
   part("Unknown is said, never taken for zero; Store gets no notice");
@@ -131,9 +140,14 @@ async function main(): Promise<void> {
   is("the page reads the count exactly, unknown as null", page.includes("windowId(store) === null && store.listId\n      ? null\n      : usedThisMonthExact(store.listId, windowId(store)).then(shownMonthCount, () => null),"), true);
   is("one reader of the month's count, defined once (#2958)", (read("lib/mail.ts").match(/export async function usedThisMonthExact\b/g) ?? []).length, 1);
   is("the page builds the notice from the facts it has", /mailMonthNotice\(\{/.test(page), true);
-  is("no count is not '0 of'", /props\.used === null/.test(studioSource) && studioSource.includes("This month&apos;s count could not be read just now. Reload the page to try again."), true);
+  is("no count is not '0 of'", /props\.used === null/.test(studioSource) && studioSource.includes("This month&apos;s count can&apos;t be shown right now."), true);
+  // A negative count is shown as unknown too, and reloading does not mend it: no advice that does not work.
+  is("never 'reload' for a count reloading does not mend", /Reload the page to try again/.test(studioSource), false);
   is("the composer's count needs a known number", studioSource.includes("month={props.monthKnown && props.used !== null ? { used: props.used, allowance: props.allowance } : null}"), true);
   is("the note sits in the This month card", /<MailMonthNoticeBox\b/.test(studioSource) && /id="mail-month-heading"[^>]*tabIndex=\{-1\}/.test(studioSource), true);
+  const heading = studioSource.match(/<(\w+) id="mail-month-heading"[^>]*>/);
+  is("the card's title is a real heading at the level of its neighbours (h2)", heading?.[1], "h2");
+  is("the heading shows the site's focus ring when focus is handed to it", /focus-visible:outline-\[3px\]/.test(heading?.[0] ?? "") && /focus-visible:outline-\[var\(--focus\)\]/.test(heading?.[0] ?? ""), true);
   done();
 }
 

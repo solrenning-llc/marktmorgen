@@ -1,0 +1,92 @@
+/**
+ * Review proof (#2945, head 8f43ea83e), never committed. The PR lists "Keep a way back in" only "when its check mark is
+ * known" (app/studio/page.tsx:1261-1263: recoveryRead !== null || passkeys.length > 0). The passkey list it relies on
+ * is listPasskeys(email).catch(() => []) (:851): an unread list is taken for "no passkeys". With a passkey kept and no
+ * recovery address, a failed passkey-list read lists the step as NOT done: the real page, real store, real passkey.
+ */
+import { createHash } from "node:crypto";
+import { NextRequest } from "next/server";
+import { isValidElement } from "react";
+import { answering } from "./security/next-headers";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { listPasskeys } from "@/lib/passkeys";
+import { claimHandle, ensureStatsId } from "@/lib/store";
+import StudioPage from "@/app/studio/page";
+import { StudioStart } from "@/components/studio-start";
+import { PasskeyManager } from "@/components/passkey-manager";
+import { makePasskey } from "./passkey-world";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
+const hex = (value: string) => createHash("sha256").update(value).digest("hex");
+
+async function propsOf(node: unknown, type: unknown, found: Record<string, unknown>[] = [], seen = new Set<unknown>()): Promise<Record<string, unknown>[]> {
+  if (!node || typeof node !== "object" || seen.has(node)) return found;
+  seen.add(node);
+  if (typeof (node as PromiseLike<unknown>).then === "function") return propsOf(await node, type, found, seen);
+  if (Array.isArray(node)) {
+    await Promise.all(node.map((child) => propsOf(child, type, found, seen)));
+    return found;
+  }
+  if (isValidElement(node)) {
+    const props = node.props as Record<string, unknown>;
+    if (node.type === type) found.push(props);
+    await Promise.all(Object.values(props).map((value) => propsOf(value, type, found, seen)));
+  }
+  return found;
+}
+
+async function main(): Promise<void> {
+  redis.clear();
+  const OWNER = "r2945-step@example.com";
+  await claimHandle(OWNER, "r2945step", "Review step", "");
+  await ensureStatsId(OWNER);
+  await makePasskey(OWNER, "cred-r2945").keep();
+  const session = await openSession(OWNER);
+  const listKey = `nl:pk:${hex(`nimbus-passkeys:${OWNER}`).slice(0, 40)}`;
+  is("setup: the passkey is kept", (await listPasskeys(OWNER)).map((p) => p.id), ["cred-r2945"]);
+
+  const recoveryStep = async (fault: boolean) => {
+    const kept = redis.pipeline;
+    let faults = 0;
+    if (fault)
+      redis.pipeline = async (commands) => {
+        if (commands.some((c) => c[0] === "GET" && c[1] === listKey)) {
+          faults += 1;
+          throw new Error("SYNTHETIC_PASSKEY_LIST_READ_FAULT");
+        }
+        return kept.call(redis, commands);
+      };
+    answering(new NextRequest("https://marktmorgen.com/studio", { headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
+    try {
+      const tree = await StudioPage({ searchParams: Promise.resolve({}) });
+      const starts = await propsOf(tree, StudioStart);
+      const steps = starts.flatMap((p) => (p.steps as { key: string; done: boolean }[]) ?? []);
+      const managers = (await propsOf(tree, PasskeyManager)).map((p) => (p.initial as unknown[]).length);
+      return { steps: steps.filter((s) => s.key === "recovery").map((s) => s.done), faults, managers };
+    } finally {
+      redis.pipeline = kept;
+      answering(null);
+    }
+  };
+
+  part("control: the passkey list read");
+  const read = await recoveryStep(false);
+  is("the step is listed as done (a passkey is kept)", read.steps, [true]);
+
+  part("the passkey list could not be read; no recovery address");
+  const unread = await recoveryStep(true);
+  is("the fault happened on the passkey list", unread.faults > 0, true);
+  is("the step is not listed as not done over a passkey that is kept (its check mark is unknown)", unread.steps.includes(false), false);
+  part("rule 30, sibling older than this PR: the passkey managers");
+  is("control: each manager is handed the kept passkey", read.managers.length > 0 && read.managers.every((n) => n === 1), true);
+  is("an unread list is not handed over as empty (\"No passkeys yet.\", components/passkey-manager.tsx:290)", unread.managers.some((n) => n === 0), false);
+  is("the passkey is still kept", (await listPasskeys(OWNER)).map((p) => p.id), ["cred-r2945"]);
+  done();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

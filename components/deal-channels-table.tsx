@@ -1,18 +1,24 @@
 import type { Deal, Stage } from "@/lib/crm-rules";
 import { type DealChannels, dealTotals, dealsByChannel } from "@/lib/deal-channels";
 import { formatMoney } from "@/lib/money";
-import { buyerLedger } from "@/lib/segments";
+import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
+import { LedgerNotCounted, buyerLedger } from "@/lib/segments";
 import type { Store } from "@/lib/store";
 
 /**
  * Reads the buyers' ledger (lib/segments.ts: cached ten minutes, and up to
  * half a minute to read again from the creator's Stripe account) and draws
- * the table. The deals page puts it in a Suspense boundary, so the board is
- * never kept waiting for it; a ledger that cannot be read shows a plain line
- * and nothing else changes.
+ * the table. That reading is counted in the studio's requests before it is
+ * made, as the buyers page counts it (lib/person-agenda-read.ts countLedger):
+ * the copy by its size, Stripe as BUYER_LEDGER_UNITS. Not counted, nothing
+ * more is read and the table says why. The deals page puts it in a Suspense
+ * boundary, so the board is never kept waiting for it; a ledger that cannot
+ * be read shows a plain line and nothing else changes.
  */
 export async function DealChannelsLoader({ store, deals, stages }: { store: Store; deals: readonly Deal[]; stages: readonly Stage[] }) {
-  const ledger = await buyerLedger(store).catch(() => null);
+  const counting = countLedger(store);
+  const ledger = await buyerLedger(store, counting.count).catch((error: unknown) => (error instanceof LedgerNotCounted ? error : null));
+  if (ledger instanceof LedgerNotCounted) return <DealChannelsTable result={null} currency={store.currency} notCounted={counting.said.message || NOT_COUNTED} />;
   const result = ledger ? dealsByChannel(deals, stages, (email) => ledger.buyers.get(email)?.channel ?? null, ledger.partial) : null;
   return <DealChannelsTable result={result} currency={store.currency} />;
 }
@@ -38,7 +44,7 @@ export function DealChannelsWaiting() {
  * reader says each figure with its channel and its kind; the words say what
  * the numbers are and are not.
  */
-export function DealChannelsTable({ result, currency }: { result: DealChannels | null; currency: string }) {
+export function DealChannelsTable({ result, currency, notCounted = "" }: { result: DealChannels | null; currency: string; notCounted?: string }) {
   return (
     <section aria-labelledby="deal-channels-title" className="mt-10">
       <h2 id="deal-channels-title" className="t-h3">
@@ -47,7 +53,11 @@ export function DealChannelsTable({ result, currency }: { result: DealChannels |
       <p className="mt-2 max-w-2xl text-ink-soft">
         Each deal counts under the channel its person first bought from here. Someone who has not bought yet is never given a channel.
       </p>
-      {result === null ? (
+      {result === null && notCounted ? (
+        <p className="mt-4 text-ink-soft" role="status">
+          {notCounted} This table is not shown; your deals are all still here.
+        </p>
+      ) : result === null ? (
         <p className="mt-4 text-ink-soft" role="status">
           Your sales could not be read just now, so this table is not shown. Your deals are all still here; open this page again in a few minutes.
         </p>

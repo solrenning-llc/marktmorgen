@@ -102,6 +102,11 @@ async function main(): Promise<void> {
   is("read back", [...readCartMember("p1:20.p3:30")], [["p1", 20], ["p3", 30]]);
   is("anything else reads as nothing shown", [readCartMember(undefined), readCartMember(""), readCartMember("p1:23"), readCartMember("p1:20;x"), readCartMember("bad id:20")].map((m) => m.size), [0, 0, 0, 0, 0]);
   is("kept two hours at most", CART_MEMBER_SECONDS <= 7200, true);
+  // Review L (pre-review of money): a handle may hold a dot, so "ana.art" and "anaart" are two stores on one domain.
+  const names = ["ana.art", "anaart", "ana-art", "ana_art", "a.n.a"].map((handle) => cartMemberCookie({ handle }));
+  is("one cookie per store: two handles never share one", new Set(names).size, names.length);
+  is("each a valid cookie name", names.every((name) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)), true);
+  is("a handle without a dot keeps the name it had", cartMemberCookie({ handle: "anaart" }), "nl_cartm_anaart");
 
   part("In the store's cart");
   await claimHandle(OWNER, HANDLE, "Harbor Kitchen", "");

@@ -27,6 +27,16 @@
  *   LOW 3     a record "stripe:paypal:…" passed as Stripe's own id;
  *   LOW 4     the design said the rule refuses a duplicate id across sources
  *             (an ES1 payment already in Stripe); it did not.
+ *
+ * Then Claude 2's focal return on #2941 at b9fa7aa7 (comment 6704822225):
+ *
+ *   MEDIUM C  the design's plan for unit 2 still said to reuse readPaidSales,
+ *             readRenewals and the PayPal readers with their page caps, against
+ *             its own table (never readPaidSales, every paid invoice but
+ *             subscription_create, PayPal read in its exact shape);
+ *   LOW 5     money given back read while the disputes it gives back were
+ *             said not read was added: a sale of 1500, its dispute not read and
+ *             the 1500 given back read made the year 3000, not 1500.
  */
 import { readFileSync } from "node:fs";
 import * as rule from "@/lib/earnings-by-month";
@@ -264,6 +274,42 @@ part("PRE-REVIEW LOW 4: the same id in two sources is refused, as the design say
   }));
   is("control: different ids are both added", month(other, "2026-10").totals?.map((l) => l.netCents), [6000]);
   is("the design says the rule refuses the same id in two sources", doc.includes("the same id in two sources"), true);
+}
+
+part("FOCAL MEDIUM C: the design's plan for unit 2 says what its table says");
+{
+  const units = doc.slice(doc.indexOf("## Units, in order"));
+  const second = units.slice(units.indexOf("2. **The year reading**"), units.indexOf("\n3. "));
+  is("the plan is found", second.startsWith("2. **The year reading**"), true);
+  is("it never reuses readPaidSales, readRenewals or the PayPal readers as they are", /reusing|the PayPal readers with their page caps|`readRenewals`, `readRefunds`/.test(second), false);
+  is("it takes every paid invoice but subscription_create, as the table does", second.includes("subscription_create"), true);
+  is("the reading section no longer says the same functions", doc.includes("the same functions with the same page caps"), false);
+}
+
+part("FOCAL LOW 5: money given back is never added while the disputes it gives back are not read");
+{
+  // Claude 2's proof (c2-2941-back-alone, 0/2 at b9fa7aa7): a sale of 1500, its dispute not read, the 1500 given back read.
+  const sale = list("sale", [{ id: "stripe:cs_1", at: utc(2026, 9, 20), cents: 1500, currency: "usd" }]);
+  const back = list("reinstated", [{ id: "stripe:du_1:back", at: utc(2026, 11, 2), cents: 1500, currency: "usd" }]);
+  const proof = earningsByMonth(input({ providers: [fullStripe([sale, back], ["dispute"])] }));
+  const nov = source(proof, "2026-11", "stripe");
+  is(
+    "November is not +1500 'read' beside disputes not read",
+    nov.state === "unknown" || (nov.state === "read" && (nov.lines ?? []).every((l) => l.reinstatedCents === 0) && (nov.leftOut ?? []).includes("reinstated")),
+    true,
+  );
+  const year = proof!.months.every((m) => m.totals) ? proof!.months.reduce((sum, m) => sum + m.totals!.reduce((t, l) => t + l.netCents, 0), 0) : null;
+  is("and the year never adds to 3000", year === 3000, false);
+  is("Stripe's reading is refused, never trimmed", [nov.state, nov.why], ["unknown", "invalid"]);
+  const empty = earningsByMonth(input({ providers: [fullStripe([sale], ["dispute"])] }));
+  is("even an empty list of money given back, beside disputes not read", source(empty, "2026-11", "stripe").state, "unknown");
+  // Sibling: PayPal always says its disputes are not read, so a PayPal list of money given back is refused too.
+  const paypal = earningsByMonth(input({ providers: [fullPayPal([list("reinstated", [{ id: "paypal:back:O1", at: utc(2026, 11, 2), cents: 1500, currency: "usd" }])])] }));
+  is("PayPal's money given back beside its disputes not read: unknown", [source(paypal, "2026-11", "paypal").state, month(paypal, "2026-11").totals], ["unknown", null]);
+  const both = earningsByMonth(input({ providers: [fullStripe([sale], ["dispute", "reinstated"])] }));
+  is("control: both said not read, the months are read", [source(both, "2026-11", "stripe").state, month(both, "2026-09").totals?.map((l) => l.netCents)], ["read", [1500]]);
+  const read = earningsByMonth(input({ providers: [fullStripe([sale, back, list("dispute", [{ id: "stripe:du_1", at: utc(2026, 10, 10), cents: 1500, currency: "usd" }])])] }));
+  is("control: both read, the year is the real 1500", read!.months.reduce((sum, m) => sum + (m.totals ?? []).reduce((t, l) => t + l.netCents, 0), 0), 1500);
 }
 
 done();

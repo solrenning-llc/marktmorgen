@@ -180,6 +180,48 @@ async function main(): Promise<void> {
   const resumed = await runImport(odd, Date.now() + 30_000);
   is("read again, the queue empties and it is done", [resumed?.state, (await real([["SCARD", `nl:import:${odd}:mail`]]))[0], await active(odd)], ["done", 0, 0]);
 
+  part("Addresses taken off the queue on the server, with the reply lost on the way back, are queued again");
+  // Independent review on #2881, L3: the command that takes addresses off the queue runs on the server, and only
+  // its reply comes back unreadable. Before, SPOP had already removed them, and nobody knew which: they were
+  // neither emailed nor counted as not emailed.
+  const lost = "9".repeat(24);
+  await put(mailing(lost));
+  const takes = (command: Command) => (command[0] === "SPOP" || command[0] === "SREM") && command[1] === `nl:import:${lost}:mail`;
+  redis.pipeline = (async (commands: Command[]) => {
+    const replies = await real(commands);
+    return commands.length === 1 && takes(commands[0]) ? [{ unexpected: true }] : replies;
+  }) as typeof redis.pipeline;
+  const garbled = await runImport(lost, Date.now() + 30_000);
+  redis.pipeline = real;
+  is("still mailing, every address back on the queue, still active", [garbled?.state, (await readJob(lost))?.state, (await real([["SCARD", `nl:import:${lost}:mail`]]))[0], await active(lost)], ["mailing", "mailing", 3, 1]);
+  is("the very same three addresses wait", ((await real([["SMEMBERS", `nl:import:${lost}:mail`]]))[0] as string[]).slice().sort(), ["ann@example.com", "ben@example.com", "cal@example.com"]);
+  const recovered = await runImport(lost, Date.now() + 30_000);
+  is("read again, the queue empties and it is done", [recovered?.state, (await real([["SCARD", `nl:import:${lost}:mail`]]))[0], await active(lost)], ["done", 0, 0]);
+
+  part("Two imports started at once against a slot a finished import still holds: only one starts");
+  // Independent review on #2881, L2: both found the slot taken (SET NX), both read a finished holder, and both
+  // took the slot with a plain SET, so two imports of one store ran at once.
+  const slot = `nl:imports:busy:${sid}`;
+  await real([["SET", slot, mailed, "EX", 3600]]);
+  let waiting: (() => void)[] = [];
+  redis.pipeline = (async (commands: Command[]) => {
+    if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === slot) {
+      // Both starts read the holder before either acts on it, as two requests at the same instant can.
+      await new Promise<void>((resolve) => {
+        waiting.push(resolve);
+        if (waiting.length === 2) for (const go of waiting.splice(0)) go();
+        else setTimeout(() => waiting.splice(0).forEach((go) => go()), 500);
+      });
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const both = await Promise.all([startImport(store, OWNER, "contacts", INPUT), startImport(store, OWNER, "contacts", INPUT)]);
+  redis.pipeline = real;
+  waiting = [];
+  const started = both.flatMap((one) => (one.ok ? [one.job.id] : []));
+  is("one started, the other told the store is busy", [started.length, both.map((one) => (one.ok ? "started" : one.reason)).sort()], [1, ["busy", "started"]]);
+  is("the slot is the one that started", (await real([["GET", slot]]))[0], started[0] ?? null);
+
   done();
 }
 

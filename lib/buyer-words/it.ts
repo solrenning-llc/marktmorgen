@@ -38,7 +38,7 @@ export const it: BuyerWords = {
 
   fairHead: (country, percent) => `Prezzo equo per il tuo Paese (${country}): sconto del ${percent}${S}%`,
   fairNote: (store, plan) =>
-    `${store} abbassa i prezzi dove il denaro vale meno. Lo sconto si applica nella pagina di pagamento, senza codice${plan ? "; il prezzo ridotto vale per il pagamento in un'unica soluzione" : ""}.`,
+    `${store} abbassa i prezzi dove il denaro vale meno. Questo prezzo è stato stabilito automaticamente per te, in base al Paese della tua connessione internet. Lo sconto si applica nella pagina di pagamento, senza codice${plan ? "; il prezzo ridotto vale per il pagamento in un'unica soluzione" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}sconto del ${percent}${S}% · ${ends}`,
   saleNote: (until, plan) =>
     `Fino al ${until}. Lo sconto si applica nella pagina di pagamento, senza codice${plan ? "; il prezzo scontato vale per il pagamento in un'unica soluzione" : ""}.`,
@@ -300,6 +300,7 @@ export const it: BuyerWords = {
   newer: "Più recenti",
   older: "Meno recenti",
   askUnknown: (store) => `Questa pagina non lo dice. Chiedi a ${store} prima di acquistare.`,
+  askTermsCut: () => "Qui non ho le condizioni complete. Chiedi al creatore prima di acquistare.",
 
   noLongerOnSale: "Questo prodotto non è più in vendita.",
   seeStore: (store) => `Vedi ${store}`,

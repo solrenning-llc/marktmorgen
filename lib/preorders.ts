@@ -23,8 +23,9 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { sendEmail } from "@/lib/email";
 import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { onAccount } from "@/lib/stripe-account";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -152,6 +153,29 @@ export async function readPreorder(store: Store, productId: string, sessionId: s
   return parsePreorder(raw);
 }
 
+/**
+ * Whether a pre-order is given, read exactly, for a run that found another
+ * run's mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the entry as
+ * text, JSON with its buyer's address, and `given` a positive whole number of
+ * seconds (true) or absent (false). Anything else is unknown and throws.
+ */
+async function givenExactly(sid: string, productId: string, sessionId: string): Promise<boolean> {
+  const raw = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), sessionId]]), 1)?.[0];
+  let entry: unknown = null;
+  try {
+    entry = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    entry = null;
+  }
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof (entry as { to?: unknown }).to !== "string" || !(entry as { to: string }).to) {
+    throw new UnknownReplyError("a pre-order's entry");
+  }
+  const given = (entry as { given?: unknown }).given;
+  if (given === undefined) return false;
+  if (typeof given === "number" && Number.isSafeInteger(given) && given > 0) return true;
+  throw new UnknownReplyError("a pre-order's entry");
+}
+
 /** A person's pre-orders of these products and what became of them, for the copy of their data (619 [SZ3]). Only reads. */
 export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
@@ -225,8 +249,17 @@ export type HandOverOutcome = "given" | "already" | "skip";
 export async function handOverPreorder(store: Store, product: Listing, sessionId: string, deps: HandOverDeps): Promise<HandOverOutcome> {
   if (!store.statsId || !isRedisConfigured()) return "skip";
   const sid = store.statsId;
-  const [claimed] = await redisPipeline([["SET", giveKey(sessionId), "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
+  // hands nothing over and says so, as when Redis does not answer, and the next run tries again.
+  const value = claimValue();
+  const claimed = await claimMark(giveKey(sessionId), 300, value);
+  if (claimed === "taken") {
+    // Another run holds the mark: "already" only once the pre-order is given, as for a gift (lib/gifts.ts):
+    // confirmPreorder answers "given" for it, so said while the other run may still fail, nothing would hand it over.
+    if (await givenExactly(sid, product.id, sessionId)) return "already";
+    throw new Error("another run is handing this pre-order over right now");
+  }
+  if (claimed === "unknown") throw new UnknownReplyError("a pre-order's giving mark");
   try {
     const entry = await readPreorder(store, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
@@ -239,7 +272,8 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
     await sendOut(store, product, entry.to, deps, `nimbus-preorder-out:${sessionId}`);
     return "given";
   } finally {
-    await redisPipeline([["DEL", giveKey(sessionId)]]).catch(() => {});
+    // Let go only while it still holds this run's value (releaseMark never throws).
+    await releaseMark(giveKey(sessionId), value);
   }
 }
 
@@ -475,14 +509,33 @@ export async function revokeRefundedPreorders(
             unsure = true;
             continue;
           }
-          const job = (() => {
+          // No record: nothing of this pre-order is held as a purchase any more (null). A record that does not read,
+          // or whose job is not text, is unknown, never "given another way" (rule 30, Claude 4 on #2781).
+          let job = "";
+          if (typeof given === "string") {
+            let v: unknown;
             try {
-              return String((JSON.parse(String(given)) as { job?: unknown }).job ?? "");
+              v = JSON.parse(given);
             } catch {
-              return "";
+              v = undefined;
             }
-          })();
+            const named = v && typeof v === "object" && !Array.isArray(v) ? (v as { job?: unknown }).job : undefined;
+            if (typeof named !== "string") {
+              unsure = true;
+              continue;
+            }
+            job = named;
+          }
           if (job === `pre:${session}`) {
+            // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
+            // purchase, so the next run takes both away again; taking a course away twice is harmless.
+            try {
+              await dropStart(entry.to, productId);
+            } catch (error) {
+              console.error("taking a refunded pre-order's course away failed; tried again next run", error);
+              unsure = true;
+              continue;
+            }
             // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24):
             // a write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
             const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]), 1);
@@ -490,7 +543,6 @@ export async function revokeRefundedPreorders(
               unsure = true;
               continue;
             }
-            await dropStart(entry.to, productId);
           }
         }
         const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);

@@ -41,7 +41,7 @@ async function main() {
   is("what closing does to the store's data and to its renewals is said", [html.includes("its files are removed"), html.includes("stopped at Stripe"), html.includes("deleted")], [true, true, true]);
   is("never that the creator's own Stripe account is untouched", /not touched/.test(html), false);
   is("a way back of the same weight", html.includes("Go back without changing anything"), true);
-  is("a skip link to the content", html.includes('href="#content"'), true);
+  is("the shared studio layout remains the only skip-link owner", html.includes('href="#content"'), false);
   is("the Help answer it links exists", HELP_SECTIONS.some((s) => s.items.some((item) => answerId(item.q) === "what-happens-when-my-plan-ends")) && html.includes("/help#what-happens-when-my-plan-ends"), true);
 
   part("Not the owner");

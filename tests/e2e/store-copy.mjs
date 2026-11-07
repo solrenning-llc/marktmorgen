@@ -102,6 +102,7 @@ import {checkPathScripts} from "./path-scripts.mjs";
 import {checkReturnPath} from "./path-return.mjs";
 import {checkPostSalePath} from "./path-growth.mjs";
 import { checkPathCardText } from "./path-card-text.mjs";
+import { checkShrinkTone } from "./shrink-tone.mjs";
 
 async function storePlaceholderContrast(page,field){
   return placeholderPaint(page,field);
@@ -915,6 +916,7 @@ await checkNudgeAcknowledgment({browser,LOCAL,fixture:pauseFixtures[0],is});
   await checkShippingSave({browser,LOCAL,fixture:shippingFixture,is});
   await checkDiscountAcknowledgment({browser,LOCAL,fixture:libraryFixture,is});
   await checkBillingStudioObservation({browser,LOCAL,services,fixture:billingObservation,is});
+  await checkShrinkTone({ browser, root, is });
   is("no page threw", errors, []);
 } catch (error) {
   failed += 1;

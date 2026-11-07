@@ -37,7 +37,7 @@ export const nl: BuyerWords = {
 
   fairHead: (country, percent) => `Eerlijke prijs voor jouw land (${country}): ${percent}${S}% korting`,
   fairNote: (store, plan) =>
-    `${store} verlaagt de prijzen waar geld minder waard is. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de lagere prijs geldt bij betaling in één keer" : ""}.`,
+    `${store} verlaagt de prijzen waar geld minder waard is. Deze prijs is automatisch voor jou bepaald, op basis van het land van je internetverbinding. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de lagere prijs geldt bij betaling in één keer" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% korting · ${ends}`,
   saleNote: (until, plan) =>
     `Tot ${until}. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de actieprijs geldt bij betaling in één keer" : ""}.`,
@@ -299,6 +299,7 @@ export const nl: BuyerWords = {
   newer: "Nieuwer",
   older: "Ouder",
   askUnknown: (store) => `Dat staat niet op deze pagina. Vraag het ${store} voordat je koopt.`,
+  askTermsCut: () => "Ik heb de volledige voorwaarden hier niet. Vraag het de maker voordat je koopt.",
 
   noLongerOnSale: "Dit product is niet meer te koop.",
   seeStore: (store) => `Bekijk ${store}`,

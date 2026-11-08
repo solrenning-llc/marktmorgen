@@ -26,6 +26,9 @@ const listed = [...(/\n {4}workflows:\n((?: {6}- .+\n)+)/.exec(triggers)?.[1] ??
 is("its workflows are exactly the required workflows' names", [...listed].sort(), required.map(nameOf).sort());
 is("the script's list is the same nine files and names", REQUIRED.map((w) => [w.file, w.name]).sort(),
   required.map((f) => [`.github/workflows/${f}`, nameOf(f)]).sort());
+is("each of the nine carries its required check, the exact name of its single \"All checks (…)\" job",
+  REQUIRED.map((w) => [w.check, [...read(w.file).matchAll(/^ {4}name: (All checks \(.+\))$/gm)].map((m) => m[1])]),
+  REQUIRED.map((w) => [`All checks (${w.file.slice(w.file.lastIndexOf("/") + 1, -".yml".length)})`, [`All checks (${w.file.slice(w.file.lastIndexOf("/") + 1, -".yml".length)})`]]));
 is("one trigger only: workflow_run completed on main", [
   /\non:\n {2}workflow_run:\n/.test(triggers),
   /\n {4}types: \[completed\]\n/.test(triggers),
@@ -35,8 +38,8 @@ is("one trigger only: workflow_run completed on main", [
 is("no pull_request, push, schedule, merge_group or manual trigger", /\n {2}(pull_request|pull_request_target|push|schedule|merge_group|workflow_dispatch):/.test(triggers), false);
 
 part("minimal permissions, pinned actions, no secret, no untrusted text in a shell");
-is("permissions are actions: read, contents: read and issues: write, nothing else, and no job widens them",
-  [/\npermissions:\n {2}actions: read\n {2}contents: read\n {2}issues: write\n(?! )/.test(triggers), (alarm.match(/permissions:/g) ?? []).length], [true, 1]);
+is("permissions are actions: read, checks: read, contents: read and issues: write, nothing else, and no job widens them",
+  [/\npermissions:\n {2}actions: read\n {2}checks: read\n {2}contents: read\n {2}issues: write\n(?! )/.test(triggers), (alarm.match(/permissions:/g) ?? []).length], [true, 1]);
 is("every action is pinned by a full commit SHA already used in this repository",
   [...alarm.matchAll(/uses: ([^@\s]+)@(\S+)/g)].every(([, action, sha]) =>
     /^[0-9a-f]{40}$/.test(sha) && read(".github/workflows/product-checks.yml").includes(`uses: ${action}@${sha}`)), true);
@@ -217,6 +220,25 @@ part("a canceled run with a failed job is red (Claude 5 on #3042: pushes cancel 
     decide({ runs: allGreen(), trigger: allGreen()[0], head: HEAD, redJobs: allGreen().map((r) => r.id) }).action, "close");
 }
 
+part("main's head is green when its tree is a merge-queue commit whose nine required checks passed");
+{
+  // TODOS-19/21: pushes to main cancel each other's runs (cancel-in-progress stays); the merge queue
+  // already ran the nine on a commit with the same tree. alarm() finds that commit; decide() takes it.
+  const QUEUE = "d".repeat(40);
+  const redHead = [...restGreen(), run(PC, "failure")];
+  is("head red, its tree proven green in the merge queue: close, nothing reported",
+    [decide({ runs: redHead, trigger: redHead[8], head: HEAD, treeGreen: QUEUE }).action, decide({ runs: redHead, trigger: redHead[8], head: HEAD, treeGreen: QUEUE }).red],
+    ["close", []]);
+  const allStopped = REQUIRED.map((_, i) => run(i, stopped));
+  is("head all canceled, its tree proven green in the merge queue: close",
+    decide({ runs: allStopped, trigger: allStopped[0], head: HEAD, treeGreen: QUEUE }).action, "close");
+  is("and the decision names the merge-queue commit", decide({ runs: allStopped, trigger: allStopped[0], head: HEAD, treeGreen: QUEUE }).treeGreen, QUEUE);
+  is("without that proof nothing changes", decide({ runs: allStopped, trigger: allStopped[0], head: HEAD, treeGreen: null }).action, "none");
+  let refused = false;
+  try { decide({ runs: allStopped, trigger: allStopped[0], head: HEAD, treeGreen: "main" }); } catch { refused = true; }
+  is("an unreadable proof is refused, never taken as green", refused, true);
+}
+
 part("the texts");
 const red = [run(2, "failure"), run(7, "timed_out", { event: "schedule" })];
 const body = openBody(red, HEAD);
@@ -228,6 +250,9 @@ is("the issue points to the MV rule", body.includes("AGENTS.md") && body.include
 is("a run already in the issue is not reported again", unreported(red, [body]).map((r) => r.id), []);
 is("a new red run is reported once", unreported([...red, run(3, "failure")], [body, failureComment(red)]).map((r) => r.path), [REQUIRED[3].file]);
 is("the closing comment says MAIN VERDE and the head", greenComment(HEAD).includes("MAIN VERDE") && greenComment(HEAD).includes(HEAD), true);
+is("closed by a merge-queue commit with the same tree, it names that commit too",
+  [greenComment(HEAD, "d".repeat(40)).includes("MAIN VERDE"), greenComment(HEAD, "d".repeat(40)).includes(HEAD), greenComment(HEAD, "d".repeat(40)).includes("d".repeat(40)), greenComment(HEAD, "d".repeat(40)).includes("árvore")],
+  [true, true, true, true]);
 is("green closes only the issues the alarm opened, never one opened by hand for a failure proven otherwise",
   closable([{ number: 1, user: { login: "github-actions[bot]" } }, { number: 2, user: { login: "someone" } }, { number: 3, user: null }]).map((i) => i.number), [1]);
 is("label and title", [LABEL, TITLE], ["main-vermelho", "MAIN VERMELHO"]);
@@ -249,7 +274,8 @@ async function endToEnd() {
   const job = (name: string, conclusion: string | null) => ({ id: 1, name, status: conclusion === null ? "in_progress" : "completed", conclusion });
   const cleanJobs = { total_count: 2, jobs: [job("verify", stopped), job("All checks (product-checks)", "failure")] };
   const redJobsReply = { total_count: 3, jobs: [job("verify", "success"), job("Mobile render (candidate)", "failure"), job("All checks (product-checks)", "failure")] };
-  const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown, jobs?: Record<number, unknown> }) => {
+  const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown, jobs?: Record<number, unknown>,
+    trees?: Record<string, unknown>, queue?: unknown[][], queueReply?: unknown, checks?: Record<string, unknown>, failOn?: RegExp }) => {
     const reads: string[] = [];
     const writes: { method: string, path: string, body: unknown }[] = [];
     const api: Api = async (method, path, body, absentIsNull) => {
@@ -258,7 +284,18 @@ async function endToEnd() {
         return method === "POST" && path === "issues" ? { number: 9001 } : {};
       }
       reads.push(path);
+      if (o.failOn?.test(path)) throw new Error("GET " + path + ": HTTP 403");
       if (path === "git/ref/heads/main") return { object: { sha: o.head } };
+      const commit = /^git\/commits\/([0-9a-f]{40})$/.exec(path);
+      if (commit) return commit[1] in (o.trees ?? {}) ? o.trees?.[commit[1]] : { sha: commit[1], tree: { sha: "0".repeat(40) } };
+      const queue = /^actions\/runs\?event=merge_group&created=%3E%3D([0-9TZ:.-]+)&exclude_pull_requests=true&per_page=100&page=(\d+)$/.exec(path);
+      if (queue) {
+        if (o.queueReply !== undefined) return o.queueReply;
+        const pages = o.queue ?? [];
+        return { total_count: pages.flat().length, workflow_runs: pages[Number(queue[2]) - 1] ?? [] };
+      }
+      const checkRuns = /^commits\/([0-9a-f]{40})\/check-runs\?filter=latest&per_page=100$/.exec(path);
+      if (checkRuns) return o.checks?.[checkRuns[1]] ?? { total_count: 0, check_runs: [] };
       if (path === `actions/runs?branch=main&head_sha=${o.head}&per_page=100&page=1`) return { total_count: o.headRuns.length, workflow_runs: o.headRuns };
       const older = /^actions\/workflows\/([\w.-]+)\/runs\?branch=main&status=completed&per_page=100&page=(\d+)$/.exec(path);
       if (older) {
@@ -340,6 +377,132 @@ async function endToEnd() {
     let threw = false;
     try { await alarmRun({ api: gh.api, trigger: restGreen()[0], log: quiet }); } catch { threw = true; }
     is("an unreadable earlier-head listing fails the run: never green, never red", [threw, gh.writes], [true, []]);
+  }
+  {
+    // TODOS-19/21: main's head has the tree of a merge-queue commit whose nine "All checks (…)" passed.
+    const TREE = "e".repeat(40);
+    const QUEUE = "d".repeat(40);
+    const NOW = Date.parse("2026-11-08T12:00:00Z");
+    const SINCE = "2026-11-07T12:00:00.000Z";
+    const queueRun = (sha: string, tree: string, over: Record<string, unknown> = {}) => ({
+      ...run(PC, "success", { event: "merge_group", head_branch: `gh-readonly-queue/main/pr-3139-${"f".repeat(40)}`, head_sha: sha }),
+      head_commit: { id: sha, tree_id: tree }, ...over,
+    });
+    const checkRun = (sha: string, name: string, conclusion: string | null, over: Record<string, unknown> = {}) => ({
+      id: 1, name, head_sha: sha, status: conclusion === null ? "in_progress" : "completed", conclusion, app: { slug: "github-actions" }, ...over,
+    });
+    const nineChecks = (sha: string, change: (name: string) => unknown[] = (name) => [checkRun(sha, name, "success")]) => {
+      const list = REQUIRED.flatMap((w) => change(w.check));
+      return { total_count: list.length, check_runs: list };
+    };
+    const headTree = { [HEAD]: { sha: HEAD, tree: { sha: TREE } } };
+    const redHead = [...restGreen(), run(PC, "failure", { id: 8_001 })];
+    const stoppedHead = REQUIRED.map((_, i) => run(i, stopped, { id: 8_100 + i }));
+    const writesOf = (gh: { writes: { method: string, path: string }[] }) => gh.writes.map((w) => `${w.method} ${w.path}`);
+
+    {
+      const gh = github({ head: HEAD, headRuns: redHead, issues: [botIssue], trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      is("(a) head red, its tree equal to a merge-queue commit whose nine required checks passed: green, the bot's issue closes",
+        [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
+      is("and the MAIN VERDE comment names the merge-queue commit",
+        String((gh.writes[0]?.body as { body?: string } | undefined)?.body ?? "").includes(QUEUE), true);
+      is("the merge queue is read only for the last 24 hours, one page, and that commit's check runs once",
+        gh.reads.filter((p) => p.includes("merge_group") || p.includes("check-runs")),
+        [`actions/runs?event=merge_group&created=%3E%3D${SINCE}&exclude_pull_requests=true&per_page=100&page=1`, `commits/${QUEUE}/check-runs?filter=latest&per_page=100`]);
+      is("and no earlier main head is read once the tree is proven green", gh.reads.filter((p) => p.startsWith("actions/workflows/")), []);
+    }
+    {
+      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      is("(a) and with no issue open, nothing is opened: no alarm", gh.writes, []);
+    }
+    {
+      const gh = github({ head: HEAD, headRuns: stoppedHead, issues: [botIssue], trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) },
+        older: { "product-checks.yml": [[]] } });
+      const d = await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet, now: NOW });
+      is("(a) head all canceled by later pushes, same tree green in the queue: green", [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
+    }
+    {
+      const gh = github({ head: HEAD, headRuns: stoppedHead, issues: [botIssue], trees: headTree, queue: [[queueRun(HEAD, TREE)]], checks: { [HEAD]: nineChecks(HEAD) } });
+      const d = await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet, now: NOW });
+      is("(a) the queue commit being main's head itself: green", d.action, "close");
+    }
+    {
+      // An older queue commit with the same tree whose checks failed, a newer one whose checks passed.
+      const OLDQ = "9".repeat(40);
+      const gh = github({ head: HEAD, headRuns: redHead, issues: [botIssue], trees: headTree,
+        queue: [[queueRun(QUEUE, TREE, { id: 9_002 }), queueRun(OLDQ, TREE, { id: 9_001 })]],
+        checks: { [QUEUE]: nineChecks(QUEUE), [OLDQ]: nineChecks(OLDQ, (name) => [checkRun(OLDQ, name, "failure")]) } });
+      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      is("(a) one passing queue commit with the same tree is enough", d.action, "close");
+    }
+    for (const [what, change] of [
+      ["one required check failed", (name: string) => [checkRun(QUEUE, name, name === REQUIRED[3].check ? "failure" : "success")]],
+      ["one required check missing", (name: string) => (name === REQUIRED[6].check ? [] : [checkRun(QUEUE, name, "success")])],
+      ["one required check still pending", (name: string) => [checkRun(QUEUE, name, name === REQUIRED[0].check ? null : "success")]],
+      ["one required check canceled", (name: string) => [checkRun(QUEUE, name, name === REQUIRED[1].check ? stopped : "success")]],
+      ["one required check skipped", (name: string) => [checkRun(QUEUE, name, name === REQUIRED[2].check ? "skipped" : "success")]],
+      ["one required check posted by another app", (name: string) => [checkRun(QUEUE, name, "success", name === REQUIRED[8].check ? { app: { slug: "someone-else" } } : {})]],
+      ["one required check also failed under the same name", (name: string) => [checkRun(QUEUE, name, "success"), ...(name === REQUIRED[5].check ? [checkRun(QUEUE, name, "failure")] : [])]],
+      ["one required check reported for another commit", (name: string) => [checkRun(QUEUE, name, "success", name === REQUIRED[4].check ? { head_sha: OLD } : {})]],
+    ] as [string, (name: string) => unknown[]][]) {
+      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE, change) } });
+      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      is(`(b) same tree but ${what}: not green, the red head still opens the issue`, [d.action, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
+    }
+    {
+      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, "1".repeat(40))]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      is("(c) a queue commit whose nine passed but whose tree differs: unchanged, the issue opens", [d.action, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
+      is("and its check runs are never read", gh.reads.some((p) => p.includes("check-runs")), false);
+    }
+    for (const [what, over] of [
+      ["a pull_request run", { event: "pull_request" }], ["a push run", { event: "push" }],
+      ["a branch outside main's merge queue", { head_branch: "gh-readonly-queue/other/pr-1" }],
+    ] as [string, Record<string, unknown>][]) {
+      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, TREE, over)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      is(`(c) the same tree from ${what} is not a merge-queue proof`, d.action, "open");
+    }
+    {
+      const filler = Array.from({ length: 5 }, (_, p) => Array.from({ length: 100 }, (_, i) => queueRun("8".repeat(40), "2".repeat(40), { id: 20_000 - p * 100 - i })));
+      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [...filler, [queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      is("the merge-queue listing stops at 3 pages: a match beyond them is never read, and the head is not green",
+        [d.action, gh.reads.filter((p) => p.includes("merge_group")).length], ["open", 3]);
+    }
+    {
+      const gh = github({ head: HEAD, headRuns: allGreen(), issues: [botIssue], trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      await alarmRun({ api: gh.api, trigger: allGreen()[0], log: quiet, now: NOW });
+      is("when the nine passed on the head itself, the merge queue is never read",
+        gh.reads.filter((p) => p.includes("merge_group") || p.includes("check-runs") || p.startsWith("git/commits/")), []);
+    }
+    for (const [what, over] of [
+      ["the merge-queue listing is not a list", { queueReply: { workflow_runs: "nope" } }],
+      ["the merge-queue listing has no count", { queueReply: { workflow_runs: [] } }],
+      ["the head commit has no tree", { trees: { [HEAD]: { sha: HEAD } } }],
+      ["the head commit is another commit", { trees: { [HEAD]: { sha: QUEUE, tree: { sha: TREE } } } }],
+      ["the check runs are not a list", { checks: { [QUEUE]: { total_count: 9 } } }],
+      ["the check runs are a short page", { checks: { [QUEUE]: { ...nineChecks(QUEUE), total_count: 120 } } }],
+      ["a check run has no conclusion field", { checks: { [QUEUE]: nineChecks(QUEUE, (name) => [{ name, head_sha: QUEUE, status: "completed", app: { slug: "github-actions" } }]) } }],
+      ["a queue run has no head commit", { queue: [[queueRun(QUEUE, TREE, { head_commit: null })]] }],
+      ["a queue run's head commit is another commit", { queue: [[queueRun(QUEUE, TREE, { head_commit: { id: OLD, tree_id: TREE } })]] }],
+      ["the merge-queue listing fails (HTTP 403)", { failOn: /merge_group/ }],
+      ["the check runs fail (HTTP 403)", { failOn: /check-runs/ }],
+      ["the head commit fails (HTTP 404)", { failOn: /^git\/commits\// }],
+    ] as [string, Record<string, unknown>][]) {
+      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) }, ...over });
+      let outcome = "";
+      try { outcome = (await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW })).action; } catch { outcome = "threw"; }
+      is(`(d) ${what}: never green, the red head still opens the issue as before`, [outcome, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
+    }
+    {
+      const gh = github({ head: HEAD, headRuns: stoppedHead, issues: [botIssue], trees: headTree, queueReply: "garbage", older: { "product-checks.yml": [[]] } });
+      let outcome = "";
+      try { outcome = (await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet, now: NOW })).action; } catch { outcome = "threw"; }
+      is("(d) head all canceled and an unreadable merge-queue reply: nothing closes, nothing opens", [outcome, gh.writes], ["none", []]);
+    }
   }
   {
     const gh = github({ head: "main", headRuns: [] });

@@ -159,17 +159,23 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   }
 
   const selling = canSell(store);
+  // A read that failed is its own mark, never "not soon", "no limit" or "keys left" (rule 24): stockLeft's null means
+  // no limit, so its failure is UNREAD.
+  const UNREAD = "unread" as const;
   const [coming, stock, noKeys, related, summary] = await Promise.all([
-    soonOne(store, product.id).catch(() => ({ soon: false, day: null })),
-    stockLeft(store, product).catch(() => null),
-    outOfKeys(store, product).catch(() => false),
+    soonOne(store, product.id).catch(() => null),
+    stockLeft(store, product).catch(() => UNREAD),
+    outOfKeys(store, product).catch(() => null),
     product.bumps.length ? readListings(store, bumpTargets(product)).catch(() => []) : Promise.resolve([]),
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
-  const soon = coming.soon;
-  const count = noKeys ? 0 : stock;
+  // Whether it can be bought here is not known: the card is only a link to the product's own page, which decides on its
+  // own reading. No checkout, and no calendar in the frame (it opens only on a link to the booking page).
+  const unread = coming === null || stock === UNREAD || noKeys === null;
+  const soon = coming?.soon ?? false;
+  const count = unread ? null : noKeys ? 0 : stock;
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
-  const computed = pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day));
+  const computed = pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, soon, coming?.day ?? null));
   const page = tag(productPath(store, product));
   // A card the script opened on a site the creator did not list, past the
   // store's visits or past the opens one connection gets, and one pasted
@@ -177,7 +183,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   // a plain link to the product's own page. So is a card with an affiliate's
   // code, which the product's page takes under the store's consent rules.
   const plain = open ? !open.live || Boolean(open.via) : !(await pastedAllowed(store));
-  const { action, label } = plain && computed.action.kind === "checkout" ? { action: { kind: "link" as const, href: productPath(store, product) }, label: computed.label } : computed;
+  const { action, label } = unread ? { action: { kind: "link" as const, href: productPath(store, product) }, label: computed.label } : plain && computed.action.kind === "checkout" ? { action: { kind: "link" as const, href: productPath(store, product) }, label: computed.label } : computed;
   // A product page link with the place on it, and the part of the page it was meant for.
   const into = (href: string) => (href.startsWith("#") ? `${page.split("#")[0]}${href}` : tag(href));
   // Something handed over digitally is paid for from the product's buy box,

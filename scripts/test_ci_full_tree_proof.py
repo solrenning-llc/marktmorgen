@@ -172,10 +172,10 @@ class MergeQueueSameCommitTests(unittest.TestCase):
             elif mutation == "unstarted": reply["jobs"][0]["started_at"] = None
             else: reply["jobs"].append(dict(reply["jobs"][0], name="Something else")); reply["total_count"] += 1
             self.assertFalse(prove_merge_group(H, data.__getitem__), mutation)
-        # A newer run of the same workflow on the same SHA that failed or is still going wins.
-        for later in [{"status":"in_progress","conclusion":None}, {"conclusion":"failure"}]:
+        # A newer run of the same workflow on the same SHA that failed, is still going or is unreadable wins.
+        for later in [{"status":"in_progress","conclusion":None}, {"conclusion":"failure"}, {"id":"1000"}]:
             data = queue_fixture(); listing = queue_listing(data)
-            newer = copy.deepcopy(listing["workflow_runs"][0]); newer.update(id=999, **later)
+            newer = copy.deepcopy(listing["workflow_runs"][0]); newer.update({"id": 999, **later})
             listing["workflow_runs"].append(newer); listing["total_count"] += 1
             self.assertFalse(prove_merge_group(H, data.__getitem__), later)
 

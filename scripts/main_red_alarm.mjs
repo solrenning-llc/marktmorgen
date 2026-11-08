@@ -20,28 +20,25 @@
  *   completes after main moved to B, or is canceled. The issue labeled main-vermelho is opened (or
  *   the open one gets a comment naming each red run not yet named in it).
  * - close: all nine have a completed success as their latest counted run on the current head; an
- *   earlier head never closes. Or (TODOS-19/21) every required workflow is either green on the
- *   current head or has no result there (its run canceled with no failed job, skipped, missing, or
- *   queued and not started), and the head's git tree is the tree of a commit of main's merge queue
- *   (a merge_group run on gh-readonly-queue/main/…, created in the last MERGE_GROUP_HOURS) on which
- *   the nine required checks "All checks (…)" all passed: the same tree is the same code, already
- *   proven, so the cancels on main (cancel-in-progress stays) do not keep it red. A run on the head
- *   that completed red (failure, timed_out, startup_failure, a canceled run with a failed job), with
- *   an unexpected conclusion (action_required…) or still in progress is never hidden by the tree: the
- *   decision is exactly as without it (TODOS-21: the #3139 red was real and appeared after its
- *   merge-queue commit had passed). The proof is read only then, at most MERGE_GROUP_PAGES pages and
- *   MERGE_GROUP_CHECK_READS commits; any unreadable or failing reply in it is never green: it is
- *   logged and the decision stays as without it. Remaining limit: a failure that appears only after
- *   the queue commit passed (time, date, outside service) and whose main run was canceled is not
- *   seen on that head; the next head's own runs, or the daily schedule, still show it. Every open main-vermelho issue the alarm opened gets "MAIN VERDE"
+ *   earlier head never closes. A workflow whose counted runs on the current head give no result there
+ *   (its push run canceled with no failed job, skipped, or missing) takes the result of its newest
+ *   merge_group run on that very head, when that run is a completed success in main's merge queue
+ *   (branch gh-readonly-queue/main/…), read in its own listing (head_sha=<head>&event=merge_group):
+ *   main only fast-forwards to the merge queue's commit, so the queue already ran the nine on the
+ *   head, and the push to main repeats them (C1-0305-C4-28). Only a success, only on the current
+ *   head, never on an earlier one; a merge_group failure never opens and never blocks a green push
+ *   run. The newest counted run still decides: a push or schedule run on the head that completed red,
+ *   still runs, is queued or ended otherwise is never replaced by the merge queue, so a later red
+ *   still opens. An unreadable merge_group listing is logged and not used: never green, and the
+ *   decision stays as without it. Every open main-vermelho issue the alarm opened gets "MAIN VERDE"
  *   with the head and is closed; one opened by hand (a failure proven another way) is left to the
  *   PR that fixes it.
  * - none: anything else (a run still going with no red behind it, a workflow without a run, an
  *   unexpected conclusion).
  *
  * Never counted, either way: skipped, neutral and stale runs, canceled runs with no failed job,
- * runs of another branch, of another file, or of any other event (pull_request, merge_group,
- * workflow_dispatch...). The jobs of a canceled run are read for every one on the current head and,
+ * runs of another branch, of another file, or of any other event (pull_request, workflow_dispatch...);
+ * merge_group runs only as above, from their own listing, and only a success on the current head. The jobs of a canceled run are read for every one on the current head and,
  * on earlier heads, newest first, for at most JOB_READS runs per workflow per alarm run; beyond
  * that a canceled run counts as before (no evidence), so the read stays bounded. An
  * unreadable reply from GitHub is never green or red: the script throws and the run fails, visible
@@ -88,16 +85,8 @@ const NOT_STARTED = new Set(["queued", "waiting", "pending", "requested"]);
 const MAX_PAGES = 10;
 /** Canceled runs on earlier main heads whose jobs are read, per workflow, per alarm run. */
 export const JOB_READS = 10;
-/** How far back main's merge queue is read for a commit with the head's tree. */
-export const MERGE_GROUP_HOURS = 24;
-/** Pages of 100 merge_group runs read, at most, per alarm run. */
-export const MERGE_GROUP_PAGES = 3;
-/** Merge-queue commits with the head's tree whose check runs are read, at most, per alarm run. */
-export const MERGE_GROUP_CHECK_READS = 5;
 /** The branches of main's merge queue: gh-readonly-queue/main/pr-<number>-<sha>. */
 const QUEUE_BRANCH = /^gh-readonly-queue\/main\//;
-/** The app whose check runs are the workflows' jobs. */
-const ACTIONS_APP = "github-actions";
 
 /**
  * @typedef {{ id: number, name: string, path: string, event: string, head_branch: string | null,
@@ -145,17 +134,20 @@ const isRed = (r, redJobs) => r.status === "completed" && r.conclusion !== null
 const newest = (runs) => runs.reduce((a, b) => (a && a.id > b.id ? a : b), /** @type {Run | null} */ (null));
 
 /**
- * @param {{ runs: unknown[], trigger: unknown, head: string, redJobs?: number[], treeGreen?: string | null }} input
+ * @param {{ runs: unknown[], trigger: unknown, head: string, redJobs?: number[], queueRuns?: unknown[] }} input
  *   runs of the current head and, for the workflows earlierNeeded() names, of earlier main heads;
  *   redJobs: the canceled runs in which a job other than the aggregator ended in failure or
- *   timed_out; treeGreen: a merge-queue commit with the head's tree on which the nine required
- *   checks passed (queueProof), which makes the head green only when treeEligible(states)
- * @returns {{ action: "open" | "close" | "none", red: Run[], states: State[], treeGreen: string | null }}
+ *   timed_out; queueRuns: the merge_group runs on the current head, from their own listing
+ * @returns {{ action: "open" | "close" | "none", red: Run[], states: State[], queueGreen: string[] }}
+ *   queueGreen: the files whose green on the head is their merge_group run's
  */
-export function decide({ runs, trigger, head, redJobs = [], treeGreen = null }) {
+export function decide({ runs, trigger, head, redJobs = [], queueRuns = [] }) {
   if (typeof head !== "string" || !SHA.test(head)) throw new Error("unreadable main head: " + String(head));
-  if (treeGreen !== null && (typeof treeGreen !== "string" || !SHA.test(treeGreen))) throw new Error("unreadable merge-queue proof: " + String(treeGreen));
   if (!Array.isArray(runs)) throw new Error("unreadable run list");
+  if (!Array.isArray(queueRuns)) throw new Error("unreadable merge-queue run list");
+  // main's merge queue, on the current head only; every status and conclusion, so that the newest decides.
+  const queue = queueRuns.map(checked).filter((r) => r.event === "merge_group" && r.head_branch !== null
+    && QUEUE_BRANCH.test(r.head_branch) && r.head_sha === head);
   if (!Array.isArray(redJobs) || !redJobs.every((n) => Number.isSafeInteger(n))) throw new Error("unreadable job evidence");
   const failedInside = new Set(redJobs);
   const woke = checked(trigger);
@@ -179,33 +171,32 @@ export function decide({ runs, trigger, head, redJobs = [], treeGreen = null }) 
       if (done && isRed(done, failedInside)) latest = done;
     }
     let state = "missing";
+    let fromQueue = false;
     if (latest) {
       if (latest.status !== "completed") state = NOT_STARTED.has(latest.status) ? "queued" : "running";
       else if (latest.conclusion === "success") state = "green";
       else if (isRed(latest, failedInside)) state = "red";
       else state = "unknown";
+    } else {
+      // No result from the head's own push or schedule runs: the merge queue's newest run of this file on
+      // this very head stands, only when it passed. A failure there is never red.
+      const queued = newest(queue.filter((r) => r.path === file));
+      if (queued && queued.status === "completed" && queued.conclusion === "success") {
+        state = "green";
+        latest = queued;
+        fromQueue = true;
+      }
     }
     // No result on the current head yet: the latest completed result on an earlier head stands.
     const prior = state === "green" || state === "red" ? null
       : newest(mine.filter((r) => r.head_sha !== head && r.status === "completed"));
     const earlier = prior && isRed(prior, failedInside) ? prior : null;
-    return { file, name, state, run: latest, earlier };
+    return { file, name, state, run: latest, earlier, fromQueue };
   });
-  // The head's tree already passed the nine in the merge queue, and no run on the head says
-  // otherwise (each is green or has no result): green. A completed red on the head is never hidden.
-  if (treeGreen && treeEligible(states)) return { action: "close", red: [], states, treeGreen };
   const red = states.flatMap((s) => (s.state === "red" ? [/** @type {Run} */ (s.run)] : s.earlier ? [s.earlier] : []));
   const action = red.length ? "open" : states.every((s) => s.state === "green") ? "close" : "none";
-  return { action, red, states, treeGreen: null };
-}
-
-/**
- * Whether a merge-queue proof may make the head green: every required workflow is green on the head
- * or has no result there (missing, or queued and not started). Never when one is red, unknown or
- * still in progress on the head. @param {State[]} states
- */
-export function treeEligible(states) {
-  return states.every((s) => s.state === "green" || s.state === "missing" || s.state === "queued");
+  const queueGreen = states.filter((s) => s.fromQueue).map((s) => s.file);
+  return { action, red, states: states.map((s) => ({ file: s.file, name: s.name, state: s.state, run: s.run, earlier: s.earlier })), queueGreen };
 }
 
 /** The workflow files whose earlier main heads must be read: neither green nor red on the current head. @param {State[]} states */
@@ -232,7 +223,7 @@ export function openBody(red, head) {
     ...red.map(line),
     "",
     "Regra MV (AGENTS.md): enquanto esta issue estiver aberta, ninguém faz push em PR nenhum além do PR que conserta o main, e ninguém incorpora outra coisa. O trabalho local e as revisões continuam.",
-    "Esta issue fecha sozinha quando os 9 workflows obrigatórios passarem no head atual do main, ou quando nenhum run do head atual tiver falhado (só cancelados, pulados, ausentes ou não iniciados) e a árvore dele for a de um commit da fila de merge em que os 9 checks obrigatórios passaram (scripts/main_red_alarm.mjs).",
+    "Esta issue fecha sozinha quando os 9 workflows obrigatórios passarem no head atual do main; um workflow cujo run de push nesse head foi cancelado, pulado ou não existe conta o run de merge_group que passou na fila de merge nesse mesmo commit (scripts/main_red_alarm.mjs).",
   ].join("\n");
 }
 
@@ -250,10 +241,10 @@ export function failureComment(red) {
   return ["Nova falha no main:", "", ...red.map(line)].join("\n");
 }
 
-/** @param {string} head @param {string | null} [queue] the merge-queue commit with the head's tree, when that is the proof */
-export function greenComment(head, queue = null) {
-  if (queue) {
-    return `MAIN VERDE: o head atual do main, \`${head}\`, tem a mesma árvore do commit da fila de merge \`${queue}\`, em que os 9 checks obrigatórios "All checks (…)" passaram.`;
+/** @param {string} head @param {boolean} [viaQueue] whether some of the nine passed only in the merge queue, on this same commit */
+export function greenComment(head, viaQueue = false) {
+  if (viaQueue) {
+    return `MAIN VERDE: os 9 workflows obrigatórios passaram no head atual do main, \`${head}\`, alguns no run de merge_group da fila de merge sobre esse mesmo commit.`;
   }
   return `MAIN VERDE: os 9 workflows obrigatórios passaram no head atual do main, \`${head}\`.`;
 }
@@ -282,64 +273,10 @@ async function failedInside(api, id) {
 }
 
 /**
- * Whether the nine required checks all passed on this commit: for each, at least one check run of
- * that exact name, and every check run of that name posted by GitHub Actions for this commit,
- * completed with success. A missing, pending, canceled, skipped or failed one is not green. An
- * unreadable reply throws.
- * @param {Api} api @param {string} sha
- */
-async function nineChecksPassed(api, sha) {
-  const listing = await api("GET", `commits/${sha}/check-runs?filter=latest&per_page=100`);
-  if (!Number.isSafeInteger(listing?.total_count) || !Array.isArray(listing?.check_runs) || listing.check_runs.length !== listing.total_count) {
-    throw new Error(`unreadable check-run listing of ${sha}`);
-  }
-  for (const c of listing.check_runs) {
-    if (!c || typeof c !== "object" || typeof c.name !== "string" || typeof c.status !== "string" || typeof c.head_sha !== "string"
-        || !("conclusion" in c) || !(c.conclusion === null || typeof c.conclusion === "string")) {
-      throw new Error(`unreadable check run of ${sha}`);
-    }
-  }
-  return REQUIRED.every(({ check }) => {
-    const mine = listing.check_runs.filter((c) => c.name === check);
-    return mine.length > 0 && mine.every((c) => c.head_sha === sha && c.app?.slug === ACTIONS_APP && c.status === "completed" && c.conclusion === "success");
-  });
-}
-
-/**
- * A commit of main's merge queue, from the last MERGE_GROUP_HOURS, whose git tree is the tree of
- * main's head and on which the nine required checks passed; null when none is found within the
- * bounds. Read newest first, at most MERGE_GROUP_PAGES pages of merge_group runs and the check runs
- * of at most MERGE_GROUP_CHECK_READS commits. A run whose branch, event or head commit is not
- * readable as main's merge queue is not a candidate. An unreadable reply throws: never green.
- * @param {Api} api @param {string} head @param {number} now
- */
-export async function queueProof(api, head, now) {
-  const commit = await api("GET", `git/commits/${head}`);
-  const tree = commit?.tree?.sha;
-  if (commit?.sha !== head || typeof tree !== "string" || !SHA.test(tree)) throw new Error("unreadable main head commit");
-  const since = new Date(now - MERGE_GROUP_HOURS * 3_600_000).toISOString();
-  const tried = new Set();
-  for (let page = 1; page <= MERGE_GROUP_PAGES; page += 1) {
-    const listing = await api("GET", `actions/runs?event=merge_group&created=%3E%3D${since}&exclude_pull_requests=true&per_page=100&page=${page}`);
-    if (!Number.isSafeInteger(listing?.total_count) || !Array.isArray(listing?.workflow_runs)) throw new Error("unreadable merge-queue run listing");
-    for (const r of listing.workflow_runs) {
-      const sha = r?.head_sha;
-      if (r?.event !== "merge_group" || typeof r?.head_branch !== "string" || !QUEUE_BRANCH.test(r.head_branch)) continue;
-      if (typeof sha !== "string" || !SHA.test(sha) || r.head_commit?.id !== sha || r.head_commit?.tree_id !== tree || tried.has(sha)) continue;
-      if (tried.size >= MERGE_GROUP_CHECK_READS) return null;
-      tried.add(sha);
-      if (await nineChecksPassed(api, sha)) return sha;
-    }
-    if (listing.workflow_runs.length < 100) break;
-  }
-  return null;
-}
-
-/**
  * One run of the alarm: read main, decide, then open, comment or close.
- * @param {{ api: Api, trigger: unknown, log?: (line: string) => void, now?: number }} input
+ * @param {{ api: Api, trigger: unknown, log?: (line: string) => void }} input
  */
-export async function alarm({ api, trigger, log = console.log, now = Date.now() }) {
+export async function alarm({ api, trigger, log = console.log }) {
   const ref = await api("GET", "git/ref/heads/main");
   const head = ref?.object?.sha;
   if (typeof head !== "string" || !SHA.test(head)) throw new Error("unreadable main head: " + String(head));
@@ -360,22 +297,25 @@ export async function alarm({ api, trigger, log = console.log, now = Date.now() 
   for (const r of onHead.values()) {
     if (r.head_sha === head && canceled(r) && REQUIRED.some((w) => counted(r, w.file)) && (await failedInside(api, r.id))) redJobs.push(r.id);
   }
-  // Not green on the head's own runs, but none of them red, unknown or in progress either: its tree may
-  // already have passed the nine in the merge queue. Anything unreadable there is never green: the
-  // decision goes on as without it.
-  let treeGreen = null;
-  const onHeadOnly = decide({ runs, trigger, head, redJobs });
-  if (onHeadOnly.action !== "close" && treeEligible(onHeadOnly.states)) {
+  // Not all green on the head's own runs: the merge queue's runs on this same commit, in their own
+  // listing. Anything unreadable there is never green: it is logged and the decision goes on without it.
+  let queueRuns = /** @type {Run[]} */ ([]);
+  if (decide({ runs, trigger, head, redJobs }).action !== "close") {
     try {
-      treeGreen = await queueProof(api, head, now);
+      const listing = await api("GET", `actions/runs?head_sha=${head}&event=merge_group&per_page=100`);
+      if (!Number.isSafeInteger(listing?.total_count) || !Array.isArray(listing?.workflow_runs) || listing.workflow_runs.length !== listing.total_count) {
+        throw new Error("unreadable merge-queue run listing");
+      }
+      queueRuns = listing.workflow_runs.map(checked);
     } catch (error) {
-      log(`merge-queue proof not used (unreadable): ${error instanceof Error ? error.message : String(error)}`);
+      queueRuns = [];
+      log(`merge-queue runs not used (unreadable): ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   // Earlier main heads, only for the workflows with no result on the current head, newest first,
   // until the first completed counted run on an earlier head (the latest one) is found. A canceled
   // one is evidence only when a job inside it failed; at most JOB_READS of them are read.
-  for (const file of treeGreen ? [] : earlierNeeded(decide({ runs, trigger, head, redJobs }).states)) {
+  for (const file of earlierNeeded(decide({ runs, trigger, head, redJobs, queueRuns }).states)) {
     const workflow = file.slice(file.lastIndexOf("/") + 1);
     let jobReads = 0;
     let settled = false;
@@ -399,8 +339,8 @@ export async function alarm({ api, trigger, log = console.log, now = Date.now() 
       if (page >= MAX_PAGES) throw new Error(`earlier run listing too long: ${workflow}`);
     }
   }
-  const decision = decide({ runs, trigger, head, redJobs, treeGreen });
-  log(`head ${head}: ${decision.action}${treeGreen ? ` (same tree as merge-queue commit ${treeGreen}, its nine required checks passed)` : ""}`);
+  const decision = decide({ runs, trigger, head, redJobs, queueRuns });
+  log(`head ${head}: ${decision.action}${decision.queueGreen.length ? ` (green from the merge queue on this commit: ${decision.queueGreen.join(", ")})` : ""}`);
   for (const s of decision.states) {
     log(`  ${s.name}: ${s.state}${s.run ? " " + s.run.html_url : ""}${s.earlier ? `; earlier head red ${s.earlier.html_url}` : ""}`);
   }
@@ -434,7 +374,7 @@ export async function alarm({ api, trigger, log = console.log, now = Date.now() 
   } else if (decision.action === "close") {
     for (const issue of open.filter((i) => !closable(open).includes(i))) log(`#${issue.number} was opened by hand: left open`);
     for (const issue of closable(open)) {
-      await api("POST", `issues/${issue.number}/comments`, { body: greenComment(head, decision.treeGreen) });
+      await api("POST", `issues/${issue.number}/comments`, { body: greenComment(head, decision.queueGreen.length > 0) });
       await api("PATCH", `issues/${issue.number}`, { state: "closed", state_reason: "completed" });
       log(`closed #${issue.number}`);
     }

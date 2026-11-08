@@ -304,6 +304,11 @@ part("a merge_group run that passed on main's very head is that workflow's resul
     is(`a queue "success" from ${what} is not the head's green: the earlier red still opens`,
       withQueue(q, [...restGreen(), run(PC, "failure", { head_sha: OLD }), run(PC, stopped)]).action, "open");
   }
+  for (const [what, later] of [["failed", "failure"], ["is still going", null]] as [string, string | null][]) {
+    const q = [...queueGreen(), queued(PC, later)];
+    is(`the newest merge_group run of the file on the head ${what} after an older one passed: not green, the earlier red still opens`,
+      withQueue(q, [...restGreen(), run(PC, "failure", { head_sha: OLD }), run(PC, stopped)]).action, "open");
+  }
   is("a merge_group success passed in the main listing counts for nothing", action([...allGreen().slice(1), queued(0, "success")]), "none");
   let refused = false;
   try { withQueue([{ ...queueGreen()[0], id: "x" as unknown as number }], []); } catch { refused = true; }

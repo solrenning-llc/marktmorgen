@@ -459,6 +459,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/withdraw/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/withdraw",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/p/[product]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/p/[product]",
@@ -1592,6 +1603,7 @@
     "components/takedown-actions.tsx",
     "components/task-editor.tsx",
     "components/tasks-agenda.tsx",
+    "components/tax-collected.tsx",
     "components/tax-editor.tsx",
     "components/team-event-editor.tsx",
     "components/team-manager.tsx",
@@ -1941,6 +1953,7 @@
     "app/api/store/welcome-offer/route.ts",
     "app/api/store/welcome/open/route.ts",
     "app/api/store/why-not-ask/route.ts",
+    "app/api/store/withdraw/route.ts",
     "app/api/store/yearly-ask/route.ts",
     "app/api/stream/hook/route.ts",
     "app/api/stripe/check/route.ts",

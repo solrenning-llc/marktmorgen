@@ -355,6 +355,9 @@ const en = {
   stopReviews: "Stop review requests",
   /** Said on the stop page when the last press was not saved; the button is offered again. */
   reviewsNotSaved: "We could not save that just now. Please try again.",
+  /** Said on a community stop page whose link could not be read just now (CX-123 rule 24): never "unknown", never stopped. */
+  linkNotReadTitle: "We could not open this link just now",
+  linkNotReadBody: "Please try again in a minute.",
 };
 
 export type AffiliatesWords = typeof en;
@@ -643,6 +646,8 @@ const es: AffiliatesWords = {
   reviewsFor: (email) => `Para ${email}. Con una sola pulsación dejan de llegar para siempre. Una reseña que ya escribiste se queda como está.`,
   stopReviews: "Dejar de recibir solicitudes de reseña",
   reviewsNotSaved: "No pudimos guardarlo ahora. Inténtalo de nuevo.",
+  linkNotReadTitle: "No pudimos abrir este enlace ahora",
+  linkNotReadBody: "Inténtalo de nuevo en un minuto.",
 };
 
 // ---- French ------------------------------------------------------------------------------------------
@@ -929,6 +934,8 @@ const fr: AffiliatesWords = {
   reviewsFor: (email) => `Pour ${email}. Une seule pression les arrête définitivement. Un avis que vous avez déjà écrit reste tel quel.`,
   stopReviews: "Arrêter les demandes d'avis",
   reviewsNotSaved: "Nous n'avons pas pu l'enregistrer pour le moment. Veuillez réessayer.",
+  linkNotReadTitle: "Nous n'avons pas pu ouvrir ce lien pour le moment",
+  linkNotReadBody: "Veuillez réessayer dans une minute.",
 };
 
 // ---- German ------------------------------------------------------------------------------------------
@@ -1223,6 +1230,8 @@ const de: AffiliatesWords = {
     `Für ${email}. Ein Klick beendet sie endgültig. Eine Bewertung, die Sie bereits geschrieben haben, bleibt, wie sie ist.`,
   stopReviews: "Bewertungsanfragen stoppen",
   reviewsNotSaved: "Das konnten wir gerade nicht speichern. Bitte versuchen Sie es erneut.",
+  linkNotReadTitle: "Wir konnten diesen Link gerade nicht öffnen",
+  linkNotReadBody: "Bitte versuchen Sie es in einer Minute erneut.",
 };
 
 // ---- Italian -----------------------------------------------------------------------------------------
@@ -1511,6 +1520,8 @@ const it: AffiliatesWords = {
   reviewsFor: (email) => `Per ${email}. Basta un clic per fermarle per sempre. Una recensione che hai già scritto resta com'è.`,
   stopReviews: "Interrompi le richieste di recensione",
   reviewsNotSaved: "Non siamo riusciti a salvarlo ora. Riprova.",
+  linkNotReadTitle: "Non siamo riusciti ad aprire questo link ora",
+  linkNotReadBody: "Riprova tra un minuto.",
 };
 
 // ---- Dutch -------------------------------------------------------------------------------------------
@@ -1800,6 +1811,8 @@ const nl: AffiliatesWords = {
   reviewsFor: (email) => `Voor ${email}. Eén klik stopt ze voorgoed. Een beoordeling die je al hebt geschreven, blijft zoals hij is.`,
   stopReviews: "Stop de beoordelingsverzoeken",
   reviewsNotSaved: "We konden dat nu niet opslaan. Probeer het opnieuw.",
+  linkNotReadTitle: "We konden deze link nu niet openen",
+  linkNotReadBody: "Probeer het over een minuut opnieuw.",
 };
 
 // ---- European Portuguese -------------------------------------------------------------------------------
@@ -2093,6 +2106,8 @@ const pt: AffiliatesWords = {
   reviewsFor: (email) => `Para ${email}. Basta um clique para os parar de vez. Uma avaliação que já escreveu fica como está.`,
   stopReviews: "Parar os pedidos de avaliação",
   reviewsNotSaved: "Não conseguimos guardar isso agora. Tente novamente.",
+  linkNotReadTitle: "Não conseguimos abrir este link agora",
+  linkNotReadBody: "Tente novamente daqui a um minuto.",
 };
 
 export const AFFILIATES_WORDS: Record<LanguageCode, AffiliatesWords> = { en, es, fr, de, it, nl, pt };

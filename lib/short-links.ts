@@ -56,9 +56,11 @@ const shown = ({ code, name, place, target, made }: Kept): ShortLink => ({ code,
 /** How many short links a store has made, in one command: what the path's post-link missions count (lib/path-facts.ts). */
 export async function countLinks(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["HLEN", storeKey(statsId)]]);
-  const n = Number(raw);
-  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+  // Read exactly (CX-123 rule 24): an answer in any other shape throws, so the path keeps its last reading, never 0 links.
+  const [raw] = repliesFor(await redisPipeline([["HLEN", storeKey(statsId)]]), 1) ?? [undefined];
+  const n = countOf(raw);
+  if (n === null) throw new UnknownReplyError("a store's short links count");
+  return n;
 }
 
 /**

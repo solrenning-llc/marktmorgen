@@ -10,6 +10,7 @@
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
@@ -25,7 +26,6 @@ import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
 import { listingSizes, productIds } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
   CONFIRM_SECONDS,
@@ -64,17 +64,26 @@ function sender(store: Store): string {
 
 // ------------------------------------------------------------------ coming soon
 
-/** The products of a store that are coming soon, for its pages. */
+/**
+ * The products of a store that are coming soon, for its pages. A reply that is
+ * not exactly a list of text (none, another shape, a hole, a lost pipeline) is
+ * unknown, never an empty set: it throws, so no caller can take a product whose
+ * state could not be read for one already on sale (rule 24).
+ */
 export async function soonProducts(store: Store): Promise<Set<string>> {
   if (!store.statsId || !isRedisConfigured()) return new Set();
-  const [raw] = await redisPipeline([["SMEMBERS", soonKey(store.statsId)]]);
-  return new Set(Array.isArray(raw) ? (raw as string[]) : []);
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", soonKey(store.statsId)]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("the products coming soon");
+  return new Set(members);
 }
 
+/** Whether one product is coming soon: 0 or 1 only, as lib/preorders.ts reads it; anything else throws as unknown (rule 24). */
 export async function isSoon(store: Store, productId: string): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId]]);
-  return raw === 1 || raw === "1";
+  const raw = repliesFor(await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId]]), 1)?.[0];
+  if (raw === 1 || raw === "1") return true;
+  if (raw === 0 || raw === "0") return false;
+  throw new UnknownReplyError("whether a product is coming soon");
 }
 
 export async function setSoon(store: Store, productId: string, on: boolean): Promise<void> {

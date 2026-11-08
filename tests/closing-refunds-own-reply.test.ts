@@ -147,13 +147,13 @@ async function main() {
   );
 
   part("The invoice names no payment, and the list of its payments is not whole (has_more)");
-  await triedAgain("notwhole", false, { invoice: noIntentInvoice, listed: { object: "list", has_more: true, data: [{ id: "inpay_closeown3", object: "invoice_payment", invoice: INVOICE, status: "failed" }] }, intent: ownIntent }, 2);
+  await triedAgain("notwhole", false, { invoice: noIntentInvoice, listed: { object: "list", has_more: true, data: [{ id: "inpay_closeown3", object: "invoice_payment", invoice: INVOICE, status: "canceled" }] }, intent: ownIntent }, 2);
 
   part("The invoice names no payment, and the list says whether it is whole in no readable way");
   await triedAgain("nohasmore", false, { invoice: noIntentInvoice, listed: { object: "list", data: [] }, intent: ownIntent }, 2);
 
   part("Control: a whole list with no paid payment still settles the member none");
-  const nonePaid = await run("nonepaid", false, { invoice: noIntentInvoice, listed: { object: "list", has_more: false, data: [{ id: "inpay_closeown4", object: "invoice_payment", invoice: INVOICE, status: "failed" }] }, intent: ownIntent });
+  const nonePaid = await run("nonepaid", false, { invoice: noIntentInvoice, listed: { object: "list", has_more: false, data: [{ id: "inpay_closeown4", object: "invoice_payment", invoice: INVOICE, status: "canceled" }] }, intent: ownIntent });
   is("nothing POSTed", posts, []);
   is("settled none", [nonePaid.settled, nonePaid.result?.none], ["none", 1]);
 

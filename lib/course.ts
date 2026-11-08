@@ -653,20 +653,29 @@ export async function readBodyExact(courseId: string, lessonId: string): Promise
 /** Lesson bodies read together, across courses: how many a command. Each is at most MAX_BODY_LENGTH, so one command carries a few megabytes at the most. */
 export const BODIES_PER_READ = 500;
 
-/** The text of every lesson of these courses, by course and lesson, BODIES_PER_READ at a command whatever course each is of (lib/store-export.ts). */
+/**
+ * The text of every lesson of these courses, by course and lesson, BODIES_PER_READ at a command whatever course each is of (lib/store-export.ts).
+ * Read exactly (rule 24): "" only for Redis's own null; a reply that is not one list of exactly the keys asked, or a
+ * value that is not text, throws UnknownReply, so the export says the part could not be read instead of writing the
+ * lesson out empty in the file a creator takes before the store closes.
+ */
 export async function readAllBodies(courses: { id: string; lessons: string[] }[]): Promise<Map<string, Record<string, string>>> {
+  const what = "the lessons' text a store's export reads";
   const out = new Map<string, Record<string, string>>();
   const wanted = courses.filter((c) => COURSE_ID_PATTERN.test(c.id)).flatMap((c) => {
     out.set(c.id, {});
     return c.lessons.filter((id) => ITEM_ID_PATTERN.test(id)).map((lesson) => ({ course: c.id, lesson }));
   });
-  if (!isRedisConfigured()) return out;
+  if (wanted.length === 0) return out;
+  if (!isRedisConfigured()) throw new UnknownReply(what);
   for (let i = 0; i < wanted.length; i += BODIES_PER_READ) {
     const some = wanted.slice(i, i + BODIES_PER_READ);
-    const [raw] = await redisPipeline([["MGET", ...some.map((w) => bodyKey(w.course, w.lesson))]]);
+    const [raw] = exactReplies(await redisPipeline([["MGET", ...some.map((w) => bodyKey(w.course, w.lesson))]]), 1, what);
+    const values = exactReplies(raw, some.length, what);
     some.forEach((w, n) => {
-      const value = Array.isArray(raw) ? raw[n] : null;
-      out.get(w.course)![w.lesson] = typeof value === "string" ? value : "";
+      const value = values[n];
+      if (value !== null && typeof value !== "string") throw new UnknownReply(what);
+      out.get(w.course)![w.lesson] = value ?? "";
     });
   }
   return out;

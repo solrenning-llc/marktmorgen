@@ -217,7 +217,9 @@ export async function requestCopy(input: {
   // figure in a free trial, nothing without a plan, and for a store that pays
   // its plan's figure, admitted with its paid orders (lib/order-admission.ts).
   const cap = freeCopiesLimitFor(store);
-  if ((await storeOrdersThisMonth(store)) >= cap) return "unavailable";
+  // Unknown (a paying store whose billing window is not known): none given.
+  const counted = await storeOrdersThisMonth(store);
+  if (counted === null || counted >= cap) return "unavailable";
   const admitted = await admitOrders(store, 1);
   if (!admitted.ok) return "unavailable";
 

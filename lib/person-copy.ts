@@ -33,14 +33,14 @@ import { readDeals, readFields, readPersonTasks, readStages, readValues } from "
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
 import { listRequests } from "@/lib/payment-request-store";
-import { listAgreements, readVersion } from "@/lib/agreement-store";
+import { listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
 import { bondRecordOf } from "@/lib/affiliate-bond";
-import { readLeads } from "@/lib/affiliate-leads";
+import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
 import { inviteField, readInvite } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
@@ -226,7 +226,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const out: unknown[] = [];
     for (const a of list.filter((a) => same(a.email, s.email))) {
       const versions = [];
-      for (const mark of a.versions) versions.push({ ...mark, ...((await readVersion(a, mark.n)) ?? {}) });
+      for (const mark of a.versions) versions.push({ ...mark, ...((await readVersionExact(a, mark.n)) ?? {}) });
       out.push({ ...a, versions });
     }
     return out;
@@ -282,7 +282,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const affiliate = await bondRecordOf(s.statsId, s.email);
     return affiliate ? [{ affiliate }] : [];
   },
-  "lib/affiliate-leads.ts": async (s) => (await readLeads(s.store)).filter((l) => l.email && same(l.email, s.email)),
+  // Only their own field (leadOf): another person's lead that does not read never blocks this copy; theirs throws.
+  "lib/affiliate-leads.ts": async (s) => {
+    const lead = await leadOf(s.store, s.email);
+    return lead && lead.email && same(lead.email, s.email) ? [lead] : [];
+  },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
   "lib/move-members.ts": async (s) => {

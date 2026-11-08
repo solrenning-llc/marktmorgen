@@ -55,6 +55,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
 import {
   type Account,
@@ -170,6 +171,25 @@ export type ConnectionView = {
   /** Why it stopped working; empty while it works. */
   broken: string;
 };
+
+/**
+ * What disconnect answers for a connection that read as one: its view, and
+ * `providerAccessRemoved: false` only when the provider did not confirm that
+ * it took the access back (refused, failed, or no token opened). Absent when
+ * it confirmed, so nothing changes then.
+ */
+export type DisconnectedView = ConnectionView & { providerAccessRemoved?: false };
+
+/**
+ * What a disconnect request found, for the routes: the view (null when none
+ * read as one), and `providerAccessRemoved`, true only when the provider
+ * confirmed the give-back in this very request. False when it did not, when a
+ * damaged record held no access to give back, and when nothing was there: an
+ * earlier try may have stopped after forgetting it here with its answer lost,
+ * so whether the provider took it back can no longer be known, and is never
+ * said (G review 5815599962).
+ */
+export type DisconnectOutcome = { view: DisconnectedView | null; providerAccessRemoved: boolean };
 
 export type MeetProblem = { at: number; provider: MeetProvider; what: string; error: string };
 
@@ -357,37 +377,131 @@ async function keepConnection(
   return { ok: true, view: viewOf(connection), replaced: Boolean(before) };
 }
 
-async function giveBack(statsId: string, c: Connection, host = ""): Promise<void> {
-  const opened = unseal(c.refresh, context(statsId, c.provider, "refresh", host));
-  // Zoom takes back the whole grant from its access token; Google from either.
-  const access = unseal(c.access, context(statsId, c.provider, "access", host));
-  const token = c.provider === "zoom" ? (access.ok ? access.value : "") : opened.ok ? opened.value : "";
-  if (token) await revoke(c.provider, token);
+/**
+ * The token that gives a connection's whole grant back, opened from its sealed
+ * texts in their own context, or "" when none of them opens. Zoom takes back
+ * the whole grant from its access token; Google from either, the refresh
+ * token first.
+ */
+function grantToken(statsId: string, provider: MeetProvider, sealed: { refresh: unknown; access: unknown }, host = ""): string {
+  const open = (part: "access" | "refresh") => {
+    const text = sealed[part];
+    if (typeof text !== "string" || !text) return "";
+    const opened = unseal(text, context(statsId, provider, part, host));
+    return opened.ok ? opened.value : "";
+  };
+  return provider === "zoom" ? open("access") : open("refresh") || open("access");
+}
+
+/** Gives a connection's grant back: true only when the provider confirmed it (lib/meet-providers.ts revoke). */
+async function giveBack(statsId: string, c: Connection, host = ""): Promise<boolean> {
+  const token = grantToken(statsId, c.provider, c, host);
+  return token ? await revoke(c.provider, token) : false;
+}
+
+/**
+ * What can still be given back from text kept as a connection that does not
+ * read as one (damaged): the grant's token, if a sealed text in it still opens
+ * in this connection's own context, and the account id it was listed under,
+ * if one is still there.
+ */
+function salvage(raw: string, statsId: string, provider: MeetProvider, host: string): { token: string; accountId: string } {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return { token: "", accountId: "" };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { token: "", accountId: "" };
+  const v = value as { refresh?: unknown; access?: unknown; account?: unknown };
+  const account = v.account && typeof v.account === "object" ? (v.account as { id?: unknown }).id : undefined;
+  return { token: grantToken(statsId, provider, { refresh: v.refresh, access: v.access }, host), accountId: typeof account === "string" ? account : "" };
+}
+
+/** Each reply of a pipeline that deletes, confirmed by its own count (DEL, SREM), or UnknownReplyError: never taken as done unseen. */
+function confirmCounts(replies: unknown, commands: number, what: string): void {
+  const answered = repliesFor(replies, commands);
+  if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
 }
 
 /**
  * Disconnects: gives the access back to the provider, then forgets it here.
  * Returns the account that was connected, or null when none was.
+ *
+ * Read exactly (CX-123 rule 24): null only for a confirmed none, the slot
+ * answering null. A reply of another shape is unknown and throws, so the
+ * creator is never told an account is gone while its tokens are still kept
+ * (the route answers 500, "try again"). Text kept there that is not a
+ * connection (damaged) is answered as null once it is gone: a token in it that
+ * still opens is given back first, and the text is deleted only after the
+ * provider confirmed it; a give-back that fails or is not confirmed keeps the
+ * text and throws, so disconnecting can be tried again while the access may
+ * still be live. Text with no token that opens is deleted at once, since the
+ * creator asked to end it and nothing in it can be given back. Every deletion
+ * is confirmed by its own count, or this throws.
+ *
+ * A connection that reads as one is forgotten here whatever the provider
+ * answers, since the creator asked to end it; when the provider did not
+ * confirm the give-back, the view says so (`providerAccessRemoved: false`),
+ * for the studio and the email to tell the creator how to remove it at the
+ * provider, never that it was removed (G review 5815300198, disposition A).
  */
-export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<ConnectionView | null> {
+export async function disconnect(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectedView | null> {
+  return (await disconnectFor(statsId, provider, host)).view;
+}
+
+/** Disconnects as `disconnect` does, and says whether the provider confirmed the give-back in this request. */
+export async function disconnectFor(statsId: string, provider: MeetProvider, host = ""): Promise<DisconnectOutcome> {
   // Under the renewal lock: a renewal under way finishes first, and none can
   // write the connection back after it is gone.
-  return withLock(refreshLockKey(statsId, provider, host), 20, 9_000, async () => {
-    const c = await readConnection(statsId, provider, host);
-    if (!c) return null;
-    // Forgotten here whatever the provider says: a revoke that fails must not
-    // leave a connection the creator asked to end.
-    await giveBack(statsId, c, host).catch((error) => console.error("giving a meeting connection back failed", error));
-    if (host) {
-      await redisPipeline([["DEL", connKey(statsId, provider, host)]]);
-      return viewOf(c);
+  return withLock(refreshLockKey(statsId, provider, host), 20, 9_000, async (): Promise<DisconnectOutcome> => {
+    const read = repliesFor(await redisPipeline([["GET", connKey(statsId, provider, host)]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a meeting connection");
+    if (read[0] === null) return { view: null, providerAccessRemoved: false };
+    const c = parseConnection(read[0], provider);
+    if (!c) {
+      const left = salvage(read[0], statsId, provider, host);
+      if (left.token) {
+        // Not forgotten until the provider confirmed the access is back: a
+        // failed or unconfirmed revoke throws (ProviderError included) and
+        // keeps the text, so a retry can still give it back.
+        if (!(await revoke(provider, left.token))) throw new Error("a damaged meeting connection's access could not be given back");
+      } else {
+        console.error("a damaged meeting connection was deleted with no access in it that could be given back", provider, host ? "host" : "store");
+      }
+      const gone = host
+        ? [["DEL", connKey(statsId, provider, host)]]
+        : [
+            ["DEL", connKey(statsId, provider)],
+            ["DEL", testKey(statsId, provider)],
+            ...(left.accountId ? [["SREM", userKey(provider, left.accountId), statsId]] : []),
+          ];
+      confirmCounts(await redisPipeline(gone), gone.length, "a meeting connection's deletion");
+      return { view: null, providerAccessRemoved: Boolean(left.token) };
     }
-    await redisPipeline([
-      ["DEL", connKey(statsId, provider)],
-      ["DEL", testKey(statsId, provider)],
-      ["SREM", userKey(provider, c.account.id), statsId],
-    ]);
-    return viewOf(c);
+    // Forgotten here whatever the provider says: a revoke that fails must not
+    // leave a connection the creator asked to end. One the provider did not
+    // confirm is said in the answer, never taken as given back.
+    const removed = await giveBack(statsId, c, host).catch((error) => {
+      console.error("giving a meeting connection back failed", error);
+      return false;
+    });
+    if (!removed) console.error("a meeting connection was disconnected here without the provider confirming its access was given back", provider, host ? "host" : "store");
+    const view: DisconnectedView = removed ? viewOf(c) : { ...viewOf(c), providerAccessRemoved: false };
+    if (host) {
+      confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider, host)]]), 1, "a meeting connection's deletion");
+      return { view, providerAccessRemoved: removed };
+    }
+    confirmCounts(
+      await redisPipeline([
+        ["DEL", connKey(statsId, provider)],
+        ["DEL", testKey(statsId, provider)],
+        ["SREM", userKey(provider, c.account.id), statsId],
+      ]),
+      3,
+      "a meeting connection's deletion",
+    );
+    return { view, providerAccessRemoved: removed };
   });
 }
 

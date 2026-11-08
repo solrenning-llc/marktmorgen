@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { imageFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioEmptyState } from "@/components/empty-state";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { photoUrl } from "@/lib/photo-limits";
 import { EMPTY_PAGE, MAX_BLOCKS } from "@/lib/sales-page";
@@ -107,10 +108,7 @@ export default async function StudioSitePage({ searchParams }: Params) {
                   </AiOn>
                 </>
               ) : (
-                <div className="card p-6 sm:p-8">
-                  <p className="text-lg font-semibold tracking-[-0.02em] text-ink">No pages yet</p>
-                  <p className="mt-2 text-ink-soft">Start one from the list: About, Start here, Work with me or Questions, or give a page a title of your own.</p>
-                </div>
+                <StudioEmptyState title="No pages yet" body="Pick a starter from the list, such as About or Start here, or type a title of your own." action={{ href: "#new-page-title", label: "Start a page" }} level={2} className="card p-6 sm:p-8" />
               )}
             </div>
           </div>

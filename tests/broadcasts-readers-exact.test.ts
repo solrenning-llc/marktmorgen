@@ -62,6 +62,23 @@ async function main(): Promise<void> {
     }
     replies = [[[id, other]], [JSON.stringify(row)]];
     await throws("list: fewer records than ids: unknown", () => listBroadcasts("chosen-list"));
+
+    // Claude 4's LEVE 1 on #3187: holes and a Proxy were read past instead of refused, unlike repliesFor/stringList.
+    part("A reply with a hole or behind a Proxy is unknown, as repliesFor reads it");
+    // eslint-disable-next-line no-sparse-arrays
+    const holed = [, id];
+    replies = [[holed], [0, 0]];
+    is("sizes: ids with a hole: null", await broadcastSizes("chosen-list"), null);
+    replies = [[holed], [JSON.stringify(row)]];
+    await throws("list: ids with a hole: unknown", () => listBroadcasts("chosen-list"));
+    replies = [[new Proxy([id], {})], [120]];
+    is("sizes: ids behind a Proxy: null", await broadcastSizes("chosen-list"), null);
+    // eslint-disable-next-line no-sparse-arrays
+    replies = [[[id, other]], [, 100]];
+    is("sizes: a size with a hole: null, never the other's bytes alone", await broadcastSizes("chosen-list"), null);
+    // eslint-disable-next-line no-sparse-arrays
+    replies = [[[id, other]], [, JSON.stringify(row)]];
+    await throws("list: records with a hole: unknown, never an expired record", () => listBroadcasts("chosen-list"));
   } finally {
     redis.pipeline = original;
   }

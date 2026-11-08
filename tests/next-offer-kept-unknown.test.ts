@@ -11,6 +11,15 @@
  *   - the buyer's "no thanks" (dismissNextOffer) writes nothing;
  *   - the confirmation email (nextOfferForEmail) carries nothing.
  *
+ * The kept record is read exactly as `keep` writes it: its own s, p, r and w,
+ * and x only as 1. A dismissal whose x is "1", true or 2, a w that is not
+ * text, or a key the writer never writes is unknown too, so a buyer's "no
+ * thanks" is never read as a live choice (Claude 2's review of #3265). And
+ * the SET that keeps a choice is read exactly: anything but "OK" shows
+ * nothing (the email could not carry it), leaves the minute's lock in place
+ * so no other opening asks the model in that minute, and a dismissal says
+ * not done.
+ *
  * Controls: a kept record is shown as before, a dismissed one stays hidden,
  * and a confirmed absent key still makes the choice once. Stripe and the
  * model are played by a stand-in for `fetch`; synthetic data only.
@@ -125,6 +134,16 @@ async function main(): Promise<void> {
     ["JSON out of the record's shape", () => [JSON.stringify({ s: store.statsId, p: 5, r: "ai", w: "" })]],
     ["no reply at all", () => []],
     ["two replies for one command", () => [null, null]],
+    // Claude 2's review of #3265: the dismissal itself in another shape, or a key the writer never writes.
+    ...([
+      ["a dismissal with x in text", { x: "1" }],
+      ["a dismissal with x true", { x: true }],
+      ["a dismissal with x 2", { x: 2 }],
+      ["a dismissal with x null", { x: null }],
+      ["a record with w as a number", { w: 5 }],
+      ["a record without w", { w: undefined }],
+      ["a record with a key the writer never writes", { y: 1 }],
+    ] as [string, Record<string, unknown>][]).map(([label, change]): [string, () => unknown[]] => [label, () => [JSON.stringify({ ...JSON.parse(String(dismissedRaw)), ...change })]]),
   ];
   for (const [name, reply] of shapes) {
     part(`Unknown kept record: ${name}`);
@@ -152,6 +171,53 @@ async function main(): Promise<void> {
 
   part("The healthy record is untouched by all of it");
   is("the kept order still shows its own choice, nothing more asked", [(await offerFor(kept))?.product.id, await rawKept(kept), modelCalls], [first?.product.id, keptRaw, 2]);
+
+  part("The SET that keeps a choice answers in another shape");
+  const setReplies: [string, () => unknown[]][] = [
+    ["null", () => [null]],
+    ["a number", () => [1]],
+    ["QUEUED", () => ["QUEUED"]],
+    ["no reply at all", () => []],
+  ];
+  for (const [name, reply] of setReplies) {
+    const order = session();
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === keptKey(order)) return reply();
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let page: unknown, email: unknown, again: unknown, callsAfterFirst = 0;
+    const callsBefore = modelCalls;
+    try {
+      page = await settled(() => offerFor(order));
+      callsAfterFirst = modelCalls - callsBefore;
+      email = await settled(() => nextOfferForEmail(store, order, meta));
+      again = await settled(() => offerFor(order));
+    } finally {
+      redis.pipeline = real as typeof redis.pipeline;
+    }
+    is(`SET answered ${name}: the page shows nothing it could not keep`, page === "threw" || page === null, true);
+    is(`SET answered ${name}: the email carries nothing`, email === "threw" || email === null, true);
+    is(`SET answered ${name}: the lock stays for its minute, so the page opened again asks no model`, [again === "threw" || again === null, modelCalls - callsBefore - callsAfterFirst, (await redis.pipeline([["GET", lockKey(order)]]))[0] !== null], [true, 0, true]);
+  }
+  for (const [name, reply] of setReplies) {
+    const order = session();
+    await offerFor(order);
+    const keptBefore = await rawKept(order);
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === keptKey(order)) return reply();
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let dismiss: unknown;
+    try {
+      dismiss = await settled(() => dismissNextOffer(store, order));
+    } finally {
+      redis.pipeline = real as typeof redis.pipeline;
+    }
+    is(`SET answered ${name}: a dismissal that was not kept does not say done`, [dismiss === "threw" || dismiss === false, await rawKept(order)], [true, keptBefore]);
+  }
+
 }
 
 main()

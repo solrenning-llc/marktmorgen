@@ -7,7 +7,10 @@
  * Only a list read to its end (`has_more` false) with every row readable says
  * "owns nothing more". A checkout-session or payment-intent list in any other
  * shape — no `data`, no `has_more`, `has_more` not true or false, `{}`, or a
- * row without its id or with metadata that is not an object — is unknown:
+ * row without its id, with metadata that is not an object of strings, or with
+ * any other field the decision reads (a session's `status`, `payment_status`
+ * and `customer`, an intent's `status`) missing or not one of Stripe's values
+ * at the pinned API version — is unknown (Claude 2's review of #3265):
  *
  *   - ownedHere answers null, never an empty set;
  *   - the page after paying (nextOfferFor) shows nothing and keeps nothing,
@@ -100,6 +103,13 @@ async function main(): Promise<void> {
   is("the paired product is offered", (await ask(order()))?.product.id, groceryId);
   sessionsAnswer = documentedSessions;
 
+  part("Control: a guest checkout (customer null, as Stripe gives it) is still read, with no one-click purchases to read");
+  sessionsAnswer = ({ bought: row }) => ({ object: "list", data: [{ ...row, customer: null }], has_more: false });
+  is("the checkout's product is owned, not unknown", [...((await ownedHere(store, BUYER)) ?? ["unknown"])], [groceryId]);
+  sessionsAnswer = ({ bought: row }) => ({ object: "list", data: [{ ...row, metadata: {} }, row], has_more: false });
+  is("a row of no store with empty metadata stays readable", [...((await ownedHere(store, BUYER)) ?? [])].sort(), [groceryId, batchId].sort());
+  sessionsAnswer = documentedSessions;
+
   const unknownSessions: [string, Answer][] = [
     ["a list without data", () => ({ object: "list", url: "/v1/checkout/sessions" })],
     ["an empty page without has_more", () => ({ object: "list", data: [] })],
@@ -110,12 +120,31 @@ async function main(): Promise<void> {
     ["the purchase's row with metadata in text", ({ bought: row }) => ({ object: "list", data: [{ ...row, metadata: JSON.stringify(row.metadata) }], has_more: false })],
     ["a row that is not an object", ({ bought: row }) => ({ object: "list", data: [row, "cs_test_ownedgarbled01"], has_more: false })],
     ["more pages than are read", ({ bought: row }) => ({ object: "list", data: [row], has_more: true })],
+    // Claude 2's review of #3265: legible on id and metadata, garbled on a field the decision reads.
+    ["the purchase's row without payment_status", ({ bought: row }) => ({ object: "list", data: [{ ...row, payment_status: undefined }], has_more: false })],
+    ["the purchase's row with payment_status null", ({ bought: row }) => ({ object: "list", data: [{ ...row, payment_status: null }], has_more: false })],
+    ["the purchase's row with a payment_status Stripe does not give", ({ bought: row }) => ({ object: "list", data: [{ ...row, payment_status: "PAID" }], has_more: false })],
+    ["the purchase's row with status as a number", ({ bought: row }) => ({ object: "list", data: [{ ...row, status: 1 }], has_more: false })],
+    ["the purchase's row without status", ({ bought: row }) => ({ object: "list", data: [{ ...row, status: undefined }], has_more: false })],
+    ["the purchase's row without customer", ({ bought: row }) => ({ object: "list", data: [{ ...row, customer: undefined }], has_more: false })],
+    ["the purchase's row with customer as a number", ({ bought: row }) => ({ object: "list", data: [{ ...row, customer: 7 }], has_more: false })],
+    ["the purchase's row with customer as an object", ({ bought: row }) => ({ object: "list", data: [{ ...row, customer: { id: "cus_OwnedBuyer01" } }], has_more: false })],
+    ["the purchase's row with a customer that is not a customer id", ({ bought: row }) => ({ object: "list", data: [{ ...row, customer: "buyer01" }], has_more: false })],
+    ["the purchase's row with metadata.product as a number", ({ bought: row }) => ({ object: "list", data: [{ ...row, metadata: { ...(row.metadata as object), product: 12 } }], has_more: false })],
+    ["the purchase's row with metadata.store as a number", ({ bought: row }) => ({ object: "list", data: [{ ...row, metadata: { ...(row.metadata as object), store: 3 } }], has_more: false })],
+    ["the purchase's row with metadata.bundle as a list", ({ bought: row }) => ({ object: "list", data: [{ ...row, metadata: { ...(row.metadata as object), bundle: ["x"] } }], has_more: false })],
   ];
   const unknownIntents: [string, Answer][] = [
     ["an empty object", () => ({})],
     ["a list without has_more", ({ upsell }) => ({ object: "list", data: [upsell] })],
     ["the one-click purchase's row without its id", ({ upsell }) => ({ object: "list", data: [{ ...upsell, id: 7 }], has_more: false })],
     ["the one-click purchase's row with metadata as a list", ({ upsell }) => ({ object: "list", data: [{ ...upsell, metadata: ["upsell"] }], has_more: false })],
+    ["the one-click purchase's row without status", ({ upsell }) => ({ object: "list", data: [{ ...upsell, status: undefined }], has_more: false })],
+    ["the one-click purchase's row with status as a number", ({ upsell }) => ({ object: "list", data: [{ ...upsell, status: 1 }], has_more: false })],
+    ["the one-click purchase's row with a status Stripe does not give", ({ upsell }) => ({ object: "list", data: [{ ...upsell, status: "SUCCEEDED" }], has_more: false })],
+    ["the one-click purchase's row with metadata null", ({ upsell }) => ({ object: "list", data: [{ ...upsell, metadata: null }], has_more: false })],
+    ["the one-click purchase's row with metadata.product as a number", ({ upsell }) => ({ object: "list", data: [{ ...upsell, metadata: { ...(upsell.metadata as object), product: 12 } }], has_more: false })],
+    ["the one-click purchase's row with metadata.kind as a number", ({ upsell }) => ({ object: "list", data: [{ ...upsell, metadata: { ...(upsell.metadata as object), kind: 1 } }], has_more: false })],
   ];
 
   const refuses = async (label: string) => {

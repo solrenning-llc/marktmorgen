@@ -1,0 +1,126 @@
+
+FILE z-3311-shapes.proof.ts
+  ok    only the requested read
+  FAIL  unknown shape 0
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 1
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 2
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 3
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 4
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 5
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 6
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 7
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 8
+        expected null
+        got      {"chargesEnabled":false,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 9
+        expected null
+        got      {"chargesEnabled":true,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 10
+        expected null
+        got      {"chargesEnabled":true,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 11
+        expected null
+        got      {"chargesEnabled":true,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 12
+        expected null
+        got      {"chargesEnabled":true,"detailsSubmitted":true}
+  ok    only the requested read
+  FAIL  unknown shape 13
+        expected null
+        got      {"chargesEnabled":true,"detailsSubmitted":true}
+  ok    only the requested read
+  ok    known state active
+  ok    only the requested read
+  ok    known state pending
+  ok    only the requested read
+  ok    known state restricted
+  ok    only the requested read
+  ok    non-200 remains unknown
+  ok    only the requested read
+  ok    transport remains unknown
+  ok    only the requested read
+  FAIL  actual checkup boundary retains unknown
+        expected "not-checked"
+        got      "ok"
+  ok    one mock request per read
+
+41 checks, 15 failing.
+Z_VOLUME {"runs":0,"mocks":20,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3311-status-unknown.proof.ts
+  ok    synthetic owner
+STATUS_ROUTE {"name":"check","status":" ","said":"pending","still":false,"commands":15,"jsonBytes":5620,"requests":1}
+  FAIL  check unknown status is error " "
+        expected "error"
+        got      "pending"
+  FAIL  check unknown status preserves selling " "
+        expected true
+        got      false
+STATUS_ROUTE {"name":"check","status":"future_unknown","said":"pending","still":false,"commands":11,"jsonBytes":5439,"requests":1}
+  FAIL  check unknown status is error "future_unknown"
+        expected "error"
+        got      "pending"
+  FAIL  check unknown status preserves selling "future_unknown"
+        expected true
+        got      false
+STATUS_ROUTE {"name":"return","status":" ","said":"pending","still":false,"commands":11,"jsonBytes":5439,"requests":1}
+  FAIL  return unknown status is error " "
+        expected "error"
+        got      "pending"
+  FAIL  return unknown status preserves selling " "
+        expected true
+        got      false
+STATUS_ROUTE {"name":"return","status":"future_unknown","said":"pending","still":false,"commands":11,"jsonBytes":5439,"requests":1}
+  FAIL  return unknown status is error "future_unknown"
+        expected "error"
+        got      "pending"
+  FAIL  return unknown status preserves selling "future_unknown"
+        expected true
+        got      false
+STATUS_CHECKUP {"deadline":" ","state":"ok"}
+  FAIL  unknown deadline is not checked " "
+        expected "not-checked"
+        got      "ok"
+STATUS_CHECKUP {"deadline":"future_unknown","state":"ok"}
+  FAIL  unknown deadline is not checked "future_unknown"
+        expected "not-checked"
+        got      "ok"
+  ok    known past due remains a problem
+  ok    known state remains ok
+PROVIDER_CALLS [{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0},{"method":"GET","path":"/v2/core/accounts/acct_z3311Status","requestBodyBytes":0}]
+
+13 checks, 10 failing.
+Z_VOLUME {"runs":128,"mocks":8,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3311review-aFB3ex

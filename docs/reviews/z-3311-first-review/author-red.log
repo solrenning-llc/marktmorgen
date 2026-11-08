@@ -1,0 +1,191 @@
+
+FILE stripe-connect-account-exact.test.ts
+
+readAccount: every unknown shape throws
+  FAIL  no configuration (the include ignored): throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  configuration not an object: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  no merchant: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  merchant null: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  no capabilities: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  no card_payments: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  card_payments an array: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  status missing: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  status a number: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  status empty: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  status null: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  no requirements, card payments active: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  requirements a string: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  requirements an array: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  requirements without summary: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  summary a string: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  summary an array: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  minimum_deadline a string: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  minimum_deadline an array: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  minimum_deadline without status: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  minimum_deadline status a number: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":true,\"detailsSubmitted\":true}"
+  FAIL  only an id: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  empty object: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  ok    JSON null: throws
+  FAIL  JSON array: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  JSON number: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+  FAIL  not JSON: throws
+        expected "threw"
+        got      "{\"chargesEnabled\":false,\"detailsSubmitted\":true}"
+
+readAccount: confirmed shapes read as before
+  ok    active, eventually due: read
+  ok    active, currently due: read
+  ok    active, past due: read
+  ok    restricted, past due: read
+  ok    pending, nothing due (empty summary): read
+  ok    active, minimum_deadline null (nothing due): read
+  ok    active, summary null (confirmed none): read
+  ok    active, requirements null (confirmed none): read
+  ok    inactive, nothing due: read
+
+checkup: an unknown shape is said as not checked, never as fine
+  FAIL  no configuration (the include ignored): payments line
+        expected "not-checked"
+        got      "problem"
+  FAIL  no requirements, card payments active: payments line
+        expected "not-checked"
+        got      "ok"
+  ok    control, past due: warned
+  ok    control, nothing due: ok
+  ok    synthetic store
+
+return: an unknown shape writes nothing and says the check failed
+  ok    seeded selling
+  FAIL  return no configuration (the include ignored): told the check failed
+        expected "error"
+        got      "pending"
+  FAIL  return no configuration (the include ignored): the selling record is unchanged
+        expected true
+        got      false
+  ok    return no configuration (the include ignored): Stripe asked once
+  ok    seeded selling
+  FAIL  return no merchant: told the check failed
+        expected "error"
+        got      "pending"
+  FAIL  return no merchant: the selling record is unchanged
+        expected true
+        got      false
+  ok    return no merchant: Stripe asked once
+  ok    seeded selling
+  FAIL  return no requirements, card payments active: told the check failed
+        expected "error"
+        got      "ready"
+  ok    return no requirements, card payments active: the selling record is unchanged
+  ok    return no requirements, card payments active: Stripe asked once
+  ok    seeded selling
+  FAIL  return not JSON: told the check failed
+        expected "error"
+        got      "pending"
+  FAIL  return not JSON: the selling record is unchanged
+        expected true
+        got      false
+  ok    return not JSON: Stripe asked once
+
+return: confirmed shapes are written and said as before
+  ok    seeded
+  ok    return active: said
+  ok    return active: written
+  ok    seeded
+  ok    return pending: said
+  ok    return pending: written
+
+check: an unknown shape writes nothing and says the check failed
+  ok    seeded selling
+  FAIL  check no configuration (the include ignored): told the check failed
+        expected "error"
+        got      "pending"
+  FAIL  check no configuration (the include ignored): the selling record is unchanged
+        expected true
+        got      false
+  ok    check no configuration (the include ignored): Stripe asked once
+  ok    seeded selling
+  FAIL  check no merchant: told the check failed
+        expected "error"
+        got      "pending"
+  FAIL  check no merchant: the selling record is unchanged
+        expected true
+        got      false
+  ok    check no merchant: Stripe asked once
+  ok    seeded selling
+  FAIL  check no requirements, card payments active: told the check failed
+        expected "error"
+        got      "ready"
+  ok    check no requirements, card payments active: the selling record is unchanged
+  ok    check no requirements, card payments active: Stripe asked once
+  ok    seeded selling
+  FAIL  check not JSON: told the check failed
+        expected "error"
+        got      "pending"
+  FAIL  check not JSON: the selling record is unchanged
+        expected true
+        got      false
+  ok    check not JSON: Stripe asked once
+
+check: confirmed shapes are written and said as before
+  ok    seeded
+  ok    check active: said
+  ok    check active: written
+  ok    seeded
+  ok    check pending: said
+  ok    check pending: written
+
+85 checks, 42 failing.
+Z_VOLUME {"runs":360,"mocks":52,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3311review-KTdeCy

@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 
   part("A refund the store's Stripe events show forgets what was kept");
   is("there is a way to forget one payment's kept check", typeof api.forgetRefundCheck, "function");
-  is("the events reader forgets it on a refunded charge, whether or not an endpoint listens for refunds", /event\.type === "charge\.refunded"\) \{[\s\S]{0,400}forgetRefundCheck\([\s\S]{0,400}heard\.has\("refund\.issued"\)/.test(readFileSync("lib/webhooks.ts", "utf8")), true);
+  is("the events reader forgets it on a refunded charge, whether or not an endpoint listens for refunds", /event\.type === "charge\.refunded"\) \{[\s\S]{0,900}forgetRefundCheck\([\s\S]{0,900}heard\.has\("refund\.issued"\)/.test(readFileSync("lib/webhooks.ts", "utf8")), true);
   is("an endpoint that listens only for disputes is kept", (await addEndpoint(store, "https://hooks.example.net/in", ["dispute.opened"])).ok, true);
   events = [{ id: "evt_RefDemand1", type: "charge.refunded", created: Math.floor(now / 1000), data: { object: { id: "ch_RefDemand1", payment_intent: INTENT, amount_refunded: PAID, amount: PAID, refunded: true, currency: "usd", metadata: {} } } }];
   const quiet = console.error;
@@ -245,9 +245,25 @@ async function main(): Promise<void> {
     );
   const offered = draw([row({ refundsOnDemand: true })]);
   is("cut at the cap: a button to check this payment's refunds, for a role that cannot send too", offered.includes(">Check refunds for this payment<"), true);
-  is("and the notice says the request can be checked on its own", offered.includes("Check refunds for this payment"), true);
+  is("and the notice says why and that each request can be checked on its own, in words", /role="status"[^>]*>Refunds on Stripe could not all be checked[^<]*more refunds than this list reads at once/.test(offered), true);
+  is("the button says what it reads", offered.includes("Reads this one payment&#x27;s refunds on your Stripe account."), true);
   const notOffered = draw([row({ refundsOnDemand: false, refundsRetry: true })]);
   is("not at the cap: no button", notOffered.includes("Check refunds for this payment"), false);
+
+  part("The studio believes only an answer in the route's exact shape");
+  const reply = (requests as unknown as { refundCheckReply?: unknown }).refundCheckReply;
+  const { refundCheckReply } = await import("@/lib/payment-request-reply");
+  is("control: a whole check", refundCheckReply(true, { ok: true, checked: true, state: "paid", refunded: 10_000 }), { checked: true, state: "paid", refunded: 10_000 });
+  is("not checked, with the route's own sentence", refundCheckReply(true, { ok: true, checked: false, state: "paid", refunded: 0, message: "Refunds were not checked: try again." }), { checked: false, message: "Refunds were not checked: try again." });
+  for (const [what, body, httpOk] of [
+    ["an HTTP error with a success body", { ok: true, checked: true, state: "paid", refunded: 0 }, false],
+    ["checked as a string", { ok: true, checked: "true", state: "paid", refunded: 0 }, true],
+    ["no amount", { ok: true, checked: true, state: "paid" }, true],
+    ["an amount that is not whole", { ok: true, checked: true, state: "paid", refunded: 1.5 }, true],
+    ["a state that cannot have refunds", { ok: true, checked: true, state: "open", refunded: 0 }, true],
+    ["no answer at all", null, true],
+  ] as const) is(`${what}: not checked, never 0 refunded`, refundCheckReply(httpOk, body).checked, false);
+  is("(nothing of the reader is on lib/payment-requests)", reply, undefined);
 
   done();
 }

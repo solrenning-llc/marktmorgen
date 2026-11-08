@@ -79,7 +79,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
   "nl:orders:open:", "nl:orders:pending:", "nl:orders:seen:", "nl:outreach:stop:all", "nl:pause:", "nl:pause:due",
-  "nl:pause:last:", "nl:pay:currencies:", "nl:taxreg:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
+  "nl:pause:last:", "nl:pay:currencies:", "nl:taxreg:", "nl:payreq:lock:", "nl:payreq:rf:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
   "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan:closing:",
@@ -341,6 +341,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // Payment requests (lib/payment-request-store.ts): the store's lists go, and each request through them; its reminders and its place in the sweep's list are taken out.
   "nl:payreq:s:": E, "nl:payreq:o:": E, "nl:payreq:p:": E, "nl:payreq:r:": T("nl:payreq:s:", 400),
   "nl:payreq:due": I, "nl:payreq:stores": I, "nl:payreq:lock:": X(1), "nl:payreq:w:": X(1),
+  // One payment's refunds read whole for a request checked on its own (lib/payment-request-refund-cache.ts): a minute.
+  "nl:payreq:rf:": X(1),
   "nl:person:": E, "nl:person:find:": X(1),
   "nl:pfunnel:done:": E, "nl:pfunnel:seen:": E, "nl:pfunnels:": E,
   "nl:phone:cfg:": E, "nl:phone:seen:": X(40), "nl:phone:st:": E,

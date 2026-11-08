@@ -747,6 +747,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:payreq:stores@lib/payment-request-store.ts": company("The stores with open payment requests", "One member a store, read once a run by the five-minute job and let go when it has none open: the job's own index, like its cursor."),
   "nl:payreq:lock:@lib/payment-request-store.ts": short("A payment request's checkout being opened, a minute", "request", 1, MARK, REQ("pay-request")),
   "nl:payreq:w:@lib/payment-request-store.ts": short("A payment request's record being changed, ten seconds at the most", "request", 1, MARK, REQ("pay-request")),
+  "nl:payreq:rf:@lib/payment-request-refund-cache.ts": short("One payment's refunds as last read whole on Stripe, for a payment request checked on its own: a number, a minute (REFUND_CHECK_SECONDS); its name holds the store and a payment id of up to 258 characters, so 512 bytes with what Redis keeps beside it", "studio", 1, 512),
   "nl:pay:currencies:@lib/payment-methods.ts": { what: "The currencies a Stripe account takes, cached", parts: [capped(KB, "One a store.")] },
   "nl:taxreg:@lib/tax-registrations.ts": { what: "The tax registrations active on a Stripe account, cached half a day", parts: [capped(32 * KB, "One a store, at most TAX_REGISTRATIONS_MAX_BYTES, checked before it is written.")] },
   "nl:dun:report:@lib/payment-recovery-report.ts": { what: "Failed renewals, cached", parts: [capped(256 * KB, "One cached view.")] },

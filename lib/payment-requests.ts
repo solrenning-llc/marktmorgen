@@ -40,8 +40,11 @@ import { requestWords } from "@/lib/buyer-words/requests";
 import { type Store, saleHandles, storeForId, storeIdGone } from "@/lib/store";
 import { type CheckedRequest, type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
 import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, requestOf, requestRecordKey } from "@/lib/payment-request-store";
+import { forgetRefundCheck, keepRefundCheck, keptRefundCheck, REFUND_CHECK_SECONDS } from "@/lib/payment-request-refund-cache";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
+import { essentialLimitState } from "@/lib/request-guard";
+import { countStudio } from "@/lib/studio-route";
 
 /** A reminder that could not go is tried again a day later, never sooner. */
 const RETRY_MS = 86_400_000;
@@ -346,44 +349,81 @@ const REFUND_STATUSES = new Set(["pending", "requires_action", "succeeded", "fai
 /** A refund still under way: not yet given back, but it may be, so its payment is not checked. */
 const REFUND_UNDER_WAY = new Set(["pending", "requires_action"]);
 
+/** One refund row in Stripe's shape, or null for a row in any other (a status Stripe does not list, an empty payment id, an amount that is not a whole number). */
+function refundRow(item: unknown): { id: string; intent: string | null; status: string; amount: number } | null {
+  const row = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+  const id = row && typeof row.id === "string" && row.id ? row.id : "";
+  const intent = row?.payment_intent;
+  if (!row || !id || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) < 0) return null;
+  return { id, intent: intent as string | null, status: row.status, amount: row.amount as number };
+}
+
 /**
  * The account's succeeded refunds since `since`, summed per payment, and
  * whether every one was read (rule 24): a list still marked has_more after
- * the last page read, a page or a row in another shape (a status Stripe does
- * not list, an empty payment id), or the same refund twice leaves `complete`
- * false. What was read is still counted, once each: it is a floor of what
- * was refunded, never the total. `underWay` names the payments with a refund
- * still pending or waiting on an action: not counted, and not checked.
- * Throws when Stripe cannot be read.
+ * the last page read (`capped` too), a page or a row in another shape (a
+ * status Stripe does not list, an empty payment id), or the same refund
+ * twice leaves `complete` false. What was read is still counted, once each:
+ * it is a floor of what was refunded, never the total. `underWay` names the
+ * payments with a refund still pending or waiting on an action: not
+ * counted, and not checked. Throws when Stripe cannot be read.
  */
-async function readRefunds(account: string, since: number): Promise<{ back: Map<string, number>; complete: boolean; underWay: Set<string> }> {
+async function readRefunds(account: string, since: number): Promise<{ back: Map<string, number>; complete: boolean; capped: boolean; underWay: Set<string> }> {
   const back = new Map<string, number>();
   const underWay = new Set<string>();
   const seen = new Set<string>();
   let complete = true;
   let after = "";
   for (let page = 0; ; page += 1) {
-    if (page === REFUND_PAGES) return { back, complete: false, underWay };
+    if (page === REFUND_PAGES) return { back, complete: false, capped: true, underWay };
     const listed = await onAccount("GET", account, `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
-    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { back, complete: false, underWay };
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { back, complete: false, capped: false, underWay };
     for (const item of listed.data as unknown[]) {
-      const row = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
-      const id = row && typeof row.id === "string" && row.id ? row.id : "";
-      const intent = row?.payment_intent;
-      if (!row || !id || seen.has(id) || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) < 0) {
+      const row = refundRow(item);
+      if (!row || seen.has(row.id)) {
         complete = false;
         continue;
       }
-      seen.add(id);
-      if (typeof intent !== "string") continue;
-      if (row.status === "succeeded") back.set(intent, (back.get(intent) ?? 0) + (row.amount as number));
-      else if (REFUND_UNDER_WAY.has(row.status)) underWay.add(intent);
+      seen.add(row.id);
+      if (row.intent === null) continue;
+      if (row.status === "succeeded") back.set(row.intent, (back.get(row.intent) ?? 0) + row.amount);
+      else if (REFUND_UNDER_WAY.has(row.status)) underWay.add(row.intent);
     }
-    if (!listed.has_more) return { back, complete, underWay };
+    if (!listed.has_more) return { back, complete, capped: false, underWay };
     const last = (listed.data as unknown[]).at(-1) as Record<string, unknown> | null | undefined;
-    if (!last || typeof last !== "object" || typeof last.id !== "string" || !last.id) return { back, complete: false, underWay };
+    if (!last || typeof last !== "object" || typeof last.id !== "string" || !last.id) return { back, complete: false, capped: false, underWay };
     after = last.id;
   }
+}
+
+/** Only a request paid through its checkout has refunds on Stripe; one refunded in full has nothing more to learn. */
+const onStripe = (r: PaymentRequest) => r.state === "paid" && !r.outside;
+
+/**
+ * A request as the studio shows it: checked when it has nothing on Stripe to
+ * read or `read` says its refunds were all read. Without a payment to look up
+ * or a Stripe account, every reading is the same: no reload is promised and
+ * nothing can be read on its own.
+ */
+function checkedOf(store: Store, r: PaymentRequest, read: boolean, retry = false, onDemand = false): CheckedRequest {
+  const refundsChecked = !onStripe(r) || (read && PAYMENT_INTENT.test(r.payment));
+  const lookable = !refundsChecked && PAYMENT_INTENT.test(r.payment) && !!store.stripeAccountId;
+  return { ...r, refundsChecked, refundsRetry: lookable && retry, refundsOnDemand: lookable && onDemand };
+}
+
+/**
+ * Writes refunds read on Stripe into the request, only ever upward (a refund
+ * read is a refund), in full making it "refunded". The request as it now
+ * stands, or null when what was read could not be written.
+ */
+async function raiseRefunded(store: Store, r: PaymentRequest, refunded: number, now: number): Promise<PaymentRequest | null> {
+  if (refunded <= r.refunded) return r;
+  const done = await changeRequest(store, r.id, (current) =>
+    current.payment === r.payment && refunded > current.refunded
+      ? { next: { ...current, refunded, state: refunded >= (current.amountPaid || current.total) ? "refunded" : current.state }, answer: null }
+      : { next: null, answer: null },
+  now).catch(() => null);
+  return done ? done.request : null;
 }
 
 /**
@@ -397,42 +437,31 @@ async function readRefunds(account: string, since: number): Promise<{ back: Map<
  * in another shape, Stripe not answering, no Stripe account or no payment
  * to look up, or a whole list giving back less than the record holds), so
  * the studio never shows it as surely not refunded. `refundsRetry` says
- * whether reading again may change that. What was read is still written,
- * only ever upward: a refund read is a refund.
+ * whether reading again may change that; `refundsOnDemand`, whether the
+ * list was cut at its pages, so that one payment can be read on its own when
+ * the creator asks (checkRequestRefunds). The list itself never reads a
+ * payment on its own. What was read is still written, only ever upward: a
+ * refund read is a refund.
  */
 export async function refreshRefunds(store: Store, requests: PaymentRequest[], now = Date.now()): Promise<CheckedRequest[]> {
-  // Only a request paid through its checkout has refunds on Stripe; one refunded in full has nothing more to learn.
-  const onStripe = (r: PaymentRequest) => r.state === "paid" && !r.outside;
-  const shown = (r: PaymentRequest, read: boolean, retry = false): CheckedRequest => {
-    const refundsChecked = !onStripe(r) || (read && PAYMENT_INTENT.test(r.payment));
-    // Without a payment to look up or a Stripe account, every reading is the same: no reload is promised.
-    return { ...r, refundsChecked, refundsRetry: !refundsChecked && retry && PAYMENT_INTENT.test(r.payment) && !!store.stripeAccountId };
-  };
   const paid = requests.filter((r) => onStripe(r) && PAYMENT_INTENT.test(r.payment));
-  if (!paid.length || !store.stripeAccountId) return requests.map((r) => shown(r, false));
+  if (!paid.length || !store.stripeAccountId) return requests.map((r) => checkedOf(store, r, false));
   const since = Math.floor(Math.min(...paid.map((r) => r.paidAt)) / 1000) - 60;
-  let read: { back: Map<string, number>; complete: boolean; underWay: Set<string> };
+  let read: Awaited<ReturnType<typeof readRefunds>>;
   try {
     read = await readRefunds(store.stripeAccountId, since);
   } catch (error) {
     console.error("reading a store's refunds for payment requests failed", error);
-    return requests.map((r) => shown(r, false, true));
+    return requests.map((r) => checkedOf(store, r, false, true));
   }
-  if (!read.complete) console.error("a store's refunds for payment requests were not all read; shown as not checked", { pages: REFUND_PAGES });
+  if (!read.complete) console.error("a store's refunds for payment requests were not all read; shown as not checked", { pages: REFUND_PAGES, capped: read.capped });
   const changed = new Map<string, PaymentRequest>();
   const unsaved = new Set<string>();
   for (const r of paid) {
-    const refunded = read.back.get(r.payment) ?? 0;
-    if (refunded > r.refunded) {
-      const done = await changeRequest(store, r.id, (current) =>
-        current.payment === r.payment && refunded > current.refunded
-          ? { next: { ...current, refunded, state: refunded >= (current.amountPaid || current.total) ? "refunded" : current.state }, answer: null }
-          : { next: null, answer: null },
-      now).catch(() => null);
-      if (done) changed.set(r.id, done.request);
-      // What was read could not be written: what is shown is older than Stripe, so not checked.
-      else unsaved.add(r.id);
-    }
+    const latest = await raiseRefunded(store, r, read.back.get(r.payment) ?? 0, now);
+    if (latest) changed.set(r.id, latest);
+    // What was read could not be written: what is shown is older than Stripe, so not checked.
+    else unsaved.add(r.id);
   }
   return requests.map((r) => {
     const latest = changed.get(r.id) ?? r;
@@ -442,8 +471,110 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
     // A refund still under way may yet give the money back, and a write that failed may not fail again: not checked,
     // and reading again may change that. A list not read in full reads the same next time.
     const passing = unsaved.has(r.id) || read.underWay.has(r.payment);
-    return shown(latest, read.complete && !short && !passing, read.complete && !short && passing);
+    return checkedOf(store, latest, read.complete && !short && !passing, read.complete && !short && passing, read.capped);
   });
+}
+
+/**
+ * Checks of one payment's refunds (checkRequestRefunds) a store may ask
+ * Stripe for in a minute, counted by the essential limiter under the scope
+ * "payreq-refunds" (it fails closed; tests/plan-cost-registry.ts, SCOPES).
+ * A creator presses one at a time: ten in a minute is more than a person
+ * opens, and far below Stripe's read limit (100 a second in live mode). A
+ * check the kept reading answers asks Stripe nothing and is not counted.
+ */
+export const REFUND_CHECKS_PER_MINUTE = 10;
+/**
+ * Studio requests one check takes before Stripe is asked, besides the
+ * route's own: its one GET of up to a hundred refunds waited on for its
+ * whole timeout (STRIPE_TIMEOUT_MS) at 2 GB. tests/plan-cost-registry.test.ts
+ * holds them at the fewest that cover it (REFUND_CHECK_READ).
+ */
+export const REFUND_CHECK_UNITS = 3;
+
+export { forgetRefundCheck, REFUND_CHECK_SECONDS };
+
+/**
+ * Why one request's check left it not checked: "" when it is checked;
+ * "limit" past the store's checks for the minute; "unavailable" that count
+ * or the kept reading could not be read; "used" past the studio's requests;
+ * "stripe" Stripe could not be read; "more" more than one page of refunds
+ * on that payment; "shape" a reply or a row in another shape; "under_way" a
+ * refund still under way; "unsaved" what was read could not be written; "short"
+ * Stripe gives back less than the record holds; "none" no Stripe account or
+ * no payment to look up.
+ */
+export type RefundCheckWhy = "" | "limit" | "unavailable" | "used" | "stripe" | "more" | "shape" | "under_way" | "unsaved" | "short" | "none";
+
+/**
+ * One request's refunds, read on their own when the creator opens it in the
+ * studio (coordinator's decision C1-20261108-0315-C4-30): for a request the
+ * list could not check because the account has more refunds than its pages
+ * read. One GET /v1/refunds?payment_intent=... on the creator's account,
+ * only after the store's check for the minute (REFUND_CHECKS_PER_MINUTE) and
+ * REFUND_CHECK_UNITS studio requests are taken; a whole reading is kept
+ * REFUND_CHECK_SECONDS per payment (lib/payment-request-refund-cache.ts), so
+ * opening it again asks Stripe nothing, and a refund the store's Stripe
+ * events show forgets it (lib/webhooks.ts). Every other answer is not
+ * checked, never 0 refunded (rule 24): a failed read, a list with more,
+ * a reply or a row in another shape, a refund under way, the cap or the
+ * studio's figure reached. What was read is written, only ever upward.
+ * Null when the request is not one of this store's.
+ */
+export async function checkRequestRefunds(store: Store, id: string, now = Date.now()): Promise<{ request: CheckedRequest; why: RefundCheckWhy } | null> {
+  const r = await requestOf(store, id);
+  if (!r) return null;
+  const not = (why: RefundCheckWhy, request: PaymentRequest = r, retry = true) => ({ request: checkedOf(store, request, false, retry, true), why });
+  if (!onStripe(r)) return { request: checkedOf(store, r, true), why: "" };
+  if (!PAYMENT_INTENT.test(r.payment) || !store.stripeAccountId || !store.sid) return { request: checkedOf(store, r, false), why: "none" };
+  let refunded: number | null;
+  try {
+    refunded = await keptRefundCheck(store.sid, r.payment);
+  } catch (error) {
+    console.error("a payment request's kept refund check could not be read; not checked", error);
+    return not("unavailable");
+  }
+  if (refunded === null) {
+    const room = await essentialLimitState("payreq-refunds", store.sid, REFUND_CHECKS_PER_MINUTE, 60);
+    // Past the cap, or a count that could not be read: Stripe is not asked (fails closed).
+    if (room !== "within") return not(room === "exceeded" ? "limit" : "unavailable");
+    const taken = await countStudio(store, null, REFUND_CHECK_UNITS).catch(() => ({ ok: false as const }));
+    if (!taken.ok) return not("used", r, false);
+    let listed: Record<string, unknown>;
+    try {
+      listed = await onAccount("GET", store.stripeAccountId, `/refunds?payment_intent=${encodeURIComponent(r.payment)}&limit=100`);
+    } catch (error) {
+      console.error("reading one payment request's refunds failed", error);
+      return not("stripe");
+    }
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return not("shape", r, false);
+    // More than a page on one payment reads the same next time: not checked, and no reload promised.
+    if (listed.has_more) return not("more", r, false);
+    let sum = 0;
+    let underWay = false;
+    const seen = new Set<string>();
+    for (const item of listed.data as unknown[]) {
+      const row = refundRow(item);
+      // A row of another payment in this payment's own list, or the same refund twice, is a list in another shape.
+      if (!row || row.intent !== r.payment || seen.has(row.id)) return not("shape", r, false);
+      seen.add(row.id);
+      if (row.status === "succeeded") sum += row.amount;
+      else if (REFUND_UNDER_WAY.has(row.status)) underWay = true;
+    }
+    if (!Number.isSafeInteger(sum)) return not("shape", r, false);
+    if (underWay) {
+      const latest = await raiseRefunded(store, r, sum, now);
+      return not("under_way", latest ?? r);
+    }
+    refunded = sum;
+    // Kept only once whole; a reading that could not be kept is still Stripe's answer, only asked again next time.
+    await keepRefundCheck(store.sid, r.payment, refunded).catch((error) => console.error("a payment request's refund check could not be kept", error));
+  }
+  const latest = await raiseRefunded(store, r, refunded, now);
+  if (!latest) return not("unsaved");
+  // Stripe gives back less than the record holds (a refund since failed): never lowered, and not checked.
+  if (refunded < latest.refunded) return not("short", latest, false);
+  return { request: checkedOf(store, latest, true), why: "" };
 }
 
 /** Why a request could not be marked as paid outside Stripe. */

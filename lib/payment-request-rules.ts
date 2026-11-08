@@ -104,6 +104,12 @@ export type CheckedRequest = PaymentRequest & {
    * a list short of the record, no Stripe account or no payment to look up), so the studio promises no reload.
    */
   refundsRetry: boolean;
+  /**
+   * Not checked because the account's refund list was cut at the pages read (more than 300 refunds), and the
+   * payment can be looked up: the studio offers to read this one payment's refunds when the creator asks
+   * (lib/payment-requests.ts, checkRequestRefunds), never while the list is drawn.
+   */
+  refundsOnDemand: boolean;
 };
 
 /** How a request was paid outside Stripe. */

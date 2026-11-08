@@ -42,6 +42,8 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { PATH_READ_UNITS } from "@/lib/path";
+import { REFUND_CHECK_UNITS } from "@/lib/payment-requests";
+import { REFUND_CHECK_READ } from "./plan-cost-registry";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
@@ -321,6 +323,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.deepEqual([moveReads(0), moveReads(1), moveReads(100), moveReads(101), moveReads(500), moveReads(Number.NaN)], [0, 1, 1, 2, 5, Number.POSITIVE_INFINITY]);
   assert.deepEqual([ordersMovesCommands(40), ordersMovesCommands(500), ORDERS_CALL_MOVES], [2, 10, 10]);
   console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
+  // One payment request's refunds read on their own: the route's studio request and REFUND_CHECK_UNITS more cover its Stripe wait, and no fewer would.
+  assert.ok((1 + REFUND_CHECK_UNITS) * UNIT_COST.studio >= REFUND_CHECK_READ, `${1 + REFUND_CHECK_UNITS} x ${UNIT_COST.studio} < ${REFUND_CHECK_READ}`);
+  assert.ok(REFUND_CHECK_UNITS * UNIT_COST.studio < REFUND_CHECK_READ, `${REFUND_CHECK_UNITS} x ${UNIT_COST.studio} >= ${REFUND_CHECK_READ}: lower REFUND_CHECK_UNITS`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
   // Making a store's count of its tasks again reads every task once, after tasksRecountUnits(people) studio requests are taken:

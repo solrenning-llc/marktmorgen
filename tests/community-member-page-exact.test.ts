@@ -36,8 +36,11 @@ const original = redis.pipeline.bind(redis);
 /** What the member list's HSCAN batch answers instead of the stub, while set. */
 let injected: unknown[] | null = null;
 let written: Command[] = [];
+/** The member list's read fails in transport (no answer at all), while set. */
+let membersDown = false;
 redis.pipeline = (async (batch: Command[]) => {
   written.push(...batch);
+  if (membersDown && batch.some((c) => c[0] === "HSCAN" && String(c[1]).endsWith(":m"))) throw new Error("synthetic transport failure reading the members");
   if (injected && batch.some((c) => c[0] === "HSCAN" && String(c[1]).endsWith(":m"))) return injected;
   return original(batch);
 }) as typeof redis.pipeline;
@@ -138,6 +141,30 @@ async function main() {
       injected = null;
     }
   }
+  // Codex M (M1 on #3213): a member read that fails in transport, after the post was saved, is the same "who asked
+  // could not be read" as a reply in another shape: one error the route tells apart, raised before any queue write.
+  const failure = async (run: () => Promise<unknown>) => {
+    try {
+      await run();
+      return "resolved";
+    } catch (error) {
+      return error instanceof Error ? error.name : "not an error";
+    }
+  };
+  membersDown = true;
+  written = [];
+  try {
+    is("queueAnnouncement, the member read fails in transport: said as the recipients not read", await failure(() => queueAnnouncement(mailing, freshConfig(store.name), post)), "RecipientsUnreadError");
+    is("queueAnnouncement, the member read fails in transport: no job written, nothing queued", written.filter((c) => c[0] === "RPUSH" || c[0] === "SADD" || c[0] === "SET").length, 0);
+  } finally {
+    membersDown = false;
+  }
+  injected = MALFORMED[2][1];
+  try {
+    is("queueAnnouncement, a member page in another shape: the same error", await failure(() => queueAnnouncement(mailing, freshConfig(store.name), post)), "RecipientsUnreadError");
+  } finally {
+    injected = null;
+  }
   const queued = await queueAnnouncement(mailing, freshConfig(store.name), post);
   is("healthy control: a read list queues the send to the one member who asked", queued.ok ? queued.job.total : queued.reason, 1);
 
@@ -188,6 +215,7 @@ async function main() {
   part("The announcement route: an unread member list says the post went up and the email did not");
   const route = source("app/api/store/community/route.ts");
   is("the route tells an unread list apart", /error instanceof UnknownReplyError\) return back\(`\$\{home\}\/post\/\$\{made\.post\.id\}`, "notemailed"\)/.test(route), true);
+  is("the route tells an unread list apart however the read failed, and only the read", /error instanceof RecipientsUnreadError\) return back\(`\$\{home\}\/post\/\$\{made\.post\.id\}`, "notemailed"\)/.test(route), true);
   const notEmailed = LANGUAGE_CODES.map((l) => communityNotices(l).notemailed);
   is("its notice is in all seven languages, each its own, said as a warning", [notEmailed.every((n) => typeof n?.text === "string" && n.text.length > 20 && n.tone === "warn"), new Set(notEmailed.map((n) => n?.text)).size], [true, 7]);
   is("its notice says the post is up and nothing was emailed", /^Posted\. It was not emailed/.test(communityNotices("en").notemailed?.text ?? ""), true);

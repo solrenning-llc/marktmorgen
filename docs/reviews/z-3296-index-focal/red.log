@@ -1,0 +1,68 @@
+
+FILE r24-review-proof-exact.test.ts
+✔ mintReviewLink throws, and takes the link back, when the link's SET answers nil (7.611694ms)
+✔ mintReviewLink throws, and takes the link back, when the link's SET answers a number (0.875611ms)
+✔ mintReviewLink throws, and takes the link back, when the link's SET answers an undefined slot (0.62979ms)
+✔ mintReviewLink throws, and takes the link back, when the index's ZADD answers text (0.455407ms)
+✔ mintReviewLink throws, and takes the link back, when the index's trim answers nil (0.425111ms)
+✔ mintReviewLink throws, and takes the link back, when the index's EXPIRE answers a negative number (0.401315ms)
+✔ mintReviewLink throws, and takes the link back, when a reply is missing from the link's write (0.383889ms)
+✔ mintReviewLink throws, and takes the link back, when a reply is missing from the erasure note (0.413674ms)
+✔ mintReviewLink throws, and takes the link back, when a reply too many on the link's write (0.625163ms)
+✔ mintReviewLink throws, and takes the link back, when a reply too many on the erasure note (0.778034ms)
+✔ mintReviewLink throws, and takes the link back, when the link's write answers something that is not a list (0.54371ms)
+✔ mintReviewLink throws, and takes the link back, when the erasure note answers something that is not a list (0.433093ms)
+✖ a pipeline that throws after the link's SET landed returns no token, and an erasure still finds no link (Codex Z) (1.853937ms)
+✖ when the take-back itself fails too, the link is still noted for erasure, and the log says what is left (0.515758ms)
+✔ an unknown SET whose take-back fails is still erased with the address (0.717212ms)
+✔ a healthy link is written, noted for erasure, opened by its key and deleted with the address (control) (0.957604ms)
+✔ a store with no stats id writes the link alone and reads its one reply (control) (0.293853ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 15
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.49958
+
+✖ failing tests:
+
+test at [stdin]:54642:30
+✖ a pipeline that throws after the link's SET landed returns no token, and an erasure still finds no link (Codex Z) (1.853937ms)
+  AssertionError [ERR_ASSERTION]: the grant is gone after the address's erasure
+  + actual - expected
+
+  + '{"s":"0123456789abcdef0123456789abcdef","r":"pi_reviewproof0001","e":"reviewer@buyer.example"}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:54651:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"s":"0123456789abcdef0123456789abcdef","r":"pi_reviewproof0001","e":"reviewer@buyer.example"}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54653:30
+✖ when the take-back itself fails too, the link is still noted for erasure, and the log says what is left (0.515758ms)
+  AssertionError [ERR_ASSERTION]: the log names what may be left
+      at TestContext.<anonymous> ([stdin]:54665:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '',
+    expected: /review request's link/,
+    operator: 'match',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":98,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3296focal-peJOm6

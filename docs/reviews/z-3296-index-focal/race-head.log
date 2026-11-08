@@ -1,0 +1,38 @@
+
+FILE z-3296-index-race.proof.ts
+Z_INDEX_RACE {"erasedDuringMint":true,"returnedToken":true,"grantBytes":103,"notes":[],"ttl":5184000,"retainedAfterSecondErasure":true,"productAndErasureCommands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","SMEMBERS","ZRANGEBYSCORE","DEL","SET"],"jsonPipelineBytes":1016}
+✖ MEDIUM: erasure after confirmed note must not be followed by an unindexed address grant (7.204513ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24.158622
+
+✖ failing tests:
+
+test at [stdin]:54590:27
+✖ MEDIUM: erasure after confirmed note must not be followed by an unindexed address grant (7.204513ms)
+  AssertionError [ERR_ASSERTION]: once the actual indexed-record erasure completed, a later grant must not retain the erased address outside that index
+  + actual - expected
+
+  + '{"s":"11111111111111111111111111111111","r":"pi_synthetic_race3296","e":"synthetic-race@buyer.example"}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:54618:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"s":"11111111111111111111111111111111","r":"pi_synthetic_race3296","e":"synthetic-race@buyer.example"}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":14,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3296focal-tcZaWJ

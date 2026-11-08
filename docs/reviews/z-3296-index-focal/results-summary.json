@@ -1,0 +1,130 @@
+{
+  "red.log": [
+    {
+      "file": "r24-review-proof-exact.test.ts",
+      "tests": 17,
+      "pass": 15,
+      "fail": 2,
+      "custom": null,
+      "volume": {
+        "runs": 98,
+        "mocks": 0,
+        "over": false
+      }
+    }
+  ],
+  "head.log": [
+    {
+      "file": "r24-review-proof-exact.test.ts",
+      "tests": 17,
+      "pass": 17,
+      "fail": 0,
+      "custom": null,
+      "volume": {
+        "runs": 97,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "z-3296-erasure-index.proof.ts",
+      "tests": 10,
+      "pass": 10,
+      "fail": 0,
+      "custom": null,
+      "volume": {
+        "runs": 68,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "z-3296-index-before-grant.proof.ts",
+      "tests": 3,
+      "pass": 3,
+      "fail": 0,
+      "custom": null,
+      "volume": {
+        "runs": 11,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "review-link-exact.test.ts",
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "custom": "6 checks, all passing.",
+      "volume": {
+        "runs": 1,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "review-request-erasure-evidence.test.ts",
+      "tests": 19,
+      "pass": 19,
+      "fail": 0,
+      "custom": null,
+      "volume": {
+        "runs": 2009,
+        "mocks": 38,
+        "over": false
+      }
+    },
+    {
+      "file": "plan-cost-registry.test.ts",
+      "tests": 26,
+      "pass": 26,
+      "fail": 0,
+      "custom": null,
+      "volume": {
+        "runs": 0,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "store-data-registry.test.ts",
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "custom": null,
+      "volume": {
+        "runs": 0,
+        "mocks": 0,
+        "over": false
+      }
+    }
+  ],
+  "race-old.log": [
+    {
+      "file": "z-3296-index-race.proof.ts",
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "custom": null,
+      "volume": {
+        "runs": 14,
+        "mocks": 0,
+        "over": false
+      }
+    }
+  ],
+  "race-head.log": [
+    {
+      "file": "z-3296-index-race.proof.ts",
+      "tests": 1,
+      "pass": 0,
+      "fail": 1,
+      "custom": null,
+      "volume": {
+        "runs": 14,
+        "mocks": 0,
+        "over": false
+      }
+    }
+  ]
+}

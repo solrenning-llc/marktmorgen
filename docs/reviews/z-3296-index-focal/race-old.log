@@ -1,0 +1,16 @@
+
+FILE z-3296-index-race.proof.ts
+Z_INDEX_RACE {"erasedDuringMint":true,"returnedToken":true,"grantBytes":0,"notes":[],"ttl":-2,"retainedAfterSecondErasure":false,"productAndErasureCommands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","SMEMBERS","ZRANGEBYSCORE","DEL"],"jsonPipelineBytes":1015}
+✔ MEDIUM: erasure after confirmed note must not be followed by an unindexed address grant (6.357376ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20.502109
+Z_VOLUME {"runs":14,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3296focal-a2e0ss

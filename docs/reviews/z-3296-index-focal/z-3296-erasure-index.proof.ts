@@ -1,0 +1,41 @@
+import {test} from "node:test";
+import assert from "node:assert/strict";
+import {mintReviewLink,REVIEW_LINK_PATTERN} from "@/lib/review-proof";
+import {forgetNoted} from "@/lib/erasure-index";
+import type {Store} from "@/lib/store";
+import {store as redis} from "../../../tests/redis-stub";
+const stats="0".repeat(32),email="synthetic-review@buyer.example",reference="pi_synthetic_review3296";
+const room={statsId:stats,handle:"z3296review"} as unknown as Store;
+type Batch=(string|number)[][];
+const counts=()=> (globalThis as typeof globalThis & {__zCounts:()=>{runs:number;mocks:number;over:boolean}}).__zCounts();
+const shapes:[string,(a:unknown[])=>unknown][]=[
+ ["hole",a=>{const out=a.slice();delete out[0];return out;}],
+ ["inherited OK",a=>{const out=a.slice();delete out[0];Object.setPrototypeOf(out,Object.assign(Object.create(Array.prototype),{0:"OK"}));return out;}],
+ ["getter",a=>Object.defineProperty(a.slice(),"0",{get(){throw Error("getter ran");}})],
+ ["frozen malformed",a=>Object.freeze(["QUEUED",...a.slice(1)])],
+ ["fractional note",a=>[a[0],0.5,...a.slice(2)]],["unsafe note",a=>[a[0],Number.MAX_SAFE_INTEGER+1,...a.slice(2)]],
+ ["extra",a=>[...a,0]],["boxed OK",a=>[new String("OK"),...a.slice(1)]],
+];
+async function receipt(label:string,change:((a:unknown[])=>unknown)|null){
+ redis.clear();const original=redis.pipeline.bind(redis);let key="";const batches:Batch[]=[];const before=counts();
+ redis.pipeline=async(b)=>{batches.push(b);const a=await original(b);if(b[0]?.[0]==="SET"&&String(b[0][1]).startsWith("nl:rev:link:")){key=String(b[0][1]);return(change?change(a):a) as unknown[];}return a;};
+ let token:string|undefined,error:unknown;try{token=await mintReviewLink(room,reference,email);}catch(e){error=e;}finally{redis.pipeline=original;}
+ const after=counts();const [raw]=await original([["GET",key]]);console.log("Z_RECEIPT",JSON.stringify({label,returned:!!token,errorName:error instanceof Error?error.name:null,stored:raw!==null,commands:batches.flat().map(c=>c[0]),jsonPipelineBytes:batches.reduce((n,b)=>n+Buffer.byteLength(JSON.stringify(b)),0),nestedRedis:after.runs-before.runs,http:after.mocks-before.mocks}));return{token,error,key,raw};
+}
+for(const [label,change]of shapes)test(`real committed pipeline refuses ${label} and removes unsent grant`,async()=>{const r=await receipt(label,change);assert.equal((r.error as Error)?.name,"UnknownReplyError");assert.equal(r.token,undefined);assert.equal(r.raw,null);});
+test("frozen healthy pipeline remains indexed and actual erasure deletes the grant",async()=>{const r=await receipt("frozen healthy",a=>Object.freeze(a));assert.equal(r.error,undefined);assert.match(r.token!,REVIEW_LINK_PATTERN);assert.equal(JSON.parse(String(r.raw)).e,email);assert.ok(await forgetNoted(stats,email)>=1);assert.equal((await redis.pipeline([["GET",r.key]]))[0],null);});
+test("MEDIUM: partial pipeline exception must not leave a sixty-day unindexed grant",async()=>{
+ redis.clear();const original=redis.pipeline.bind(redis);let key="",bytes=0;const batches:Batch[]=[];
+ redis.pipeline=async(b)=>{
+  batches.push(b);
+  if(b[0]?.[0]==="SET"&&String(b[0][1]).startsWith("nl:rev:link:")){
+   key=String(b[0][1]);const r=await original([b[0]]);assert.deepEqual(r,["OK"]);bytes=Buffer.byteLength(JSON.stringify([b[0]]));
+   throw Error("synthetic pipeline failure AFTER grant SET, BEFORE erasure notes");
+  }
+  return original(b);
+ };
+ try{await assert.rejects(mintReviewLink(room,reference,email),/synthetic pipeline failure/);}finally{redis.pipeline=original;}
+ const [raw,ttl]=await original([["GET",key],["TTL",key]]);const erased=await forgetNoted(stats,email);const [after]=await original([["GET",key]]);
+ console.log("Z_MEDIUM",JSON.stringify({grantCommitted:true,grantBytes:typeof raw==="string"?Buffer.byteLength(raw):0,ttl,notedErased:erased,retainedAfterErasure:typeof after==="string",attemptedPipelineCommands:batches.flat().map(c=>c[0]),actualSetBatchBytes:bytes}));
+ assert.equal(after,null,"a grant with the buyer address must either be removed after pipeline failure or remain discoverable to erasure");
+});

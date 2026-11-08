@@ -7,11 +7,11 @@
  *     throws UnknownReplyError instead of meaning "no offers", and the
  *     affiliates page says the offers could not be loaded just now instead of
  *     showing nothing;
- *   - the customer-voice report (lib/customer-voice.ts) names every list
- *     whose read failed: gatherVoice says which, the model is told the texts
- *     are not everything customers said, the kept summary carries the names,
- *     and the studio and the reviews page say them; with too few texts while a
- *     list is unread, nothing is asked or counted and the creator is told why.
+ *   - the customer-voice report (lib/customer-voice.ts) is made only from
+ *     every list read whole: gatherVoice names each list whose read failed,
+ *     and then nothing is asked, counted or kept (the summary stands for the
+ *     whole month); the creator is told which lists could not be read and can
+ *     try again for the complete report.
  *
  * Synthetic data only; Redis is the in-memory stub, the model a stand-in.
  */
@@ -19,18 +19,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { offerPartnership, waitingFor } from "@/lib/partner-invites";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { MIN_TEXTS, gatherVoice, makeVoice, type VoiceSummary } from "@/lib/customer-voice";
+import { MIN_TEXTS, gatherVoice, makeVoice } from "@/lib/customer-voice";
 import { keepAnswer } from "@/lib/answers";
 import { saveReview } from "@/lib/reviews";
 import { countSearchMiss } from "@/lib/stats";
 import { addProduct, claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { aiMonthKey } from "@/lib/ai";
-import { CustomerVoice } from "@/components/customer-voice";
-import { ReviewThemes } from "@/components/review-themes";
+import * as voiceScreen from "@/components/customer-voice";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
@@ -141,19 +138,20 @@ test("a list whose read failed is named by gatherVoice, the rest still read", as
   assert.deepEqual(two.unread, ["review", "search"]);
 });
 
-test("a summary made while a list was unread names it, and the model is not told the texts are complete", async () => {
+test("enough texts but a list unread: nothing asked, nothing counted, nothing kept, and the list is named", async () => {
   const questions = ["Is there a printable version?", "Can I print the planner?", "Does it come as a PDF?", "Is there a print layout?"];
   const { store, statsId, now } = await voiceStore("owner.made@example.com", "made", questions, ["printable", "pdf", "print version", "large print"]);
   const before = systems.length;
-  const made = await withReads([`nl:rev:all:${statsId}`], failing, () => makeVoice(store, now));
-  if (!made.ok) throw new Error(`no summary: ${made.reason}`);
-  assert.deepEqual(made.summary.unread, ["review"], "kept with the summary, so every screen that shows it can say so");
-  assert.equal(made.summary.read.review, undefined);
-  assert.equal(systems.length, before + 1, "asked once");
-  const system = systems.at(-1)!;
-  assert.match(system, /could not be read/i, "the model is told some lists are missing");
-  assert.match(system, /not everything customers said/i, "and that the texts are not complete");
-  assert.doesNotMatch(system, /You are given numbered texts: words members wrote when canceling, questions a product page could not answer, reviews, and words searched/, "never the old sentence listing every kind as given");
+  const result = await withReads([`nl:rev:all:${statsId}`], failing, () => makeVoice(store, now));
+  assert.deepEqual(result, { ok: false, reason: "unread", unread: ["review"], texts: 8 }, "a partial report is never made: it would stand for the whole month");
+  assert.equal(systems.length, before, "no model call");
+  const key = aiMonthKey(store, new Date(now));
+  assert.equal(Number((await redis.pipeline([["GET", key ?? ""]]))[0] ?? 0), 0, "no AI job counted");
+  assert.equal((await redis.pipeline([["EXISTS", `nl:voice:${statsId}:${new Date(now).toISOString().slice(0, 7)}`]]))[0], 0, "nothing kept for the month");
+  const later = await makeVoice(store, now);
+  if (!later.ok) throw new Error(`no summary once read again: ${later.reason}`);
+  assert.equal(later.summary.read.review, 2, "tried again once the list reads, the report is whole");
+  assert.equal(systems.length, before + 1, "and only then is the model asked");
 });
 
 test("too few texts while a list is unread: nothing asked, nothing counted, and the reason is the unread list", async () => {
@@ -167,42 +165,26 @@ test("too few texts while a list is unread: nothing asked, nothing counted, and 
   assert.ok(MIN_TEXTS > 1);
 });
 
-test("a whole read with enough texts still keeps no names of unread lists", async () => {
+test("a whole read with enough texts is sorted as before", async () => {
   const questions = ["Is there a printable version?", "Can I print the planner?", "Does it come as a PDF?", "Is there a print layout?"];
   const { store, now } = await voiceStore("owner.whole@example.com", "whole", questions, ["printable", "pdf"]);
   const made = await makeVoice(store, now);
   if (!made.ok) throw new Error(`no summary: ${made.reason}`);
-  assert.deepEqual(made.summary.unread, []);
-  assert.doesNotMatch(systems.at(-1)!, /could not be read/i, "nothing said missing when nothing is");
+  assert.deepEqual(made.summary.read, { question: 4, review: 2, search: 2 });
+  assert.match(systems.at(-1)!, /You are given numbered texts: words members wrote when canceling, questions a product page could not answer, reviews, and words searched for on the store that found nothing\./, "the model is told what it was given, all of it");
 });
 
-const SUMMARY: VoiceSummary = {
-  at: 1,
-  month: new Date().toISOString().slice(0, 7),
-  read: { question: 4, search: 4 },
-  themes: [{ title: "Wants it printable", count: 8, sources: { question: 4, search: 4 }, examples: [{ source: "question", text: "Is there a printable version?", n: 1 }] }],
-  reviewThemes: [],
-  other: 0,
-  unread: ["review", "search"],
-};
-
-test("the studio names the lists that could not be read in the summary", () => {
-  const html = renderToStaticMarkup(createElement(CustomerVoice, { initial: SUMMARY }));
-  assert.match(html, /role="status"[^>]*>[^<]*Reviews and searches with no result could not be read/, "named, in words, as a status");
-  const whole = renderToStaticMarkup(createElement(CustomerVoice, { initial: { ...SUMMARY, unread: [] } }));
-  assert.doesNotMatch(whole, /could not be read/, "nothing said when everything was read");
-  const old = renderToStaticMarkup(createElement(CustomerVoice, { initial: { ...SUMMARY, unread: undefined } }));
-  assert.doesNotMatch(old, /could not be read/, "a summary kept before this is shown as before");
+test("the studio names the lists that could not be read when it refuses", () => {
+  const unreadWords = (voiceScreen as unknown as { unreadWords?: (u: string[]) => string }).unreadWords;
+  assert.equal(typeof unreadWords, "function", "the naming is the screen's own, exported to be checked");
+  if (!unreadWords) return;
+  assert.equal(unreadWords(["search", "review"]), "Reviews and searches with no result");
+  assert.equal(unreadWords(["cancel"]), "Members leaving");
+  assert.equal(unreadWords(["cancel", "question", "review"]), "Members leaving, unanswered questions and reviews");
   const studio = readFileSync(join(process.cwd(), "components/customer-voice.tsx"), "utf8");
   assert.match(studio, /unread: "Some of what customers said could not be read just now/, "the screen's words for the refusal");
-});
-
-test("the reviews page says reviews could not be read instead of 'no review themes'", () => {
-  const html = renderToStaticMarkup(createElement(ReviewThemes, { voice: { ...SUMMARY, unread: ["review"] }, studioHome: "/studio?store=x" }));
-  assert.doesNotMatch(html, /None of this month/, "never 'none' for reviews that were not read");
-  assert.match(html, /Reviews could not be read when this summary was made/);
-  const read = renderToStaticMarkup(createElement(ReviewThemes, { voice: { ...SUMMARY, unread: [] }, studioHome: "/studio?store=x" }));
-  assert.match(read, /None of this month/, "a confirmed none stays a none");
+  assert.match(studio, /No AI job was used/, "and that nothing was spent");
+  assert.match(studio, /Not read: \$\{named\}/, "with the names beside them");
 });
 
 test("the route answers the unread refusal as unavailable, with the names", () => {

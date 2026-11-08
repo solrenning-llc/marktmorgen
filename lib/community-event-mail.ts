@@ -276,19 +276,14 @@ async function listReaders(job: EventMailJob, readers: string[]): Promise<boolea
 }
 
 /**
- * Gives back a claim this run took (startJob), with any readers written under it, once nothing of its send is known to
- * stand (review of #3140, M1; Claude 5 on #2954). While the claim is younger than CLAIM_SECONDS less a minute it still
- * holds this run's own value: nobody else writes the key while it stands, and a mark is taken over only past
- * ORPHAN_MS, longer than it stands; so it goes in one DEL with the readers. Older, it goes only on a compare and
- * delete (releaseMark), so a newer claim is never touched. Never throws: a claim that could not be given back lapses
- * on its own within CLAIM_SECONDS, and a due reminder stays queued meanwhile (madeOrTakeOver).
+ * Gives back a claim this run took (startJob), once nothing of its send is known to stand (review of #3140, M1;
+ * Claude 5 on #2954): always on a compare and delete (releaseMark), so a newer claim is never touched, whatever the
+ * time. Its readers' list is left: it lapses with KEEP_SECONDS, and the next start deletes it before writing its own
+ * (DEL first). Never throws: a claim that could not be given back lapses on its own within CLAIM_SECONDS, and a due
+ * reminder stays queued meanwhile (madeOrTakeOver).
  */
-async function giveBack(id: string, mark: string, claimedAt: number): Promise<void> {
+async function giveBack(id: string, mark: string): Promise<void> {
   try {
-    if (Date.now() - claimedAt < (CLAIM_SECONDS - 60) * 1000) {
-      await redisPipeline([["DEL", madeKey(id), toKey(id)]]);
-      return;
-    }
     await releaseMark(madeKey(id), mark);
   } catch (error) {
     console.error("an event send's failed start could not give its claim back", error);
@@ -343,7 +338,6 @@ async function startJob(
   // (madeOrTakeOver); unknown makes nothing and lets go of the mark only while it holds our own value. The claim
   // stands CLAIM_SECONDS until the send is written down, then as long as the send (review of #3140, M1).
   const mark = claimValue();
-  const claimedAt = Date.now();
   let claimed = await claimMark(madeKey(id), CLAIM_SECONDS, mark);
   let tookOver = false;
   if (claimed === "taken") {
@@ -365,7 +359,7 @@ async function startJob(
     try {
       standing = await readEventJob(id);
     } catch (error) {
-      await giveBack(id, mark, claimedAt);
+      await giveBack(id, mark);
       throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's send under a new mark");
     }
     if (standing) {
@@ -392,7 +386,7 @@ async function startJob(
     note: "",
     failures: 0,
   };
-  if (readers === null) return await startWaiting({ ...job, note: WAITING_NOTE, waiting: true }, mark, claimedAt);
+  if (readers === null) return await startWaiting({ ...job, note: WAITING_NOTE, waiting: true }, mark);
   const commands: (string | number)[][] = [["DEL", toKey(id)]];
   for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(id), ...readers.slice(i, i + 500)]);
   commands.push(["EXPIRE", toKey(id), KEEP_SECONDS]);
@@ -405,7 +399,7 @@ async function startJob(
     const listed = repliesFor(await redisPipeline(commands), commands.length);
     if (!listed || !listed.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("an event email's list of people");
   } catch (error) {
-    await giveBack(id, mark, claimedAt);
+    await giveBack(id, mark);
     throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's list of people");
   }
   try {
@@ -424,7 +418,7 @@ async function startJob(
       (replies) => repliesFor(replies, 1),
       () => null,
     );
-    if (back && back[0] === null) await giveBack(id, mark, claimedAt);
+    if (back && back[0] === null) await giveBack(id, mark);
     throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's send");
   }
   return job;
@@ -435,7 +429,7 @@ async function startJob(
  * written: read back, as startJob does; not there, its once-only mark is let go (only while it holds our value), so
  * asking again makes it; there, or not known, the mark stays and the next ask finds it (madeOrTakeOver).
  */
-async function startWaiting(job: EventMailJob, mark: string, claimedAt: number): Promise<EventMailJob> {
+async function startWaiting(job: EventMailJob, mark: string): Promise<EventMailJob> {
   try {
     // The notice, put in line, and its claim kept as long as it (review of #3140, M1), every reply exact.
     const written = repliesFor(
@@ -452,7 +446,7 @@ async function startWaiting(job: EventMailJob, mark: string, claimedAt: number):
       (replies) => repliesFor(replies, 1),
       () => null,
     );
-    if (back && back[0] === null) await giveBack(job.id, mark, claimedAt);
+    if (back && back[0] === null) await giveBack(job.id, mark);
     throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an event email's notice waiting for its list");
   }
   return job;

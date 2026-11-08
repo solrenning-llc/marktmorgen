@@ -368,7 +368,8 @@ async function main(): Promise<void> {
     let dels = 0;
     intercept(async (c) => {
       if (setsJob(job)(c) && dels === 0) throw new Error("Redis request failed with status 503");
-      if (c.some((x) => x[0] === "DEL" && x.includes(evMade(job))) && dels === 0) {
+      // Giving the claim back is a compare and delete of it (releaseMark's EVAL), or a DEL of it: either fails here.
+      if (c.some((x) => (x[0] === "DEL" || x[0] === "EVAL") && x.includes(evMade(job))) && dels === 0) {
         dels += 1;
         throw new Error("Redis request failed with status 503");
       }

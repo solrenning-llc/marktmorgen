@@ -107,7 +107,74 @@ INDIRECT_META_RESOLVE = re.compile(
     r"""\bimport(?!\.meta\.resolve\s*\()\s*\.\s*meta\b(?!\s*\.\s*(?!resolve\b)[A-Za-z_$])""")
 
 
-def computed(code):
+# One canonical spelling before every rule (Codex G's eighth return on #3037): JavaScript
+# allows whitespace, newlines and comments around ".", "?.", "[", "]" and "(", so
+# `import . meta . url`, `import/**/.meta.url` or `require /*x*/ .resolve.call` are the same
+# code as their compact forms. Rather than one rule per spelling, every rule reads the code
+# in canonical form: comments removed and that whitespace dropped, strings never changed
+# (the whitespace to drop is found in a copy whose strings are masked). Then a fail-closed
+# rule: any require or import.meta left in a form no rule classifies is computed.
+SQUEEZE = re.compile(r"""\s+(?=\?\.|[.\[\]()])|(?<=[.\[\]()])\s+""")
+# Identifiers may be spelled with escapes (`\u0072equire`); outside strings they are decoded.
+ESCAPED = re.compile(r"""\\u(?:([0-9A-Fa-f]{4})|\{([0-9A-Fa-f]{1,6})\})""")
+# Fail closed: in the canonical code with every string masked, each `require` and each
+# `import.meta` must be one of the forms below; any other use (a sequence, a return, an
+# alias, a key, a spelling no rule reads) is computed, so the suites run.
+REQUIRE_WORD = re.compile(r"""\brequire\b""")
+# The classified forms: a literal require(…) or require.resolve(…), `typeof require`, the
+# binding `const require = …` (whose createRequire call CREATE_REQUIRE reads), and the word
+# where it cannot be code that loads: followed on its line by another word (prose in JSX
+# text, "still require a purchase"; but not the TypeScript `as` or `satisfies`, which keep
+# require as a value) or by a single "|" (an alternation in a regular expression literal).
+REQUIRE_CLASSIFIED = re.compile(
+    r"""\brequire(?:\.resolve)?\((["'])x*\1\s*[),]|\btypeof\s+require\b"""
+    r"""|(?:\b(?:const|let|var)\s+|,\s*)require\s*=(?!=)"""
+    r"""|\brequire(?=[ \t]+(?!(?:as|satisfies)\b)[A-Za-z_$]|\|(?!\|))""")
+META_WORD = re.compile(r"""\bimport\.meta\b""")
+META_EDGE = re.compile(
+    r"""import\.meta\.(?:(?:url|dirname|filename|env|main)\b(?!\()|resolve\((["'])x*\1\s*[),])""")
+# The loader named by a string (`module['require']`): no rule can follow that call. The
+# resolver named that way is caught where it is read: require[…] and import.meta[…] are
+# computed already, and "resolve" is a common key (safeFetch hooks, a package name).
+LOADER_NAME = re.compile(r"""(["'`])(?:require|createRequire)\1""")
+
+
+def _squeezed(kept, masked):
+    """Both copies without the whitespace next to ".", "?.", "[", "]" and "(" outside strings."""
+    drop = [m.span() for m in SQUEEZE.finditer(masked)]
+
+    def cut(text):
+        parts, last = [], 0
+        for start, end in drop:
+            parts.append(text[last:start])
+            last = end
+        parts.append(text[last:])
+        return "".join(parts)
+    return cut(kept), cut(masked)
+
+
+def canonical(code):
+    """The code without comments and without the whitespace next to ".", "?.", "[", "]" and
+    "(", strings kept; and the same with every string masked and identifier escapes decoded."""
+    kept, masked = without_comments(code), without_comments(code, mask="x")
+    if len(kept) != len(masked):
+        raise Uncertain("code read two ways")
+    kept, masked = _squeezed(kept, masked)
+    return kept, ESCAPED.sub(lambda m: chr(int(m.group(1) or m.group(2), 16)), masked)
+
+
+def unclassified_loader(masked):
+    """A require or an import.meta in a form no precise rule reads as a literal edge."""
+    classified = set()
+    for m in REQUIRE_CLASSIFIED.finditer(masked):
+        word = REQUIRE_WORD.search(masked, m.start(), m.end())
+        classified.add(word.start())
+    if any(m.start() not in classified for m in REQUIRE_WORD.finditer(masked)):
+        return True
+    return any(not META_EDGE.match(masked, m.start()) for m in META_WORD.finditer(masked))
+
+
+def _rules(code):
     if (COMPUTED.search(code) or RENAMED_LOADER.search(code) or INDIRECT_REQUIRE.search(code)
             or INDIRECT_META_RESOLVE.search(code)):
         return True
@@ -115,6 +182,20 @@ def computed(code):
            for m in CREATE_REQUIRE.finditer(code)):
         return True
     return "import.meta.url" in code and bool(NEW_URL_COMPUTED.search(code))
+
+
+def computed(code):
+    """Every rule reads three copies: the code as written with only that whitespace dropped
+    (its comments kept, as the older line filter's lines need), the canonical code, and the
+    canonical code with strings masked. A hit in any, a loader named by a string, or a loader
+    in a form no rule classifies (fail closed) is computed."""
+    try:
+        kept, masked = canonical(code)
+    except Uncertain:
+        return True
+    if any(_rules(variant) for variant in (SQUEEZE.sub("", code), kept, masked)):
+        return True
+    return bool(LOADER_NAME.search(kept)) or unclassified_loader(masked)
 
 
 LISTING = re.compile(r"""\b(?:readdirSync|readdir|opendirSync|opendir|globSync|glob)\s*\(""")
@@ -176,12 +257,14 @@ def install_hooks(read):
         raise Uncertain("package.json runs scripts on install")
 
 
-def without_comments(text):
+def without_comments(text, mask=None):
     """The text with every comment blanked and every string kept, newlines in place.
 
     Reads quotes and template literals (with their ${...} code) so a "//" or "/*" inside a
     string is not a comment. A regular-expression literal is not recognized; code_lines()
-    therefore also keeps the older line filter's lines, so a misread only adds text."""
+    therefore also keeps the older line filter's lines, so a misread only adds text.
+    With mask, each character inside a string (not its quotes, a newline or the code of a
+    ${...}) becomes mask, so positions stay the same."""
     out, i, n = [], 0, len(text)
     stack = []  # open template literals: the brace depth of each ${...} being read
     state = "code"
@@ -227,7 +310,7 @@ def without_comments(text):
             out.append(c if c == "\n" else " ")
         elif state == "`":
             if c == "\\":
-                out.append(text[i:i + 2])
+                out.append(_masked(text[i:i + 2], mask))
                 i += 2
                 continue
             if pair == "${":
@@ -238,17 +321,25 @@ def without_comments(text):
                 continue
             if c == "`":
                 state = "code"
-            out.append(c)
+                out.append(c)
+            else:
+                out.append(_masked(c, mask))
         else:  # inside '...' or "..."; a newline ends a broken one
             if c == "\\":
-                out.append(text[i:i + 2])
+                out.append(_masked(text[i:i + 2], mask))
                 i += 2
                 continue
             if c == state or c == "\n":
                 state = "code"
-            out.append(c)
+                out.append(c)
+            else:
+                out.append(_masked(c, mask))
         i += 1
     return "".join(out)
+
+
+def _masked(chars, mask):
+    return chars if mask is None else "".join(c if c == "\n" else mask for c in chars)
 
 
 def code_lines(text):
@@ -368,6 +459,8 @@ def reachable(files, read):
         if LISTING.search(code) and current not in LISTERS:
             raise Uncertain("unreviewed directory listing in " + current)
         specs = [m.group(2) for m in LITERAL.finditer(text)]
+        # The same literal edges spelled with spaces, newlines or comments (canonical form).
+        specs += [m.group(2) for m in LITERAL.finditer(canonical(text)[0])]
         if current.endswith(".css"):
             specs += [m.group(2) for m in CSS_URL.finditer(text)]
         targets = {resolve(current, spec, files) for spec in specs} - {None}

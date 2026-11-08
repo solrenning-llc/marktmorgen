@@ -1,0 +1,109 @@
+
+FILE z-3237-move-refusal.proof.ts
+
+Executable envelope refusals, no getters or traps executed
+  FAIL  outer extra refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer extra executes no reply code
+  FAIL  outer sparse refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer sparse executes no reply code
+  FAIL  outer inherited refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer inherited executes no reply code
+  FAIL  outer getter refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  outer getter executes no reply code
+        expected 0
+        got      2
+  FAIL  outer proxy refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  outer proxy executes no reply code
+        expected 0
+        got      4
+  FAIL  inner sparse refuses
+        expected "unknown"
+        got      "returned"
+  ok    inner sparse executes no reply code
+  FAIL  inner inherited refuses
+        expected "unknown"
+        got      "returned"
+  ok    inner inherited executes no reply code
+  FAIL  inner getter refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  inner getter executes no reply code
+        expected 0
+        got      1
+  FAIL  inner proxy refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  inner proxy executes no reply code
+        expected 0
+        got      1
+  ok    101 keys preserve the healthy last slot
+  ok    the same registry batch ceiling is used before reading
+
+Actual moveBooking refuses before business writes or HTTP
+  FAIL  broken JSON: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":true,"start":1794934800000,"end":1794938400000,"moves":1}
+  FAIL  broken JSON: no move, diary, reminder or confirmation write
+        expected []
+        got      [["SET","nl:call:moved:cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"n\":1}","EX",17280000],["ZREM","nl:call:remindq","6ae0614187f34fe6b368f2127a37084a|zmoves|cs_test_zmovesbooking000001|24|1794927600000","6ae0614187f34fe6b368f2127a37084a|zmoves|cs_test_zmovesbooking000001|1|1794927600000"]]
+  FAIL  broken JSON: no downstream HTTP and lock released
+        expected [0,null]
+        got      [1,null]
+  FAIL  broken JSON: actual move, diary, reminder and confirmation state unchanged
+        expected ["{bad",[],[],null]
+        got      ["{\"s\":1794934800000,\"e\":1794938400000,\"n\":1}",["cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"until\":0,\"session\":\"cs_test_zmovesbooking000001\",\"p\":\"9f64d0a850\"}"],[],"1"]
+  FAIL  negative move count: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":true,"start":1794934800000,"end":1794938400000,"moves":0}
+  FAIL  negative move count: no move, diary, reminder or confirmation write
+        expected []
+        got      [["SET","nl:call:moved:cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"n\":0}","EX",17280000],["ZREM","nl:call:remindq","6ae0614187f34fe6b368f2127a37084a|zmoves|cs_test_zmovesbooking000001|24|1794927600000","6ae0614187f34fe6b368f2127a37084a|zmoves|cs_test_zmovesbooking000001|1|1794927600000"]]
+  FAIL  negative move count: no downstream HTTP and lock released
+        expected [0,null]
+        got      [1,null]
+  FAIL  negative move count: actual move, diary, reminder and confirmation state unchanged
+        expected ["{\"s\":1794927600000,\"e\":1794931200000,\"n\":-1}",[],[],"1"]
+        got      ["{\"s\":1794934800000,\"e\":1794938400000,\"n\":0}",["cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"until\":0,\"session\":\"cs_test_zmovesbooking000001\",\"p\":\"9f64d0a850\"}"],[],"1"]
+  FAIL  unsafe move count: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":false,"reason":"limit"}
+  ok    unsafe move count: no move, diary, reminder or confirmation write
+  ok    unsafe move count: no downstream HTTP and lock released
+  ok    unsafe move count: actual move, diary, reminder and confirmation state unchanged
+  FAIL  missing outer acknowledgement: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":true,"start":1794934800000,"end":1794938400000,"moves":1}
+  FAIL  missing outer acknowledgement: no move, diary, reminder or confirmation write
+        expected []
+        got      [["SET","nl:call:moved:cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"n\":1}","EX",17280000],["ZREM","nl:call:remindq","6ae0614187f34fe6b368f2127a37084a|zmoves|cs_test_zmovesbooking000001|24|1794927600000","6ae0614187f34fe6b368f2127a37084a|zmoves|cs_test_zmovesbooking000001|1|1794927600000"]]
+  FAIL  missing outer acknowledgement: no downstream HTTP and lock released
+        expected [0,null]
+        got      [1,null]
+  FAIL  missing outer acknowledgement: actual move, diary, reminder and confirmation state unchanged
+        expected ["{\"s\":1794927600000,\"e\":1794931200000,\"n\":2}",[],[],"1"]
+        got      ["{\"s\":1794934800000,\"e\":1794938400000,\"n\":1}",["cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"until\":0,\"session\":\"cs_test_zmovesbooking000001\",\"p\":\"9f64d0a850\"}"],[],"1"]
+  FAIL  extra MGET value: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":false,"reason":"limit"}
+  ok    extra MGET value: no move, diary, reminder or confirmation write
+  ok    extra MGET value: no downstream HTTP and lock released
+  ok    extra MGET value: actual move, diary, reminder and confirmation state unchanged
+  ok    healthy maximum stays refused as limit
+  ok    healthy move still succeeds
+  ok    healthy write remains readable with the actual new count
+
+43 checks, 27 failing.
+Z_VOLUME {"runs":236,"mocks":4,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3237-FyBhAN

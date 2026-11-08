@@ -1,0 +1,69 @@
+
+FILE z-3237-move-refusal.proof.ts
+
+Executable envelope refusals, no getters or traps executed
+  FAIL  outer extra refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer extra executes no reply code
+  FAIL  outer sparse refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer sparse executes no reply code
+  FAIL  outer inherited refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer inherited executes no reply code
+  FAIL  outer getter refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  outer getter executes no reply code
+        expected 0
+        got      2
+  FAIL  outer proxy refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  outer proxy executes no reply code
+        expected 0
+        got      4
+  FAIL  inner sparse refuses
+        expected "unknown"
+        got      "returned"
+  ok    inner sparse executes no reply code
+  FAIL  inner inherited refuses
+        expected "unknown"
+        got      "returned"
+  ok    inner inherited executes no reply code
+  FAIL  inner getter refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  inner getter executes no reply code
+        expected 0
+        got      1
+  FAIL  inner proxy refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  inner proxy executes no reply code
+        expected 0
+        got      1
+  ok    101 keys preserve the healthy last slot
+  ok    the same registry batch ceiling is used before reading
+
+Actual moveBooking refuses before business writes or HTTP
+Z_VOLUME {"runs":88,"mocks":0,"over":false}
+[stdin]:1847
+            throw new Error(`MemoryRedis does not implement ${name}`);
+                  ^
+
+Error: MemoryRedis does not implement ZRANGE
+    at MemoryRedis.run ([stdin]:1847:19)
+    at [stdin]:242:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:242:54)
+    at state ([stdin]:54624:25)
+    at main ([stdin]:54625:31)
+
+Node.js v24.22.1
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3237-feHMjd

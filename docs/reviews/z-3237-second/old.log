@@ -1,0 +1,212 @@
+
+FILE call-moves-read-exact.test.ts
+
+Controls: gone, no string, healthy, none
+  ok    a key gone or holding a hash (MGET answers null) is never moved; the healthy moves read as written
+  ok    no session, or only empty ones, reads nothing
+
+A reply of another shape is never "never moved"
+  FAIL  the pipeline answered with a string: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  the pipeline answered null: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "other: TypeError: Cannot read properties of null (reading '0')"
+  FAIL  the pipeline cut short (one MGET of two answered): readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}]]"
+  FAIL  an MGET answered with a string: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}]]"
+  FAIL  an MGET answered with an object: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  an MGET answered with fewer values than keys: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  an MGET answered with more values than keys: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  a value that is a number: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  a value that is a list: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+
+A kept value that is not a move is never "never moved"
+  FAIL  broken JSON: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  broken JSON: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  the JSON null: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  the JSON null: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  a number: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  a number: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  a list: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  a list: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  an end before its start: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  an end before its start: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  a count that is not whole: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  a count that is not whole: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  a count below zero: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000007\",{\"s\":10,\"e\":20,\"n\":-1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  a count below zero: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000007\",{\"s\":10,\"e\":20,\"n\":-1}]]"
+  FAIL  a start as text: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  a start as text: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  no count: readMoves throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [[\"cs_test_000000000000000000000000\",{\"s\":10,\"e\":20,\"n\":1}],[\"cs_test_000000000000000000000120\",{\"s\":30,\"e\":40,\"n\":0}]]"
+  FAIL  no count: read alone, it throws too
+        expected "UnknownReplyError"
+        got      "no error: []"
+  ok    the broken value gone, the same read is whole again
+
+A booking lead is never approved before a move that could not be read
+  ok    control: moved to tomorrow, the lead waits for the call
+  ok    control: bookingEnds reads the moved end
+  FAIL  the move kept but unreadable: bookingEnds throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  the move kept but unreadable: the approval answers 503 and the lead stays open
+        expected [{"status":503,"body":{"ok":false,"error":"unavailable"}},"open"]
+        got      [{"status":200,"body":{"ok":true,"changed":1}},"approved"]
+  FAIL  the moves' MGET answered in another shape: bookingEnds throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  the moves' MGET answered in another shape: the approval answers 503 and the lead stays open
+        expected [{"status":503,"body":{"ok":false,"error":"unavailable"}},"open"]
+        got      [{"status":200,"body":{"ok":true,"changed":1}},"approved"]
+  ok    control: never moved (the key gone), the lead is approved
+
+37 checks, 31 failing.
+Z_VOLUME {"runs":169,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3237-move-refusal.proof.ts
+
+Executable envelope refusals, no getters or traps executed
+  FAIL  outer extra refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer extra executes no reply code
+  FAIL  outer sparse refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer sparse executes no reply code
+  FAIL  outer inherited refuses
+        expected "unknown"
+        got      "returned"
+  ok    outer inherited executes no reply code
+  FAIL  outer getter refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  outer getter executes no reply code
+        expected 0
+        got      2
+  FAIL  outer proxy refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  outer proxy executes no reply code
+        expected 0
+        got      5
+  FAIL  inner sparse refuses
+        expected "unknown"
+        got      "returned"
+  ok    inner sparse executes no reply code
+  FAIL  inner inherited refuses
+        expected "unknown"
+        got      "returned"
+  ok    inner inherited executes no reply code
+  FAIL  inner getter refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  inner getter executes no reply code
+        expected 0
+        got      1
+  FAIL  inner proxy refuses
+        expected "unknown"
+        got      "returned"
+  FAIL  inner proxy executes no reply code
+        expected 0
+        got      1
+  ok    101 keys preserve the healthy last slot
+  ok    the same registry batch ceiling is used before reading
+
+Actual moveBooking refuses before business writes or HTTP
+  FAIL  broken JSON: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":true,"start":1794934800000,"end":1794938400000,"moves":1}
+  FAIL  broken JSON: no move, diary, reminder or confirmation write
+        expected []
+        got      [["SET","nl:call:moved:cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"n\":1}","EX",17280000],["ZREM","nl:call:remindq","f0a333d5ba0549d88963369b87566a65|zmoves|cs_test_zmovesbooking000001|24|1794927600000","f0a333d5ba0549d88963369b87566a65|zmoves|cs_test_zmovesbooking000001|1|1794927600000"]]
+  FAIL  broken JSON: no downstream HTTP and lock released
+        expected [0,null]
+        got      [1,null]
+  FAIL  negative move count: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":true,"start":1794934800000,"end":1794938400000,"moves":0}
+  FAIL  negative move count: no move, diary, reminder or confirmation write
+        expected []
+        got      [["SET","nl:call:moved:cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"n\":0}","EX",17280000],["ZREM","nl:call:remindq","f0a333d5ba0549d88963369b87566a65|zmoves|cs_test_zmovesbooking000001|24|1794927600000","f0a333d5ba0549d88963369b87566a65|zmoves|cs_test_zmovesbooking000001|1|1794927600000"]]
+  FAIL  negative move count: no downstream HTTP and lock released
+        expected [0,null]
+        got      [1,null]
+  FAIL  unsafe move count: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":false,"reason":"limit"}
+  ok    unsafe move count: no move, diary, reminder or confirmation write
+  ok    unsafe move count: no downstream HTTP and lock released
+  FAIL  missing outer acknowledgement: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":true,"start":1794934800000,"end":1794938400000,"moves":1}
+  FAIL  missing outer acknowledgement: no move, diary, reminder or confirmation write
+        expected []
+        got      [["SET","nl:call:moved:cs_test_zmovesbooking000001","{\"s\":1794934800000,\"e\":1794938400000,\"n\":1}","EX",17280000],["ZREM","nl:call:remindq","f0a333d5ba0549d88963369b87566a65|zmoves|cs_test_zmovesbooking000001|24|1794927600000","f0a333d5ba0549d88963369b87566a65|zmoves|cs_test_zmovesbooking000001|1|1794927600000"]]
+  FAIL  missing outer acknowledgement: no downstream HTTP and lock released
+        expected [0,null]
+        got      [1,null]
+  FAIL  extra MGET value: real move returns error
+        expected {"ok":false,"reason":"error"}
+        got      {"ok":false,"reason":"limit"}
+  ok    extra MGET value: no move, diary, reminder or confirmation write
+  ok    extra MGET value: no downstream HTTP and lock released
+  ok    healthy maximum stays refused as limit
+  ok    healthy move still succeeds
+  ok    healthy write remains readable with the actual new count
+
+38 checks, 24 failing.
+Z_VOLUME {"runs":196,"mocks":4,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3237-3Tn3V6

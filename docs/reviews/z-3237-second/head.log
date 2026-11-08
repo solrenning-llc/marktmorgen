@@ -1,0 +1,160 @@
+
+FILE call-moves-read-exact.test.ts
+
+Controls: gone, no string, healthy, none
+  ok    a key gone or holding a hash (MGET answers null) is never moved; the healthy moves read as written
+  ok    no session, or only empty ones, reads nothing
+
+A reply of another shape is never "never moved"
+  ok    the pipeline answered with a string: readMoves throws UnknownReplyError
+  ok    the pipeline answered null: readMoves throws UnknownReplyError
+  ok    the pipeline cut short (one MGET of two answered): readMoves throws UnknownReplyError
+  ok    an MGET answered with a string: readMoves throws UnknownReplyError
+  ok    an MGET answered with an object: readMoves throws UnknownReplyError
+  ok    an MGET answered with fewer values than keys: readMoves throws UnknownReplyError
+  ok    an MGET answered with more values than keys: readMoves throws UnknownReplyError
+  ok    a value that is a number: readMoves throws UnknownReplyError
+  ok    a value that is a list: readMoves throws UnknownReplyError
+
+A kept value that is not a move is never "never moved"
+  ok    broken JSON: readMoves throws UnknownReplyError
+  ok    broken JSON: read alone, it throws too
+  ok    the JSON null: readMoves throws UnknownReplyError
+  ok    the JSON null: read alone, it throws too
+  ok    a number: readMoves throws UnknownReplyError
+  ok    a number: read alone, it throws too
+  ok    a list: readMoves throws UnknownReplyError
+  ok    a list: read alone, it throws too
+  ok    an end before its start: readMoves throws UnknownReplyError
+  ok    an end before its start: read alone, it throws too
+  ok    a count that is not whole: readMoves throws UnknownReplyError
+  ok    a count that is not whole: read alone, it throws too
+  ok    a count below zero: readMoves throws UnknownReplyError
+  ok    a count below zero: read alone, it throws too
+  ok    a start as text: readMoves throws UnknownReplyError
+  ok    a start as text: read alone, it throws too
+  ok    no count: readMoves throws UnknownReplyError
+  ok    no count: read alone, it throws too
+  ok    the broken value gone, the same read is whole again
+
+A booking lead is never approved before a move that could not be read
+  ok    control: moved to tomorrow, the lead waits for the call
+  ok    control: bookingEnds reads the moved end
+  ok    the move kept but unreadable: bookingEnds throws UnknownReplyError
+  ok    the move kept but unreadable: the approval answers 503 and the lead stays open
+  ok    the moves' MGET answered in another shape: bookingEnds throws UnknownReplyError
+  ok    the moves' MGET answered in another shape: the approval answers 503 and the lead stays open
+  ok    control: never moved (the key gone), the lead is approved
+
+37 checks, all passing.
+Z_VOLUME {"runs":167,"mocks":0,"over":false}
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered a booking's move in an unknown shape
+    at [stdin]:20720:24
+    at Array.forEach (<anonymous>)
+    at [stdin]:20716:9
+    at Array.forEach (<anonymous>)
+    at readMoves ([stdin]:20713:8)
+    at async bookingEnds ([stdin]:53284:17)
+    at async [stdin]:53303:64
+    at async withLock ([stdin]:10150:12)
+    at async decideLeads ([stdin]:53295:12)
+    at async POST ([stdin]:56416:21)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered the bookings' moves in an unknown shape
+    at [stdin]:20715:56
+    at Array.forEach (<anonymous>)
+    at readMoves ([stdin]:20713:8)
+    at async bookingEnds ([stdin]:53284:17)
+    at async [stdin]:53303:64
+    at async withLock ([stdin]:10150:12)
+    at async decideLeads ([stdin]:53295:12)
+    at async POST ([stdin]:56416:21)
+    at async approve ([stdin]:56709:22)
+    at async main ([stdin]:56735:103)
+
+Z_STATUS 0 null
+
+FILE z-3237-move-refusal.proof.ts
+
+Executable envelope refusals, no getters or traps executed
+  ok    outer extra refuses
+  ok    outer extra executes no reply code
+  ok    outer sparse refuses
+  ok    outer sparse executes no reply code
+  ok    outer inherited refuses
+  ok    outer inherited executes no reply code
+  ok    outer getter refuses
+  ok    outer getter executes no reply code
+  ok    outer proxy refuses
+  FAIL  outer proxy executes no reply code
+        expected 0
+        got      1
+  ok    inner sparse refuses
+  ok    inner sparse executes no reply code
+  ok    inner inherited refuses
+  ok    inner inherited executes no reply code
+  ok    inner getter refuses
+  ok    inner getter executes no reply code
+  ok    inner proxy refuses
+  ok    inner proxy executes no reply code
+  ok    101 keys preserve the healthy last slot
+  ok    the same registry batch ceiling is used before reading
+
+Actual moveBooking refuses before business writes or HTTP
+  ok    broken JSON: real move returns error
+  ok    broken JSON: no move, diary, reminder or confirmation write
+  ok    broken JSON: no downstream HTTP and lock released
+  ok    negative move count: real move returns error
+  ok    negative move count: no move, diary, reminder or confirmation write
+  ok    negative move count: no downstream HTTP and lock released
+  ok    unsafe move count: real move returns error
+  ok    unsafe move count: no move, diary, reminder or confirmation write
+  ok    unsafe move count: no downstream HTTP and lock released
+  ok    missing outer acknowledgement: real move returns error
+  ok    missing outer acknowledgement: no move, diary, reminder or confirmation write
+  ok    missing outer acknowledgement: no downstream HTTP and lock released
+  ok    extra MGET value: real move returns error
+  ok    extra MGET value: no move, diary, reminder or confirmation write
+  ok    extra MGET value: no downstream HTTP and lock released
+  ok    healthy maximum stays refused as limit
+  ok    healthy move still succeeds
+  ok    healthy write remains readable with the actual new count
+
+38 checks, 1 failing.
+Z_VOLUME {"runs":145,"mocks":1,"over":false}
+moving a booking failed UnknownReplyError: Redis answered a booking's move in an unknown shape
+    at [stdin]:14157:24
+    at Array.forEach (<anonymous>)
+    at [stdin]:14153:9
+    at Array.forEach (<anonymous>)
+    at readMoves ([stdin]:14150:8)
+    at async moveBooking ([stdin]:54263:23)
+    at async main ([stdin]:54636:45)
+moving a booking failed UnknownReplyError: Redis answered a booking's move in an unknown shape
+    at [stdin]:14157:24
+    at Array.forEach (<anonymous>)
+    at [stdin]:14153:9
+    at Array.forEach (<anonymous>)
+    at readMoves ([stdin]:14150:8)
+    at async moveBooking ([stdin]:54263:23)
+    at async main ([stdin]:54636:45)
+moving a booking failed UnknownReplyError: Redis answered a booking's move in an unknown shape
+    at [stdin]:14157:24
+    at Array.forEach (<anonymous>)
+    at [stdin]:14153:9
+    at Array.forEach (<anonymous>)
+    at readMoves ([stdin]:14150:8)
+    at async moveBooking ([stdin]:54263:23)
+    at async main ([stdin]:54636:45)
+moving a booking failed UnknownReplyError: Redis answered the bookings' moves in an unknown shape
+    at readMoves ([stdin]:14149:23)
+    at async moveBooking ([stdin]:54263:23)
+    at async main ([stdin]:54636:45)
+moving a booking failed UnknownReplyError: Redis answered the bookings' moves in an unknown shape
+    at [stdin]:14152:56
+    at Array.forEach (<anonymous>)
+    at readMoves ([stdin]:14150:8)
+    at async moveBooking ([stdin]:54263:23)
+    at async main ([stdin]:54636:45)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3237-clOtIA

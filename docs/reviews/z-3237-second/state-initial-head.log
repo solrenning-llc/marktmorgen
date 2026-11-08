@@ -1,0 +1,43 @@
+
+FILE z-3237-move-refusal.proof.ts
+
+Executable envelope refusals, no getters or traps executed
+  ok    outer extra refuses
+  ok    outer extra executes no reply code
+  ok    outer sparse refuses
+  ok    outer sparse executes no reply code
+  ok    outer inherited refuses
+  ok    outer inherited executes no reply code
+  ok    outer getter refuses
+  ok    outer getter executes no reply code
+  ok    outer proxy refuses
+  ok    outer proxy executes no reply code
+  ok    inner sparse refuses
+  ok    inner sparse executes no reply code
+  ok    inner inherited refuses
+  ok    inner inherited executes no reply code
+  ok    inner getter refuses
+  ok    inner getter executes no reply code
+  ok    inner proxy refuses
+  ok    inner proxy executes no reply code
+  ok    101 keys preserve the healthy last slot
+  ok    the same registry batch ceiling is used before reading
+
+Actual moveBooking refuses before business writes or HTTP
+Z_VOLUME {"runs":88,"mocks":0,"over":false}
+[stdin]:1847
+            throw new Error(`MemoryRedis does not implement ${name}`);
+                  ^
+
+Error: MemoryRedis does not implement ZRANGE
+    at MemoryRedis.run ([stdin]:1847:19)
+    at [stdin]:242:72
+    at Array.map (<anonymous>)
+    at MemoryRedis.pipeline ([stdin]:242:54)
+    at state ([stdin]:54635:25)
+    at main ([stdin]:54636:31)
+
+Node.js v24.22.1
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3237-N3xlmf

@@ -1,0 +1,351 @@
+
+FILE call-moves-read.test.ts
+✔ five hundred bookings: five MGETs of a hundred in one trip, and every move as written (17.695446ms)
+✔ a key that is gone or not a string is read as never moved; the others still are; a value that is not a move throws (3.81595ms)
+✔ one booking is one MGET; none, or only empty sessions, reads nothing (0.407143ms)
+✔ the same session twice is read twice and found once, as before (0.313533ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.984214
+Z_VOLUME {"runs":106,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE call-lengths-booking.test.ts
+
+The setup keeps them only in the shape the rules allow
+  ok    two lengths, shortest first, the first the setup's own
+  ok    one length, or none, is no list
+  ok    out of order, not the setup's own first, twice, no price, a part of a cent, an unknown length, four, a group, too long for the hours, a deposit not below every price, one that is not the setup's own, not a list
+  ok    the setup and the rules allow the same number of lengths
+  ok    read back from storage, lengths the rules no longer allow are dropped, never the call: it sells at its own length alone
+  ok    a setup broken elsewhere is still refused from storage
+  ok    a deposit below every price is kept
+
+The length of a new booking
+  ok    none sent is the setup's own; one of the list at its own price
+  ok    a length the call does not have is refused
+  ok    a product whose price was changed elsewhere sells only the setup's own length, at the price now
+  ok    a call with one length: its own length at the product's price, and nothing else
+  ok    dated sessions have their own lengths
+  ok    a paid booking keeps its own length when it moves, with or without the list
+
+Booked and charged at the length chosen
+  ok    the product carries them
+  ok    the hour is charged at the hour's price, said on the line and kept on the sale
+  ok    its whole hour is held: half an hour inside it cannot be booked
+  ok    none chosen is the setup's own, at the product's price
+  ok    refused before anything is opened: an unknown length, a price changed since, another length from a package, with a deposit or with a code
+  ok    a call with one length is charged its own price, whatever is passed
+  ok    back from Stripe's page, the length chosen is still chosen; the call's own length needs nothing said
+
+A paid booking moves at its own length
+  ok    an hour stays an hour, though the setup's own is half of one
+  ok    a booking whose length is not one a call may have is never moved at a guess
+  ok    the times offered to move it are a whole hour each: none starts after 4 p.m.
+  ok    the studio's save route refuses several lengths for now
+
+Once the list is gone, a paid hour still moves as an hour
+  ok    the setup's own is half an hour, the booking stays an hour
+
+25 checks, all passing.
+Z_VOLUME {"runs":181,"mocks":8,"over":false}
+
+Z_STATUS 0 null
+
+FILE call-team-read-failure.test.ts
+
+Confirming a paid team booking while its team cannot be read
+  ok    the hold claims its host's time for as long as the checkout can be paid
+  ok    a failed team read throws and leaves the booking unconfirmed, for the next confirmation
+  ok    confirmed once the team can be read, its host's claim is kept for good
+
+Moving a team booking while its team cannot be read
+  ok    the booking is confirmed with its host's claim for good
+  ok    the move is refused, and the host keeps the booked time
+  ok    once the team can be read, the move keeps its host at the new time
+
+6 checks, all passing.
+Z_VOLUME {"runs":284,"mocks":5,"over":false}
+reading a moved booking's team failed Error: Redis request failed with status 503
+    at store.pipeline ([stdin]:56095:111)
+    at redisPipeline ([stdin]:2355:41)
+    at readTeams ([stdin]:55071:23)
+    at teamForMove ([stdin]:55792:22)
+    at moveBooking ([stdin]:55640:18)
+    at main ([stdin]:56176:23)
+
+Z_STATUS 0 null
+
+FILE affiliate-leads-read-unknown.test.ts
+
+Controls: the exact empty list, healthy leads, and the budget and the cap reached by healthy leads
+  ok    no leads kept: the exact empty list is none
+  ok    no leads kept: a decision on a lead that is not there is unknown
+  ok    healthy leads read whole
+  ok    one approved ($5 of $10): the new lead is approved
+  ok    two approved reach the $10 budget: the new lead is refused
+  ok    two approved reach the cap of two a day: the new lead is refused
+
+1. An approved lead that does not read never drops out of the budget or the cap
+  ok    budget, the second approved lead with broken JSON: readLeads throws UnknownReplyError
+  ok    budget, broken JSON: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its amount as text: readLeads throws UnknownReplyError
+  ok    budget, its amount as text: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its currency in capitals (a euro lead read as dollars): readLeads throws UnknownReplyError
+  ok    budget, its currency in capitals (a euro lead read as dollars): the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its state of another shape: readLeads throws UnknownReplyError
+  ok    budget, its state of another shape: the approval answers 503 unavailable and the new lead stays open
+  ok    cap, the second approved lead with its time as text: readLeads throws UnknownReplyError
+  ok    cap, its time as text: the approval answers 503 unavailable and the new lead stays open
+
+1b. A HGETALL reply of another shape is never an empty or a partial list
+  ok    leads-object: readLeads throws UnknownReplyError
+  ok    leads-object: the approval answers 503 unavailable
+  ok    leads-queued: readLeads throws UnknownReplyError
+  ok    leads-queued: the approval answers 503 unavailable
+  ok    leads-odd: readLeads throws UnknownReplyError
+  ok    leads-odd: the approval answers 503 unavailable
+  ok    the new lead was never approved on a reply of another shape
+
+2. The person's copy never comes out complete with a lead missing
+  ok    healthy: the person's own lead is copied
+  ok    no leads kept: nothing to copy, exactly
+  ok    leads-object: the copier throws, never an empty copy
+  ok    leads-queued: the copier throws, never an empty copy
+  ok    leads-null: the copier throws, never an empty copy
+  ok    their own lead unreadable: the copier throws, never a copy without it
+
+2b. Another person's unreadable lead never blocks a person's copy (Art. 15); their own still does
+  ok    B's lead with an amount as text: A's copy is A's lead, whole
+  ok    B's lead with an amount as text: B's own copy throws, never a copy without it
+  ok    B's lead with an amount as text: the program's leads still do not read for a decision
+  ok    B's lead with an amount as text: a person with no lead gets an empty copy, exactly
+  ok    B's lead with broken JSON: A's copy is A's lead, whole
+  ok    B's lead with broken JSON: B's own copy throws, never a copy without it
+  ok    B's lead with broken JSON: the program's leads still do not read for a decision
+  ok    B's lead with broken JSON: a person with no lead gets an empty copy, exactly
+  ok    A's own lead with an amount as text: A's copy throws, never a copy without it
+  ok    A's own lead with an amount as text: B's copy is B's lead, whole
+  ok    A's own lead with broken JSON: A's copy throws, never a copy without it
+  ok    A's own lead with broken JSON: B's copy is B's lead, whole
+  ok    A's own lead with a state of another shape: A's copy throws, never a copy without it
+  ok    A's own lead with a state of another shape: B's copy is B's lead, whole
+  ok    the address asked for written in capitals: the same person's lead
+  ok    a lead whose address already came off (deleted person): nothing to copy
+
+3. The sibling readers: deleting a person, and the contact credit
+  ok    no lead for the person: nothing to forget
+  ok    their lead unreadable, the address maybe in it: the deletion throws and is tried again
+  ok    and the record is left as it was
+  ok    a healthy lead: the address comes off
+  ok    an amount of another type: the address comes off, and the amount is written back as kept, never a readable 0
+  ok    so the program's leads still do not read after the deletion
+  ok    an address of another type: the deletion throws and is tried again
+  ok    control: a healthy lead before the checkout credits its affiliate
+  ok    a reversal whose state no longer reads never credits the affiliate
+
+54 checks, all passing.
+Z_VOLUME {"runs":308,"mocks":0,"over":false}
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53958:23)
+    at async [stdin]:53989:19
+    at async withLock ([stdin]:10183:12)
+    at async decideLeads ([stdin]:53988:12)
+    at async POST ([stdin]:68239:21)
+    at async approve ([stdin]:68494:22)
+    at async main ([stdin]:68550:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53958:23)
+    at async [stdin]:53989:19
+    at async withLock ([stdin]:10183:12)
+    at async decideLeads ([stdin]:53988:12)
+    at async POST ([stdin]:68239:21)
+    at async approve ([stdin]:68494:22)
+    at async main ([stdin]:68550:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53958:23)
+    at async [stdin]:53989:19
+    at async withLock ([stdin]:10183:12)
+    at async decideLeads ([stdin]:53988:12)
+    at async POST ([stdin]:68239:21)
+    at async approve ([stdin]:68494:22)
+    at async main ([stdin]:68550:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53958:23)
+    at async [stdin]:53989:19
+    at async withLock ([stdin]:10183:12)
+    at async decideLeads ([stdin]:53988:12)
+    at async POST ([stdin]:68239:21)
+    at async approve ([stdin]:68494:22)
+    at async main ([stdin]:68550:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53958:23)
+    at async [stdin]:53989:19
+    at async withLock ([stdin]:10183:12)
+    at async decideLeads ([stdin]:53988:12)
+    at async POST ([stdin]:68239:21)
+    at async approve ([stdin]:68494:22)
+    at async main ([stdin]:68550:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53954:47)
+    at async [stdin]:53989:19
+    at async withLock ([stdin]:10183:12)
+    at async decideLeads ([stdin]:53988:12)
+    at async POST ([stdin]:68239:21)
+    at async approve ([stdin]:68494:22)
+    at async main ([stdin]:68557:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53954:47)
+    at async [stdin]:53989:19
+    at async withLock ([stdin]:10183:12)
+    at async decideLeads ([stdin]:53988:12)
+    at async POST ([stdin]:68239:21)
+    at async approve ([stdin]:68494:22)
+    at async main ([stdin]:68557:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53954:47)
+    at async [stdin]:53989:19
+    at async withLock ([stdin]:10183:12)
+    at async decideLeads ([stdin]:53988:12)
+    at async POST ([stdin]:68239:21)
+    at async approve ([stdin]:68494:22)
+    at async main ([stdin]:68557:60)
+
+Z_STATUS 0 null
+
+FILE call-reminder.test.ts
+
+The checkout of a call
+  ok    without reminders: Stripe is asked nothing
+  ok    with them: Stripe asks for consent, and keeps the address if the buyer leaves
+  ok    and the call keeps its own closing time
+  ok    an account Stripe will not ask for still sells the call, without asking
+
+A call left with Stripe's yes
+  ok    not without the yes
+  ok    not for a session from a package
+  ok    with it: one email
+  ok    to the buyer, about the time they picked
+  ok    naming the time in their own zone, and that it was not kept
+  ok    leading to the times still open, at today's price
+  ok    with why it came, the stop link and the creator's address
+  ok    never twice in a week
+  ok    nor to somebody who has booked it since
+  ok    nor when no time is left to book
+
+A call long over leaves the diary, and gives its room back
+  ok    the call that ended more than PAST_CALL_DAYS ago is let go; the recent one stays
+  ok    and what its line took is given back, never more
+  ok    given back once
+
+17 checks, all passing.
+Z_VOLUME {"runs":196,"mocks":16,"over":false}
+call checkout refused the reminder fields; opened without them StripeError: Stripe request failed (400 invalid_request_error): consent_collection[promotions] is not available for this account.
+    at onAccount ([stdin]:5991:11)
+    at async [stdin]:57359:16
+    at async openKeepingTheSale ([stdin]:6063:12)
+    at async holdAndCheckout ([stdin]:57357:21)
+    at async main ([stdin]:64911:20) {
+  status: 400,
+  code: 'invalid_request_error',
+  stripeMessage: 'consent_collection[promotions] is not available for this account.'
+}
+
+Z_STATUS 0 null
+
+FILE redis-reply-envelope.test.ts
+
+stringList reads only own data slots (S proof, blob 6dd43857)
+  ok    confirmed plain strings
+  ok    confirmed empty list
+  ok    confirmed frozen list
+  ok    a plain hole is refused
+  ok    a string inherited into a hole is not a confirmed member
+  ok    an accessor is refused without executing it
+  ok    a Proxy around valid strings is refused
+  ok    stringList runs no trap of that Proxy
+  ok    a revoked Proxy is refused, not thrown on
+  ok    the answer is a fresh list, not the reply itself
+  ok    a non-string member is still refused
+
+repliesFor refuses a Proxy before any reflection
+  ok    a Proxy around a valid two-reply pipeline is refused
+  ok    repliesFor runs no trap of that Proxy
+  ok    a plain pipeline reply still passes
+  ok    a frozen pipeline reply still passes
+  ok    a wrong count is still refused
+  ok    a hole is still refused
+
+ordersGrant does not run a Proxy reply (S proof, blob 260c6b68)
+  ok    confirmed grant retains its address
+  ok    the confirmed grant uses only one GET
+  ok    an executable reply does not authorize an address
+  ok    the consumer executes no reply traps
+  ok    transport Promise probing is explicitly accounted for
+  ok    confirmed frozen grant remains valid
+
+23 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (33.266291ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (86.327086ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (32.054184ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.017221ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.157518ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.116446ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.387574ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (63.746992ms)
+✔ every store figure taken in the code is a kind a line prices (43.072221ms)
+✔ every email sent names a meter, and each file only the meters it may use (67.600964ms)
+✔ the units a figure is taken in cost at least what they stand for (8.595614ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.825273ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.157057ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.275175ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.136235ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.129415ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.334634ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.143306ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.724432ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.077607ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (1.998154ms)
+✔ Path push fits its reserved studio requests (0.080151ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.179651ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.104468ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.153242ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (32.618154ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 396.721916
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3237-5jEbw8

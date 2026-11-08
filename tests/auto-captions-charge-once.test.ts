@@ -16,7 +16,7 @@
  * The fake Stripe keeps its invoices and replays an idempotency key's first
  * answer, as Stripe does; synthetic data only.
  */
-import { requestAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
+import { requestAutoCaptions, sweepAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
 import { streamPath } from "@/lib/stream-rules";
 import type { Store } from "@/lib/store";
 import { readFileSync } from "node:fs";
@@ -30,7 +30,8 @@ const PATH = streamPath(FOLDER, "lesson000003", VIDEO);
 const KEY = `nl:stream:auto:${VIDEO}`;
 const PRICE = 12000;
 
-type Invoice = { id: string; object: "invoice"; customer: string; status: string; currency: "usd"; amount_due: number; payment_intent: string | null; created: number; metadata: { mark: string } };
+type Invoice = { id: string; object: "invoice"; customer: string; status: string; currency: "usd"; amount_due: number; payment_intent: string | null; created: number; metadata: { mark: string }; total?: number; amount_paid?: number; from_balance?: number };
+type BalanceTxn = { id: string; object: "customer_balance_transaction"; customer: string; amount: number; currency: "usd"; type: string; metadata: Record<string, string> | null };
 type Refund = { id: string; object: "refund"; amount: number; currency: "usd"; payment_intent: string; status: string };
 let invoices: Invoice[] = [];
 let refunds: Refund[] = [];
@@ -47,6 +48,13 @@ let dieAfterPay = false;
 let dieAt = "";
 let dead = false;
 const transcribes: unknown[] = [];
+/** The customer's credit balance, in cents (negative is credit, as Stripe keeps it), and its history. */
+let customerBalance = 0;
+let balanceTxns: BalanceTxn[] = [];
+/** A credit to the balance is made and its answer lost. */
+let creditAnswerLost = false;
+/** The video service refuses to write captions. */
+let transcribeRefused = false;
 
 class Died extends Error {}
 
@@ -58,6 +66,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "video.bunnycdn.com") {
     if (url.pathname.includes("/transcribe")) {
       transcribes.push(JSON.parse(String(init?.body)));
+      if (transcribeRefused) return json({ success: false, statusCode: 400 }, 400);
       return json({ success: true, statusCode: 200 });
     }
     return json({ guid: VIDEO, status: 4, captions: [] });
@@ -78,6 +87,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json(out, status);
   };
   const invoiceOf = (id: string) => invoices.find((i) => i.id === decodeURIComponent(id));
+  const history = /^\/customers\/([^/]+)\/balance_transactions$/.exec(path);
+  if (history && method === "GET") return json({ object: "list", has_more: false, data: balanceTxns.filter((t) => t.customer === decodeURIComponent(history[1])).slice().reverse() });
+  if (history && method === "POST") {
+    const made: BalanceTxn = { id: `cbtxn_Captions${String(balanceTxns.length + 1).padStart(6, "0")}`, object: "customer_balance_transaction", customer: decodeURIComponent(history[1]), amount: Number(body.get("amount")), currency: "usd", type: "adjustment", metadata: body.has("metadata[nl_captions_credit]") ? { nl_captions_credit: String(body.get("metadata[nl_captions_credit]")) } : null };
+    balanceTxns.push(made);
+    customerBalance += made.amount;
+    if (creditAnswerLost) {
+      if (key) replays.set(key, { status: 200, body: { ...made } });
+      return json({ error: { type: "api_error", message: "the answer was lost" } }, 500);
+    }
+    return answer({ ...made });
+  }
   if (path.startsWith("/subscriptions/")) return json({ id: "sub_Store000003", default_payment_method: "pm_card_on_file" });
   if (path === "/invoices" && method === "POST") {
     const made: Invoice = { id: `in_Captions${String(invoices.length + 1).padStart(6, "0")}`, object: "invoice", customer: String(body.get("customer")), status: "draft", currency: "usd", amount_due: 0, payment_intent: null, created: clock, metadata: { mark: String(body.get("metadata[mark]")) } };
@@ -102,6 +123,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (!invoice) return json({ error: { type: "invalid_request_error", message: "no such invoice" } }, 404);
     if (action[2] === "finalize") {
       invoice.status = "open";
+      // A credit balance that covers the whole invoice pays it when it is finalized, with no payment (Stripe's invoices).
+      if (invoice.amount_due > 0 && -customerBalance >= invoice.amount_due) {
+        customerBalance += invoice.amount_due;
+        balanceTxns.push({ id: `cbtxn_Captions${String(balanceTxns.length + 1).padStart(6, "0")}`, object: "customer_balance_transaction", customer: invoice.customer, amount: invoice.amount_due, currency: "usd", type: "applied_to_invoice", metadata: null });
+        invoice.total = invoice.amount_due;
+        invoice.from_balance = invoice.amount_due;
+        invoice.amount_due = 0;
+        invoice.amount_paid = 0;
+        invoice.status = "paid";
+      }
       return answer({ ...invoice });
     }
     if (action[2] === "pay") {
@@ -151,6 +182,11 @@ const store = {
   stripeCustomerId: "cus_Store000003",
 } as unknown as Store;
 
+/** The video is held by an order whose charge is not settled yet. */
+const parseOrderKept = () => {
+  const raw = redis.run(["GET", KEY]);
+  return typeof raw === "string" && raw.includes('"order"');
+};
 /** Charges kept: paid invoices less what was refunded on them. */
 const kept = () => invoices.filter((i) => i.status === "paid").reduce((sum, i) => sum + i.amount_due, 0) - refunds.filter((r) => r.status === "succeeded").reduce((sum, r) => sum + r.amount, 0);
 const paidCount = () => invoices.filter((i) => i.status === "paid").length;
@@ -166,6 +202,10 @@ function reset(): void {
   dieAfterPay = false;
   dieAt = "";
   dead = false;
+  customerBalance = 0;
+  balanceTxns = [];
+  creditAnswerLost = false;
+  transcribeRefused = false;
   redis.run(["SET", `nl:stream:v:${VIDEO}`, JSON.stringify({ id: VIDEO, path: PATH, name: "Knife skills.mp4", type: "video/mp4", bytes: 1, state: "ready", at: Date.now(), seconds: 600, width: 1920, height: 1080, settled: true })]);
 }
 
@@ -276,6 +316,134 @@ async function main(): Promise<void> {
   globalThis.fetch = realFetch;
   is("declined, nothing charged, nothing asked, the video free again", [declined, paidCount(), transcribes.length, redis.run(["GET", KEY]), invoices.length - declinedPay], ["declined", 0, 0, null, 1]);
   is("the next request charges once, under a key of its own", [await ask(T + 1_000), paidCount(), invoices.length], ["asked", 1, 2]);
+
+  part("The record's write after the charge lands, and its answer is lost (Claude 2 on #3286, finding 1)");
+  reset();
+  const realRun = redis.pipeline;
+  /** The post-charge write: SET of the record with its payment, then its queue entry. */
+  const isRecordWrite = (commands: unknown[][]) => commands.length === 2 && commands[0][0] === "SET" && commands[0][1] === KEY && String(commands[0][2]).includes('"pi"');
+  redis.pipeline = async (commands) => {
+    if (isRecordWrite(commands as unknown[][])) {
+      await realRun(commands);
+      return [] as unknown[];
+    }
+    return realRun(commands);
+  };
+  const landed = await ask(T);
+  redis.pipeline = realRun;
+  is("read back, the record holds this charge: the captions are asked for, once", [landed, paidCount(), transcribes.length], ["asked", 1, 1]);
+  is("a retry is told they are being written, and charges nothing more", [await ask(T + 1_000), paidCount(), invoices.length], ["busy", 1, 1]);
+  reset();
+  redis.pipeline = async (commands) => (isRecordWrite(commands as unknown[][]) ? ([] as unknown[]) : realRun(commands));
+  const lost = await ask(T);
+  redis.pipeline = realRun;
+  is("the write did not land: nothing asked of the service, the order still held", [lost, transcribes.length, parseOrderKept()], ["checking", 0, true]);
+  advance(16 * 60_000);
+  await syncAutoCaptions(VIDEO, T + 16 * 60_000);
+  await syncAutoCaptions(VIDEO, T + 30 * 60_000);
+  is("the order is settled from Stripe's invoice: refunded in full, once", [paidCount(), refunds.length, kept(), redis.run(["GET", KEY])], [1, 1, 0, null]);
+  reset();
+  redis.pipeline = async (commands) => {
+    if (isRecordWrite(commands as unknown[][])) {
+      await realRun(commands);
+      return [] as unknown[];
+    }
+    if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === KEY) return [] as unknown[];
+    return realRun(commands);
+  };
+  const unread = await ask(T);
+  redis.pipeline = realRun;
+  is("landed but the read-back is unknown too: nothing asked, kept for the sweep", [unread, transcribes.length, redis.run(["ZSCORE", "nl:stream:autoq", VIDEO]) !== null], ["checking", 0, true]);
+
+  part("An invoice paid wholly from the creator's credit balance (Claude 2 finding 2, Claude 6's MEDIUM on #3286)");
+  reset();
+  customerBalance = -50_000;
+  const fromCredit = await ask(T);
+  is("the credit paid it: the captions are asked for, once, and nothing is charged to the card", [fromCredit, transcribes.length, customerBalance, invoices.map((i) => [i.status, i.payment_intent])], ["asked", 1, -38_000, [["paid", null]]]);
+  is("a retry charges nothing more", [await ask(T + 1_000), invoices.length, customerBalance], ["busy", 1, -38_000]);
+  advance(49 * 3_600_000);
+  await syncAutoCaptions(VIDEO, T + 49 * 3_600_000);
+  is("nothing written after GIVE_UP_HOURS: the whole price goes back to the credit balance, once", [customerBalance, balanceTxns.filter((t) => t.amount < 0).length, redis.run(["GET", KEY])], [-50_000, 1, null]);
+  is("and is marked with its own key", balanceTxns.filter((t) => t.amount < 0).map((t) => [t.amount, t.metadata?.nl_captions_credit?.startsWith(`nl-captions:${VIDEO}:`)]), [[-12_000, true]]);
+
+  reset();
+  customerBalance = -50_000;
+  transcribeRefused = true;
+  is("the video service refuses: given back to the credit, said as such", [await ask(T), customerBalance, redis.run(["GET", KEY])], ["credited", -50_000, null]);
+  is("the creator is told where the money went", readFileSync("components/course-editor.tsx", "utf8").includes('auto_credited: "The video service would not write these captions, so the charge was returned to your account credit.'), true);
+
+  reset();
+  customerBalance = -50_000;
+  transcribeRefused = true;
+  creditAnswerLost = true;
+  is("the credit back is made and its answer lost: kept as owed", [await ask(T), customerBalance], ["refund_pending", -50_000]);
+  creditAnswerLost = false;
+  advance(24 * 3_600_000 + 60_000);
+  replays.clear();
+  await syncAutoCaptions(VIDEO, T + 24 * 3_600_000 + 60_000);
+  await syncAutoCaptions(VIDEO, T + 25 * 3_600_000);
+  is("a look a day later reads the balance history and credits nothing twice", [customerBalance, balanceTxns.filter((t) => t.amount < 0).length, redis.run(["GET", KEY])], [-50_000, 1, null]);
+
+  reset();
+  customerBalance = -50_000;
+  dieAt = "/pay";
+  is("the process dies once the credit paid the invoice: kept, nothing asked", [await ask(T), redis.run(["GET", KEY]) !== null, customerBalance, transcribes.length], ["checking", true, -38_000, 0]);
+  dieAt = "";
+  dead = false;
+  advance(16 * 60_000);
+  await syncAutoCaptions(VIDEO, T + 16 * 60_000);
+  await syncAutoCaptions(VIDEO, T + 30 * 60_000);
+  await syncAutoCaptions(VIDEO, T + 60 * 60_000);
+  is("the sweep finds the invoice paid from the credit and gives it back, once", [customerBalance, balanceTxns.filter((t) => t.amount < 0).length, redis.run(["GET", KEY])], [-50_000, 1, null]);
+  is("asked again: used once more", [await ask(T + 61 * 60_000), customerBalance, transcribes.length], ["asked", -38_000, 1]);
+
+  part("A claim whose write landed but cannot be read back is still queued (Claude 2 finding 4)");
+  reset();
+  redis.pipeline = async (commands) => {
+    const c = commands as unknown[][];
+    if (c.length === 1 && c[0][0] === "SET" && c[0][1] === KEY && c[0].includes("NX")) {
+      await realRun(commands);
+      return [] as unknown[];
+    }
+    if (c.length === 1 && c[0][0] === "GET" && c[0][1] === KEY) return [] as unknown[];
+    return realRun(commands);
+  };
+  const claimLost = await ask(T);
+  redis.pipeline = realRun;
+  is("unknown claim: nothing charged, and the video queued so the order is settled", [claimLost, invoices.length, redis.run(["GET", KEY]) !== null, redis.run(["ZSCORE", "nl:stream:autoq", VIDEO]) !== null], ["unavailable", 0, true, true]);
+  advance(16 * 60_000);
+  await sweepAutoCaptions(Number.POSITIVE_INFINITY, T + 16 * 60_000);
+  is("the sweep finds it and lets the unpaid order go", redis.run(["GET", KEY]), null);
+
+  part("A slow settler of an old order never takes a newer order's queue entry (Claude 2 finding 3)");
+  reset();
+  dieAt = "GET /subscriptions/sub_Store000003";
+  is("an old order, cut off before any invoice", await ask(T), "checking");
+  dieAt = "";
+  dead = false;
+  advance(16 * 60_000);
+  const at = T + 16 * 60_000;
+  let raced = false;
+  const listFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (!raced && url.includes("/v1/invoices?")) {
+      raced = true;
+      // While the slow settler reads Stripe: a creator's retry settles the old order, then a new order is charged and its process dies.
+      globalThis.fetch = listFetch;
+      await ask(at);
+      dieAfterPay = true;
+      await ask(at + 1_000);
+      dieAfterPay = false;
+      dead = false;
+    }
+    return listFetch(input, init);
+  }) as typeof fetch;
+  await syncAutoCaptions(VIDEO, at);
+  globalThis.fetch = listFetch;
+  is("the new, paid order is still queued once the slow settler is done", [raced, paidCount(), redis.run(["ZSCORE", "nl:stream:autoq", VIDEO]) !== null], [true, 1, true]);
+  for (let minutes = 20; minutes <= 60; minutes += 5) await sweepAutoCaptions(Number.POSITIVE_INFINITY, T + minutes * 60_000);
+  is("and the sweep, which reads only the queue, refunds it in full, once", [paidCount(), refunds.length, kept()], [1, 1, 0]);
 
   done();
 }

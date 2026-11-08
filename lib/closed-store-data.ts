@@ -53,7 +53,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, scanPage } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -316,15 +316,27 @@ type Follower = { match: (key: string) => boolean; find: (keys: string[], entry:
 
 const READ_BATCH = FOLLOW_BATCH;
 
+/** The most pages one walk of a key's members reads (a thousand asked for a page); a walk not at its end by then is unknown. */
+const MEMBER_PAGES = 10_000;
+
+/**
+ * Every member of one key, a page at a time. A page that does not read, or a walk not at its end after
+ * MEMBER_PAGES, throws UnknownReplyError (rules 24 and 30, review of #2921): never "no more members", so the walk's
+ * page is not deleted, its cursor is not moved on, its stores are not finished, and the next run reads it again.
+ * Until then a short walk here left a closing store's members and followed keys behind while the store was
+ * reported erased.
+ */
 async function scanAll(command: "HSCAN" | "SSCAN" | "ZSCAN", key: string, each: (flat: string[]) => Promise<void> | void): Promise<void> {
   let cursor = "0";
-  for (let round = 0; round < 10_000; round += 1) {
-    const [reply] = await redisPipeline([[command, key, cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) return;
-    cursor = String(reply[0]);
-    await each(Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : []);
+  for (let round = 0; round < MEMBER_PAGES; round += 1) {
+    const page = scanPage(await redisPipeline([[command, key, cursor, "COUNT", 1000]]));
+    // A hash or a sorted set answers pairs (field and value, member and score): an odd page is not one.
+    if (!page || (command !== "SSCAN" && page.items.length % 2 !== 0)) throw new UnknownReplyError(`the closing walk's ${command} of a key`);
+    cursor = page.next;
+    await each(page.items);
     if (cursor === "0") return;
   }
+  throw new UnknownReplyError(`the closing walk's ${command} of a key, not at its end after ${MEMBER_PAGES} pages,`);
 }
 
 const json = (raw: string): Record<string, unknown> | null => {
@@ -651,10 +663,11 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   const batch = await readBatch();
   const owners = ownersOf([...batch.values()]);
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
-    const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", "nl:*", "COUNT", WALK_COUNT]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    const next = String(reply[0]);
-    const keys = Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
+    // A page that does not read is unknown, not a page with no keys nor the end of the database (rule 30): the run
+    // stops with the cursor where it was, so the page is read again and no store is finished past it.
+    const page = scanPage(await redisPipeline([["SCAN", cursor, "MATCH", "nl:*", "COUNT", WALK_COUNT]]));
+    if (!page) throw new UnknownReplyError("the closing walk's SCAN");
+    const { next, items: keys } = page;
     const done = await walkPage(keys, batch, owners);
     report.deleted += done.deleted;
     report.pruned += done.pruned;

@@ -103,6 +103,23 @@ export function repliesFor(replies: unknown, commands: number): unknown[] | null
   return ownSlots(replies, commands);
 }
 
+/**
+ * One page of a SCAN, SSCAN, HSCAN or ZSCAN, read exactly (rules 24 and 30, review of #2921): the pipeline's one
+ * reply, a [cursor, items] pair whose cursor is a string of digits and whose items are strings; null for anything
+ * else. A page that does not read is unknown: never the end of the walk ("0"), never a page with nothing on it.
+ * The caller throws UnknownReplyError on null, and bounds its walk with a page ceiling past which it is unknown too.
+ */
+export function scanPage(replies: unknown): { next: string; items: string[] } | null {
+  const reply = ownSlots(replies, 1);
+  const page = reply ? ownSlots(reply[0], 2) : null;
+  if (!page) return null;
+  const next = page[0];
+  // "", "abc", " 0" or a number is not a cursor (Codex T on #2921): it would end the walk or mislead it.
+  if (typeof next !== "string" || !/^[0-9]+$/.test(next)) return null;
+  const items = stringList(page[1]);
+  return items ? { next, items } : null;
+}
+
 /** Thrown where a reply was not in its exact shape, so what depended on it is said as not done. */
 export class UnknownReplyError extends Error {
   constructor(what: string) {

@@ -30,6 +30,8 @@ import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { GIFT_ID, GIFT_KEPT_SECONDS, GIFT_PENDING_SECONDS, MAX_GIFT_FROM, MAX_GIFT_MESSAGE, canGift, givenOption } from "@/lib/gift-rules";
+// On its own line, so open pull requests that change the imports above still merge cleanly.
+import { type StripePage, StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 
 export type Gift = {
   id: string;
@@ -60,6 +62,14 @@ const piKey = (pi: string) => `nl:gift:pi:${pi}`;
 export const giftKeys = (id: string, pi: string): string[] => [...(id ? [giftKey(id), `${giftKey(id)}:giving`] : []), ...(pi ? [piKey(pi)] : [])];
 const anyKey = (sid: string) => `nl:gift:${sid}:any`;
 const anchorKey = (sid: string) => `nl:gift:${sid}:refunds`;
+
+/**
+ * Pages of the creator's refunds (GET /refunds, up to 100 each) the checkout sweep reads for gifts per store per run,
+ * only for a store that ever sold one (CX-123 rule 24; r24 money inventory, item 1). Stripe lists the newest first: a
+ * run that stops here with pages left keeps the anchor, so no refund behind them is passed over. With the pre-orders (lib/preorders.ts, PREORDER_REFUND_PAGES_PER_STORE),
+ * at most twice this many calls a store every five minutes; priced in tests/plan-cost-registry.ts (NOT_A_COST).
+ */
+export const GIFT_REFUND_PAGES_PER_STORE = 3;
 const seenKey = (sid: string) => `nl:gift:${sid}:seen`;
 /** A write of one item (HDEL, HSET, EXPIRE or SADD of one field, member or key) answers 0 or 1; anything else is unknown (Codex Z). */
 const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
@@ -290,33 +300,68 @@ export async function revokeRefundedGifts(
   const since = Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
   let newest = Number(anchorRaw) || since;
   let revoked = 0;
-  const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
-  query.append("expand[]", "data.charge");
-  const listed = await onAccount("GET", store.stripeAccountId, `/refunds?${query}`);
-  // The refunds in their exact shape (Codex Q on #2724; CX-123 rule 24): a list of rows each as refundRowKnown()
-  // reads it, with every field that decides whether money went back. Anything else leaves the read unsure, so the
-  // anchor does not move past refunds that could not be read.
-  const refundsKnown = Array.isArray(listed.data) && (listed.data as unknown[]).every(refundRowKnown);
-  const refunds = refundsKnown ? (listed.data as Record<string, unknown>[]) : [];
+  // Every page of the refunds since the anchor (CX-123 rule 24; r24 money inventory, item 1): Stripe lists the newest
+  // first, so a read that stopped after one page passed over the older ones and still moved the anchor past them.
+  // Each page in its exact shape (lib/stripe-list.ts), each row as refundRowKnown() reads it, with every field that
+  // decides whether money went back (Codex Q on #2724). A page in another shape, a row not readable, a run out of
+  // time or pages left past GIFT_REFUND_PAGES_PER_STORE leave the read unsure, so the anchor does not move past
+  // refunds that could not be read; a full refund on a readable row is still taken back.
+  const refunds: Record<string, unknown>[] = [];
+  let rowsKnown = true;
+  let ended = false;
+  let after = "";
+  for (let page = 0; page < GIFT_REFUND_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
+    const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
+    query.append("expand[]", "data.charge");
+    if (after) query.set("starting_after", after);
+    let read: StripePage;
+    try {
+      read = readStripePage(await onAccount("GET", store.stripeAccountId, `/refunds?${query}`), refundRowKnown);
+    } catch (error) {
+      if (!(error instanceof StripeListUnreadable)) throw error;
+      console.error("reading refunds for gifts: a page in another shape", error);
+      break;
+    }
+    refunds.push(...read.rows);
+    if (read.unreadable) rowsKnown = false;
+    if (!read.hasMore) {
+      ended = true;
+      break;
+    }
+    // More pages, and no readable last row to read them from: not read to its end.
+    if (!read.lastId) break;
+    after = read.lastId;
+  }
+  const refundsKnown = ended && rowsKnown;
   // A dispute closed as lost takes a gift back as a full refund does, whatever its amount (lib/refunds.ts, the
   // owner's rule of 4 November 2026; queue 388 [TB14]): read from Stripe's closing events, as lib/call-meetings.ts
   // does. A read that fails or does not reach the end keeps the place, so it is read again next run.
   const lost = await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("gift", sid));
   let unsure = !lost.complete || !refundsKnown;
+  // The time of the oldest refund read that has not gone through yet (Infinity: none).
+  let waiting = Infinity;
   for (const refund of [...lost.rows, ...refunds]) {
     if (Date.now() >= deadline) return revoked;
     const id = typeof refund.id === "string" ? refund.id : "";
     const created = typeof refund.created === "number" ? refund.created : 0;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-    const charge = refund.charge as { refunded?: unknown } | null;
     const dispute = refund.object === "dispute";
+    // Disputes and refunds read by the one shared rule (lib/refunds.ts rowGivesBack), as the other jobs that take
+    // things back read them: a full refund going through (succeeded or pending), or a dispute lost; and, as before,
+    // a refund that succeeded on a charge marked refunded, whatever else that charge says.
+    const charge = refund.charge as { refunded?: unknown } | null;
+    const givesBack = rowGivesBack(refund) || (!dispute && refund.status === "succeeded" && charge?.refunded === true);
     newest = Math.max(newest, created);
+    // A refund Stripe has not finished (pending, or waiting on an action) whose charge is not refunded in full yet
+    // keeps the anchor at its time (review of #3188, Claude 3): a later refund never moves the read past it, so it is
+    // listed again and taken back once it goes through. One that already gives everything back is taken back now.
+    if (!dispute && (refund.status === "pending" || refund.status === "requires_action") && !givesBack) waiting = Math.min(waiting, created);
     if (dispute && id && !pi) {
       // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
       if (!(await markRead(sid, id))) unsure = true;
       continue;
     }
-    if (!id || !pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) continue;
+    if (!id || !pi || !givesBack) continue;
     // Read before anything is marked (Codex Z on #2724; CX-123 rule 24): whether this row was handled, the payment's
     // gift and the gift itself, each in its exact shape. Unknown leaves the row unread and the read unsure, and the
     // next run asks again; nothing is marked read until it was handled.
@@ -388,6 +433,7 @@ export async function revokeRefundedGifts(
   // anchor with it: the closing events are read from the anchor, so it waits while they are not all read.
   if (!(await confirmLostRead(lost, seenKey(sid)))) unsure = true;
   else if (lost.complete && lost.resumed) newest = Math.min(newest, Math.max(lost.newest, since));
+  newest = Math.min(newest, Math.max(waiting, since));
   if (!unsure) await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
   return revoked;
 }

@@ -125,17 +125,21 @@ export async function recordUnpaidRenewal(subscription: Record<string, unknown>)
   return true;
 }
 
-/** Brings the store named by one listed subscription in line with it. */
-async function applyListed(subscription: Record<string, unknown>, counts: SyncCounts): Promise<void> {
+/**
+ * Brings the store named by one listed subscription in line with it. Answers
+ * whether the store that wrote this subscription down was brought in line
+ * with Stripe's word: only then does step 2 not need to ask about it again.
+ */
+async function applyListed(subscription: Record<string, unknown>, counts: SyncCounts): Promise<boolean> {
   // The Store assistant's own subscription: brought in line with its store by its own rules (lib/assistant-billing.ts).
   if (isAddOn(subscription)) {
     if (await applyListedAssistant(subscription)) counts.updated += 1;
-    return;
+    return false;
   }
   const id = typeof subscription.id === "string" ? subscription.id : "";
   const meta = subscription.metadata as Record<string, string> | null | undefined;
   const handle = meta?.store;
-  if (!id || typeof handle !== "string" || !handle) return;
+  if (!id || typeof handle !== "string" || !handle) return false;
   const store = await storeForHandle(handle);
   // A plan for a store already closing, or already removed, is never written
   // down: it is ended and its payment returned (queue item 307 [EC1],
@@ -143,19 +147,19 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   if (subscription.status !== "canceled" && subscription.status !== "incomplete_expired" && (!store || (store.planEndedAt && ownedBy(store, subscription)))) {
     const customer = subscription.customer;
     const customerId = typeof customer === "string" ? customer : typeof (customer as { id?: unknown } | null)?.id === "string" ? String((customer as { id: string }).id) : "";
-    if ((await refusePlanIfClosing({ store, handle, subscriptionId: id, customerId })) !== "no") return;
+    if ((await refusePlanIfClosing({ store, handle, subscriptionId: id, customerId })) !== "no") return false;
   }
-  if (!store) return;
+  if (!store) return false;
 
   // The one this store wrote down: Stripe's word stands.
   if (store.subscriptionId === id) {
     const state=stateOf(subscription);
     if(state.state==='active'&&hasContractFunding(subscription)){
-      const observed=await startedFromObservedSubscription(store,subscription);if(!observed)return;
+      const observed=await startedFromObservedSubscription(store,subscription);if(!observed)return false;
       state.period=observed.period;
     }
     if (await recordState(store, state)) counts.updated += 1;
-    return;
+    return true;
   }
 
   // Another subscription under this store's address. Written down only when
@@ -163,13 +167,14 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   // plainly this store's. A second paying one beside a first is left for a
   // person to sort out — a refund is not something to decide in a loop.
   const started = startedFrom(subscription);
-  if (!started || !ownedBy(store, subscription)) return;
+  if (!started || !ownedBy(store, subscription)) return false;
   if (store.subscriptionActive && store.subscriptionId) {
     console.error(`store ${store.handle} has a second subscription in good standing: ${id}`);
-    return;
+    return false;
   }
   const verified=await startedFromObservedSubscription(store,subscription);
   if(verified && await setSubscription(storeRef(store),verified)) counts.adopted += 1;
+  return false;
 }
 
 /** Step 1: every subscription on our account, newest first. */
@@ -184,14 +189,26 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
   };
   for (let page = 0; page < MAX_PAGES; page += 1) {
     if (Date.now() > deadline) return stop();
-    const { data, hasMore } = await listSubscriptions("all", after);
+    // A page Stripe answered with a row that cannot be read is refused whole
+    // (lib/billing.ts, listSubscriptions): nothing on it is taken as paying
+    // or as not paying, it is counted as a failure, and the saved place in
+    // the list stays on it, so the next run reads it again.
+    let listedPage: Awaited<ReturnType<typeof listSubscriptions>>;
+    try {
+      listedPage = await listSubscriptions("all", after);
+    } catch (error) {
+      counts.failed += 1;
+      console.error("reading the list of subscriptions failed", error);
+      return stop();
+    }
+    const { data, hasMore } = listedPage;
     for (const subscription of data) {
       counts.seen += 1;
       try {
-        await applyListed(subscription, counts);
-        // Seen only once its state is applied: one whose apply failed is
-        // asked about again by step 2, in this same run, not a lap later.
-        if (typeof subscription.id === "string") seen.add(subscription.id);
+        // Seen only once the store that wrote it down is in line with it: one
+        // whose apply failed, or that named another store, is asked about
+        // again by step 2, in this same run, not a lap later.
+        if ((await applyListed(subscription, counts)) && typeof subscription.id === "string") seen.add(subscription.id);
       } catch (error) {
         counts.failed += 1;
         console.error("settling a store's subscription failed", error);
@@ -227,7 +244,14 @@ async function syncStores(deadline: number, seen: Set<string>, counts: SyncCount
       if (!store.subscriptionActive || !store.subscriptionId || seen.has(store.subscriptionId)) continue;
       counts.checked += 1;
       try {
-        if (await recordState(store, await readSubscription(store.subscriptionId,store))) counts.updated += 1;
+        const state = await readSubscription(store.subscriptionId, store);
+        // Stripe could not be asked: nothing changes, and it counts as a
+        // failure, not as a store checked and found in line.
+        if (state.state === "unknown") {
+          counts.failed += 1;
+          continue;
+        }
+        if (await recordState(store, state)) counts.updated += 1;
       } catch (error) {
         counts.failed += 1;
         console.error("checking a store's subscription failed", error);
@@ -250,10 +274,8 @@ export async function syncSubscriptions(deadline: number): Promise<SyncCounts> {
   const seen = new Set<string>();
   // Stripe's list gets at most two thirds of the time, so the stores that
   // count as paid up are always asked about too.
-  // A page Stripe answered with a row that cannot be read is refused whole
-  // (lib/billing.ts, listSubscriptions): nothing on it is taken as paying or
-  // as not paying, the saved place in the list stays on it so the next run
-  // reads it again, and it is counted as a failure. Step 2 runs regardless.
+  // Step 2 runs whatever happens to step 1: a failure there (the saved place
+  // could not be read or kept) is counted, and the run is not complete.
   let listed = false;
   try {
     listed = await syncListed(Date.now() + ((deadline - Date.now()) * 2) / 3, seen, counts);

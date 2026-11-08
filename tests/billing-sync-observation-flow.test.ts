@@ -48,7 +48,8 @@ async function main() {
     await redis.pipeline([["SET", listCursorKey, cursor]]);
     list = bad;
     const refused = await syncSubscriptions(Date.now() + 10000);
-    is("the refusal is counted and the run is not complete", [refused.failed, refused.complete, refused.updated, refused.adopted], [1, false, 0, 0]);
+    // Two failures: the refused page, and step 2's read of the store's own subscription, answered unreadably here.
+    is("the refusal and the unreadable step-2 read are counted; the run is not complete", [refused.failed, refused.complete, refused.updated, refused.adopted], [2, false, 0, 0]);
     const after = (await storeForEmail(owner))!;
     is("the actual store is unchanged, including paid period and active status", after, before);
     is("the allowance window derived from the actual store is unchanged", allowanceWindow(after), allowanceWindow(before));

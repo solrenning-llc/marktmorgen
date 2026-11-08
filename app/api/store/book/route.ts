@@ -2,7 +2,7 @@ import { bookingLength } from "@/lib/call-lengths";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { adsCheckout } from "@/lib/ad-events";
 import { holdSession, prepareSession } from "@/lib/call-packages";
-import { isSoon } from "@/lib/waitlist";
+import { isComingSoon } from "@/lib/preorders";
 import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
@@ -107,7 +107,9 @@ export async function POST(request: NextRequest) {
     });
 
   if (!canSellProduct(store, product)) return back("unavailable");
-  if (await isSoon(store, product.id).catch(() => false)) return back("unavailable");
+  const comingSoon = await isComingSoon(store, product.id).catch(() => null);
+  if (comingSoon === null) return back("error");
+  if (comingSoon) return back("unavailable");
   if (!Number.isFinite(start)) return back("invalid");
   // A length chosen comes with the price the page showed for it. One the creator took off meanwhile, or one sent with
   // no shown price (only ever a request the page did not make): said, never booked. A price changed meanwhile: said,

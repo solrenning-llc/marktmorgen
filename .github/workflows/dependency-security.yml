@@ -14,9 +14,10 @@ permissions:
   actions: read
 concurrency:
   group: dependency-security-${{ github.ref }}-${{ github.event_name }}
-  # A merge group's ref is its own (gh-readonly-queue/main/pr-N-…), so with the event
-  # in the group it never shares one with a pull request or another merge group, and a
-  # queued change never has its checks cancelled.
+  # A merge group's ref is its own (gh-readonly-queue/main/pr-N-…), so with the event in
+  # the group a merge group never shares one with a pull request run or another merge group.
+  # The active merge-group run is never canceled by this group; a newer delivery of the same
+  # merge group may replace one still pending, and that replacement is the same check.
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 jobs:
   documentation-scope:

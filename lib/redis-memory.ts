@@ -125,6 +125,46 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
+        if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, hold, token] = args;
+          return this.run(["GET", hold]) === token ? this.run(["DEL", hold]) : 0;
+        }
+        // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
+        if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, members, field, json] = args;
+          const now = this.run(["HGET", members, field]);
+          if (now === null || now === undefined) {
+            this.run(["HSET", members, field, json]);
+            return 2;
+          }
+          let mark: unknown;
+          try {
+            mark = JSON.parse(String(now));
+          } catch {
+            return -1;
+          }
+          if (!mark || typeof mark !== "object") return -1;
+          if ((mark as { d?: unknown }).d === 1) return 0;
+          this.run(["HSET", members, field, json]);
+          return 1;
+        }
+        // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
+        if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, lock, book, token, json] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["SET", book, json]);
+          return 1;
+        }
+        // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
+        if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, about, expected, text] = args;
+          const now = this.run(["GET", about]);
+          const held = typeof now === "string" ? now : "";
+          if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
+          this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
+          return [1];
+        }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, imported, own, field, job, ...known] = args;
@@ -529,6 +569,13 @@ export class MemoryRedis {
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
           if (held instanceof Map && !held.has(args[2]) && held.size >= Number(args[4])) return 0;
           this.hash(target).set(args[2], args[3]);
+          return 1;
+        }
+        // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
+        if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, people, field, expected, next] = args;
+          if (this.run(["HGET", people, field]) !== expected) return 0;
+          this.run(["HSET", people, field, next]);
           return 1;
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.
@@ -974,6 +1021,30 @@ export class MemoryRedis {
               const held=this.data.get(boardKey);if(Array.isArray(held)&&!held.length)this.data.delete(boardKey);
             }
           }
+          return taken;
+        }
+        // lib/campaign-landing-store.ts WRITE_LANDINGS and DROP_LANDINGS: a product's landings and their slot in one step.
+        if (key.startsWith("-- marktmorgen:landings-write:v2\n") && args[0] === "3" && args.length === 10) {
+          const [, room, target, gone, limit, month, slot, size, expected, json] = args;
+          if (this.run(["EXISTS", gone]) === 1) return [4, 0];
+          const held = this.run(["GET", target]);
+          if ((typeof held === "string" ? held : "") !== expected) return [3, 0];
+          const taken = this.storeData([room, limit, json === "" ? "1" : "0", month, "s", slot, json === "" ? "0" : size]);
+          if (Array.isArray(taken) && taken[0] === 1) {
+            if (json === "") this.run(["DEL", target]);
+            else {
+              this.data.set(target, json);
+              this.until.delete(target);
+            }
+          }
+          return taken;
+        }
+        if (key.startsWith("-- marktmorgen:landings-drop:v2\n") && args[0] === "3" && args.length === 8) {
+          const [, room, target, gone, limit, month, slot, seconds] = args;
+          const taken = this.storeData([room, limit, "1", month, "s", slot, "0"]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return taken;
+          this.run(["DEL", target]);
+          this.run(["SET", gone, "1", "EX", seconds]);
           return taken;
         }
         // lib/stock.ts STOCK_ADMIT and STOCK_BIND (513 [PF1], Codex G2's review of #1730, 5 November 2026), step for step.

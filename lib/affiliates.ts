@@ -2719,11 +2719,14 @@ const REFUND_TAKES = new Set(["pending", "requires_action", "succeeded"]);
 
 /**
  * The payment a refund or dispute names: its id, as text or expanded; null
- * when it names none (a charge made without a PaymentIntent cannot be on the
- * book, which is keyed by payment); undefined when it does not read.
+ * when it says it names none, by an explicit null (a charge made without a
+ * PaymentIntent cannot be on the book, which is keyed by payment); undefined
+ * when it does not read, and when the field is missing altogether: Stripe's
+ * Refund and Dispute objects give it as a nullable field, so a row without it
+ * says nothing (rule 24; Codex G's G97-LPI on #3189).
  */
 function paymentOf(row: Record<string, unknown>): string | null | undefined {
-  if (!hasOwnField(row, "payment_intent")) return null;
+  if (!hasOwnField(row, "payment_intent")) return undefined;
   const raw = ownField(row, "payment_intent");
   if (raw === null) return null;
   if (typeof raw === "string") return raw || undefined;

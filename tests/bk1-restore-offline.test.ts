@@ -14,17 +14,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { copyInParts } from "@/lib/backup-parts";
-import * as codec from "@/lib/backup-codec";
+import { backupKeyFingerprint } from "@/lib/backup-codec";
 import type { BackupObjectStore } from "@/lib/backup-roundtrip";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-// Read through the namespace so this file runs, and fails check by check, on the code before the change.
-const backupKeyFingerprint = ((codec as Record<string, unknown>).backupKeyFingerprint ?? (() => "none")) as (key: Uint8Array) => string;
-
 const RESTORE = join(process.cwd(), "scripts/backup-restore-offline.mjs");
 const FINGERPRINT = join(process.cwd(), "scripts/backup-key-fingerprint.mjs");
-const run = (script: string, args: string[], input: string) => spawnSync(process.execPath, [script, ...args], { input, encoding: "utf8", env: { PATH: process.env.PATH ?? "" } });
+const run = (script: string, args: string[], input: string) => spawnSync(process.execPath, [script, ...args], { input, encoding: "utf8", env: { PATH: process.env.PATH ?? "" } as unknown as NodeJS.ProcessEnv });
 
 async function main(): Promise<void> {
   const oldKey = Buffer.alloc(32, 3);
@@ -41,7 +38,8 @@ async function main(): Promise<void> {
     part("A synthetic set in three parts, sealed under the previous key, opened offline");
     redis.clear();
     for (let i = 0; i < 30; i += 1) redis.run(["SET", `nl:synthetic:k${String(i).padStart(2, "0")}`, `value ${i} `.repeat(40)]);
-    redis.run(["SET", "nl:synthetic:ends", "soon", "PX", 3_600_000]);
+    redis.run(["SET", "nl:synthetic:ends", "soon"]);
+    redis.run(["PEXPIRE", "nl:synthetic:ends", 3_600_000]);
     const objects = new Map<string, Uint8Array>();
     const store: BackupObjectStore = { putNew: async (id, bytes) => void objects.set(id, new Uint8Array(bytes)), read: async (id) => objects.get(id)! };
     const now = Date.now();

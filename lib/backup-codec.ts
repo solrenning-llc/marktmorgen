@@ -1,11 +1,25 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 
 // Offline codec only. No provider adapter, scheduler, secrets lookup or network.
 // Limits bound memory for synthetic restore; they do not authorize production.
-const MAGIC = Buffer.from("MMBK1");
+// Inbox C4-36 item 3: every object sealed since 8 November 2026 carries the key's id (BACKUP_KID_BYTES of
+// HMAC-SHA256(key, "mm-backup-kid")) after its magic, bound into the associated data, so a reader picks the key that
+// sealed it from a keyring (the current key and, after a rotation, the previous one) and a key id changed in the header
+// fails authentication. Objects of the older format (MMBK1, no key id) still open, with each key of the keyring tried.
+const MAGIC_V1 = Buffer.from("MMBK1");
+const MAGIC = Buffer.from("MMBK2");
 const MAX = 4 * 1024 * 1024;
-const AAD = Buffer.from("marktmorgen/backup/v1");
+const AAD_V1 = Buffer.from("marktmorgen/backup/v1");
+const AAD = Buffer.from("marktmorgen/backup/v2");
+/** Bytes of the key id in the header: the first 4 of HMAC-SHA256(key, "mm-backup-kid"). */
+export const BACKUP_KID_BYTES = 4;
+/** One key, or a keyring: the current key first, then any key a reader may still open with. */
+export type BackupKeys = Uint8Array | readonly Uint8Array[];
+/** An object sealed under a key id no key of the keyring has: not opened, never taken as another kind of object. */
+export class BackupKeyUnknownError extends Error {
+ constructor(){ super("Backup sealed under a key this keyring does not hold"); this.name="BackupKeyUnknownError"; }
+}
 export type BackupRow = { key: string; dump: string; expiresAt: number | null };
 export type BackupSnapshot = { version: 1; capturedAt: number; rows: BackupRow[] };
 function validate(raw: unknown): BackupSnapshot {
@@ -24,28 +38,73 @@ function validate(raw: unknown): BackupSnapshot {
  return x as BackupSnapshot;
 }
 function validKey(key: Uint8Array) {
- if (key.byteLength !== 32) throw new Error("Invalid backup key");
+ if (!(key instanceof Uint8Array) || key.byteLength !== 32) throw new Error("Invalid backup key");
+}
+/** The keyring as a list, every key checked: one key, or the current key first and then the others. */
+export function keysOf(keys: BackupKeys): Uint8Array[] {
+ const list = keys instanceof Uint8Array ? [keys] : [...keys];
+ if (list.length === 0) throw new Error("Invalid backup key");
+ for (const key of list) validKey(key);
+ return list;
+}
+/** A key's id in the header: the first BACKUP_KID_BYTES bytes of HMAC-SHA256(key, "mm-backup-kid"). */
+export function backupKid(key: Uint8Array): Buffer {
+ validKey(key);
+ return createHmac("sha256",key).update("mm-backup-kid").digest().subarray(0,BACKUP_KID_BYTES);
+}
+/** What the report shows of a key (inbox C4-36 item 2): its id as 8 hex, never the key. */
+export const backupKeyFingerprint = (key: Uint8Array): string => backupKid(key).toString("hex");
+
+/** A sealed envelope's two formats: the older one (magic, nonce, tag) and the one with the key id after the magic. */
+export type SealFormat = { magicV1: Buffer; aadV1: Buffer; magic: Buffer; aad: Buffer };
+const PART_FORMAT: SealFormat = { magicV1: MAGIC_V1, aadV1: AAD_V1, magic: MAGIC, aad: AAD };
+
+/** `packed` sealed under `key` in the current format: magic, key id, nonce, tag, AES-256-GCM over magic's own AAD and the key id. */
+export function sealWithKid(format: SealFormat, key: Uint8Array, packed: Buffer): Buffer {
+ const kid = backupKid(key);
+ const nonce = randomBytes(12);
+ const cipher = createCipheriv("aes-256-gcm",key,nonce);
+ cipher.setAAD(Buffer.concat([format.aad,kid]));
+ const encrypted = Buffer.concat([cipher.update(packed),cipher.final()]);
+ return Buffer.concat([format.magic,kid,nonce,cipher.getAuthTag(),encrypted]);
+}
+const decrypt = (key: Uint8Array, aad: Buffer, nonce: Buffer, tag: Buffer, body: Buffer) => {
+ const decipher = createDecipheriv("aes-256-gcm",key,nonce);
+ decipher.setAAD(aad);
+ decipher.setAuthTag(tag);
+ return Buffer.concat([decipher.update(body),decipher.final()]);
+};
+/**
+ * What `blob` holds, authenticated before anything else is read: in the current format with the key whose id is in its
+ * header (BackupKeyUnknownError when the keyring has none), in the older one with the first key that authenticates it.
+ */
+export function openSealed(format: SealFormat, keys: BackupKeys, blob: Buffer): Buffer {
+ const ring = keysOf(keys);
+ if (blob.length >= 34 && blob.subarray(0,5).equals(format.magicV1)) {
+  for (const key of ring) {
+   try { return decrypt(key,format.aadV1,blob.subarray(5,17),blob.subarray(17,33),blob.subarray(33)); } catch { /* the next key */ }
+  }
+  throw new Error("Invalid backup envelope");
+ }
+ if (blob.length < 5+BACKUP_KID_BYTES+28 || !blob.subarray(0,5).equals(format.magic)) throw new Error("Invalid backup envelope");
+ const kid = blob.subarray(5,5+BACKUP_KID_BYTES);
+ const key = ring.find((candidate)=>backupKid(candidate).equals(kid));
+ if (!key) throw new BackupKeyUnknownError();
+ const at = 5+BACKUP_KID_BYTES;
+ return decrypt(key,Buffer.concat([format.aad,kid]),blob.subarray(at,at+12),blob.subarray(at+12,at+28),blob.subarray(at+28));
 }
 export function sealBackup(snapshot: BackupSnapshot, key: Uint8Array): Buffer {
  validKey(key);
  const plain = Buffer.from(JSON.stringify(validate(snapshot)));
  if (plain.length > MAX) throw new Error("Backup exceeds codec bound");
- const packed = gzipSync(plain);
- const nonce = randomBytes(12);
- const cipher = createCipheriv("aes-256-gcm",key,nonce);
- cipher.setAAD(AAD);
- const encrypted = Buffer.concat([cipher.update(packed),cipher.final()]);
- return Buffer.concat([MAGIC,nonce,cipher.getAuthTag(),encrypted]);
+ return sealWithKid(PART_FORMAT,key,gzipSync(plain));
 }
-export function openBackup(sealed: Uint8Array, key: Uint8Array): BackupSnapshot {
- validKey(key);
+export function openBackup(sealed: Uint8Array, keys: BackupKeys): BackupSnapshot {
+ const ring = keysOf(keys);
  const blob = Buffer.from(sealed);
- if (blob.length < 34 || blob.length > MAX+65536 || !blob.subarray(0,5).equals(MAGIC)) throw new Error("Invalid backup envelope");
- const decipher = createDecipheriv("aes-256-gcm",key,blob.subarray(5,17));
- decipher.setAAD(AAD);
- decipher.setAuthTag(blob.subarray(17,33));
+ if (blob.length < 34 || blob.length > MAX+65536) throw new Error("Invalid backup envelope");
  // Authenticate all ciphertext before decompression or parsing.
- const packed = Buffer.concat([decipher.update(blob.subarray(33)),decipher.final()]);
+ const packed = openSealed(PART_FORMAT,ring,blob);
  return validate(JSON.parse(gunzipSync(packed,{maxOutputLength:MAX}).toString("utf8")));
 }
 export function restoreRows(snapshot: BackupSnapshot, now: number): BackupRow[] {

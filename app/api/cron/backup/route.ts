@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
-import { BACKUP_COST_REVIEW, runBackup } from "@/lib/backup-run";
+import { BACKUP_COST_REVIEW, backupKey, runBackup } from "@/lib/backup-run";
+import { backupKeyFingerprint } from "@/lib/backup-codec";
 import { backupAlarmConfig, backupAlarmSignal, sendBackupAlarm } from "@/lib/backup-alarm";
 
 /**
@@ -26,6 +27,7 @@ export async function GET(request: NextRequest) {
   const config = backupAlarmConfig();
   const alarm = signal && config ? await sendBackupAlarm(signal, config) : "off";
   if (!result.ok) console.error(`backup: ${result.reason}`);
-  // The outcome only: counts and reasons, never a key, an address or a value.
-  return Response.json({ ...result, alarm }, { headers });
+  // The outcome only: counts, reasons and the key's fingerprint (inbox C4-36 item 2), never a key, an address or a value.
+  const key = backupKey();
+  return Response.json({ ...result, kid: key ? backupKeyFingerprint(key) : null, alarm }, { headers });
 }

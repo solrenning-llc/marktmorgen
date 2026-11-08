@@ -84,7 +84,7 @@
  */
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { BackupObjectLockedError, type BackupBucket, type BackupListedObject, type BackupObjectStore } from "@/lib/backup-roundtrip";
-import { MAX_PARTS, copyInParts, manifestBound, openManifest, runStoredBound } from "@/lib/backup-parts";
+import { MAX_PARTS, copyInParts, isManifestEnvelope, manifestBound, openManifest, runStoredBound } from "@/lib/backup-parts";
 import { BACKUP_LIST_PAGE_KEYS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { redisPipeline } from "@/lib/redis";
@@ -258,11 +258,37 @@ export type BackupRunResult =
         | "verify";
     };
 
-export function backupKey(): Uint8Array | null {
-  const raw = process.env.BACKUP_ENCRYPTION_KEY?.trim();
-  if (!raw || !/^[A-Za-z0-9+/]+={0,2}$/.test(raw)) return null;
-  const key = Buffer.from(raw, "base64");
+/** 32 bytes from a setting's base64; null for anything else. */
+function keyFrom(raw: string | undefined): Uint8Array | null {
+  const text = raw?.trim();
+  if (!text || !/^[A-Za-z0-9+/]+={0,2}$/.test(text)) return null;
+  const key = Buffer.from(text, "base64");
   return key.length === 32 ? new Uint8Array(key) : null;
+}
+
+export function backupKey(): Uint8Array | null {
+  return keyFrom(process.env.BACKUP_ENCRYPTION_KEY);
+}
+
+/** Days after a rotation that the previous key still opens copies (inbox C4-36 item 3): the retention's 30, twice. */
+export const BACKUP_KEY_PREVIOUS_DAYS = 60;
+
+/**
+ * The keys a run uses (inbox C4-36 item 3): the current key (BACKUP_ENCRYPTION_KEY) writes and reads; after a
+ * rotation, the previous one (BACKUP_ENCRYPTION_KEY_PREVIOUS) is also read, from the rotation day
+ * (BACKUP_ENCRYPTION_KEY_ROTATED_AT, YYYY-MM-DD, UTC) for BACKUP_KEY_PREVIOUS_DAYS days, never before that day, never
+ * after, never when malformed or the same key. Null without a current key.
+ */
+export function backupKeyring(now: number = Date.now()): { current: Uint8Array; readers: Uint8Array[] } | null {
+  const current = backupKey();
+  if (!current) return null;
+  const previous = keyFrom(process.env.BACKUP_ENCRYPTION_KEY_PREVIOUS);
+  const day = (process.env.BACKUP_ENCRYPTION_KEY_ROTATED_AT ?? "").trim();
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(day) ? Date.parse(`${day}T00:00:00Z`) : NaN;
+  const real = Number.isFinite(from) && dayOf(from) === day;
+  const open = real && now >= from && now <= from + BACKUP_KEY_PREVIOUS_DAYS * DAY_MS;
+  const same = previous !== null && Buffer.from(previous).equals(Buffer.from(current));
+  return { current, readers: previous && open && !same ? [current, previous] : [current] };
 }
 
 
@@ -274,6 +300,8 @@ export type BackupRunOptions = {
   key?: Uint8Array | null;
   /** The run's cutoff, in ms from when it starts listing; BACKUP_RUN_CUTOFF_MS unless a test shortens it. */
   cutoffMs?: number;
+  /** Keys besides `key` that copies may be opened with (never written with): the keyring's previous key by default. */
+  previousKeys?: Uint8Array[];
 };
 
 function defaultStore(): BackupBucket | null {
@@ -316,6 +344,9 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   if (!store) return { ok: false, reason: "off_store" };
   const key = "key" in options ? options.key : backupKey();
   if (!key || key.length !== 32) return { ok: false, reason: "off_key" };
+  // Read with the current key first, then the previous one while it may still open copies (backupKeyring).
+  const extra = "previousKeys" in options ? (options.previousKeys ?? []) : (backupKeyring(now)?.readers.slice(1) ?? []);
+  const readers = [key, ...extra.filter((k) => k instanceof Uint8Array && k.length === 32)];
 
   const keep = outcomeSeconds(review);
   // One run at a time, before anything else (inbox C4-53): a call that finds a run going is refused, and noted so a
@@ -354,7 +385,7 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   let markReply: Promise<unknown> | null = null;
   const readMark: MarkReader = () => (markReply ??= redisPipeline([["GET", LAST_OK]]));
   const result: BackupRunResult = await withCutoff(cutoff, async () => {
-    const room = await makeRoom(review, store, key, now, readMark);
+    const room = await makeRoom(review, store, readers, now, readMark);
     lost = room.lost;
     if (!room.ok) return { ok: false, reason: room.reason };
     const copied = await copy(review, store, key, now);
@@ -425,7 +456,7 @@ class LostLastGood extends Error {}
  * good copy": the mark is kept for good once written, so its absence is a loss, and the run never deletes to make
  * room without knowing what to keep; copies left that way go by the bucket's lifecycle rule.
  */
-async function lastVerified(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[], readMark: MarkReader): Promise<Set<string>> {
+async function lastVerified(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[], readMark: MarkReader): Promise<Set<string>> {
   const replies: unknown = await readMark();
   if (!Array.isArray(replies) || replies.length !== 1 || typeof replies[0] !== "string") throw new Unverified();
   const set = readLastOk(replies[0])?.set;
@@ -443,11 +474,13 @@ async function lastVerified(store: BackupBucket, key: Uint8Array, listed: Backup
 
 /**
  * Every verified set still in the bucket, when the last good copy is lost: each listed object small enough to be a
- * manifest is read and opened, and every manifest that opens is kept with every part it names. An object that cannot
- * be read throws Unverified (nothing deleted on doubt); one that reads but does not open as a manifest is not one.
- * Reads at most backupKeptObjects objects (Class B, priced in lib/backup-cost.ts).
+ * manifest is read and opened with the keyring, and every manifest that opens is kept with every part it names. An
+ * object that cannot be read throws Unverified (nothing deleted on doubt), and so does one that begins as a manifest
+ * but does not open (under a key the keyring lacks, or damaged: inbox C4-36 item 3), since the parts it names cannot
+ * be known; one that does not begin as a manifest is not one. Reads at most backupKeptObjects objects (Class B, priced
+ * in lib/backup-cost.ts).
  */
-async function verifiedInBucket(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[]): Promise<Set<string>> {
+async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[]): Promise<Set<string>> {
   const keep = new Set<string>();
   for (const object of listed) {
     if (object.bytes > manifestBound(MAX_PARTS)) continue;
@@ -463,7 +496,8 @@ async function verifiedInBucket(store: BackupBucket, key: Uint8Array, listed: Ba
       keep.add(object.id);
       for (const part of manifest.parts) keep.add(part.id);
     } catch {
-      // Not a manifest that opens with this key: a part, or a failed run's leftover.
+      if (isManifestEnvelope(bytes)) throw new Unverified();
+      // Not a manifest at all: a part, or a failed run's leftover.
     }
   }
   return keep;
@@ -478,7 +512,7 @@ async function verifiedInBucket(store: BackupBucket, key: Uint8Array, listed: Ba
 async function makeRoom(
   review: BackupCostReview,
   store: BackupBucket,
-  key: Uint8Array,
+  key: Uint8Array[],
   now: number,
   readMark: MarkReader,
 ): Promise<{ ok: true; deleted: number; lost: boolean } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked"; lost: boolean }> {

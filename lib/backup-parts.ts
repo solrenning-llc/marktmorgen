@@ -26,10 +26,10 @@
  *
  * Server-only. Built and off: nothing schedules it (lib/backup-run.ts).
  */
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { openBackup, sealBackup, type BackupRow, type BackupSnapshot } from "@/lib/backup-codec";
+import { openBackup, openSealed, sealBackup, sealWithKid, type BackupKeys, type BackupRow, type BackupSnapshot, type SealFormat } from "@/lib/backup-codec";
 import { BACKUP_MAX_BYTES, BACKUP_MAX_ROWS, BACKUP_PREFIX } from "@/lib/backup-export";
 import type { BackupObjectStore } from "@/lib/backup-roundtrip";
 import { timeLeft } from "@/lib/fetch-timeout";
@@ -58,8 +58,22 @@ export const BACKUP_SCAN_PAGES = 200;
 /** The longest key the backup format keeps (lib/backup-codec.ts), in bytes. */
 const KEY_MAX_BYTES = 1_024;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
-const MANIFEST_MAGIC = Buffer.from("MMBM1");
-const MANIFEST_AAD = Buffer.from("marktmorgen/backup-manifest/v1");
+/** The manifest's two formats (lib/backup-codec.ts): the older one, and the one with the key id after the magic. */
+const MANIFEST_FORMAT: SealFormat = {
+  magicV1: Buffer.from("MMBM1"),
+  aadV1: Buffer.from("marktmorgen/backup-manifest/v1"),
+  magic: Buffer.from("MMBM2"),
+  aad: Buffer.from("marktmorgen/backup-manifest/v2"),
+};
+
+/**
+ * True when `bytes` begin as a manifest does, in either format: such an object that does not open is a manifest under
+ * a key the reader lacks, or a damaged one, and never "not a manifest" (inbox C4-36 item 3).
+ */
+export function isManifestEnvelope(bytes: Uint8Array): boolean {
+  const head = Buffer.from(bytes.subarray(0, 5));
+  return head.equals(MANIFEST_FORMAT.magicV1) || head.equals(MANIFEST_FORMAT.magic);
+}
 
 /** The caps of one run in parts, decided by the reviewed cost ceiling (lib/backup-run.ts). */
 export type PartsLimits = {
@@ -114,27 +128,20 @@ function validManifest(raw: unknown): BackupManifest {
   return m as BackupManifest;
 }
 
-/** The manifest, sealed as the parts are (AES-256-GCM over gzip), under its own magic and associated data. */
+/** The manifest, sealed as the parts are (AES-256-GCM over gzip, with the key id), under its own magic and associated data. */
 export function sealManifest(manifest: BackupManifest, key: Uint8Array): Buffer {
-  if (key.byteLength !== 32) throw new Error("Invalid backup key");
+  if (!(key instanceof Uint8Array) || key.byteLength !== 32) throw new Error("Invalid backup key");
   const plain = Buffer.from(JSON.stringify(validManifest(manifest)));
   if (plain.length > manifestBound(manifest.parts.length)) throw new Error("Manifest exceeds its bound");
-  const nonce = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, nonce);
-  cipher.setAAD(MANIFEST_AAD);
-  const encrypted = Buffer.concat([cipher.update(gzipSync(plain)), cipher.final()]);
-  return Buffer.concat([MANIFEST_MAGIC, nonce, cipher.getAuthTag(), encrypted]);
+  return sealWithKid(MANIFEST_FORMAT, key, gzipSync(plain));
 }
 
-export function openManifest(sealed: Uint8Array, key: Uint8Array): BackupManifest {
-  if (key.byteLength !== 32) throw new Error("Invalid backup key");
+/** A manifest opened with the key whose id its header names, from one key or a keyring (lib/backup-codec.ts). */
+export function openManifest(sealed: Uint8Array, keys: BackupKeys): BackupManifest {
   const blob = Buffer.from(sealed);
-  if (blob.length < 34 || blob.length > manifestBound(MAX_PARTS) || !blob.subarray(0, 5).equals(MANIFEST_MAGIC)) throw new Error("Invalid manifest envelope");
-  const decipher = createDecipheriv("aes-256-gcm", key, blob.subarray(5, 17));
-  decipher.setAAD(MANIFEST_AAD);
-  decipher.setAuthTag(blob.subarray(17, 33));
+  if (blob.length < 34 || blob.length > manifestBound(MAX_PARTS)) throw new Error("Invalid manifest envelope");
   // Authenticated before it is unpacked or read.
-  const packed = Buffer.concat([decipher.update(blob.subarray(33)), decipher.final()]);
+  const packed = openSealed(MANIFEST_FORMAT, keys, blob);
   return validManifest(JSON.parse(gunzipSync(packed, { maxOutputLength: manifestBound(MAX_PARTS) }).toString("utf8")));
 }
 
@@ -278,7 +285,7 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
  */
 export async function readBackupSet(
   manifestId: string,
-  key: Uint8Array,
+  key: BackupKeys,
   store: BackupObjectStore,
   maxBytes: number,
   onPart: (snapshot: BackupSnapshot, index: number) => Promise<void>,

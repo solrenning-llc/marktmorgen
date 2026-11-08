@@ -15,21 +15,12 @@
  */
 import { createCipheriv, createHmac, randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
-import * as codec from "@/lib/backup-codec";
-import * as parts from "@/lib/backup-parts";
-import { runBackup, type BackupCostReview } from "@/lib/backup-run";
+import { backupKeyFingerprint as fingerprint, openBackup, sealBackup, type BackupSnapshot } from "@/lib/backup-codec";
+import { openManifest, sealManifest, type BackupManifest } from "@/lib/backup-parts";
+import { BACKUP_KEY_PREVIOUS_DAYS as PREVIOUS_DAYS, backupKeyring as keyring, runBackup, type BackupCostReview } from "@/lib/backup-run";
 import type { BackupBucket } from "@/lib/backup-roundtrip";
-import type { BackupSnapshot } from "@/lib/backup-codec";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-
-// Read through the namespaces so this file runs, and fails check by check, on the code before the change.
-const C = codec as Record<string, unknown>;
-const fingerprint = (C.backupKeyFingerprint ?? (() => "")) as (key: Uint8Array) => string;
-const keyring = (C.backupKeyring ?? (() => null)) as (now: number) => { current: Uint8Array; readers: Uint8Array[] } | null;
-const PREVIOUS_DAYS = C.BACKUP_KEY_PREVIOUS_DAYS as number;
-const openBackup = codec.openBackup as unknown as (sealed: Uint8Array, keys: Uint8Array | readonly Uint8Array[]) => BackupSnapshot;
-const openManifest = parts.openManifest as unknown as (sealed: Uint8Array, keys: Uint8Array | readonly Uint8Array[]) => parts.BackupManifest;
 
 const fails = (run: () => unknown) => {
   try {
@@ -54,20 +45,20 @@ async function main(): Promise<void> {
   is("no key byte shown", fingerprint(newKey).includes(newKey.toString("hex").slice(0, 8)), false);
 
   part("The key id in the header of every part and manifest");
-  const sealedPart = codec.sealBackup(snapshot, newKey);
+  const sealedPart = sealBackup(snapshot, newKey);
   is("a part: magic MMBK2, then the key id", [sealedPart.subarray(0, 5).toString("latin1"), sealedPart.subarray(5, 9).toString("hex")], ["MMBK2", want]);
-  const manifest: parts.BackupManifest = { version: 1, capturedAt: T0, rows: 0, parts: [] };
-  const sealedManifest = parts.sealManifest(manifest, newKey);
+  const manifest: BackupManifest = { version: 1, capturedAt: T0, rows: 0, parts: [] };
+  const sealedManifest = sealManifest(manifest, newKey);
   is("a manifest: magic MMBM2, then the key id", [sealedManifest.subarray(0, 5).toString("latin1"), sealedManifest.subarray(5, 9).toString("hex")], ["MMBM2", want]);
   const kidChanged = Buffer.from(sealedPart);
   kidChanged[6] ^= 1;
   is("a key id changed in the header: refused", fails(() => openBackup(kidChanged, newKey)), true);
 
   part("Reading with the previous key after a rotation");
-  const underOld = codec.sealBackup(snapshot, oldKey);
+  const underOld = sealBackup(snapshot, oldKey);
   is("a keyring with the previous key opens what it sealed", fails(() => openBackup(underOld, [newKey, oldKey])), false);
   is("a keyring without it: refused", fails(() => openBackup(underOld, [newKey])), true);
-  const manifestUnderOld = parts.sealManifest(manifest, oldKey);
+  const manifestUnderOld = sealManifest(manifest, oldKey);
   is("a manifest under the previous key opens with the keyring", fails(() => openManifest(manifestUnderOld, [newKey, oldKey])), false);
   is("and not without it", fails(() => openManifest(manifestUnderOld, [newKey])), true);
   {
@@ -135,7 +126,7 @@ async function main(): Promise<void> {
     bucketClock = clock;
     // A good set sealed under the old key, before the rotation.
     const good = await runBackup({ now: clock, review, store, key: oldKey });
-    const goodIds = good.ok ? [good.id, ...parts.openManifest(objects.get(good.id)!, oldKey).parts.map((p) => p.id)] : [];
+    const goodIds = good.ok ? [good.id, ...openManifest(objects.get(good.id)!, oldKey).parts.map((p) => p.id)] : [];
     // The mark then names a manifest the bucket's rule took, and the bucket fills with old leftovers.
     redis.run(["SET", "nl:backup:last-ok", JSON.stringify({ at: clock, set: "dddddddd-dddd-4ddd-8ddd-000000000000", base: { keys: 0, bytes: 0 } })]);
     for (let i = 0; i < 31; i += 1) {
@@ -149,12 +140,12 @@ async function main(): Promise<void> {
   };
   {
     const { clock, goodIds } = await setup();
-    const result = await runBackup({ now: clock, review, store, key: newKey, previousKeys: [] } as Parameters<typeof runBackup>[0]);
+    const result = await runBackup({ now: clock, review, store, key: newKey, previousKeys: [] });
     is("without the old key: nothing deleted to make room (room_unverified), the old-key set whole", [result, deleted.length, goodIds.length > 1 && goodIds.every((id) => objects.has(id))], [{ ok: false, reason: "room_unverified" }, 0, true]);
   }
   {
     const { clock, goodIds } = await setup();
-    const result = await runBackup({ now: clock, review, store, key: newKey, previousKeys: [oldKey] } as Parameters<typeof runBackup>[0]);
+    const result = await runBackup({ now: clock, review, store, key: newKey, previousKeys: [oldKey] });
     is("with the old key in the keyring: room made from leftovers, the old-key set kept, the new copy written", [result.ok, goodIds.length > 1 && goodIds.every((id) => objects.has(id)), deleted.every((id) => !goodIds.includes(id))], [true, true, true]);
   }
   {
@@ -163,9 +154,9 @@ async function main(): Promise<void> {
     const junk = "ffffffff-ffff-4fff-8fff-000000000000";
     objects.set(junk, new Uint8Array([1, 2, 3]));
     writtenAt.set(junk, T0 + 5);
-    const result = await runBackup({ now: clock, review, store, key: newKey, previousKeys: [oldKey] } as Parameters<typeof runBackup>[0]);
+    const result = await runBackup({ now: clock, review, store, key: newKey, previousKeys: [oldKey] });
     is("control: a leftover that is no manifest goes", [result.ok, objects.has(junk)], [true, false]);
-    is("the strange key opens nothing here", fails(() => openManifest(parts.sealManifest(manifest, strange), [newKey, oldKey])), true);
+    is("the strange key opens nothing here", fails(() => openManifest(sealManifest(manifest, strange), [newKey, oldKey])), true);
   }
   done();
 }

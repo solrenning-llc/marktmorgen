@@ -19,6 +19,8 @@ import {
   MAX_EPISODE_TITLE,
   PODCAST_ID,
   type Podcast,
+  type PodcastRef,
+  exactEpisodeAudio,
   parsePodcast,
 } from "@/lib/podcast-rules";
 
@@ -32,6 +34,23 @@ export async function readPodcast(id: string): Promise<Podcast | null> {
   if (!PODCAST_ID.test(id) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", podKey(id)]]);
   return parsePodcast(raw);
+}
+
+/**
+ * The audio the episodes of this product's podcast play, read exactly (exactEpisodeAudio), for a decision to delete
+ * a file in the product's folder: an empty set for a product that is not a podcast, and for a podcast with no record
+ * (episodes live only in it, so none names a file); null, unknown, when the product was not read, the store's answer
+ * is not exactly one GET's, or the record is bent. A caller keeps the file on null.
+ */
+export async function audioPlayedBy(product: { podcast?: PodcastRef | null } | null | undefined): Promise<Set<string> | null> {
+  if (!product) return null;
+  if (!product.podcast) return new Set();
+  const id = product.podcast.id;
+  if (!PODCAST_ID.test(id) || !isRedisConfigured()) return null;
+  const answers = await redisPipeline([["GET", podKey(id)]]).catch(() => null);
+  if (!Array.isArray(answers) || answers.length !== 1) return null;
+  if (answers[0] === null) return new Set();
+  return exactEpisodeAudio(answers[0], id);
 }
 
 export async function savePodcast(podcast: Podcast): Promise<void> {

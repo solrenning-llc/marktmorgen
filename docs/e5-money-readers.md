@@ -144,6 +144,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `app/studio/import/page.tsx` | SETTING | 125: an imported product's price label | no |
 | `components/store-product.tsx` | SETTING | 693: bundle pick prices on the store page | no (unit 3) |
 | `components/store-tip-box.tsx` | SETTING | 17/18/59: tip buttons and range on the store page | no |
+| `components/member-price-section.tsx` | SETTING | 16: the studio's member-price editor labels product prices in the store's currency (620 [SZ4], unit 3) | no |
 | `lib/affiliate-directory.ts` | SETTING | 145: earnings from product prices | no |
 | `lib/affiliate-leads.ts` | SETTING | 165: a lead bounty from the creator's terms | partly: the record keeps its currency |
 | `lib/agreement-store.ts` | SETTING | 103: an agreement version records the store's currency | partly |

@@ -140,10 +140,10 @@ export function MemberPriceEditor({
           A buyer sees the lower price after they sign in, or open the link we email them, with the address they bought with.
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
-          <button type="button" className="btn btn-primary btn-sm min-h-11" onClick={() => void save()} disabled={busy} aria-busy={busy}>
+          <button type="button" className="btn btn-primary btn-sm inline-flex min-h-11 items-center" onClick={() => void save()} disabled={busy} aria-busy={busy}>
             {busy ? "Saving…" : "Confirm and save"}
           </button>
-          <button type="button" className="btn btn-ghost btn-sm min-h-11" onClick={() => setReviewing(false)} disabled={busy}>
+          <button type="button" className="btn btn-ghost btn-sm inline-flex min-h-11 items-center" onClick={() => setReviewing(false)} disabled={busy}>
             Go back and change
           </button>
         </div>
@@ -292,7 +292,7 @@ export function MemberPriceEditor({
       {rules.length < MAX_MEMBER_RULES ? (
         <button
           type="button"
-          className="btn btn-ghost btn-sm mt-4 min-h-11"
+          className="btn btn-ghost btn-sm mt-4 inline-flex min-h-11 items-center"
           onClick={() => {
             setProblem(null);
             setRules((rows) => [...rows, { id: newRuleId(), percent: 20, by: [], all: true, products: [] }]);
@@ -310,7 +310,7 @@ export function MemberPriceEditor({
           {`${problem.rule !== null ? `Rule ${problem.rule + 1}: ` : ""}${problem.message}`}
         </p>
       ) : null}
-      <button type="button" className="btn btn-primary btn-sm mt-4 min-h-11" onClick={review} disabled={busy || !changed}>
+      <button type="button" className="btn btn-primary btn-sm mt-4 inline-flex min-h-11 items-center" onClick={review} disabled={busy || !changed}>
         Review changes
       </button>
     </div>

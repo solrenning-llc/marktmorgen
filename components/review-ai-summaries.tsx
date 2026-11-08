@@ -147,7 +147,7 @@ export function ReviewAiSummaries({ products, now, canAsk = false }: { products:
           })}
         </ul>
       ) : (
-        <StudioEmptyState title="No product has reviews yet" body="A summary appears here for each product once buyers review it." action={canAsk ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined} className="mt-3" />
+        <StudioEmptyState title="No product has reviews yet" body={`Each product shows here once buyers review it. A summary needs at least ${MIN_SUMMARY_REVIEWS} reviews with words, and you make it when you are ready.`} action={canAsk ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined} className="mt-3" />
       )}
     </section>
   );

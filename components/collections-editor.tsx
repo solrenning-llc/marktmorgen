@@ -204,12 +204,12 @@ export function CollectionsEditor({
               );
             })}
           </ul>
-          ) : (
-            <StudioEmptyState title="No collections yet" body="A collection groups products under one name and gets a page of its own." action={unavailable ? undefined : { href: "#add-collection", label: "Add the first collection" }} className="mt-5" />
-          )}
+          ) : saved.length === 0 ? (
+            <StudioEmptyState title="No collections yet" body="A collection groups products under one name and gets a page of its own." className="mt-5" />
+          ) : null}
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {rows.length < MAX_COLLECTIONS ? (
-              <button type="button" id="add-collection" disabled={unavailable} className="btn btn-secondary btn-sm" onClick={() => setRows((all) => [...all, { id: "", title: "", blurb: "", products: [] }])}>
+              <button type="button" disabled={unavailable} className="btn btn-secondary btn-sm" onClick={() => setRows((all) => [...all, { id: "", title: "", blurb: "", products: [] }])}>
                 <Icon name="plus" size={15} />
                 {`Add a collection (${rows.length} of ${MAX_COLLECTIONS})`}
               </button>

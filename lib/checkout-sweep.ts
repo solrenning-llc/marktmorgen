@@ -61,7 +61,7 @@ import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
-import { listOrder, listedAlready } from "@/lib/buyer-list";
+import { putOnList, listedAlready } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { isHouseStore } from "@/lib/house-store";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -537,7 +537,12 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       });
       const listed = await listedAlready(ordinary.map((row) => row.id as string));
       for (let i = 0; i < ordinary.length && Date.now() < deadline; i += 1) {
-        if (listed[i]) continue;
+        if (listed[i] === true) continue;
+        // Not known whether it is on the list (CX-123 rule 24, L7): nothing done on it this run, and the run says so.
+        if (listed[i] === null) {
+          failOrder(ordinary[i].id as string);
+          continue;
+        }
         const row = ordinary[i];
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : typeof row.customer_email === "string" ? row.customer_email : "";
         if (!email) continue;
@@ -546,14 +551,17 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         // the order, not the buyer. The try's body is left unindented on purpose: #2719 rewrites those lines.
         try {
         const products = await listingsNamed(store, row.metadata);
-        if ((await listOrder(store, {
+        const outcome = await putOnList(store, {
           sessionId: row.id as string,
           email,
           news: row.metadata?.news === "yes",
           clicks: row.metadata?.news === "yes" && row.metadata?.clicks === "yes",
           created: typeof row.created === "number" ? row.created : Math.floor(Date.now() / 1000),
           products: products.map((p) => ({ id: p.id, title: p.title })),
-        })) === "done") counts.listed += 1;
+        });
+        if (outcome === "done") counts.listed += 1;
+        // A claim or a write not known to have landed is said as failed (Codex G on #2719); a no-op or another run's work is not.
+        else if (outcome === "failed") failOrder(row.id as string);
         } catch (error) {
           failOrder(row.id as string);
           console.error("a paid order was left off the list for the next run", row.id, describe(error));

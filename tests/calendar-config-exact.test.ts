@@ -22,8 +22,8 @@ const STORE = { statsId: STATS, handle: "rhea-studio", callsId: null } as unknow
 const cfgKey = `nl:cal:cfg:${STATS}`;
 const TOKEN = "a".repeat(48);
 const FEEDS = [
-  { id: "1111111111111111", url: "https://calendar.example.com/one.ics", addedAt: "2026-11-01T00:00:00.000Z" },
-  { id: "2222222222222222", url: "https://calendar.example.com/two.ics", addedAt: "2026-11-02T00:00:00.000Z" },
+  { id: "1111111111111111", url: "https://calendar.example.test/one.ics", addedAt: "2026-11-01T00:00:00.000Z" },
+  { id: "2222222222222222", url: "https://calendar.example.test/two.ics", addedAt: "2026-11-02T00:00:00.000Z" },
 ];
 const KEPT = JSON.stringify({ handle: STORE.handle, feeds: FEEDS, token: TOKEN, tokenAt: "2026-11-01T00:00:00.000Z", callsId: null });
 

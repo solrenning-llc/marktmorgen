@@ -134,17 +134,21 @@ export default async function CollectionPage({ params }: Params) {
     store.reviewed ? summaries(store.statsId).catch(() => new Map()) : Promise.resolve(new Map()),
     Promise.all(
       products.map(async (product) => {
-        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => false)]);
-        return out ? 0 : stock;
+        // Keys left that could not be read are unknown, never "keys left" (CX-123 rule 24): no way to buy, no count.
+        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => null)]);
+        return out === null ? ("unread" as const) : out ? 0 : stock;
       }),
     ),
   ]);
   const soon = coming.soon;
   const left = new Map<string, number>();
+  const unread = new Set<string>();
   products.forEach((product, i) => {
-    if (counts[i] !== null) left.set(product.id, counts[i] as number);
+    const count = counts[i];
+    if (count === "unread") unread.add(product.id);
+    else if (count !== null) left.set(product.id, count);
   });
-  const inCart = cartOn ? products.filter((p) => cartable(p) && canSellProduct(store, p) && !soon.has(p.id) && left.get(p.id) !== 0).map((p) => p.id) : [];
+  const inCart = cartOn ? products.filter((p) => cartable(p) && canSellProduct(store, p) && !soon.has(p.id) && left.get(p.id) !== 0 && !unread.has(p.id)).map((p) => p.id) : [];
 
   const say = speech(store);
   const { w } = say;
@@ -197,6 +201,7 @@ export default async function CollectionPage({ params }: Params) {
               soon={soon.has(product.id)}
               preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
               cart={inCart.includes(product.id)}
+              unread={unread.has(product.id)}
             />
           ))}
         </ul>

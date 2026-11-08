@@ -240,8 +240,9 @@ export async function stampedCopy(
       await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
     }
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
-    // copy is already made, and a failure leaves them on the list for the next try.
-    await retryStampDrops(RETRY_PER_CALL).catch((error: unknown) => console.error("stamped copies left from before could not be deleted yet; they stay on the list", error));
+    // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
+    // for a later try: emptying it now would delete the copy handed over below.
+    await retryStampDrops(RETRY_PER_CALL, copyFolder(file)).catch((error: unknown) => console.error("stamped copies left from before could not be deleted yet; they stay on the list", error));
     return copy;
   } catch (error) {
     console.error("stamping a file failed; handing over the original", error);
@@ -282,14 +283,16 @@ async function noteDrop(folder: string): Promise<boolean> {
  * list only after every copy in it is confirmed deleted; the first that fails stops the try and stays. A list read
  * in any shape but an exact list of text throws (UnknownReplyError), and nothing is deleted on it.
  */
-export async function retryStampDrops(limit: number): Promise<number> {
+export async function retryStampDrops(limit: number, keep?: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const replies = repliesFor(await redisPipeline([["SRANDMEMBER", DROP_QUEUE, limit]]), 1);
   const folders = replies ? stringList(replies[0]) : null;
   if (!folders || folders.length > limit) throw new UnknownReplyError("the stamped copies to delete");
   let emptied = 0;
   for (const folder of folders) {
-    if (!COPY_FOLDER.test(folder)) continue;
+    // `keep` is the folder of a copy being handed over right now: it stays on the list for a later try, so a new
+    // copy is never deleted by its own call (Codex M on #3312).
+    if (!COPY_FOLDER.test(folder) || folder === keep) continue;
     await deleteFolder(folder);
     const gone = repliesFor(await redisPipeline([["SREM", DROP_QUEUE, folder]]), 1);
     const count = gone ? countOf(gone[0]) : null;

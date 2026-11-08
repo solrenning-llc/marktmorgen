@@ -2,6 +2,7 @@
 // already ended or switched it. A write that did not happen (null) or failed
 // (a throw) must never be reported as "ended" or "switched": the store would
 // keep the old plan's rights while the creator is told otherwise.
+import {readFileSync} from "node:fs";
 import {NextRequest} from "next/server";
 import {POST as cancelPOST} from "@/app/api/billing/cancel/route";
 import {POST as switchPOST} from "@/app/api/billing/switch/route";
@@ -39,6 +40,26 @@ async function main(){
   is("one store write with Stripe's plan, write "+write,world.writes,[["write-test@example.com",{active:true,tier:"creator",cycle:"year",trialEnds:0,shared:false,period:null}]]);
   is("Stripe asked exactly as before, write "+write,world.provider,[["switch","sub_WriteTest0001",{tier:"creator",cycle:"year"},{id:"grant_WriteTest"}]]);
  }
+ part("Switch: sent to Stripe, outcome not confirmed");
+ // Stripe may already have switched and billed: never "Nothing changed and nothing was charged".
+ for(const end of ["unconfirmed","inactive"] as const){
+  resetWorld();world.switchEnd=end;
+  is("may have changed, "+end,await outcome(()=>switchPOST(form("switch","tier=creator&cycle=year"))),"switch-unconfirmed");
+  is("no store write, "+end,world.writes.length,0);
+  is("Stripe asked once, "+end,world.provider.length,1);
+ }
+ part("Switch: refused or failed before anything changed");
+ for(const end of ["refused","before"] as const){
+  resetWorld();world.switchEnd=end;
+  is("nothing changed, "+end,await outcome(()=>switchPOST(form("switch","tier=creator&cycle=year"))),"switch-error");
+  is("no store write, "+end,world.writes.length,0);
+ }
+ const notice=/"switch-unconfirmed": \{\n\s*title: "([^"]+)",\n\s*body: "([^"]+)"/.exec(readFileSync("app/studio/page.tsx","utf8"));
+ is("the studio has the may-have-changed notice",Boolean(notice),true);
+ is("which never says nothing changed or nothing was charged",/nothing (changed|was changed|was charged)/i.test(notice?.[1]+" "+notice?.[2]),false);
+ resetWorld();
+ is("a malformed choice is refused before Stripe",await outcome(()=>switchPOST(form("switch","tier=creator&cycle=decade"))),"switch-error");
+ is("Stripe never asked for a malformed choice",world.provider.length,0);
  done();
 }
 main().catch(e=>{console.error(e);process.exit(1);});

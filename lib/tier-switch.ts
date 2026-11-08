@@ -245,8 +245,8 @@ export function refusedUnapplied(error: unknown): error is StripeError {
 }
 
 /**
- * After an unconfirmed switch the membership's lock is left to run out (60 seconds, past Stripe's 20-second ceiling,
- * STRIPE_TIMEOUT_MS) rather than let go: a new preview, whose new second makes a new key, is "busy" while the first
+ * After an unconfirmed switch the membership's lock is held a full 60 seconds from that answer (withLock, keepFullTerm,
+ * whatever the reads before the charge took) and left to run out rather than let go: a new preview, whose new second makes a new key, is "busy" while the first
  * request may still be running at Stripe, and is read again afterwards.
  */
 export function keepWhileUnconfirmed(result: { ok: boolean; reason?: string }): boolean {

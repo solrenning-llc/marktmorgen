@@ -88,7 +88,14 @@ export async function forgetServer(room: string, sid: string): Promise<number> {
   await redisPipeline([
     ["DEL", serverKey(room), productsKey(room), membersKey(room), ...addresses.map((e) => addressKey(room, e))],
     ...(people.length ? [["ZREM", DUE_KEY, ...people.map((id) => `${sid}|${id}`)]] : []),
-  ]);
+  ]).then((replies) => {
+    // The deletes are read too, as forgetMember's (#2932, CX-123 rule 24): a missing, short, long or queued answer is not
+    // "forgotten", so nobody is counted and the disconnect is said as not done. DEL removes at most the keys it names
+    // (the server, the products' roles, the people, each address link) and ZREM at most the people it names.
+    const most = [3 + addresses.length, people.length];
+    const counts = repliesFor(replies, people.length ? 2 : 1)?.map(countOf);
+    if (!counts || !counts.every((count, i) => count !== null && count <= most[i])) throw new UnknownReplyError("the deletion of a Discord server and its people");
+  });
   return people.length;
 }
 

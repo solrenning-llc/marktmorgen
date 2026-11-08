@@ -46,6 +46,14 @@ async function world(): Promise<{ store: Store; id: string; sha: string }> {
   return { store, id: made.agreement.id, sha: made.version.sha256 };
 }
 
+async function second(store: Store): Promise<{ id: string; sha: string }> {
+  const draft = readDraft({ kind: "agreement", email: PERSON, name: "Synthetic Person", title: "Second agreement", body: "More synthetic text.", lines: [], consent: true }, "usd");
+  if (!("draft" in draft)) throw Error("invalid fixture draft");
+  const made = await createAgreement(store, draft.draft);
+  if (!made.ok) throw Error(made.message);
+  return { id: made.agreement.id, sha: made.version.sha256 };
+}
+
 const input = (sha: string) => ({ n: 1, sha256: sha, name: "Synthetic Person", email: PERSON, consent: true, ip: "unknown" });
 const left = (id: string) => agreementKeys(id).filter((k) => redis.keys().includes(k));
 
@@ -116,6 +124,53 @@ async function main(): Promise<void> {
     is("no record comes back (name, address, signature)", await readAgreement(w.id), null);
     is("no record or version key comes back", left(w.id), []);
     is("a retry finds nothing left, and nothing is stored", [await forgetAgreementsPerson(w.store.sid!, PERSON), left(w.id)], [0, []]);
+  }
+  for (const [label, pauseAt] of [
+    ["before it takes the next agreement's lock", "next lock"],
+    ["between taking an agreement's lock and deleting it", "own delete"],
+  ] as const) {
+    part(`the erasure's own lock runs out ${label}; a new signature takes it (Codex M on #3151)`);
+    const w = await world();
+    const b = await second(w.store);
+    const [first, next] = [w.id, b.id].sort();
+    const sha = first === w.id ? w.sha : b.sha;
+    let armed = true;
+    let release: () => void = () => {};
+    const erasureDone = new Promise<void>((resolve) => (release = resolve));
+    let signing: Promise<{ ok: boolean }> | null = null;
+    redis.pipeline = (async (commands: Parameters<typeof original>[0]) => {
+      const c = commands[0];
+      const hit =
+        pauseAt === "next lock"
+          ? c?.[0] === "SET" && c[1] === `nl:agree:lock:${next}` && c.includes("NX")
+          : (c?.[0] === "EVAL" && commands.some((x) => x.includes(`nl:agree:r:${first}`))) || (c?.[0] === "DEL" && c.includes(`nl:agree:r:${first}`));
+      if (armed && hit) {
+        armed = false;
+        redis.advance(11_000); // the erasure paused past its own ten-second lock
+        signing = signAgreement(w.store, first, input(sha), "Synthetic Person");
+        await new Promise((r) => setTimeout(r, 50)); // the new signer takes the free lock and reads
+      }
+      if (!armed && signing && commands.some((x) => x[0] === "GET" && x[1] === `nl:agree:v:${first}:1`)) {
+        const reply = await original(commands);
+        await erasureDone; // the signer's version read answers only once the erasure has finished
+        return reply;
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const erased = await forgetAgreementsPerson(w.store.sid!, PERSON).then(
+      (n) => n,
+      (error: unknown) => `threw ${(error as Error)?.name}`,
+    );
+    release();
+    const signed = signing ? await signing : { ok: false };
+    redis.pipeline = original;
+    is("the pause was reached", armed, false);
+    const finished = typeof erased === "number";
+    is("an erasure that said it is done leaves no record of either agreement", finished ? [await readAgreement(first), await readAgreement(next)] : [null, null], [null, null]);
+    is("an erasure that could not finish says so, never a count", finished || /^threw /.test(String(erased)), true);
+    void signed;
+    await forgetAgreementsPerson(w.store.sid!, PERSON);
+    is("a retry after the signature leaves nothing of either", [left(first), left(next)], [[], []]);
   }
   done();
 }

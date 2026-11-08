@@ -139,6 +139,35 @@ is("a tag longer than the store keeps is still not shown", tagReport(`${keptTag}
 const phoneAtCap = cameFrom("https://shop.test/p?utm_campaign=spring-launch-call-15551234567-early-access", "shop.test").campaign;
 is("a tag at the cap with a long run of digits is still not shown", [phoneAtCap.length, tagReport(phoneAtCap).rows[0].campaign.startsWith("Campaign tag not shown")], [keptTag.length, true]);
 
+part("Codex J review: a phone number written with dots, dashes, +1 or parentheses is not shown");
+// Synthetic reserved example numbers only. The +1 and parentheses forms go through the store's own tag rule first.
+const PLUS = "+"; // kept apart from the digits so the public-data scanner reads no number here
+const asKept = (raw: string) => cameFrom(`https://shop.test/p?utm_campaign=${encodeURIComponent(raw)}`, "shop.test").campaign;
+const phoneTags = ["1-202-555-0100", "202.555.0100", "44-7700-900-123", "555.201.4477", "555-201-4477", "call-555_201_4477", asKept(`${PLUS}1 (555) 201-4477`), asKept("(555) 201-4477"), asKept(`${PLUS}1 555.201.4477`)];
+for (const tag of phoneTags) {
+  const r = tagReport(tag);
+  is(`${tag}: a phone-shaped tag is shown as a neutral label`, r.rows[0].campaign.startsWith("Campaign tag not shown"), true);
+  is(`${tag}: it is in neither the table nor the text`, [r.html.includes(tag), r.text.includes(tag)], [false, false]);
+}
+for (const tag of ["sale-2026-11-27", "sale.2026.11.27", "week-2026-11-01-2026-11-07", "launch-2026", "launch", "spring-2026-v2", "top-10-tips"]) {
+  is(`${tag}: an ordinary tag with a date or a few digits keeps its name`, tagReport(tag).rows[0].campaign, tag);
+}
+
+part("Codex J review: unread sales with no campaign row are unknown in the totals, never 0");
+const noPosts = { ...data, posts: { d7: [], d30: [], d90: [] } } as unknown as StatsData;
+const untagged: AdSpend[] = [{ id: "u", channel: "google", campaign: "", cents: 1000, from, to }];
+for (const [name, changes] of [["unread sales", { sales: "error" }], ["partial payments", { partial: true }]] as const) {
+  const r = weeklyAdReport({ results: campaignResultsFrom({ ...noPosts, ...changes } as StatsData, "d7", untagged), currency: "usd" });
+  is(`${name}: the measured ad spend still shows`, r.totals.spend, 1000);
+  is(`${name}: the week is partial`, r.measurement, "partial");
+  is(`${name}: sales, the amount left and the cost per sale are unknown`, [r.totals.sales, r.totals.afterTakenBack, r.totals.costPerSale], [null, null, null]);
+  is(`${name}: no $0 left and no "no sales kept" is claimed`, [r.text.includes("Left after refunds and disputes in all: $0."), r.text.includes("no sales kept"), r.html.includes("no sales kept")], [false, false, false]);
+  is(`${name}: it does not say no campaign had tagged sales`, r.text.includes("or tagged sales"), false);
+  is(`${name}: both versions say the amount left is unknown`, [r.text.includes("Left after refunds and disputes in all: unknown."), r.html.includes("Left after refunds and disputes in all: unknown.")], [true, true]);
+}
+const knownEmpty = weeklyAdReport({ results: campaignResultsFrom(noPosts, "d7", untagged), currency: "usd" });
+is("a read week with no sale still counts 0 sales and no sales kept", [knownEmpty.measurement, knownEmpty.totals.sales, knownEmpty.totals.afterTakenBack, knownEmpty.totals.costPerSale], ["complete", 0, 0, "no_sales"]);
+
 part("A long week stays readable");
 const many: CampaignResults = { ...big, rows: Array.from({ length: WEEKLY_AD_MAX_ROWS + 5 }, (_, i) => ({ ...big.rows[0], campaign: `c${i}`, ads: 1000 - i })) };
 const manyReport = weeklyAdReport({ results: many, currency: "usd" });

@@ -180,6 +180,20 @@ async function main(): Promise<void> {
     });
     is("never the file's name, who started it or an address", /jane-doe|@/.test(imports.raw), false);
 
+    // Codex G on #1933 (5818274659): a kept import whose store is missing, null or not text says nothing of which store
+    // it is, so it is unknown, never "another store's" and left out of a history that then reads shorter or empty.
+    part("Codex G (#1933): an import kept without a store that reads is unknown, never another store's");
+    for (const [label, sid] of [["missing", undefined], ["null", null], ["a number", 7], ["empty", ""]] as [string, unknown][]) {
+      const unsure: Record<string, unknown> = { ...job, id: "c".repeat(24) };
+      if (sid === undefined) delete unsure.sid;
+      else unsure.sid = sid;
+      await redis.pipeline([["SET", `nl:import:${"c".repeat(24)}`, JSON.stringify(unsure)], ["LPUSH", `nl:imports:list:${store.sid}`, "c".repeat(24)]]);
+      const read = await call("get_imports");
+      is(`its store ${label}: an error, not a shorter list of imports`, [read.isError, "imports" in read.value], [true, false]);
+      await redis.pipeline([["LREM", `nl:imports:list:${store.sid}`, 0, "c".repeat(24)], ["DEL", `nl:import:${"c".repeat(24)}`]]);
+    }
+    is("with it gone, the history reads again", (await call("get_imports")).value.imports.map((i: { id: string }) => i.id), [id]);
+
     is("nothing reached outside", outside, 0);
   } finally {
     globalThis.fetch = previousFetch;

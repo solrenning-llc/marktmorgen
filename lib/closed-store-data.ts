@@ -143,10 +143,12 @@ function filesIn(value: unknown, out: { pathname: string; addedAt: string }[] = 
  * Stripe account, which name the company's records about its plan.
  */
 export async function marksOf(store: Store): Promise<{ marks: string[]; files: { pathname: string; addedAt: string }[] }> {
-  const listings = await readAllListings(store).catch(() => []);
-  const flows = store.listId ? await readFlows(store.listId).catch(() => []) : [];
+  // A read that fails is never "nothing" (rule 24): its ids would be missed and their keys never erased. It throws,
+  // and the walk tries the store again later (eraseClosed), or the closing day holds (lib/plan-closing.ts).
+  const listings = await readAllListings(store);
+  const flows = store.listId ? await readFlows(store.listId) : [];
   const courseIds = listings.flatMap((l) => (l.course ? [l.course.id] : []));
-  const courses = courseIds.length ? [...(await readCourses(courseIds).catch(() => new Map())).values()] : [];
+  const courses = courseIds.length ? [...(await readCourses(courseIds)).values()] : [];
   const own = [store.sid, store.statsId, store.listId, store.callsId, store.catalog?.id, store.community?.id, await storeFolder(storeRef(store)), store.photoId];
   const found = new Set<string>([...own.filter((id): id is string => typeof id === "string" && id.length >= 6), ...idsIn(JSON.stringify(store), JSON.stringify(listings), JSON.stringify(flows), JSON.stringify(courses))]);
   for (const id of [...courseIds, ...listings.flatMap((l) => (l.podcast ? [l.podcast.id] : [])), ...flows.map((f) => f.id)]) if (id) found.add(id);
@@ -206,7 +208,8 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   const { marks } = await marksOf(store);
   const extra: string[] = [];
   // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
-  const team = store.sid ? await readTeam(store.sid).catch(() => ({ members: [], invites: [] })) : { members: [], invites: [] };
+  // Read whole or not at all: a team not read is never "no teammates" (rule 24); it throws, and the walk waits.
+  const team = store.sid ? await readTeam(store.sid) : { members: [], invites: [] };
   const own = new Set(marks);
   for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
     let cursor = "0";

@@ -25,7 +25,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
-import { accessFor, disconnect, forgetUser, hostConnectionView, meetSettingsView, meetView, NotConnected, usableProviders } from "@/lib/meet-connect";
+import { accessFor, disconnect, finishConsent, forgetUser, hostConnectionView, meetSettingsView, meetView, NotConnected, usableProviders } from "@/lib/meet-connect";
 import { POST as saveCall } from "@/app/api/store/call/route";
 import { POST as manageCommunity } from "@/app/api/store/community/manage/route";
 import { POST as saveEvent } from "@/app/api/store/community/events/route";
@@ -50,11 +50,19 @@ process.env.ZOOM_CLIENT_SECRET = "synthetic-zoom-secret";
 process.env.ZOOM_WEBHOOK_SECRET_TOKEN = "synthetic-zoom-token";
 
 let outbound: string[] = [];
+/** Only while true does a stand-in Zoom answer its consent: the code traded, the user read, a grant given back. */
+let zoomAnswers = false;
 globalThis.fetch = (async (input: RequestInfo | URL) => {
-  const url = String(input instanceof Request ? input.url : input);
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
   // Stripe's list reads of the call route (bookings to come): none.
-  if (url.includes("api.stripe.com")) return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
-  outbound.push(url);
+  if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
+  outbound.push(`${url.origin}${url.pathname}`);
+  if (zoomAnswers && url.hostname === "zoom.us" && url.pathname === "/oauth/token") {
+    return json({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600, scope: "meeting:write:meeting user:read:user" });
+  }
+  if (zoomAnswers && url.hostname === "api.zoom.us" && url.pathname === "/v2/users/me") return json({ id: "acct-zoom-new", email: "new@example.test", first_name: "New" });
+  if (zoomAnswers && url.hostname === "zoom.us" && url.pathname === "/oauth/revoke") return json({ status: "success" });
   throw Error("Unexpected external request in a synthetic test");
 }) as typeof fetch;
 
@@ -214,6 +222,53 @@ async function main(): Promise<void> {
       [true, true, true, 1, []],
     );
   }
+
+  // The uninstall list itself (SMEMBERS) answered in another shape: Zoom's
+  // notice is unknown, so Zoom retries, and the list that finds the store's
+  // connection is kept, never deleted as if nobody were on it.
+  const oddMembers: [string, unknown][] = [
+    ["a number", 42],
+    ["an object", { 0: SID }],
+    ["missing", undefined],
+    ["a list with a number", [SID, 7]],
+    ["null", null],
+  ];
+  for (const [label, reply] of oddMembers) {
+    part(`Zoom's uninstall list answered as ${label}: unknown, never "nobody to forget"`);
+    await keepBoth(SID);
+    await redisPipeline([["SADD", userKey("zoom", "acct-zoom"), SID]]);
+    redis.pipeline = (async (commands: Commands) => {
+      const replies = await pipe(commands);
+      return replies.map((r, i) => (commands[i][0] === "SMEMBERS" ? reply : r));
+    }) as typeof redis.pipeline;
+    is(`${label}: forgetUser is unknown (so Zoom retries), not "nothing to forget"`, await outcome(() => forgetUser("zoom", "acct-zoom")), "unknown");
+    restore();
+    is(`${label}: the uninstall list and the connection are still kept`, [(await redisPipeline([["SCARD", userKey("zoom", "acct-zoom")]]))[0], Boolean(await kept(connKey(SID, "zoom")))], [1, true]);
+  }
+  part("Zoom's uninstall list, healthy and confirmed empty");
+  await keepBoth(SID);
+  await redisPipeline([["SADD", userKey("zoom", "acct-zoom"), SID]]);
+  is("healthy: the store's connection is forgotten, and the list with it", [await outcome(async () => (await forgetUser("zoom", "acct-zoom")).map((f) => f.statsId)), Boolean(await kept(connKey(SID, "zoom"))), (await redisPipeline([["SCARD", userKey("zoom", "acct-zoom")]]))[0]], [JSON.stringify([SID]), false, 0]);
+  is("confirmed empty: nothing to forget", await outcome(() => forgetUser("zoom", "acct-nobody")), "[]");
+
+  part("A new Zoom grant whose earlier connection cannot be read: given back, never left granted");
+  await keepBoth(SID);
+  outbound = [];
+  zoomAnswers = true;
+  answering(42);
+  const consent = { statsId: SID, code: "code-1", verifier: "v".repeat(43), by: OWNER, owner: { email: OWNER, handle: "meetshop" } };
+  is("finishConsent throws unknown", await outcome(() => finishConsent("zoom", consent)), "unknown");
+  restore();
+  zoomAnswers = false;
+  is("the grant Zoom just gave is given back", outbound.filter((u) => u === "https://zoom.us/oauth/revoke").length, 1);
+  is("and the connection kept before is untouched", JSON.parse(String(await kept(connKey(SID, "zoom")))).account.id, "acct-zoom");
+  part("Control: a healthy new Zoom grant is kept, not given back");
+  outbound = [];
+  zoomAnswers = true;
+  const healthy = await outcome(async () => (await finishConsent("zoom", consent)).ok);
+  zoomAnswers = false;
+  is("healthy: kept", [healthy, JSON.parse(String(await kept(connKey(SID, "zoom")))).account.id], ["true", "acct-zoom-new"]);
+  is("healthy: only the replaced account's grant is given back", outbound.filter((u) => u === "https://zoom.us/oauth/revoke").length, 1);
 
   const oddAll: [string, unknown][] = [
     ["a number", 42],

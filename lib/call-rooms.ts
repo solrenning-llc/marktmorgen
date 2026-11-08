@@ -93,7 +93,7 @@ function storedMeetingLink(raw: string | null, scope: string): string | null {
     const link = givenLink(record);
     if (link) {
       const room = cleanRoom(link);
-      if (room === null || room === "bad") throw unreadableRooms();
+      if (room === null || room === "bad" || new URL(link).toString() !== link) throw unreadableRooms();
     }
     return link;
   } catch {

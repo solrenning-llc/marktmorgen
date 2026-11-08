@@ -29,6 +29,10 @@ for (const [label, reply] of Object.entries({
   unknownMeetingStatus: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "https://meet.google.com/abc-defg-hij" }), null],
   wrongMeetingScope: [null, null, JSON.stringify({ provider: "google", scope: "c:another-store:b:another-booking", link: "https://meet.google.com/abc-defg-hij", gone: false }), null],
   unusableMeetingLink: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "not a meeting URL", gone: false }), null],
+  crlfMeetingLink: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "https://zoom.us/j/1\r\nATTENDEE:mailto:x@example.com", gone: false }), null],
+  tabMeetingLink: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "https://zoom.us/j/1\t", gone: false }), null],
+  spacedMeetingLink: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: " https://zoom.us/j/1", gone: false }), null],
+  quotedMeetingLink: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: 'https://zoom.us/j/1"><x', gone: false }), null],
   executableMeetingLink: [null, null, JSON.stringify({ provider: "google", scope: `c:calls-evidence:b:${ask.session}`, link: "javascript:alert(1)", gone: false }), null],
 })) {
   test(`unknown room evidence never silently switches to a fallback: ${label}`, async () => {

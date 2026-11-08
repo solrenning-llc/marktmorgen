@@ -38,7 +38,8 @@ async function storeOf(query: Query): Promise<Store | null> {
   }
   const community = param(query, "c");
   if (community) {
-    const found = COMMUNITY_UNSUB.test(community) ? await readCommunityUnsub(community) : null;
+    // A link that could not be read just now is spoken of in English, as one we do not know the store of.
+    const found = COMMUNITY_UNSUB.test(community) ? await readCommunityUnsub(community).catch(() => null) : null;
     return found ? storeForPage(found.handle) : null;
   }
   const update = param(query, "u");
@@ -74,7 +75,7 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
   const update = param(query, "u");
   if (update) return <StopUpdates token={update} />;
   const community = param(query, "c");
-  if (community) return <StopAnnouncements token={community} />;
+  if (community) return <StopAnnouncements token={community} notSaved={param(query, "done") === "0"} />;
   const links = param(query, "l");
   if (links) return <StopLinkCounting token={links} store={await storeOf(query)} />;
   const token = param(query, "t");
@@ -160,9 +161,21 @@ async function StopLinkCounting({ token, store }: { token: string; store: Store 
   );
 }
 
-/** The same one button, for a community's emails: announcements and live event reminders. */
-async function StopAnnouncements({ token }: { token: string }) {
-  const found = COMMUNITY_UNSUB.test(token) ? await readCommunityUnsub(token) : null;
+/**
+ * The same one button, for a community's emails: announcements and live event reminders.
+ * `notSaved`: the route answered done=0, so the last press was not saved (its read or write was
+ * unknown). Said only while the link is still found and not stopped, with the button offered again.
+ * A link whose read was unknown (CX-123 rule 24) is never called unknown nor stopped: the page says
+ * it could not open it just now, in English, as the store is not known, and offers no button.
+ */
+async function StopAnnouncements({ token, notSaved }: { token: string; notSaved: boolean }) {
+  let unread = false;
+  const found = COMMUNITY_UNSUB.test(token)
+    ? await readCommunityUnsub(token).catch(() => {
+        unread = true;
+        return null;
+      })
+    : null;
   const store = found ? await storeForPage(found.handle) : null;
   const config = found && store?.community?.id === found.community ? await readConfig(found.community) : null;
   const who = store ? store.mail?.fromName || store.name : "";
@@ -171,7 +184,12 @@ async function StopAnnouncements({ token }: { token: string }) {
   return (
     <main id="content" lang={localeOf(store)} className="min-h-screen bg-paper px-4 py-20 text-ink">
       <div className="card mx-auto max-w-md p-7 sm:p-9">
-        {!found ? (
+        {unread ? (
+          <>
+            <h1 className="t-h3">{a.linkNotReadTitle}</h1>
+            <p className="mt-3 text-ink-soft">{a.linkNotReadBody}</p>
+          </>
+        ) : !found ? (
           <>
             <h1 className="t-h3">{a.unknownLink}</h1>
             <p className="mt-3 text-ink-soft">{a.unknownOtherBody}</p>
@@ -185,6 +203,7 @@ async function StopAnnouncements({ token }: { token: string }) {
           <>
             <h1 className="t-h3">{a.communityAsk(who)}</h1>
             <p className="mt-3 text-ink-soft">{a.communityFor(found.member.e, where)}</p>
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?c=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.stopEmails}</button>

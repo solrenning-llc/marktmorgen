@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "crumb", "Crumb Bakery", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestRefundExact1", true);
+  await setStripeAccount(OWNER, "acct_1TestRefundEx1", true);
   await setAffiliateSetting(OWNER, { ...NO_AFFILIATES, enabled: true, percent: 30 });
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;

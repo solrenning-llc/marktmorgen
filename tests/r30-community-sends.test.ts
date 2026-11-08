@@ -13,6 +13,15 @@
  * - tokenFor, in both: a member's stop-link token was written with setMemberToken, which kept nothing when the
  *   member's record did not read, and the email went out with a stop link that leads nowhere. Now the token is the one
  *   the record keeps, or the batch waits; a token another send made first is the one used.
+ *
+ * Claude 2's review of #3140 at 4ea029d30:
+ * - M1: a reminder whose readers were written but whose send was not (the job's SET failed) kept its `:made` claim;
+ *   the next run found the claim, read no send, and the entry was taken off the queue unsent. And a send's own record
+ *   was read without repliesFor, so a lost reply took a send under way off nl:cm:evmailq for good.
+ * - M2: with `strict`, one member who can never be resolved (Stripe has more than one page of their checkouts, more
+ *   than ten customers, or the store's Stripe account is disconnected) held a whole announcement or reminder: nobody
+ *   after them was emailed, ever. Now such a member is left out of the batch, counted as skipped (never as sent), and
+ *   the others go on; a member Stripe keeps failing to answer for is treated so after MEMBER_TRIES tries in a row.
  */
 import { createHash } from "node:crypto";
 import { freshConfig, saveConfig, touchMember, type Member, type Post } from "@/lib/community";
@@ -319,6 +328,204 @@ async function main(): Promise<void> {
     await run();
     is("a member whose ticket is known to have lapsed is skipped", [reminder("Lapsed call"), ...(await sendState(job))], [[everyone[1]], "sent", 2, 2, false]);
     await fresh();
+  }
+
+  // ------------------------------------------------------------ review of #3140, M1
+  const evJob = (job: string) => `nl:cm:evmail:${job}`;
+  const evMade = (job: string) => `nl:cm:evmail:${job}:made`;
+  /** Fails the first pipeline that matches, once; `land` lets the stub apply it first (a reply lost after it landed). */
+  const failOnce = (match: (c: Commands) => boolean, land = false) => {
+    let fired = false;
+    intercept(async (c) => {
+      if (fired || !match(c)) return undefined;
+      fired = true;
+      if (land) await stub(c);
+      throw new Error("Redis request failed with status 503");
+    });
+  };
+  const setsJob = (job: string) => (c: Commands) => c.some((x) => x[0] === "SET" && x[1] === evJob(job));
+  const inQueue = async (e: CommunityEvent) =>
+    ((await original([["ZRANGEBYSCORE", EVENT_QUEUE, 0, "+inf"]]))[0] as string[]).some((m) => m.includes(`|${e.id}|24|`));
+
+  part("Review M1: a reminder whose readers were written but whose send was not is started again, never dropped");
+  {
+    const e = await event("Unsaved call");
+    const job = await due(e);
+    failOnce(setsJob(job));
+    try {
+      is("the failed start leaves the entry queued, nobody reminded", [await run(), await inQueue(e), reminder("Unsaved call")], ["", true, []]);
+    } finally {
+      intercept(null);
+    }
+    await run();
+    await run();
+    is("the next runs remind each once, and the send is done", [reminder("Unsaved call"), ...(await sendState(job)), await inQueue(e)], [everyone, "sent", 2, 2, false, false]);
+  }
+  {
+    const e = await event("Stuck claim call");
+    const job = await due(e);
+    // The send is not written, and giving its claim back fails too: the claim outlives the start that took it.
+    let dels = 0;
+    intercept(async (c) => {
+      if (setsJob(job)(c) && dels === 0) throw new Error("Redis request failed with status 503");
+      if (c.some((x) => x[0] === "DEL" && x.includes(evMade(job))) && dels === 0) {
+        dels += 1;
+        throw new Error("Redis request failed with status 503");
+      }
+      return undefined;
+    });
+    try {
+      await run();
+    } finally {
+      intercept(null);
+    }
+    await run();
+    is("a claim with no send written behind it keeps the entry queued, nobody reminded", [await inQueue(e), reminder("Stuck claim call")], [true, []]);
+    const ttl = (await original([["TTL", evMade(job)]]))[0] as number;
+    is("that claim lapses on its own within five minutes", ttl > 0 && ttl <= 300, true);
+    redis.advance(301_000);
+    await run();
+    await run();
+    is("once it lapses, the reminder is started and each reminded once", [reminder("Stuck claim call"), ...(await sendState(job)), await inQueue(e)], [everyone, "sent", 2, 2, false, false]);
+  }
+  {
+    const e = await event("Landed call");
+    const job = await due(e);
+    failOnce(setsJob(job), true);
+    try {
+      await run();
+    } finally {
+      intercept(null);
+    }
+    await run();
+    await run();
+    is("control: a send written whose reply was lost goes out once to each", [reminder("Landed call"), ...(await sendState(job))], [everyone, "sent", 2, 2, false]);
+  }
+  {
+    const e = await event("Lost record call");
+    const job = await due(e);
+    // Made and queued, nothing sent: another run holds the send's lock for this one.
+    const lock = `nl:cm:evmail:${job}:lock`;
+    intercept((c) => (c.length === 1 && c[0][0] === "SET" && c[0][1] === lock ? [null] : undefined));
+    try {
+      await run();
+    } finally {
+      intercept(null);
+    }
+    is("made and queued, nobody reminded yet", [((await original([["SISMEMBER", JOBS, job]]))[0] as number) === 1, reminder("Lost record call")], [true, []]);
+    // The send's own record answers nothing once, as it is moved on.
+    let lost = false;
+    intercept((c) => (!lost && c.length === 1 && c[0][0] === "GET" && c[0][1] === evJob(job) ? ((lost = true), []) : undefined));
+    try {
+      await run();
+    } finally {
+      intercept(null);
+    }
+    is("a send whose record did not read stays among the sends under way", ((await original([["SISMEMBER", JOBS, job]]))[0] as number) === 1, true);
+    await run();
+    is("and goes out once to each", [reminder("Lost record call"), ...(await sendState(job))], [everyone, "sent", 2, 2, false]);
+  }
+
+  // ------------------------------------------------------------ review of #3140, M2
+  // Stripe, played here for the second member only: the first member's answer is kept, so Stripe is never asked of them.
+  const TRIES = 6; // MEMBER_TRIES, lib/community-mail.ts
+  let stripe: ((path: string) => { status: number; body: unknown }) | null = null;
+  /** The Stripe paths asked, in order. */
+  const asked: string[] = [];
+  const before = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (!url.startsWith("https://api.stripe.com/v1/")) return before(input, init);
+    if (!stripe) throw new TypeError("fetch failed");
+    asked.push(url.slice("https://api.stripe.com/v1".length));
+    const { status, body } = stripe(url.slice("https://api.stripe.com/v1".length));
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  process.env.STRIPE_SECRET_KEY = "sk_test_syntheticSends";
+  const list = (data: unknown[], hasMore = false) => ({ status: 200, body: { object: "list", data, has_more: hasMore } });
+  const session = (n: number) => ({
+    id: `cs_test_Synth${String(n).padStart(4, "0")}`,
+    object: "checkout.session",
+    status: "complete",
+    payment_status: "paid",
+    mode: "payment",
+    customer: `cus_Synth${String(n).padStart(6, "0")}`,
+    metadata: { store: store.handle, product: "otherproduct" },
+  });
+  const unresolvable: [string, (path: string) => { status: number; body: unknown }][] = [
+    ["more than one page of checkouts", (path) => (path.startsWith("/checkout/sessions") ? list([], true) : list([]))],
+    ["more than ten customers", (path) => (path.startsWith("/checkout/sessions") ? list(Array.from({ length: 11 }, (_, n) => session(n))) : list([]))],
+    [
+      "a disconnected Stripe account",
+      () => ({ status: 403, body: { error: { type: "invalid_request_error", code: "account_invalid", message: "The provided key does not have access to account (synthetic)." } } }),
+    ],
+  ];
+  const skippedOf = async (job: string) => ((await readJob(job)) as { skipped?: number } | null)?.skipped;
+  const sentOf = async (job: string) => (await readJob(job))?.sent;
+  try {
+    part("Review M2: one member who can never be resolved does not hold a whole announcement");
+    for (const [what, answer] of unresolvable) {
+      const title = `Unresolvable news ${what}`;
+      const job = await announce(title);
+      await holds(members[1], null);
+      stripe = answer;
+      asked.length = 0;
+      await advance(job);
+      await advance(job);
+      if (what === "more than ten customers") {
+        is(`${what}: the ten customers read are asked of, no more`, asked.filter((p) => p.startsWith("/payment_intents")).length, 10);
+      }
+      is(`${what}: the others are emailed once, the send is done`, [to(title), ...(await announcement(job)), await inMailq(job)], [[everyone[0]], true, 2, 2, false]);
+      is(`${what}: that member is counted skipped, never sent`, [await sentOf(job), await skippedOf(job)], [1, 1]);
+      stripe = null;
+      await fresh();
+    }
+
+    part("Review M2: a member Stripe keeps failing to answer for holds the batch only MEMBER_TRIES tries");
+    {
+      const title = "Failing news";
+      const job = await announce(title);
+      await holds(members[1], null);
+      stripe = () => ({ status: 500, body: { error: { type: "api_error", message: "synthetic" } } });
+      for (let i = 1; i < TRIES; i++) await advance(job);
+      is("before the last try, the batch waits whole and nobody is emailed", [to(title), ...(await announcement(job)), await inMailq(job)], [[], false, 0, 2, true]);
+      await advance(job);
+      await advance(job);
+      is("after it, the others are emailed once and the member is skipped", [to(title), ...(await announcement(job)), await sentOf(job), await skippedOf(job)], [[everyone[0]], true, 2, 2, 1, 1]);
+      stripe = null;
+      await fresh();
+    }
+    {
+      const title = "Recovered news";
+      const job = await announce(title);
+      await holds(members[1], null);
+      stripe = () => ({ status: 500, body: { error: { type: "api_error", message: "synthetic" } } });
+      for (let i = 1; i < TRIES; i++) await advance(job);
+      stripe = null;
+      await holds(members[1], true);
+      await advance(job);
+      await advance(job);
+      is("control: a member answered before the last try is emailed, nobody skipped", [to(title), ...(await announcement(job)), await sentOf(job), await skippedOf(job) ?? 0], [everyone, true, 2, 2, 2, 0]);
+      await fresh();
+    }
+
+    part("Review M2: one member who can never be resolved does not hold a reminder from the others");
+    {
+      const e = await event("Unresolvable call");
+      const job = await due(e);
+      await holds(members[1], null);
+      stripe = unresolvable[0][1];
+      await run();
+      await run();
+      const read = (await readEventJob(job)) as { sent?: number; skipped?: number } | null;
+      is("the others are reminded once, the send is done", [reminder("Unresolvable call"), ...(await sendState(job))], [[everyone[0]], "sent", 2, 2, false]);
+      is("that member is counted skipped, never sent", [read?.sent, read?.skipped], [1, 1]);
+      stripe = null;
+      await fresh();
+    }
+  } finally {
+    globalThis.fetch = before;
+    delete process.env.STRIPE_SECRET_KEY;
   }
 
   done();

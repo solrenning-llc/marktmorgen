@@ -67,11 +67,13 @@ let priceId: string | null = null;
 /**
  * Whether a price at Stripe is the add-on's own: ASSISTANT_PRICE_CENTS in dollars, every month. Asked of a price found
  * by its lookup key and of the reply to the one just made (rule 30): a reply without the values just written is never
- * used for a checkout, nor kept for the next.
+ * used for a checkout, nor kept for the next. Every month is a month unit with interval_count exactly 1 (Codex P on
+ * #3107): a month unit every two months is another frequency, and a reply with no count says no frequency at all.
  */
 const isAssistantPrice = (price: Record<string, unknown> | undefined): price is Record<string, unknown> & { id: string } => {
-  const recurring = price?.recurring as { interval?: unknown } | null | undefined;
-  return Boolean(price) && typeof price?.id === "string" && price.unit_amount === ASSISTANT_PRICE_CENTS && price.currency === "usd" && recurring?.interval === "month";
+  const recurring = price?.recurring as { interval?: unknown; interval_count?: unknown } | null | undefined;
+  return Boolean(price) && typeof price?.id === "string" && price.unit_amount === ASSISTANT_PRICE_CENTS && price.currency === "usd" &&
+    recurring?.interval === "month" && recurring.interval_count === 1;
 };
 
 /** The add-on's price at Stripe, made the first time it is needed, and replaced when it no longer matches ASSISTANT_PRICE_CENTS. */
@@ -100,6 +102,7 @@ export async function ensureAssistantPrice(): Promise<string> {
       currency: "usd",
       unit_amount: String(ASSISTANT_PRICE_CENTS),
       "recurring[interval]": "month",
+      "recurring[interval_count]": "1",
       product: ASSISTANT_PRODUCT_ID,
       lookup_key: ASSISTANT_LOOKUP_KEY,
       transfer_lookup_key: "true",

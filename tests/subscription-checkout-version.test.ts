@@ -83,7 +83,7 @@ test("the assistant subscription uses explicit classic on the platform account a
  globalThis.fetch=async(input,init)=>{
   const url=new URL(String(input));assert.equal(url.hostname,"api.stripe.com");
   const headers=new Headers(init?.headers);assert.equal(headers.get("Stripe-Account"),null);
-  if(url.pathname==="/v1/prices" && init?.method==="GET")return Response.json({object:"list",data:[{id:"price_ClassicAssistant01",unit_amount:ASSISTANT_PRICE_CENTS,currency:"usd",recurring:{interval:"month"}}],has_more:false});
+  if(url.pathname==="/v1/prices" && init?.method==="GET")return Response.json({object:"list",data:[{id:"price_ClassicAssistant01",unit_amount:ASSISTANT_PRICE_CENTS,currency:"usd",recurring:{interval:"month",interval_count:1}}],has_more:false});
   assert.equal(url.pathname,"/v1/checkout/sessions");assert.equal(init?.method,"POST");captured.push({headers,body:new URLSearchParams(String(init.body))});
   return Response.json({id:"cs_test_ClassicAssistant01",url:"https://checkout.stripe.com/c/pay/synthetic-assistant"});
  };

@@ -207,22 +207,45 @@ const linkKey = (token: string) => `nl:rev:link:${sha(`nimbus-review-link:${toke
 
 type LinkGrant = { s: string; r: string; e: string };
 
-/** A link for the review request: one order, one address, 60 days. Throws UnknownReplyError when its write or its erasure note does not read exactly; nothing may be sent then. */
+/** A link for the review request: one order, one address, 60 days. Throws when its erasure note or its write does not read exactly; nothing may be sent then. */
 export async function mintReviewLink(store: Store, reference: string, email: string): Promise<string> {
   const token = randomBytes(24).toString("hex");
+  const key = linkKey(token);
   const grant: LinkGrant = { s: store.statsId ?? "", r: reference, e: email };
-  const notes = noteForErasure(store.statsId, email, linkKey(token));
-  // Read in their exact shape (CX-123 rule 24, as lib/checkout-recovery.ts reads a reminder's stop link): the link
-  // written ("OK") and each erasure note a count. Anything else is unknown, and no request is sent with a link that
-  // may lead nowhere or that an erasure could not find.
-  const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS], ...notes]), 1 + notes.length);
-  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) {
-    // The write may have landed: the link, with the address in it, is taken back at once (best effort, its reply not
-    // read as anything), so it is not kept 60 days unsent where an erasure may not find it.
-    await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
+  const notes = noteForErasure(store.statsId, email, key);
+  // Read in their exact shape (CX-123 rule 24, as lib/checkout-recovery.ts reads a reminder's stop link). The erasure
+  // note goes first, each reply a count: until it is known, nothing with the address is written (a note left for a
+  // link never written only deletes nothing). So a link that may have landed is always one an erasure finds, whatever
+  // its own pipeline answered, threw, or its take-back did (Codex Z on #3296).
+  if (notes.length) {
+    const noted = repliesFor(await redisPipeline(notes), notes.length);
+    if (!noted || noted.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a review request's erasure note");
+  }
+  // Then the link, "OK" or unknown. Unknown, or a pipeline that threw, may have landed: it is taken back at once so
+  // it is not kept 60 days unsent, and no token comes back, so no request is sent with a link that may lead nowhere.
+  let written: unknown[] | null;
+  try {
+    written = repliesFor(await redisPipeline([["SET", key, JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS]]), 1);
+  } catch (error) {
+    await takeBackLink(key, notes.length > 0);
+    throw error;
+  }
+  if (!written || written[0] !== "OK") {
+    await takeBackLink(key, notes.length > 0);
     throw new UnknownReplyError("a review request's link");
   }
   return token;
+}
+
+/** Deletes an unsent review link that may have landed; a take-back not confirmed is logged with what may be left. */
+async function takeBackLink(key: string, noted: boolean): Promise<void> {
+  const gone = await redisPipeline([["DEL", key]]).then((replies) => repliesFor(replies, 1), () => null);
+  if (gone && countOf(gone[0]) !== null) return;
+  console.error(
+    noted
+      ? "an unsent review request's link may be left until it expires (60 days); it is noted for erasure, so deleting the person deletes it"
+      : "an unsent review request's link may be left until it expires (60 days); its store has no stats id, so it has no erasure note",
+  );
 }
 
 async function readLink(store: Store, token: string): Promise<LinkGrant | null> {

@@ -40,7 +40,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { noteForErasure } from "@/lib/erasure-index";
 import { normaliseEmail } from "@/lib/auth";
 import { storeKey } from "@/lib/learn";
-import { createRequest, saveRequest } from "@/lib/payment-request-store";
+import { changeRequest, createRequest } from "@/lib/payment-request-store";
 import { ROOM } from "./data-room";
 
 export const OWNER = "keeper@example.com";
@@ -151,7 +151,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   // A payment request sent them, with its reminder waiting (lib/payment-request-store.ts).
   const billed = await createRequest(store, { email, name: "Tess", lines: [{ text: "Coaching, October", quantity: 1, cents: 48_000 }], note: `For ${email}`, dueDate: "", autoReminders: 1, total: 48_000 }, Date.now());
   if (!billed.ok) throw new Error(`a payment request was not kept: ${billed.message}`);
-  await saveRequest({ ...billed.request, sent: [Date.now()] });
+  await changeRequest(store, billed.request.id, (current) => ({ next: { ...current, sent: [Date.now()] }, answer: null }));
   // A form answer (lib/form-store.ts).
   await addResponse(statsId, w.formId, { id: hex(16), at: now, page: "/@erase-shop/form/intake", answers: { fmail1: email, fgoal1: "Learn fast" }, outcome: "", joined: false }, ROOM);
 

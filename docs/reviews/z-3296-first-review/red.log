@@ -1,0 +1,377 @@
+
+FILE r24-review-proof-exact.test.ts
+✖ mintReviewLink throws, and takes the link back, when the link's SET answers nil (6.231455ms)
+✖ mintReviewLink throws, and takes the link back, when the link's SET answers a number (0.471682ms)
+✖ mintReviewLink throws, and takes the link back, when the link's SET answers an undefined slot (0.813828ms)
+✖ mintReviewLink throws, and takes the link back, when the index's ZADD answers text (0.360594ms)
+✖ mintReviewLink throws, and takes the link back, when the index's trim answers nil (0.368376ms)
+✖ mintReviewLink throws, and takes the link back, when the index's EXPIRE answers a negative number (0.449829ms)
+✖ mintReviewLink throws, and takes the link back, when a reply is missing (0.349888ms)
+✖ mintReviewLink throws, and takes the link back, when a reply too many (0.511231ms)
+✖ mintReviewLink throws, and takes the link back, when the pipeline answers something that is not a list (0.470781ms)
+✔ a healthy link is written, noted for erasure, opened by its key and deleted with the address (control) (2.620995ms)
+✔ a store with no stats id writes the link alone and reads its one reply (control) (0.45016ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 2
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32.424075
+
+✖ failing tests:
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when the link's SET answers nil (6.231455ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when the link's SET answers a number (0.471682ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when the link's SET answers an undefined slot (0.813828ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when the index's ZADD answers text (0.360594ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when the index's trim answers nil (0.368376ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when the index's EXPIRE answers a negative number (0.449829ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when a reply is missing (0.349888ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when a reply too many (0.511231ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:54593:32
+✖ mintReviewLink throws, and takes the link back, when the pipeline answers something that is not a list (0.470781ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54598:7)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":47,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3296-erasure-index.proof.ts
+Z_RECEIPT {"label":"hole","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_RECEIPT {"label":"inherited OK","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_RECEIPT {"label":"getter","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_RECEIPT {"label":"frozen malformed","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_RECEIPT {"label":"fractional note","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_RECEIPT {"label":"unsafe note","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_RECEIPT {"label":"extra","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_RECEIPT {"label":"boxed OK","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_RECEIPT {"label":"frozen healthy","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_MEDIUM {"grantCommitted":true,"grantBytes":107,"ttl":5184000,"notedErased":2,"retainedAfterErasure":true,"attemptedPipelineCommands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"actualSetBatchBytes":199}
+✖ real committed pipeline refuses hole and removes unsent grant (10.208212ms)
+✖ real committed pipeline refuses inherited OK and removes unsent grant (1.181764ms)
+✖ real committed pipeline refuses getter and removes unsent grant (0.989003ms)
+✖ real committed pipeline refuses frozen malformed and removes unsent grant (0.714419ms)
+✖ real committed pipeline refuses fractional note and removes unsent grant (0.761559ms)
+✖ real committed pipeline refuses unsafe note and removes unsent grant (0.721599ms)
+✖ real committed pipeline refuses extra and removes unsent grant (0.688419ms)
+✖ real committed pipeline refuses boxed OK and removes unsent grant (0.746788ms)
+✔ frozen healthy pipeline remains indexed and actual erasure deletes the grant (1.748831ms)
+✖ MEDIUM: partial pipeline exception must not leave a sixty-day unindexed grant (6.089865ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 1
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40.399699
+
+✖ failing tests:
+
+test at [stdin]:54618:66
+✖ real committed pipeline refuses hole and removes unsent grant (10.208212ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - 'UnknownReplyError'
+
+      at TestContext.<anonymous> ([stdin]:54620:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'UnknownReplyError',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54618:66
+✖ real committed pipeline refuses inherited OK and removes unsent grant (1.181764ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - 'UnknownReplyError'
+
+      at TestContext.<anonymous> ([stdin]:54620:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'UnknownReplyError',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54618:66
+✖ real committed pipeline refuses getter and removes unsent grant (0.989003ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - 'UnknownReplyError'
+
+      at TestContext.<anonymous> ([stdin]:54620:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'UnknownReplyError',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54618:66
+✖ real committed pipeline refuses frozen malformed and removes unsent grant (0.714419ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - 'UnknownReplyError'
+
+      at TestContext.<anonymous> ([stdin]:54620:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'UnknownReplyError',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54618:66
+✖ real committed pipeline refuses fractional note and removes unsent grant (0.761559ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - 'UnknownReplyError'
+
+      at TestContext.<anonymous> ([stdin]:54620:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'UnknownReplyError',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54618:66
+✖ real committed pipeline refuses unsafe note and removes unsent grant (0.721599ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - 'UnknownReplyError'
+
+      at TestContext.<anonymous> ([stdin]:54620:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'UnknownReplyError',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54618:66
+✖ real committed pipeline refuses extra and removes unsent grant (0.688419ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - 'UnknownReplyError'
+
+      at TestContext.<anonymous> ([stdin]:54620:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'UnknownReplyError',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54618:66
+✖ real committed pipeline refuses boxed OK and removes unsent grant (0.746788ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + undefined
+  - 'UnknownReplyError'
+
+      at TestContext.<anonymous> ([stdin]:54620:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'UnknownReplyError',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:54632:27
+✖ MEDIUM: partial pipeline exception must not leave a sixty-day unindexed grant (6.089865ms)
+  AssertionError [ERR_ASSERTION]: a grant with the buyer address must either be removed after pipeline failure or remain discoverable to erasure
+  + actual - expected
+
+  + '{"s":"00000000000000000000000000000000","r":"pi_synthetic_review3296","e":"synthetic-review@buyer.example"}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:54657:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"s":"00000000000000000000000000000000","r":"pi_synthetic_review3296","e":"synthetic-review@buyer.example"}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":56,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3296-P7LVB5

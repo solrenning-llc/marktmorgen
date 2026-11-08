@@ -1,0 +1,206 @@
+
+FILE r24-review-proof-exact.test.ts
+✔ mintReviewLink throws, and takes the link back, when the link's SET answers nil (5.169805ms)
+✔ mintReviewLink throws, and takes the link back, when the link's SET answers a number (0.499373ms)
+✔ mintReviewLink throws, and takes the link back, when the link's SET answers an undefined slot (0.281375ms)
+✔ mintReviewLink throws, and takes the link back, when the index's ZADD answers text (0.282466ms)
+✔ mintReviewLink throws, and takes the link back, when the index's trim answers nil (0.243587ms)
+✔ mintReviewLink throws, and takes the link back, when the index's EXPIRE answers a negative number (0.21854ms)
+✔ mintReviewLink throws, and takes the link back, when a reply is missing (0.33777ms)
+✔ mintReviewLink throws, and takes the link back, when a reply too many (0.274384ms)
+✔ mintReviewLink throws, and takes the link back, when the pipeline answers something that is not a list (0.357029ms)
+✔ a healthy link is written, noted for erasure, opened by its key and deleted with the address (control) (2.205009ms)
+✔ a store with no stats id writes the link alone and reads its one reply (control) (0.317779ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23.889694
+Z_VOLUME {"runs":65,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3296-erasure-index.proof.ts
+Z_RECEIPT {"label":"hole","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":649,"nestedRedis":5,"http":0}
+Z_RECEIPT {"label":"inherited OK","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":649,"nestedRedis":5,"http":0}
+Z_RECEIPT {"label":"getter","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":649,"nestedRedis":5,"http":0}
+Z_RECEIPT {"label":"frozen malformed","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":649,"nestedRedis":5,"http":0}
+Z_RECEIPT {"label":"fractional note","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":649,"nestedRedis":5,"http":0}
+Z_RECEIPT {"label":"unsafe note","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":649,"nestedRedis":5,"http":0}
+Z_RECEIPT {"label":"extra","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":649,"nestedRedis":5,"http":0}
+Z_RECEIPT {"label":"boxed OK","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":649,"nestedRedis":5,"http":0}
+Z_RECEIPT {"label":"frozen healthy","returned":true,"errorName":null,"stored":true,"commands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"jsonPipelineBytes":585,"nestedRedis":4,"http":0}
+Z_MEDIUM {"grantCommitted":true,"grantBytes":107,"ttl":5184000,"notedErased":2,"retainedAfterErasure":true,"attemptedPipelineCommands":["SET","ZADD","ZREMRANGEBYSCORE","EXPIRE"],"actualSetBatchBytes":199}
+✔ real committed pipeline refuses hole and removes unsent grant (6.448505ms)
+✔ real committed pipeline refuses inherited OK and removes unsent grant (1.026139ms)
+✔ real committed pipeline refuses getter and removes unsent grant (0.746207ms)
+✔ real committed pipeline refuses frozen malformed and removes unsent grant (0.718444ms)
+✔ real committed pipeline refuses fractional note and removes unsent grant (0.760328ms)
+✔ real committed pipeline refuses unsafe note and removes unsent grant (0.705775ms)
+✔ real committed pipeline refuses extra and removes unsent grant (0.586636ms)
+✔ real committed pipeline refuses boxed OK and removes unsent grant (0.664193ms)
+✔ frozen healthy pipeline remains indexed and actual erasure deletes the grant (1.606555ms)
+✖ MEDIUM: partial pipeline exception must not leave a sixty-day unindexed grant (3.432892ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.214162
+
+✖ failing tests:
+
+test at [stdin]:54637:27
+✖ MEDIUM: partial pipeline exception must not leave a sixty-day unindexed grant (3.432892ms)
+  AssertionError [ERR_ASSERTION]: a grant with the buyer address must either be removed after pipeline failure or remain discoverable to erasure
+  + actual - expected
+
+  + '{"s":"00000000000000000000000000000000","r":"pi_synthetic_review3296","e":"synthetic-review@buyer.example"}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:54662:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"s":"00000000000000000000000000000000","r":"pi_synthetic_review3296","e":"synthetic-review@buyer.example"}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":64,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE review-link-exact.test.ts
+
+Unknown answers are never 'expired'
+  ok    no reply
+  ok    undefined
+  ok    a number
+  ok    an object
+  ok    two replies
+
+Control: a link Redis no longer holds has expired
+  ok    null
+
+6 checks, all passing.
+Z_VOLUME {"runs":1,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE review-request-erasure-evidence.test.ts
+✔ empty recipient evidence retains the erased buyer's review request for retry (39.922028ms)
+✔ short recipient evidence retains the erased buyer's review request for retry (6.244277ms)
+✔ missing suppression recipient evidence retains the erased buyer's review request for retry (5.083754ms)
+✔ extra recipient evidence retains the erased buyer's review request for retry (5.516678ms)
+✔ null opt-out recipient evidence retains the erased buyer's review request for retry (6.293851ms)
+✔ string opt-out recipient evidence retains the erased buyer's review request for retry (7.331258ms)
+✔ negative opt-out recipient evidence retains the erased buyer's review request for retry (7.689549ms)
+✔ null suppression recipient evidence retains the erased buyer's review request for retry (9.702017ms)
+✔ string suppression recipient evidence retains the erased buyer's review request for retry (5.664651ms)
+✔ object suppression recipient evidence retains the erased buyer's review request for retry (4.699785ms)
+✔ false suppression recipient evidence retains the erased buyer's review request for retry (4.628268ms)
+✔ invalid contact recipient evidence retains the erased buyer's review request for retry (4.221532ms)
+✔ object contact recipient evidence retains the erased buyer's review request for retry (4.221373ms)
+✔ primitive contact recipient evidence retains the erased buyer's review request for retry (4.377328ms)
+✔ array contact recipient evidence retains the erased buyer's review request for retry (7.002541ms)
+✔ wrong opt-out field recipient evidence retains the erased buyer's review request for retry (7.053308ms)
+✔ sparse recipient evidence retains the erased buyer's review request for retry (4.279922ms)
+✔ transport failure recipient evidence retains the erased buyer's review request for retry (3.809862ms)
+✔ complete evidence still sends a permitted buyer one review request (27.616651ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 173.627887
+Z_VOLUME {"runs":2009,"mocks":38,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (65.69039ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (78.395465ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (29.379594ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.054295ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.171528ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.125239ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.462658ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (78.33809ms)
+✔ every store figure taken in the code is a kind a line prices (44.718625ms)
+✔ every email sent names a meter, and each file only the meters it may use (79.521876ms)
+✔ the units a figure is taken in cost at least what they stand for (14.852037ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.88156ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.211789ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.389268ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.121974ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.081022ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.339553ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.216046ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.924365ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.100762ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.004034ms)
+✔ Path push fits its reserved studio requests (0.076375ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.05315ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.102985ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.163387ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (33.08724ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 456.295305
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (92.23847ms)
+✔ each family is bounded one way at least, and what it says can be checked (43.80697ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (3.629959ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.144948ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.471652ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (6.312848ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.170628ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 163.770317
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3296-vqbbiq

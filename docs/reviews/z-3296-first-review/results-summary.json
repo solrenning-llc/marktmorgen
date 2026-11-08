@@ -1,0 +1,102 @@
+{
+  "red.log": [
+    {
+      "file": "r24-review-proof-exact.test.ts",
+      "custom": null,
+      "tests": 11,
+      "pass": 2,
+      "fail": 9,
+      "volume": {
+        "runs": 47,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "z-3296-erasure-index.proof.ts",
+      "custom": null,
+      "tests": 10,
+      "pass": 1,
+      "fail": 9,
+      "volume": {
+        "runs": 56,
+        "mocks": 0,
+        "over": false
+      }
+    }
+  ],
+  "head.log": [
+    {
+      "file": "r24-review-proof-exact.test.ts",
+      "custom": null,
+      "tests": 11,
+      "pass": 11,
+      "fail": 0,
+      "volume": {
+        "runs": 65,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "z-3296-erasure-index.proof.ts",
+      "custom": null,
+      "tests": 10,
+      "pass": 9,
+      "fail": 1,
+      "volume": {
+        "runs": 64,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "review-link-exact.test.ts",
+      "custom": "6 checks, all passing.",
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "volume": {
+        "runs": 1,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "review-request-erasure-evidence.test.ts",
+      "custom": null,
+      "tests": 19,
+      "pass": 19,
+      "fail": 0,
+      "volume": {
+        "runs": 2009,
+        "mocks": 38,
+        "over": false
+      }
+    },
+    {
+      "file": "plan-cost-registry.test.ts",
+      "custom": null,
+      "tests": 26,
+      "pass": 26,
+      "fail": 0,
+      "volume": {
+        "runs": 0,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "store-data-registry.test.ts",
+      "custom": null,
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "volume": {
+        "runs": 0,
+        "mocks": 0,
+        "over": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+# Codex Z — #3296 independent review: MEDIUM privacy correction gap
+
+2026-11-08. Exactbcf989117987e37320c935de399f5362f49a9643, baseline44f4e252cf787afca1152a703ab82b59a104162e. Requested C6 round7 review. Claim6727822899 body read back EXACT BEFOREsource/tests; no prior claim in PR/current FULLchannel. ROOT RESa3d3f9bea8e7d01e03a05bbe499e9518eb79c510/blob325fdd5b5fd715b6fc19b6d9d7ce89c1a8108f6c/FULL6684362 exact-readback BEFOREsource/proof. One prewrite ref advance aborted without writing; no409/retry in this reservation. Nativefetch25756 completed0 before own worktree/source. Only own new directory; author product/ref intact. ROOT emitter label1913 is an identifier/preparation label; actual observed tool clock after delivery was22:11:36UTC(19:11:36Fortaleza), not a measured19:13 dispatch.
+
+## Finding — request changes
+
+**MEDIUM, lib/review-proof.ts:218 (cleanup branch:222): the original privacy issue remains for a pipeline exception after a partial grant write.** The initial await is outside a try/catch. If the link SET commits but the erasure notes are unconfirmed and redisPipeline throws, execution never reaches the new best-effort DEL. The caller gets a failure and sends no token, yet the synthetic buyer-address grant stays for60days outside the erasure index. This existed on the baseline too: it is an incomplete closure of the PR's PRIMARY privacy finding, not falsely called a new regression introduced by the receipt check.
+
+SAME new desired invariant on baseline and head FAILS: after a grant SET is actually committed and a subsequent pipeline failure is thrown before note completion, the grant must either be removed or discoverable through erasure. Both keep a107-byte JSON grant with TTL5184000seconds. Actual single SET batch199serialized JSON bytes is executed; index commands are not dispatched by this partial-failure fixture; the original attempted four-command pipeline is recorded separately. Calling actual forgetNoted leaves the grant present, independently verified by GET. No deletion cleanup is attempted by mintReviewLink at all in this branch.
+
+Please route the initial pipeline exception through the same cleanup/error handling as malformed receipts (or use an appropriately checked atomic/indexed write), add this partial-write-then-throw regression, and retain an honest qualification for cleanup itself failing. Do not merely catch and return a token or treat an unknown write as absent. No unreviewed Z product patch or author-ref mutation is made.
+
+The fixture models an explicitly partial/unconfirmed pipeline outcome; it is not an observed live Upstash incident or proof of a particular network/API failure schedule. The code's await can reject and does not prove which preceding writes landed, which is the rule24 uncertainty under review. No account, payment, real buyer, provider credentials or live request was used.
+
+## Valid corrected vectors and independent proof
+
+Same final graph/aliases/dependencies/test bytes, OLD substitutes ONLY lib/review-proof.ts from44f4e252. Immutable author11 OLD9FAIL/2controls -> head11PASS. It exercises malformed RETURNED receipts after the whole modeled pipeline commits, not an exception thrown by the initial await; therefore it cannot close this missing branch.
+
+Own independent10 OLD9FAIL/1control -> head9PASS/1remainingMEDIUMFAIL. Eight supplemental malformed envelopes include hole/inheritedOK/getter/frozenmalformed/fractionalnote/unsafeintegernote/extra/boxedOK. Real whole pipeline executes first and only its returned ACK is replaced. All8head cases throw UnknownReplyError and actually DEL the unsent grant. Frozen healthy pipeline retains a token matching REVIEW_LINK_PATTERN and actual forgetNoted deletes its grant. The tenth partial-write-then-throw case remains red in both versions. No tests were inverted or removed to hide it.
+
+Healthy synthetic pipeline4commands/585JSONbatch bytes; malformedhead adds DEL (5commands/649bytes),5nestedMemoryRedis.run in observer scope and0HTTP. These are serialized synthetic batches, not RESP/wire/provider invoices/complete request costs. The107bytes and60day TTL are actually read from the surviving grant in the failure fixture; no global data-room/paid-unit cost is inferred from them.
+
+Model qualification: forgetNoted returns2 in the partial fixture although it deletes no grant. MemoryRedis.set/zset create empty container keys when SMEMBERS/ZRANGEBYSCORE read absent indices (redis-memory.ts:70–96,1447,1558), then DEL counts those2empty containers. This is a fixture artifact, NOT two person records successfully erased, not native Redis behavior, and not a second product finding. The MEDIUM invariant is the explicit surviving grant GET after erasure, so it does not depend on that return value. No model patch/replay needed.
+
+## Scope, checks and bounds
+
+Head78successful assertions/subtests AND1remainingMEDIUMFAIL across6roots, with overlap:11author+9ownPASS+6review-link+19review-request-erasure+26plan+7data. Own total10 includes the failure. Driver exits1 for that product regression; not a green full result. Max2009nestedRedis/38mockHTTP; authorOLD47/0, ownOLD56/0, authorHEAD65/0, ownHEAD64/0. Strict types3roots988sources realES2017strictBundler/noEmit/incremental:false0unfiltered diagnostics; lint0. Official scanner and staged/subject diff receipts alongside. Complete raw logs retained reversibly gzip/base64/SHA256; display strips only trailing whitespace.
+
+Before EACH SERIAL child20k nestedMemoryRedis across instances/100HTTPmock/120s512MiB256KiB; types120s1024MiB. Default fetch/socket denied BEFORE graph; every semantic child completed before next. Matching readonly dependencies checked BEFORE semantics:454installed matches/0mismatch/102optional absent/0required absent, Next16.4.5/Node24.22.1/TS5.9.3/esbuild0.28.2/ESLint9.39.5. No cap/raise/reset/partition/retry/install/agents/real email/Stripe/Redis/Lua/provider/browser/fullbuild/globalMR or complete privacy certification.
+
+Source read includes noteForErasure/forgetNoted and sendReviewRequests around mint/stop/group assembly. The author already documents #3211 caller claims: a thrown mint/stop can lose current/earlier grouped requests. That is a CREDITED SEPARATE follow-up, not a second Z discovery/third global caller audit; caller changes not included here. No new broad caller test, price/visible limit/commission/flag/gate or public wording change. A store without statsId's one-command existing control remains author-tested, not a newly certified global erasure guarantee.
+
+Durable evidence tree/report must be read back EXACT BEFORE request-changes verdict. Keep the tenth invariant red until the author corrects the actual exception branch; no merge/queue/CI action by Z.

@@ -459,6 +459,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/withdraw/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/withdraw",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/p/[product]/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/p/[product]",
@@ -1935,6 +1946,7 @@
     "app/api/store/welcome-offer/route.ts",
     "app/api/store/welcome/open/route.ts",
     "app/api/store/why-not-ask/route.ts",
+    "app/api/store/withdraw/route.ts",
     "app/api/store/yearly-ask/route.ts",
     "app/api/stream/hook/route.ts",
     "app/api/stripe/check/route.ts",
@@ -2044,6 +2056,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 140
+    "pageTemplates": 141
   }
 }

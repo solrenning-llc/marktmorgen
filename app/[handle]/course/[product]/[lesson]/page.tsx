@@ -36,6 +36,7 @@ import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
 import { LessonNotes } from "@/components/lesson-notes";
 import { readNote } from "@/lib/lesson-notes";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -331,7 +332,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
             ) : null}
 
             {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !task ? (
-              <p className="st-muted mt-6">{w.emptyLesson}</p>
+              <EmptyState title={said.w.nothingYet} body={w.emptyLesson} className="mt-6" />
             ) : null}
 
             {quiz ? (

@@ -366,6 +366,34 @@ export async function undoGiven(store: Store, benefit: unknown, sub: unknown, pe
   return { ok: true, undone: removed === 1 };
 }
 
+// ------------------------------------------------------------------ the person's copy
+
+export type BenefitMarkCopy = { benefit: string; membership: string; subscription: string; period: string; given: string };
+
+/**
+ * A person's marks, for their copy (lib/person-copy.ts, 619 [SZ3]): the benefit's
+ * words, its membership, the period and when it was marked. Who on the team
+ * marked it is theirs, left out. Only reading. Throws when a mark or the
+ * benefits cannot be read in their exact shape: a copy that leaves one out is
+ * not the copy.
+ */
+export async function benefitMarksOf(store: Store, person: string): Promise<BenefitMarkCopy[]> {
+  if (!store.statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
+  const marks = (await readMarks(store.statsId, [person])).get(person);
+  if (!marks || marks === "unknown") throw new UnknownReplyError("a person's benefit marks, for their copy");
+  if (marks.size === 0) return [];
+  const benefits = await readBenefits(store);
+  if (benefits === null) throw new UnknownReplyError("the store's benefits, for a person's copy");
+  const byId = new Map(benefits.map((b) => [b.id, b]));
+  const out: BenefitMarkCopy[] = [];
+  for (const [f, given] of marks) {
+    const [benefit = "", subscription = "", period = ""] = f.split(":");
+    const kept = byId.get(benefit);
+    out.push({ benefit: kept?.text ?? "", membership: kept?.product ?? "", subscription, period, given: new Date(given.at * 1000).toISOString() });
+  }
+  return out.sort((a, b) => a.given.localeCompare(b.given) || a.subscription.localeCompare(b.subscription));
+}
+
 // ------------------------------------------------------------------ erasure
 
 /** A deleted person's marks (lib/person-erasure.ts): how many keys went. Throws when the answer cannot be read. */

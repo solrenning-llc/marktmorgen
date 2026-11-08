@@ -47,7 +47,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
@@ -167,9 +167,18 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
   return false;
 }
 
-/** Sets the closing's budget of calls to the creator's Stripe account, once an ending, before any is made. */
+/**
+ * Sets the closing's budget of calls to the creator's Stripe account, once an
+ * ending, before any is made. Throws UnknownReplyError unless DEL answers 0 or
+ * 1 and HSET exactly 1, one new field after the DEL (CX-123 rule 24): closeOne
+ * (lib/plan-closing.ts) then writes no holdFrom, so the budget is set again the
+ * next day, never taken as set when it may not be there (every takeCalls would
+ * be refused, and no member held).
+ */
 export async function startCallBudget(folder: string, calls: number): Promise<void> {
-  await redisPipeline([["DEL", workKey(folder)], ["HSET", workKey(folder), "calls", Math.max(0, Math.floor(calls))]]);
+  const replies = repliesFor(await redisPipeline([["DEL", workKey(folder)], ["HSET", workKey(folder), "calls", Math.max(0, Math.floor(calls))]]), 2);
+  const cleared = replies ? countOf(replies[0]) : null;
+  if (cleared === null || cleared > 1 || replies?.[1] !== 1) throw new UnknownReplyError("a closing's budget of Stripe calls");
 }
 
 /**

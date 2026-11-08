@@ -41,6 +41,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
@@ -366,11 +367,17 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
 export async function removeFlow(store: Store, id: string): Promise<FlowResult> {
   if (!store.listId) return { ok: false, reason: "unknown" };
   const flows = await readFlowListStrict(store.listId);
-  if (!flows.some((f) => f.id === id)) return { ok: false, reason: "unknown" };
+  const flow = flows.find((f) => f.id === id);
+  if (!flow) return { ok: false, reason: "unknown" };
+  // Paused first, so nobody new starts it and nothing more of it is sent while its runs are erased; then its runs,
+  // their history, starts and queued steps, so nothing of the people in it is kept; and only once that is confirmed
+  // is it taken off the list. An erasure that cannot be confirmed throws with the workflow still listed (paused), so a
+  // removal tried again, a person's erasure request (forgetWorkflowPerson) or the store's deletion
+  // (forgetStoreWorkflows), which walk the listed workflows, still reach its runs (CX-123 rule 24).
+  if (flow.active) await writeFlows(store, store.listId, flows.map((f) => (f.id === id ? { ...f, active: false } : f)));
+  await purgeFlow(store, flow);
   const next = flows.filter((f) => f.id !== id);
   await writeFlows(store, store.listId, next);
-  // Its runs, their history, starts and queued steps: nothing of the people in it is kept.
-  await purgeFlow(store, flows.find((f) => f.id === id)!).catch((error) => console.error("erasing a removed workflow's runs failed", error));
   return { ok: true, flows: next };
 }
 
@@ -389,12 +396,16 @@ function queuedOf(store: Store, flow: Pick<Flow, "id">, emails: string[]): (stri
   return out;
 }
 
-/** Confirms a pipeline of deletions was answered in full; anything else is not an erasure. */
+/**
+ * Confirms a pipeline of deletions (DEL and ZREM only) was answered in full, each reply the count its command
+ * answers, a whole number from zero up (countOf); anything else, a null included, is not an erasure (Codex M on
+ * #3083, CX-123 rule 24) and throws, so the workflow stays listed and its runs findable.
+ */
 async function erase(commands: (string | number)[][]): Promise<void> {
   for (let i = 0; i < commands.length; i += 500) {
     const chunk = commands.slice(i, i + 500);
-    const reply = await redisPipeline(chunk);
-    if (!Array.isArray(reply) || reply.length !== chunk.length) throw new FlowWriteUnconfirmed();
+    const replies = repliesFor(await redisPipeline(chunk), chunk.length);
+    if (!replies || replies.some((reply) => countOf(reply) === null)) throw new FlowWriteUnconfirmed();
   }
 }
 

@@ -8,7 +8,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { handIn, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -118,9 +118,7 @@ export async function POST(request: NextRequest) {
         // Work that was not kept leaves no file behind it: the new file sent here (never the one the earlier work keeps)
         // is deleted, and its bytes come back once it is gone; a file that could not be deleted stays counted. Once the
         // write was sent, both stay counted, which only refuses sooner.
-        // Another hand-in of the same work was written meanwhile (HandInChangedError): nothing of this one was, so the
-        // same holds as before the write.
-        if (taken && file && (!written || error instanceof HandInChangedError)) {
+        if (taken && file && !written) {
           const gone = await deleteFile(file.path).then(
             () => true,
             (deleteError: unknown) => (console.error("deleting a task file that was not handed in failed", deleteError), false),
@@ -133,14 +131,15 @@ export async function POST(request: NextRequest) {
       });
       // Work that needs no reading is done at once, and may finish the course (lib/course-finish.ts).
       if (done.state === "approved") await noteIfFinished(store, product.id, course.id, email);
-      // The file it replaced is no longer anybody's work. Its room comes back only once it is gone: a file whose delete
-      // failed is still kept in storage, so its bytes stay counted, which only refuses sooner (CX-123 rule 24).
+      // The file it replaced is no longer anybody's work. Its bytes come back only when this hand-in took it out of the
+      // files' hash (lib/assignment.ts, freedBytes) and only once it is gone: a file whose delete failed is still kept
+      // in storage, so its bytes stay counted, which only refuses sooner (CX-123 rule 24).
       if (done.replaced) {
         const gone = await deleteFile(done.replaced.path).then(
           () => true,
           (error: unknown) => (console.error("could not delete a replaced assignment file: its room stays counted", error), false),
         );
-        if (gone) await releaseBytes(room, done.replaced.bytes).catch(() => {});
+        if (gone && done.freedBytes) await releaseBytes(room, done.freedBytes).catch(() => {});
       }
       return null;
     });
@@ -157,8 +156,6 @@ export async function POST(request: NextRequest) {
     if (error instanceof DataRoomError) return no("noroom", 409);
     // Another hand-in of the same work still running: nothing was read or taken, the student hands in again.
     if (error instanceof LockBusyError) return no("busy", 409);
-    // The same work was handed in again while this one waited (its lease ran out): this one kept nothing, and says so.
-    if (error instanceof HandInChangedError) return no("busy", 409);
     console.error("handing in an assignment failed", error);
     return no("server_error", 500);
   }

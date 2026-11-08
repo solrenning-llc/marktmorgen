@@ -1,0 +1,44 @@
+
+/workspace/scratch/z-review-3169-allowance-count/tests/z-3169-reminder-count.proof.ts
+   26:10   warning  'readFileSync' is defined but never used                   @typescript-eslint/no-unused-vars
+   27:10   warning  'join' is defined but never used                           @typescript-eslint/no-unused-vars
+   30:10   warning  'aiRequestHoldMicroUsd' is defined but never used          @typescript-eslint/no-unused-vars
+   31:10   warning  'takeAllowance' is defined but never used                  @typescript-eslint/no-unused-vars
+   32:10   warning  'remindAbandoned' is defined but never used                @typescript-eslint/no-unused-vars
+   32:27   warning  'stopReminders' is defined but never used                  @typescript-eslint/no-unused-vars
+   33:10   warning  'FEATURE_PAGES' is defined but never used                  @typescript-eslint/no-unused-vars
+   34:10   warning  'HELP_SECTIONS' is defined but never used                  @typescript-eslint/no-unused-vars
+   35:10   warning  'PERSON_DATA' is defined but never used                    @typescript-eslint/no-unused-vars
+   36:10   warning  'pool' is defined but never used                           @typescript-eslint/no-unused-vars
+   38:3    warning  'ADD_ON_ROOM_CENTS' is defined but never used              @typescript-eslint/no-unused-vars
+   39:3    warning  'ASSISTANT_MESSAGE_COMMANDS' is defined but never used     @typescript-eslint/no-unused-vars
+   40:3    warning  'ASSISTANT_MESSAGES_MONTHLY' is defined but never used     @typescript-eslint/no-unused-vars
+   41:3    warning  'ASSISTANT_MODEL' is defined but never used                @typescript-eslint/no-unused-vars
+   42:3    warning  'ASSISTANT_PRICE_CENTS' is defined but never used          @typescript-eslint/no-unused-vars
+   43:3    warning  'assistantMeetsFloor' is defined but never used            @typescript-eslint/no-unused-vars
+   44:3    warning  'assistantMessageExtraMicroUsd' is defined but never used  @typescript-eslint/no-unused-vars
+   45:3    warning  'assistantMessageWorstMicroUsd' is defined but never used  @typescript-eslint/no-unused-vars
+   46:3    warning  'assistantMonthWorst' is defined but never used            @typescript-eslint/no-unused-vars
+   47:3    warning  'assistantPoolMicroUsd' is defined but never used          @typescript-eslint/no-unused-vars
+   48:3    warning  'assistantSettledMicroUsd' is defined but never used       @typescript-eslint/no-unused-vars
+   51:10   warning  'receivingOf' is defined but never used                    @typescript-eslint/no-unused-vars
+   52:10   warning  'assistantTaxFixture' is defined but never used            @typescript-eslint/no-unused-vars
+   52:31   warning  'ASSISTANT_TAX_TEST_NOW' is defined but never used         @typescript-eslint/no-unused-vars
+   53:10   warning  'ASSISTANT_ON_SALE' is defined but never used              @typescript-eslint/no-unused-vars
+   54:10   warning  'ASSIST_REMIND_KEEP_SECONDS' is defined but never used     @typescript-eslint/no-unused-vars
+   54:38   warning  'ASSIST_REMIND_OUTPUT_TOKENS' is defined but never used    @typescript-eslint/no-unused-vars
+   54:90   warning  'neutralLine' is defined but never used                    @typescript-eslint/no-unused-vars
+   54:103  warning  'parseAssistReminder' is defined but never used            @typescript-eslint/no-unused-vars
+   54:124  warning  'withinReminderReply' is defined but never used            @typescript-eslint/no-unused-vars
+   55:10   warning  'ASSIST_REMIND_SYSTEM' is defined but never used           @typescript-eslint/no-unused-vars
+   55:55   warning  'forgetAssistReminderPerson' is defined but never used     @typescript-eslint/no-unused-vars
+   55:143  warning  'sendAssistReminders' is defined but never used            @typescript-eslint/no-unused-vars
+   56:10   warning  'ASSIST_REMINDER_WORDS' is defined but never used          @typescript-eslint/no-unused-vars
+   58:20   warning  'part' is defined but never used                           @typescript-eslint/no-unused-vars
+   74:5    error    'paidList' is never reassigned. Use 'const' instead        prefer-const
+  101:7    warning  'poolOf' is assigned a value but never used                @typescript-eslint/no-unused-vars
+  129:9    warning  'course' is assigned a value but never used                @typescript-eslint/no-unused-vars
+  144:9    warning  'window' is assigned a value but never used                @typescript-eslint/no-unused-vars
+
+✖ 39 problems (1 error, 38 warnings)
+  1 error and 0 warnings potentially fixable with the `--fix` option.

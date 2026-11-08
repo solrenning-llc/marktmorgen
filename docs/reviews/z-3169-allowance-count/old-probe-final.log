@@ -1,0 +1,32 @@
+
+FILE z-3169-reminder-count.proof.ts
+  ok    switched off: no box, nothing kept
+  ok    switched on, the add-on not paid for: still no box
+  ok    paid for, but no postal address: no box, and nothing kept (the studio says why)
+  ok    with the address: the box is offered on a product's checkout
+{"label":"a word","reply":["many"],"observed":["sent",1,1],"expected":["failed",0,0],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  FAIL  unread count boundary: a word
+        expected ["failed",0,0]
+        got      ["sent",1,1]
+{"label":"empty string","reply":[""],"observed":["sent",1,1],"expected":["failed",0,0],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  FAIL  unread count boundary: empty string
+        expected ["failed",0,0]
+        got      ["sent",1,1]
+{"label":"whitespace","reply":[" "],"observed":["sent",1,1],"expected":["failed",0,0],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  FAIL  unread count boundary: whitespace
+        expected ["failed",0,0]
+        got      ["sent",1,1]
+{"label":"hex zero","reply":["0x0"],"observed":["sent",1,1],"expected":["failed",0,0],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  FAIL  unread count boundary: hex zero
+        expected ["failed",0,0]
+        got      ["sent",1,1]
+{"label":"canonical zero","reply":["0"],"observed":["sent",1,1],"expected":["sent",1,1],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  ok    unread count boundary: canonical zero
+{"label":"confirmed absent","reply":[null],"observed":["sent",1,1],"expected":["sent",1,1],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  ok    unread count boundary: confirmed absent
+
+10 checks, 4 failing.
+Z_VOLUME {"runs":368,"mocks":24,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3169-Nl6y8e

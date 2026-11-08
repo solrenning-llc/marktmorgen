@@ -1,0 +1,8 @@
+lib/broadcasts.ts:808:    const counts = await allowancesUsedStrict(current, ["studio"], now * 1000).catch(() => null);
+app/studio/page.tsx:967:    figures: current && may("settings") ? early(Promise.all(ALLOWANCE_KINDS.map(async (kind) => ({ kind, used: await allowanceUsed(current, kind), limit: allowanceFor(current, kind) })))) : null,
+lib/checkup.ts:153:    within(() => allowancesUsedStrict(store, ALLOWANCE_KINDS, now), null, ms),
+lib/webhooks.ts:622:  const month = integrationPauseWord(store, now / 1000) ? null : await allowancesUsedStrict(store, ["webhook"], now).catch(() => null);
+lib/erasure-request.ts:77:  const row = (await allowancesUsedStrict(store, ["transactional"], now).catch(() => null))?.[0];
+lib/store-allowance.ts:245:export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonly AllowanceKind[], now = Date.now()): Promise<{ kind: AllowanceKind; used: number; figure: number }[] | null> {
+lib/store-allowance.ts:277:  return (await allowancesUsedStrict(store, [kind], now))?.[0]?.used ?? null;
+lib/store-allowance.ts:285:export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {

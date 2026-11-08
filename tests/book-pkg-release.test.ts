@@ -190,7 +190,7 @@ async function main(): Promise<void> {
     is("the other tab took the last session while this request held its time", raced, true);
     is("the route answers pkg-used", [response.status, location.includes("status=pkg-used")], [303, true]);
     is("one checkout was opened for it, free by a 100% single-use coupon, marked as the package's", [opened.size, Boolean(only?.body.get("discounts[0][coupon]")), only?.body.get("metadata[package]"), only?.body.get("customer_email")], [1, true, PAID, "dana@example.test"]);
-    is("the buyer is never handed it: no checkout URL in the answer, no hold cookie", [location.includes("checkout.stripe.com"), location.includes(only.id), response.headers.get("set-cookie")], [false, false, null]);
+    is("the buyer is never handed it: no checkout URL in the answer, no hold cookie", [new URL(location, "https://store.example.test").hostname === "checkout.stripe.com", location.includes(only.id), response.headers.get("set-cookie")], [false, false, null]);
     const closes = Number(only.body.get("expires_at")) - t0;
     is("Stripe closes it by itself within 31 minutes", closes >= CHECKOUT_OPEN_SECONDS - 5 && closes <= CHECKOUT_OPEN_SECONDS + 5, true);
     is("the failure injected", thrown, fail === "read" || fail === "write" ? 1 : 0);

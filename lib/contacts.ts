@@ -32,6 +32,7 @@
  * fingerprint of the address, so nothing but their own yes, given again,
  * puts them back on as someone who may be written to (forgetContactPerson).
  */
+import { stringList } from "@/lib/redis-reply";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -223,13 +224,22 @@ export async function upsertContact(
   const email = normaliseEmail(rawEmail);
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return none;
   const key = leadsKey(listId);
-  const [raw, size, erased] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["HGET", key, email],
     ["HLEN", key],
     suppressedCommand(listId, email),
-  ]);
+  ]), 3);
+  // HGET answers text or nothing, HLEN a count, HEXISTS 0 or 1. Any other shape, or fewer replies than commands, is
+  // unknown (CX-123 rule 24): never "not on the list" (which wrote someone who unsubscribed back as a new contact who
+  // agreed, without why they were taken off or their link's token), never room on a full list, never "not deleted".
+  const raw = replies?.[0];
+  const size = countOf(replies?.[1]);
+  const erased = countOf(replies?.[2]);
+  if (!replies || (raw !== null && typeof raw !== "string") || size === null || erased === null || erased > 1) {
+    throw new UnknownReplyError("a contact's row, the list's size or whether the address was deleted");
+  }
   const before = parseContact(raw);
-  if (!before && Number(size) >= MAX_LEADS) return { ...none, full: true };
+  if (!before && size >= MAX_LEADS) return { ...none, full: true };
 
   const now = new Date().toISOString();
   const wasMailable = before ? mailable(before) : false;
@@ -843,7 +853,11 @@ export async function stopWriting(listId: string, rawEmail: string, why: "bounce
   // Written only if the address still holds what was read: a purchase noted,
   // or their own unsubscribe, in the same moment is not written over.
   for (let round = 0; round < 3; round += 1) {
-    const [raw] = await redisPipeline([["HGET", key, email]]);
+    const replies = repliesFor(await redisPipeline([["HGET", key, email]]), 1);
+    const raw = replies?.[0];
+    // HGET answers text or nothing: any other shape is unknown (CX-123 rule 24), never "not on the list", so the
+    // sender's notice is not dropped while the address keeps being written to; thrown, it is heard again.
+    if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a contact's row before it is taken off");
     const contact = parseContact(raw);
     if (!contact || contact.unsub || typeof raw !== "string") return false;
     const { clicks: _left, ...kept } = contact;
@@ -884,16 +898,22 @@ export async function forEachContact(
   const key = leadsKey(listId);
   let cursor = "0";
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    cursor = String(reply[0]);
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+    // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
+    // list, so an email is never sent to part of it as if to all, nor an export cut short as if whole.
+    const reply = repliesFor(repliesFor(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]), 1)?.[0], 2);
+    const next = reply?.[0];
+    const flat = stringList(reply?.[1]);
+    const nextCursor = typeof next === "string" && /^\d+$/.test(next) ? next : countOf(next) !== null ? String(next) : null;
+    if (!reply || nextCursor === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
+    cursor = nextCursor;
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const contact = parseContact(flat[i + 1]);
-      if (contact) each(String(flat[i]), contact);
+      if (contact) each(flat[i], contact);
     }
-    if (cursor === "0") break;
+    if (cursor === "0") return;
   }
+  // More pages than a full list can take: never read as the whole list.
+  throw new UnknownReplyError("a store's list that did not end");
 }
 
 /**

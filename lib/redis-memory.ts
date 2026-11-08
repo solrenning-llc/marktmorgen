@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 /**
  * A Redis that lives in memory, for testing the parts of this codebase whose
@@ -172,6 +173,18 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", book, json]);
           return 1;
+        }
+        // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
+        if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
+          const target = args[1];
+          const out: number[] = [];
+          for (let i = 2; i < args.length; i += 3) {
+            const current = this.run(["HGET", target, args[i]]);
+            const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+            if (seen === args[i + 1]) this.run(["HSET", target, args[i], args[i + 2]]);
+            out.push(seen === args[i + 1] ? 1 : 0);
+          }
+          return out;
         }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
@@ -1437,16 +1450,17 @@ export class MemoryRedis {
 
       case "ZADD": {
         const z = this.zset(key);
-        // "NX": a member already there keeps the score it has.
+        // "NX": a member already there keeps the score it has. "XX": only a member already there is moved.
         const onlyNew = args[0] === "NX";
-        const pairs = onlyNew ? args.slice(1) : args;
+        const onlyOld = args[0] === "XX";
+        const pairs = onlyNew || onlyOld ? args.slice(1) : args;
         for (let i = 0; i + 1 < pairs.length; i += 2) {
           const score = Number(pairs[i]);
           const member = pairs[i + 1];
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) {
             if (!onlyNew) z[at].score = score;
-          } else z.push({ score, member });
+          } else if (!onlyOld) z.push({ score, member });
         }
         z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
         return 1;

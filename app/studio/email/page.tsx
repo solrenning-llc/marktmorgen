@@ -158,7 +158,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
         ) : allowance === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</p>
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Part of Pro</h2>
               <span className="tag tag-brand">{priceWords("pro", "month")}</span>
             </div>
             <ul className="mt-4 space-y-2 text-ink-soft">

@@ -52,6 +52,7 @@ import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf as replyCount, repliesFor } from "@/lib/redis-reply";
 import { countOf, holdsAll } from "@/lib/community-search";
 import { CREATOR } from "@/lib/community";
+import { stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -437,16 +438,30 @@ export async function searchMessages(id: string, who: string, used: string[]): P
  * stays with that person.
  */
 export async function forgetDmPerson(id: string, who: string): Promise<number> {
-  const [mine, asked] = await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]);
-  const pairs = [...new Set([...(Array.isArray(mine) ? mine : []), ...(Array.isArray(asked) ? asked : [])].map(String))].filter((p) => p.split(".").includes(who));
+  // Both lists in their exact shape (CX-123 rule 24): a lost or off-shape reply
+  // is not "no conversations", so nothing is deleted, their own lists included,
+  // and the erasure stays pending to be retried. Only exact empty lists have
+  // nothing to go through.
+  const what = "a member's private conversations forgotten";
+  const lists = repliesFor(await redisPipeline([["ZRANGEBYSCORE", inboxKey(id, who), "-inf", "+inf"], ["ZRANGEBYSCORE", askedKey(id, who), "-inf", "+inf"]]), 2);
+  const mine = stringList(lists?.[0]);
+  const asked = stringList(lists?.[1]);
+  if (!mine || !asked) throw new UnknownReplyError(what);
+  const pairs = [...new Set([...mine, ...asked])].filter((p) => p.split(".").includes(who));
   const commands: (string | number)[][] = [];
   for (const pair of pairs) {
     const other = pair.split(".").find((k) => k !== who) ?? "";
     commands.push(["DEL", chatKey(id, pair), readKey(id, pair)]);
     if (other) commands.push(["ZREM", inboxKey(id, other), pair], ["ZREM", askedKey(id, other), pair]);
   }
-  commands.push(["DEL", ...dmKeys(id, who)]);
-  await redisPipeline(commands);
+  // The conversations first, each deletion answered with its count; their own
+  // lists only after that, so a retry can still find every conversation.
+  if (commands.length) {
+    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    if (!replies || replies.some((reply) => replyCount(reply) === null)) throw new UnknownReplyError(what);
+  }
+  const gone = repliesFor(await redisPipeline([["DEL", ...dmKeys(id, who)]]), 1);
+  if (replyCount(gone?.[0]) === null) throw new UnknownReplyError(what);
   return pairs.length;
 }
 

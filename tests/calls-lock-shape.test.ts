@@ -326,6 +326,14 @@ async function main(): Promise<void> {
     ["no start, filed under a field that is not one", "cs_test_entryshape000000005", JSON.stringify({ e: E + HOUR, until: 0 })],
     ["until in text", "cs_test_entryshape000000006", JSON.stringify({ s: E, e: E + HOUR, until: "0", session: "cs_test_entryshape000000006" })],
     ["a list", "cs_test_entryshape000000007", JSON.stringify([E, E + HOUR])],
+    ["a hold that ran out before 1970 (until -1)", "cs_test_entryshape000000008", JSON.stringify({ s: E, e: E + HOUR, until: -1, session: "cs_test_entryshape000000008" })],
+    ["until that is not a whole number", "cs_test_entryshape000000009", JSON.stringify({ s: E, e: E + HOUR, until: Date.now() + 600_000.5, session: "cs_test_entryshape000000009" })],
+    ["until past the largest safe whole number", "cs_test_entryshape000000010", JSON.stringify({ s: E, e: E + HOUR, until: 2 ** 60, session: "cs_test_entryshape000000010" })],
+    ["no length (its end at its start)", "cs_test_entryshape000000011", JSON.stringify({ s: E, e: E, until: 0, session: "cs_test_entryshape000000011" })],
+    ["an end before its start", "cs_test_entryshape000000012", JSON.stringify({ s: E, e: E - HOUR, until: 0, session: "cs_test_entryshape000000012" })],
+    ["a start at zero", "cs_test_entryshape000000013", JSON.stringify({ s: 0, e: HOUR, until: 0, session: "cs_test_entryshape000000013" })],
+    ["a start that is not a whole number", "cs_test_entryshape000000014", JSON.stringify({ s: E + 0.5, e: E + HOUR, until: 0, session: "cs_test_entryshape000000014" })],
+    ["no start, filed under zero", "0", JSON.stringify({ e: HOUR, until: 0 })],
   ];
   for (const [what, field, value] of entries) {
     await run([["HSET", diaryOf(d), field, value]]);
@@ -338,6 +346,46 @@ async function main(): Promise<void> {
     await clear(d);
   }
   is("once the diary reads again, times are offered", ((await offered(d))?.length ?? 0) > 0, true);
+
+  // Codex Z's first money review of #3240: a real buyer's hold, read back with only its times changed in the reply
+  // (the stored entry stays healthy). A negative `until` was read as a hold that ran out: the real hold was deleted,
+  // its time offered and a second checkout opened for it. A zero or reversed length was partly trusted.
+  part("A real hold read back with times no writer makes is unknown: nothing is offered, sold or deleted");
+  const h = await callStore("heldshape@example.com", "heldshape", "acct_1HeldShape");
+  const H = weekdayAt(13, 600);
+  const readBack: [string, (entry: Record<string, unknown>) => Record<string, unknown>][] = [
+    ["no length", (entry) => ({ ...entry, e: entry.s })],
+    ["an end before its start", (entry) => ({ ...entry, e: Number(entry.s) - HOUR })],
+    ["a negative end of hold", (entry) => ({ ...entry, until: -1 })],
+  ];
+  for (const [what, change] of readBack) {
+    await clear(h);
+    const held = await sellSession(h, H);
+    const [raw] = await run([["HGET", diaryOf(h), held]]);
+    if (typeof raw !== "string") throw new Error("no hold written");
+    is(`${what}: control, the real hold keeps its time`, (await offered(h))?.includes(H), false);
+    swap.diary = { value: [held, JSON.stringify(change(JSON.parse(raw) as Record<string, unknown>))] };
+    const count = deletes.length;
+    is(`${what}: no time is offered`, await offered(h), null);
+    before = opened;
+    is(`${what}: the time is not sold, no second checkout is opened`, [await sell(h, H), opened - before], ["error", 0]);
+    unswap();
+    is(`${what}: the real hold is not deleted`, [(await run([["HGET", diaryOf(h), held]]))[0], deletes.length - count], [raw, 0]);
+  }
+  await clear(h);
+  const expiring = await sellSession(h, H);
+  const [expiringRaw] = await run([["HGET", diaryOf(h), expiring]]);
+  if (typeof expiringRaw !== "string") throw new Error("no hold written");
+  const until = (JSON.parse(expiringRaw) as { until: number }).until;
+  const clock = Date.now;
+  try {
+    Date.now = () => until + 1;
+    is("control: a real hold whose time ran out gives its time back", (await offered(h))?.includes(H), true);
+    is("control: …and is tidied away", (await run([["HGET", diaryOf(h), expiring]]))[0], null);
+  } finally {
+    Date.now = clock;
+  }
+  await clear(h);
 
   done();
 }

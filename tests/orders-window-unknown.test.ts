@@ -7,7 +7,7 @@
  * is held and counted in the window once it is known (rule 30; Claude 3's
  * note on #3105). A store with no plan keeps the calendar month.
  */
-import { admitOrders } from "@/lib/order-admission";
+import { type Admission, admitOrders } from "@/lib/order-admission";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
 import { countOrder, ordersIn, storeOrdersThisMonth } from "@/lib/orders";
 import { allowanceWindow, calendarWindow } from "@/lib/allowance-window";
@@ -71,6 +71,78 @@ async function main(): Promise<void> {
   is("the billing window has both", await ordersIn(folder, billing as string), 7);
   await countOrder((await storeForEmail(OWNER))!, "checkout:cs_ordwin_5", 0, now);
   is("held once: a later order adds only itself", await ordersIn(folder, billing as string), 8);
+
+  part("Moving the held orders is one step: no admission lands between its parts (Claude 4 on #3150)");
+  await setSubscription(OWNER, { active: true, period });
+  const again = (await storeForEmail(OWNER))!;
+  const pendingKey = `nl:orders:pending:${folder}`, windowKey = `nl:orders:n:${folder}:${billing}`, openKey = `nl:orders:open:${folder}`;
+  const plain = redis.pipeline;
+  const read = async (key: string) => Number((await plain([["GET", key]]))[0] ?? 0);
+  const held = async () => {
+    const pairs = (await plain([["HGETALL", openKey]]))[0] as string[];
+    let sum = 0;
+    for (let i = 1; i < pairs.length; i += 2) sum += Number(pairs[i]);
+    return sum;
+  };
+  // Two orders held while the window was unknown; the window two short of the figure: the held orders fill it.
+  const reset = () => plain([["SET", pendingKey, 2], ["SET", windowKey, limit - 2], ["DEL", openKey, `${openKey}:b`]]);
+  const admit = (store: typeof again) => admitOrders(store, 1, now).catch((): Admission => ({ ok: false, reason: "unavailable" }));
+  await reset();
+  let trips = 0;
+  redis.pipeline = async (commands) => { trips += 1; return plain(commands); };
+  is("set up: the held orders alone fill the figure", await admit(again), { ok: false, reason: "paused" });
+  redis.pipeline = plain;
+  is("set up: an admission makes several round trips", trips >= 2, true);
+  const breaches: string[] = [];
+  for (let at = 1; at <= trips; at += 1) {
+    await reset();
+    let call = 0;
+    let racer: Admission | null = null;
+    const hooked = async (commands: (string | number)[][]): Promise<unknown[]> => {
+      call += 1;
+      if (call === at) {
+        // A second checkout's admission runs whole before this round trip.
+        redis.pipeline = plain;
+        racer = await admit(again);
+        redis.pipeline = hooked;
+      }
+      return plain(commands);
+    };
+    redis.pipeline = hooked;
+    const first = await admit(again);
+    redis.pipeline = plain;
+    const total = (await read(windowKey)) + (await held());
+    const second = racer as Admission | null;
+    if (first.ok || second?.ok || total > limit || (await read(pendingKey)) !== 0) {
+      breaches.push(`before trip ${at}: first ${JSON.stringify(first)}, racing ${JSON.stringify(second)}, counted and open ${total}`);
+    }
+  }
+  is("no admission past the figure, whichever round trip a second one lands before", breaches, []);
+
+  part("A failure while moving the held orders never loses them (Claude 4 on #3150)");
+  const losses: string[] = [];
+  for (const lost of ["before it runs", "after it ran"] as const) {
+    for (let at = 1; at <= trips; at += 1) {
+      await reset();
+      let call = 0;
+      // The connection is lost at this round trip (its reply never arrives) and stays lost.
+      redis.pipeline = async (commands) => {
+        call += 1;
+        if (call < at) return plain(commands);
+        if (call === at && lost === "after it ran") await plain(commands);
+        throw new Error("connection lost");
+      };
+      const answer = await admit(again);
+      redis.pipeline = plain;
+      const kept = (await read(pendingKey)) + (await read(windowKey));
+      if (answer.ok || kept !== limit) losses.push(`lost ${lost} at trip ${at}: ${JSON.stringify(answer)}, held and counted ${kept} of ${limit}`);
+    }
+  }
+  is("the held orders are always either still held or in the window, never in neither", losses, []);
+  await reset();
+  is("once Redis answers again, they are moved and fill the figure", await admit(again), { ok: false, reason: "paused" });
+  is("all of them in the window", await read(windowKey), limit);
+  is("none left held", await read(pendingKey), 0);
 
   part("Control: a store with no plan keeps the calendar month");
   const FREE = "orders-window-free@example.com";

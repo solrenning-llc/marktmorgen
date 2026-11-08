@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   is("and its setting is not even read", sent.some((c) => c[0] === "GET" && String(c[1]).endsWith(":cfg")), false);
   store = (await setCommunity(OWNER, true))!;
   const owned = { ...store, tier: "pro" as const, subscriptionActive: true, domain: { name: "rye.example.com", liveAt: "2026-10-01", verifiedAt: "2026-10-01" } } as unknown as typeof store;
-  is("on the creator's own domain: under the domain", (await urls(owned)).includes("https://rye.example.com/community/about"), true);
+  is("on the creator's own domain: under the domain", (await urls(owned)).some((url) => url === "https://rye.example.com/community/about"), true);
   const resting = { ...store, suspended: "2026-11-01" } as unknown as typeof store;
   is("a store switched off after notices lists nothing", (await urls(resting)).length, 0);
 

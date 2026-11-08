@@ -1,0 +1,391 @@
+
+FILE paypal-sales.test.ts
+
+Off until Marktmorgen is an approved PayPal partner
+  ok    not configured
+  ok    so no product takes PayPal, even with an account set
+  ok    on with the four credentials
+
+Connecting the creator's PayPal
+  ok    tracked by the store's own id
+  ok    asking for taking payments and refunding them, nothing else
+  ok    the fields PayPal requires
+  ok    PayPal's own page to send them to
+  ok    nothing finished under the store's id
+  ok    permissions not granted
+  ok    email not confirmed
+  ok    cannot receive payments
+  ok    another store's account
+  ok    ready
+  ok    an id that is not PayPal's is not kept
+  ok    kept on the store
+
+What can be sold with PayPal
+  ok    a paid download
+  ok    not something free
+  ok    not a membership
+  ok    not a call
+  ok    not with price options
+  ok    not pay what you want
+  ok    not with license keys
+  ok    not limited stock
+  ok    not a draft
+  ok    not something that hands over nothing
+  ok    this store's guide, on its plan, without Stripe
+  ok    the plan opens this till too
+  ok    every currency a store sells in is one PayPal takes
+  ok    the store's pages say who takes it
+
+The order
+  ok    no yes, or a yes of another version: no PayPal order
+  ok    sent to PayPal's page
+  ok    paid into the creator's account
+  ok    at the store's price less the running sale
+  ok    captured at once, nothing shipped
+  ok    with PayPal's partner and idempotency headers
+  ok    only fields PayPal's description has
+
+Declined
+  ok    nothing is handed over
+
+Paid
+  ok    taken for the creator's account, as PayPal's assertion says
+  ok    the assertion helper itself
+  ok    written down once, under the buyer's PayPal address
+  ok    theirs on this store
+  ok    one receipt, with the way in and who was paid
+  ok    back again: nothing taken twice
+  ok    on their list as bought and paid with PayPal
+  ok    and the list's email says who charged it
+
+Not what was asked
+  ok    a different amount hands nothing over
+  ok    an order of another store is not taken here
+
+Pending, or the answer lost
+  ok    a pending payment hands nothing over yet
+  ok    and is waited on
+  ok    an answer lost on the way
+  ok    taken already, by a request that never wrote it down: PayPal's order settles it
+  ok    PayPal took the lost one: handed over; the pending one waits
+  ok    then the pending one, once PayPal completes it
+  ok    asked again, nothing twice
+
+Refunds
+  ok    asked often at first, then less, until PayPal's 180 days
+  ok    a partial refund keeps it
+  ok    the first refunded in full: the second payment keeps it
+  ok    now standing on the second
+  ok    a course removal that fails keeps the purchase for the next run
+  ok    both refunded: taken back
+  ok    from their purchases and their course
+  ok    the paid record stays, for the thanks page and PayPal's id
+
+A funded new seller onboarding requires its resource cohort
+  ok    no new referral without a funded resource window
+  ok    the provider is not asked and the existing seller stays
+
+A funded seller return rechecks admission before provider verification
+  ok    a marked owner stays at the studio without completing seller installation
+  ok    no PayPal request including auth and no seller replacement
+
+Disconnected
+  ok    no PayPal button, no order
+
+67 checks, all passing.
+Z_VOLUME {"runs":329,"mocks":42,"over":false}
+a PayPal capture did not match its order 5O190127TN3647103
+capturing a PayPal order failed PayPalError: PayPal 500 INTERNAL_SERVER_ERROR
+    at call2 ([stdin]:19294:13)
+    at async captureOrder ([stdin]:19565:13)
+    at async main ([stdin]:68324:37) {
+  status: 500,
+  code: 'INTERNAL_SERVER_ERROR'
+}
+capturing a PayPal order failed PayPalError: PayPal 422 ORDER_ALREADY_CAPTURED
+    at call2 ([stdin]:19294:13)
+    at async captureOrder ([stdin]:19565:13)
+    at async main ([stdin]:68330:17) {
+  status: 422,
+  code: 'ORDER_ALREADY_CAPTURED'
+}
+taking a refunded PayPal sale's course away failed; looked at again in an hour Error: the ledger did not answer
+    at dropStart ([stdin]:68362:11)
+    at watchPayPal ([stdin]:19826:56)
+    at async main ([stdin]:68361:3)
+
+Z_STATUS 0 null
+
+FILE paypal-sales-shape.test.ts
+
+Captured, the answer unreadable: kept for the sweep, handed over once PayPal is read
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+Captured, the answer without the buyer's address: kept for the sweep
+  ok    not reported as paid yet
+  ok    the order is kept for the sweep
+  ok    the sweep hands it over, once
+
+A pending order read back garbled stays watched
+  ok    pending
+  ok    still watched after a garbled read
+  ok    handed over once PayPal completes it
+
+A paid order read back COMPLETED without its captures stays watched (review of Codex G on #2681)
+  ok    still watched
+  ok    handed over once PayPal shows the capture
+
+A capture read back garbled at the end of its refund window is not taken for 'not refunded'
+  ok    still watched, to be asked again
+
+12 checks, all passing.
+Z_VOLUME {"runs":173,"mocks":20,"over":false}
+
+Z_STATUS 0 null
+
+FILE paypal-payouts.test.ts
+
+Connecting the creator's own PayPal app
+  ok    not a Client ID
+  ok    PayPal refuses it
+  ok    an app without Payouts on
+  ok    an app with Payouts on
+  ok    the Secret is not stored readable
+  ok    the studio sees only a shortened Client ID
+
+One press
+  ok    another payout holding the lock: busy, never an error, and nothing asked of PayPal or Stripe
+  ok    a balance that does not cover it sends nothing
+  ok    everyone owed, in one batch
+  ok    with PayPal's idempotency key, the batch's own id
+  ok    each by email, in the store's currency, as PayPal writes amounts
+  ok    only fields PayPal's description has
+  ok    both on their way
+  ok    nobody is sent twice while on their way
+  ok    the book does not say paid yet
+
+Unavailable pending records never start a new payment
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    unknown pending exposure rejects the read
+  ok    unknown pending exposure refuses a new batch
+  ok    no provider batch is dispatched
+  ok    invalid storage is not cleared by settlement
+  ok    saved pending records were not changed
+  ok    valid pending records recover immediately
+
+What PayPal reports
+  ok    paid, and still waiting to be claimed
+  ok    the book says paid for SUCCESS only
+  ok    asked again, nothing is written twice
+  ok    still counted as paid once
+  ok    not claimed in time: back to owed
+  ok    nobody on their way any more
+  ok    and they can be paid again
+
+Payday by itself
+  ok    off until asked
+  ok    on when asked
+  ok    the email says what was sent, from where
+  ok    and when nothing could be sent, why
+
+Taken away
+  ok    nothing is sent without it
+
+49 checks, all passing.
+Z_VOLUME {"runs":219,"mocks":51,"over":false}
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable ([stdin]:47127:9)
+    at readPendingPayoutBatches ([stdin]:47142:17)
+    at readOpen ([stdin]:47317:10)
+    at async onTheirWay ([stdin]:47321:16)
+    at async [stdin]:47379:40
+    at async withLock ([stdin]:4377:12)
+    at async payWithPayPal ([stdin]:47376:12)
+    at async main ([stdin]:47777:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable ([stdin]:47127:9)
+    at readPendingPayoutBatches ([stdin]:47142:17)
+    at readOpen ([stdin]:47317:10)
+    at async onTheirWay ([stdin]:47321:16)
+    at async [stdin]:47379:40
+    at async withLock ([stdin]:4377:12)
+    at async payWithPayPal ([stdin]:47376:12)
+    at async main ([stdin]:47777:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable ([stdin]:47127:9)
+    at readPendingPayoutBatches ([stdin]:47135:38)
+    at readOpen ([stdin]:47317:10)
+    at async onTheirWay ([stdin]:47321:16)
+    at async [stdin]:47379:40
+    at async withLock ([stdin]:4377:12)
+    at async payWithPayPal ([stdin]:47376:12)
+    at async main ([stdin]:47777:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable ([stdin]:47127:9)
+    at readPendingPayoutBatches ([stdin]:47150:14)
+    at readOpen ([stdin]:47317:10)
+    at async onTheirWay ([stdin]:47321:16)
+    at async [stdin]:47379:40
+    at async withLock ([stdin]:4377:12)
+    at async payWithPayPal ([stdin]:47376:12)
+    at async main ([stdin]:47777:21)
+paying affiliates with PayPal failed Error: Pending payout records are unavailable
+    at unavailable ([stdin]:47127:9)
+    at readPendingPayoutBatches ([stdin]:47156:155)
+    at readOpen ([stdin]:47317:10)
+    at async onTheirWay ([stdin]:47321:16)
+    at async [stdin]:47379:40
+    at async withLock ([stdin]:4377:12)
+    at async payWithPayPal ([stdin]:47376:12)
+    at async main ([stdin]:47777:21)
+
+Z_STATUS 0 null
+
+FILE paypal-payouts-unknown.test.ts
+
+A batch made, its answer garbled: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer empty: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer no-id: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer dropped: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+A batch made, its answer server: nobody in it is paid twice
+  ok    the press is not reported as paid
+  ok    PayPal made one batch
+  ok    both affiliates stay on their way
+  ok    a second press sends no new batch
+  ok    and says there is nothing to pay now
+
+The daily settling leaves a batch whose answer is not known on its way, and asks PayPal nothing about it
+  ok    both still waiting, no read of a batch id PayPal never gave
+  ok    and still on their way
+
+What the creator is told never says nothing was sent
+  ok    the payday email says it is not known, and to look at PayPal
+  ok    the studio's words for it
+
+A 4xx without PayPal's own error name (nameless) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-name) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+A 4xx without PayPal's own error name (blank-error) is not a refusal: kept on its way
+  ok    unknown, never 'nothing was sent'
+  ok    both stay on their way
+
+PayPal made the batch, and writing its id got no answer: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+PayPal made the batch, and writing its id got an error: nobody is paid twice (review of Codex G on #2681, GRAVE)
+  ok    the write of its id failed
+  ok    both stay on their way
+  ok    a second press sends no new batch
+
+A batch PayPal refused by name (insufficient funds): owed, paid on the next press
+  ok    refused for funds
+  ok    nobody is on their way
+  FAIL  the next press pays both, once
+        expected [true,1,2]
+        got      [false,0,0]
+  FAIL  both on their way under the real batch
+        expected 2
+        got      0
+
+45 checks, 2 failing.
+Z_VOLUME {"runs":435,"mocks":101,"over":true}
+
+Z_STATUS 1 null
+
+FILE paypal-payouts-reconcile.test.ts
+
+The answer was lost after PayPal made the batch: the retry gets it back, one payment
+  ok    the press is not known
+  ok    one batch in all, now known by PayPal's id
+  ok    paid once, and nobody on their way any more
+  ok    counted for the month: one unknown, one settled
+
+The first request never reached PayPal: the retry makes it, once
+  ok    one batch, paid once
+
+PayPal says the batch already exists, with its link: taken as sent, its id kept, never paid again
+  ok    still one batch, known by the original's id
+
+PayPal says it already exists, without a link: needs a manual check, never paid again
+  ok    kept, marked for a manual check
+  ok    and not tried again
+  ok    both still on their way, nobody paid
+
+Any other answer: still on its way, at most one try a day
+  ok    one try
+  ok    no second try the same day
+  ok    still on its way, nothing made
+  ok    a day later, one more try, still unknown
+
+After 7 days: a manual check, no more tries
+  ok    marked for a manual check and not tried
+
+The settling gets the batch back and writing its id fails: the evidence stays, nobody is paid twice (review of Codex G on #2681)
+  ok    the write of its id failed, the '?' evidence is kept
+  ok    both still on their way
+  ok    a press sends no new batch
+  ok    the next day's try gets the same batch back and settles it, paid once
+
+An affiliate changed their PayPal address before the retry: never sent to another recipient (review of Codex H2 on #2681, GRAVE)
+Z_VOLUME {"runs":418,"mocks":102,"over":true}
+[stdin]:47650
+  if (!linked.ok) throw new Error(`not linked: ${JSON.stringify(linked)}`);
+                        ^
+
+Error: not linked: {"ok":false,"reason":"error"}
+    at seed ([stdin]:47650:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main ([stdin]:47778:5)
+
+Node.js v24.22.1
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3204-mG8Duu

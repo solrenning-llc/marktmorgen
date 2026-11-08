@@ -1,0 +1,129 @@
+
+FILE affiliate-paypal-refunds-exact.test.ts
+
+Control: a sale not refunded is payable
+  ok    checked
+  ok    its commission offered
+
+Control: a refund in full, read whole, takes the commission back
+  ok    checked
+  ok    no commission
+  ok    nothing offered
+  ok    the line says refunded
+
+Control: the currency in capitals is the sale's
+  ok    checked
+  ok    no commission
+
+No capture
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A capture that is empty
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A capture that is not text
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A refund in another currency than the sale's
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A refund of no cents
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A refund of negative cents
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A refund of a part of the sale
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A refund in cents that are not a whole number
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A refund in cents that are not a number
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A refund with no cents
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+A listed refund whose kept record is gone: the read is partial, nothing is paid
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+Control: 500 refunds in all, this sale's the last: read whole, its commission taken back
+  ok    checked
+  ok    no commission
+  ok    nothing offered
+
+More than 500 refunds, this sale's past the cut: the read is partial, nothing is paid
+  ok    the book is not checked
+  ok    nothing passes the refund guard
+
+The same refund listed twice counts once, and the book stays checked
+  ok    checked
+  ok    refunded once, the sale's cents
+  ok    no commission
+
+Control: another sale's refund leaves this one payable
+  ok    checked
+  ok    its commission offered
+  ok    no provider was asked
+
+41 checks, all passing.
+Z_VOLUME {"runs":2311,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3204-paypal-coverage.proof.ts
+
+Healthy controls
+  ok    unrefunded sale stays payable
+  ok    whole healthy refund removes its commission
+
+C2 HIGH: a 501st current refund cannot leave the book checked
+Z_REFUND_CASE {"label":"target is 501st","partial":true,"rows":500,"checked":false,"through":0,"commission":1000}
+  ok    fault reaches the actual coverage reader
+  ok    cut-short read prevents eligibility
+
+Boundary control: the target in a complete 500-row read is refunded
+Z_REFUND_CASE {"label":"target is 500th","partial":false,"rows":500,"checked":true,"through":0,"commission":0}
+  ok    complete boundary is confirmed whole
+  ok    complete boundary remains healthy
+
+C2 HIGH: a missing listed refund is unknown
+Z_REFUND_CASE {"label":"listed refund missing","partial":true,"rows":0,"checked":false,"through":0,"commission":1000}
+  ok    missing record is flagged by the actual coverage reader
+  ok    missing refund prevents eligibility
+
+C2 MEDIUM: unreadable or inconsistent full-refund amounts
+Z_REFUND_CASE {"label":"stored cents 0","partial":false,"rows":1,"checked":false,"through":0,"commission":1000}
+  ok    amount 0 has a present indexed record
+  ok    amount 0 never passes the refund guard
+Z_REFUND_CASE {"label":"stored cents -5000","partial":false,"rows":1,"checked":false,"through":0,"commission":1000}
+  ok    amount -5000 has a present indexed record
+  ok    amount -5000 never passes the refund guard
+Z_REFUND_CASE {"label":"stored cents 100","partial":false,"rows":1,"checked":false,"through":0,"commission":1000}
+  ok    amount 100 has a present indexed record
+  ok    amount 100 never passes the refund guard
+Z_REFUND_CASE {"label":"stored cents abc","partial":false,"rows":1,"checked":false,"through":0,"commission":1000}
+  ok    amount abc has a present indexed record
+  ok    amount abc never passes the refund guard
+Z_REFUND_CASE {"label":"stored cents undefined","partial":false,"rows":1,"checked":false,"through":0,"commission":1000}
+  ok    amount undefined has a present indexed record
+  ok    amount undefined never passes the refund guard
+  ok    no provider request
+
+19 checks, all passing.
+Z_VOLUME {"runs":2181,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3204-ysrfBu

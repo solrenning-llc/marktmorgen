@@ -1,0 +1,13 @@
+import ts from 'typescript';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+const dir='docs/reviews/z-3204-refund-focal/';
+const partitions=JSON.parse(readFileSync(dir+'partition-sources.json','utf8'));
+const calls=s=>{const out=[];const f=ts.createSourceFile('test.ts',s,ts.ScriptTarget.Latest,true);const visit=n=>{if(ts.isCallExpression(n)&&n.expression.getText(f)==='is')out.push(n.getText(f));ts.forEachChild(n,visit)};visit(f);return out;};
+const unknown=readFileSync('tests/paypal-payouts-unknown.test.ts','utf8');
+const reconcile=readFileSync('tests/paypal-payouts-reconcile.test.ts','utf8');
+const equal=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+const manifest={unknownOriginalSha256:createHash('sha256').update(unknown).digest('hex'),reconcileOriginalSha256:createHash('sha256').update(reconcile).digest('hex'),unknownIsCallsEachUnchanged:[0,1].map(i=>equal(calls(unknown),calls(partitions['unknown-'+i].source))),reconcileIsCallsConcatenatedExactlyOriginal:equal(calls(reconcile),[...calls(partitions['reconcile-0'].source),...calls(partitions['reconcile-1'].source)]),unknownVectors:{original:['garbled','empty','no-id','dropped','server'],part0:['garbled','no-id','server'],part1:['empty','dropped']}};
+console.log(JSON.stringify(manifest,null,2));
+writeFileSync(dir+'partition-check.json',JSON.stringify(manifest,null,2)+'\n');
+if(!manifest.unknownIsCallsEachUnchanged.every(Boolean)||!manifest.reconcileIsCallsConcatenatedExactlyOriginal)process.exitCode=1;

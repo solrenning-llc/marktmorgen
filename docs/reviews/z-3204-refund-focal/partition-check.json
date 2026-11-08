@@ -1,0 +1,27 @@
+{
+  "unknownOriginalSha256": "0b5eabd6a00d43f5cd5ca25a852f9f766c08feb217a99e3d20967a72a9960b5e",
+  "reconcileOriginalSha256": "dd4b98a422fbcf73892ffae6c183747e82b2585ec0072e83bb7ecfa53345a7cc",
+  "unknownIsCallsEachUnchanged": [
+    true,
+    true
+  ],
+  "reconcileIsCallsConcatenatedExactlyOriginal": true,
+  "unknownVectors": {
+    "original": [
+      "garbled",
+      "empty",
+      "no-id",
+      "dropped",
+      "server"
+    ],
+    "part0": [
+      "garbled",
+      "no-id",
+      "server"
+    ],
+    "part1": [
+      "empty",
+      "dropped"
+    ]
+  }
+}

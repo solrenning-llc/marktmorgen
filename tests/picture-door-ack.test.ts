@@ -12,7 +12,13 @@ const PATH = `images/${"a".repeat(24)}/${"b".repeat(32)}.jpg`;
 const NOW = 1_800_000_000_000;
 
 async function withReply<T>(reply: unknown, run: () => Promise<T>): Promise<T> {
-  redis.pipeline = (async () => reply) as typeof redis.pipeline;
+  return withReplies([reply], run);
+}
+
+/** Each pipeline sent is answered with the next of these replies (a take reads, then removes: two pipelines). */
+async function withReplies<T>(replies: unknown[], run: () => Promise<T>): Promise<T> {
+  let at = 0;
+  redis.pipeline = (async () => replies[Math.min(at++, replies.length - 1)]) as typeof redis.pipeline;
   try {
     return await run();
   } finally {
@@ -20,9 +26,9 @@ async function withReply<T>(reply: unknown, run: () => Promise<T>): Promise<T> {
   }
 }
 
-async function take(reply: unknown): Promise<string[] | "unknown"> {
+async function take(replies: unknown[]): Promise<string[] | "unknown"> {
   try {
-    return await withReply(reply, async () => [...(await takePictureDoor([PATH], NOW)).keys()]);
+    return await withReplies(replies, async () => [...(await takePictureDoor([PATH], NOW)).keys()]);
   } catch {
     return "unknown";
   }
@@ -31,11 +37,13 @@ async function take(reply: unknown): Promise<string[] | "unknown"> {
 async function main(): Promise<void> {
   part("The upload door needs its whole write acknowledgement");
   is("a short write reply does not open the upload door", await withReply([0], () => notePictureDoor(PATH, NOW)), false);
-  is("the canonical write reply opens it", await withReply([0, 1, 0, 1], () => notePictureDoor(PATH, NOW)), true);
+  // Both adds and the store's count (lib/picture-door.ts, since rule 24 inventory A1b: the store's list and the list of unclaimed pictures).
+  is("the canonical write reply opens it", await withReply([1, 1, 1], () => notePictureDoor(PATH, NOW)), true);
 
   part("Taking a picture needs an exact removal acknowledgement");
-  is("a numeric-looking removal string is unknown", await take([String(NOW), "1"]), "unknown");
-  is("the canonical score and numeric removal acknowledge the picture", await take([String(NOW), 1]), [PATH]);
+  // The score read, then the removals from the list of unclaimed pictures (which decides) and from the store's list.
+  is("a numeric-looking removal string is unknown", await take([[String(NOW)], ["1", 1]]), "unknown");
+  is("the canonical score and numeric removal acknowledge the picture", await take([[String(NOW)], [1, 1]]), [PATH]);
   part("A page's pictures not read exactly are ours to say, never \"add it again\" (Claude 4 on #2156)");
   let claimed: boolean | "unknown";
   try {

@@ -8,7 +8,8 @@
  * session, with synthetic files in a file store held in memory (tests/failure-cleanup-world.ts), and reads the list:
  *
  *   - a store already holding PICTURE_DOOR_MAX fresh doors nothing has taken is refused (429, pictures_waiting), with
- *     nothing noted and none of its notes pushed out; notes past the day do not count, and another store is not held;
+ *     nothing noted and none of its notes pushed out; notes past the day count until the sweep deletes their pictures
+ *     (tests/picture-door-sweep.test.ts), and another store is not held;
  *   - a store past its hourly count of doors is refused (429, pictures_hourly), counted before anything is signed;
  *   - a count that cannot be read (the hourly counter's reply, or the list's own count, in any other shape) refuses
  *     (503, pictures_unavailable), never opens;
@@ -82,12 +83,16 @@ async function main(): Promise<void> {
   is("and its oldest fresh note is not pushed out", redis.run(["ZSCORE", shop.doors, oldest]) !== null, true);
   is("another store's door still opens", await answer(await other.ask(other.fresh())), [200, "ok"]);
 
-  part("Notes past the day are not counted");
+  part("Notes past the day still count until the sweep deletes their pictures");
   redis.run(["DEL", shop.doors]);
   const stale = now - (PICTURE_DOOR_SECONDS + 60) * 1000;
   for (let i = 0; i < PICTURE_DOOR_MAX; i += 1) redis.run(["ZADD", shop.doors, stale, shop.fresh()]);
-  is("a store whose notes are all past the day opens a door", await answer(await shop.ask(shop.fresh())), [200, "ok"]);
-  is("and the stale notes went with it", shop.card(), 1);
+  is("a store whose untaken notes are all past the day is still refused", await answer(await shop.ask(shop.fresh())), [429, "pictures_waiting"]);
+  is("and its notes all wait for the sweep", shop.card(), PICTURE_DOOR_MAX);
+  // As the sweep leaves the list once their files are deleted (tests/picture-door-sweep.test.ts).
+  redis.run(["DEL", shop.doors]);
+  is("once they are swept, a door opens", await answer(await shop.ask(shop.fresh())), [200, "ok"]);
+  is("and it alone is noted", shop.card(), 1);
 
   part("A store past its hourly doors is refused before anything is signed");
   redis.run(["SET", hourKey(shop.folder), "100000", "EX", 3600]);

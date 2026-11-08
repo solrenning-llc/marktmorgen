@@ -14,7 +14,8 @@
  *   - the sweep and an attach can never both win one picture (the list's ZREM decides);
  *   - an unknown reply keeps the file; a failed delete puts the picture back for the next run; a run has a cap;
  *   - a store's untaken pictures count against PICTURE_DOOR_MAX until the sweep deletes them;
- *   - the course job runs the sweep, and the registry prices what the door keeps (line picture-doors).
+ *   - the course job runs the sweep; the registry says what bounds what the door keeps (its cost line waits for the
+ *     owner: at its drafted ceilings it takes the first year given back past the US$ 65 kept for it).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -211,11 +212,15 @@ async function main(): Promise<void> {
   is("and the door opens again", await answer(reopened), [200, "ok"]);
   is("the refusal's sentence no longer says the pictures are from the last day", /last day/.test(STUDIO_MESSAGES.pictures_waiting ?? ""), false);
 
-  part("The course job runs the sweep, and the registry prices what the door keeps");
+  part("The course job runs the sweep, and the registry says what the door keeps");
   const cron = readFileSync(join(process.cwd(), "app/api/cron/courses/route.ts"), "utf8");
   is("the course job calls sweepPictureDoors with the file store's delete", /sweepPictureDoors\(del\)/.test(cron), true);
-  is("a cost line prices the door's pictures", COST_LINES.some((line) => line.id === "picture-doors"), true);
-  is("NOT_A_COST no longer says the retained pictures have no line", /have no line yet/.test(NOT_A_COST.PICTURE_DOORS_PER_HOUR ?? ""), false);
+  is("the sweep waits past the door's day", door.PICTURE_SWEEP_AFTER_SECONDS > door.PICTURE_DOOR_SECONDS, true);
+  // The cost line itself waits for the owner: at its drafted ceilings it takes the first year given back past US$ 65.
+  const said = NOT_A_COST.PICTURE_DOORS_PER_HOUR ?? "";
+  is("NOT_A_COST no longer says untaken pictures are kept for good", /is not deleted once its note is a day old/.test(said), false);
+  is("it names the sweep and the cap that bound what is kept", /sweepPictureDoors/.test(said) && /PICTURE_DOOR_MAX/.test(said), true);
+  is("and no line prices it yet: not certified, never zero", !COST_LINES.some((line) => line.id === "picture-doors") && /never zero/.test(said), true);
 
   done();
 }

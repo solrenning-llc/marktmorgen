@@ -15,7 +15,7 @@
  *     once put on something it is never taken as fresh again, and a door asked for a picture already stored is
  *     refused, even in the same second the picture was stored;
  *   - each store's list: a stale note is never taken, one store's doors never push out another's, and the list
- *     expires a window after its last note.
+ *     has no expiry: a note goes only when its picture is taken or swept (lib/picture-door.ts, sweepPictureDoors).
  *
  * The inventory at the end reads every deletion in app/api/store, and in the lib files those routes delete through,
  * and holds each to a reason it cannot reach a file the browser named that belongs to another record, so a new
@@ -142,7 +142,7 @@ async function main(): Promise<void> {
   // Refused past its cap, never by pushing its oldest out (lib/picture-door.ts; tests/picture-door-ceiling.test.ts).
   is("and that store is refused one more, keeping its oldest", [past, ...(await takePictureDoor([other(0), other(PICTURE_DOOR_MAX)], now + 2_000)).keys()], ["full", other(0)]);
   const [ttl] = (await redis.pipeline([["TTL", `nl:pictures:doors:${"9".repeat(24)}`]])) as number[];
-  is("each list expires a window after its last note", ttl > 0 && ttl <= PICTURE_DOOR_SECONDS, true);
+  is("each list has no expiry: its untaken notes count until they are taken or swept", ttl, -1);
 
   part("Inventory: every deletion under app/api/store, and why it cannot reach another record's file");
   const routes: string[] = [];

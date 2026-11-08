@@ -213,13 +213,14 @@ async function main(): Promise<void> {
   is("the same picture chosen again from the device (a new upload): put on", await attach(c, another), [200, "ok"]);
 
   part("A take from the door that cannot be confirmed: refused before anything is written");
-  // The file store's Redis failing on the picture door's read and removal (ZSCORE + ZREM), once: before the removal
-  // ran, or after it ran with its answer lost. Before 4 November 2026 the failure was swallowed, so a picture could
-  // go on a record with its note still on the list, and a later refused request naming it deleted it.
+  // The file store's Redis failing on the picture door's read (ZSCORE) or its removal (ZREM) from the list of unclaimed
+  // pictures, once: before the removal ran, or after it ran with its answer lost. Before 4 November 2026 the failure was
+  // swallowed, so a picture could go on a record with its note still on the list, and a later refused request naming it
+  // deleted it.
   const unfailed = redis.pipeline;
   const takeFails = async <T>(removalRan: boolean, run: () => Promise<T>): Promise<T> => {
     redis.pipeline = async (commands) => {
-      if (commands.some((command) => command[0] === "ZSCORE" && String(command[1]).startsWith("nl:pictures:doors:"))) {
+      if (commands.some((command) => command[0] === (removalRan ? "ZREM" : "ZSCORE") && command[1] === "nl:pictures:unclaimed")) {
         if (removalRan) await unfailed(commands);
         throw new Error("Redis request failed with status 503");
       }

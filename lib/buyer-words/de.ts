@@ -187,6 +187,8 @@ export const de: BuyerWords = {
     `Sobald sie live ist, wird die Zahlung von Stripe auf dem eigenen Konto von ${store} eingezogen: Marktmorgen hält das Geld nie und behält nichts davon.`,
   paidBy: (takers, store) =>
     `Die Zahlung wird von ${takers} auf dem eigenen Konto von ${store} eingezogen. Marktmorgen hält das Geld nie und behält nichts davon.`,
+  whoAnswers: (store) =>
+    `${store} ist der Verkäufer und verantwortlich für das, was Sie kaufen, für Erstattungen und für ein etwaiges Widerrufsrecht. Marktmorgen stellt die Seiten des Shops bereit und ist nicht Partei des Kaufvertrags.`,
   noPaymentsTitle: "Dieser Shop kann noch keine Zahlungen annehmen.",
   noPaymentsBody: (store) => `Die Preise oben sind echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
   noPaymentsBodyOne: (store) => `Der Preis oben ist echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
@@ -310,6 +312,7 @@ export const de: BuyerWords = {
   seeStore: (store) => `${store} ansehen`,
   cardTestMode: "Testmodus: Es wird keine echte Karte belastet.",
   cardCheckout: "Sichere Zahlung über Stripe, in einem neuen Tab.",
+  cardSoldBy: (store) => `${store} ist der Verkäufer und dafür verantwortlich.`,
   cardOpens: (store) => `Öffnet sich im Shop von ${store}, in einem neuen Tab.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

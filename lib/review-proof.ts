@@ -207,7 +207,13 @@ const linkKey = (token: string) => `nl:rev:link:${sha(`nimbus-review-link:${toke
 
 type LinkGrant = { s: string; r: string; e: string };
 
-/** A link for the review request: one order, one address, 60 days. Throws when its erasure note or its write does not read exactly; nothing may be sent then. */
+// A review link written only while its erasure note is still there, in one step, so an erasure of the address that
+// ran after the note (and deleted it) is never undone by a grant no later erasure can find (Codex Z on #3296).
+// KEYS: the address's erasure note, the link. ARGV: the link's key as noted, the grant, its seconds. 1 written, 0 not.
+const REVIEW_LINK_IF_NOTED =
+  '-- marktmorgen:review-link-if-noted:v1\nif redis.call("ZSCORE", KEYS[1], ARGV[1]) then redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
+
+/** A link for the review request: one order, one address, 60 days. Throws when its erasure note or its write does not read exactly, or when the address was erased meanwhile; nothing may be sent then. */
 export async function mintReviewLink(store: Store, reference: string, email: string): Promise<string> {
   const token = randomBytes(24).toString("hex");
   const key = linkKey(token);
@@ -221,16 +227,23 @@ export async function mintReviewLink(store: Store, reference: string, email: str
     const noted = repliesFor(await redisPipeline(notes), notes.length);
     if (!noted || noted.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a review request's erasure note");
   }
-  // Then the link, "OK" or unknown. Unknown, or a pipeline that threw, may have landed: it is taken back at once so
-  // it is not kept 60 days unsent, and no token comes back, so no request is sent with a link that may lead nowhere.
+  // Then the link: with a note, only while that note is still there (1 written, 0 not, as one step); without one (a
+  // store with no stats id has no erasure note), a plain SET, "OK". Unknown, or a pipeline that threw, may have landed:
+  // it is taken back at once so it is not kept 60 days unsent, and no token comes back, so no request is sent with a
+  // link that may lead nowhere.
+  const write: (string | number)[] = notes.length
+    ? ["EVAL", REVIEW_LINK_IF_NOTED, 2, String(notes[0][1]), key, key, JSON.stringify(grant), REVIEW_LINK_SECONDS]
+    : ["SET", key, JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS];
   let written: unknown[] | null;
   try {
-    written = repliesFor(await redisPipeline([["SET", key, JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS]]), 1);
+    written = repliesFor(await redisPipeline([write]), 1);
   } catch (error) {
     await takeBackLink(key, notes.length > 0);
     throw error;
   }
-  if (!written || written[0] !== "OK") {
+  // Its note is gone: the address was erased after the note was written. Nothing was written, so nothing is taken back.
+  if (notes.length && written?.[0] === 0) throw new Error("a review request's address was erased before its link was written; no link was written");
+  if (!written || written[0] !== (notes.length ? 1 : "OK")) {
     await takeBackLink(key, notes.length > 0);
     throw new UnknownReplyError("a review request's link");
   }

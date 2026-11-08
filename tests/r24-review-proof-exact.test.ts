@@ -32,12 +32,15 @@ let failTakeBack = false;
 // written (Codex Z on #3296, review 5819974680).
 let eraseAfterNote = false;
 let linkKey = "";
-const isLinkSet = (c: Command) => c[0] === "SET" && /^nl:rev:link:/.test(String(c[1]));
+// The link's write: one step that writes it only while its erasure note is there, or a plain SET without a note.
+const isLinkSet = (c: Command) =>
+  (c[0] === "SET" && /^nl:rev:link:/.test(String(c[1]))) || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:review-link-if-noted:v1\n"));
+const linkOf = (c: Command) => String(c[0] === "EVAL" ? c[4] : c[1]);
 const isNote = (c: Command) => c[0] === "ZADD" && /^nl:erase:ix:/.test(String(c[1])) && /^nl:rev:link:/.test(String(c[3]));
 redis.pipeline = (async (commands: Command[]) => {
   const set = commands.find(isLinkSet);
   const note = commands.find(isNote);
-  if (set) linkKey = String(set[1]);
+  if (set) linkKey = linkOf(set);
   else if (note) linkKey = String(note[3]);
   if (commands.length === 1 && commands[0][0] === "DEL" && /^nl:rev:link:/.test(String(commands[0][1])) && failTakeBack) {
     throw new Error("synthetic: the take-back's outcome is unknown");
@@ -65,17 +68,18 @@ const pipe = (name: string, change: (replies: unknown[]) => unknown) => (command
   commands.some((c) => c[0] === name) ? change(replies) : replies;
 
 const UNKNOWN: [string, (commands: Command[], replies: unknown[]) => unknown][] = [
-  ["the link's SET answers nil", reply("SET", null)],
-  ["the link's SET answers a number", reply("SET", 1)],
-  ["the link's SET answers an undefined slot", reply("SET", undefined)],
+  ["the link's write answers nil", reply("EVAL", null)],
+  ["the link's write answers a number that is neither 1 nor 0", reply("EVAL", 2)],
+  ["the link's write answers text", reply("EVAL", "OK")],
+  ["the link's write answers an undefined slot", reply("EVAL", undefined)],
   ["the index's ZADD answers text", reply("ZADD", "x")],
   ["the index's trim answers nil", reply("ZREMRANGEBYSCORE", null)],
   ["the index's EXPIRE answers a negative number", reply("EXPIRE", -1)],
-  ["a reply is missing from the link's write", pipe("SET", (replies) => replies.slice(0, -1))],
+  ["a reply is missing from the link's write", pipe("EVAL", (replies) => replies.slice(0, -1))],
   ["a reply is missing from the erasure note", pipe("ZADD", (replies) => replies.slice(0, -1))],
-  ["a reply too many on the link's write", pipe("SET", (replies) => [...replies, 1])],
+  ["a reply too many on the link's write", pipe("EVAL", (replies) => [...replies, 1])],
   ["a reply too many on the erasure note", pipe("ZADD", (replies) => [...replies, 1])],
-  ["the link's write answers something that is not a list", pipe("SET", () => "OK")],
+  ["the link's write answers something that is not a list", pipe("EVAL", () => "OK")],
   ["the erasure note answers something that is not a list", pipe("ZADD", () => "OK")],
 ];
 
@@ -142,10 +146,10 @@ test("when the take-back itself fails too, the link is still noted for erasure, 
   assert.equal(left, null, "but an erasure of the address finds it and deletes it");
 });
 
-test("an unknown SET whose take-back fails is still erased with the address", async () => {
+test("an unknown write whose take-back fails is still erased with the address", async () => {
   redis.clear();
   linkKey = "";
-  rewrite = reply("SET", null);
+  rewrite = reply("EVAL", null);
   failTakeBack = true;
   const { error } = await mintCapturing().finally(() => {
     rewrite = null;

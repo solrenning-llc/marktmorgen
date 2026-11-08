@@ -27,6 +27,7 @@
  */
 import { type Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type ErasureScope } from "@/lib/erasure-rules";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
@@ -42,7 +43,7 @@ import { lessonComments } from "@/lib/lesson-comments";
 import { bondRecordOf } from "@/lib/affiliate-bond";
 import { readLeads } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
-import { inviteField, readInvite } from "@/lib/move-members";
+import { inviteField, inviteForCopy } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
 import { readReview, reviewId } from "@/lib/reviews";
@@ -184,9 +185,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/order-confirmation-outbox.ts": s => orderConfirmationMailOf(s.statsId, s.email),
   "lib/contacts.ts": async (s) => {
     if (!s.listId) return [];
-    const [raw] = await redisPipeline([["HGET", leadsKey(s.listId), s.email]]);
-    const contact = parseContact(raw);
-    return contact ? [{ email: s.email, ...contact }] : [];
+    const reply = repliesFor(await redisPipeline([["HGET", leadsKey(s.listId), s.email]]), 1);
+    if (!reply) throw new UnknownReplyError("the person's contact record");
+    if (reply[0] === null) return [];
+    // A record that does not read would leave out whether they agreed or left: the copy fails rather than omit it.
+    const contact = parseContact(reply[0]);
+    if (!contact) throw new UnknownReplyError("the person's contact record");
+    return [{ email: s.email, ...contact }];
   },
   "lib/crm.ts": async (s) => {
     const [fields, stages, tasks] = await Promise.all([readFields(s.statsId), readStages(s.statsId), readPersonTasks(s.statsId, s.person)]);
@@ -275,6 +280,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
   "lib/affiliate-bond.ts": async (s) => {
     const affiliate = await bondRecordOf(s.statsId, s.email);
+    if (affiliate === null) throw new UnknownReplyError("the person's affiliate bond");
     return affiliate ? [{ affiliate }] : [];
   },
   "lib/affiliate-leads.ts": async (s) => (await readLeads(s.store)).filter((l) => l.email && same(l.email, s.email)),
@@ -283,7 +289,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     for (const productId of s.productIds) {
-      const invite = await readInvite(s.statsId, inviteField(s.email, productId));
+      const invite = await inviteForCopy(s.statsId, inviteField(s.email, productId));
+      if (invite === "unknown") throw new UnknownReplyError("an invitation to keep a membership");
       if (invite) out.push({ product: productId, ...invite });
     }
     return out;
@@ -399,9 +406,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return out;
   },
   "lib/call-packages.ts": async (s) => {
-    const [raw] = await redisPipeline([["SMEMBERS", packagesKey(s.statsId)]]);
+    // The store's packages, exactly: a set that cannot be read is never "none sold", which would leave theirs out.
+    const checkouts = stringList(repliesFor(await redisPipeline([["SMEMBERS", packagesKey(s.statsId)]]), 1)?.[0]);
+    if (!checkouts) throw new UnknownReplyError("the store's call packages");
     const out: unknown[] = [];
-    for (const checkout of (Array.isArray(raw) ? raw : []).map(String)) {
+    for (const checkout of checkouts) {
       const bought = await readBought(checkout);
       // The booking link's token is a key, left out: they have it in the email that sent it.
       if (bought && same(bought.e, s.email)) out.push({ product: bought.p, sessions: bought.total, bought: iso(bought.at), bookBy: iso(bought.until), booked: bought.holds });

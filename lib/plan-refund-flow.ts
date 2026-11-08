@@ -127,8 +127,13 @@ const oursFor = (row: Row, sid: string): boolean => {
   const metadata = ownField(row, "metadata");
   return plainObject(metadata) && ownField(metadata, "plan_refund") === sid;
 };
-/** One page of refunds read exactly (lib/stripe-list.ts), or null when it is not a list at all. */
+/**
+ * One page of refunds read exactly (lib/stripe-list.ts), or null when it is not a list at all. Stripe names every
+ * list reply `"object": "list"`; a reply named anything else, or not named, is not that list, however empty its
+ * `data` looks, so it never reads as "no refund" (Codex G on #3190, 6726655568).
+ */
 function refundPage(listed: unknown): StripePage | null {
+  if (!plainObject(listed) || ownField(listed, "object") !== "list") return null;
   try {
     return readStripePage(listed, refundLegible);
   } catch (error) {

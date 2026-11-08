@@ -28,6 +28,9 @@ let rewrite: ((commands: Command[], replies: unknown[]) => unknown) | null = nul
 // outcome is not known (Codex Z on #3296).
 let commitSetThenThrow = false;
 let failTakeBack = false;
+// Runs a real erasure of the address right after the pipeline carrying the erasure note answered, before the link is
+// written (Codex Z on #3296, review 5819974680).
+let eraseAfterNote = false;
 let linkKey = "";
 const isLinkSet = (c: Command) => c[0] === "SET" && /^nl:rev:link:/.test(String(c[1]));
 const isNote = (c: Command) => c[0] === "ZADD" && /^nl:erase:ix:/.test(String(c[1])) && /^nl:rev:link:/.test(String(c[3]));
@@ -45,6 +48,10 @@ redis.pipeline = (async (commands: Command[]) => {
   }
   if (set || note) {
     const replies = (await real(commands)) as unknown[];
+    if (note && !set && eraseAfterNote) {
+      eraseAfterNote = false;
+      await forgetNoted(STATS, EMAIL);
+    }
     return (rewrite ? rewrite(commands, replies) : replies) as unknown[];
   }
   return real(commands);
@@ -148,6 +155,23 @@ test("an unknown SET whose take-back fails is still erased with the address", as
   await forgetNoted(STATS, EMAIL);
   const [left] = await redis.pipeline([["GET", linkKey]]);
   assert.equal(left, null, "the erasure finds the link it may have left");
+});
+
+// Codex Z's race on #3296 (review 5819974680): the erasure note is confirmed, then the address is erased in full
+// (index and every noted record), then the link would be written. The erased address must not come back in an
+// unindexed grant that no later erasure can find, and no token may come back for an email.
+test("an erasure that runs between the note and the link's write is never undone: no token, no grant (Codex Z)", async () => {
+  redis.clear();
+  linkKey = "";
+  eraseAfterNote = true;
+  const { error } = await mintCapturing().finally(() => (eraseAfterNote = false));
+  assert.ok(error instanceof Error, "it throws: no token, so no email");
+  assert.ok(linkKey, "the link's key is known");
+  const [left] = await redis.pipeline([["GET", linkKey]]);
+  assert.equal(left, null, "no grant with the erased address is written after the erasure");
+  await forgetNoted(STATS, EMAIL);
+  const [still] = await redis.pipeline([["GET", linkKey]]);
+  assert.equal(still, null, "nor is one left that a second erasure cannot find");
 });
 
 test("a healthy link is written, noted for erasure, opened by its key and deleted with the address (control)", async () => {

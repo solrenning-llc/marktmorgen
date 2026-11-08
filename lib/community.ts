@@ -463,6 +463,28 @@ export async function readMembers(id: string, keys: string[]): Promise<Map<strin
   return out;
 }
 
+/**
+ * The members of `keys`, read exactly (rules 24 and 30), for deciding who an email goes to: one left out of the map
+ * only when its row answered exactly nil, so it is gone. A reply lost, cut short or in another shape, or a row that is
+ * not that member's record, throws UnknownReplyError: a member who did not read is not one who is gone, and an email
+ * meant for them is not counted as sent (lib/community-event-mail.ts).
+ */
+export async function readMembersExact(id: string, keys: string[]): Promise<Map<string, Member>> {
+  const out = new Map<string, Member>();
+  const unique = [...new Set(keys)].filter((k) => k !== CREATOR);
+  if (!unique.length) return out;
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...unique]]), 1);
+  const rows = replies && repliesFor(replies[0], unique.length);
+  if (!rows) throw new UnknownReplyError("community members");
+  unique.forEach((key, i) => {
+    if (rows[i] === null) return;
+    const member = parseMember(rows[i]);
+    if (!member || member.k !== key) throw new UnknownReplyError("a community member record");
+    out.set(key, member);
+  });
+  return out;
+}
+
 /** Writes a member's record only if it is still exactly what was read. */
 const CAS_MEMBER = [
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',

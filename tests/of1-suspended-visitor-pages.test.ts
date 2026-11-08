@@ -13,6 +13,9 @@
  * an affiliate's own page and the emailed link that signs one back in; the
  * store's layout (app/[handle]/layout.tsx) puts nothing of the store in the
  * head (manifest, name, icons, theme color), as for an address with no store.
+ * The picture a shared product link unfolds into (app/[handle]/p/[product]/opengraph-image.tsx)
+ * and the store's home-screen icon (app/[handle]/app-icon/[size]/route.tsx) answer 404, kept by
+ * no cache, as the manifest does.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -30,6 +33,10 @@ import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
 import { GET as manifest } from "@/app/[handle]/manifest.webmanifest/route";
 import { GET as robots } from "@/app/[handle]/store-robots/route";
+import ProductCard from "@/app/[handle]/p/[product]/opengraph-image";
+import { GET as appIcon } from "@/app/[handle]/app-icon/[size]/route";
+import { iconUrl } from "@/lib/store-app";
+import { drawings } from "./of1-next-og";
 import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { readSetup, type CallSetup } from "@/lib/call-setup";
@@ -153,6 +160,21 @@ async function main(): Promise<void> {
     return [response.status, response.headers.get("cache-control")];
   };
 
+  /** The shared card of the paid product: its status, its cache and whether what it draws names the store or the product. */
+  const card = async () => {
+    drawings.last = null;
+    const response = (await ProductCard({ params: Promise.resolve({ handle, product: paid.product.id }) })) as Response;
+    const drawn = drawings.last ? await html({ node: drawings.last }) : "";
+    return [response.status, response.headers.get("cache-control"), drawn.includes("Glaze Workshop Replay") || drawn.includes("Glaze Works") || drawn.includes("$29")];
+  };
+  /** The store's 192-pixel icon, at its own address or at the bare one: its status and its cache. */
+  const icon = async (bare = false) => {
+    const address = iconUrl((await storeForEmail(owner))!, 192);
+    const request = new Request(`https://marktmorgen.com${bare ? address.split("?")[0] : address}`, { headers: { "x-forwarded-for": "203.0.113.8", host: "marktmorgen.com" } });
+    const response = await appIcon(request, { params: Promise.resolve({ handle, size: "192.png" }) });
+    return [response.status, response.headers.get("cache-control")];
+  };
+
   part("A store switched off after a report (lib/takedown.ts)");
   await noteTakedown(owner, null, true);
   for (const page of pages) {
@@ -166,6 +188,9 @@ async function main(): Promise<void> {
   }
   is("the store's app manifest is not given, kept by no cache", await file(manifest, "/manifest.webmanifest"), [404, "no-store"]);
   is("nor the rules for crawlers on its own domain", await file(robots, "/store-robots"), [404, "no-store"]);
+  is("nor the picture a shared product link unfolds into, which names nothing of the store or the product", await card(), [404, "no-store", false]);
+  is("nor the store's home-screen icon, drawn from its photo or its name, kept by no cache", await icon(), [404, "no-store"]);
+  is("nor at the icon's bare address, which is not sent on to the icon", await icon(true), [404, "no-store"]);
   const visitor = await affiliates({});
   is("the affiliate page says the store is not available to a visitor, as the store's page does", suspendedPage(visitor), true);
   is("and shows none of the program's terms or its form to apply", [(await html(visitor)).includes("Earn by sharing"), (await html(visitor)).includes("<form")], [false, false]);
@@ -223,6 +248,8 @@ async function main(): Promise<void> {
   is("as does moving a booking", await tracks((await open(pages[0], { move: "cs_test_of1move000000" }) as { node: unknown }).node), true);
   is("the manifest is given again", (await file(manifest, "/manifest.webmanifest"))[0], 200);
   is("and the rules for crawlers", (await file(robots, "/store-robots"))[0], 200);
+  is("the shared card names the product and the store again", await card(), [200, "public, immutable, no-transform, max-age=31536000", true]);
+  is("and the store's icon is drawn again, kept for good at its own address", await icon(), [200, "public, max-age=31536000, immutable"]);
   is("the affiliate page shows the program to a visitor again", (await html(await affiliates({}))).includes("Earn by sharing Glaze Works"), true);
   const again = await head();
   is("the store's layout names the store in the head again, with its manifest", [again.includes("/@glazeworks/manifest.webmanifest"), again.includes("Glaze Works")], [true, true]);

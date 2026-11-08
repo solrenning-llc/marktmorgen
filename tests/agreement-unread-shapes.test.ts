@@ -8,8 +8,7 @@
  *   - sending it again never answers "gone" on an unknown read;
  *   - an email that already went is still reported as sent when writing down its time cannot be confirmed, so the
  *     studio never invites a second agreement for the same person;
- *   - deleting a person never reports zero agreements, nor removes the index that finds them, on an unknown list,
- *     and never counts as deleted what the deletion's replies do not confirm.
+ *   - a person's erasure (forgetAgreementsPerson) is held by tests/agreements-erase-unknown.test.ts (#3151).
  *
  * The healthy and confirmed-empty paths are checked unchanged. Synthetic store, synthetic people, in-memory Redis,
  * the email provider mocked.
@@ -18,7 +17,7 @@ import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { type AgreementDraft, readDraft, statusOf } from "@/lib/agreement-rules";
-import { createAgreement, deleteAgreement, forgetAgreementsPerson, readAgreement, signAgreement, withdrawAgreement } from "@/lib/agreement-store";
+import { createAgreement, deleteAgreement, readAgreement, signAgreement, withdrawAgreement } from "@/lib/agreement-store";
 import { resendSignedCopy, sendAgain, sendAgreementEmail } from "@/lib/agreements";
 import { POST as studioRoute } from "@/app/api/store/agreements/route";
 import { store as redis } from "./redis-stub";
@@ -55,8 +54,6 @@ async function under<T>(match: Pick1, reply: unknown, run: () => Promise<T>): Pr
 }
 
 const getRecord = (id: string): Pick1 => (cmd) => cmd[0] === "GET" && cmd[1] === `nl:agree:r:${id}`;
-const membersOf = (sid: string): Pick1 => (cmd) => cmd[0] === "SMEMBERS" && String(cmd[1]).startsWith(`nl:agree:p:${sid}:`);
-const deletion: Pick1 = (cmd) => cmd[0] === "DEL" && String(cmd[1]).startsWith("nl:agree:");
 
 async function paidStore(owner: string, handle: string): Promise<Store> {
   await claimHandle(owner, handle, "Synthetic Coaching", "");
@@ -161,40 +158,6 @@ async function main(): Promise<void> {
   is("healthy send: sent and written down", [sentOnce.sent, sentOnce.agreement.sent.length, (await readAgreement(healthy.agreement.id))?.sent.length], [true, 1, 1]);
   is("healthy send again within a day: refused by the spacing", (await sendAgain(store, healthy.agreement.id)).ok, false);
   is("healthy withdraw", (await withdrawAgreement(store, healthy.agreement.id) as { state?: string } | null)?.state, "withdrawn");
-
-  part("Deleting a person never reports none on an unknown list");
-  const sid = store.sid!;
-  const person = "signer-erase@example.com";
-  const one = await make(person);
-  const two = await make(person);
-  const kept = async () => [await readAgreement(one.agreement.id), await readAgreement(two.agreement.id)].filter(Boolean).length;
-  const personKeys = () => [...redis.keys()].filter((k) => k.startsWith(`nl:agree:p:${sid}:`)).length;
-  const indexBefore = personKeys();
-  const UNKNOWN_SETS: [string, unknown][] = [
-    ["no reply", []],
-    ["a null set", [null]],
-    ["a number", [3]],
-    ["a string", ["x"]],
-    ["a member that is not a string", [[one.agreement.id, 7]]],
-    ["a bare string", "QUEUED"],
-    ["two replies for one command", [[], []]],
-  ];
-  for (const [what, reply] of UNKNOWN_SETS) {
-    const r = await under(membersOf(sid), reply, () => forgetAgreementsPerson(sid, person));
-    is(`list on ${what}: refused, not 0`, r.threw, true);
-    is(`list on ${what}: both agreements and the person's index kept`, [await kept(), personKeys()], [2, indexBefore]);
-  }
-  const UNKNOWN_DELETES: [string, unknown][] = [
-    ["no reply", []],
-    ["a short reply", [1]],
-    ["text for counts", ["OK", "OK", "OK", "OK", "OK"]],
-  ];
-  for (const [what, reply] of UNKNOWN_DELETES) {
-    const r = await under(deletion, reply, () => forgetAgreementsPerson(sid, person));
-    is(`deletion answered with ${what}: not counted as deleted`, r.threw, true);
-  }
-  is("healthy: both deleted, counted", [await forgetAgreementsPerson(sid, person), await kept()], [2, 0]);
-  is("confirmed empty: none", await forgetAgreementsPerson(sid, person), 0);
 
   done();
 }

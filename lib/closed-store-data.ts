@@ -53,6 +53,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -566,6 +567,18 @@ async function readBatch(): Promise<Map<string, Batched>> {
   return out;
 }
 
+/**
+ * Moves a closing store that could not be read or prepared back a walk (ZADD XX: never puts back one that left the
+ * line meanwhile). True only on Redis's own answer, 0 or 1; anything else is not known to have moved (rule 24), so the
+ * old due time may still stand and the run must not say it is done.
+ */
+async function moveBack(ref: string, now: number): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]), 1)?.[0];
+  if (reply === 0 || reply === 1) return true;
+  console.error("moving a closed store back a walk was not confirmed; it may come up again before then", reply);
+  return false;
+}
+
 /** What the closing job does when a store's records are gone: told by the caller (lib/plan-closing.ts), which writes it down and emails the owner. */
 export type Finisher = (entry: Batched, now: number) => Promise<void>;
 
@@ -577,6 +590,8 @@ export type Finisher = (entry: Batched, now: number) => Promise<void>;
 export async function eraseClosed(deadline: number, finish: Finisher, now = Date.now()): Promise<WalkReport> {
   const report: WalkReport = { started: false, stores: 0, pages: 0, deleted: 0, pruned: 0, finished: 0, done: false };
   if (!isRedisConfigured()) return report;
+  // A move back a walk that Redis did not confirm (moveBack): this run is never said to be done.
+  let unsure = false;
   const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase"]]);
   const [cursorRaw, startedRaw, phaseRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", ""];
   let phase = phaseRaw || "idle";
@@ -597,7 +612,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
         // Not read (rule 24): never "no store". It stays in line, moved back a walk so it does not hold the head of
         // the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves the line.
         console.error("a closed store's record could not be read; it waits for the next walk", error);
-        await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]);
+        if (!(await moveBack(ref, now))) unsure = true;
         continue;
       }
       if (store) {
@@ -608,7 +623,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
           // Something it needs could not be read (rule 24), such as whether a host still serves another store:
           // never taken as "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat).
           console.error("a closed store could not be prepared; it waits for the next walk", error);
-          await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]);
+          if (!(await moveBack(ref, now))) unsure = true;
           continue;
         }
         await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);
@@ -617,7 +632,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
     const [count] = await redisPipeline([["HLEN", BATCH_KEY]]);
-    if (!Number(count)) return { ...report, done: true };
+    if (!Number(count)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";
@@ -648,7 +663,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       report.finished += 1;
     }
     await redisPipeline([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "finished", now]]);
-    report.done = true;
+    report.done = !unsure;
   }
   return report;
 }

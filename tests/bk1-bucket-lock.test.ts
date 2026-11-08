@@ -13,19 +13,17 @@
  *     the bucket holds other copies pruned anyway;
  * The route, the schedule and the alarm are held by tests/bk1-backup-route.test.ts.
  */
-// Read through the modules' namespaces so this file runs, and fails check by check, on the code before the change.
-import * as backupRun from "@/lib/backup-run";
-import * as roundtrip from "@/lib/backup-roundtrip";
-import type { BackupBucket } from "@/lib/backup-roundtrip";
+import {
+  BACKUP_BUCKET_LOCK_DAYS,
+  BACKUP_SHRINK_LIMIT_PERCENT,
+  backupLastFailure,
+  runBackup,
+  type BackupCostReview,
+} from "@/lib/backup-run";
 import { randomBytes } from "node:crypto";
+import { BackupObjectLockedError, type BackupBucket } from "@/lib/backup-roundtrip";
 import { r2BackupStore } from "@/lib/backup-store";
 import { store as redis } from "./redis-stub";
-
-type BackupCostReview = backupRun.BackupCostReview;
-const { backupLastFailure, runBackup } = backupRun;
-const BACKUP_BUCKET_LOCK_DAYS = (backupRun as Record<string, unknown>).BACKUP_BUCKET_LOCK_DAYS as number;
-const BACKUP_SHRINK_LIMIT_PERCENT = (backupRun as Record<string, unknown>).BACKUP_SHRINK_LIMIT_PERCENT as number;
-const BackupObjectLockedError = ((roundtrip as Record<string, unknown>).BackupObjectLockedError ?? class NotBuiltYet extends Error {}) as new () => Error;
 import { done, is, part } from "./check";
 
 const T0 = Date.parse("2026-11-02T03:00:00Z");
@@ -83,12 +81,6 @@ async function main(): Promise<void> {
     redis.now = () => clock;
   };
   wipe();
-  let sent = 0;
-  const real = redis.pipeline.bind(redis);
-  (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (list: (string | number)[][]) => {
-    sent += list.length;
-    return real(list);
-  }) as typeof redis.pipeline;
   // Values that do not compress away, so the sealed bytes follow them.
   const seed = (n: number, size = 40) => {
     for (let i = 0; i < n; i += 1) redis.run(["SET", `nl:store:s${i}`, randomBytes(size).toString("hex")]);

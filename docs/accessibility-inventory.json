@@ -1660,6 +1660,7 @@
     "app/api/billing/switch/route.ts",
     "app/api/creators/route.ts",
     "app/api/cron/affiliates/route.ts",
+    "app/api/cron/backup/route.ts",
     "app/api/cron/closed-data/route.ts",
     "app/api/cron/closing/route.ts",
     "app/api/cron/courses/route.ts",

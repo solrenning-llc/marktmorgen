@@ -26,11 +26,14 @@
  * review's retention (lib/backup-run.ts). The listing offers only names this store
  * writes (backups/<uuid>.mmbk), so nothing else in the bucket is ever deleted;
  * a listing it cannot read whole throws, never reads as an empty bucket. The
- * bucket's lifecycle rule stays as a safety net.
+ * bucket's lifecycle rule stays as a safety net. A delete answered 409, which
+ * R2 gives an object under the bucket lock (inbox C4-36 item 5, as reported to
+ * Claude 1; not re-read on Cloudflare's pages in this unit), throws
+ * BackupObjectLockedError, never a done delete.
  */
 import { EMPTY_HASH, hashOf, signV4, type AwsKey } from "@/lib/aws-sign";
 import { timed } from "@/lib/fetch-timeout";
-import type { BackupBucket } from "@/lib/backup-roundtrip";
+import { BackupObjectLockedError, type BackupBucket } from "@/lib/backup-roundtrip";
 
 export type BackupStoreConfig = { endpoint: string; bucket: string; key: AwsKey };
 
@@ -200,6 +203,8 @@ export function r2BackupStore(config: BackupStoreConfig): BackupBucket {
         await response.body?.cancel().catch(() => {});
         return response.status;
       });
+      // A locked object (the bucket lock, inbox C4-35 and C4-36 item 5) answers 409: said as such, never as done.
+      if (status === 409) throw new BackupObjectLockedError();
       // S3 answers 204 for a delete, the object there or not; anything else is not taken as done.
       if (status !== 204 && status !== 200) throw new Error(`Backup delete failed with status ${status}`);
     },

@@ -60,11 +60,30 @@
  * a write while the deletions work. Names under backups/ this
  * code does not write are never listed as its own nor deleted; the bucket's
  * lifecycle rule, kept as a safety net, removes them and anything left while
- * no run happens. Nothing schedules it: vercel.json is untouched (owner
- * prerequisite 6 of docs/backup.md), and no route calls it.
+ * no run happens.
+ *
+ * The bucket lock (inbox C4-35): neither step ever asks the bucket to delete an
+ * object younger than BACKUP_BUCKET_LOCK_DAYS and an hour (the owner's lock on
+ * backups/, proposed at 7 days); step 1 that cannot make room without one
+ * writes nothing ("room_locked"), and a delete the bucket refuses as locked
+ * (409, BackupObjectLockedError) is "room_locked" or "prune_locked".
+ *
+ * A database emptied or corrupted (inbox C4-36 item 1): before the prune, the
+ * copy just verified is compared with the last good set's keys and bytes (the
+ * base kept with the last good copy's mark). When either fell more than
+ * BACKUP_SHRINK_LIMIT_PERCENT, nothing is deleted ("prune_shrunk") and the base
+ * stays the earlier, larger set, so the next days hold the prune too. With no
+ * mark at all while the bucket holds copies other than the one just written
+ * (the marks went with the database), or a mark without a base, nothing is
+ * deleted either ("prune_unverified") and no base is written. Accepting a
+ * smaller database as the new base is not built: it is the owner's decision.
+ *
+ * Called by app/api/cron/backup/route.ts, scheduled in vercel.json twice a
+ * day (the day's run and its new try); off while BACKUP_COST_REVIEW is null,
+ * before any command is sent.
  */
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
-import type { BackupBucket, BackupListedObject, BackupObjectStore } from "@/lib/backup-roundtrip";
+import { BackupObjectLockedError, type BackupBucket, type BackupListedObject, type BackupObjectStore } from "@/lib/backup-roundtrip";
 import { MAX_PARTS, copyInParts, manifestBound, openManifest, runStoredBound } from "@/lib/backup-parts";
 import { BACKUP_LIST_PAGE_KEYS, backupStoreConfig, r2BackupStore } from "@/lib/backup-store";
 import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
@@ -110,7 +129,16 @@ export const BACKUP_RUN_COMMANDS = 10;
  * given up by then and none is sent after it (lib/fetch-timeout.ts, withCutoff), and the walk, each part and the
  * manifest are refused once it has passed. The outcome is written after it, outside it.
  */
-export const BACKUP_RUN_CUTOFF_MS = 800_000;
+export const BACKUP_RUN_CUTOFF_MS = 700_000;
+/**
+ * Days the owner's bucket lock on backups/ keeps an object from deletion (proposal, inbox C4-35; the owner sets the
+ * lock on the bucket). The run never asks to delete an object younger than this and LOCK_CLOCK_ROOM_MS.
+ */
+export const BACKUP_BUCKET_LOCK_DAYS = 7;
+/** Room for the bucket's clock against the run's: an object counts as locked for an hour past the lock. */
+const LOCK_CLOCK_ROOM_MS = 3_600_000;
+/** How far, in percent, a copy's keys or bytes may fall below the last good set's before the prune is held (inbox C4-36). */
+export const BACKUP_SHRINK_LIMIT_PERCENT = 20;
 /** The lock's life, in ms: past the admission's two requests (5 s each at most) and the cutoff, with room to spare. */
 export const BACKUP_LOCK_MS = 900_000;
 /**
@@ -216,13 +244,16 @@ export function validReview(review: unknown): review is BackupCostReview {
   return admitReview(review) !== null;
 }
 
+/** How the prune after a verified copy ended. */
+export type BackupPruneState = "done" | "prune_error" | "prune_pages" | "prune_cutoff" | "prune_locked" | "prune_shrunk" | "prune_unverified";
+
 export type BackupRunResult =
-  | { ok: true; id: string; keys: number; bytes: number; parts: number; pruned: number; prune: "done" | "prune_error" | "prune_pages" | "prune_cutoff" }
+  | { ok: true; id: string; keys: number; bytes: number; parts: number; pruned: number; prune: BackupPruneState; note?: "last_good_copy_lost" }
   | {
       ok: false;
       reason:
         | "off_review" | "off_store" | "off_key" | "busy" | "already_ran" | "mark_error"
-        | "room_error" | "room_pages" | "room_cutoff" | "room_unverified"
+        | "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked"
         | "export_limits" | "export_budget" | "export_cutoff" | "export_scan_pages" | "export_too_many" | "export_too_big" | "export_too_many_parts" | "export_unreadable" | "export_error"
         | "verify";
     };
@@ -250,19 +281,31 @@ function defaultStore(): BackupBucket | null {
   return config ? r2BackupStore(config) : null;
 }
 
-/** The last good copy as kept: its time and its manifest's id; a bare time (older format) names no manifest. */
-function readLastOk(raw: unknown): { at: number; set: string | null } | null {
+/** The keys and bytes of the last good set a new copy is compared with before the prune (inbox C4-36 item 1). */
+type BackupBase = { keys: number; bytes: number };
+const isCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+
+/**
+ * The last good copy as kept: its time, its manifest's id and the base; a bare time (older format) names no manifest,
+ * and a mark without both counts has no base.
+ */
+function readLastOk(raw: unknown): { at: number; set: string | null; base: BackupBase | null } | null {
   if (typeof raw !== "string") return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed === "number") return Number.isFinite(parsed) ? { at: parsed, set: null } : null;
+    if (typeof parsed === "number") return Number.isFinite(parsed) ? { at: parsed, set: null, base: null } : null;
     if (!parsed || typeof parsed !== "object") return null;
-    const { at, set } = parsed as { at?: unknown; set?: unknown };
-    return typeof at === "number" && Number.isFinite(at) ? { at, set: typeof set === "string" ? set : null } : null;
+    const { at, set, base } = parsed as { at?: unknown; set?: unknown; base?: unknown };
+    if (typeof at !== "number" || !Number.isFinite(at)) return null;
+    const { keys, bytes } = (base && typeof base === "object" ? base : {}) as { keys?: unknown; bytes?: unknown };
+    return { at, set: typeof set === "string" ? set : null, base: isCount(keys) && isCount(bytes) ? { keys, bytes } : null };
   } catch {
     return null;
   }
 }
+
+/** The last good copy's mark, read at most once a run (one GET, inside BACKUP_RUN_COMMANDS) by whichever step asks first. */
+type MarkReader = () => Promise<unknown>;
 
 /** One run: off unless all three are there; otherwise a verified copy, or a failure that says which step. Never throws. */
 export async function runBackup(options: BackupRunOptions = {}): Promise<BackupRunResult> {
@@ -306,8 +349,12 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   const cutoff = Date.now() + Math.min(options.cutoffMs ?? BACKUP_RUN_CUTOFF_MS, BACKUP_RUN_CUTOFF_MS);
   // Set when the last good copy was found lost while making room: the owner's report says so.
   let lost = false;
+  // The base the outcome keeps with the new copy's mark: none until the prune's check says which.
+  let base: BackupBase | null = null;
+  let markReply: Promise<unknown> | null = null;
+  const readMark: MarkReader = () => (markReply ??= redisPipeline([["GET", LAST_OK]]));
   const result: BackupRunResult = await withCutoff(cutoff, async () => {
-    const room = await makeRoom(review, store, key);
+    const room = await makeRoom(review, store, key, now, readMark);
     lost = room.lost;
     if (!room.ok) return { ok: false, reason: room.reason };
     const copied = await copy(review, store, key, now);
@@ -316,8 +363,9 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
     if (!copied.ok) return copied;
     // After a verified write, as best it can: a failure is reported and never costs the copy just made. The copy just
     // made is the last verified one now, and it is younger than the retention.
-    const pruned = await prune(review, store, now);
-    return { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state };
+    const pruned = await prune(review, store, now, copied, readMark);
+    base = pruned.base;
+    return { ...copied, pruned: room.deleted + pruned.deleted, prune: pruned.state, ...(lost ? { note: "last_good_copy_lost" as const } : {}) };
   });
   try {
     await redisPipeline(
@@ -325,7 +373,9 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
         ? [
             // Kept for good: it names the copy never deleted to make room, which may outlive any expiry while new copies
             // fail; its absence is then a loss, never "no copy yet" (lastVerified).
-            ["SET", LAST_OK, JSON.stringify({ at: now, set: result.id })],
+            // With the base the next copy is compared with (inbox C4-36): the earlier one when this copy shrank, none
+            // when it could not be known.
+            ["SET", LAST_OK, JSON.stringify({ at: now, set: result.id, ...(base ? { base } : {}) })],
             // Done: no new try today; the count goes past the day's limit.
             ["INCRBY", day, BACKUP_RUNS_PER_DAY],
             ...(result.prune !== "done"
@@ -375,8 +425,8 @@ class LostLastGood extends Error {}
  * good copy": the mark is kept for good once written, so its absence is a loss, and the run never deletes to make
  * room without knowing what to keep; copies left that way go by the bucket's lifecycle rule.
  */
-async function lastVerified(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[]): Promise<Set<string>> {
-  const replies: unknown = await redisPipeline([["GET", LAST_OK]]);
+async function lastVerified(store: BackupBucket, key: Uint8Array, listed: BackupListedObject[], readMark: MarkReader): Promise<Set<string>> {
+  const replies: unknown = await readMark();
   if (!Array.isArray(replies) || replies.length !== 1 || typeof replies[0] !== "string") throw new Unverified();
   const set = readLastOk(replies[0])?.set;
   if (!set || !ID.test(set)) throw new Unverified();
@@ -429,7 +479,9 @@ async function makeRoom(
   review: BackupCostReview,
   store: BackupBucket,
   key: Uint8Array,
-): Promise<{ ok: true; deleted: number; lost: boolean } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified"; lost: boolean }> {
+  now: number,
+  readMark: MarkReader,
+): Promise<{ ok: true; deleted: number; lost: boolean } | { ok: false; reason: "room_error" | "room_pages" | "room_cutoff" | "room_unverified" | "room_locked"; lost: boolean }> {
   const need = objectBound(review);
   const objects = runLimits(review).maxParts + 1;
   const most = backupKeptObjects(review);
@@ -443,47 +495,108 @@ async function makeRoom(
     if (fits()) return { ok: true, deleted: 0, lost };
     let keep: Set<string>;
     try {
-      keep = await lastVerified(store, key, listed);
+      keep = await lastVerified(store, key, listed, readMark);
     } catch (error) {
       if (!(error instanceof LostLastGood)) throw error;
       lost = true;
       keep = await verifiedInBucket(store, key, listed);
     }
     const oldest = listed.filter((o) => !keep.has(o.id)).sort((a, b) => a.writtenAt - b.writtenAt || (a.id < b.id ? -1 : 1));
+    // Never asked for inside the bucket lock (inbox C4-35): such an object is left, and counted as the reason.
+    const line = lockLine(now);
+    const free = oldest.filter((o) => o.writtenAt <= line);
     let deleted = 0;
-    for (const object of oldest) {
+    for (const object of free) {
       if (fits()) break;
       if (timeLeft() <= 0) return { ok: false, reason: "room_cutoff", lost };
-      await store.delete(object.id);
+      try {
+        await store.delete(object.id);
+      } catch (error) {
+        if (error instanceof BackupObjectLockedError) return { ok: false, reason: "room_locked", lost };
+        throw error;
+      }
       bytes -= object.bytes;
       count -= 1;
       deleted += 1;
     }
-    return fits() ? { ok: true, deleted, lost } : { ok: false, reason: "room_error", lost };
+    if (fits()) return { ok: true, deleted, lost };
+    return { ok: false, reason: free.length < oldest.length ? "room_locked" : "room_error", lost };
   } catch (error) {
     if (error instanceof Unverified) return { ok: false, reason: "room_unverified", lost };
     return { ok: false, reason: timeLeft() <= 0 ? "room_cutoff" : "room_error", lost };
   }
 }
 
+/** The newest moment an object may have been written and be asked for deletion: past the bucket lock and its hour. */
+const lockLine = (now: number) => now - BACKUP_BUCKET_LOCK_DAYS * DAY_MS - LOCK_CLOCK_ROOM_MS;
+
+/** True when `now` fell more than BACKUP_SHRINK_LIMIT_PERCENT below `was`. */
+const shrank = (now: number, was: number) => now * 100 < was * (100 - BACKUP_SHRINK_LIMIT_PERCENT);
+
+/**
+ * The check before the prune (inbox C4-36 item 1), from the last good copy's mark read exactly (one reply, a text or
+ * nothing): "ok" with the new copy as the base; "shrunk", keeping the earlier base, when its keys or bytes fell more
+ * than the limit; "unverified", with no base, when the reply or the mark cannot be read or the mark has no base;
+ * "none" when there is no mark at all, which the listing decides.
+ */
+async function shrinkCheck(copied: { keys: number; bytes: number }, readMark: MarkReader): Promise<{ state: "ok" | "shrunk" | "unverified" | "none"; base: BackupBase | null }> {
+  const fresh = { keys: copied.keys, bytes: copied.bytes };
+  let replies: unknown;
+  try {
+    replies = await readMark();
+  } catch {
+    return { state: "unverified", base: null };
+  }
+  if (!Array.isArray(replies) || replies.length !== 1 || (replies[0] !== null && typeof replies[0] !== "string")) return { state: "unverified", base: null };
+  if (replies[0] === null) return { state: "none", base: fresh };
+  const was = readLastOk(replies[0])?.base;
+  if (!was) return { state: "unverified", base: null };
+  return shrank(fresh.keys, was.keys) || shrank(fresh.bytes, was.bytes) ? { state: "shrunk", base: was } : { state: "ok", base: fresh };
+}
+
 /**
  * After the write (step 2), as best it can: deletes every object of the backup's own written more than retentionDays
- * days before `now`. Deletes are one by one (DeleteObject, free on R2).
+ * days before `now`, never one inside the bucket lock, and nothing when the new copy shrank or the last good set
+ * cannot be known (shrinkCheck). Deletes are one by one (DeleteObject, free on R2). Also gives the base the outcome
+ * keeps.
  */
-async function prune(review: BackupCostReview, store: BackupBucket, now: number): Promise<{ deleted: number; state: "done" | "prune_error" | "prune_pages" | "prune_cutoff" }> {
+async function prune(
+  review: BackupCostReview,
+  store: BackupBucket,
+  now: number,
+  copied: { keys: number; bytes: number; parts: number },
+  readMark: MarkReader,
+): Promise<{ deleted: number; state: BackupPruneState; base: BackupBase | null }> {
   const line = now - review.retentionDays * DAY_MS;
+  const locked = lockLine(now);
+  const check = await shrinkCheck(copied, readMark);
+  // A listing that fails leaves "none" unknown: no base is written, so the next run holds its prune too.
+  let base = check.state === "none" ? null : check.base;
+  if (check.state === "shrunk") return { deleted: 0, state: "prune_shrunk", base };
+  if (check.state === "unverified") return { deleted: 0, state: "prune_unverified", base };
   let deleted = 0;
   try {
     const listed = await listAll(review, store);
-    for (const object of listed ?? []) {
-      if (object.writtenAt >= line) continue;
-      if (timeLeft() <= 0) return { deleted, state: "prune_cutoff" };
-      await store.delete(object.id);
+    if (!listed) return { deleted, state: "prune_pages", base };
+    if (check.state === "none") {
+      // No mark, and copies other than this run's parts and manifest: the marks went with the database.
+      if (listed.length > copied.parts + 1) return { deleted, state: "prune_unverified", base: null };
+      base = check.base;
+    }
+    for (const object of listed) {
+      if (object.writtenAt >= line || object.writtenAt > locked) continue;
+      if (timeLeft() <= 0) return { deleted, state: "prune_cutoff", base };
+      try {
+        await store.delete(object.id);
+      } catch (error) {
+        if (error instanceof BackupObjectLockedError) return { deleted, state: "prune_locked", base };
+        throw error;
+      }
       deleted += 1;
     }
-    return { deleted, state: listed ? "done" : "prune_pages" };
+    return { deleted, state: "done", base };
   } catch {
-    return { deleted, state: timeLeft() <= 0 ? "prune_cutoff" : "prune_error" };
+    return { deleted, state: timeLeft() <= 0 ? "prune_cutoff" : "prune_error", base };
   }
 }
 

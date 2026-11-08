@@ -16,9 +16,17 @@ export type BackupListPage = { objects:BackupListedObject[]; next:string|null };
  * which only the run's retention calls (inbox C4-49), for copies past the review's retention. Every failure throws.
  */
 export type BackupBucket = BackupObjectStore & {
+ /** Throws BackupObjectLockedError when the bucket's lock refuses it, any other error on every other failure. */
  list: (next:string|null)=>Promise<BackupListPage>;
  delete: (id:string)=>Promise<void>;
 };
+/**
+ * A delete the bucket refused because the object is still under its bucket lock (inbox C4-35, C4-36 item 5: R2 answers
+ * 409). Never taken as done: the run reports room_locked or prune_locked.
+ */
+export class BackupObjectLockedError extends Error {
+ constructor(){ super("Backup object is under the bucket lock"); this.name="BackupObjectLockedError"; }
+}
 export type VerifiedBackup = { id:string; keys:number; bytes:number };
 export async function verifyBackupRoundtrip(snapshot:BackupSnapshot,key:Uint8Array,store:BackupObjectStore,maxBytes:number):Promise<VerifiedBackup>{
  if(!Number.isSafeInteger(maxBytes)||maxBytes<34||maxBytes>4*1024*1024+65536)throw new Error("Invalid backup bound");

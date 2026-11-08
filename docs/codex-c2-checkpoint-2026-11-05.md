@@ -1,3 +1,11 @@
+# C2 focal3009 FORMAL RETURN — 2026-11-07 21:01 Fortaleza
+
+**5815660392 COMMENT/FULL readback EXACT18228chars** on **9b1b9dfd7ff8ee268e7a0d1acea0f09fffb7617a**: originalMED5814485484 CLOSED; no newHIGH/MED demonstrated in wholecorrective2paths, not thirdglobalfinancial/CI/queuecert. Durable FULL evidence was published BEFOREformal at293e257f23042aef08dc0fa964ed5ee6e51bb6e9/blobf0afcbcbd95d9f8939966695f533035b6e9505a0/readbackEXACT382244chars; complete prior267054-char suffix intact. Localproof6573f7d21/tree735923 notremote-ref-fetchable. SAME33old3FAIL->33PASS; permanent15old6FAIL->15PASS; separatecleanup15PASS+254linked=317currentPASS/overlap. Broaderstore-closing-fair INCONCLUSIVE100mockguard/NOTproductRED/NOT103PASS, person-copy-keptNOTdispatched;2890run inclnestedsetup,0realprovider/TSstrict4roots0/lint5/diffsyntax0/scanner4261/0 beforeownreport. Fullsources/launcher/ALLlogs below; no replayforgreen/capraise.
+
+C1-2014pauseSUSPENDED;C1-2027/2030FULLlidas/C4-2051ativo/C3-2057devolveownership acknowledged, don'tduplicate. FULLchannelthroughG2100/4688613chars prefixexact; no new own2692/2695scope/composition/WG16lease/R2 disposition. Own2692official461706 (notold35e6),2695dc,2846official3d OPEN/unmerged attargetedGET2052;3007same42b3awaitR2/C1, proofsnotreplayed. Singlecontinuityenabled/sameschedule, serial0agents/noCIquery/pushproduto/mainintegration/queue/merge/paidIO. NextcausalownC1composition/scope/nominalreturn/R2; transientwaitnotcompletion, no backgroundwatcher.
+
+---
+
 # C2 nominal focal #3009 — 2026-11-07 21:00 Fortaleza
 
 C1 coordinates; C4 executor/ownership intact. This NEW causal focal supersedes pending3009 in the COMPLETE prior267054-char suffix, retained EXACTLY. C1-2014TODOS16 lifts pause1746; no longer treat it as active. C1-2027/2030 assignments respected. Own2692/2695 priority1633 remains; same461706/dc and no new scope/display/WG16/R2 disposition. No inferred shared-client lease.

@@ -206,19 +206,23 @@ export async function send(
   // ZCARD a whole count. A hole, null, text or a short pipeline is not "not
   // declined", "under the cap" or "already talking": nothing is written and
   // the route answers 503.
+  // The pair's place in the recipient's request list too: a score in text or
+  // none, exactly.
   const checks = repliesFor(
     await redisPipeline([
       ["SISMEMBER", shutKey(id, to), from],
       ["EXISTS", chatKey(id, pair)],
       ["ZCARD", inboxKey(id, to)],
+      ["ZSCORE", askedKey(id, to), pair],
     ]),
-    3,
+    4,
   );
   const declined = replyCount(checks?.[0]);
   const already = replyCount(checks?.[1]);
   const size = replyCount(checks?.[2]);
-  if (declined === null || declined > 1 || already === null || already > 1 || size === null) {
-    throw new UnknownReplyError("a private message's declined, conversation or count check");
+  const queued = checks?.[3];
+  if (declined === null || declined > 1 || already === null || already > 1 || size === null || !scoreOrNone(queued)) {
+    throw new UnknownReplyError("a private message's declined, conversation, count or request check");
   }
   // Declined once is declined for good, and the sender is told nothing that
   // would let them work out they were declined rather than ignored.
@@ -230,6 +234,11 @@ export async function send(
   // one. The creator writing to a member never is; a member writing to the
   // creator never is either.
   const asking = setting.ask && !already && from !== CREATOR && to !== CREATOR;
+  // A request the recipient has not answered stays one: the conversation it
+  // opened exists, but that is not "already talking". Another message from the
+  // sender joins it where it waits, in its first place in the list, and never
+  // reaches their inbox before they accept.
+  const waiting = Boolean(already) && queued !== null;
 
   // Its room first (DataRoomError when it does not fit). A conversation at
   // MAX_MESSAGES lets its oldest go, and that one's room comes back.
@@ -254,11 +263,16 @@ export async function send(
     ["RPUSH", chatKey(id, pair), JSON.stringify(message)],
     ["LTRIM", chatKey(id, pair), -MAX_MESSAGES, -1],
     ["ZADD", inboxKey(id, from), message.at, pair],
-    ...(asking ? [["ZADD", askedKey(id, to), message.at, pair]] : [["ZADD", inboxKey(id, to), message.at, pair]]),
+    ...(asking ? [["ZADD", askedKey(id, to), message.at, pair]] : waiting ? [] : [["ZADD", inboxKey(id, to), message.at, pair]]),
     // The sender has read what they just wrote.
     ["HSET", readKey(id, pair), from, message.at],
   ]);
-  return { ok: true, asked: asking };
+  return { ok: true, asked: asking || waiting };
+}
+
+/** A sorted-set score as Redis gives it (a number in text), or none (null). */
+function scoreOrNone(reply: unknown): boolean {
+  return reply === null || (typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)));
 }
 
 /**

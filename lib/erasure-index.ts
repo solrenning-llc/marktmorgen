@@ -107,13 +107,16 @@ export async function forgetNoted(statsId: string | null | undefined, email: str
   const notes = notesKey(statsId, email);
   const what = "the deletion of an address's records";
   let deleted = 0;
-  for (let changed = 0, batches = 0; changed < FORGET_TRIES && batches <= FORGET_BATCHES; ) {
+  for (let changed = 0, batches = 0; changed < FORGET_TRIES; ) {
     const replies = repliesFor(await redisPipeline([["SMEMBERS", index], ["ZRANGEBYSCORE", notes, "-inf", "+inf"]]), 2);
     const raw = stringList(replies?.[0]);
     const scored = stringList(replies?.[1]);
     if (!raw || !scored) throw new UnknownReplyError("the notes of an address's records");
     const keys = [...new Set([...raw, ...scored].filter((k) => k.startsWith("nl:")))];
     if (keys.length > FORGET_KEYS) {
+      // The allowance is checked before the batch is sent: at most FORGET_BATCHES, and still more than FORGET_KEYS
+      // records after them means not finished. The final checked step is still allowed after the last batch.
+      if (batches >= FORGET_BATCHES) break;
       batches += 1;
       const part = keys.slice(0, FORGET_KEYS);
       const [reply] = repliesFor(await redisPipeline([["EVAL", FORGET_NOTED_PART, 2 + part.length, index, notes, ...part]]), 1) ?? [];

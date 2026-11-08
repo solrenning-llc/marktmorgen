@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { paymentRequestReply, type RequestAction } from "@/lib/payment-request-reply";
 import { toast } from "@/components/toast";
+import { StudioEmptyState } from "@/components/empty-state";
 import { Icon } from "@/components/icons";
 import { type Currency, fieldPrefix, formatMoney, readMoney } from "@/lib/money";
 import {
@@ -350,7 +351,7 @@ export function PaymentRequestsStudio({
 
       <section aria-labelledby="requests-heading">
         <h2 id="requests-heading" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Requests (${rows.length.toLocaleString("en-US")} of ${limits.kept.toLocaleString("en-US")} kept)`}</h2>
-        {rows.length === 0 ? <p className="mt-3 text-ink-soft">No requests yet.</p> : null}
+        {rows.length === 0 ? <StudioEmptyState title="No payment requests yet" body="A request you send shows here, with whether it was paid." action={canSend && open ? { href: "#pr-email", label: "Write your first payment request" } : undefined} className="mt-3" /> : null}
         {rows.some((r) => !r.refundsChecked) ? (
           // A reload is promised only where reading again may change the answer (lib/payment-requests.ts, refundsRetry).
           rows.some((r) => !r.refundsChecked && r.refundsRetry) ? (

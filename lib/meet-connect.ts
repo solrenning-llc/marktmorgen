@@ -332,8 +332,10 @@ export async function finishConsent(
     return await withLock(refreshLockKey(input.statsId, provider, input.host ?? ""), 20, 9_000, (held) => keepConnection(provider, input, traded, held));
   } catch (error) {
     // Not kept: what Google or Zoom just gave is given back rather than left
-    // granted with nothing here that knows of it.
-    if (error instanceof LockBusyError) {
+    // granted with nothing here that knows of it. An earlier connection that
+    // could not be read (rule 24) stops the write before it, so that grant is
+    // not kept either.
+    if (error instanceof LockBusyError || error instanceof exactReply.UnknownReplyError) {
       await revoke(provider, provider === "zoom" ? traded.tokens.access : traded.tokens.refresh).catch(() => {});
     }
     throw error;
@@ -425,8 +427,12 @@ export async function forgetUser(
   accountId: string,
 ): Promise<{ statsId: string; owner: { email: string; handle: string }; account: string }[]> {
   if (!isRedisConfigured() || !accountId) return [];
-  const [members] = await redisPipeline([["SMEMBERS", userKey(provider, accountId)]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
+  // One list of text for the one command (an empty one for nobody), or
+  // unknown: the notice then fails, so Zoom sends it again, and the list that
+  // finds the stores is not deleted as if nobody were on it (rule 24).
+  const replies = exactReply.repliesFor(await redisPipeline([["SMEMBERS", userKey(provider, accountId)]]), 1);
+  const stores = replies ? exactReply.stringList(replies[0]) : null;
+  if (!stores) throw new exactReply.UnknownReplyError("the stores a Zoom user connected");
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
   for (const statsId of stores.slice(0, 50)) {
     const c = await withLock(refreshLockKey(statsId, provider), 20, 9_000, async () => {

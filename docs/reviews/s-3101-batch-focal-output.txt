@@ -1,0 +1,288 @@
+
+### old
+S_BATCH_BYTES {"products":500,"sessionsPerProduct":50,"roomCharacters":500,"serializedListingBytes":29449,"largestResponseBytes":15127904,"syntheticLimitBytes":10485760,"productReads":1,"failure":"Error: synthetic transport: 15127904 response bytes exceed 10485760"}
+S_VOLUME {"runs":1536,"mocks":6}
+AssertionError [ERR_ASSERTION]: a catalog accepted by productWrites must still export
++ actual - expected
+
++ 'Error: synthetic transport: 15127904 response bytes exceed 10485760'
+- ''
+
+    at main ([stdin]:12296:25) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'Error: synthetic transport: 15127904 response bytes exceed 10485760',
+  expected: '',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+S_STATUS 1 null undefined LOG /tmp/s3101-Vd2zDT
+
+
+### proof-final
+S_BATCH_BYTES {"products":500,"sessionsPerProduct":50,"roomCharacters":500,"serializedListingBytes":29449,"largestResponseBytes":151294,"syntheticLimitBytes":10485760,"productReads":100,"rows":500,"failure":""}
+4 checks, all passing.
+S_VOLUME {"runs":1635,"mocks":6}
+S_STATUS 0 null undefined LOG /tmp/s3101-QUQ6MJ
+
+CHILD_EXIT 0
+
+
+### author-old
+
+The bound holds at the worst, by construction
+  FAIL  an answer budget is named, under the provider's 10 MB
+        expected true
+        got      false
+  FAIL  an MGET's worst answer (every record at its bound, every byte escaped) fits that budget
+        expected true
+        got      false
+  FAIL  and what is in flight at once stays under 64 MB
+        expected true
+        got      false
+
+500 records of about 29 KB each: the file is made, every answer under the provider's ceiling
+  FAIL  the file is made
+        expected "made"
+        got      "failed"
+  FAIL  with every sale a row and each product's own title
+        expected [500,true,false]
+        got      null
+  FAIL  no answer passed the provider's ceiling
+        expected "under"
+        got      "14784393 bytes"
+  FAIL  no more MGETs in flight at once than the bound
+        expected "within"
+        got      "1 at once"
+
+7 checks, 7 failing.
+S_VOLUME {"runs":536,"mocks":6}
+S_STATUS 1 null undefined LOG /tmp/s3101-Ekbf5u
+
+CHILD_EXIT 1
+
+
+### author-final
+
+The bound holds at the worst, by construction
+  ok    an answer budget is named, under the provider's 10 MB
+  ok    an MGET's worst answer (every record at its bound, every byte escaped) fits that budget
+  ok    and what is in flight at once stays under 64 MB
+
+500 records of about 29 KB each: the file is made, every answer under the provider's ceiling
+  ok    the file is made
+  ok    with every sale a row and each product's own title
+  ok    no answer passed the provider's ceiling
+  ok    no more MGETs in flight at once than the bound
+
+7 checks, all passing.
+S_VOLUME {"runs":635,"mocks":6}
+S_STATUS 0 null undefined LOG /tmp/s3101-B1d3P9
+
+CHILD_EXIT 0
+
+
+### cheaper
+
+An ordinary file is byte for byte what it was
+  ok    the same bytes as before
+  ok    every sale a row, none partial
+  ok    a product confirmed gone keeps the title its sale carried
+
+Products are read in batches, not one after another
+  ok    at most ceil(N/LISTING_MGET_KEYS) + 2 = 243 trips for 1203 products
+  ok    and a command for each batch, never one for each product
+  ok    every sale is still a row
+  ok    each product's own title, and its extras' titles
+  ok    byte for byte what it was
+
+Each cell is bounded in the file, a cut marked, no row left out
+  ok    every sale is still a row, every column still there
+  ok    no row is more than 2,435 bytes
+  ok    a long buyer name is cut at 600 bytes, with a visible mark
+  ok    so are an email and an id no real one could be
+  ok    a buyer name of 400 characters in another alphabet is cut too, with the mark
+  ok    a catalog title and option label are never cut
+
+A product record that does not read is said, never a missing product (rule 24)
+  ok    no reply for the read: the file is not made
+  ok    a reply of another type: the file is not made
+  ok    a list cut short: the file is not made
+  ok    a record that is not a listing: the file is not made
+  ok    a healthy read still writes the product's title
+
+19 checks, all passing.
+S_VOLUME {"runs":2728,"mocks":26}
+S_STATUS 0 null undefined LOG /tmp/s3101-blNxUw
+
+CHILD_EXIT 0
+
+
+### catalog
+
+A store with a head
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store without a head
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store inline
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store with no catalog to read from
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+  ok    the head is not read again
+  ok    an inline store reads none
+
+22 checks, all passing.
+S_VOLUME {"runs":23,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3101-6zvR7D
+
+CHILD_EXIT 0
+
+
+### report
+
+What a browser and the host say
+  ok    devices
+  ok    countries
+
+Counted, and read back
+  ok    countries
+  ok    devices
+  ok    checkouts by channel, untagged as direct
+  ok    free addresses by channel
+  ok    the all-time record keeps no countries
+
+A channel from visit to sale
+  ok    one row a channel, money first
+
+The API's summary
+  ok    visits are there, money is null without Stripe
+  ok    its channels
+  ok    its countries and devices
+
+The weekly email
+  ok    it says the week
+  ok    with where it came from and how to stop it
+  ok    a week with nobody is not written about
+  ok    a week starts on its Monday
+  ok    claimed once a week
+  ok    the stop link is the store's own
+  ok    stopped, and started again
+
+18 checks, all passing.
+S_VOLUME {"runs":319,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3101-Intv8h
+
+CHILD_EXIT 0
+
+
+### export
+✔ an unreadable data-room size refuses the export shape before any later read (4.485111ms)
+✔ an unknown data-room reply (boolean counts) refuses the export shape before later reads (0.480593ms)
+✔ an unknown data-room reply (blank counts) refuses the export shape before later reads (0.230829ms)
+✔ an unknown data-room reply (negative bytes) refuses the export shape before later reads (0.354462ms)
+✔ an unknown data-room reply (fractional bytes) refuses the export shape before later reads (0.380551ms)
+✔ an unknown data-room reply (an extra HMGET field) refuses the export shape before later reads (0.223883ms)
+✔ an unknown data-room reply (an extra pipeline result) refuses the export shape before later reads (0.225386ms)
+✔ a confirmed empty data room remains an exact zero-sized shape (13.488391ms)
+✔ the route answers unavailable before allowance or export work when the shape cannot be measured (0.819863ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.48267
+S_VOLUME {"runs":3,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3101-wBdkjD
+
+CHILD_EXIT 0
+
+
+### cost
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (150.797588ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (175.527432ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (66.260472ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (4.687429ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.373026ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.217923ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.899937ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (125.808607ms)
+✔ every store figure taken in the code is a kind a line prices (104.802861ms)
+✔ every email sent names a meter, and each file only the meters it may use (161.219706ms)
+✔ the units a figure is taken in cost at least what they stand for (20.560104ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (3.425287ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.304745ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.513586ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.257723ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.367537ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.847042ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.490844ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.144693ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (6.220713ms)
+✔ Path push fits its reserved studio requests (0.196711ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.103499ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.093895ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.135356ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (128.899909ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 990.146232
+S_VOLUME {"runs":0,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3101-XbruXe
+
+CHILD_EXIT 0
+
+
+### types
+
+EXIT 0
+
+
+### lint
+
+EXIT 0
+
+SCANNER
+Public data check: 4310 tracked files; 0 file(s) require correction.
+SCANNER_EXIT0
+DIFFCHECK0

@@ -41,6 +41,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [] });
   if (path === "/subscriptions") return answer({ object: "list", data: url.searchParams.get("customer") === "cus_member0001" ? subs : [] });
   if (path === "/promotion_codes") return answer({ object: "list", data: codes, has_more: false });
+  const one = codes.find((c) => path === `/promotion_codes/${c.id}`);
+  if (path.startsWith("/promotion_codes/")) return one ? answer(one) : answer({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such promotion code" } }, 404);
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
     posted.push({ path, body: String(init.body), key: headers.get("Idempotency-Key") });

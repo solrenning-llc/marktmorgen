@@ -15,6 +15,7 @@ import {
   bookingsWork, codeMakeWork, codeStopWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+import { MAX_CODES } from "@/lib/discount";
 
 /** What each reading that reads more than a page counts as, from the code that takes it (lib/api-read-rules.ts). */
 const STUDENTS_PAGE_COUNTS = 1 + apiReadUnits(studentsPageWork(API_PAGE, 1));
@@ -559,7 +560,9 @@ export default function DevelopersPage() {
       <LegalSection title="Discount codes">
         <Endpoint path="/api/v1/codes">
           Your discount codes, read from your own Stripe account as your studio lists them: what each takes off, how many
-          times it was used, its limit, its smallest order and whether it is live.
+          times it was used, its limit, its smallest order and whether it is live. One answer holds your{" "}
+          {MAX_CODES} newest codes; <code className="font-mono">has_more</code> is true when you have older ones too,
+          which you can see in your Stripe dashboard.
         </Endpoint>
         <p>{`Reading them asks your Stripe account, so it counts as ${n(CODES_COUNT)} of your API requests; making a code counts as ${n(CODE_MAKE_COUNT)} and switching one off as ${n(CODE_STOP_COUNT)}, taken before Stripe is asked.`}</p>
         <Endpoint method="POST" path="/api/v1/codes">
@@ -572,7 +575,10 @@ export default function DevelopersPage() {
         </Endpoint>
         <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
           Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
-          the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}
+          the list, switched off. If it was switched off but your codes could not be read back from Stripe, the answer
+          has <code className="font-mono">stopped</code> with its id, <code className="font-mono">listed: false</code> and{" "}
+          <code className="font-mono">data: null</code>: read them again with GET. Making and switching off need a key
+          that writes; all three answer 409{" "}
           <code className="font-mono">not_selling</code> while your store is not taking payments.
         </Endpoint>
       </LegalSection>

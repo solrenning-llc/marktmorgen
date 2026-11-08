@@ -3,6 +3,7 @@
 import { useState, useSyncExternalStore } from "react";
 import {
   CODE_PROBLEMS,
+  MAX_CODES,
   type CodeProblem,
   type DiscountCode,
   amountProblem,
@@ -13,7 +14,7 @@ import {
 import { type Currency, fieldPrefix } from "@/lib/money";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { readDiscountConfirmation } from "@/lib/discount-confirmation";
+import { discountListComplete, readDiscountConfirmation } from "@/lib/discount-confirmation";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -27,7 +28,7 @@ const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
-type Answer = { codes?: DiscountCode[]; problem?: string };
+type Answer = { codes?: DiscountCode[]; complete?: boolean; problem?: string };
 
 async function send(payload: Record<string, unknown>, currency: Currency): Promise<Answer> {
   try {
@@ -38,7 +39,7 @@ async function send(payload: Record<string, unknown>, currency: Currency): Promi
     });
     const data: unknown = await response.json().catch(() => null);
     const codes = readDiscountConfirmation(data, response.ok);
-    if (codes !== null) return { codes };
+    if (codes !== null) return { codes, complete: discountListComplete(data) };
     if (data && typeof data === "object" && Object.hasOwn(data,"ok") && (data as {ok?: unknown}).ok === false && Object.hasOwn(data,"error")) {
       const refusal = data as {error?: unknown;reason?: unknown};
       if (refusal.error === "code" && Object.hasOwn(data,"reason")) {
@@ -75,6 +76,8 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
   const ready = useSyncExternalStore(subscribeReady, clientReady, serverReady);
 
   const [codes, setCodes] = useState<DiscountCode[] | null>(null);
+  // False when Stripe has older codes behind the newest page shown here.
+  const [complete, setComplete] = useState(true);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,8 +98,10 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
     setError(null);
     const answer = await send({ action: "list" }, currency);
     setBusy(false);
-    if (answer.codes) setCodes(answer.codes);
-    else setError(answer.problem ?? MESSAGES.server_error);
+    if (answer.codes) {
+      setCodes(answer.codes);
+      setComplete(answer.complete === true);
+    } else setError(answer.problem ?? MESSAGES.server_error);
   }
 
   async function run(payload: Record<string, unknown>, done: () => void, confirmation: string) {
@@ -109,6 +114,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
       return;
     }
     setCodes(answer.codes);
+    setComplete(answer.complete === true);
     done();
     toast(confirmation);
   }
@@ -209,7 +215,13 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
             </ul>
           ) : null}
 
-          {codes !== null && live.length === 0 && !adding ? (
+          {codes !== null && !complete ? (
+            <p className="mt-5 text-sm text-ink-soft">
+              {`These are your ${MAX_CODES} newest codes. You have older ones too; see them in your Stripe dashboard.${live.length === 0 ? " None of these newest codes is live." : ""}`}
+            </p>
+          ) : null}
+
+          {codes !== null && complete && live.length === 0 && !adding ? (
             <p className="mt-5 text-sm text-ink-soft">
               No live code right now. A buyer sees no box to type one into,
               which is how it should be until there is something to type.

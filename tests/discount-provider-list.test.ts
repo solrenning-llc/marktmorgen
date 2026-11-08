@@ -23,11 +23,11 @@ try{
  body={data:[]};
  is("a page that does not say it is the last one is refused, not an empty list",await listCodes("acct_synthetic_discount"),{state:"error"});
  body={data:[],has_more:false};
- is("explicit empty provider list, confirmed the last page, remains valid",await listCodes("acct_synthetic_discount"),{state:"ok",codes:[]});
+ is("explicit empty provider list, confirmed the last page, remains valid",await listCodes("acct_synthetic_discount"),{state:"ok",codes:[],complete:true});
  const row={id:"promo_preserved",code:"Creator-Édition",active:true,times_redeemed:3,max_redemptions:null,expires_at:null,promotion:{coupon:{percent_off:12.5}}};
  body={data:[row],has_more:false};
  const expected={id:row.id,code:row.code,active:true,timesRedeemed:3,maxRedemptions:null,expiresAt:null,off:{kind:"percent",percent:12.5},minimum:null,firstOrder:false,duration:null,otherRules:false};
- is("valid creator spelling and IDs remain unchanged",isDeepStrictEqual(await listCodes("acct_synthetic_discount"),{state:"ok",codes:[expected]}),true);
+ is("valid creator spelling and IDs remain unchanged",isDeepStrictEqual(await listCodes("acct_synthetic_discount"),{state:"ok",codes:[expected],complete:true}),true);
  body={data:[row,{...row,id:""}],has_more:false};
  is("one unreadable row refuses whole reconciliation",await listCodes("acct_synthetic_discount"),{state:"error"});
  body={data:[row,row],has_more:false};

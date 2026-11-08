@@ -76,12 +76,13 @@ export async function POST(request: NextRequest) {
       if (action !== "list") return Response.json({ ok: true, done: action, listed: false });
       return Response.json({ ok: false, error: "stripe" }, { status: 502 });
     }
-    await setHasDiscounts(
-      ref,
-      list.codes.some((entry) => entry.active),
-    );
+    // A live code on the page is enough for the box; "no live code" only
+    // from a list read to its end. A page with more behind it leaves the bit
+    // as it was (rule 24), and the studio says it shows the newest codes.
+    const live = list.codes.some((entry) => entry.active);
+    if (live || list.complete) await setHasDiscounts(ref, live);
 
-    return Response.json({ ok: true, codes: list.codes });
+    return Response.json({ ok: true, codes: list.codes, complete: list.complete });
   } catch (error) {
     console.error("changing a discount code failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

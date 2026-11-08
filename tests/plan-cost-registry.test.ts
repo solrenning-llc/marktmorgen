@@ -637,7 +637,7 @@ test("an API reading that reads more than a page takes further requests that cov
   assert.ok(apiReadUnits(eventsWork()) >= apiReadUnits(EVENTS_PROBE_MOST), "the most a reading of events takes holds its measuring");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codesWork()));", "listCodes(");
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeMakeWork()));", "createCode(");
-  before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));", "const before = await listCodes(account);");
+  before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));", "const before = await findCode(account, id);");
   before("app/api/mcp/route.ts", "const read = await apiNumbers(store,", "await tool(read.data)");
   before("app/api/mcp/route.ts", "const refused = await read.settle(", "result(id, answer)");
   // Every GET of the API and every MCP tool past the door takes what it reads; only the store's own record fits in its request.

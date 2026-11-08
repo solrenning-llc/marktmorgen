@@ -50,7 +50,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
     // The creator's own codes, so one of them can be given to an affiliate
     // (lib/affiliate-codes.ts). Only worth asking Stripe when they have made any.
     store.hasDiscounts && store.stripeAccountId
-      ? listCodes(store.stripeAccountId).catch(() => ({ state: "error" as const }))
+      ? listCodes(store.stripeAccountId, { active: true }).catch(() => ({ state: "error" as const }))
       : Promise.resolve({ state: "unavailable" as const }),
     // Payments whose answer from PayPal is not known (lib/paypal-payouts.ts): counted, never guessed.
     paypalChecks(store).catch(() => null),

@@ -31,6 +31,7 @@
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Currency, formatMoney, rangeWords } from "@/lib/money";
 import type { MayComeOff } from "@/lib/platform-share";
+import { hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 /** Pinned, so the shape we send is the shape this version expects. */
 const API_VERSION = "2025-09-30.clover";
@@ -163,8 +164,20 @@ export function codeRules(entry: Pick<DiscountCode, "minimum" | "firstOrder" | "
 }
 
 export type CodeList =
-  | { state: "ok"; codes: DiscountCode[] }
+  /**
+   * `complete` is true only when Stripe said the page is the last one
+   * (has_more false). A page with more behind it is the newest MAX_CODES
+   * codes: what is on it is found, but no code on it is not "no code"
+   * (lib/stripe-list.ts), so nothing "none" is concluded or written from it.
+   */
+  | { state: "ok"; codes: DiscountCode[]; complete: boolean }
   | { state: "unavailable" }
+  | { state: "error" };
+
+/** One code looked up by its id: found (live or not), confirmed absent by Stripe, or not known. */
+export type FoundCode =
+  | { state: "found"; active: boolean }
+  | { state: "none" }
   | { state: "error" };
 
 /**
@@ -241,44 +254,68 @@ function readRow(row: Record<string, unknown>): DiscountCode | null {
 }
 
 /**
- * The codes on this creator's account.
+ * The codes on this creator's account: the newest page of them.
  *
  * Read from Stripe on every look rather than copied into our own record, for
  * the same reason the sales list is: there is then no second copy to drift
  * from the real one, and the redemption counts are the ones that actually
  * decide whether a code still works.
+ *
+ * One page, MAX_CODES codes, newest first, which is all one API read is
+ * counted for (lib/api-read-rules.ts, codesWork). Stripe never deletes a
+ * code, so a store past MAX_CODES always has a page behind this one: that
+ * page is still read and answered, with `complete` false, never refused
+ * whole and never taken for the whole list. `active` asks Stripe for the
+ * live codes alone, for a reader that only offers live ones.
  */
-export async function listCodes(account: string): Promise<CodeList> {
+export async function listCodes(account: string, only: { active?: true } = {}): Promise<CodeList> {
   try {
-    const page = await onAccount(
+    const raw = await onAccount(
       "GET",
       account,
       // Expanded, so what each code takes off comes from the coupon itself
       // rather than from anything we wrote down beside it.
-      `/promotion_codes?limit=${MAX_CODES}&expand[]=data.promotion.coupon`,
+      `/promotion_codes?limit=${MAX_CODES}${only.active ? "&active=true" : ""}&expand[]=data.promotion.coupon`,
       undefined,
       API_VERSION,
     );
-    // An absent/unreadable provider list is not evidence that no live code
-    // exists. The route reconciles hasDiscounts only after a confirmed list.
-    if (!Object.hasOwn(page,"data") || !Array.isArray(page.data)) return { state:"error" };
-    // One page is the whole list only when Stripe says it is the last one.
-    // Newest first with stopped codes included, a page with more behind it
-    // can hide an older live code, and a page that does not say is no proof
-    // either: refused, so the route writes nothing from it (rule 24).
-    if (!Object.hasOwn(page,"has_more") || page.has_more !== false) return { state:"error" };
+    // Read in its exact shape (lib/stripe-list.ts): no own `data` list or no
+    // `has_more` true/false is not a page at all, and throws.
+    const page = readStripePage(raw, (row) => hasOwnField(row, "code") && readRow(row) !== null);
+    // One unreadable row refuses the page: the studio and the API show the
+    // codes as a list, and a list with a hole in it is not Stripe's list.
+    if (page.unreadable > 0) return { state: "error" };
     const codes: DiscountCode[] = [];
     const ids = new Set<string>();
-    for (const raw of page.data) {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw) || !Object.hasOwn(raw,"id") || !Object.hasOwn(raw,"code")) return { state:"error" };
-      const entry = readRow(raw as Record<string,unknown>);
-      if (!entry || ids.has(entry.id)) return { state:"error" };
+    for (const row of page.rows) {
+      const entry = readRow(row);
+      if (!entry || ids.has(entry.id)) return { state: "error" };
       ids.add(entry.id);
       codes.push(entry);
     }
-    return { state: "ok", codes };
+    return { state: "ok", codes, complete: !page.hasMore };
   } catch (error) {
     console.error("listing discount codes failed", error);
+    return { state: "error" };
+  }
+}
+
+/**
+ * One code on this creator's account, asked for by its id, on whatever page
+ * of the list it would be (GET /promotion_codes/:id, one request, the slot
+ * the list read used to take). Only Stripe's own "no such object"
+ * (404 resource_missing) is "none"; any other failure, or an answer that is
+ * not that code with a true/false `active`, is not known.
+ */
+export async function findCode(account: string, id: string): Promise<FoundCode> {
+  try {
+    const row = await onAccount("GET", account, `/promotion_codes/${encodeURIComponent(id)}`, undefined, API_VERSION);
+    if (!plainObject(row) || hasOwnField(row, "error") || ownField(row, "id") !== id) return { state: "error" };
+    const active = ownField(row, "active");
+    return typeof active === "boolean" ? { state: "found", active } : { state: "error" };
+  } catch (error) {
+    if (error instanceof StripeError && error.status === 404 && error.code === "resource_missing") return { state: "none" };
+    console.error("looking up a discount code failed", error);
     return { state: "error" };
   }
 }

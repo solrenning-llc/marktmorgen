@@ -9,10 +9,13 @@
  * hasDiscounts from the list (any active code), and that bit decides whether
  * every checkout offers the code box (allow_promotion_codes) and whether the
  * affiliate pages stay open. A page Stripe says is not the last one (twenty
- * newer stopped codes, an older live one behind them), or a page that does
- * not say, is not proof that no live code exists: listCodes refuses it, the
- * route answers 502 and writes nothing. Exactly one page is still asked, so
- * the read's cost (lib/api-read-rules.ts, stripePages 1) is unchanged.
+ * newer stopped codes, an older live one behind them) is not proof that no
+ * live code exists: listCodes answers it with `complete` false, the route
+ * shows it as the newest page and writes nothing false from it. A page that
+ * does not say whether it is the last is not a page: refused, 502, nothing
+ * written. Exactly one page is still asked, so the read's cost
+ * (lib/api-read-rules.ts, stripePages 1) is unchanged. A store past one page
+ * keeps every way of using its codes: tests/discount-list-pages.test.ts.
  *
  * A make or a stop that Stripe already did is never answered as a failure
  * because only the list after it could not be confirmed: a creator told
@@ -35,6 +38,8 @@ let page: unknown = null;
 const pages: unknown[] = [];
 const asked: string[] = [];
 const writes: string[] = [];
+/** What a lookup of one code by its id answers (GET /promotion_codes/:id). */
+let found: Record<string, unknown> | "fail" = "fail";
 const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json" } });
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -54,6 +59,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ ...row(90, true), id: "promo_ListMade000001", code: form.get("code") });
   }
   const stop = url.pathname.match(/\/promotion_codes\/(promo_\w+)$/);
+  if (method === "GET" && stop) {
+    asked.push(url.pathname);
+    return found === "fail" ? new Response(JSON.stringify({ error: { message: "Synthetic lookup failure" } }), { status: 500 }) : json({ ...found, id: stop[1] });
+  }
   if (method === "POST" && stop && form.get("active") === "false") {
     writes.push(`stop ${stop[1]}`);
     return json({ ...row(1, false), id: stop[1] });
@@ -100,10 +109,12 @@ async function main(): Promise<void> {
   await setHasDiscounts(OWNER, true);
   page = { object: "list", data: stopped, has_more: true, url: "/v1/promotion_codes" };
   asked.length = 0;
-  is("twenty newer stopped codes, an older one on the next page: refused, not 'ok'", await listCodes(ACCOUNT), { state: "error" });
+  const firstPage = await listCodes(ACCOUNT);
+  is("twenty newer stopped codes, an older one on the next page: the newest page, said not complete", firstPage.state === "ok" ? [firstPage.codes.length, firstPage.codes.some((c) => c.active), firstPage.complete] : firstPage, [MAX_CODES, false, false]);
   is("one page asked, at the same limit, no second page (cost unchanged)", [asked.length, asked[0]?.includes(`limit=${MAX_CODES}`), asked.some((a) => a.includes("starting_after"))], [1, true, false]);
   const partial = await listRoute();
-  is("the route answers that Stripe could not be read", [partial.status, await partial.json()], [502, { ok: false, error: "stripe" }]);
+  const partialBody = (await partial.json()) as { codes?: unknown[]; complete?: unknown };
+  is("the route answers the newest page, said not complete", [partial.status, partialBody.codes?.length, partialBody.complete], [200, MAX_CODES, false]);
   is("and hasDiscounts is not written false while a live code may exist", await flag(), true);
 
   part("A page that does not say whether it is the last is not the whole list");
@@ -124,7 +135,7 @@ async function main(): Promise<void> {
   part("Controls: a page Stripe says is the last one is read as before");
   await setHasDiscounts(OWNER, true);
   page = { object: "list", data: [], has_more: false, url: "/v1/promotion_codes" };
-  is("a confirmed empty list is still an empty list", await listCodes(ACCOUNT), { state: "ok", codes: [] });
+  is("a confirmed empty list is still an empty list", await listCodes(ACCOUNT), { state: "ok", codes: [], complete: true });
   const empty = await listRoute();
   is("the route answers it", [empty.status, ((await empty.json()) as { codes?: unknown }).codes], [200, []]);
   is("and with no code at all, hasDiscounts is written false", await flag(), false);
@@ -140,7 +151,7 @@ async function main(): Promise<void> {
 
   part("A code made on Stripe, the codes then not confirmed: the make is said as done, never as a failure");
   await setHasDiscounts(OWNER, false);
-  page = { object: "list", data: stopped, has_more: true, url: "/v1/promotion_codes" };
+  page = { object: "list", data: stopped };
   writes.length = 0;
   const made = await studio({ action: "add", code: "LISTDONE", kind: "percent", percent: "15" });
   const madeBody = (await made.json()) as Record<string, unknown>;
@@ -151,7 +162,7 @@ async function main(): Promise<void> {
 
   part("A code switched off on Stripe, the codes then not confirmed: the stop is said as done");
   await setHasDiscounts(OWNER, true);
-  page = { object: "list", data: [], has_more: true, url: "/v1/promotion_codes" };
+  page = { object: "list", data: [] };
   writes.length = 0;
   const off = await studio({ action: "stop", id: "promo_List000001" });
   const offBody = (await off.json()) as Record<string, unknown>;
@@ -177,18 +188,17 @@ async function main(): Promise<void> {
     return { status: r.status, body: (await r.json()) as Record<string, unknown> };
   };
   pages.length = 0;
-  pages.push({ object: "list", data: [row(1, true)], has_more: false, url: "/v1/promotion_codes" });
-  page = { object: "list", data: [], has_more: true, url: "/v1/promotion_codes" };
+  found = { ...row(1, true) };
+  page = { object: "list", data: [] };
   writes.length = 0;
   const apiOff = await apiDelete("promo_List000001");
   is("Stripe switched the one code off", writes, ["stop promo_List000001"]);
-  is("the API answers 200 with the code switched off and the codes not confirmed", [apiOff.status, apiOff.body.stopped, apiOff.body.listed, typeof apiOff.body.message], [200, "promo_List000001", false, "string"]);
+  is("the API answers 200 with the code switched off and the codes not confirmed (data null, never [])", [apiOff.status, apiOff.body.stopped, apiOff.body.listed, apiOff.body.data, typeof apiOff.body.message], [200, "promo_List000001", false, null, "string"]);
   is("and hasDiscounts is not written false from the unconfirmed list", (await storeForEmail(API_OWNER))?.hasDiscounts, true);
-  pages.length = 0;
-  page = { object: "list", data: [row(1, true)], has_more: true, url: "/v1/promotion_codes" };
+  found = "fail";
   writes.length = 0;
   const notFound = await apiDelete("promo_List000001");
-  is("the code to stop is looked for only in a confirmed list: refused, nothing sent", [notFound.status, writes], [502, []]);
+  is("a lookup of the code Stripe cannot answer: refused, nothing sent", [notFound.status, writes], [502, []]);
 
   done();
 }

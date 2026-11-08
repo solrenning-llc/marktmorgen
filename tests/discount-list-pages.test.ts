@@ -144,7 +144,7 @@ async function main(): Promise<void> {
     const r = await (method === "GET" ? apiList(request) : apiStop(request));
     return { status: r.status, body: (await r.json()) as Record<string, unknown> };
   };
-  const ids = (list: unknown) => (Array.isArray(list) ? list.map((c) => (c as { id: string }).id) : list);
+  const ids = (list: unknown): string[] | null => (Array.isArray(list) ? list.map((c) => (c as { id: string }).id) : null);
   const reset = (next: Row[]) => {
     codes = next;
     lookup = "real";
@@ -181,7 +181,7 @@ async function main(): Promise<void> {
   const page = await studio({ action: "list" });
   is("the studio lists the newest page, all switched off, and says there are more", [page.status, ids(page.body.codes)?.length, page.body.complete], [200, MAX_CODES, false]);
   is("hasDiscounts is not written false from it", await flag(), true);
-  const live = await listCodes(ACCOUNT, { active: true } as never);
+  const live = await listCodes(ACCOUNT, { active: true });
   is("the live codes alone are one page, read to its end", live.state === "ok" ? [ids(live.codes), (live as { complete?: unknown }).complete] : live, [[older], true]);
   const found = await member({ action: "find", email: "member@example.com" });
   is("the member discount offers the older live code", [found.status, found.body.codes], [200, [{ id: older, code: "PAGE1" }]]);

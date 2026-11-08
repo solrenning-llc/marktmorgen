@@ -14,7 +14,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { saleHandles, type Store } from "@/lib/store";
-import { listCodes } from "@/lib/discount";
+import { findCode } from "@/lib/discount";
 
 /** The Stripe version lib/discount.ts reads codes with, so `discounts[0][promotion_code]` means the same here. */
 const API_VERSION = "2025-09-30.clover";
@@ -107,9 +107,11 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
   const sub = subs.find((s) => s.id === subscription);
   if (!sub) return { ok: false, reason: "not_member" };
   if (sub.discounted) return { ok: false, reason: "discounted" };
-  const codes = await listCodes(account);
-  if (codes.state !== "ok") return { ok: false, reason: "stripe" };
-  if (!codes.codes.some((c) => c.id === promotion && c.active)) return { ok: false, reason: "code" };
+  // That one code, asked for by its id, so it is found on any page of the
+  // list; only Stripe's "no such code" or a code switched off is "code".
+  const code = await findCode(account, promotion);
+  if (code.state === "error") return { ok: false, reason: "stripe" };
+  if (code.state === "none" || !code.active) return { ok: false, reason: "code" };
   try {
     await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
     return { ok: true };

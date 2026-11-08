@@ -2,14 +2,14 @@ import { apiAdder, apiError, apiOk, apiStore, apiWriter, takeMoreApi } from "@/l
 import { apiOkFields, badFields } from "@/lib/api-fields";
 import { apiReadUnits, codeMakeWork, codeStopWork, codesWork } from "@/lib/api-read-rules";
 import { CODE_FIELDS, codeOut, refusalWords } from "@/lib/api-codes";
-import { createCode, listCodes, stopCode } from "@/lib/discount";
+import { createCode, findCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
 import { setHasDiscounts, storeRef, type Store } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
 
 /**
  * Discount codes on the creator's own Stripe account (lib/api-codes.ts):
- *   GET    /api/v1/codes            every code, as the studio lists them
+ *   GET    /api/v1/codes            the newest page of codes, as the studio lists them, and has_more
  *   POST   /api/v1/codes            { code, percent } or { code, kind: "amount", amount }, with uses and minimum optional
  *   DELETE /api/v1/codes?id=promo_… switches one of this store's codes off
  * Writing needs a key that writes. While the store is not taking payments,
@@ -31,7 +31,8 @@ export async function GET(request: Request) {
   if (refused) return refused;
   try {
     const list = await listCodes(store.stripeAccountId as string);
-    return list.state === "ok" ? apiOkFields(request, { data: list.codes.map(codeOut) }) : unreadable();
+    // has_more: the newest page of codes, with older ones on Stripe behind it (lib/discount.ts, listCodes).
+    return list.state === "ok" ? apiOkFields(request, { data: list.codes.map(codeOut), has_more: !list.complete }) : unreadable();
   } catch (error) {
     console.error("api: codes failed", error);
     return unreadable();
@@ -77,17 +78,22 @@ export async function DELETE(request: Request) {
   if (refused) return refused;
   try {
     const account = store.stripeAccountId as string;
-    // Only a code the store's own list shows, never any id on the account.
-    const before = await listCodes(account);
-    if (before.state !== "ok") return unreadable();
-    if (!before.codes.some((c) => c.id === id)) return apiError(404, "not_found", "No discount code of this store has that id.");
+    // Asked for by its id on the store's own Stripe account, the account the
+    // list reads, so a code on any page of it is found; only Stripe's "no
+    // such code" is a 404, and a lookup it cannot answer switches nothing off.
+    const before = await findCode(account, id);
+    if (before.state === "error") return unreadable();
+    if (before.state === "none") return apiError(404, "not_found", "No discount code of this store has that id.");
     if (!(await stopCode(account, id))) return apiError(502, "unavailable", "The code could not be switched off on Stripe just now. Try again in a moment.");
     // Listed again, so the answer is what Stripe says now; the checkout's box stays only while a code is live.
     const after = await listCodes(account);
-    // Switched off on Stripe already: said as done, with the codes not read back, and nothing written from them.
-    if (after.state !== "ok") return apiOk({ stopped: id, listed: false, message: "The code was switched off. Your discount codes could not be read back from Stripe just now; read them again with GET /api/v1/codes." });
-    await setHasDiscounts(storeRef(store), after.codes.some((c) => c.active));
-    return apiOk({ data: after.codes.map(codeOut) });
+    // Switched off on Stripe already: said as done, with the codes not read
+    // back as data null (not known, never an empty list), and nothing written from them.
+    if (after.state !== "ok") return apiOk({ stopped: id, listed: false, data: null, message: "The code was switched off. Your discount codes could not be read back from Stripe just now; read them again with GET /api/v1/codes." });
+    // "No live code" only from a list read to its end; a page with more behind it leaves the box as it was.
+    const live = after.codes.some((c) => c.active);
+    if (live || after.complete) await setHasDiscounts(storeRef(store), live);
+    return apiOk({ data: after.codes.map(codeOut), has_more: !after.complete });
   } catch (error) {
     console.error("api: switching a code off failed", error);
     return unreadable();

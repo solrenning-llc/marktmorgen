@@ -17,6 +17,11 @@
  *   - the words of reviews (lib/reviews.ts);
  *   - what was searched for on the store and found nothing (lib/stats.ts).
  *
+ * A list whose read failed is never taken for an empty one (rule 24): it is
+ * named in the summary (unread), the model is told the texts are not
+ * everything customers said, and with too few texts while one is unread
+ * nothing is asked or counted ("unread").
+ *
  * From the last 90 days. The model only sorts: it is handed the texts by
  * number and returns a short name for each theme and the numbers that belong
  * to it. The counts are worked out here from those numbers, and the
@@ -97,6 +102,12 @@ export type VoiceSummary = {
   reviewThemes?: VoiceTheme[];
   /** Texts that fit no theme said by two or more. */
   other: number;
+  /**
+   * The lists that could not be read when it was made, so it is without them
+   * and every screen that shows it says so. Missing on a summary made before
+   * they were named.
+   */
+  unread?: VoiceSource[];
 };
 
 export const DAYS = 90;
@@ -174,27 +185,38 @@ export function cleanVoice(value: string, max = MAX_TEXT): string {
     .slice(0, max);
 }
 
-/** The texts of the last 90 days, newest first in each list, numbered from 1. */
-export async function gatherVoice(store: Store, now = Date.now()): Promise<VoiceItem[]> {
+/**
+ * The texts of the last 90 days, newest first in each list, numbered from 1,
+ * and the lists whose read failed (rule 24): those are named, never taken for
+ * lists with nothing in them. A product's title that cannot be read only
+ * leaves the text without it.
+ */
+export async function gatherVoice(store: Store, now = Date.now()): Promise<{ items: VoiceItem[]; unread: VoiceSource[] }> {
   const since = Math.floor(now / 1000) - DAYS * 86_400;
   const items: Omit<VoiceItem, "id">[] = [];
+  const unread: VoiceSource[] = [];
+  const failed = (source: VoiceSource) => (error: unknown) => {
+    console.error(`reading the ${source} texts for what customers are saying failed`, error);
+    unread.push(source);
+    return null;
+  };
   const titles = await readTitles(store).catch(() => new Map<string, string>());
   const titleOf = (id: string) => (id === STORE_PAGE ? "the store page" : titles.get(id));
 
   if (store.stripeAccountId && sellsMemberships(store)) {
-    const numbers = await membershipNumbers(store).catch(() => null);
+    const numbers = await membershipNumbers(store).catch(failed("cancel"));
     for (const c of numbers?.leaving?.recent ?? []) {
       if (c.at >= since) items.push({ source: "cancel", text: c.text, n: 1 });
     }
   }
-  for (const q of await missedQuestions(store, 50).catch(() => [])) {
+  for (const q of (await missedQuestions(store, 50).catch(failed("question"))) ?? []) {
     if (q.at >= since) items.push({ source: "question", text: q.question, n: 1, product: titleOf(q.productId) });
   }
-  const reviews = await studioReviews(store.statsId, { queue: false, offset: 0, limit: 100 }).catch(() => ({ rows: [] }));
-  for (const r of reviews.rows) {
+  const reviews = await studioReviews(store.statsId, { queue: false, offset: 0, limit: 100 }).catch(failed("review"));
+  for (const r of reviews?.rows ?? []) {
     if (r.createdAt / 1000 >= since && r.text.trim()) items.push({ source: "review", text: r.text, n: 1, product: titleOf(r.productId), stars: r.rating });
   }
-  const stats = await readStats(store, now).catch(() => null);
+  const stats = await readStats(store, now).catch(failed("search"));
   if (stats) {
     for (const row of studioStats(store, stats, null, "none", []).searchMisses?.d90 ?? []) {
       if (row.name.trim()) items.push({ source: "search", text: row.name, n: Math.max(1, row.visits) });
@@ -208,7 +230,30 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<Voice
     out.push({ ...item, text, id: out.length + 1 });
     if (out.length >= MAX_TEXTS) break;
   }
-  return out;
+  return { items: out, unread };
+}
+
+const GIVEN: Record<VoiceSource, string> = {
+  cancel: "words members wrote when canceling",
+  question: "questions a product page could not answer",
+  review: "reviews",
+  search: "words searched for on the store that found nothing",
+};
+
+/** A list of phrases joined in plain English: "a", "a and b", "a, b and c". Pure. */
+const joined = (list: string[]) => (list.length < 2 ? list.join("") : `${list.slice(0, -1).join(", ")} and ${list.at(-1)}`);
+
+/**
+ * What the model is told it was given: only the kinds that were read, and,
+ * when a list could not be read, that the texts are not everything customers
+ * said, so it never sorts them as the whole. Pure.
+ */
+export function voiceGiven(unread: VoiceSource[]): string {
+  const read = VOICE_SOURCES.filter((source) => !unread.includes(source));
+  const given = `You are given numbered texts: ${joined(read.map((source) => GIVEN[source]))}.`;
+  if (!unread.length) return given;
+  const missing = joined(unread.map((source) => GIVEN[source]));
+  return `${given} ${missing[0].toUpperCase()}${missing.slice(1)} could not be read this time, so these texts are not everything customers said: say nothing about what is missing.`;
 }
 
 /** What the model is handed: each text by its number, where it came from, and nothing else. Pure. */
@@ -316,7 +361,7 @@ export async function readVoice(store: Store, now = Date.now()): Promise<VoiceSu
 
 export type VoiceResult =
   | { ok: true; summary: VoiceSummary; fresh: boolean; left: number | null }
-  | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number };
+  | { ok: false; reason: "few" | "unread" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number; unread?: VoiceSource[] };
 
 /**
  * This month's summary: the one already made, or, when there is none and
@@ -334,8 +379,9 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
   });
   if (!held) return { ok: false, reason: "busy" };
   try {
-    const items = await gatherVoice(store, now);
-    if (items.length < MIN_TEXTS) return { ok: false, reason: "few", texts: items.length };
+    const { items, unread } = await gatherVoice(store, now);
+    // Too few while a list is unread is not "few": there may be more, so nothing is asked or counted.
+    if (items.length < MIN_TEXTS) return unread.length ? { ok: false, reason: "unread", unread, texts: items.length } : { ok: false, reason: "few", texts: items.length };
     // Inside the request's cutoff (the route's withCutoff), the model gets the time left less the
     // margin to save the summary; with too little left, nothing is counted (VOICE_MODEL_MIN_MS).
     const room = timeLeft() - VOICE_DEADLINE_MARGIN_MS;
@@ -345,7 +391,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     const done = await counted(store, now, async () => {
       const system = [
         "You sort what an online store's customers wrote into the few themes they repeat.",
-        "You are given numbered texts: words members wrote when canceling, questions a product page could not answer, reviews, and words searched for on the store that found nothing.",
+        voiceGiven(unread),
         `Group texts that say the same thing into at most ${MAX_THEMES} themes. A theme needs at least two texts. Leave out texts that fit no theme. Each text goes in one theme at most.`,
         "Name each theme in plain American English, at most 8 words, saying what customers said or wanted (for example: \"Wants a printable version\", \"Price feels high for what is inside\"). No numbers in a name, no judgment of the customers, nothing that is not in the texts.",
         "Return only a JSON object: {\"themes\": [{\"title\": string, \"ids\": [numbers of its texts]}]}, the most repeated theme first.",
@@ -354,7 +400,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
       const json = reply ? jsonIn(reply) : null;
       if (!json) return null;
       const sorted = themesFrom(json, items);
-      const summary: VoiceSummary = { at: Math.floor(now / 1000), month, read: readBySource(items), themes: sorted.themes, reviewThemes: sorted.reviewThemes, other: sorted.other };
+      const summary: VoiceSummary = { at: Math.floor(now / 1000), month, read: readBySource(items), themes: sorted.themes, reviewThemes: sorted.reviewThemes, other: sorted.other, unread };
       return summary;
     });
     if (!done.ok) return { ok: false, reason: done.reason === "notes" ? "failed" : done.reason };

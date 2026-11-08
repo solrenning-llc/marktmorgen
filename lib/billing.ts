@@ -617,7 +617,7 @@ export function planOf(subscription: Record<string, unknown>): { tier: Tier; cyc
 }
 
 /** An own data property of a plain object, never a getter or an inherited one. */
-function ownField(value: unknown, key: string): unknown {
+function ownDataField(value: unknown, key: string): unknown {
   if (!value || typeof value !== "object") return undefined;
   const field = Object.getOwnPropertyDescriptor(value, key);
   return field && Object.hasOwn(field, "value") ? field.value : undefined;
@@ -633,21 +633,21 @@ const plainRecord = (value: unknown): value is Record<string, unknown> =>
  * about which plan is paid for, never the lowest plan at $0.
  */
 function hasExactPlanLine(subscription: Record<string, unknown>): boolean {
-  const items = ownField(subscription, "items");
+  const items = ownDataField(subscription, "items");
   if (!plainRecord(items)) return false;
-  const data = ownField(items, "data");
+  const data = ownDataField(items, "data");
   if (!Array.isArray(data) || data.length !== 1) return false;
-  const line = ownField(data, "0");
+  const line = ownDataField(data, "0");
   if (!plainRecord(line)) return false;
-  const price = ownField(line, "price");
+  const price = ownDataField(line, "price");
   if (!plainRecord(price)) return false;
-  const amount = ownField(price, "unit_amount");
+  const amount = ownDataField(price, "unit_amount");
   if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) return false;
-  const recurring = ownField(price, "recurring");
+  const recurring = ownDataField(price, "recurring");
   if (!plainRecord(recurring)) return false;
-  const interval = ownField(recurring, "interval");
+  const interval = ownDataField(recurring, "interval");
   if (interval !== "month" && interval !== "year") return false;
-  const named = planFromLookupKey(ownField(price, "lookup_key"));
+  const named = planFromLookupKey(ownDataField(price, "lookup_key"));
   return !named || named.cycle === interval;
 }
 
@@ -660,8 +660,8 @@ export function stateOf(subscription: Record<string, unknown>): SubscriptionStat
   // A subscription in good standing is a plan only as Stripe sends one in full:
   // its one plan line, and whether and when it stops, both explicit. A reply
   // without them is unknown, and every caller keeps what it wrote down.
-  const cancelAtField = ownField(subscription, "cancel_at");
-  const stopsField = ownField(subscription, "cancel_at_period_end");
+  const cancelAtField = ownDataField(subscription, "cancel_at");
+  const stopsField = ownDataField(subscription, "cancel_at_period_end");
   if (!hasExactPlanLine(subscription) || typeof stopsField !== "boolean" ||
       !(cancelAtField === null || (typeof cancelAtField === "number" && Number.isSafeInteger(cancelAtField) && cancelAtField >= 0))) {
     return { state: "unknown" };

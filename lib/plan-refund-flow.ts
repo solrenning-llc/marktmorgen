@@ -51,6 +51,7 @@ import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter } from "@/lib/plan-refund-words";
+import { ownField, plainObject, readStripePage, StripeListUnreadable, type StripePage } from "@/lib/stripe-list";
 import { randomBytes } from "node:crypto";
 
 const AT = "2024-06-20";
@@ -110,6 +111,31 @@ const refundCents = (value: unknown): number | null => (typeof value === "number
 const refundCurrency = (value: unknown): string | null => (typeof value === "string" && /^[a-z]{3}$/.test(value) ? value : null);
 /** Our refund given back or on its way (not failed or canceled): the ones whose amounts say what was given. */
 const counts = (status: unknown): boolean => status === "succeeded" || status === "pending" || status === "requires_action";
+/** Every status Stripe gives a refund (the Refund object in Stripe's API reference; the set lib/refunds.ts reads). */
+const REFUND_STATES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+/**
+ * A refund row that reads (rule 24): its status one Stripe gives, its metadata an object (or null: none). A row that
+ * does not read proves nothing: it may be ours, so a list holding one never says "none" or "partial".
+ */
+const refundLegible = (row: Row): boolean => {
+  const status = ownField(row, "status");
+  const metadata = ownField(row, "metadata");
+  return typeof status === "string" && REFUND_STATES.has(status) && (metadata === null || plainObject(metadata));
+};
+/** Whether a readable refund row says it is this store's plan refund (`metadata.plan_refund`). */
+const oursFor = (row: Row, sid: string): boolean => {
+  const metadata = ownField(row, "metadata");
+  return plainObject(metadata) && ownField(metadata, "plan_refund") === sid;
+};
+/** One page of refunds read exactly (lib/stripe-list.ts), or null when it is not a list at all. */
+function refundPage(listed: unknown): StripePage | null {
+  try {
+    return readStripePage(listed, refundLegible);
+  } catch (error) {
+    if (error instanceof StripeListUnreadable) return null;
+    throw error;
+  }
+}
 
 function readNote(raw: unknown): Note | null {
   if (typeof raw !== "string") return null;
@@ -178,6 +204,7 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
   let succeededAll = true;
   let coveredAll = true;
   let anyOurs = false;
+  let unreadable = false;
   let first: Row | null = null;
   let total = 0;
   for (const part of parts) {
@@ -188,8 +215,16 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
       console.error("reading a plan payment's refunds failed", error);
       return { kind: "unknown" };
     }
-    if (listed.has_more !== false) return { kind: "unknown" };
-    const ours = rows(listed).filter((r) => (r.metadata as Row | null | undefined)?.plan_refund === sid && typeof r.id === "string" && REFUND_ID.test(r.id));
+    const page = refundPage(listed);
+    // A list in another shape, or one with more than one page (a charge has a few refunds), is not decided.
+    if (!page || page.hasMore) return { kind: "unknown" };
+    // A row that does not read may be ours: it keeps a "none" or a "partial" from being said (below).
+    if (page.unreadable > 0) unreadable = true;
+    // Rule 30: a charge's list holds that charge's refunds only; a row of another charge is not this one's to count.
+    if (page.rows.some((r) => ownField(r, "charge") !== part.c)) return { kind: "unknown" };
+    // Ours, but with an id that is not a refund's: not decided, never left out as not ours.
+    if (page.rows.some((r) => oursFor(r, sid) && !REFUND_ID.test(r.id))) return { kind: "unknown" };
+    const ours = page.rows.filter((r) => oursFor(r, sid));
     // One of ours whose amount or currency does not read: not decided, never counted as nothing given (rule 24).
     if (ours.some((r) => counts(r.status) && (refundCents(r.amount) === null || refundCurrency(r.currency) === null))) return { kind: "unknown" };
     const sum = (ok: (status: unknown) => boolean) => ours.filter((r) => ok(r.status)).reduce((n, r) => n + (refundCents(r.amount) ?? 0), 0);
@@ -201,6 +236,7 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
     first ??= ours.find((r) => counts(r.status)) ?? null;
     total += part.a;
   }
+  if (unreadable && (!anyOurs || !coveredAll)) return { kind: "unknown" };
   if (!anyOurs) return { kind: "none" };
   if (!coveredAll || !first) return { kind: "partial" };
   const currency = refundCurrency(first.currency);
@@ -214,6 +250,7 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
  */
 export async function findPlanRefund(sid: string, at: number, until: number): Promise<Found> {
   let after = "";
+  let unreadable = false;
   for (let page = 0; page < MAX_REFUND_PAGES; page += 1) {
     let listed: Row;
     try {
@@ -224,8 +261,10 @@ export async function findPlanRefund(sid: string, at: number, until: number): Pr
       console.error("reading the platform's refunds failed", error);
       return { kind: "unknown" };
     }
-    const data = rows(listed);
-    const ours = data.find((r) => (r.metadata as Row | null | undefined)?.plan_refund === sid && typeof r.id === "string" && REFUND_ID.test(r.id) && counts(r.status));
+    const page = refundPage(listed);
+    if (!page) return { kind: "unknown" };
+    if (page.unreadable > 0 || page.rows.some((r) => oursFor(r, sid) && !REFUND_ID.test(r.id))) unreadable = true;
+    const ours = page.rows.find((r) => oursFor(r, sid) && REFUND_ID.test(r.id) && counts(r.status));
     if (ours) {
       // Ours, but its amount or currency does not read: not decided (rule 24), never ended on with a letter of $0.
       const cents = refundCents(ours.amount);
@@ -233,10 +272,10 @@ export async function findPlanRefund(sid: string, at: number, until: number): Pr
       if (cents === null || currency === null) return { kind: "unknown" };
       return { kind: "found", refund: ours, cents, currency, settled: ours.status === "succeeded" };
     }
-    if (listed.has_more !== true) return listed.has_more === false ? { kind: "none" } : { kind: "unknown" };
-    const last = data[data.length - 1];
-    if (!last || typeof last.id !== "string") return { kind: "unknown" };
-    after = last.id;
+    // "None" only from a list read to its end with every row readable (lib/stripe-list.ts).
+    if (!page.hasMore) return unreadable ? { kind: "unknown" } : { kind: "none" };
+    if (!page.lastId) return { kind: "unknown" };
+    after = page.lastId;
   }
   // More refunds since the note than we read: not decided, never "none".
   return { kind: "unknown" };

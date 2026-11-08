@@ -203,42 +203,48 @@ export async function send(
   const pair = pairOf(from, to);
 
   // Each reply in its exact shape (CX-123 rule 24): SISMEMBER and EXISTS 0 or 1,
-  // ZCARD a whole count. A hole, null, text or a short pipeline is not "not
-  // declined", "under the cap" or "already talking": nothing is written and
-  // the route answers 503.
-  // The pair's place in the recipient's request list too: a score in text or
-  // none, exactly.
+  // ZCARD a whole count, and the pair's place in the recipient's request list
+  // and in their inbox a score in text or none. A hole, null, text or a short
+  // pipeline is not "not declined", "under the cap" or "already talking":
+  // nothing is written and the route answers 503.
   const checks = repliesFor(
     await redisPipeline([
       ["SISMEMBER", shutKey(id, to), from],
       ["EXISTS", chatKey(id, pair)],
       ["ZCARD", inboxKey(id, to)],
       ["ZSCORE", askedKey(id, to), pair],
+      ["ZSCORE", inboxKey(id, to), pair],
     ]),
-    4,
+    5,
   );
   const declined = replyCount(checks?.[0]);
   const already = replyCount(checks?.[1]);
   const size = replyCount(checks?.[2]);
   const queued = checks?.[3];
-  if (declined === null || declined > 1 || already === null || already > 1 || size === null || !scoreOrNone(queued)) {
+  const listed = checks?.[4];
+  if (declined === null || declined > 1 || already === null || already > 1 || size === null || !scoreOrNone(queued) || !scoreOrNone(listed)) {
     throw new UnknownReplyError("a private message's declined, conversation, count or request check");
   }
   // Declined once is declined for good, and the sender is told nothing that
   // would let them work out they were declined rather than ignored.
   if (declined === 1) return { ok: false, reason: "declined" };
-  if (size >= MAX_CONVERSATIONS && !already) return { ok: false, reason: "full" };
+  // "Already talking" is the pair in the recipient's own inbox, never a
+  // conversation that merely exists: one left behind with no line of theirs
+  // (a request trimmed while its sender wrote again, Claude 6 on #3266) must
+  // not let the next message past the request.
+  const talking = listed !== null;
+  // A new conversation, or a new request, needs room in the recipient's list.
+  if (size >= MAX_CONVERSATIONS && !talking && queued === null) return { ok: false, reason: "full" };
 
   const message: Message = { a: from, text: words, at: now() };
-  // A request when this is the first thing said and the community asks for
-  // one. The creator writing to a member never is; a member writing to the
-  // creator never is either.
-  const asking = setting.ask && !already && from !== CREATOR && to !== CREATOR;
-  // A request the recipient has not answered stays one: the conversation it
-  // opened exists, but that is not "already talking". Another message from the
-  // sender joins it where it waits, in its first place in the list, and never
-  // reaches their inbox before they accept.
-  const waiting = Boolean(already) && queued !== null;
+  // A request whenever the community asks for one and the two are not talking
+  // yet. The creator writing to a member never is; a member writing to the
+  // creator never is either. A request the recipient has not answered stays
+  // one: another message from the sender joins it where it waits, in its first
+  // place (ZADD NX), and never reaches their inbox before they accept.
+  const asking = setting.ask && !talking && from !== CREATOR && to !== CREATOR;
+  // Only a request that is not in the list yet takes a place in it.
+  const fresh = asking && queued === null;
 
   // Its room first (DataRoomError when it does not fit). A conversation at
   // MAX_MESSAGES lets its oldest go, and that one's room comes back.
@@ -250,7 +256,7 @@ export async function send(
   // A full request list makes room before the new request goes in, and the
   // requests that leave it go whole (rule 30). Unknown: nothing new is written
   // and the room just taken comes back.
-  if (asking) {
+  if (fresh) {
     try {
       await dropOldestRequests(id, to, room);
     } catch (error) {
@@ -263,11 +269,14 @@ export async function send(
     ["RPUSH", chatKey(id, pair), JSON.stringify(message)],
     ["LTRIM", chatKey(id, pair), -MAX_MESSAGES, -1],
     ["ZADD", inboxKey(id, from), message.at, pair],
-    ...(asking ? [["ZADD", askedKey(id, to), message.at, pair]] : waiting ? [] : [["ZADD", inboxKey(id, to), message.at, pair]]),
+    // NX: a request already in the list keeps its first place, and one a trim
+    // took out while this was on its way is put back, so what is stored stays
+    // in the recipient's list for their copy and their erasure (rule 30).
+    ...(asking ? [["ZADD", askedKey(id, to), "NX", message.at, pair]] : [["ZADD", inboxKey(id, to), message.at, pair]]),
     // The sender has read what they just wrote.
     ["HSET", readKey(id, pair), from, message.at],
   ]);
-  return { ok: true, asked: asking || waiting };
+  return { ok: true, asked: asking };
 }
 
 /** A sorted-set score as Redis gives it (a number in text), or none (null). */
@@ -296,7 +305,9 @@ function scoreOrNone(reply: unknown): boolean {
  * recipient accepts one of these requests between the read and the deletion,
  * the accepted conversation loses the messages it had, and their inbox keeps
  * its name (still theirs to copy and erase). If the same sender writes again
- * in that moment, that message goes with it.
+ * in that moment, their write puts the request's line back (send's ZADD NX):
+ * whatever it stores stays in the recipient's request list, and the list may
+ * hold one past the cap until the next request trims it.
  */
 async function dropOldestRequests(id: string, to: string, room: DataStore): Promise<void> {
   const what = "a member's oldest private-message requests removed";

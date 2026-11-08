@@ -107,10 +107,22 @@ export async function POST(request: NextRequest) {
     }
     if (!text.trim() && !file) return no("needed");
 
-    const done = await handIn({ courseId: course.id, lessonId: lesson.id, who, email, task, text, file, data: store }).catch(async (error: unknown) => {
-      if (taken) await releaseBytes(room, taken).catch(() => {});
-      // Work that was not kept leaves no file behind it.
-      if (error instanceof DataRoomError && file) await deleteFile(file.path).catch(() => {});
+    // Whether handIn sent its write: from then on the work may keep the file even when the call fails (its answer
+    // lost, or a step after it failing), so neither the file nor its bytes may be let go (CX-123 rule 24).
+    let written = false;
+    const done = await handIn({ courseId: course.id, lessonId: lesson.id, who, email, task, text, file, data: store, writing: () => { written = true; } }).catch(async (error: unknown) => {
+      // Work that was not kept leaves no file behind it: the new file sent here (never the one the earlier work keeps)
+      // is deleted, and its bytes come back once it is gone; a file that could not be deleted stays counted. Once the
+      // write was sent, both stay counted, which only refuses sooner.
+      if (taken && file && !written) {
+        const gone = await deleteFile(file.path).then(
+          () => true,
+          (deleteError: unknown) => (console.error("deleting a task file that was not handed in failed", deleteError), false),
+        );
+        if (gone) await releaseBytes(room, taken).catch(() => {});
+      } else if (taken) {
+        console.error("a hand-in failed after its write: its file and the room it took are kept", error);
+      }
       throw error;
     });
     // Work that needs no reading is done at once, and may finish the course (lib/course-finish.ts).

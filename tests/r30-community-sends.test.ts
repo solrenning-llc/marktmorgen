@@ -88,7 +88,7 @@ async function main(): Promise<void> {
   await saveConfig(id, { ...freshConfig(store.name), access: [TICKET] });
   const load = async (handle: string): Promise<Store | null> => {
     const found = await storeForHandle(handle);
-    return found && { ...found, stripeAccountId: "acct_1SendsSynthetic00", catalog: { ...found.catalog, items: [...found.catalog.items, { id: TICKET, kind: KIND.paid } as never] } };
+    return found && { ...found, stripeAccountId: "acct_1SendsSynth0", catalog: { ...found.catalog, items: [...found.catalog.items, { id: TICKET, kind: KIND.paid } as never] } };
   };
   const loaded = (await load(store.handle))!;
   const everyone = ["member000@example.com", "member001@example.com"];

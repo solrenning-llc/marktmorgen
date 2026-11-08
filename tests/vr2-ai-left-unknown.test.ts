@@ -45,10 +45,16 @@ const posts = (left: Shown) =>
   renderToStaticMarkup(createElement(AiOn.Provider, { value: aiOnValue(left) }, createElement(AiPosts, { url: "https://example.test", what: "store" })));
 const setupBox = (left: Shown) => renderToStaticMarkup(createElement(StoreSetupAi, { currency: "usd", left: prop(left), hasFaq: false, storeName: "Demo" }));
 const helpBox = (left: Shown) => renderToStaticMarkup(createElement(StudioHelp, { left: prop(left) }));
+// A button's words without its inner tags: the text after each tag's closing ">", for comparing words only.
+const wordsOf = (html: string) =>
+  html
+    .split("<")
+    .map((part, i) => (i === 0 ? part : part.slice(part.indexOf(">") + 1)))
+    .join("");
 // The buttons that start an AI job: their opening tag and their words.
 const writeButtons = (html: string) =>
   [...html.matchAll(/<button\b([^>]*)>((?:(?!<\/button>)[\s\S])*)<\/button>/g)]
-    .filter((m) => /\b(Write|Draft|Ask)\b/.test(m[2].replace(/<[^>]+>/g, "")))
+    .filter((m) => /\b(Write|Draft|Ask)\b/.test(wordsOf(m[2])))
     .map((m) => m[1]);
 const describedByUnknown = (html: string, tag: string) => {
   const id = tag.match(/aria-describedby="([^"]+)"/)?.[1];
@@ -192,7 +198,7 @@ const editorTools: [string, (left: Shown) => string, RegExp][] = [
 ];
 const jobButtons = (html: string, words: RegExp) =>
   [...html.matchAll(/<button\b([^>]*)>((?:(?!<\/button>)[\s\S])*)<\/button>/g)]
-    .filter((m) => words.test(m[2].replace(/<[^>]+>/g, "").trim()))
+    .filter((m) => words.test(wordsOf(m[2]).trim()))
     .map((m) => m[1]);
 const EXPECTED_BUTTONS: Record<string, number> = { "block rewrite": 4, "block draft": 1, "page coach": 1, "page translation": 1 };
 

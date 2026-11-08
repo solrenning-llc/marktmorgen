@@ -20,6 +20,9 @@
  * invoice decides (paid: used or refunded; void or never made: the order
  * goes). A charge that succeeded is recorded with its payment before anything
  * else, so a process that dies after it leaves a record the sweep refunds.
+ * An invoice Stripe paid wholly from the creator's credit balance (it is paid
+ * when finalized, with no payment) is a charge like any other: it is used, and
+ * whatever of it is owed back goes back to that balance, never to a card.
  *
  * A refund Stripe has not confirmed as succeeded is never taken as done: the
  * record is kept with what is owed (`owed`), the video is asked about again,
@@ -102,6 +105,9 @@ type Owed = {
   stuck?: true;
 };
 
+/** A charge paid wholly from the customer's credit balance: what is owed back goes back there. */
+type Credit = { customer: string; invoice: string };
+
 type Pending = {
   /** The languages asked for, the one spoken first. */
   langs: string[];
@@ -110,9 +116,11 @@ type Pending = {
   /** When it was asked, in ms. */
   at: number;
   cents: number;
-  /** The payment it was charged with, for a refund. */
+  /** The payment it was charged with, for a refund; empty when the credit balance paid it. */
   pi: string;
   path: string;
+  /** Paid from the credit balance: refunds go back to it. */
+  credit?: Credit;
   /** A refund asked for and not yet confirmed by Stripe. */
   owed?: Owed;
 };
@@ -123,6 +131,14 @@ function parseOwed(raw: unknown): Owed | undefined {
   const cents = value.cents === null ? null : Number.isSafeInteger(value.cents) && (value.cents as number) > 0 ? (value.cents as number) : undefined;
   if (cents === undefined || typeof value.key !== "string" || !value.key || typeof value.since !== "number" || !Number.isSafeInteger(value.looks)) return undefined;
   return { cents, key: value.key, since: value.since, looks: value.looks as number, ...(value.stuck === true ? { stuck: true as const } : {}) };
+}
+
+function readCredit(raw: unknown): Credit {
+  const value = raw as Partial<Credit> | null;
+  return {
+    customer: typeof value?.customer === "string" ? value.customer : "",
+    invoice: typeof value?.invoice === "string" ? value.invoice : "",
+  };
 }
 
 function parsePending(raw: unknown): Pending | null {
@@ -137,6 +153,8 @@ function parsePending(raw: unknown): Pending | null {
       cents: value.cents,
       pi: value.pi,
       path: value.path,
+      // One that does not read is kept, never dropped: a refund to it is then not confirmed, so it is owed and shown.
+      ...(value.credit !== undefined ? { credit: readCredit(value.credit) } : {}),
       ...(value.owed !== undefined ? { owed: parseOwed(value.owed) ?? { cents: null, key: `nl-captions:unreadable:${value.at}:refund`, since: value.at, looks: REFUND_LOOKS_MAX, stuck: true as const } } : {}),
     };
   } catch {
@@ -146,7 +164,7 @@ function parsePending(raw: unknown): Pending | null {
 
 export type AutoAnswer =
   | { ok: true; writing: string[]; cents: number }
-  | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "checking" | "owed" | "refund_pending" | "refunded" | "plan" | "card" | "declined" | "unavailable" };
+  | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "checking" | "owed" | "refund_pending" | "refunded" | "credited" | "plan" | "card" | "declined" | "unavailable" };
 
 /** What captions for this video cost, by how many languages: its length as charged. Null when it cannot have them yet. */
 export async function autoQuote(pathname: string): Promise<{ minutes: number; seconds: number } | null> {
@@ -179,8 +197,12 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
   const value = JSON.stringify(order);
   // The order is written before the charge and kept as long as a refund may be owed: it is the only trace of a charge whose answer was lost.
   const claim = await claimMark(key, REFUND_KEEP_SECONDS, value);
-  // An uncertain claim must not authorize a charge or remove another request.
-  if (claim === "unknown") return { ok: false, reason: "unavailable" };
+  // An uncertain claim must not authorize a charge or remove another request. Queued all the same (NX: a request
+  // already queued keeps its time), so an order whose write landed is settled by the sweep, not kept unseen.
+  if (claim === "unknown") {
+    await redisPipeline([["ZADD", QUEUE, "NX", now + ORDER_SETTLE_MS, record.id]]);
+    return { ok: false, reason: "unavailable" };
+  }
   if (claim === "taken") return heldBy(record.id, now);
   // Queued before the charge, so the sweep finds this order if nothing after the charge runs.
   const queued = repliesFor(await redisPipeline([["ZADD", QUEUE, now + ORDER_SETTLE_MS, record.id]]), 1);
@@ -199,7 +221,8 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     mark: sign,
     idempotencyKey: `nl-${sign}`,
   });
-  let pi: string;
+  let pi = "";
+  let credit: Credit | undefined;
   if (charged.ok) {
     pi = charged.paymentIntent;
   } else {
@@ -210,17 +233,24 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
       return { ok: false, reason: charged.reason === "error" ? "unavailable" : charged.reason };
     }
     if (found === "unknown") return { ok: false, reason: "checking" };
-    pi = found.pi;
+    if ("pi" in found) pi = found.pi;
+    else credit = { customer: store.stripeCustomerId, invoice: found.credit };
   }
 
   // Charged: recorded with its payment before anything else, and queued, so a refund is never lost.
-  const pending: Pending = { langs: asked.languages, got: [], at: now, cents, pi, path: pathname };
+  const pending: Pending = { langs: asked.languages, got: [], at: now, cents, pi, path: pathname, ...(credit ? { credit } : {}) };
+  const written = JSON.stringify(pending);
   const wrote = repliesFor(await redisPipeline([
-    ["SET", key, JSON.stringify(pending), "EX", KEEP_SECONDS],
+    ["SET", key, written, "EX", KEEP_SECONDS],
     ["ZADD", QUEUE, now + LOOK_FIRST_MS, record.id],
   ]), 2);
-  // Not written for sure: the service is not asked. The order or the record stays queued, and either refunds it.
-  if (!wrote || wrote[0] !== "OK" || (wrote[1] !== 0 && wrote[1] !== 1)) return { ok: false, reason: "checking" };
+  if (!wrote || wrote[0] !== "OK" || (wrote[1] !== 0 && wrote[1] !== 1)) {
+    // An answer lost is not a write lost (Claude 2 on #3286): read back, as claimMark does. Holding this record, the
+    // write landed and the service is asked. Anything else (the order, or a read that does not read) is not known
+    // written: the service is not asked, and the order or the record, both queued, refunds it.
+    const back = repliesFor(await redisPipeline([["GET", key]]), 1);
+    if (!back || back[0] !== written) return { ok: false, reason: "checking" };
+  }
 
   const answer = await askStream("POST", `/videos/${record.id}/transcribe?force=true`, {
     sourceLanguage: asked.spoken,
@@ -234,9 +264,9 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
   if (answer.status !== 200 || success === false) {
     console.error("the video service would not write captions", answer.status, answer.data);
     const refundKey = `nl-${sign}:refund`;
-    if (await refundCharge(pi, null, refundKey)) {
+    if (await giveBack(pending, null, refundKey)) {
       await redisPipeline([["DEL", key]]);
-      return { ok: false, reason: "refunded" };
+      return { ok: false, reason: credit ? "credited" : "refunded" };
     }
     await owe(record.id, pending, null, refundKey, now);
     return { ok: false, reason: "refund_pending" };
@@ -267,7 +297,7 @@ async function heldBy(id: string, now: number): Promise<AutoAnswer> {
  * void), "unknown" otherwise. Only `final` (the order is ORDER_SETTLE_MS old)
  * takes an invoice not listed, or a draft, for none, and voids one left open.
  */
-async function orderCharge(id: string, order: Order, final: boolean): Promise<{ pi: string } | "none" | "unknown"> {
+async function orderCharge(id: string, order: Order, final: boolean): Promise<{ pi: string } | { credit: string } | "none" | "unknown"> {
   const sign = orderSign(id, order);
   try {
     const query = new URLSearchParams({
@@ -291,7 +321,13 @@ async function orderCharge(id: string, order: Order, final: boolean): Promise<{ 
     if (invoice.customer !== order.customer || invoice.currency !== "usd") return "unknown";
     if (invoice.status === "paid") {
       const pi = invoice.payment_intent;
-      return typeof pi === "string" && /^pi_[A-Za-z0-9]{8,64}$/.test(pi) ? { pi } : "unknown";
+      if (typeof pi === "string" && /^pi_[A-Za-z0-9]{8,64}$/.test(pi)) return { pi };
+      // Paid wholly from the credit balance (Claude 2 and Claude 6 on #3286): Stripe marks such an invoice paid when it
+      // is finalized, with no payment, nothing due and nothing paid by card, for the whole price. Only exactly that.
+      if (pi === null && invoice.amount_due === 0 && invoice.amount_paid === 0 && invoice.total === order.cents && typeof invoice.id === "string" && /^in_[A-Za-z0-9]{6,64}$/.test(invoice.id)) {
+        return { credit: invoice.id };
+      }
+      return "unknown";
     }
     if (invoice.status === "void") return "none";
     if (!final) return "unknown";
@@ -316,13 +352,14 @@ async function orderCharge(id: string, order: Order, final: boolean): Promise<{ 
 async function settleOrder(id: string, raw: string, order: Order, now: number): Promise<"refund" | "gone" | "kept"> {
   const found = await orderCharge(id, order, true);
   if (found === "none") {
-    // Out of the queue first: a new order written once this one goes queues itself again.
-    await redisPipeline([["ZREM", QUEUE, id]]);
+    // Not taken out of the queue here (Claude 2 on #3286): by the time this ends, a newer order may hold the video and
+    // be queued under the same id. Left there, the entry is dropped by the sweep once it finds the video free.
     await releaseMark(pendingKey(id), raw);
     return "gone";
   }
   if (found !== "unknown") {
-    const pending: Pending = { langs: order.langs, got: [], at: order.at, cents: order.cents, pi: found.pi, path: order.path };
+    const paid = "pi" in found ? { pi: found.pi } : { pi: "", credit: { customer: order.customer, invoice: found.credit } };
+    const pending: Pending = { langs: order.langs, got: [], at: order.at, cents: order.cents, path: order.path, ...paid };
     await owe(id, pending, null, `nl-${orderSign(id, order)}:refund`, now);
     return "refund";
   }
@@ -406,7 +443,7 @@ async function settle(id: string, pending: Pending, got: string[], now: number):
     const cents = got.length === 0 ? null : Math.floor((pending.cents * missing) / pending.langs.length);
     if (cents === null || cents > 0) {
       const key = `nl-captions:${id}:${pending.at}:refund`;
-      if (!(await refundCharge(pending.pi, cents, key))) {
+      if (!(await giveBack(pending, cents, key))) {
         await owe(id, { ...pending, got }, cents, key, now);
         return false;
       }
@@ -414,6 +451,73 @@ async function settle(id: string, pending: Pending, got: string[], now: number):
   }
   await redisPipeline([["DEL", pendingKey(id)], ["ZREM", QUEUE, id]]);
   return true;
+}
+
+/** Gives back `cents` (null: all of it) of a charge: to the card it was paid with, or to the credit balance that paid it. True only when confirmed. */
+async function giveBack(pending: Pending, cents: number | null, key: string): Promise<boolean> {
+  return pending.credit ? creditBack(pending.credit, cents ?? pending.cents, key) : refundCharge(pending.pi, cents, key);
+}
+
+const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
+/** The most pages of a customer's balance history read; one longer than that is not known whole. */
+const CREDIT_HISTORY_PAGES = 10;
+
+/**
+ * The amount of the credit back marked `key` on a customer's balance, null when the history holds none, "unknown"
+ * when it cannot be read whole or exactly (rule 24): never taken for "none", so a credit is never made twice.
+ */
+async function creditedUnder(customer: string, key: string): Promise<number | null | "unknown"> {
+  let after = "";
+  for (let page = 0; page < CREDIT_HISTORY_PAGES; page += 1) {
+    const query = new URLSearchParams({ limit: "100" });
+    if (after) query.set("starting_after", after);
+    const list = await onPlatformAt(CHARGE_READ_VERSION, "GET", `/customers/${customer}/balance_transactions?${query}`);
+    if (!list || list.object !== "list" || typeof list.has_more !== "boolean" || !Array.isArray(list.data) || list.data.length > 100) return "unknown";
+    let last = "";
+    for (const row of list.data as unknown[]) {
+      if (!row || typeof row !== "object") return "unknown";
+      const { id, amount, metadata } = row as { id?: unknown; amount?: unknown; metadata?: unknown };
+      if (typeof id !== "string" || !id) return "unknown";
+      if (metadata !== null && (typeof metadata !== "object" || Array.isArray(metadata))) return "unknown";
+      const mark = metadata ? (metadata as Record<string, unknown>).nl_captions_credit : undefined;
+      if (mark !== undefined && typeof mark !== "string") return "unknown";
+      if (mark === key) return Number.isSafeInteger(amount) ? (amount as number) : "unknown";
+      last = id;
+    }
+    if (list.has_more === false) return null;
+    if (!last) return "unknown";
+    after = last;
+  }
+  return "unknown";
+}
+
+/**
+ * Puts `cents` back on the customer's credit balance, once: the balance history is read first for a credit already
+ * carrying `key` (a credit made whose answer was lost, even past Stripe's 24-hour idempotency window), and the credit
+ * is sent under its own idempotency key. True only when Stripe confirms one for exactly that amount.
+ */
+async function creditBack(credit: Credit, cents: number, key: string): Promise<boolean> {
+  if (!CUSTOMER_PATTERN.test(credit.customer) || !Number.isSafeInteger(cents) || cents <= 0) return false;
+  try {
+    const found = await creditedUnder(credit.customer, key);
+    if (found === "unknown") return false;
+    if (found !== null) {
+      if (found !== -cents) console.error("a captions credit back carries another amount than owed", credit.invoice);
+      return found === -cents;
+    }
+    const body = new URLSearchParams({
+      amount: String(-cents),
+      currency: "usd",
+      description: "Refund of AI captions that were not written",
+      "metadata[nl_captions_credit]": key,
+      "metadata[invoice]": credit.invoice,
+    });
+    const made = await onPlatformAt(CHARGE_READ_VERSION, "POST", `/customers/${credit.customer}/balance_transactions`, body, `${key}:credit`);
+    return made?.object === "customer_balance_transaction" && typeof made.id === "string" && made.amount === -cents && made.currency === "usd" && made.customer === credit.customer;
+  } catch (error) {
+    console.error("a captions credit back was not confirmed", credit.invoice, error);
+    return false;
+  }
 }
 
 /** Keeps a refund that was not confirmed, and asks about it again in LOOK_AGAIN_MS. */
@@ -454,24 +558,9 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
     await redisPipeline([["ZREM", QUEUE, id]]);
     return "waiting";
   }
-  const listed = await refundsOnIntent(pending.pi);
-  // Never more than the card paid: what an invoice took from a credit balance cannot go back to the card.
-  const target = listed ? Math.min(owed.cents ?? pending.cents, listed.paid) : owed.cents ?? pending.cents;
-  if (listed && listed.returned >= target) {
-    if (target < (owed.cents ?? pending.cents)) console.error("a captions refund was capped at what the card paid; the rest was paid from a credit balance", id);
+  if (await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
     await closeOwed(id, pending);
     return "done";
-  }
-  if (listed && listed.inFlight === 0) {
-    // The first key while Stripe lists nothing: had a refund been made under it, it would be listed.
-    const fresh = listed.failed === 0 && listed.returned === 0 && target === (owed.cents ?? pending.cents);
-    const left = target - listed.returned;
-    const cents = fresh ? owed.cents : left;
-    const key = fresh ? owed.key : `${owed.key}:${listed.failed}:${listed.returned}`;
-    if (await refundCharge(pending.pi, cents, key)) {
-      await closeOwed(id, pending);
-      return "done";
-    }
   }
   const looks = owed.looks + 1;
   if (looks >= REFUND_LOOKS_MAX) {
@@ -489,6 +578,22 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
     ["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, LOOK_AGAIN_MS * 2 ** Math.min(looks, 10)), id],
   ]);
   return "waiting";
+}
+
+/** A refund to the card, as Stripe lists the payment's refunds: true once enough is returned. */
+async function cardRefundSettled(id: string, pending: Pending, owed: Owed): Promise<boolean> {
+  const listed = await refundsOnIntent(pending.pi);
+  // Never more than the card paid: what an invoice took from a credit balance cannot go back to the card.
+  const target = listed ? Math.min(owed.cents ?? pending.cents, listed.paid) : owed.cents ?? pending.cents;
+  if (listed && listed.returned >= target) {
+    if (target < (owed.cents ?? pending.cents)) console.error("a captions refund was capped at what the card paid; the rest was paid from a credit balance", id);
+    return true;
+  }
+  if (!listed || listed.inFlight !== 0) return false;
+  // The first key while Stripe lists nothing: had a refund been made under it, it would be listed.
+  const fresh = listed.failed === 0 && listed.returned === 0 && target === (owed.cents ?? pending.cents);
+  const left = target - listed.returned;
+  return refundCharge(pending.pi, fresh ? owed.cents : left, fresh ? owed.key : `${owed.key}:${listed.failed}:${listed.returned}`);
 }
 
 /** The five-minute job's part: every video whose captions are due a look, until `deadline`. */

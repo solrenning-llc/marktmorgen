@@ -86,6 +86,7 @@ import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion } from "@/lib/affiliate-promotion";
 import { onAccount } from "@/lib/stripe-account";
+import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { DISPUTE_TAKES } from "@/lib/retained-revenue";
 import { isSettled } from "@/lib/instant-pay";
@@ -2722,18 +2723,37 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    for (const refund of rows) {
+    // Read exactly (CX-123 rule 24; Claude 2 on #3248): a page that is not Stripe's list throws, and a row that does not
+    // read (no id, an amount that is not a whole number, a status or payment intent of another kind) leaves the read
+    // not complete, never a refund of 0; so the book never says checked on refunds it could not read.
+    const page = readStripePage(listed, refundLegible);
+    for (const refund of page.rows) {
       if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      const amount = typeof refund.amount === "number" ? refund.amount : 0;
-      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+      const pi = refund.payment_intent as string | null;
+      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + (refund.amount as number));
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
-    after = last.id;
+    if (page.unreadable > 0) return { byIntent, complete: false };
+    if (!page.hasMore) return { byIntent, complete: true };
+    if (!page.lastId) return { byIntent, complete: false };
+    after = page.lastId;
   }
   return { byIntent, complete: false };
+}
+
+/** A whole number from 0 up: an amount in cents as Stripe gives it. */
+const wholeCents = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/** A refund row as Stripe gives it: a status in text, a whole amount, and a payment intent in text or null. */
+function refundLegible(row: Record<string, unknown>): boolean {
+  const pi = ownField(row, "payment_intent");
+  return typeof ownField(row, "status") === "string" && wholeCents(ownField(row, "amount")) && (pi === null || typeof pi === "string");
+}
+
+/** A dispute row as Stripe gives it: a status in text, a whole amount, and a payment intent in text, expanded with its id, or null. */
+function disputeLegible(row: Record<string, unknown>): boolean {
+  const raw = ownField(row, "payment_intent");
+  const intent = raw === null || typeof raw === "string" || (plainObject(raw) && typeof ownField(raw, "id") === "string");
+  return typeof ownField(row, "status") === "string" && wholeCents(ownField(row, "amount")) && intent;
 }
 
 /**
@@ -2758,17 +2778,19 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    for (const dispute of rows) {
-      if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
+    // Read exactly, as the refunds are (CX-123 rule 24; Claude 2 on #3248).
+    const page = readStripePage(listed, disputeLegible);
+    for (const dispute of page.rows) {
+      if (!DISPUTE_TAKES.has(dispute.status as string)) continue;
       const raw = dispute.payment_intent;
-      const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const amount = typeof dispute.amount === "number" && dispute.amount > 0 ? dispute.amount : 0;
+      const pi = typeof raw === "string" ? raw : plainObject(raw) ? (ownField(raw, "id") as string) : "";
+      const amount = dispute.amount as number;
       if (pi && amount) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
-    after = last.id;
+    if (page.unreadable > 0) return { byIntent, complete: false };
+    if (!page.hasMore) return { byIntent, complete: true };
+    if (!page.lastId) return { byIntent, complete: false };
+    after = page.lastId;
   }
   return { byIntent, complete: false };
 }

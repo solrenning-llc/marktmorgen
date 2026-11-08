@@ -9,7 +9,8 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { createElement } from "react";
+import * as React from "react";
+import { createElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { aiLeft } from "@/lib/ai";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -18,6 +19,10 @@ import { StoreSetupAi } from "@/components/store-setup-ai";
 import { StudioHelp } from "@/components/studio-help";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { AiPosts } from "@/components/ai-posts";
+import { BlockRewrite } from "@/components/block-rewrite";
+import { PageCoach } from "@/components/page-coach";
+import { TranslatePage } from "@/components/translate-page";
+import type { PageBlock, SalesPage } from "@/lib/sales-page";
 import { setUnknown } from "./vr2-ai-left-unknown-world";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -114,6 +119,126 @@ test("control: a spent allowance is still 0 left, with the buttons off", () => {
   const off = [...writeButtons(box), ...writeButtons(posts(0))];
   assert.equal(off.length, 2);
   for (const tag of off) assert.match(tag, /disabled=""/, tag);
+});
+
+// The three tools on the sales-page editor: rewrite one block, review the page, translate the page.
+const textBlock = { id: "text0001", kind: "text", heading: "What it is", body: "A simple practice lesson." } as PageBlock;
+const emptyBenefits = { id: "bene0001", kind: "benefits", heading: "", items: [] } as PageBlock;
+const salesPage = { blocks: [textBlock], seoDescription: "", test: null } as unknown as SalesPage;
+const inAi = (left: Shown, child: ReactNode) => renderToStaticMarkup(createElement(AiOn.Provider, { value: aiOnValue(left) }, child));
+const rewrite = (left: Shown, block = textBlock) =>
+  inAi(left, createElement(BlockRewrite, { productId: "vr2", block, page: () => salesPage, onChange: () => {} }));
+const translate = (left: Shown) =>
+  inAi(left, createElement(TranslatePage, { productId: "vr2", storeLanguage: "pt", page: () => salesPage, onResult: () => true }));
+const coachProps = {
+  productId: "vr2", productTitle: "Practice", free: true, picture: false, pictureAlt: "", facts: {}, page: salesPage, reach: null,
+  onAdd: () => {}, onHeadline: () => {}, onTest: () => {}, onFit: () => {}, onQuestions: () => {},
+} as Parameters<typeof PageCoach>[0];
+
+// The page coach opens its writing help only when the creator presses "See what to improve". There is no DOM in
+// these tests, so this harness runs PageCoach's own hooks with a minimal stand-in dispatcher, presses that button
+// through the component's own onClick (its real setOpen), runs it again with the state that click left, and hands
+// the opened tree to React's server renderer. Nothing in the component is patched or forced.
+type Hooks = { H: unknown };
+const internals = (React as unknown as { __CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE: Hooks })
+  .__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+type Node = ReactElement<{ children?: unknown; onClick?: () => void; "aria-expanded"?: boolean }>;
+const textOf = (node: unknown): string =>
+  Array.isArray(node) ? node.map(textOf).join("") : typeof node === "string" || typeof node === "number" ? String(node)
+    : React.isValidElement(node) ? textOf((node as Node).props.children) : "";
+const findButton = (node: unknown, words: string): Node | undefined => {
+  if (Array.isArray(node)) {
+    for (const child of node) { const hit = findButton(child, words); if (hit) return hit; }
+    return undefined;
+  }
+  if (!React.isValidElement(node)) return undefined;
+  const element = node as Node;
+  if (element.type === "button" && textOf(element.props.children) === words) return element;
+  return findButton(element.props.children, words);
+};
+const coach = (left: Shown) => {
+  const states: unknown[] = [];
+  const run = () => {
+    let at = 0;
+    const before = internals.H;
+    internals.H = {
+      useContext: () => aiOnValue(left),
+      useId: () => "vr2-coach-allowance",
+      useState: (initial: unknown) => {
+        const slot = at++;
+        if (!(slot in states)) states[slot] = typeof initial === "function" ? (initial as () => unknown)() : initial;
+        return [states[slot], (next: unknown) => { states[slot] = typeof next === "function" ? (next as (was: unknown) => unknown)(states[slot]) : next; }];
+      },
+    };
+    try { return (PageCoach as (props: typeof coachProps) => ReactElement)(coachProps); } finally { internals.H = before; }
+  };
+  const closed = run();
+  const toggle = findButton(closed, "See what to improve");
+  assert.ok(toggle, "the coach's own open button is drawn");
+  assert.equal(toggle.props["aria-expanded"], false);
+  assert.doesNotMatch(renderToStaticMarkup(closed), /Review my page/, "closed, the coach shows no AI job button");
+  toggle.props.onClick?.();
+  const opened = run();
+  assert.equal(findButton(opened, "Hide")?.props["aria-expanded"], true, "the press opened it");
+  return renderToStaticMarkup(opened);
+};
+
+// Each editor tool, with the words of the buttons that start one of its AI jobs.
+const editorTools: [string, (left: Shown) => string, RegExp][] = [
+  ["block rewrite", (left) => rewrite(left), /^(Clearer|Shorter|More specific|Warmer)$/],
+  ["block draft", (left) => rewrite(left, emptyBenefits), /^Write it with AI$/],
+  ["page coach", coach, /^Review my page$/],
+  ["page translation", translate, /^Translate$/],
+];
+const jobButtons = (html: string, words: RegExp) =>
+  [...html.matchAll(/<button\b([^>]*)>((?:(?!<\/button>)[\s\S])*)<\/button>/g)]
+    .filter((m) => words.test(m[2].replace(/<[^>]+>/g, "").trim()))
+    .map((m) => m[1]);
+const EXPECTED_BUTTONS: Record<string, number> = { "block rewrite": 4, "block draft": 1, "page coach": 1, "page translation": 1 };
+
+test("editor tools: an unread allowance is said in words, every AI job button is off and tied to that sentence", () => {
+  const failures: string[] = [];
+  let checked = 0;
+  for (const [where, render, words] of editorTools) {
+    const html = render(unread);
+    if (!UNKNOWN.test(html)) failures.push(`${where}: no "could not check" sentence`);
+    if (SAYS_A_COUNT.test(html)) failures.push(`${where}: says ${html.match(SAYS_A_COUNT)?.[0]}`);
+    const buttons = jobButtons(html, words);
+    if (buttons.length !== EXPECTED_BUTTONS[where]) failures.push(`${where}: ${buttons.length} AI job buttons, expected ${EXPECTED_BUTTONS[where]}`);
+    for (const tag of buttons) {
+      checked++;
+      if (!/disabled=""/.test(tag)) failures.push(`${where}: an AI job button is on: ${tag}`);
+      if (!describedByUnknown(html, tag)) failures.push(`${where}: an AI job button is not described by the sentence: ${tag}`);
+    }
+  }
+  console.log(`  ${editorTools.length} editor tools, ${checked} AI job buttons checked with an unread allowance`);
+  assert.deepEqual(failures, []);
+});
+
+test("editor tools control: a known allowance shows its number, the buttons are on and still described by it", () => {
+  for (const [where, render, words] of editorTools) {
+    const html = render(9);
+    assert.match(html, /9 left this month/, where);
+    assert.doesNotMatch(html, UNKNOWN, where);
+    const buttons = jobButtons(html, words);
+    assert.equal(buttons.length, EXPECTED_BUTTONS[where], where);
+    for (const tag of buttons) {
+      assert.doesNotMatch(tag, /disabled=""/, `${where}: ${tag}`);
+      const id = tag.match(/aria-describedby="([^"]+)"/)?.[1];
+      assert.ok(id && new RegExp(`id="${id}"[^>]*>[^<]*9 left this month`).test(html), `${where}: ${tag}`);
+    }
+  }
+});
+
+test("editor tools control: a spent allowance is still 0 left, with every AI job button off", () => {
+  for (const [where, render, words] of editorTools) {
+    const html = render(0);
+    assert.match(html, /0 left this month/, where);
+    assert.doesNotMatch(html, UNKNOWN, where);
+    const buttons = jobButtons(html, words);
+    assert.equal(buttons.length, EXPECTED_BUTTONS[where], where);
+    for (const tag of buttons) assert.match(tag, /disabled=""/, `${where}: ${tag}`);
+  }
 });
 
 // Call sites still reading an unknown allowance as 0, each in another agent's open pull request or reservation

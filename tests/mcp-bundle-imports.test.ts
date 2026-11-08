@@ -192,7 +192,7 @@ async function main(): Promise<void> {
       is(`its store ${label}: an error, not a shorter list of imports`, [read.isError, "imports" in read.value], [true, false]);
       await redis.pipeline([["LREM", `nl:imports:list:${store.sid}`, 0, "c".repeat(24)], ["DEL", `nl:import:${"c".repeat(24)}`]]);
     }
-    is("with it gone, the history reads again", (await call("get_imports")).value.imports.map((i: { id: string }) => i.id), [id]);
+    is("with it gone, the history reads again", ((await call("get_imports")).value.imports as { id: string }[]).map((i) => i.id), [id]);
 
     is("nothing reached outside", outside, 0);
   } finally {

@@ -64,7 +64,9 @@ export async function GET(request: NextRequest) {
   }
   const country = readCountry(request.headers.get("x-vercel-ip-country"));
   const locale = LANGUAGES[store.language].locale;
-  const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => ({ soon: new Set<string>() }))]);
+  // Which products are still coming soon: a reading that cannot be had is never "none" (Claude 6's audit of rule 24),
+  // so no line is payable right now, as for a stock count that cannot be read.
+  const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
   const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));
@@ -79,7 +81,7 @@ export async function GET(request: NextRequest) {
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
     const soldOut = left.get(id) === 0;
     const unknown = left.has(id) && left.get(id) === undefined;
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
   });
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
   const shippable = items.filter((item) => item.ok).flatMap((item) => listings.filter((p) => p.id === item.id));
@@ -139,8 +141,9 @@ export async function GET(request: NextRequest) {
     const listing = listings.find((p) => p.id === item.id);
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
-  const suggest = await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []);
-  const bundle = bundleSwap(store, payable, ids, coming.soon, country, locale);
+  // With the coming-soon reading unknown nothing is offered either: a suggestion or a bundle could be a product not out yet.
+  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []) : [];
+  const bundle = coming ? bundleSwap(store, payable, ids, coming.soon, country, locale) : null;
   return Response.json(
     {
       ok: true,

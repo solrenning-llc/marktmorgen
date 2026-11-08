@@ -1,0 +1,99 @@
+
+FILE z-3060-client-gate.proof.tsx
+{"label":"closed","card":true,"kept":true,"removed":0}
+{"label":"unknown","card":true,"kept":true,"removed":0}
+{"label":"prefix only","card":true,"kept":true,"removed":0}
+✔ control: an open store offers the actual kept lesson (10.963739ms)
+✖ closed store draws no card but preserves the valid device record (3.91015ms)
+✖ unknown store draws no card but preserves the valid device record (0.962305ms)
+✖ prefix only store draws no card but preserves the valid device record (0.962599ms)
+✔ another person does not see or remove this person's record (0.419655ms)
+✔ invalid record is hidden and cleaned (0.42625ms)
+✔ expired record is hidden and cleaned (0.367406ms)
+✔ blocked storage is hidden without inventing a readable value (0.290334ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 5
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.869743
+
+✖ failing tests:
+
+test at [stdin]:28132:29
+✖ closed store draws no card but preserves the valid device record (3.91015ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '<section aria-labelledby="library-continue-heading" class="card mt-6 min-w-0 p-5" data-library-continue="true"><h2 id="library-continue-heading" class="text-lg font-semibold">Continue where you left off</h2><p class="mt-2 min-w-0 text-ink-soft [overflow-wrap:anywhere]">Painting, from Ada Studio. The last lesson you opened in this browser.</p><div class="mt-4 flex min-w-0 flex-wrap gap-3"><a href="/@ada-studio/course/p1/l3" class="btn btn-primary btn-sm btn-wrap min-w-0"><span class="min-w-0 [overflow-wrap:anywhere]">Continue “Lesson 3”</span></a></div></section>'
+  - ''
+
+      at TestContext.<anonymous> ([stdin]:28135:31)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'nywhere]">Continue “Lesson 3”</span></a></div></section>...',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:28132:29
+✖ unknown store draws no card but preserves the valid device record (0.962305ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '<section aria-labelledby="library-continue-heading" class="card mt-6 min-w-0 p-5" data-library-continue="true"><h2 id="library-continue-heading" class="text-lg font-semibold">Continue where you left off</h2><p class="mt-2 min-w-0 text-ink-soft [overflow-wrap:anywhere]">Painting, from Ada Studio. The last lesson you opened in this browser.</p><div class="mt-4 flex min-w-0 flex-wrap gap-3"><a href="/@ada-studio/course/p1/l3" class="btn btn-primary btn-sm btn-wrap min-w-0"><span class="min-w-0 [overflow-wrap:anywhere]">Continue “Lesson 3”</span></a></div></section>'
+  - ''
+
+      at TestContext.<anonymous> ([stdin]:28135:31)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'nywhere]">Continue “Lesson 3”</span></a></div></section>...',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:28132:29
+✖ prefix only store draws no card but preserves the valid device record (0.962599ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '<section aria-labelledby="library-continue-heading" class="card mt-6 min-w-0 p-5" data-library-continue="true"><h2 id="library-continue-heading" class="text-lg font-semibold">Continue where you left off</h2><p class="mt-2 min-w-0 text-ink-soft [overflow-wrap:anywhere]">Painting, from Ada Studio. The last lesson you opened in this browser.</p><div class="mt-4 flex min-w-0 flex-wrap gap-3"><a href="/@ada-studio/course/p1/l3" class="btn btn-primary btn-sm btn-wrap min-w-0"><span class="min-w-0 [overflow-wrap:anywhere]">Continue “Lesson 3”</span></a></div></section>'
+  - ''
+
+      at TestContext.<anonymous> ([stdin]:28135:31)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'nywhere]">Continue “Lesson 3”</span></a></div></section>...',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3060-ptmUqq

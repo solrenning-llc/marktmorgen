@@ -1,0 +1,346 @@
+
+FILE wg10-library-continue.test.ts
+
+Where the last lesson is kept: the student's own key, made on our server
+  ok    one record for one student
+  ok    another student on the same device has another
+  ok    nothing for a key we did not make
+
+The lesson's address: only a lesson page of this site
+  ok    a store's lesson
+  ok    never a handle, product or lesson we do not make
+
+What is written, and read back whole
+  ok    written and read back as it was, with when
+  ok    a title is cut to 200 characters when written
+  ok    nothing written for a path that is not a lesson page
+  ok    nothing written without a title or a course id
+  ok    a path changed on the device to another site is refused
+  ok    a title longer than ever written is refused
+  ok    older than the places' own 90 days: nothing
+  ok    a time in the future, a broken value, or nothing: nothing
+
+Forgetting it with the course whose access ended
+  ok    this course: removed, for this student only
+  ok    another course's last lesson stays
+  ok    one that cannot be read is removed too
+
+The key: from the address alone, with a key only the server holds
+  ok    no server key: no device key, so nothing is kept or shown
+  ok    the address as typed any way, 32 hex
+  ok    another person, another key; and not a course's place key
+  ok    another server key, another device key
+
+The lesson page remembers it for a signed-in student only
+  ok    the key is made for the signed-in student only (never the creator or a visitor)
+  ok    and the lesson's own address, titles and course are handed over
+  ok    the course page forgets it whenever it opens without confirming access
+
+The library: nothing drawn before the browser is read
+  ok    server markup is empty, so nothing shows that is not there
+  ok    the library hands over the key made from its own address
+  ok    a named section with a heading, and a link whose words name the lesson (2.4.9)
+  ok    the link is at least 44 px tall (2.5.5)
+
+The library shows the card only for a store it shows itself (Claude 6's MEDIUM on #3060)
+  ok    a store the library shows: the card
+  ok    a store the library does not show (closed, or its record not read as open): no card
+  ok    the stores could not all be read: no card, since a failed read is not proof either way (rule 24)
+  ok    no stores at all: no card
+  ok    a handle that only starts the same is not the store
+  ok    nothing kept: nothing shown
+  ok    the library hands the card the handles it shows, or null when a store could not be read
+  ok    the card draws only what lastShown lets through, and never removes a record for it
+
+Said in the privacy policy, and in the person-data registry
+  ok    the policy names the key, what it holds, the library, and its removal
+  ok    the policy no longer says the place is all that is kept
+  ok    the registry line names the last lesson too
+
+38 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3060-client-gate.proof.tsx
+{"label":"closed","card":false,"kept":true,"removed":0}
+{"label":"unknown","card":false,"kept":true,"removed":0}
+{"label":"prefix only","card":false,"kept":true,"removed":0}
+✔ control: an open store offers the actual kept lesson (10.393995ms)
+✔ closed store draws no card but preserves the valid device record (1.331287ms)
+✔ unknown store draws no card but preserves the valid device record (0.353487ms)
+✔ prefix only store draws no card but preserves the valid device record (0.299688ms)
+✔ another person does not see or remove this person's record (0.180824ms)
+✔ invalid record is hidden and cleaned (0.334223ms)
+✔ expired record is hidden and cleaned (0.218465ms)
+✔ blocked storage is hidden without inventing a readable value (0.181339ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.998983
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE wg10-lesson-position.test.ts
+
+Where a place is kept: the course, the lesson and the student's own key
+  ok    a place for one student in one lesson
+  ok    another student on the same device has another key
+  ok    no key without a learner key (the creator, a visitor), or with an address instead of one
+  ok    no key for ids we do not make
+
+Read back whole, or nothing
+  ok    what was written reads back
+  ok    nothing kept, not JSON, not an object
+  ok    a time that is not whole, negative, or from the future
+  ok    kept 90 days after it was written, not a day more
+
+A place past its days, or not one we wrote, is removed as it is read (Claude 4 on #2728)
+  ok    too old, broken: removed; ours and fresh, or nothing there: left
+  ok    the player removes it when it reads it
+
+What is offered back
+  ok    40 seconds in: continue at 40
+  ok    before the length is known, still offered
+  ok    a few seconds in: nothing to continue
+  ok    within 10 seconds of the end: watched, nothing offered
+
+At most one write every 15 seconds while playing
+  ok    the first one, then not before the time, then again
+
+The time as a player shows it
+  ok    minutes and seconds, and hours past an hour
+
+The speed kept for the next lessons
+  ok    a speed from the list reads back; anything else is the normal speed
+  ok    only speeds from the list are kept
+  ok    its key is the device's, not a student's
+
+Forgetting a course on this device: only that student's places in it
+  ok    two removed
+  ok    the other student's, the other course's, the speed and the rest stay
+
+The player as drawn
+  ok    the same video, with its own controls
+  ok    nothing offered before the browser has read the device
+
+The lesson page: hosted video through the player, with the signed-in student's own key only
+  ok    both hosted players use it
+  ok    no bare hosted <video> left
+  ok    the key is made for the signed-in student only (never the creator or a visitor)
+  ok    both players get that key
+
+The course page: places forgotten once the student's access is not open
+  ok    drawn for a signed-in student whose access is not open (refund, lost dispute, ended, taken off)
+
+The device key cannot be worked out from an address (Revisor 1 on #2728)
+  ok    no server key: no device key, so nothing is kept
+  ok    made from the course and the address as typed any way, 32 hex
+  ok    not the learner key anyone can compute from the address
+  ok    another course, another key; another person, another key
+  ok    another server key, another device key
+
+Said in the privacy policy, and in the person-data registry
+  ok    the policy says places go also when access could not be checked, not only when it ended (Claude 5, LEVE on #2728)
+  ok    the policy names both keys, the 90 days, and that nothing is sent to us
+  ok    the registry line
+
+The words, in every language
+  ok    en: the time in both sentences, and the rest written
+  ok    es: the time in both sentences, and the rest written
+  ok    fr: the time in both sentences, and the rest written
+  ok    de: the time in both sentences, and the rest written
+  ok    it: the time in both sentences, and the rest written
+  ok    nl: the time in both sentences, and the rest written
+  ok    pt: the time in both sentences, and the rest written
+
+43 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE wg10-resume-words-flight.test.ts
+
+Control: plain words cross Flight, a function does not
+  ok    plain text crosses
+  ok    a function is refused
+
+The page builds the player's words with the shared builder
+  ok    the page's words are resumeWordsOf(w)
+
+Every language: the words cross, and read as the language's own sentence once filled in
+  ok    en: every word is plain text
+  ok    en: the words cross to the client player
+  ok    en: "stopped" filled in reads as before
+  ok    en: "resume" filled in reads as before
+  ok    es: every word is plain text
+  ok    es: the words cross to the client player
+  ok    es: "stopped" filled in reads as before
+  ok    es: "resume" filled in reads as before
+  ok    fr: every word is plain text
+  ok    fr: the words cross to the client player
+  ok    fr: "stopped" filled in reads as before
+  ok    fr: "resume" filled in reads as before
+  ok    de: every word is plain text
+  ok    de: the words cross to the client player
+  ok    de: "stopped" filled in reads as before
+  ok    de: "resume" filled in reads as before
+  ok    it: every word is plain text
+  ok    it: the words cross to the client player
+  ok    it: "stopped" filled in reads as before
+  ok    it: "resume" filled in reads as before
+  ok    nl: every word is plain text
+  ok    nl: the words cross to the client player
+  ok    nl: "stopped" filled in reads as before
+  ok    nl: "resume" filled in reads as before
+  ok    pt: every word is plain text
+  ok    pt: the words cross to the client player
+  ok    pt: "stopped" filled in reads as before
+  ok    pt: "resume" filled in reads as before
+
+31 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE buyer-library.test.ts
+
+What is kept
+  ok    the store's id, under the address whatever its capitals
+  ok    and the address itself is nowhere in the key
+  ok    a purchase handed over another way puts its store in too
+  ok    a purchase brought over from another platform does not
+  ok    kept in its quarter's set, which ends three years and at most a quarter on
+
+Signing in by email
+  ok    an address that bought nothing: the same answer, and no email
+  ok    not an address
+  ok    a buyer: a link to their library
+  ok    the link opens it for that address, and a made-up one for nobody
+  ok    a few times an hour per address, then no more
+
+10 checks, all passing.
+Z_VOLUME {"runs":148,"mocks":5,"over":false}
+
+Z_STATUS 0 null
+
+FILE accessibility-inventory.test.ts
+
+Every source stays visible in the accessibility inventory; inventory is not a pass
+  ok    all page templates mapped
+  ok    all layout templates mapped
+  ok    all error/loading/not-found boundaries mapped
+  ok    all shared TSX components mapped
+  ok    all API route sources mapped
+
+Generated route templates retain gaps instead of claiming fixture coverage
+  ok    generator keeps the checked inventory current
+  ok    home route
+  ok    dynamic course route
+  ok    groups and parallel slots are not URL segments
+  ok    catch-all route
+  ok    optional catch-all route
+  ok    ambiguous or non-page source is refused app/api/x/route.ts
+  ok    ambiguous or non-page source is refused elsewhere/page.tsx
+  ok    ambiguous or non-page source is refused app/(.)photo/page.tsx
+  ok    ambiguous or non-page source is refused app/[[broken]/page.tsx
+  ok    source generator never certifies untested pages
+
+16 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE person-data-registry.test.ts
+
+Every file that keeps something per person is in the registry
+  ok    the scan finds the files it should
+  ok    each is in lib/person-data.ts (add a line saying what deleting a person does to it)
+  ok    each file named exists
+
+Erased means erased by the erasure itself
+  ok    every erased line names a module the erasure runs
+  ok    every module the erasure runs has an erased line
+  ok    no module runs twice
+  ok    each forget function the erasure imports is exported by its module
+  ok    and each is one of the modules it runs
+  ok    the list's own row is the last thing forgotten, after the modules that read it
+  ok    the fingerprint is written before any eraser runs
+  ok    each community module said to be erased through lib/community-erasure.ts is called from it
+
+What the confirmation reads
+  ok    there is something deleted, a fingerprint and kept lines
+  ok    every kept line says why
+  ok    every expiring line says within how many days
+  ok    in US English, and never the word the owner forbids
+
+The pages say so, and send a deletion to the page that does it
+  ok    the privacy policy has the deletion section
+  ok    and no longer sends a deletion to an email address
+  ok    the person's page posts to the route that deletes
+  ok    every store's page links to it
+  ok    the help says how
+
+20 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE platform-us-english.test.ts
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3060-gSccIP

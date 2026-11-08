@@ -1,0 +1,27 @@
+✘ [ERROR] No matching export in "lib/lesson-position-rules.ts" for import "lastShown"
+
+    tests/wg10-library-continue.test.ts:15:56:
+      15 │ ...IX, forgetLastIn, lastKey, lastShown, lessonPath, readLast, wri...
+         ╵                               ~~~~~~~~~
+
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+tests/wg10-library-continue.test.ts:15:56: ERROR: No matching export in "lib/lesson-position-rules.ts" for import "lastShown"
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at runOnEndCallbacks (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1592:45)
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1

@@ -14,11 +14,11 @@
 import { NO_NUDGE, bandOf, nudgeFits, parseNudge, scoreOf } from "@/lib/member-health-rules";
 import { memberHealth } from "@/lib/member-health";
 import { nudgeEmail, nudgeStore, nudgesThisMonth } from "@/lib/member-nudge";
-import { lastSeenIn } from "@/lib/community";
+import { freshConfig, lastSeenIn, memberKey, saveConfig, touchMember } from "@/lib/community";
 import { touchStudent } from "@/lib/learn";
 import { upsertContact } from "@/lib/contacts";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setNudge, setProductCourse, setStripeAccount, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setCommunity, setNudge, setProductCourse, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
@@ -29,6 +29,13 @@ const NOW = Math.floor(Date.now() / 1000);
 type Mail = { to: string[] | string; subject: string; text: string };
 const mails: Mail[] = [];
 let subs: Record<string, unknown>[] = [];
+const originalRun = redis.run.bind(redis);
+let syntheticCommands = 0;
+redis.run = (command) => {
+  if (syntheticCommands >= 100_000) throw new Error("synthetic command budget exceeded");
+  syntheticCommands += 1;
+  return originalRun(command);
+};
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -121,6 +128,24 @@ async function main(): Promise<void> {
   subs = kept;
   await memberHealth(store, true);
 
+  part("Unknown activity evidence never becomes 'never opened'");
+  const originalPipeline: typeof redis.pipeline = redis.pipeline.bind(redis);
+  let activityReads = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "HMGET" && String(command[1]).includes(":students"))) {
+      activityReads += 1;
+      return [[]];
+    }
+    return originalPipeline(commands);
+  };
+  let reportRefused = false;
+  try { await memberHealth(store, true); } catch { reportRefused = true; }
+  is("an incomplete course activity reply refuses the report", [reportRefused, activityReads], [true, 1]);
+  redis.pipeline = async (commands) => {
+    if (commands.some((command) => command[0] === "HMGET" && String(command[1]).includes(":students"))) throw new Error("synthetic activity read unavailable");
+    return originalPipeline(commands);
+  };
+
   part("The email back in");
   is("on only with an address", (await setNudge(OWNER, { on: true, address: "" })).ok, false);
   is("saved with one", (await setNudge(OWNER, { on: true, address: "1 Main St, Portland, OR 97201" })).ok, true);
@@ -128,6 +153,10 @@ async function main(): Promise<void> {
   for (const email of ["ana@example.com", "cy@example.com"]) {
     await upsertContact(store.listId as string, email, { agreed: true, explicit: true, source: "buyer", productId: club.product.id, title: "Weeknight Club" }, ROOM);
   }
+  let nudgeRefused = false;
+  try { await nudgeStore(store, Date.now() + 20_000); } catch { nudgeRefused = true; }
+  is("an unavailable activity read sends no come-back email", [nudgeRefused, mails.length], [true, 0]);
+  redis.pipeline = originalPipeline;
   await nudgeStore(store, Date.now() + 20_000);
   is("only the member away, who agreed; not the one whose payment failed", mails.map((m) => [m.to].flat()[0]), ["ana@example.com"]);
   const mail = mails[0];
@@ -140,6 +169,96 @@ async function main(): Promise<void> {
   await nudgeStore(store, Date.now() + 20_000);
   is("once per period they pay for", [mails.length, await nudgesThisMonth(store)], [1, 1]);
   is("the words in the store's language", nudgeEmail({ storeName: "Harbor", title: "Club", courseUrl: "u", communityUrl: "", language: "de" }).subject, "Club ist weiter für Sie da");
+
+  part("Unknown community activity cannot certify a report or send a comeback email");
+  const communityOwner = "community-owner@example.com";
+  const communityStore = await claimHandle(communityOwner, "health-community", "Community Club", "");
+  if (!communityStore.ok) throw new Error("no community store");
+  await ensureStatsId(communityOwner);
+  await ensureListId(communityOwner);
+  await setStripeAccount(communityOwner, "acct_TestCm00001", true);
+  await setCommunity(communityOwner, true);
+  await setNudge(communityOwner, { on: true, address: "1 Main St, Portland, OR 97201" });
+  const communityProduct = await addProduct(communityOwner, "Community Club", "", "20", { interval: "month", trialDays: 0, payments: 0 });
+  if (!communityProduct.ok) throw new Error("no community product");
+  const communityStoreNow = (await storeForEmail(communityOwner))!;
+  const communityId = communityStoreNow.community!.id;
+  const communityConfig = { ...freshConfig("Club"), access: [communityProduct.product.id] };
+  await saveConfig(communityId, communityConfig);
+  const visitor = await touchMember(communityId, "visitor@example.com", null, ROOM);
+  if (!visitor) throw new Error("no community visitor");
+  await upsertContact(communityStoreNow.listId as string, "visitor@example.com", { agreed: true, explicit: true, source: "buyer", productId: communityProduct.product.id, title: "Community Club" }, ROOM);
+  subs = [member("sub_Community0001", "visitor@example.com", { metadata: { store: communityStoreNow.handle, product: communityProduct.product.id } })];
+  mails.length = 0;
+  const communityControl = (await memberHealth(communityStoreNow, true))!;
+  is("a confirmed visit today stays healthy and sends no email", [communityControl.members[0]?.score, communityControl.atRisk, communityControl.complete, await nudgeStore(communityStoreNow, Date.now() + 20_000), mails.length], [100, 0, true, 0, 0]);
+
+  const memberRecord = JSON.stringify(visitor);
+  const malformedActivity: [string, unknown[]][] = [
+    ["missing pipeline reply", []],
+    ["extra pipeline reply", [[memberRecord], null]],
+    ["empty HMGET", [[]]],
+    ["non-array HMGET", [{}]],
+    ["null HMGET", [null]],
+    ["overfull HMGET", [[memberRecord, null]]],
+    ["unparseable member", [["{cut"]]],
+    ["missing member identity", [["{}"]]],
+    ["unknown visit time", [[JSON.stringify({ ...visitor, seen: null, at: null })]]],
+    ["negative visit time", [[JSON.stringify({ ...visitor, seen: -1 })]]],
+  ];
+  for (const [index, [name, reply]] of malformedActivity.entries()) {
+    subs[0].id = `sub_Community${index + 2}`;
+    await originalPipeline([
+      ["DEL", `nl:health:${communityStoreNow.statsId}`],
+    ]);
+    mails.length = 0;
+    let targeted = 0;
+    redis.pipeline = async (commands) => {
+      if (commands.some((command) => command[0] === "HMGET" && command[1] === `nl:cm:${communityId}:m`)) {
+        targeted += 1;
+        return reply;
+      }
+      return originalPipeline(commands);
+    };
+    let refused = false;
+    try { await memberHealth(communityStoreNow, true); } catch { refused = true; }
+    const cache = await originalPipeline([["GET", `nl:health:${communityStoreNow.statsId}`]]);
+    let emailRefused = false;
+    try { await nudgeStore(communityStoreNow, Date.now() + 20_000); } catch { emailRefused = true; }
+    redis.pipeline = originalPipeline;
+    is(`${name}: report and successful cache are refused`, [refused, cache[0] === null], [true, true]);
+    is(`${name}: no false comeback email`, [emailRefused, mails.length], [true, 0]);
+    is(`${name}: both real consumers reached the activity boundary`, targeted, 2);
+  }
+  const directEmails = ["absent@example.com", "removed@example.com", "visitor@example.com"];
+  const removed = { ...visitor, k: memberKey(directEmails[1]), e: directEmails[1], removed: true };
+  await originalPipeline([["HSET", `nl:cm:${communityId}:m`, removed.k, JSON.stringify(removed)]]);
+  is("confirmed absent, removed and recently seen members remain distinct", [...(await lastSeenIn(communityId, directEmails)).values()], [0, 0, visitor.seen]);
+  let shortRefused = false;
+  redis.pipeline = async (commands) => commands.some((command) => command[0] === "HMGET" && command[1] === `nl:cm:${communityId}:m`) ? [[null]] : originalPipeline(commands);
+  try { await lastSeenIn(communityId, directEmails); } catch { shortRefused = true; }
+  redis.pipeline = originalPipeline;
+  is("a short multi-member answer is unknown, not absent", shortRefused, true);
+
+  part("Unknown scoring prerequisites cannot make a report complete");
+  for (const boundary of ["listing", "community configuration"] as const) {
+    await originalPipeline([["DEL", `nl:health:${communityStoreNow.statsId}`]]);
+    let targeted = false;
+    redis.pipeline = async (commands) => {
+      const isTarget = commands.some((command) => boundary === "community configuration"
+        ? command[0] === "GET" && command[1] === `nl:cm:${communityId}:cfg`
+        : command[0] === "GET" && String(command[1]).startsWith("nl:catalog:"));
+      if (isTarget) { targeted = true; throw new Error("synthetic scoring prerequisite unavailable"); }
+      return originalPipeline(commands);
+    };
+    let refused = false;
+    const readStore = boundary === "listing" ? { ...communityStoreNow, catalog: { ...communityStoreNow.catalog, head: [], inline: null } } : communityStoreNow;
+    try { await memberHealth(readStore, true); } catch { refused = true; }
+    redis.pipeline = originalPipeline;
+    is(`${boundary}: the fixture reached the requested read`, targeted, true);
+    is(`${boundary}: unknown cannot certify or cache a complete score`, [refused, (await originalPipeline([["GET", `nl:health:${communityStoreNow.statsId}`]]))[0] === null], [true, true]);
+  }
+  console.log(`Synthetic Redis commands: ${syntheticCommands}/100000.`);
 
   done();
 }

@@ -1,0 +1,11 @@
+{
+  "file": "tests/flow-stop-action.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "26a6cbc094a931165ad0afe048204f10d305c316",
+  "stdout": "\nRead and kept\n  ok    another of the store's sequences, never one that is not\n  ok    never the workflow itself\n  ok    saved, and the stored list reads it back\n\nTaken out where they are\n  ok    Ana waits in the nurture sequence for its first email\n  ok    taken out: nothing of hers waits in it\n  ok    its history says it ended, and by what\n  ok    joining again does not start her on it again: each person goes through a sequence once\n  ok    no email of it went\n  ok    someone not in it is told so, in the step's history\n\nWaiting under an address the store had before\n  ok    an entry made before the store changed its address\n  ok    is taken out too\n\nDue in the same minute: the stop really cancels the email\n  ok    the stop, done first in the batch, keeps the email from going, and nothing of that sequence is left queued for her\n  ok    both histories say so: taken out, not put off for later\n\nA step under way when the stop lands\n  ok    the email under way goes, nothing after it is queued, and the run ends, saying why\n  ok    every place a run is queued again after its step goes through the lease check\n\nWaiting for room to send when the stop lands\n  ok    taken out: ended there, said why; still in it: the wait as it was\n  ok    both places a step is put off use it, and a wait taken out is not counted as later\n\nA condition that sends them on, when the stop lands first\n  ok    the conditional sequence is saved\n  ok    taken out before the condition is read: nothing of that sequence is queued for him, and his run stays ended\n\nOut of time in the same batch, after the stop\n  ok    his DS step is not put back in the queue, no email of it goes, and his run stays ended\n\nWhen the sequence is gone\n  ok    the workflow's review says so\n\nSaid in words\n  ok    the studio's choice and what it does\n  ok    the map says it\n\n23 checks, all passing.\nS_VOLUME {\"runs\":645,\"attempts\":4,\"forwarded\":4}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

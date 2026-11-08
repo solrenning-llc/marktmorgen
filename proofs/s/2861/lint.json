@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "--max-old-space-size=512",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings=0",
+    "lib/flows.ts",
+    "lib/flow-runs.ts",
+    "tests/flows-exact.test.ts",
+    "proofs/s/2861/run.mjs",
+    "proofs/s/2861/checks.mjs"
+  ],
+  "status": 0,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "error": null
+}

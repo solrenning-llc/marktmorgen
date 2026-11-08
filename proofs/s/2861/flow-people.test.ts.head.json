@@ -1,0 +1,11 @@
+{
+  "file": "tests/flow-people.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "26a6cbc094a931165ad0afe048204f10d305c316",
+  "stdout": "\nRead and saved strictly\n  ok    a field and a value it keeps; a stage the board has; a note with words\n  ok    a form that asks for no address cannot start a sequence\n  ok    a sequence that starts with the form, its steps kept\n\nStarted by the form, for people on the list\n  ok    the field is set for those on the list, not for somebody who is not\n  ok    Ana gets a new deal in the stage; Ben's open deal moves there\n  ok    a note on her page, saying where it came from\n  ok    the owner told once, with both of them\n  ok    and the email goes to each, once\n\nA sign-up asked from a form remembers it\n  ok    the confirmation link uses the service route and knows the form\n\nA workflow for one quiz result (added 17 October 2026)\n  ok    a result the quiz does not have is refused\n  ok    one of its results is kept on the workflow\n  ok    only the person who got that result starts it\n  ok    a sign-up asked from a quiz keeps the service route, form and result\n\n13 checks, all passing.\nS_VOLUME {\"runs\":553,\"attempts\":9,\"forwarded\":9}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

@@ -254,6 +254,18 @@ part("main's head is green when its tree is a merge-queue commit whose nine requ
     const runs = [...restGreen(), run(PC, null)];
     is("head run still in progress: exactly as before (its own result will decide)", [withProof(runs).action, ...sameAsBefore(runs)], ["none", true, true, null]);
   }
+  // Codex H2 on #3144: a later run of the same workflow on the same head that has not finished (a
+  // schedule queued after a failed push) never hides the completed red, with or without the queue proof.
+  for (const [label, later] of [["only queued", { status: "queued" }], ["still in progress", {}]] as [string, Partial<Run>][]) {
+    const failed = run(PC, "failure");
+    const runs = [...restGreen(), failed, run(PC, null, { event: "schedule", ...later })];
+    is(`(e) head run failed, a later run on the same head ${label}: still red, the failed run reported, no proof named`,
+      [withProof(runs).action, withProof(runs).red.map((r) => r.id), without(runs).action, withProof(runs).treeGreen], ["open", [failed.id], "open", null]);
+  }
+  {
+    const runs = [...restGreen(), run(PC, "failure"), run(PC, "success", { event: "schedule" })];
+    is("control: head run failed, then a later run on the same head passed: green", [withProof(runs).action, without(runs).action], ["close", "close"]);
+  }
   is("(f) head run canceled, its tree proven green in the merge queue: green, nothing reported",
     [withProof([...restGreen(), run(PC, stopped)]).action, withProof([...restGreen(), run(PC, stopped)]).red], ["close", []]);
   const allStopped = REQUIRED.map((_, i) => run(i, stopped));

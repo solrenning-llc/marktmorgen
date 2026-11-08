@@ -1,0 +1,32 @@
+✔ control: link 100 is accepted and link 101 refused when HVALS answers (63.721489ms)
+✔ fails closed: a reply missing its slot to HVALS never lets link 101 or a second "Post 0" be written (0.840338ms)
+✔ fails closed: a reply that is not a list to HVALS never lets link 101 or a second "Post 0" be written (0.3778ms)
+✔ fails closed: a list with a member that is not a string to HVALS never lets link 101 or a second "Post 0" be written (0.363779ms)
+✔ fails closed: a list with a hole to HVALS never lets link 101 or a second "Post 0" be written (0.482929ms)
+✔ fails closed: an unknown SET NX reply writes nothing to the store's links (0.417119ms)
+✔ control: a new group gets a fresh id; the same name keeps its id; group 20 accepted, group 21 refused (1.609479ms)
+✔ fails closed: a reply missing its slot to HVALS never lets group 21 or a second "Group 0" be written (0.552393ms)
+✔ fails closed: a reply that is not a list to HVALS never lets group 21 or a second "Group 0" be written (0.357319ms)
+✔ fails closed: a list with a member that is not a string to HVALS never lets group 21 or a second "Group 0" be written (0.447715ms)
+✔ the routes answer an unknown read with an honest 503, and the studio says it in words (83.067009ms)
+✔ imported buyers that cannot be read make the reading partial, and no ten-minute copy is kept without them (1.417999ms)
+✔ fails closed: an HSET to the store's links applied, answered in an unknown shape never leaves a working code outside the list (0.44424ms)
+✔ fails closed: an HSET to the store's links not applied, answered with no slot never leaves a working code outside the list (0.237118ms)
+✔ fails closed: an HSET to the store's links applied, answered with a negative count never leaves a working code outside the list (0.167443ms)
+✔ fails closed: an HSET of a new group answered in an unknown shape is not said saved, and the group is taken back (0.515909ms)
+✔ fails closed: an HSET replacing a group answered in an unknown shape is not said saved, and the group read before is put back (0.282687ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 184.20777
+V2892_CHILD {"status":0,"signal":null,"error":null}
+a store's short links could not be read UnknownReplyError: Redis answered a store's short links in an unknown shape
+    at readLinks (/tmp/v2892-0KYH33/test.cjs:63627:19)
+V2892_VOLUME {"redis":619,"http":0}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

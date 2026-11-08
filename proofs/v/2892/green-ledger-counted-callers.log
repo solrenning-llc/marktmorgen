@@ -1,0 +1,217 @@
+
+A narrowed email written down counts its reading of the buyers first
+  ok    with fewer studio requests left than reading Stripe again needs, nothing is read from Stripe or written
+  ok    and the refusal says how many this needs and how many are left
+  ok    the composer is told so, not that the write is unknown
+
+Telling a product's buyers of an update counts every paid sale it reads first
+  ok    with fewer left than it needs, it is refused with the sentence, and Stripe is not read
+  ok    a reading of the buyers' worth, with the PayPal sales kept by their weight
+  ok    the Stripe part only when Stripe is read; nothing when no sales are read
+  ok    with room, it counts them and then reads Stripe
+
+A narrowed email's send reads the buyers once, counted (review M1)
+  ok    a reading's worst case, as kept now: the copy by size, and Stripe's pages should the copy be gone
+  ok    sent now: due now, it holds EXTRA_READS readings in this month, should another run make its list
+  ok    it lists from the narrowing just read and counted: Stripe not read, nothing counted again, the hold given back
+
+ALTO: every way the scheduled job makes a narrowed email's list is paid before it reads: one set for the next minute, one due now that it takes first
+  ok    set for the next minute, it is the scheduled job's to start: scheduled, holding READS_HELD readings in this month
+  ok    a run before it is due does nothing with it
+  ok    due, its copy gone and this month's requests used up by the rest, the scheduled job reads drawing from its hold, and lists it
+  ok    what the reading drew stays taken; the rest of the hold is given back once its list is made
+  ok    due now and taken first by the scheduled job, it reads drawing from the EXTRA_READS it held: Stripe read, nothing taken over the month
+
+Decision (1): what a reading needs beyond the hold is taken from the month it is read in; with none left there, it waits for the next month, saying when, never read unpaid
+  ok    the excess taken from this month, the hold drawn to nothing, then read and listed
+  ok    an email written down with nothing to count it holds nothing
+  ok    with no studio request left this month it is not read: it waits, saying why and when they open again, until then
+  ok    a note that fits the room it was given
+  ok    before that day nothing is tried, even with room again
+  ok    that day, it is read, paid from that month, and goes on
+  ok    held for another month than the one it goes out in: that hold is let go, and the month it is read in pays for the reading
+
+Decision (2): a scheduled email holds in the month it goes out; scheduling past that month's figure, or past the plan's end, is refused at once
+  ok    two months ahead: held in that month's own figure, nothing in this one's but the count just read
+  ok    all held for a month never passes that month's figure: refused, with how many it needs and how many that month has left, nothing written or held
+  ok    the composer is told that sentence
+  ok    set to end in 20 days, an email for day 40 is refused, saying the plan's end
+  ok    three months ahead: held in that month only
+  ok    the plan ended before it was due: canceled, saying so; nothing read, sent or taken; its hold given back; out of the queue
+  ok    a narrowed email canceled with the plan does not say none of the studio requests were used; one to the whole list may
+  ok    the plan ended: an email to the whole list is canceled too, saying so, nothing sent, out of the queue (never waiting for Pro)
+  ok    one going out stops where it was, saying how many went
+  ok    the plan on again later does not bring it back
+
+The month a moment ahead falls in, as the plan stands now (windowAt)
+  ok    a monthly plan anchored on the 31st: the period running, then the periods Stripe makes from that anchor (cut to a short month, back to the 31st after)
+  ok    the same anchor read from a period that began cut short (28 February to 31 March)
+  ok    anchored on the 30th
+  ok    a yearly plan: its months on its own day, into the next year
+  ok    a plan set to end has no month after its end; an ended one counts the calendar month, where holdAllowanceAt holds nothing; an unknown moment has none
+
+MÉDIO 3: a reading that fails at Stripe never fails the email at once: what it drew stays spent, it waits, saying so, and stops after READ_MISSES_ALLOWED in a row
+  ok    waiting with the note; what the try drew from its hold stays spent; no reading counted; this month's figure untouched
+  ok    tried again after an hour, and not before
+  ok    failing 7 times in a row: waiting until then, then failed, saying so, out of the queue
+  ok    every try paid before it asked Stripe: the hold first, then this month
+  ok    Stripe answering again, it is read and listed, with no wait or miss left on it
+  ok    its notes fit the room they were given
+
+ALTO (round 2): a narrowed email whose store no longer reads its buyers is never sent without its narrowing
+  ok    written to the one buyer who spent enough, of three on the list
+  ok    Stripe disconnected, no PayPal and none brought over: canceled, saying why, sent to no one, its hold given back
+
+MÉDIO 2: a hold made under a larger plan never draws past the figure of the smaller plan of the month it is read in
+  ok    on Pro, its hold draws only the 4 Pro leaves, the rest given back; the reading needs more, so it waits for next month, unread
+
+Refusals and waits that say what happened
+  ok    this month too few left: how many it needs and how many are left
+  ok    in a trial, a day past its end is refused with the day the trial ends
+  ok    a count that could not be made: not read, waiting an hour, saying so
+  ok    giving back to a counter that is not there never leaves one below zero, nor one without an expiry
+  ok    a subject test decided by sales: without studio requests its sales are not read
+  ok    with them, paid first, then read
+
+MÉDIO 4 and the record's room: a full data room refuses the email and gives back what it held
+  ok    store_full, nothing written, and nothing held left taken
+  ok    the studio says so, as a refusal, not as a write it cannot confirm
+  ok    the room it takes covers its record at its widest: its readings, misses, wait and hold too
+
+LEVE 8: a draw that cannot be written down takes nothing from the hold
+  ok    not read, waiting, its hold whole on the record
+
+A list that cannot be made for another reason is read again at most EXTRA_READS times, each paid, then the email stops, failed, saying why
+  ok    an email holding its readings, its data room full for 3 rounds: read 2 times at the most, waiting with the data room's note until then, then failed
+  ok    what it held and did not draw given back when it stops
+  ok    then it stops, failed, with why it waited, out of the queue: never dropped without a word
+  ok    an email written down with nothing held, its data room full for 3 rounds: read 2 times at the most, waiting with the data room's note until then, then failed
+  ok    what it held and did not draw given back when it stops
+  ok    then it stops, failed, with why it waited, out of the queue: never dropped without a word
+  ok    waiting, its note says what happens and when: tried again in an hour, once more, then it stops
+  ok    and before that hour nothing is tried
+  ok    made room within its readings, its list is made at the next round and it goes on
+  ok    the note without a retry sentence of its own keeps its words; an empty one says the list could not be made
+
+A scheduled or waiting email with no list made, nothing sent, can be canceled; what it held and did not draw is given back
+  ok    canceled while scheduled: canceled, out of the queue, its hold given back and marked so
+  ok    not while a run holds it
+  ok    then it cancels, leaves the queue, and its half-written list, kept with no expiry, goes with it (LEVE 6)
+  ok    a run after that reads and sends nothing
+  ok    a waiting email whose list was made still cannot be canceled
+  ok    a waiting email with some sent still cannot be canceled
+  ok    a record with {"hold":{"window":"2026-10-29","units":-1}} is refused as malformed, never run
+  ok    a record with {"hold":{"window":"soon","units":1}} is refused as malformed, never run
+  ok    a record with {"reads":1.5} is refused as malformed, never run
+  ok    a record with {"retryAt":-1} is refused as malformed, never run
+
+The routes and the studio
+  ok    the studio offers the same button for a waiting email with no list made and nothing sent, at a 44-pixel target
+  ok    the composer's count counts its reading of the buyers, and says the refusal's sentence
+  ok    a narrowed email written down counts it too
+  ok    the mail route reads the buyers only counted: never without a count, and its send started now takes the narrowing just counted
+  ok    a hold refused says its own sentence
+  ok    the update's refusal carries its sentence, or the shared one
+  ok    asking the numbers checks the month's AI jobs, then counts their reading as their page does, then reads them
+  ok    with the shared sentence when the count gave none
+  ok    a narrowed email says, before it is confirmed, what it sets aside and from which month, and that what it does not use comes back; a refusal is shown as an alert
+  ok    the composer shows the sentence, on the count as on a send, and takes the count's away when the next count goes through
+  ok    so do the update box and the numbers question
+
+87 checks, all passing.
+V2892_CHILD {"status":0,"signal":null,"error":null}
+reading a scheduled email's buyers failed c60d4a6e5ccd9a0331fd9da3 TypeError: fetch failed
+    at globalThis.fetch (/tmp/v2892-uxZIsB/test.cjs:64179:62)
+    at mock (file:///workspace/scratch/v-2892-integration/proofs/v/2892/preload.mjs:9:245)
+    at /tmp/v2892-uxZIsB/test.cjs:10848:29
+    at timed (/tmp/v2892-uxZIsB/test.cjs:2387:19)
+    at onAccount (/tmp/v2892-uxZIsB/test.cjs:10847:43)
+    at readRenewalPayments (/tmp/v2892-uxZIsB/test.cjs:19064:25)
+    at buyerLedger (/tmp/v2892-uxZIsB/test.cjs:63190:14)
+    at async keepFor (/tmp/v2892-uxZIsB/test.cjs:63271:24)
+    at async readNarrowing (/tmp/v2892-uxZIsB/test.cjs:63778:12)
+    at async advanceBroadcast (/tmp/v2892-uxZIsB/test.cjs:63564:23)
+reading a scheduled email's buyers failed c60d4a6e5ccd9a0331fd9da3 TypeError: fetch failed
+    at globalThis.fetch (/tmp/v2892-uxZIsB/test.cjs:64179:62)
+    at mock (file:///workspace/scratch/v-2892-integration/proofs/v/2892/preload.mjs:9:245)
+    at /tmp/v2892-uxZIsB/test.cjs:10848:29
+    at timed (/tmp/v2892-uxZIsB/test.cjs:2387:19)
+    at onAccount (/tmp/v2892-uxZIsB/test.cjs:10847:43)
+    at readRenewalPayments (/tmp/v2892-uxZIsB/test.cjs:19064:25)
+    at buyerLedger (/tmp/v2892-uxZIsB/test.cjs:63190:14)
+    at async keepFor (/tmp/v2892-uxZIsB/test.cjs:63271:24)
+    at async readNarrowing (/tmp/v2892-uxZIsB/test.cjs:63778:12)
+    at async advanceBroadcast (/tmp/v2892-uxZIsB/test.cjs:63564:23)
+reading a scheduled email's buyers failed c60d4a6e5ccd9a0331fd9da3 TypeError: fetch failed
+    at globalThis.fetch (/tmp/v2892-uxZIsB/test.cjs:64179:62)
+    at mock (file:///workspace/scratch/v-2892-integration/proofs/v/2892/preload.mjs:9:245)
+    at /tmp/v2892-uxZIsB/test.cjs:10848:29
+    at timed (/tmp/v2892-uxZIsB/test.cjs:2387:19)
+    at onAccount (/tmp/v2892-uxZIsB/test.cjs:10847:43)
+    at readRenewalPayments (/tmp/v2892-uxZIsB/test.cjs:19064:25)
+    at buyerLedger (/tmp/v2892-uxZIsB/test.cjs:63190:14)
+    at async keepFor (/tmp/v2892-uxZIsB/test.cjs:63271:24)
+    at async readNarrowing (/tmp/v2892-uxZIsB/test.cjs:63778:12)
+    at async advanceBroadcast (/tmp/v2892-uxZIsB/test.cjs:63564:23)
+reading a scheduled email's buyers failed c60d4a6e5ccd9a0331fd9da3 TypeError: fetch failed
+    at globalThis.fetch (/tmp/v2892-uxZIsB/test.cjs:64179:62)
+    at mock (file:///workspace/scratch/v-2892-integration/proofs/v/2892/preload.mjs:9:245)
+    at /tmp/v2892-uxZIsB/test.cjs:10848:29
+    at timed (/tmp/v2892-uxZIsB/test.cjs:2387:19)
+    at onAccount (/tmp/v2892-uxZIsB/test.cjs:10847:43)
+    at readRenewalPayments (/tmp/v2892-uxZIsB/test.cjs:19064:25)
+    at buyerLedger (/tmp/v2892-uxZIsB/test.cjs:63190:14)
+    at async keepFor (/tmp/v2892-uxZIsB/test.cjs:63271:24)
+    at async readNarrowing (/tmp/v2892-uxZIsB/test.cjs:63778:12)
+    at async advanceBroadcast (/tmp/v2892-uxZIsB/test.cjs:63564:23)
+reading a scheduled email's buyers failed c60d4a6e5ccd9a0331fd9da3 TypeError: fetch failed
+    at globalThis.fetch (/tmp/v2892-uxZIsB/test.cjs:64179:62)
+    at mock (file:///workspace/scratch/v-2892-integration/proofs/v/2892/preload.mjs:9:245)
+    at /tmp/v2892-uxZIsB/test.cjs:10848:29
+    at timed (/tmp/v2892-uxZIsB/test.cjs:2387:19)
+    at onAccount (/tmp/v2892-uxZIsB/test.cjs:10847:43)
+    at readRenewalPayments (/tmp/v2892-uxZIsB/test.cjs:19064:25)
+    at buyerLedger (/tmp/v2892-uxZIsB/test.cjs:63190:14)
+    at async keepFor (/tmp/v2892-uxZIsB/test.cjs:63271:24)
+    at async readNarrowing (/tmp/v2892-uxZIsB/test.cjs:63778:12)
+    at async advanceBroadcast (/tmp/v2892-uxZIsB/test.cjs:63564:23)
+reading a scheduled email's buyers failed c60d4a6e5ccd9a0331fd9da3 TypeError: fetch failed
+    at globalThis.fetch (/tmp/v2892-uxZIsB/test.cjs:64179:62)
+    at mock (file:///workspace/scratch/v-2892-integration/proofs/v/2892/preload.mjs:9:245)
+    at /tmp/v2892-uxZIsB/test.cjs:10848:29
+    at timed (/tmp/v2892-uxZIsB/test.cjs:2387:19)
+    at onAccount (/tmp/v2892-uxZIsB/test.cjs:10847:43)
+    at readRenewalPayments (/tmp/v2892-uxZIsB/test.cjs:19064:25)
+    at buyerLedger (/tmp/v2892-uxZIsB/test.cjs:63190:14)
+    at async keepFor (/tmp/v2892-uxZIsB/test.cjs:63271:24)
+    at async readNarrowing (/tmp/v2892-uxZIsB/test.cjs:63778:12)
+    at async advanceBroadcast (/tmp/v2892-uxZIsB/test.cjs:63564:23)
+reading a scheduled email's buyers failed c60d4a6e5ccd9a0331fd9da3 TypeError: fetch failed
+    at globalThis.fetch (/tmp/v2892-uxZIsB/test.cjs:64179:62)
+    at mock (file:///workspace/scratch/v-2892-integration/proofs/v/2892/preload.mjs:9:245)
+    at /tmp/v2892-uxZIsB/test.cjs:10848:29
+    at timed (/tmp/v2892-uxZIsB/test.cjs:2387:19)
+    at onAccount (/tmp/v2892-uxZIsB/test.cjs:10847:43)
+    at readRenewalPayments (/tmp/v2892-uxZIsB/test.cjs:19064:25)
+    at buyerLedger (/tmp/v2892-uxZIsB/test.cjs:63190:14)
+    at async keepFor (/tmp/v2892-uxZIsB/test.cjs:63271:24)
+    at async readNarrowing (/tmp/v2892-uxZIsB/test.cjs:63778:12)
+    at async advanceBroadcast (/tmp/v2892-uxZIsB/test.cjs:63564:23)
+reading a scheduled email's buyers failed 77558aafa7fc054ffc38d62a TypeError: fetch failed
+    at globalThis.fetch (/tmp/v2892-uxZIsB/test.cjs:64179:62)
+    at mock (file:///workspace/scratch/v-2892-integration/proofs/v/2892/preload.mjs:9:245)
+    at /tmp/v2892-uxZIsB/test.cjs:10848:29
+    at timed (/tmp/v2892-uxZIsB/test.cjs:2387:19)
+    at onAccount (/tmp/v2892-uxZIsB/test.cjs:10847:43)
+    at readRenewalPayments (/tmp/v2892-uxZIsB/test.cjs:19064:25)
+    at buyerLedger (/tmp/v2892-uxZIsB/test.cjs:63190:14)
+    at async keepFor (/tmp/v2892-uxZIsB/test.cjs:63271:24)
+    at async readNarrowing (/tmp/v2892-uxZIsB/test.cjs:63778:12)
+    at async advanceBroadcast (/tmp/v2892-uxZIsB/test.cjs:63564:23)
+reading a subject test's sales failed Error: a subject test's sales were not read: its studio requests could not be counted
+    at countTest (/tmp/v2892-uxZIsB/test.cjs:63833:27)
+    at async main (/tmp/v2892-uxZIsB/test.cjs:64459:18)
+V2892_VOLUME {"redis":1254,"http":88}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

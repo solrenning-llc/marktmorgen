@@ -1,0 +1,109 @@
+
+inviteMember: an invitation is emailed only on a whole count under the day's limit
+  ok    inviteMember, a count that is null: refused, never sent
+  ok    inviteMember, a count written as text: refused, never sent
+  ok    inviteMember, a fractional count: refused, never sent
+  ok    inviteMember, a negative count: refused, never sent
+  ok    inviteMember, a count that is an object: refused, never sent
+  ok    inviteMember, a count that is true: refused, never sent
+  ok    inviteMember, a reply missing the count: refused, never sent
+  ok    inviteMember, a third, unasked-for reply: refused, never sent
+  ok    inviteMember, a reply that is not a list: refused, never sent
+  ok    inviteMember, a Redis that cannot be asked: refused, never sent
+  ok    inviteMember: one past the day's limit is limited, as before
+  ok    inviteMember: the day's last one (20) is sent
+  ok    inviteMember: the real counter still sends
+
+phone sendTest: a test push is sent only on a whole count under the minute's limit
+  ok    phone sendTest, a count that is null: refused, nothing pushed
+  ok    phone sendTest, a count written as text: refused, nothing pushed
+  ok    phone sendTest, a fractional count: refused, nothing pushed
+  ok    phone sendTest, a negative count: refused, nothing pushed
+  ok    phone sendTest, a count that is an object: refused, nothing pushed
+  ok    phone sendTest, a count that is true: refused, nothing pushed
+  ok    phone sendTest, a reply missing the count: refused, nothing pushed
+  ok    phone sendTest, a third, unasked-for reply: refused, nothing pushed
+  ok    phone sendTest, a reply that is not a list: refused, nothing pushed
+  ok    phone sendTest, a Redis that cannot be asked: refused, nothing pushed
+  ok    phone sendTest: one past the minute's limit is limited, as before
+  ok    phone sendTest: the minute's last one (6) is tried
+  ok    phone sendTest: the real counter still tries it
+
+phone alertCreator: a quiet event is pushed only on a whole count under the hour's limit
+  ok    alertCreator, a count that is null: nothing pushed
+  ok    alertCreator, a count written as text: nothing pushed
+  ok    alertCreator, a fractional count: nothing pushed
+  ok    alertCreator, a negative count: nothing pushed
+  ok    alertCreator, a count that is an object: nothing pushed
+  ok    alertCreator, a count that is true: nothing pushed
+  ok    alertCreator, a reply missing the count: nothing pushed
+  ok    alertCreator, a third, unasked-for reply: nothing pushed
+  ok    alertCreator, a reply that is not a list: nothing pushed
+  ok    alertCreator, a Redis that cannot be asked: nothing pushed
+  ok    alertCreator, the "seen" mark answered an unknown answer: nothing pushed
+  ok    alertCreator, the "seen" mark answered an empty reply: nothing pushed
+  ok    alertCreator, the "seen" mark answered a list of two: nothing pushed
+  ok    alertCreator, the "seen" mark answered a Redis that cannot be asked: nothing pushed
+  ok    alertCreator: an event already seen (null) is not pushed again, as before
+  ok    alertCreator: one past the hour's limit is not pushed, as before
+  ok    alertCreator: the hour's last one (20) is pushed
+  ok    alertCreator: the real counter still pushes
+
+buyerLedger: the buyers' copy is read and counted only on a whole size
+  ok    buyerLedger, the copy's size is a count that is null: not counted, nothing read
+  ok    buyerLedger, the copy's size is a count written as text: not counted, nothing read
+  ok    buyerLedger, the copy's size is a fractional count: not counted, nothing read
+  ok    buyerLedger, the copy's size is a negative count: not counted, nothing read
+  ok    buyerLedger, the copy's size is a count that is an object: not counted, nothing read
+  ok    buyerLedger, the copy's size is a count that is true: not counted, nothing read
+  ok    buyerLedger, the copy's size is an empty reply: not counted, nothing read
+  ok    buyerLedger, the copy's size is a second, unasked-for reply: not counted, nothing read
+  ok    buyerLedger, the copy's size is a reply that is not a list: not counted, nothing read
+  ok    buyerLedger, the copy's size is a Redis that cannot be asked: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a count that is null: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a count written as text: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a fractional count: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a negative count: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a count that is an object: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a count that is true: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is an empty reply: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a second, unasked-for reply: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a reply that is not a list: not counted, nothing read
+  ok    buyerLedger, the imported buyers' count is a Redis that cannot be asked: not counted, nothing read
+  ok    buyerLedger: no copy kept (0) is read from the sales, as before
+  ok    buyerLedger: the real reading still answers
+  ok    LedgerNotCounted is the error the callers already handle
+
+ledgerReadingUnits: what a reading costs is measured only on whole sizes
+  ok    ledgerReadingUnits, a size that is null: not counted
+  ok    ledgerReadingUnits, a size written as text: not counted
+  ok    ledgerReadingUnits, a count written as text: not counted
+  ok    ledgerReadingUnits, a fractional size: not counted
+  ok    ledgerReadingUnits, a negative count: not counted
+  ok    ledgerReadingUnits, a size that is true: not counted
+  ok    ledgerReadingUnits, a reply missing the count: not counted
+  ok    ledgerReadingUnits, a third, unasked-for reply: not counted
+  ok    ledgerReadingUnits: nothing kept still measures
+
+forgetDiscordPerson: the records removed are counted only on a whole DEL count
+  ok    forgetDiscordPerson, a count that is null: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, a count written as text: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, a fractional count: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, a negative count: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, a count that is an object: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, a count that is true: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, an empty reply: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, a second, unasked-for reply: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, a reply that is not a list: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson, a Redis that cannot be asked: said as unknown, never as 0 removed
+  ok    forgetDiscordPerson: two removed are counted as two
+  ok    forgetDiscordPerson: none there is counted as none
+  ok    forgetDiscordPerson: the real DEL still counts
+  ok    UnknownReplyError is the shape error the erasure runner reports as not finished
+
+90 checks, all passing.
+V2892_CHILD {"status":0,"signal":null,"error":null}
+V2892_VOLUME {"redis":257,"http":2}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

@@ -1,0 +1,17 @@
+  ok    forgetLedgerCopy, null: never reported as a finished count
+  ok    forgetLedgerCopy, text: never reported as a finished count
+  ok    forgetLedgerCopy, fractional: never reported as a finished count
+  ok    forgetLedgerCopy, negative: never reported as a finished count
+  ok    forgetLedgerCopy, true: never reported as a finished count
+  ok    forgetLedgerCopy, empty reply: never reported as a finished count
+  ok    forgetLedgerCopy, second reply: never reported as a finished count
+  ok    forgetLedgerCopy, not a list: never reported as a finished count
+  ok    forgetLedgerCopy: one removed is one
+  ok    forgetLedgerCopy: none there is none
+
+10 checks, all passing.
+V2892_CHILD {"status":0,"signal":null,"error":null}
+V2892_VOLUME {"redis":0,"http":0}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

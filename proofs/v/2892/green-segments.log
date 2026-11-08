@@ -1,0 +1,18 @@
+✔ control: with every member read, the full list refuses group 21 and the same name keeps its id (9.578316ms)
+✔ a kept member that does not read is unknown: listSegments throws rather than answering fewer groups (0.830153ms)
+✔ a kept member that does not read never lets group 21 be written (0.721499ms)
+✔ the member of the same name that does not read never lets a second group of that name be written (0.844464ms)
+✔ confirmed absence: a list with no saved group answers none (0.223618ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.414768
+V2892_CHILD {"status":0,"signal":null,"error":null}
+V2892_VOLUME {"redis":85,"http":0}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

@@ -343,7 +343,13 @@ export async function listSegments(listId: string | null): Promise<Segment[]> {
   if (!listId || !isRedisConfigured()) return [];
   const raw = stringList(repliesFor(await redisPipeline([["HVALS", segmentsKey(listId)]]), 1)?.[0]);
   if (!raw) throw new UnknownReplyError("a store's saved groups");
-  return raw.map(parseSegment).filter((s): s is Segment => s !== null).sort(byName);
+  const segments = raw.map((value) => {
+    const segment = parseSegment(value);
+    // An unreadable kept member is unknown, never an absent group for the cap or name lookup.
+    if (!segment) throw new UnknownReplyError("a store's saved group");
+    return segment;
+  });
+  return segments.sort(byName);
 }
 
 /** listSegments, with null for a reply in an unknown shape; any other failure is thrown as it was. */

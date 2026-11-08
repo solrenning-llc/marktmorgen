@@ -1,0 +1,21 @@
+
+A cart as where a link goes
+  ok    two of the store's products, and a code in capitals
+  ok    no code is fine
+  ok    refused: one product, the same twice, too many, another store's, or a code of the wrong shape
+  ok    it opens the store with the cart and the code, tagged with the post
+
+Through the real redirect
+  ok    sent to the store with the cart and the code
+
+The studio
+  ok    the list says where it goes and keeps it as its own choice
+  ok    the builder offers a short link with a labeled name and place
+  ok    and says the result in a status, or why not in an alert
+
+8 checks, all passing.
+V2892_CHILD {"status":0,"signal":null,"error":null}
+V2892_VOLUME {"redis":13,"http":0}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

@@ -1,0 +1,17 @@
+✔ inactive diagnostic observations retain their existing absolute one-day expiry (1.622068ms)
+✔ every family of the registry says what becomes of it when its store closes, and nothing more is said (0.972097ms)
+✔ what each says fits how the registry bounds it (3.309254ms)
+✔ a key belongs to its longest family, and the walk takes only what names a closing store (0.630221ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12.115083
+V2892_CHILD {"status":0,"signal":null,"error":null}
+V2892_VOLUME {"redis":0,"http":0}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

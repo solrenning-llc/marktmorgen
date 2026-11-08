@@ -1,0 +1,33 @@
+
+Names, places and where a link goes
+  ok    a post's name as a utm_campaign is counted
+  ok    a place from the list, or somewhere else
+  ok    a product only when the store has it
+  ok    it opens the page tagged with where it was posted and the post's name
+
+Making links
+  ok    six letters nobody misreads
+  ok    one link to a name
+  ok    a product of another store is refused
+  ok    the store's links, the newest first
+
+Opening a link
+  ok    sent to the store, tagged, kept by the CDN for five minutes
+  ok    typed in capitals it still opens
+  ok    a code that never was opens the page that says so
+
+Changing where it goes, and ending it
+  ok    the same link now opens the product
+  ok    another store cannot change it
+  ok    nor end it
+  ok    ended, it opens the page that says so and leaves the list
+
+A hundred links at most
+  ok    the hundred and first is refused
+
+16 checks, all passing.
+V2892_CHILD {"status":0,"signal":null,"error":null}
+V2892_VOLUME {"redis":438,"http":0}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

@@ -1,0 +1,22 @@
+
+Everywhere the audience goes
+  ok    in the narrowing the count, the draft, the send and a saved group read
+  ok    counted when it changes, and kept when the composer is set aside
+  ok    a draft with only a kind still keeps its narrowing
+  ok    a saved group brought back sets it
+
+What the creator reads
+  ok    one field, its label and its hint linked
+  ok    each kind by name, its rule under the field
+  ok    and in the audience summary
+
+How many of each kind (unit 3c)
+  ok    counted from the ledger the choices already read, with the channels, at the same moment as the kind kept
+  ok    each beside its name, only a whole count taken, and said to be all buyers
+
+9 checks, all passing.
+V2892_CHILD {"status":0,"signal":null,"error":null}
+V2892_VOLUME {"redis":0,"http":0}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":0,"signal":null,"error":null}

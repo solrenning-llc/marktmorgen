@@ -77,6 +77,16 @@ const SENT_SECONDS = 90 * 86_400;
 const PER_STORE = 100;
 /** Pages of past-due memberships read in one run, PER_STORE each: read to decide, not a larger number written. */
 const FAILED_PAGES = 5;
+/**
+ * A store not finished in a run (its sweep threw, or it still had members to write to when the run stopped) is where
+ * the next run starts, so they are not left until the walk has gone round every store (rule 24, R24 crons item 6). At
+ * most this many runs in a row on the same store: one that keeps failing never holds every other store back, and is
+ * read again on the next walk round.
+ */
+const HOLD_RUNS = 3;
+
+/** What a store's sweep did: the emails sent, and whether everything it read was handled (false: more to do). */
+type Swept = { sent: number; complete: boolean };
 
 const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -195,7 +205,7 @@ function worthAsking(store: Store): boolean {
  * agreed to, for something already handed over, and recovering it is as fair
  * as recovering a membership.
  */
-async function remindFailed(store: Store, deadline: number): Promise<number> {
+async function remindFailed(store: Store, deadline: number): Promise<Swept> {
   const account = store.stripeAccountId as string;
   const handles = saleHandles(store);
   const query = new URLSearchParams({ status: "past_due", limit: String(PER_STORE) });
@@ -205,17 +215,25 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
   // stops this store's run, said as failed, never read as "nobody is behind".
   const subs: Sub[] = [];
   let after = "";
-  for (let page = 0; page < FAILED_PAGES && Date.now() < deadline; page += 1) {
+  let pages = 0;
+  let ended = false;
+  for (; pages < FAILED_PAGES && Date.now() < deadline; pages += 1) {
     if (after) query.set("starting_after", after);
     const listed = (await onAccount("GET", account, `/subscriptions?${query}`)) as { data?: unknown; has_more?: unknown };
     if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of past-due memberships");
     subs.push(...(listed.data as Sub[]));
     const last = (listed.data as Sub[]).at(-1)?.id;
-    if (listed.has_more === false || typeof last !== "string" || !SUB_PATTERN.test(last)) break;
+    if (listed.has_more === false || typeof last !== "string" || !SUB_PATTERN.test(last)) {
+      ended = true;
+      break;
+    }
     after = last;
   }
+  // Stopped by the run's time, not by the end of the list or the page cap: there is more to read (rule 24, R24 crons
+  // item 6). The page cap is not "more to do" here: the next run reads the same first pages again.
+  let complete = ended || pages >= FAILED_PAGES;
   const mine = subs.filter((s) => handles.has(s.metadata?.store ?? ""));
-  if (!mine.length) return 0;
+  if (!mine.length) return { sent: 0, complete };
 
   const ids = [...new Set(mine.map((s) => s.metadata?.product ?? "").filter(Boolean))];
   const titles = new Map((await readListings(store, ids).catch(() => [])).map((p) => [p.id, p.title]));
@@ -223,7 +241,11 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
   let written = 0;
 
   for (const sub of mine) {
-    if (Date.now() >= deadline || written >= PER_STORE) break;
+    // Members left for the next run, which starts at this store (recoverFailedPayments).
+    if (Date.now() >= deadline || written >= PER_STORE) {
+      complete = false;
+      break;
+    }
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
     const invoice = sub.latest_invoice && typeof sub.latest_invoice === "object" ? sub.latest_invoice : null;
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";
@@ -245,11 +267,17 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
       ["EXISTS", stepKey(account, invoiceId, 2)],
       ["EXISTS", stepKey(account, invoiceId, 3)],
     ]), 3);
-    if (!marks) continue;
+    if (!marks) {
+      complete = false;
+      continue;
+    }
     const [first] = marks;
     const second = countOf(marks[1]);
     const third = countOf(marks[2]);
-    if ((first !== null && typeof first !== "string") || second === null || third === null || second > 1 || third > 1) continue;
+    if ((first !== null && typeof first !== "string") || second === null || third === null || second > 1 || third > 1) {
+      complete = false;
+      continue;
+    }
     let step = 0;
     if (first === null) step = 1;
     else {
@@ -266,7 +294,12 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
     // so a later run can take it as the first email sent and send the reminder that follows; that is the cost of
     // never writing twice, and the member still gets the pay link in the reminder.
     const value = claimValue();
-    if ((await claimMark(key, SENT_SECONDS, value)) !== "ours") continue;
+    const claimed = await claimMark(key, SENT_SECONDS, value);
+    if (claimed === "taken") continue;
+    if (claimed !== "ours") {
+      complete = false;
+      continue;
+    }
     written += 1;
 
     try {
@@ -313,15 +346,18 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
       if (ok) {
         sent += 1;
         await countSent(store.statsId, "failed");
+      } else {
+        await releaseMark(key, value);
+        complete = false;
       }
-      else await releaseMark(key, value);
     } catch (error) {
       // Let go, so the next run tries this one again rather than never: only our own claim (Revisor 1 on #2719).
       await releaseMark(key, value);
+      complete = false;
       console.error("writing about a failed renewal failed", store.handle, error);
     }
   }
-  return sent;
+  return { sent, complete };
 }
 
 type Card = { id: string; brand: string; last4: string; expMonth: number; expYear: number };
@@ -371,13 +407,15 @@ const nextPaymentOf = (sub: RunningSub): number => {
  * pages a day, from where the last run stopped, so a store of any size is
  * read through within the days the notice is sent ahead.
  */
-async function noticeCards(store: Store, deadline: number): Promise<number> {
+async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   const account = store.stripeAccountId as string;
   const handles = saleHandles(store);
   const now = Date.now();
   const [saved] = await redisPipeline([["GET", cardCursorKey(account)]]);
   let after = typeof saved === "string" && SUB_PATTERN.test(saved) ? saved : "";
-  const due: { sub: RunningSub; card: Card; customer: string; email: string; payAt: number }[] = [];
+  // `from`: where a reading starts to list that member again, the membership listed just before it (rule 24, R24
+  // crons item 6): the cursor is moved only past the members handled, never past one read and not yet told.
+  const due: { sub: RunningSub; card: Card; customer: string; email: string; payAt: number; from: string }[] = [];
   let lookups = 0;
 
   for (let page = 0; page < CARD_PAGES && Date.now() < deadline; page += 1) {
@@ -389,7 +427,10 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     // A page that is not a list is not "no running memberships" (CX-123 rule 24, L6): the cursor is not moved.
     if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of running memberships");
     const rows = listed.data as RunningSub[];
+    let previous = after;
     for (const sub of rows) {
+      const from = previous;
+      if (typeof sub.id === "string" && SUB_PATTERN.test(sub.id)) previous = sub.id;
       if (!handles.has(sub.metadata?.store ?? "")) continue;
       // Ending, or paused: no payment for a card to miss.
       if (sub.cancel_at_period_end === true || typeof sub.cancel_at === "number" || sub.pause_collection) continue;
@@ -408,7 +449,7 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
           card = cardOf(await onAccount("GET", account, `/payment_methods/${id}`).catch(() => null));
         }
       }
-      if (card && cardNoticeDue(card, payAt, now)) due.push({ sub, card, customer: customerId, email, payAt });
+      if (card && cardNoticeDue(card, payAt, now)) due.push({ sub, card, customer: customerId, email, payAt, from });
     }
     const last = rows[rows.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") {
@@ -417,8 +458,15 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     }
     after = last.id;
   }
-  await redisPipeline([after ? ["SET", cardCursorKey(account), after, "EX", 30 * 86_400] : ["DEL", cardCursorKey(account)]]);
-  if (!due.length) return 0;
+  // Written once the members read are handled, never before (rule 24, R24 crons item 6): a run that throws on the way
+  // leaves the cursor where it was, and the members it read are read again.
+  const moveCursor = async (to: string) => {
+    await redisPipeline([to ? ["SET", cardCursorKey(account), to, "EX", 30 * 86_400] : ["DEL", cardCursorKey(account)]]);
+  };
+  if (!due.length) {
+    await moveCursor(after);
+    return { sent: 0, complete: true };
+  }
 
   const ids = [...new Set(due.map((d) => d.sub.metadata?.product ?? "").filter(Boolean))];
   const titles = new Map((await readListings(store, ids).catch(() => [])).map((p) => [p.id, p.title]));
@@ -426,16 +474,28 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
   const locale = LANGUAGES[language].locale;
   const m = membershipWords(language);
   let sent = 0;
+  // Where the next run reads again from: before the first member read and not handled (time ran out, something could
+  // not be read, the email did not go), or null when every one was.
+  let stopAt: string | null = null;
+  const notHandled = (from: string) => {
+    if (stopAt === null) stopAt = from;
+  };
 
-  for (const { sub, card, customer, email, payAt } of due) {
-    if (Date.now() >= deadline) break;
+  for (const { sub, card, customer, email, payAt, from } of due) {
+    if (Date.now() >= deadline) {
+      notHandled(from);
+      break;
+    }
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
     if (!subId) continue;
     // A member who saved a new card and closed the tab before Stripe sent
     // them back: their card is set now, and there is nothing to tell them.
     const open = repliesFor(await redisPipeline([["GET", openKey(account, subId)]]), 1);
-    // Unknown whether a card update is waiting: no notice on a guess.
-    if (!open || (open[0] !== null && typeof open[0] !== "string")) continue;
+    // Unknown whether a card update is waiting: no notice on a guess, and read again on the next run.
+    if (!open || (open[0] !== null && typeof open[0] !== "string")) {
+      notHandled(from);
+      continue;
+    }
     const pending = open[0];
     if (typeof pending === "string") {
       const finished = await finishCardUpdate(store, pending);
@@ -443,7 +503,13 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     }
     const key = cardKey(account, subId, card.id);
     const value = claimValue();
-    if ((await claimMark(key, CARD_SENT_SECONDS, value)) !== "ours") continue;
+    const claimed = await claimMark(key, CARD_SENT_SECONDS, value);
+    // Somebody else's: told already, or being told. Unknown: nothing on a guess, and read again on the next run.
+    if (claimed === "taken") continue;
+    if (claimed !== "ours") {
+      notHandled(from);
+      continue;
+    }
     try {
       const token = await cardLink(account, customer, subId);
       const mail = cardNoticeEmail({
@@ -467,21 +533,28 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
       if (ok) {
         sent += 1;
         await countSent(store.statsId, "cards");
+      } else {
+        await releaseMark(key, value);
+        notHandled(from);
       }
-      else await releaseMark(key, value);
     } catch (error) {
       await releaseMark(key, value);
+      notHandled(from);
       console.error("writing about a card that stops working failed", store.handle, error);
     }
   }
-  return sent;
+  await moveCursor(stopAt ?? after);
+  return { sent, complete: stopAt === null };
 }
 
 /** A store's failed payments, then its cards about to stop working. */
-async function sweepStore(store: Store, deadline: number): Promise<number> {
-  let sent = await remindFailed(store, deadline);
-  if (store.dunning.cardNotice && Date.now() < deadline) sent += await noticeCards(store, deadline);
-  return sent;
+async function sweepStore(store: Store, deadline: number): Promise<Swept> {
+  const failed = await remindFailed(store, deadline);
+  if (!store.dunning.cardNotice) return failed;
+  // The cards not read this run are read on the next, which starts at this store.
+  if (Date.now() >= deadline) return { sent: failed.sent, complete: false };
+  const cards = await noticeCards(store, deadline);
+  return { sent: failed.sent + cards.sent, complete: failed.complete && cards.complete };
 }
 
 /**
@@ -493,9 +566,13 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
   if (!isRedisConfigured() || !platformKey() || !isSenderConfigured()) return counts;
 
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
-  const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
+  // "cursor|done|held": where the walk stopped, and how many runs in a row it has started at that store (HOLD_RUNS).
+  const [savedCursor, savedDone, savedHeld] = typeof saved === "string" ? saved.split("|") : ["0", "0", "0"];
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;
+  const start = { cursor, skip, held: /^\d+$/.test(savedHeld ?? "") ? Number(savedHeld) : 0 };
+  // The first store not finished this run, where the next run starts (HOLD_RUNS), or null when none.
+  let hold: string | null = null;
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
@@ -508,22 +585,31 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
       if (Date.now() >= deadline) break;
       if (worthAsking(store)) {
         counts.stores += 1;
+        // A sweep that threw is not done (rule 24, R24 crons item 6): only one that handled all it read is.
+        let complete = false;
         try {
-          counts.sent += await sweepStore(store, deadline);
+          const swept = await sweepStore(store, deadline);
+          counts.sent += swept.sent;
+          complete = swept.complete;
         } catch (error) {
           console.error("reading a store's failed renewals failed", store.handle, error);
+        }
+        if (!complete && hold === null) {
+          const held = cursor === start.cursor && done === start.skip ? start.held + 1 : 1;
+          if (held < HOLD_RUNS) hold = `${cursor}|${done}|${held}`;
+          else console.error(`a store's failed renewals were not finished in ${HOLD_RUNS} runs in a row: read again on the next walk round`, store.handle);
         }
       }
       done += 1;
     }
     if (done < stores.length) {
-      await redisPipeline([["SET", CURSOR_KEY, `${cursor}|${done}`]]);
+      await redisPipeline([["SET", CURSOR_KEY, hold ?? `${cursor}|${done}`]]);
       return counts;
     }
     skip = 0;
     cursor = next;
     if (next === "0") break;
   }
-  await redisPipeline([["SET", CURSOR_KEY, `${cursor}|0`]]);
+  await redisPipeline([["SET", CURSOR_KEY, hold ?? `${cursor}|0`]]);
   return counts;
 }

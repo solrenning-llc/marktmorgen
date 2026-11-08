@@ -51,6 +51,12 @@ export async function GET(request: NextRequest) {
       console.error("sending payment request reminders failed", error);
       return { sent: 0, skipped: 0 };
     });
+    // A reminder whose email did not go and whose mark could not be let go is not tried again until the mark runs
+    // out (lib/billing-reminders.ts): said as a failed run, never as ok (rule 24, R24 crons item 6).
+    const unreleased = (counts.unreleased || 0) + (failed.unreleased || 0);
+    if (unreleased > 0) {
+      return Response.json({ ok: false, error: "marks_unreleased", ...counts, unreleased, failedPayments: failed, breaks, nudges, requests }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    }
     return Response.json({ ok: true, ...counts, failedPayments: failed, breaks, nudges, requests }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("sending billing reminders failed", error);

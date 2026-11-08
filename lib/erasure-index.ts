@@ -80,9 +80,13 @@ return {redis.call('DEL', unpack(KEYS)), held}`;
 /**
  * One batch of an address with more than FORGET_KEYS records: deletes these records and takes exactly them out of
  * both notes, in one step, so a record is never left without its note (one noted again after this step is noted
- * again with it). KEYS: the old-kind set, the scored notes, then the batch. Answers how many records were deleted.
+ * again with it). KEYS: the old-kind set, the scored notes, then the batch. Answers how many records were deleted,
+ * or -1, having deleted nothing, when a note is of another type (a script is not undone: a real redis-server ran the
+ * DEL and only then refused the SREM, so the types are checked before any write).
  */
-export const FORGET_NOTED_PART = `-- marktmorgen:forget-noted-part:v1
+export const FORGET_NOTED_PART = `-- marktmorgen:forget-noted-part:v2
+local set, zset = redis.call('TYPE', KEYS[1]).ok, redis.call('TYPE', KEYS[2]).ok
+if (set ~= 'none' and set ~= 'set') or (zset ~= 'none' and zset ~= 'zset') then return -1 end
 local gone = redis.call('DEL', unpack(KEYS, 3))
 redis.call('SREM', KEYS[1], unpack(KEYS, 3))
 redis.call('ZREM', KEYS[2], unpack(KEYS, 3))

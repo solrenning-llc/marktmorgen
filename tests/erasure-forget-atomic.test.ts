@@ -150,7 +150,7 @@ async function main(): Promise<void> {
   let batched = 0;
   redis.pipeline = async (commands: Command[]) => {
     const replies = await real(commands);
-    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:forget-noted-part:v1\n")) && ++batched === 1) await write("nl:test:fa:during-batches");
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:forget-noted-part:v2\n")) && ++batched === 1) await write("nl:test:fa:during-batches");
     return replies;
   };
   const many = await forgetNoted(STATS, PERSON);

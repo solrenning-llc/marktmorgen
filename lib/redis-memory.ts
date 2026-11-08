@@ -1102,7 +1102,7 @@ export class MemoryRedis {
         // lib/erasure-index.ts FORGET_NOTED and FORGET_NOTED_PART, step for step, read as Redis reads: a missing or
         // empty container is not a key, and a note of another type is refused before anything is deleted (the plain
         // SMEMBERS and ZRANGEBYSCORE here would make an empty one instead).
-        if (key.startsWith("-- marktmorgen:forget-noted:v2\n") || key.startsWith("-- marktmorgen:forget-noted-part:v1\n")) {
+        if (key.startsWith("-- marktmorgen:forget-noted:v2\n") || key.startsWith("-- marktmorgen:forget-noted-part:v2\n")) {
           const count = Number(args[0]);
           const named = args.slice(1, count + 1);
           const argv = args.slice(count + 1);
@@ -1128,11 +1128,13 @@ export class MemoryRedis {
             return gone;
           };
           if (!Number.isSafeInteger(count) || count < 2 || named.length !== count) throw new Error("MemoryRedis: unsupported EVAL");
-          if (key.startsWith("-- marktmorgen:forget-noted-part:v1\n")) {
+          if (key.startsWith("-- marktmorgen:forget-noted-part:v2\n")) {
             if (count < 3 || argv.length) throw new Error("MemoryRedis: unsupported EVAL");
             const records = named.slice(2);
-            // As a real redis-server runs it: the DEL first, then SREM and ZREM, each refusing a key of another type
-            // (WRONGTYPE) after the records are gone; a set or sorted set left empty is no longer a key.
+            const typeOf = (one: string) => (filled(one) ? this.run(["TYPE", one]) : "none");
+            const [setType, zsetType] = [typeOf(index), typeOf(notes)];
+            if ((setType !== "none" && setType !== "set") || (zsetType !== "none" && zsetType !== "zset")) return -1;
+            // As a real redis-server runs it: the DEL, then SREM and ZREM; a set or sorted set left empty is no longer a key.
             const gone = remove(records);
             for (const [one, kind, verb] of [[index, "set", "SREM"], [notes, "zset", "ZREM"]] as const) {
               if (!members(one, kind).length) continue;

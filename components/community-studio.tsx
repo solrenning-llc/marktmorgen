@@ -76,6 +76,7 @@ const MESSAGES: Record<string, string> = {
   level: "Pick who may start posts here.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, first.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  not_confirmed: "We could not confirm that change just now. Reload the page to see where it stands, then try again.",
   setup_read_unavailable: "Your community could not be read just now, so nothing was changed. Try again in a moment.",
   report_read_unavailable: "This report could not be checked just now, so nothing was changed and it is still in the list. Try again in a moment.",
 };

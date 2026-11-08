@@ -16,6 +16,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { emailKey, storeKey } from "@/lib/learn";
 import { normaliseEmail } from "@/lib/auth";
@@ -39,12 +40,35 @@ function parse<T>(raw: unknown): T | null {
   }
 }
 
+/**
+ * The one reply of a one-command read, exactly (CX-123 rule 24): a missing slot or a list of another length is
+ * unknown, never "nothing kept". The exact null is what Redis answers for a key or field that is not there.
+ */
+function oneReply(replies: unknown, what: string): unknown {
+  const slots = repliesFor(replies, 1);
+  if (!slots) throw new UnknownReplyError(what);
+  return slots[0];
+}
+
 // ---------------------------------------------------------------- the server
 
 export async function readServer(room: string): Promise<DiscordServer | null> {
   if (!isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GET", serverKey(room)]]);
   return parseServer(parse(raw));
+}
+
+/**
+ * The connected server, read exactly, for what takes roles back on it (lib/discord-access.ts: the check, a person's
+ * deletion): null only when none is kept; a reply of another shape throws UnknownReplyError, so nothing reads an
+ * unknown server as "disconnected" and forgets somebody whose roles are still given.
+ */
+export async function readServerOrThrow(room: string): Promise<DiscordServer | null> {
+  const raw = oneReply(await redisPipeline([["GET", serverKey(room)]]), "the connected Discord server");
+  if (raw === null) return null;
+  const server = parseServer(parse(raw));
+  if (!server) throw new UnknownReplyError("the connected Discord server");
+  return server;
 }
 
 export async function saveServer(room: string, server: DiscordServer): Promise<void> {
@@ -83,6 +107,27 @@ export async function productRoles(room: string): Promise<Map<string, string[]>>
   return out;
 }
 
+/**
+ * The roles each product gives, read exactly, for the check that takes roles back (lib/discord-access.ts
+ * checkMember): a reply that is not a whole list of field and value, or a value that is not a list, throws
+ * UnknownReplyError, so an unknown read never counts as "no product gives a role" and takes a paying buyer's roles.
+ */
+export async function productRolesOrThrow(room: string): Promise<Map<string, string[]>> {
+  const what = "the roles each product gives in Discord";
+  const pairs = stringList(oneReply(await redisPipeline([["HGETALL", productsKey(room)]]), what));
+  if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError(what);
+  const out = new Map<string, string[]>();
+  for (let i = 0; i < pairs.length; i += 2) {
+    const value = parse<unknown>(pairs[i + 1]);
+    // Every member must be a role id, and a product kept at all gives one (setProductRoles deletes an empty list):
+    // cleanRoles would drop an invalid member silently, so [7] would read as "no role" and end paid access (Codex Z on #2932).
+    if (!Array.isArray(value) || !value.length || !value.every((role) => typeof role === "string" && SNOWFLAKE.test(role))) throw new UnknownReplyError(what);
+    const roles = cleanRoles(value);
+    if (roles.length) out.set(pairs[i], roles);
+  }
+  return out;
+}
+
 export type SetRoles = { ok: true } | { ok: false; reason: "too_many" };
 
 /** Sets the roles a product gives; none takes the product off. */
@@ -117,10 +162,20 @@ export type Member = {
   k?: number;
 };
 
+/**
+ * One person given roles, read exactly: null only when none is kept for that id (the exact null). A missing slot or
+ * a record of another shape (not JSON, no address, roles that are not a list of strings) throws UnknownReplyError,
+ * so nothing takes an unknown read as "nobody", whose roles would never be taken back (sweep A2 finding 4).
+ */
 export async function readMember(room: string, userId: string): Promise<Member | null> {
   if (!SNOWFLAKE.test(userId)) return null;
-  const [raw] = await redisPipeline([["HGET", membersKey(room), userId]]);
-  return parse<Member>(raw);
+  const raw = oneReply(await redisPipeline([["HGET", membersKey(room), userId]]), "a Discord member record");
+  if (raw === null) return null;
+  const member = parse<Record<string, unknown>>(raw);
+  if (!member || typeof member !== "object" || Array.isArray(member) || typeof member.e !== "string" || !Array.isArray(member.r) || !member.r.every((r) => typeof r === "string")) {
+    throw new UnknownReplyError("a Discord member record");
+  }
+  return member as unknown as Member;
 }
 
 /** Everyone given roles in this store's server, newest first, at most `limit`. */
@@ -136,10 +191,15 @@ export async function membersOf(room: string, limit = 500): Promise<{ id: string
   return out.sort((a, b) => b.member.at - a.member.at).slice(0, limit);
 }
 
-/** The Discord account an address brought in, if any. */
+/**
+ * The Discord account an address brought in, if any: null only when no link is kept (the exact null). A missing
+ * slot or a reply that is not a Discord id throws UnknownReplyError, never "no account" (sweep A2 finding 4).
+ */
 export async function accountOf(room: string, email: string): Promise<string | null> {
-  const [raw] = await redisPipeline([["GET", addressKey(room, email)]]);
-  return typeof raw === "string" && SNOWFLAKE.test(raw) ? raw : null;
+  const raw = oneReply(await redisPipeline([["GET", addressKey(room, email)]]), "the Discord account an address brought in");
+  if (raw === null) return null;
+  if (typeof raw === "string" && SNOWFLAKE.test(raw)) return raw;
+  throw new UnknownReplyError("the Discord account an address brought in");
 }
 
 /** Keeps a person, and when they are checked next. */
@@ -154,12 +214,21 @@ export async function keepMember(room: string, sid: string, userId: string, memb
 
 /** Forgets a person: their access ended and their roles were taken back, or they left. */
 export async function forgetMember(room: string, sid: string, userId: string, email: string): Promise<void> {
-  const [held] = await redisPipeline([["GET", addressKey(room, email)]]);
-  await redisPipeline([
+  // Read exactly: an unknown reply throws before anything is deleted, never leaving the address's link behind as "not this id's".
+  // Only the exact null or a Discord id is a known link: any other present reply throws (Codex Z on #2932).
+  const held = oneReply(await redisPipeline([["GET", addressKey(room, email)]]), "the Discord account an address brought in");
+  if (held !== null && !(typeof held === "string" && SNOWFLAKE.test(held))) throw new UnknownReplyError("the Discord account an address brought in");
+  const commands: (string | number)[][] = [
     ["HDEL", membersKey(room), userId],
     ["ZREM", DUE_KEY, `${sid}|${userId}`],
     ...(held === userId ? [["DEL", addressKey(room, email)]] : []),
-  ]);
+  ];
+  // The deletes are read too: a missing, short or queued answer is not "forgotten", so the erasure is retried.
+  // Each command targets exactly one field, member or key, so only 0 or 1 is known; any other count is unknown (Codex Z on #2932).
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || !replies.every((reply) => { const count = countOf(reply); return count === 0 || count === 1; })) {
+    throw new UnknownReplyError("the deletion of a Discord member");
+  }
 }
 
 /** Puts a person first in line to be checked: a refund made in the studio, say. */

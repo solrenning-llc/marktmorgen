@@ -20,7 +20,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { ENTRY_BYTES, dataBytes } from "@/lib/store-data-rules";
 import { markLesson } from "@/lib/learn";
@@ -51,21 +51,30 @@ const DOORS_KEY = "nl:tasks:doors";
 export const DOOR_SECONDS = 24 * 60 * 60;
 const WHO = /^[0-9a-f]{16,64}$/;
 
-function parse<T>(raw: unknown): T | null {
-  if (typeof raw !== "string" || !raw) return null;
+/** A JSON object as kept, or null when the text does not read as one. */
+function storedObject(raw: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(raw) as T;
+    const value: unknown = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
   } catch {
     return null;
   }
 }
 
+/**
+ * A lesson's assignment, or null when it has none: only an explicit nil is none. A reply of another shape, or a
+ * record not as saveTask wrote it (a prompt, and its three switches as true or false), throws UnknownReplyError
+ * (CX-123 rule 24; Claude 4's audit), never "no assignment".
+ */
 export async function readTaskFor(courseId: string, lessonId: string): Promise<Task | null> {
   if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) return null;
-  const [raw] = await redisPipeline([["GET", taskKey(courseId, lessonId)]]);
-  const value = parse<Record<string, unknown>>(raw);
-  if (!value || typeof value.prompt !== "string" || !value.prompt) return null;
-  return { ...(parseTaskSetup(value) as Task), prompt: value.prompt };
+  const raw = repliesFor(await redisPipeline([["GET", taskKey(courseId, lessonId)]]), 1)?.[0];
+  if (raw === null) return null;
+  const value = typeof raw === "string" ? storedObject(raw) : null;
+  const exact =
+    !!value && typeof value.prompt === "string" && value.prompt !== "" && [value.review, value.gate, value.file].every((on) => typeof on === "boolean");
+  if (!value || !exact) throw new UnknownReplyError("a lesson's assignment");
+  return { ...(parseTaskSetup(value) as Task), prompt: value.prompt as string };
 }
 
 /**
@@ -92,6 +101,23 @@ const FILE_BYTES_TEXT = /^(0|[1-9]\d{0,15})$/;
 /** What removing an assignment will forget, read in full before anything is deleted (readTaskDrop). */
 export type TaskDrop = { courseId: string; lessonId: string; files: string[]; bytes: number; gone: string[]; freed: number };
 
+/** An assignment's files' hash (HGETALL), each file with its size, in its exact shape; anything else throws UnknownReplyError. */
+function handedFilesOf(flat: unknown): { path: string; bytes: number }[] {
+  const pairs: unknown[] | null = Array.isArray(flat)
+    ? flat
+    : flat && typeof flat === "object"
+      ? Object.entries(flat as Record<string, unknown>).flat()
+      : null;
+  if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
+  const out: { path: string; bytes: number }[] = [];
+  for (let i = 0; i < pairs.length; i += 2) {
+    const [name, size] = [pairs[i], pairs[i + 1]];
+    if (typeof name !== "string" || !name || typeof size !== "string" || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
+    out.push({ path: name, bytes: Number(size) });
+  }
+  return out;
+}
+
 /**
  * Reads what removing an assignment will forget: its handed-in files and their sizes, the work handed in, and what
  * the records weigh. Every reply in its exact shape (CX-123 rules 24 and 30; Claude 4 after Codex P on #2655): a
@@ -99,21 +125,9 @@ export type TaskDrop = { courseId: string; lessonId: string; files: string[]; by
  * takes the assignment out of the course (Revisor 1 on #2810), so a read that fails leaves everything findable.
  */
 export async function readTaskDrop(courseId: string, lessonId: string): Promise<TaskDrop> {
-  const flat = repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0];
-  const pairs: unknown[] | null = Array.isArray(flat)
-    ? flat
-    : flat && typeof flat === "object"
-      ? Object.entries(flat as Record<string, unknown>).flat()
-      : null;
-  if (!pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("the files handed in for an assignment");
-  const files: string[] = [];
-  let bytes = 0;
-  for (let i = 0; i < pairs.length; i += 2) {
-    const [name, size] = [pairs[i], pairs[i + 1]];
-    if (typeof name !== "string" || !name || typeof size !== "string" || !FILE_BYTES_TEXT.test(size)) throw new UnknownReplyError("the files handed in for an assignment");
-    files.push(name);
-    bytes += Number(size);
-  }
+  const listed = handedFilesOf(repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0]);
+  const files = listed.map((f) => f.path);
+  const bytes = listed.reduce((sum, f) => sum + f.bytes, 0);
   // Each student's own record, found by the list of all the work handed in.
   const waiting = repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0];
   if (!Array.isArray(waiting) || !waiting.every((m) => typeof m === "string")) throw new UnknownReplyError("the work handed in for a course");
@@ -151,19 +165,64 @@ export async function dropTask(courseId: string, lessonId: string, room: string 
   return applyTaskDrop(await readTaskDrop(courseId, lessonId), room, data);
 }
 
-/** One student's work on one assignment, or null when they have handed nothing in. */
-export async function submissionOf(courseId: string, lessonId: string, who: string): Promise<Submission | null> {
-  if (!isRedisConfigured() || !WHO.test(who) || !ITEM_ID_PATTERN.test(lessonId)) return null;
-  const [raw] = await redisPipeline([["GET", subKey(courseId, lessonId, who)]]);
-  return parse<Submission>(raw);
+const TASK_STATES: readonly unknown[] = ["waiting", "approved", "again"] satisfies TaskState[];
+const wholeFrom = (value: unknown, least: number) => typeof value === "number" && Number.isSafeInteger(value) && value >= least;
+
+function isHandedFile(value: unknown): value is HandedFile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const file = value as Record<string, unknown>;
+  return typeof file.path === "string" && file.path !== "" && typeof file.name === "string" && wholeFrom(file.bytes, 0) && typeof file.type === "string";
 }
 
-/** Several students' work at once, in the order asked, null where there is none. */
-export async function submissionsOf(courseId: string, rows: { lessonId: string; who: string }[]): Promise<(Submission | null)[]> {
+/** A student's record as handIn and review write it, or null for anything else. */
+function storedSubmission(raw: string): Submission | null {
+  const v = storedObject(raw);
+  if (!v) return null;
+  const exact =
+    typeof v.text === "string" &&
+    (v.file === null || isHandedFile(v.file)) &&
+    wholeFrom(v.at, 0) &&
+    TASK_STATES.includes(v.state) &&
+    typeof v.feedback === "string" &&
+    wholeFrom(v.reviewedAt, 0) &&
+    wholeFrom(v.tries, 1);
+  return exact ? (v as Submission) : null;
+}
+
+/**
+ * One student's work on one assignment, or null when they have handed nothing in: only an explicit nil is nothing.
+ * A reply cut short, of another shape, or a record that does not read as handIn wrote it throws UnknownReplyError
+ * (CX-123 rule 24; Claude 4's audit), so approved work is never taken for nothing handed in and handed in over.
+ */
+export async function submissionOf(courseId: string, lessonId: string, who: string): Promise<Submission | null> {
+  if (!isRedisConfigured() || !WHO.test(who) || !ITEM_ID_PATTERN.test(lessonId)) return null;
+  const reply = repliesFor(await redisPipeline([["GET", subKey(courseId, lessonId, who)]]), 1)?.[0];
+  if (reply === null) return null;
+  const found = typeof reply === "string" ? storedSubmission(reply) : null;
+  if (!found) throw new UnknownReplyError("one student's work on an assignment");
+  return found;
+}
+
+/** A student's record that is there but does not read as handIn wrote it: kept, and said as not read. */
+export type UnreadSubmission = { unread: true };
+
+export function isUnreadSubmission(value: Submission | UnreadSubmission | null | undefined): value is UnreadSubmission {
+  return !!value && "unread" in value && value.unread === true;
+}
+
+/**
+ * Several students' work at once, in the order asked, null where there is none (an explicit nil). A reply cut short
+ * or of another shape throws UnknownReplyError (CX-123 rule 24); a record that is there but does not read is
+ * answered `{ unread: true }`, never null, so it does not drop out of the person's copy of their data
+ * (lib/person-copy.ts) nor out of the studio's list of work, which say it could not be read.
+ */
+export async function submissionsOf(courseId: string, rows: { lessonId: string; who: string }[]): Promise<(Submission | UnreadSubmission | null)[]> {
   const asked = rows.filter((r) => WHO.test(r.who) && ITEM_ID_PATTERN.test(r.lessonId));
   if (!isRedisConfigured() || !asked.length) return rows.map(() => null);
-  const raw = await redisPipeline(asked.map((r) => ["GET", subKey(courseId, r.lessonId, r.who)]));
-  const found = new Map(asked.map((r, i) => [`${r.lessonId}|${r.who}`, parse<Submission>(raw[i])]));
+  const raws = repliesFor(await redisPipeline(asked.map((r) => ["GET", subKey(courseId, r.lessonId, r.who)])), asked.length);
+  if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("several students' work on assignments");
+  const read = (raw: unknown): Submission | UnreadSubmission | null => (raw === null ? null : (storedSubmission(raw as string) ?? { unread: true }));
+  const found = new Map(asked.map((r, i) => [`${r.lessonId}|${r.who}`, read(raws[i])]));
   return rows.map((r) => found.get(`${r.lessonId}|${r.who}`) ?? null);
 }
 
@@ -286,6 +345,11 @@ export async function handIn(input: {
   now?: number;
   /** The store whose data room the work takes from (DataRoomError when it does not fit). */
   data: DataStore;
+  /**
+   * Called just before the work is written. A failure before it kept nothing; from it on, the work (and the file in
+   * it) may be kept even when the call fails, its answer lost or a step after it failing (CX-123 rule 24).
+   */
+  writing?: () => void;
 }): Promise<HandIn> {
   const { courseId, lessonId, who, task } = input;
   const at = input.now ?? Math.floor(Date.now() / 1000);
@@ -304,6 +368,7 @@ export async function handIn(input: {
   // Its room first: what it weighs over what it replaces, its two places in the lists the first time, its file's entry.
   const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (input.file ? ENTRY_BYTES : 0);
   if (grown > 0) await needData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
+  input.writing?.();
   await redisPipeline([
     ["SET", subKey(courseId, lessonId, who), JSON.stringify(kept)],
     ...(input.file ? [["HSET", filesKey(courseId, lessonId), input.file.path, input.file.bytes]] : []),
@@ -328,24 +393,36 @@ async function finish(courseId: string, lessonId: string, who: string, email: st
 
 export type Waiting = { lessonId: string; who: string; at: number };
 
+/** When work was handed in, as a sorted set's score is answered: a whole number of seconds, as text. */
+const SECONDS_TEXT = /^(0|[1-9]\d{0,15})$/;
+
 /**
  * Work for the creator to read, and how much there is: what is waiting,
- * oldest first, or with `all` everything handed in, newest first.
+ * oldest first, or with `all` everything handed in, newest first. Every
+ * reply in its exact shape (CX-123 rule 24): a list or a count of another
+ * shape, a member that is not "lesson|student" or a time that is not one
+ * throws UnknownReplyError, never an empty list.
  */
 export async function waitingWork(courseId: string, limit = 50, all = false): Promise<{ rows: Waiting[]; total: number }> {
   if (!isRedisConfigured()) return { rows: [], total: 0 };
   const key = all ? allKey(courseId) : waitingKey(courseId);
-  const [rows, total] = await redisPipeline([
-    all ? ["ZREVRANGE", key, 0, limit - 1, "WITHSCORES"] : ["ZRANGEBYSCORE", key, "-inf", "+inf", "WITHSCORES", "LIMIT", 0, limit],
-    ["ZCARD", key],
-  ]);
-  const flat = Array.isArray(rows) ? rows : [];
+  const replies = repliesFor(
+    await redisPipeline([
+      all ? ["ZREVRANGE", key, 0, limit - 1, "WITHSCORES"] : ["ZRANGEBYSCORE", key, "-inf", "+inf", "WITHSCORES", "LIMIT", 0, limit],
+      ["ZCARD", key],
+    ]),
+    2,
+  );
+  const flat = replies ? stringList(replies[0]) : null;
+  const total = replies ? countOf(replies[1]) : null;
+  if (!flat || flat.length % 2 !== 0 || total === null) throw new UnknownReplyError("the work handed in for a course");
   const out: Waiting[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    const [lessonId, who] = String(flat[i]).split("|");
-    if (lessonId && who) out.push({ lessonId, who, at: Number(flat[i + 1]) || 0 });
+  for (let i = 0; i < flat.length; i += 2) {
+    const parts = flat[i].split("|");
+    if (parts.length !== 2 || !parts[0] || !parts[1] || !SECONDS_TEXT.test(flat[i + 1])) throw new UnknownReplyError("the work handed in for a course");
+    out.push({ lessonId: parts[0], who: parts[1], at: Number(flat[i + 1]) });
   }
-  return { rows: out, total: Number(total) || 0 };
+  return { rows: out, total };
 }
 
 export type Review = { ok: true; submission: Submission } | { ok: false; reason: "unknown" | "state" };
@@ -472,10 +549,15 @@ export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void
   return deleted;
 }
 
-/** Whether to tell the creator about new work now: once an hour per course at most. */
+/**
+ * Whether to tell the creator about new work now: once an hour per course at most. "OK" is now, nil is told already
+ * this hour; anything else throws UnknownReplyError (CX-123 rule 24), so no email goes on a guess.
+ */
 export async function tellCreatorNow(courseId: string): Promise<boolean> {
-  const [fresh] = await redisPipeline([["SET", `nl:course:${courseId}:tasks:told`, "1", "NX", "EX", 3_600]]);
-  return fresh !== null;
+  const fresh = repliesFor(await redisPipeline([["SET", `nl:course:${courseId}:tasks:told`, "1", "NX", "EX", 3_600]]), 1)?.[0];
+  if (fresh === "OK") return true;
+  if (fresh === null) return false;
+  throw new UnknownReplyError("whether a creator was told of new work this hour");
 }
 
 /** Forgets every assignment of a course that is going, and returns their files to delete. */
@@ -505,25 +587,98 @@ export async function dropCourseTasks(course: CourseTasks, room: string | null, 
 }
 
 /**
+ * The file a stored record names, for an erasure: null when it names none, undefined when the record does not read
+ * well enough to say. Only the file is needed here, so a record otherwise out of shape still gives up its file. A
+ * size that does not read gives back no room (which only refuses sooner).
+ */
+function fileOfRecord(raw: string): { path: string; bytes: number } | null | undefined {
+  const value = storedObject(raw);
+  if (!value) return undefined;
+  const file = value.file;
+  if (file === null) return null;
+  if (!file || typeof file !== "object" || Array.isArray(file)) return undefined;
+  const { path, bytes } = file as { path?: unknown; bytes?: unknown };
+  if (typeof path !== "string" || !path) return undefined;
+  return { path, bytes: wholeFrom(bytes, 0) ? (bytes as number) : 0 };
+}
+
+/** Whether a listed file sits in exactly this student's own folder for this assignment (taskFolder, any store folder). */
+function inStudentFolder(path: string, courseId: string, lessonId: string, who: string): boolean {
+  const parts = path.split("/");
+  return parts.length === 7 && parts[0] === "stores" && !!parts[1] && parts[2] === "tasks" && parts[3] === courseId && parts[4] === lessonId && parts[5] === who && !!parts[6] && !path.includes("..");
+}
+
+/**
+ * Thrown by forgetTasksPerson when it deleted records whose handed-in file it could not read from them: the
+ * erasure is incomplete (a file may be left), and is said so, never "done".
+ */
+export class TaskRecordUnreadError extends Error {
+  constructor(
+    readonly unread: number,
+    readonly records: number,
+  ) {
+    super(`${unread} of ${records} deleted assignment records did not say which file was handed in with them`);
+    this.name = "TaskRecordUnreadError";
+  }
+}
+
+/**
  * Deletes one student's work in a course's assignments (lib/person-erasure.ts):
  * each record of what they handed in and what came back, its place in the
  * creator's lists, and the room its files took. Returns the files to delete
  * from the file store, as dropTask does.
+ *
+ * Read exactly (CX-123 rule 24; Claude 4's audit): a reply cut short or of
+ * another shape throws UnknownReplyError before anything is deleted, so the
+ * erasure says it could not finish and its retry finds everything. A record
+ * that is there but does not say its file is deleted all the same (the
+ * erasure must remove it); the files of the records that do read go to the
+ * daily job that deletes uploads nobody kept (staleTaskUploads, as the
+ * erasure itself does when the file store does not answer), and it throws
+ * TaskRecordUnreadError, so the erasure is said to be incomplete; that
+ * record's file is still found in the assignment's files hash under the
+ * student's own folder, and deleted with it. The deletion's receipt is
+ * read too: a batch that does not answer a count for every command throws
+ * UnknownReplyError, its files left to the daily job (Codex P on #2847).
  */
 export async function forgetTasksPerson(courseId: string, lessonIds: string[], who: string, room: string | null): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
-  const raws = await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)]));
-  const handed = lessonIds.map((l, i) => ({ lessonId: l, sub: parse<Submission>(raws[i]) })).filter((h) => h.sub !== null);
+  const raws = repliesFor(await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)])), lessonIds.length);
+  if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("a student's work on a course's assignments");
+  const handed = lessonIds.flatMap((lessonId, i) => (typeof raws[i] === "string" ? [{ lessonId, file: fileOfRecord(raws[i] as string) }] : []));
   if (!handed.length) return { records: 0, files: [] };
-  const files = handed.flatMap((h) => (h.sub?.file?.path ? [{ lessonId: h.lessonId, path: h.sub.file.path, bytes: Number(h.sub.file.bytes) || 0 }] : []));
+  const unreadLessons = handed.filter((h) => h.file === undefined).map((h) => h.lessonId);
+  const unread = unreadLessons.length;
+  const files = handed.flatMap((h) => (h.file ? [{ lessonId: h.lessonId, ...h.file }] : []));
+  // A record that does not say its file still has it listed in the assignment's files hash, under the student's own
+  // folder (taskFolder): it is taken from there, so neither this run nor the retry leaves it behind (Claude 6 on
+  // #2847). Read exactly, before anything is deleted; read only when a record does not read.
+  if (unread) {
+    const hashes = repliesFor(await redisPipeline(unreadLessons.map((l) => ["HGETALL", filesKey(courseId, l)])), unread);
+    if (!hashes) throw new UnknownReplyError("the files handed in for an assignment");
+    unreadLessons.forEach((lessonId, i) => {
+      for (const f of handedFilesOf(hashes[i])) if (inStudentFolder(f.path, courseId, lessonId, who)) files.push({ lessonId, ...f });
+    });
+  }
   const members = handed.map((h) => `${h.lessonId}|${who}`);
-  await redisPipeline([
+  const batch: (string | number)[][] = [
     ["DEL", ...handed.map((h) => subKey(courseId, h.lessonId, who))],
     ["ZREM", waitingKey(courseId), ...members],
     ["ZREM", allKey(courseId), ...members],
     ...files.map((f) => ["HDEL", filesKey(courseId, f.lessonId), f.path]),
-  ]);
+    // Thrown below, the files it read would not reach the erasure: the daily job deletes them instead.
+    ...(unread && files.length ? [["ZADD", DOORS_KEY, ...files.flatMap((f) => [0, f.path])]] : []),
+  ];
+  // Every command answers a count (Codex P on #2847). Anything else may have applied all, part or none of the
+  // batch: nothing is sent again on a guess and no room is given back, the files read go to the daily job that
+  // deletes uploads nobody kept, and the erasure is told it could not finish, never "done".
+  const receipt = repliesFor(await redisPipeline(batch), batch.length);
+  if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) {
+    if (files.length) await redisPipeline([["ZADD", DOORS_KEY, ...files.flatMap((f) => [0, f.path])]]);
+    throw new UnknownReplyError("the deletion of a student's work on a course's assignments");
+  }
   const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
   if (room && bytes) await releaseBytes(room, bytes);
+  if (unread) throw new TaskRecordUnreadError(unread, handed.length);
   return { records: handed.length, files: files.map((f) => f.path) };
 }

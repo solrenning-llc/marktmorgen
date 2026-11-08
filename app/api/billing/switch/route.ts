@@ -40,14 +40,20 @@ export async function POST(request: NextRequest) {
     const result = await switchPlan(store.subscriptionId, { tier, cycle },grant);
     if (result.kind === "switched") {
       if (result.state.state === "active") {
-        await setSubscription(ref, {
+        const written = await setSubscription(ref, {
           active: true,
           tier: result.state.tier,
           cycle: result.state.cycle,
           trialEnds: result.state.trialing ? result.state.until : 0,
           shared: result.state.shared,
           period: result.state.period,
+        }).catch((failure) => {
+          console.error("recording the switched plan failed", failure);
+          return null;
         });
+        // Stripe has switched and will charge the new price: a store record not
+        // written is neither "switched" nor "nothing changed" (switch-error).
+        if (!written) return away(origin, studio("billing=cancel-error"));
       }
       const moved = result.state.state === "active" && result.state.tier !== store.tier ? `tier-${result.state.tier}` : cycle;
       return away(origin, studio(`billing=switched-${moved}`));

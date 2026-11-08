@@ -209,3 +209,27 @@ test("2.1 control: an empty queue is no updates, and a waiting one is moved on",
   } finally { r.restore(); }
 });
 
+// ---- 2.2: a product's latest update
+
+const unknownLatest: [string, unknown[]][] = [
+  ["an empty answer", []], ["a number", [1]], ["an object", [{}]], ["undefined", [undefined]], ["two answers", [null, null]],
+  ["text that is not a send's id", ["not-an-id"]],
+];
+for (const [name, reply] of unknownLatest) {
+  test(`2.2 a latest update that answers ${name} is unknown, never "none"`, async () => {
+    const r = await setup();
+    try {
+      redis.pipeline = (async (cs: Command[]) => cs.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:upd:latest:")) ? reply : r.original(cs)) as typeof redis.pipeline;
+      await assert.rejects(latestUpdate(r.shop, r.productId), UnknownReplyError);
+    } finally { r.restore(); }
+  });
+}
+
+test("2.2 controls: the latest update is read, and a product never updated has none", async () => {
+  const r = await setup();
+  try {
+    assert.equal((await latestUpdate(r.shop, r.productId))?.id, r.job.id);
+    assert.equal(await latestUpdate(r.shop, "no-such-product"), null);
+  } finally { r.restore(); }
+});
+

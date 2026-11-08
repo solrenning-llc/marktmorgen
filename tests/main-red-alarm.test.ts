@@ -223,17 +223,49 @@ part("a canceled run with a failed job is red (Claude 5 on #3042: pushes cancel 
 part("main's head is green when its tree is a merge-queue commit whose nine required checks passed");
 {
   // TODOS-19/21: pushes to main cancel each other's runs (cancel-in-progress stays); the merge queue
-  // already ran the nine on a commit with the same tree. alarm() finds that commit; decide() takes it.
+  // already ran the nine on a commit with the same tree. alarm() finds that commit; decide() takes it,
+  // but only where the head's own runs have no result (canceled, skipped, missing, not started): the
+  // #3139 red was real and came after the queue commit passed (a date-dependent test), so a run that
+  // completed red on the head is never hidden by the tree.
   const QUEUE = "d".repeat(40);
-  const redHead = [...restGreen(), run(PC, "failure")];
-  is("head red, its tree proven green in the merge queue: close, nothing reported",
-    [decide({ runs: redHead, trigger: redHead[8], head: HEAD, treeGreen: QUEUE }).action, decide({ runs: redHead, trigger: redHead[8], head: HEAD, treeGreen: QUEUE }).red],
-    ["close", []]);
+  const withProof = (runs: Run[], redJobs: number[] = []) => decide({ runs, trigger: runs[0], head: HEAD, redJobs, treeGreen: QUEUE });
+  const without = (runs: Run[], redJobs: number[] = []) => decide({ runs, trigger: runs[0], head: HEAD, redJobs });
+  const sameAsBefore = (runs: Run[], redJobs: number[] = []) => {
+    const a = withProof(runs, redJobs);
+    const b = without(runs, redJobs);
+    return [a.action === b.action, a.red.map((r) => r.id).join() === b.red.map((r) => r.id).join(), a.treeGreen];
+  };
+  for (const conclusion of ["failure", "timed_out", "startup_failure"]) {
+    const runs = [...restGreen(), run(PC, conclusion)];
+    is(`(e) head run ${conclusion}, its tree proven green in the merge queue: still red, exactly as before`,
+      [withProof(runs).action, ...sameAsBefore(runs)], ["open", true, true, null]);
+  }
+  {
+    const runs = [...restGreen(), run(PC, "action_required")];
+    is("(e) head run action_required: exactly as before, the tree does not make it green", [withProof(runs).action, ...sameAsBefore(runs)], ["none", true, true, null]);
+  }
+  {
+    const b = run(PC, stopped);
+    const runs = [...restGreen(), b];
+    is("(e) head run canceled with a job failed inside it: still red, exactly as before",
+      [withProof(runs, [b.id]).action, ...sameAsBefore(runs, [b.id])], ["open", true, true, null]);
+  }
+  {
+    const runs = [...restGreen(), run(PC, null)];
+    is("head run still in progress: exactly as before (its own result will decide)", [withProof(runs).action, ...sameAsBefore(runs)], ["none", true, true, null]);
+  }
+  is("(f) head run canceled, its tree proven green in the merge queue: green, nothing reported",
+    [withProof([...restGreen(), run(PC, stopped)]).action, withProof([...restGreen(), run(PC, stopped)]).red], ["close", []]);
   const allStopped = REQUIRED.map((_, i) => run(i, stopped));
-  is("head all canceled, its tree proven green in the merge queue: close",
-    decide({ runs: allStopped, trigger: allStopped[0], head: HEAD, treeGreen: QUEUE }).action, "close");
-  is("and the decision names the merge-queue commit", decide({ runs: allStopped, trigger: allStopped[0], head: HEAD, treeGreen: QUEUE }).treeGreen, QUEUE);
-  is("without that proof nothing changes", decide({ runs: allStopped, trigger: allStopped[0], head: HEAD, treeGreen: null }).action, "none");
+  is("(f) head all canceled, its tree proven green in the merge queue: close", withProof(allStopped).action, "close");
+  is("(f) head run not started (queued after a cancel): green", withProof([...restGreen(), run(PC, null, { status: "queued" })]).action, "close");
+  is("(f) head run skipped: green", withProof([...restGreen(), run(PC, "skipped")]).action, "close");
+  is("(f) head run missing: green", withProof(restGreen()).action, "close");
+  is("(f) an earlier head red, the current head's run canceled, its tree green in the queue: green (the current head decides)",
+    [without([...restGreen(), run(PC, "failure", { head_sha: OLD }), run(PC, stopped)]).action, withProof([...restGreen(), run(PC, "failure", { head_sha: OLD }), run(PC, stopped)]).action],
+    ["open", "close"]);
+  is("and the decision names the merge-queue commit", withProof(allStopped).treeGreen, QUEUE);
+  is("without that proof nothing changes", without(allStopped).action, "none");
   let refused = false;
   try { decide({ runs: allStopped, trigger: allStopped[0], head: HEAD, treeGreen: "main" }); } catch { refused = true; }
   is("an unreadable proof is refused, never taken as green", refused, true);
@@ -396,14 +428,20 @@ async function endToEnd() {
       return { total_count: list.length, check_runs: list };
     };
     const headTree = { [HEAD]: { sha: HEAD, tree: { sha: TREE } } };
+    // product-checks canceled on the head by a later push, red on an earlier head: without the proof, the
+    // alarm opens with the earlier head's run (as before); with it, the head is green.
+    const canceledHead = [...restGreen(), run(PC, stopped, { id: 8_050 })];
+    const earlierRed = { "product-checks.yml": [[run(PC, "failure", { head_sha: OLD, id: 5_500 })]] };
     const redHead = [...restGreen(), run(PC, "failure", { id: 8_001 })];
     const stoppedHead = REQUIRED.map((_, i) => run(i, stopped, { id: 8_100 + i }));
     const writesOf = (gh: { writes: { method: string, path: string }[] }) => gh.writes.map((w) => `${w.method} ${w.path}`);
+    const queueReads = (gh: { reads: string[] }) => gh.reads.filter((p) => p.includes("merge_group") || p.includes("check-runs") || p.startsWith("git/commits/"));
+    const proven = { trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } };
 
     {
-      const gh = github({ head: HEAD, headRuns: redHead, issues: [botIssue], trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
-      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
-      is("(a) head red, its tree equal to a merge-queue commit whose nine required checks passed: green, the bot's issue closes",
+      const gh = github({ head: HEAD, headRuns: canceledHead, issues: [botIssue], older: earlierRed, ...proven });
+      const d = await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet, now: NOW });
+      is("(f) head run canceled, its tree equal to a merge-queue commit whose nine required checks passed: green, the bot's issue closes",
         [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
       is("and the MAIN VERDE comment names the merge-queue commit",
         String((gh.writes[0]?.body as { body?: string } | undefined)?.body ?? "").includes(QUEUE), true);
@@ -413,29 +451,65 @@ async function endToEnd() {
       is("and no earlier main head is read once the tree is proven green", gh.reads.filter((p) => p.startsWith("actions/workflows/")), []);
     }
     {
-      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
-      await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
-      is("(a) and with no issue open, nothing is opened: no alarm", gh.writes, []);
+      const gh = github({ head: HEAD, headRuns: canceledHead, older: earlierRed, ...proven });
+      await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet, now: NOW });
+      is("(f) and with no issue open, nothing is opened: no alarm", gh.writes, []);
     }
     {
-      const gh = github({ head: HEAD, headRuns: stoppedHead, issues: [botIssue], trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) },
-        older: { "product-checks.yml": [[]] } });
+      const gh = github({ head: HEAD, headRuns: stoppedHead, issues: [botIssue], ...proven });
       const d = await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet, now: NOW });
-      is("(a) head all canceled by later pushes, same tree green in the queue: green", [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
+      is("(f) head all canceled by later pushes, same tree green in the queue: green", [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
     }
     {
       const gh = github({ head: HEAD, headRuns: stoppedHead, issues: [botIssue], trees: headTree, queue: [[queueRun(HEAD, TREE)]], checks: { [HEAD]: nineChecks(HEAD) } });
       const d = await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet, now: NOW });
-      is("(a) the queue commit being main's head itself: green", d.action, "close");
+      is("(f) the queue commit being main's head itself: green", d.action, "close");
     }
     {
       // An older queue commit with the same tree whose checks failed, a newer one whose checks passed.
       const OLDQ = "9".repeat(40);
-      const gh = github({ head: HEAD, headRuns: redHead, issues: [botIssue], trees: headTree,
+      const gh = github({ head: HEAD, headRuns: canceledHead, issues: [botIssue], older: earlierRed, trees: headTree,
         queue: [[queueRun(QUEUE, TREE, { id: 9_002 }), queueRun(OLDQ, TREE, { id: 9_001 })]],
         checks: { [QUEUE]: nineChecks(QUEUE), [OLDQ]: nineChecks(OLDQ, (name) => [checkRun(OLDQ, name, "failure")]) } });
+      const d = await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet, now: NOW });
+      is("(f) one passing queue commit with the same tree is enough", d.action, "close");
+    }
+    {
+      const gh = github({ head: HEAD, headRuns: redHead, issues: [botIssue], ...proven });
       const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
-      is("(a) one passing queue commit with the same tree is enough", d.action, "close");
+      is("(e) head run failure although its tree passed in the merge queue: still red, the open issue gets the new red run",
+        [d.action, d.treeGreen, writesOf(gh)], ["open", null, ["POST issues/7/comments"]]);
+      is("(e) and the merge queue is not even read", queueReads(gh), []);
+    }
+    {
+      const gh = github({ head: HEAD, headRuns: redHead, ...proven });
+      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      is("(e) head run failure, no issue open: the alarm opens, exactly as before", [d.action, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
+    }
+    for (const conclusion of ["timed_out", "startup_failure"]) {
+      const head = [...restGreen(), run(PC, conclusion, { id: 8_002 })];
+      const gh = github({ head: HEAD, headRuns: head, ...proven });
+      const d = await alarmRun({ api: gh.api, trigger: head[8], log: quiet, now: NOW });
+      is(`(e) head run ${conclusion}: still red, the alarm opens`, [d.action, writesOf(gh), queueReads(gh)], ["open", ["POST labels", "POST issues"], []]);
+    }
+    {
+      const head = [...restGreen(), run(PC, "action_required", { id: 8_003 })];
+      const gh = github({ head: HEAD, headRuns: head, issues: [botIssue], ...proven, older: { "product-checks.yml": [[]] } });
+      const d = await alarmRun({ api: gh.api, trigger: head[8], log: quiet, now: NOW });
+      is("(e) head run action_required: exactly as before, nothing closes", [d.action, gh.writes, queueReads(gh)], ["none", [], []]);
+    }
+    {
+      const b = run(PC, stopped, { id: 8_004 });
+      const head = [...restGreen(), b];
+      const gh = github({ head: HEAD, headRuns: head, jobs: { [b.id]: redJobsReply }, ...proven });
+      const d = await alarmRun({ api: gh.api, trigger: b, log: quiet, now: NOW });
+      is("(e) head run canceled with a job failed inside it: still red, the alarm opens", [d.action, writesOf(gh), queueReads(gh)], ["open", ["POST labels", "POST issues"], []]);
+    }
+    {
+      const head = [...restGreen(), run(PC, null, { id: 8_005 })];
+      const gh = github({ head: HEAD, headRuns: head, issues: [botIssue], older: earlierRed, ...proven });
+      const d = await alarmRun({ api: gh.api, trigger: head[0], log: quiet, now: NOW });
+      is("head run still in progress with an earlier head red: exactly as before (the tree is not read)", [d.action, queueReads(gh)], ["open", []]);
     }
     for (const [what, change] of [
       ["one required check failed", (name: string) => [checkRun(QUEUE, name, name === REQUIRED[3].check ? "failure" : "success")]],
@@ -447,13 +521,13 @@ async function endToEnd() {
       ["one required check also failed under the same name", (name: string) => [checkRun(QUEUE, name, "success"), ...(name === REQUIRED[5].check ? [checkRun(QUEUE, name, "failure")] : [])]],
       ["one required check reported for another commit", (name: string) => [checkRun(QUEUE, name, "success", name === REQUIRED[4].check ? { head_sha: OLD } : {})]],
     ] as [string, (name: string) => unknown[]][]) {
-      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE, change) } });
-      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
-      is(`(b) same tree but ${what}: not green, the red head still opens the issue`, [d.action, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
+      const gh = github({ head: HEAD, headRuns: canceledHead, older: earlierRed, trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE, change) } });
+      const d = await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet, now: NOW });
+      is(`(b) same tree but ${what}: not green, the earlier red still opens the issue`, [d.action, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
     }
     {
-      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, "1".repeat(40))]], checks: { [QUEUE]: nineChecks(QUEUE) } });
-      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      const gh = github({ head: HEAD, headRuns: canceledHead, older: earlierRed, trees: headTree, queue: [[queueRun(QUEUE, "1".repeat(40))]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      const d = await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet, now: NOW });
       is("(c) a queue commit whose nine passed but whose tree differs: unchanged, the issue opens", [d.action, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
       is("and its check runs are never read", gh.reads.some((p) => p.includes("check-runs")), false);
     }
@@ -461,22 +535,21 @@ async function endToEnd() {
       ["a pull_request run", { event: "pull_request" }], ["a push run", { event: "push" }],
       ["a branch outside main's merge queue", { head_branch: "gh-readonly-queue/other/pr-1" }],
     ] as [string, Record<string, unknown>][]) {
-      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, TREE, over)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
-      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      const gh = github({ head: HEAD, headRuns: canceledHead, older: earlierRed, trees: headTree, queue: [[queueRun(QUEUE, TREE, over)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      const d = await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet, now: NOW });
       is(`(c) the same tree from ${what} is not a merge-queue proof`, d.action, "open");
     }
     {
       const filler = Array.from({ length: 5 }, (_, p) => Array.from({ length: 100 }, (_, i) => queueRun("8".repeat(40), "2".repeat(40), { id: 20_000 - p * 100 - i })));
-      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [...filler, [queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
-      const d = await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW });
+      const gh = github({ head: HEAD, headRuns: canceledHead, older: earlierRed, trees: headTree, queue: [...filler, [queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      const d = await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet, now: NOW });
       is("the merge-queue listing stops at 3 pages: a match beyond them is never read, and the head is not green",
         [d.action, gh.reads.filter((p) => p.includes("merge_group")).length], ["open", 3]);
     }
     {
-      const gh = github({ head: HEAD, headRuns: allGreen(), issues: [botIssue], trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) } });
+      const gh = github({ head: HEAD, headRuns: allGreen(), issues: [botIssue], ...proven });
       await alarmRun({ api: gh.api, trigger: allGreen()[0], log: quiet, now: NOW });
-      is("when the nine passed on the head itself, the merge queue is never read",
-        gh.reads.filter((p) => p.includes("merge_group") || p.includes("check-runs") || p.startsWith("git/commits/")), []);
+      is("when the nine passed on the head itself, the merge queue is never read", queueReads(gh), []);
     }
     for (const [what, over] of [
       ["the merge-queue listing is not a list", { queueReply: { workflow_runs: "nope" } }],
@@ -492,13 +565,13 @@ async function endToEnd() {
       ["the check runs fail (HTTP 403)", { failOn: /check-runs/ }],
       ["the head commit fails (HTTP 404)", { failOn: /^git\/commits\// }],
     ] as [string, Record<string, unknown>][]) {
-      const gh = github({ head: HEAD, headRuns: redHead, trees: headTree, queue: [[queueRun(QUEUE, TREE)]], checks: { [QUEUE]: nineChecks(QUEUE) }, ...over });
+      const gh = github({ head: HEAD, headRuns: canceledHead, older: earlierRed, ...proven, ...over });
       let outcome = "";
-      try { outcome = (await alarmRun({ api: gh.api, trigger: redHead[8], log: quiet, now: NOW })).action; } catch { outcome = "threw"; }
-      is(`(d) ${what}: never green, the red head still opens the issue as before`, [outcome, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
+      try { outcome = (await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet, now: NOW })).action; } catch { outcome = "threw"; }
+      is(`(d) ${what}: never green, the earlier red still opens the issue as before`, [outcome, writesOf(gh)], ["open", ["POST labels", "POST issues"]]);
     }
     {
-      const gh = github({ head: HEAD, headRuns: stoppedHead, issues: [botIssue], trees: headTree, queueReply: "garbage", older: { "product-checks.yml": [[]] } });
+      const gh = github({ head: HEAD, headRuns: stoppedHead, issues: [botIssue], trees: headTree, queueReply: "garbage" });
       let outcome = "";
       try { outcome = (await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet, now: NOW })).action; } catch { outcome = "threw"; }
       is("(d) head all canceled and an unreadable merge-queue reply: nothing closes, nothing opens", [outcome, gh.writes], ["none", []]);

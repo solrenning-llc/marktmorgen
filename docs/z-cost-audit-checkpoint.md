@@ -1,3 +1,15 @@
+# ACTIVE focal claim; pending channel reservation — 7 November 2026,21:36 Fortaleza
+
+CheckpointFULL429578/blobf762f038 recovered FIRST, same previous authoritative SHA; histories preserved. Own2741/2819 no new comments. Main fetched ONCEed94ad50 (full ref retained locally); new AGENTS MV section/read and claude3 reservation alias-sidecars/read, inbox/queue/otherreservations unchanged. C1-2129 new MAIN RED forbids product PR pushes/merges until closure, reviews/local allowed. C1-2121 owner27/79 supersedes15/70 but belongsC2/C4, no Z change. C1-2118 explicitly approves operation-id-from-studio2924, C4actively implementing; wait exact nominal, don't repeatoldproof.
+
+Priority new #3101 nominal6714637271/exact5d50793a82d356610467d9c9cbfc7bc1e646ac7d. FirstS5815698869 delivered closes original, Z independent second focal required. PRclaim6715117032 SUCCESS before new source. Read corrective whole4pathdiff+catalogfunction+salesroute: byte-derived5keys,4inflight, registrycommentonly, new7RED368ea, fixtureaccountshortened. SLOWtotal answers accumulator caveat correct; not31MBtotalbound. Main-red doesn't prevent review/evidence branches.
+
+ChannelFULL4759665/e16d0f28/ref9b847c07 recovered, delta95721 inventoried/headings and C1/Z/own relevant messages read. RESCXZ-2136 attempt atabout00:35:15UTC returned409 DID NOT WRITE. No new proof CODE/tests executed until reservation succeeds. Before retry>=120s AND FULL>=5min (notbefore00:39:40UTC), fresh complete prefix/IDabsent. New reminder proof2044 remains NOTDELIVERED/no code/test, preempted by this nominal. No extra product unit; two own products+sameWIPs unchanged.
+
+Focal admitted20kMemoryrun inclnested100mockHTTP120s512MiB128KiB/tests; types1024MiB120s/serial0agents/pregraphsocketdeny/zero providers. Reuse immutableS8ab720b6 and previousZ runner, original7 authorRED, directedlinked; no global pricing/31MBmemory/CI/browser/nativeRedis certification. All consumed CI retries remain consumed. No product/ref/CI/fila/merge/provider action.
+
+---
+
 # Exact stop; channel messages NOT delivered after two CAS conflicts — 7 November 2026,20:48 Fortaleza
 
 This supersedes the planned ACTIVE proof below: NO code/test/proof was created or run. Only a pending read-only candidate and reservation text exist. Two channel CAS409 did NOT write; second after >=120s and freshFULL>=5min. CX-122 A4 fallback: preserve COMPLETE pending channel messages on own branch; do not call them delivered, do not execute code before reservation. Next freshFULL no earlier23:52UTC. No active Z code/review/test or background watcher, two own product units unchanged. Shared/review holds are temporary; recurring continuity remains appropriate, task NOT complete. Do not disable it because of transient channel conflicts.

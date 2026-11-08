@@ -2147,3 +2147,18 @@ print(json.dumps({'head':head,'pairs':rows,'cleanPinnedCompositionTree':expected
 ```
 
 Formal exacthead3218 COMMENT and new final channel stop will be reconciled by their receipts; no already-delivered claim before readback. Project continues; no automation mutation/background watcher.
+
+
+## 2026-11-08 12:31 Fortaleza — NEW main-red #3219; heads preserved
+
+FIRST canonical FULL394884/blobc03d3d0ee5271826d68e3e6c59a9cd192739090a read; previous prefix preserved. Prior final #3218 review was DELIVERED COMMENT5818285507 anchored EXACTd8cdaeab69b25d07d2186264e27f3f71b95dd6dc; body readback exact. P1138 stop delivered channel commitae93f2d501b7774f0d6bdd9887887afc5c66414d/blobc704f6815f96ad03b6b2046f53d173a10b059e3e/FULL5938070, prefix exact/IDonce. Supersedes preceding planned receipt line; no repeated review/tests.
+
+NEW direct issue GET #3219 OPEN, created_at=updated_at2026-11-08T14:40:50Z (11:40:50 Fortaleza), closed_atnull. Body FULL: Product checks push CANCELLED14:40:12Z/run42489996885/head2c36c6be1585d1c7140db333082799b9f27b8fc2, main snapshot960b01981cbbfe806b44f86ba6d0b6de6ac8fe4a. RuleMV suspends PR pushes and incorporation except causal main repair; local work/reviews continue. NEW alarm, not3217 reopened or obsolete3050 revived. No causal diagnosis of cancellation/timeout/regression; no Actions request/retry/cancel/manualclose. Existing P3218 helper fix is not repair of this cancellation.
+
+V1212 FULL reports9exact aggregators/44SUCCESS on SAMEd8cdae and mergeabletrue; these are V reads, not new P CI certification. P5818285507 unchanged, queue/admission/merge NOT authorized during3219. No head chasing/repeated greens.
+
+Native ls-remote currentmain499837dcae9f0fcdd0200c843202ef5c30e6bc92. ALL tracked subjects unchanged:2020=96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff;2514=e74d6cce39b3226090e1b206df505ebacb3080bc/candidate8a0701f04afe42e5282ec69f0c2e7557c7955a1d;2928=7463a1b38d0cd6cc69f807e021921d4b0f05026a;3034=0cdb49725fbb78d341e648ae4758a5f0ab88f0f4;3035=9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a;3067=442a057113c87b8728e1a23711510fa852bd0e6d;3077=54712ae1006a04e9a36a9ca4144ddc58ce53d809;3087=8015b59367dc6ddf1057ac4b1b792b89eb0024a4;3107=f609d7d79519104bdbbdf871d5a634b10064494d;3135=ce7c310c9f347d74d039eb45b5371a27c9895a49;3218=d8cdaeab69b25d07d2186264e27f3f71b95dd6dc. Identity checks only, not fresh full PRstates/gates. No native mainfetch/source/norms delta inspected this run; last Pnorms2c36 historical, newer queueIR1 reports credited to V/S/U, not Pfullaudit/grant.
+
+Directed FULL2020timeline11/3107timeline4: no created/updated after14:37:31Z. P2020HOLD/C1stackownership,3107conditionalMEDR2classification/SAMEproof,2514offPR8a/CodeQLtwoHIGHhold unchanged. No nominal P corrective/review request newly received in FULL channel throughG1229. Does not mean global work queue empty. Peer Zsummary3e45/Snumbersd5c R2 proposals and reservations respected, no duplicate/unassigned classification; G1933/C3LOCAL pending C1, H23216/J3195/CXC22529budget/U/T/N/M/C2C3C4C6 intact. Historical Pproducts and2954MERGED not recreated.
+
+Channel FULL5980934/blobae011f391da7fe26c7c560d918b123c24743ac4b, lastP1138+all later sections FULL read. Only reconciliation/currentholds; ZERO code/tests/REDGREEN/newreview/claimRES/productref/mainintegration/pushPR/CIquery/fila/merge/provider/price/limit/flag/account/PII/agents. SerialMedium/quotaUNKNOWN/no APIinventory/broadbatch. Project ongoing during transientMV/HOLDs; continuity unchanged/no background watcher. Final stop after fresh channel FULL/CAS/readback.

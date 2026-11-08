@@ -104,6 +104,21 @@ async function main(): Promise<void> {
   }
   await touchStudent(course.id, "ana@example.com", Math.floor(Date.now() / 1000), ROOM);
   shift += 73 * HOUR;
+  // Rule 24 (Claude 2 on #3202): an unreadable progress is unknown, never "has not opened it". The step is put back for
+  // a later run, and nobody is written to on a guess.
+  const realPipeline = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "HMGET" && commands[1]?.[0] === "SMEMBERS" ? [null, ...commands.slice(1).map(() => [])] : realPipeline.call(redis, commands)) as typeof redis.pipeline;
+  const error = console.error;
+  console.error = () => {};
+  try {
+    await run();
+  } finally {
+    redis.pipeline = realPipeline;
+    console.error = error;
+  }
+  is("an unreadable progress writes to nobody on a guess", to("Your first lesson is waiting"), []);
+  shift += 11 * 60_000;
   await run();
   is("only the one who has not opened it", to("Your first lesson is waiting"), ["ben@example.com"]);
 

@@ -57,6 +57,10 @@ async function main(): Promise<void> {
     ["the list's envelope cut short", (c, real) => (isRange(c) ? [] : real)],
     ["the list answered as nil, not a list", (c, real) => (isRange(c) ? [null] : real)],
     ["the list of another shape", (c, real) => (isRange(c) ? [42] : real)],
+    // Codex G's MEDIUM on 7959db9e3: an id this code never writes was dropped,
+    // so a list of only such ids read as "no emails".
+    ["the list holding only an id this code never writes", (c, real) => (isRange(c) ? [["not-an-id"]] : real)],
+    ["the list holding a written id and one this code never writes", (c, real) => (isRange(c) ? [[...(real[0] as string[]), "not-an-id"]] : real)],
     ["the records' envelope cut short", (c, real) => (isGet(c) ? [] : real)],
     ["the records answered as nil, not a list", (c, real) => (isGet(c) ? [null] : real)],
     ["fewer records than ids", (c, real) => (isGet(c) ? [[]] : real)],

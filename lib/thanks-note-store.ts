@@ -5,7 +5,7 @@
  * (lib/product-about.ts).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type ThanksNote, parseNote } from "@/lib/thanks-note";
@@ -91,16 +91,35 @@ export async function readThanksNotes(statsId: string | null, productIds: string
   return (await readMany(productIds.map((id) => noteKey(statsId, id)))).map(noteOf);
 }
 
-/** Writes a note, or forgets it (null), after taking its room in the store's data room (DataRoomError when it does not fit). */
+/**
+ * Writes a note after taking its room in the store's data room (DataRoomError
+ * when it does not fit), or forgets it (null) as dropThanksNote does. Done only
+ * when Redis answers the SET exactly "OK"; any other reply throws
+ * UnknownReplyError (CX-123 rule 24), so the studio never says saved, nor marks
+ * the product, for a note that may not be kept.
+ */
 export async function writeThanksNote(statsId: string, productId: string, note: ThanksNote | null, room: DataStore): Promise<void> {
-  const json = note ? JSON.stringify(note) : "";
-  await needData(room, [{ slot: `tn:${productId}`, bytes: json ? dataBytes([json], 1) : 0, set: true }]);
-  await redisPipeline([note ? ["SET", noteKey(statsId, productId), json] : ["DEL", noteKey(statsId, productId)]]);
+  if (!note) return forgetNote(statsId, productId, room);
+  const json = JSON.stringify(note);
+  await needData(room, [{ slot: `tn:${productId}`, bytes: dataBytes([json], 1), set: true }]);
+  const replies = repliesFor(await redisPipeline([["SET", noteKey(statsId, productId), json]]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a note saved");
 }
 
 /** Forgets the note of a product that is gone, and gives back its room. */
 export async function dropThanksNote(statsId: string | null, productId: string, room: DataStore): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", noteKey(statsId, productId)]]);
+  await forgetNote(statsId, productId, room);
+}
+
+/**
+ * Deletes a note, and gives back its room only once Redis confirms the DEL (a
+ * count of 0 or 1). Any other reply throws UnknownReplyError (CX-123 rule 24):
+ * a note that may still be kept stays counted in the store's data room.
+ */
+async function forgetNote(statsId: string, productId: string, room: DataStore): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["DEL", noteKey(statsId, productId)]]), 1);
+  const deleted = replies ? countOf(replies[0]) : null;
+  if (deleted === null || deleted > 1) throw new UnknownReplyError("a note deleted");
   await giveData(room, [{ slot: `tn:${productId}`, bytes: 0, set: true }]);
 }

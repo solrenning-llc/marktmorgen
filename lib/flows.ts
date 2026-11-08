@@ -291,6 +291,7 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   }
   const formOutcome = trigger === "form" && typeof raw.formOutcome === "string" ? raw.formOutcome : "";
   // The store's fields and stages, for a step that sets one or moves a deal (lib/crm.ts).
+  // Both exactly as saved: unknown ones throw CrmSchemaReadUnavailable, never "none" or the defaults (CX-123 rule 30).
   const [crmFields, stages] = await Promise.all([readFields(store.statsId), readStages(store.statsId)]);
   // A stage of one of the store's pipelines; one workflow a stage, so a deal entering it starts one run at the most.
   const stageId = trigger === "stage" && typeof raw.stageId === "string" ? raw.stageId : "";
@@ -739,11 +740,12 @@ async function actOnPeople(
   if (action.do === "field") {
     let fields: Awaited<ReturnType<typeof readFields>>;
     try {
+      // Exactly as saved: a reply in an unknown shape is unknown, never "the field was removed" (CX-123 rule 24).
       fields = await readFields(statsId);
     } catch (error) {
       if (!(error instanceof CrmSchemaReadUnavailable)) throw error;
       // Nothing was written: tried again later, which is safe (Claude 6 on #2901), never held as uncertain.
-      return each(emails, "deferred", "Your store's fields could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
+      return each(emails, "deferred", "Your store's fields could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "retry" as const }));
     }
     const field = fields.find((f) => f.id === action.field);
     if (!field) return each(emails, "failed", "The field was removed from your store.");
@@ -838,16 +840,12 @@ async function actOnDeals(
   held: Held | null,
 ): Promise<Acted[]> {
   let pipelines: Awaited<ReturnType<typeof readPipelines>>;
-  try {
-    pipelines = await readPipelines(statsId);
-  } catch (error) {
-    if (!(error instanceof CrmSchemaReadUnavailable)) throw error;
-    // Nothing was written: tried again later, as for the deals below (Claude 6 on #2901), never held as uncertain.
-    return each(emails, "deferred", "Your deals board could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "board" as const }));
-  }
-  const stages = allStages(pipelines);
+  let stages: ReturnType<typeof allStages>;
   let deals: Awaited<ReturnType<typeof readDeals>>;
   try {
+    // The store's own pipelines, or nothing: unknown ones are never read as the default stages (CX-123 rule 30).
+    pipelines = await readPipelines(statsId);
+    stages = allStages(pipelines);
     deals = await readDeals(statsId, stages);
   } catch {
     // Nothing was written: tried again later, which is safe.

@@ -1,0 +1,30 @@
+{
+  "subject": "90fb5f74fb4e20dccfeb3f9060673ee8188e8733",
+  "subjectTree": "bf1924ff3da0843228c4b49665533e1bf3207589",
+  "frozenBase": "0edae6b0a1676ac609a62e12446b69c58e4a00c1",
+  "oldRouteRef": "105b74a9538574afa63254024936303002d5e93e",
+  "sourceBlobs": {
+    "app/api/store/file/route.ts": "560d7c23a53df3123868113e7716a7a56693a325",
+    "app/api/store/image/upload/route.ts": "a6d90d5116c1338bbc16124e02264c2ae8b1bd50",
+    "lib/auth.ts": "601672905beacf1290b377a633ad9ed6d87e466c",
+    "lib/session-id.ts": "b634bc661adef2102294dfef9456cb3488123f8d",
+    "tests/upload-hand-back-signed-out.test.ts": "819fb5da38b4e90af48d3f7b0147f6efd25f207e",
+    "tests/upload-hand-back-cost.test.ts": "e2efe01e83cbdb4c6c329346372705e732356784",
+    "tests/plan-cost-registry.ts": "55434dcaa2960115e129efab0a14985475f71723",
+    "docs/limits-proposal-2026-10-18.md": "13fabfd1a1003f81a3cadf84ede11f3a34a4562f",
+    "docs/pricing-usage-proposal-2026-10-18.md": "70af49f66b490884840c440cb97f4c0a9dc1bd53",
+    "docs/pricing-optimization-2026-10-18.md": "d16245d26a6b7d72f87daada9de487117a7b320a",
+    "docs/pricing-optimization-milp-input-2026-10-18.json": "1803c5b93b32c44a437e8e1e9779463b7102b1a6",
+    "docs/pricing-optimization-milp-output-2026-10-18.json": "8d68fa8b494d2044944050a99542802c37064baf"
+  },
+  "GOriginalSHA256": "d327194d8470deb304a0761ff7916ebdb5bbe699bc6799ce19ab066738eb78b1",
+  "executableProofSHA256": "f9610f4fe5c93c5ed7901989f8bc4ef6e89ad06e2e7df1b4f53b7bef65cdbcf1",
+  "versions": {
+    "Node": "24.22.1",
+    "Next": "16.4.5",
+    "TypeScript": "5.9.3",
+    "esbuild": "0.28.2",
+    "ESLint": "9.39.5",
+    "@vercel/blob": "2.8.0"
+  }
+}

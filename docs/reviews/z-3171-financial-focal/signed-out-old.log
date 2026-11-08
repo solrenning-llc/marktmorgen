@@ -1,0 +1,75 @@
+
+FILE upload-hand-back-signed-out.test.ts
+
+/api/store/image/upload: a hand-back without a session is refused like the signed path refuses it
+  ok    control: another site is still refused
+  ok    control: a first ask without a session is refused
+  FAIL  no cookie: refused as signed out, nothing echoed
+        expected [401,false]
+        got      [200,true]
+  FAIL  an empty session cookie: refused as signed out, nothing echoed
+        expected [401,false]
+        got      [200,true]
+  FAIL  a session cookie not of a session id's shape: refused as signed out, nothing echoed
+        expected [401,false]
+        got      [200,true]
+  FAIL  another cookie only: refused as signed out, nothing echoed
+        expected [401,false]
+        got      [200,true]
+  ok    refusals read nothing from the database
+  ok    a browser holding a session id's shape is handed back what was issued, unchanged
+  ok    and the hand-back still reads nothing from the database (as priced)
+  ok    no key was written
+
+/api/store/file: a hand-back without a session is refused like the signed path refuses it
+  ok    control: another site is still refused
+  ok    control: a first ask without a session is refused
+  FAIL  no cookie: refused as signed out, nothing echoed
+        expected [401,false]
+        got      [200,true]
+  FAIL  an empty session cookie: refused as signed out, nothing echoed
+        expected [401,false]
+        got      [200,true]
+  FAIL  a session cookie not of a session id's shape: refused as signed out, nothing echoed
+        expected [401,false]
+        got      [200,true]
+  FAIL  another cookie only: refused as signed out, nothing echoed
+        expected [401,false]
+        got      [200,true]
+  ok    refusals read nothing from the database
+  ok    a browser holding a session id's shape is handed back what was issued, unchanged
+  ok    and the hand-back still reads nothing from the database (as priced)
+  ok    no key was written
+
+20 checks, 8 failing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE g-original-10.proof.ts
+
+/api/store/image/upload: claimed one funded hand-back per paid studio request
+  ok    synthetic request is below the real 16000-byte ceiling
+  ok    cross-site POST still refused
+  ok    ordinary unsigned first leg refused without a session
+G_PAIRING {"path":"/api/store/image/upload","bodyBytes":13604,"initialAccepted":0,"responses":[{"status":200,"bytes":13495},{"status":200,"bytes":13495},{"status":200,"bytes":13495}],"keys":[]}
+  ok    no storage key or allowance was written
+  FAIL  without a first accepted studio leg no hand-back is funded
+        expected 0
+        got      3
+
+/api/store/file: claimed one funded hand-back per paid studio request
+  ok    synthetic request is below the real 16000-byte ceiling
+  ok    cross-site POST still refused
+  ok    ordinary unsigned first leg refused without a session
+G_PAIRING {"path":"/api/store/file","bodyBytes":13604,"initialAccepted":0,"responses":[{"status":200,"bytes":13495},{"status":200,"bytes":13495},{"status":200,"bytes":13495}],"keys":[]}
+  ok    no storage key or allowance was written
+  FAIL  without a first accepted studio leg no hand-back is funded
+        expected 0
+        got      3
+
+10 checks, 2 failing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3171-WQWOBJ

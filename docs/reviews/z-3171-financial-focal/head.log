@@ -1,0 +1,352 @@
+
+FILE upload-hand-back-signed-out.test.ts
+
+/api/store/image/upload: a hand-back without a session is refused like the signed path refuses it
+  ok    control: another site is still refused
+  ok    control: a first ask without a session is refused
+  ok    no cookie: refused as signed out, nothing echoed
+  ok    an empty session cookie: refused as signed out, nothing echoed
+  ok    a session cookie not of a session id's shape: refused as signed out, nothing echoed
+  ok    another cookie only: refused as signed out, nothing echoed
+  ok    refusals read nothing from the database
+  ok    a browser holding a session id's shape is handed back what was issued, unchanged
+  ok    and the hand-back still reads nothing from the database (as priced)
+  ok    no key was written
+
+/api/store/file: a hand-back without a session is refused like the signed path refuses it
+  ok    control: another site is still refused
+  ok    control: a first ask without a session is refused
+  ok    no cookie: refused as signed out, nothing echoed
+  ok    an empty session cookie: refused as signed out, nothing echoed
+  ok    a session cookie not of a session id's shape: refused as signed out, nothing echoed
+  ok    another cookie only: refused as signed out, nothing echoed
+  ok    refusals read nothing from the database
+  ok    a browser holding a session id's shape is handed back what was issued, unchanged
+  ok    and the hand-back still reads nothing from the database (as priced)
+  ok    no key was written
+
+20 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE g-original-10.proof.ts
+
+/api/store/image/upload: claimed one funded hand-back per paid studio request
+  ok    synthetic request is below the real 16000-byte ceiling
+  ok    cross-site POST still refused
+  ok    ordinary unsigned first leg refused without a session
+G_PAIRING {"path":"/api/store/image/upload","bodyBytes":13604,"initialAccepted":0,"responses":[{"status":401,"bytes":33},{"status":401,"bytes":33},{"status":401,"bytes":33}],"keys":[]}
+  ok    no storage key or allowance was written
+  ok    without a first accepted studio leg no hand-back is funded
+
+/api/store/file: claimed one funded hand-back per paid studio request
+  ok    synthetic request is below the real 16000-byte ceiling
+  ok    cross-site POST still refused
+  ok    ordinary unsigned first leg refused without a session
+G_PAIRING {"path":"/api/store/file","bodyBytes":13604,"initialAccepted":0,"responses":[{"status":401,"bytes":33},{"status":401,"bytes":33},{"status":401,"bytes":33}],"keys":[]}
+  ok    no storage key or allowance was written
+  ok    without a first accepted studio leg no hand-back is funded
+
+10 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE upload-hand-back-cost.test.ts
+
+one upload's door invocations
+  ok    the door signs and counts once per upload
+  ok    and hands back what it issued once
+
+the hand-back runs nothing it is not priced at
+  ok    app/api/store/image/upload/route.ts: answers a hand-back before anything is read or counted
+  ok    app/api/store/image/upload/route.ts: its only wait before the hand-back is the body, read under 16000 bytes
+  ok    app/api/store/file/route.ts: answers a hand-back before anything is read or counted
+  ok    app/api/store/file/route.ts: its only wait before the hand-back is the body, read under 16000 bytes
+
+the studio unit carries every invocation of an upload
+  ok    UNIT_COST.studio covers 2 invocations per upload (0.00008577555555555555 >= 0.00007204444444444444 + 1 x 0.000013731111111111112)
+
+7 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":5,"over":false}
+Z_VIRTUAL_DISPATCH 3
+
+Z_STATUS 0 null
+
+FILE uploader-refusals.test.ts
+
+the file door's refusal reaches the creator, by its own reason
+  ok    a spent studio window: the window's own sentence: it threw
+  ok    a spent studio window: the window's own sentence: the reason
+  ok    a spent studio window: the window's own sentence: the words
+  ok    studio requests not counted just now: the door's own sentence: it threw
+  ok    studio requests not counted just now: the door's own sentence: the reason
+  ok    studio requests not counted just now: the door's own sentence: the words
+  ok    a held session: it threw
+  ok    a held session: the reason
+  ok    a held session: the words
+  ok    a storage that is full: it threw
+  ok    a storage that is full: the reason
+  ok    a storage that is full: the words
+  ok    an unpaid renewal: it threw
+  ok    an unpaid renewal: the reason
+  ok    an unpaid renewal: the words
+  ok    a disputed plan payment: it threw
+  ok    a disputed plan payment: the reason
+  ok    a disputed plan payment: the words
+  ok    file uploads unavailable: it threw
+  ok    file uploads unavailable: the reason
+  ok    file uploads unavailable: the words
+  ok    new uploads paused: it threw
+  ok    new uploads paused: the reason
+  ok    new uploads paused: the words
+  ok    a team that requires a second step: the reason
+  ok    a team that requires a second step: says so
+  ok    a role without products: the reason
+  ok    a role without products: says it is about permission
+  ok    signed out: the reason
+  ok    signed out: says so
+
+the creator's own form keeps its own words, except where the door sent the window's sentence
+  ok    a form's own sentence for storage_full comes first
+  ok    the window's own sentence comes before a form's
+  ok    a spent window without its sentence still says the requests are used
+
+a failure nobody explained is an upload that did not finish, never a claim about our side
+  ok    a 500: reason server_error
+  ok    a 500: did not finish, nothing changed
+  ok    a door that cannot be reached: reason server_error
+  ok    a door that cannot be reached: did not finish, nothing changed
+  ok    a door answering no JSON: did not finish, nothing changed
+
+two uploads at once each hear their own door, and other requests are left as they were
+  ok    both doors were asked
+  ok    the first hears its spent window
+  ok    the second hears its unpaid renewal
+  ok    another request's answer is untouched
+
+the file store that takes sold files in pieces says why too
+  ok    a spent window: reason
+  ok    a spent window: the window's own sentence
+  ok    a second step required: says so
+  ok    a store no longer there: the studio's sentence
+  ok    control: too big keeps its reason
+  ok    control: and the form's own words
+
+a door that said yes hands its upload to the library once, and the door hands it back unchanged
+  ok    askDoor returns what the door issued
+  ok    askDoor asked the door once
+  ok    a yes without an upload in it is no reason, and did not finish
+  ok    a door's word that is not text is no word
+  ok    handed back: the issued upload, unchanged
+  ok    a first ask is not handed back (the door checks and signs it)
+  ok    a client payload that is not JSON is not handed back
+  ok    an empty signature is not handed back
+  ok    params that are not text are not handed back
+  ok    another event is not handed back
+  ok    no body is not handed back
+  ok    app/api/store/file/route.ts: hands back before anything is checked, counted or signed
+  ok    app/api/store/file/route.ts: only after another site is refused
+  ok    app/api/store/image/upload/route.ts: hands back before anything is checked, counted or signed
+  ok    app/api/store/image/upload/route.ts: only after another site is refused
+
+every studio uploader goes through the door that says why, and shows the reason
+  ok    components/product-image-editor.tsx: no picture upload asks the door through the library alone
+  ok    components/product-image-editor.tsx: every picture upload reads its door's answer
+  ok    components/product-image-editor.tsx: shows the reason
+  ok    components/link-picture.tsx: no picture upload asks the door through the library alone
+  ok    components/link-picture.tsx: every picture upload reads its door's answer
+  ok    components/link-picture.tsx: shows the reason
+  ok    components/page-editor.tsx: no picture upload asks the door through the library alone
+  ok    components/page-editor.tsx: every picture upload reads its door's answer
+  ok    components/page-editor.tsx: shows the reason
+  ok    components/product-editor.tsx: shows the reason
+  ok    components/podcast-editor.tsx: shows the reason
+  ok    components/course-editor.tsx: shows the reason
+  ok    lib/sold-file-upload.ts: the file door is heard
+
+76 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":47,"over":false}
+
+Z_STATUS 0 null
+
+FILE auth-sessions-exact.test.ts
+✔ log out of all devices, its own session read as no result: said as not done, never "logged out of all devices" (14.417167ms)
+✔ log out of all devices, its own session read as a number: said as not done, never "logged out of all devices" (4.769228ms)
+✔ log out of all devices, its own session read as a list: said as not done, never "logged out of all devices" (2.307953ms)
+✔ log out of all devices, read in its shape: every session is closed and said so (3.503367ms)
+✔ log out of all devices with no session at all (confirmed absent): nothing to close, said as done (0.99403ms)
+✔ log out, its delete failing: this browser is logged out, but the page never says the session is gone (1.979847ms)
+✔ log out, its delete answered as no result: not said as logged out at the server (1.646334ms)
+✔ log out, its delete answered as text: not said as logged out at the server (1.903492ms)
+✔ log out, its delete answered as a negative count: not said as logged out at the server (2.240822ms)
+✔ log out, read in its shape, or with no session to close: said as logged out (1.61683ms)
+✔ a session whose place in the account's set answered with nothing (not applied) is not opened: the login fails, and nothing is left that logs in (2.4585ms)
+✔ a session whose own write answered as something else is not opened: the login fails, and nothing is left that logs in (1.332952ms)
+✔ a session whose pipeline answered short is not opened (2.76349ms)
+✔ a session answered in its shape opens as before, with its second step, and every way out reaches it (1.525713ms)
+✔ log out everywhere whose deletes answered short: unknown, never a count of sessions closed (1.67004ms)
+✔ a second step taken away, the deletes answered short: fails, never said as logged out (3.096944ms)
+✔ log out everywhere whose deletes answered as text: unknown, never a count of sessions closed (1.441196ms)
+✔ a second step taken away, the deletes answered as text: fails, never said as logged out (1.510971ms)
+✔ the deletes read in their shape: the count is the sessions closed, as before (2.22633ms)
+✔ a locked session, its lock's SET not applied (no answer): refused and taken back, never handed out unlocked (1.519734ms)
+✔ a locked session, its lock's SET answered a number: refused and taken back, never handed out unlocked (1.055173ms)
+✔ a locked session, the account's locked set answered as text: refused and taken back, never handed out unlocked (1.129064ms)
+✔ a locked session, the locked set's expiry answered nothing: refused and taken back, never handed out unlocked (1.073981ms)
+✔ a locked session, Redis failing on the lock: refused and taken back, never handed out unlocked (1.162905ms)
+✔ a locked session whose lock pipeline answered short: refused and taken back (1.367924ms)
+✔ a locked session answered in its shape opens as before, locked until its day (1.279351ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70.669588
+Z_VOLUME {"runs":265,"mocks":0,"over":false}
+reading the session to log out everywhere failed UnknownReplyError: Redis answered a session in an unknown shape
+    at sessionEmail ([stdin]:14800:56)
+    at async POST ([stdin]:14961:13)
+    at async tampered ([stdin]:15009:12)
+    at async TestContext.<anonymous> ([stdin]:15032:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+reading the session to log out everywhere failed UnknownReplyError: Redis answered a session in an unknown shape
+    at sessionEmail ([stdin]:14800:56)
+    at async POST ([stdin]:14961:13)
+    at async tampered ([stdin]:15009:12)
+    at async TestContext.<anonymous> ([stdin]:15032:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading the session to log out everywhere failed UnknownReplyError: Redis answered a session in an unknown shape
+    at sessionEmail ([stdin]:14800:56)
+    at async POST ([stdin]:14961:13)
+    at async tampered ([stdin]:15009:12)
+    at async TestContext.<anonymous> ([stdin]:15032:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sign-out failed Error: Redis error: a stand-in failure
+    at store.pipeline ([stdin]:15003:37)
+    at redisPipeline ([stdin]:7998:41)
+    at endSession ([stdin]:14819:35)
+    at async POST2 ([stdin]:14984:17)
+    at async tampered ([stdin]:15009:12)
+    at async TestContext.<anonymous> ([stdin]:15055:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sign-out everywhere failed SessionsUnknownError: Redis answered the logging out of an account's sessions in an unknown shape
+    at endAllSessions ([stdin]:14836:77)
+    at async wholePipeline ([stdin]:15018:12)
+    at async TestContext.<anonymous> ([stdin]:15115:37)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sign-out everywhere failed SessionsUnknownError: Redis answered the logging out of an account's sessions in an unknown shape
+    at endAllSessions ([stdin]:14836:77)
+    at async wholePipeline ([stdin]:15018:12)
+    at async TestContext.<anonymous> ([stdin]:15115:37)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3251
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (29.807372ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (141.72595ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (37.430126ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.719143ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.144418ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.130537ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.399843ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (67.551012ms)
+✔ every store figure taken in the code is a kind a line prices (44.379704ms)
+✔ every email sent names a meter, and each file only the meters it may use (86.135002ms)
+✔ the units a figure is taken in cost at least what they stand for (10.719497ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.541956ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.199972ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.446113ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.130006ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.094693ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.320884ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.154834ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.721018ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.138849ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.421675ms)
+✔ Path push fits its reserved studio requests (0.125199ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.063556ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.094834ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.130477ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (128.087793ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 581.199022
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (73.690262ms)
+✔ each family is bounded one way at least, and what it says can be checked (24.016188ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (1.88217ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.27948ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.471662ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (6.408352ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.169917ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 125.04029
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE margin-alignment.test.ts
+✔ the dated report remains explicitly historical and matches its reproducible figures (39.442572ms)
+✔ the unchanged dearest receiving fee and every reserve use the whole amount charged (1.067882ms)
+✔ current TX cost budgets reserve the absolute evidence-bound tax and the final net cent (11.614447ms)
+✔ old tax math is available only in the explicitly archived model, never a live fallback (0.287685ms)
+✔ every full-use unit keeps its existing cost room under complete synthetic TX evidence (21.482269ms)
+✔ unknown real review cannot be replaced by a positive model or a zero tax allowance (0.363779ms)
+✔ archived thresholds preserve historical figures without proposing current prices or rights (30.899871ms)
+✔ the value presentation retains owner quotations and its dated tax-model rows (18.814663ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 132.436751
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3171-IN9nRR

@@ -1,0 +1,21 @@
+M_LEASE_OBSERVATION {"at":"before-walk","reached":true,"reads":0,"renewedBeforeDelete":false,"outcome":"completed","record":true,"running":true,"members":["teammate@example.test"]}
+
+before-walk
+  ok    the actual plan reactivation was reached
+  ok    the real reactivated store remains active
+  ok    the active store keeps its existing team
+M_LEASE_OBSERVATION {"at":"before-team-delete","reached":false,"reads":0,"renewedBeforeDelete":false,"outcome":"completed","record":false,"members":[]}
+
+before-team-delete
+  FAIL  the actual plan reactivation was reached
+        expected true
+        got      false
+  FAIL  the real reactivated store remains active
+        expected true
+        got      false
+  FAIL  the active store keeps its existing team
+        expected ["teammate@example.test"]
+        got      []
+
+6 checks, 3 failing.
+M_ADMISSIONS {"nested":203,"pipeline":123,"mockHTTP":0}

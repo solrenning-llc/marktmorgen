@@ -1,0 +1,160 @@
+{
+  "subject": "2884a97de14473a5a930b6260c7d0e926b757d84",
+  "comparison": "old closed-store-data 86775eaa8 aliased into final graph; not whole old checkout",
+  "logs": [
+    {
+      "file": "before-m-3156-expired-delete-fenced.proof.ts.cjs.log",
+      "sha256": "8488d1d9d380489f0ccc8f48845263ad6ff4ac238f6bdb699b91caab3196a91d",
+      "results": [
+        "6 checks, 1 failing."
+      ],
+      "admissions": {
+        "nested": 155,
+        "pipeline": 119,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "before-m-3156-expired-delete-observed.proof.ts.cjs.log",
+      "sha256": "8488d1d9d380489f0ccc8f48845263ad6ff4ac238f6bdb699b91caab3196a91d",
+      "results": [
+        "6 checks, 1 failing."
+      ],
+      "admissions": {
+        "nested": 155,
+        "pipeline": 119,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-closed-store-unknown.test.ts.cjs.log",
+      "sha256": "de2c76839193dd4282e399d35683691bb48e11be0247a25a0c2966d2feccf573",
+      "results": [
+        "10 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 517,
+        "pipeline": 291,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-closed-store.test.ts.cjs.log",
+      "sha256": "480dc75da187af5b2b0737a53ceb6350d895d9376add869e81b20bd4bb399c45",
+      "results": [
+        "28 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 8210,
+        "pipeline": 7816,
+        "mockHTTP": 21
+      }
+    },
+    {
+      "file": "head-erase-lock-fence.test.ts.cjs.log",
+      "sha256": "9df662a58f24aae7117425b9837bd23122db72dd968a2bee2a71441c110f4966",
+      "results": [
+        "55 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 2996,
+        "pipeline": 2347,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-erase-race-final-check.test.ts.cjs.log",
+      "sha256": "7b452b626a1eeb0389058c50f94eefd3b0728687eecfba3ab47f8e3c10c5f8e5",
+      "results": [
+        "33 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 2127,
+        "pipeline": 1283,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-erase-reactivated-store.test.ts.cjs.log",
+      "sha256": "487d80450f74d06427ec420e7afd748262d9450da3dbf45fc02677df1e542c18",
+      "results": [
+        "29 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 1444,
+        "pipeline": 890,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-m-3156-expired-delete-fenced.proof.ts.cjs.log",
+      "sha256": "fc85b9828ecbe63d0049c58c326900027be98800ac71512795c80f3b9771d50c",
+      "results": [
+        "6 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 130,
+        "pipeline": 94,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-m-3156-expired-delete-observed.proof.ts.cjs.log",
+      "sha256": "2bdf12f568e28537e30c2f82c943d3cdb2f384950e114d62daaae06e10761908",
+      "results": [
+        "6 checks, 3 failing."
+      ],
+      "admissions": {
+        "nested": 203,
+        "pipeline": 123,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-m-erasure-concurrent.proof.ts.cjs.log",
+      "sha256": "7432577ab5d6ff3c137c7c2df797c8da850b0310d5b6afa1a3ec0e3742bacb0e",
+      "results": [
+        "6 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 332,
+        "pipeline": 208,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-m-reactivation-during-check.proof.ts.cjs.log",
+      "sha256": "582d8ad8db2ca7d80541033dc4c942d3b579aa819765042193efb15d68294823",
+      "results": [
+        "3 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 99,
+        "pipeline": 74,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-store-data-registry.test.ts.cjs.log",
+      "sha256": "a6c03bc364f9e46f1257c8f99d5ae8f7b72ebe8fb24f5f08d2cebe6c73c4a9e2",
+      "results": [],
+      "admissions": {
+        "nested": 0,
+        "pipeline": 0,
+        "mockHTTP": 0
+      }
+    },
+    {
+      "file": "head-store-data.test.ts.cjs.log",
+      "sha256": "cfce3f3fad91714c1fefd3a9300bf2764ab6b1dc921b143f23d03802de9e7def",
+      "results": [
+        "33 checks, all passing."
+      ],
+      "admissions": {
+        "nested": 56,
+        "pipeline": 41,
+        "mockHTTP": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+
+The erasing walk keeps an unreadable store in line
+  ok    the readable store is prepared and out of line
+  ok    the unreadable one is not prepared, and is still in line
+  ok    moved back a walk, so it does not hold the head of the line
+
+A host whose other stores cannot be read keeps their calendar; the closing store waits
+  ok    the host's calendar is still there
+  ok    the closing store is not prepared
+  ok    it is still in line, moved back a walk
+
+Control: a host who still serves another store keeps their calendar when the read works
+  ok    the closing store is prepared and out of line
+  ok    the host's calendar is kept
+
+Control: a host who serves no other store loses their calendar with their last store
+  ok    the closing store is prepared
+  ok    the host's calendar is gone
+
+10 checks, all passing.
+M_ADMISSIONS {"nested":517,"pipeline":291,"mockHTTP":0}
+a closed store's record could not be read; it waits for the next walk Error: Redis request timed out (test)
+    at store.pipeline (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:83630:87)
+    at redisPipeline (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:2229:41)
+    at storeForEmailSeen (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:13048:23)
+    at async takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:82675:20)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:83117:17)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:83561:18)
+a closed store could not be prepared; it waits for the next walk Error: Redis request timed out (test)
+    at store.pipeline (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:83631:96)
+    at redisPipeline (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:2229:41)
+    at memberStores (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:40616:23)
+    at prepareStore (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:82786:30)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:83127:19)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store-unknown.test.ts.cjs:83586:17)

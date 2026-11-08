@@ -1,0 +1,19 @@
+creator: room 18 MB; outside it 133.9 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (79.360313ms)
+✔ each family is bounded one way at least, and what it says can be checked (31.395567ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (2.752685ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.544902ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.455939ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (8.340121ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.214123ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 131.961594
+M_ADMISSIONS {"nested":0,"pipeline":0,"mockHTTP":0}

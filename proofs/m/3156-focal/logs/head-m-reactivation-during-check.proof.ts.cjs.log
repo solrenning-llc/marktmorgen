@@ -1,0 +1,6 @@
+  ok    control: a plan resumed before the walk stays live
+  ok    the real reactivation occurred during the final due check
+  ok    a store reactivated while the final check waits is not erased
+
+3 checks, all passing.
+M_ADMISSIONS {"nested":99,"pipeline":74,"mockHTTP":0}

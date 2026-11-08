@@ -1,0 +1,92 @@
+
+Controls: a store really closed is erased once; a store that re-subscribed and left the line is not
+  ok    closed, its plan ended: erased and finished once
+  ok    and the next day nothing again
+  ok    closed in its closing day (final index): erased and finished once
+  ok    re-subscribed, out of line (unmarkDue answered): nothing touched
+  ok    re-subscribed, unmarkDue's reply lost after it was done: nothing touched
+
+A store that re-subscribed and stayed in line is never erased: it leaves the line, untouched
+  ok    unmarkDue fails before it reaches the database (plan-closing.ts swallows it): the live store is still in line
+  ok    the next walk: nothing prepared, nothing erased, out of line
+  ok    the closing job never looks at it (no longer an ended plan), so unmarkDue is never called: nothing erased, out of line
+  ok    a run fails in prepareStore, before the record is closed: the store waits a walk, in line with its record
+  ok    then it re-subscribes and unmarkDue fails: the walk a walk later does not prepare it again, nothing more erased, out of line
+
+A store that re-subscribed and ended again is not erased on its old closing
+  ok    its new ending has no closing yet: nothing erased, out of line (the closing job puts it back when it is closed)
+
+A closing day with a plan running, or a read that is unknown: kept in line, nothing erased
+  ok    in its closing day and a plan reads running: kept in line, nothing erased
+  ok    the closing record's read answers a number: nothing prepared, nothing erased, still in line
+  ok    the closing record's read answers a number: moved back a walk, so it does not hold the head of the line
+  ok    the closing record's read answers a number: the run a walk later, whose replies read, erases it once
+  ok    the closing record does not parse: nothing prepared, nothing erased, still in line
+  ok    the closing record does not parse: moved back a walk, so it does not hold the head of the line
+  ok    the closing record does not parse: the run a walk later, whose replies read, erases it once
+  ok    the closing record is not an object: nothing prepared, nothing erased, still in line
+  ok    the closing record is not an object: moved back a walk, so it does not hold the head of the line
+  ok    the closing record is not an object: the run a walk later, whose replies read, erases it once
+  ok    the final index's read answers a list: nothing prepared, nothing erased, still in line
+  ok    the final index's read answers a list: moved back a walk, so it does not hold the head of the line
+  ok    the final index's read answers a list: the run a walk later, whose replies read, erases it once
+  ok    the final index's score is not a number: nothing prepared, nothing erased, still in line
+  ok    the final index's score is not a number: moved back a walk, so it does not hold the head of the line
+  ok    the final index's score is not a number: the run a walk later, whose replies read, erases it once
+  ok    the final index's read fails: nothing prepared, nothing erased, still in line
+  ok    the final index's read fails: moved back a walk
+
+29 checks, all passing.
+M_ADMISSIONS {"nested":1444,"pipeline":890,"mockHTTP":0}
+a closed store could not be prepared; it waits for the next walk Error: synthetic: the pipeline did not reach the database
+    at store.pipeline (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83524:13)
+    at redisPipeline (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:2229:41)
+    at /workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82679:40
+    at prepareStore (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82747:19)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83071:19)
+    at async walk (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83540:18)
+    at async outcome (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83531:19)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83600:22)
+a closed store's record could not be read; it waits for the next walk UnknownReplyError: Redis answered a closing store's record of its closing (GET) in an unknown shape
+    at dueForErasure (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82598:54)
+    at async takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82623:18)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83061:17)
+    at async walk (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83540:18)
+    at async outcome (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83531:19)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83631:74)
+a closed store's record could not be read; it waits for the next walk UnknownReplyError: Redis answered a closing store's record of its closing (GET) in an unknown shape
+    at dueForErasure (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82602:47)
+    at async takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82623:18)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83061:17)
+    at async walk (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83540:18)
+    at async outcome (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83531:19)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83631:74)
+a closed store's record could not be read; it waits for the next walk UnknownReplyError: Redis answered a closing store's record of its closing (GET) in an unknown shape
+    at dueForErasure (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82602:47)
+    at async takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82623:18)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83061:17)
+    at async walk (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83540:18)
+    at async outcome (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83531:19)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83631:74)
+a closed store's record could not be read; it waits for the next walk UnknownReplyError: Redis answered a closing store's closing day (ZSCORE) in an unknown shape
+    at dueForErasure (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82596:11)
+    at async takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82623:18)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83061:17)
+    at async walk (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83540:18)
+    at async outcome (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83531:19)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83631:74)
+a closed store's record could not be read; it waits for the next walk UnknownReplyError: Redis answered a closing store's closing day (ZSCORE) in an unknown shape
+    at dueForErasure (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82596:11)
+    at async takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82623:18)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83061:17)
+    at async walk (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83540:18)
+    at async outcome (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83531:19)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83631:74)
+a closed store's record could not be read; it waits for the next walk Error: synthetic: the reply was lost
+    at store.pipeline (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83514:32)
+    at async dueForErasure (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82592:30)
+    at async takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:82623:18)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83061:17)
+    at async walk (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83540:18)
+    at async outcome (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83531:19)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-reactivated-store.test.ts.cjs:83638:91)

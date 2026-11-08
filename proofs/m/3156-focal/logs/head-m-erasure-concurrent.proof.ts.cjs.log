@@ -1,0 +1,9 @@
+  ok    before: the real owner check and real concurrent create were reached
+  ok    before: the new store keeps its pause, last pause and folder owner
+  ok    before: the new store's private lead list remains
+  ok    after: the real owner check and real concurrent create were reached
+  ok    after: the new store keeps its pause, last pause and folder owner
+  ok    after: the new store's private lead list remains
+
+6 checks, all passing.
+M_ADMISSIONS {"nested":332,"pipeline":208,"mockHTTP":0}

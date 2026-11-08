@@ -1,0 +1,73 @@
+
+A key named by an address the closed store let go of: a store that claims it after the walk read it free keeps it
+  ok    the walk erases the closed store once
+  ok    the other store claimed oldname between the walk's read and its delete, and keeps its weekly team
+
+A list's member named by the closed store's key: a first store opened after the walk read it free keeps its place
+  ok    the walk prepares the closed store and stops at its first page
+  ok    the walk finishes the closed store once
+  ok    the new store, opened between the read and the delete, keeps its place in the pauses' line, its pause and its folder's owner
+
+A key named by the closed store's Stripe account: its owner's new store that connects it after the walk read it free keeps it
+  ok    the walk finishes the closed store once
+  ok    the new store connected the account between the read and the delete, and keeps its record
+
+The owner's other stores change between the walk's read of them and its delete: the run stops, nothing deleted, and the next one finishes
+  ok    another store is made between the read and the delete: the run stops, the account's record kept
+  ok    the next run reads the owner's stores again, finds none selling through it, and deletes it
+
+The walk holds the store's own lock while it prepares it: a plan started again meanwhile is refused, and the store is erased whole
+  ok    the walk erases the store once
+  ok    while it was prepared the store's lock was the walk's, and the plan's write waited and was refused
+  ok    nothing of it is left, and its lock is let go of
+
+Another write holds the store's lock when the walk would take it: nothing touched, still in line
+  ok    the walk prepares nothing
+  ok    the other write's lock is still its own
+  ok    once it is let go of, the next run erases the store once
+
+The store's record changes after the walk's check: read and checked again
+  ok    changed once, still due: read again and erased once
+  ok    changed after every check: after three checks it is kept in line, untouched
+  ok    and the next run, with nothing changing, erases it once
+
+A plan started again after the walk's check is seen: the store leaves the line, untouched
+  ok    nothing prepared, nothing erased, out of line
+  ok    and the next day nothing again
+
+The walk's lock runs out while it prepares the store: it stops before anything more is deleted
+  ok    the run stops; the store's record, its contacts and its place in line are there
+  ok    the next run prepares it again and erases it once
+
+The step that takes the lock answers what does not read: the store waits a walk, nothing touched
+  ok    answers a number it never answers: nothing prepared, the store untouched and in line
+  ok    answers a number it never answers: moved back a walk, so it does not hold the head of the line
+  ok    answers a number it never answers: once its lock is gone, the run a walk later erases it once
+  ok    answers nothing: nothing prepared, the store untouched and in line
+  ok    answers nothing: moved back a walk, so it does not hold the head of the line
+  ok    answers nothing: once its lock is gone, the run a walk later erases it once
+  ok    answers a list: nothing prepared, the store untouched and in line
+  ok    answers a list: moved back a walk, so it does not hold the head of the line
+  ok    answers a list: once its lock is gone, the run a walk later erases it once
+
+The step that deletes what an id names answers what does not read: the run stops at that page, and the next run finishes
+  ok    the run stops, nothing finished, its cursor where it was, the key kept
+  ok    the next run finishes the closed store, and its key goes
+
+33 checks, all passing.
+M_ADMISSIONS {"nested":2127,"pipeline":1283,"mockHTTP":0}
+a closed store's record could not be read; it waits for the next walk UnknownReplyError: Redis answered whether a closing store is as its check read it (EVAL) in an unknown shape
+    at takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:82777:29)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83190:17)
+    at async run2 (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83684:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83897:84)
+a closed store's record could not be read; it waits for the next walk UnknownReplyError: Redis answered whether a closing store is as its check read it (EVAL) in an unknown shape
+    at takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:82777:29)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83190:17)
+    at async run2 (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83684:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83897:84)
+a closed store's record could not be read; it waits for the next walk UnknownReplyError: Redis answered whether a closing store is as its check read it (EVAL) in an unknown shape
+    at takeDue (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:82777:29)
+    at async eraseClosed (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83190:17)
+    at async run2 (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83684:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-erase-race-final-check.test.ts.cjs:83897:84)

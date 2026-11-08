@@ -1,0 +1,50 @@
+
+What a room is, by plan
+  ok    a paid store's room is its plan's
+  ok    a free trial's, and an ended plan's
+  ok    what a store keeps may fill it up to two windows of its orders from the top
+  ok    bytes are UTF-8 and every entry counts, rounded up
+  ok    an order takes what it hands over
+  ok    a bundle hands over each of its items
+
+Taken before it is written, refused past the room
+  ok    a write that fits is taken, with its own field
+  ok    one past the room is refused with what it is
+  ok    and the creator is told in plain words
+  ok    nothing of it was written
+  ok    needData says it as a full store, so every studio route answers it
+  ok    a buyer is told it is the store's room, not theirs
+  ok    deleting gives the room back, field and all
+  ok    and never below nothing
+
+What expires by itself comes off with its month
+  ok    a record kept until December is counted until then
+  ok    in the room
+  ok    and gone once its month is over
+  ok    a cache that does not fit is not kept
+
+An order is never refused once paid
+  ok    what an order leaves is added whatever the room holds, at what it really adds
+  ok    so the room may be passed by what was paid for
+
+A checkout is held only while the room has space for its order
+  ok    an empty room admits a checkout
+  ok    a room with space for one more order admits one
+  ok    room made, sales go on
+  ok    a store is known by its id
+
+Unknown is not zero
+  ok    a room that cannot be read takes nothing
+  ok    and is an ordinary failure, to try again, not a full store
+  ok    a change that is not a number is refused before anything
+
+Counts that never grow a hash past its most
+  ok    new names fill the hash to its most
+  ok    what does not fit is counted under ~, and a name there always counts
+  ok    counting names that all fit runs its length once and a count each
+  ok    near its most, one read more says which are there
+  ok    the same hash named twice is refused, and nothing is written
+  ok    and the same names again, past it, as many
+
+33 checks, all passing.
+M_ADMISSIONS {"nested":56,"pipeline":41,"mockHTTP":0}

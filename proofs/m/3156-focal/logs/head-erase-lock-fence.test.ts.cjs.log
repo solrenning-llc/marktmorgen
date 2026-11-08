@@ -1,0 +1,100 @@
+
+Control: a plan that runs again before the walk keeps the whole store
+  ok    the walk leaves it
+  ok    nothing of it is deleted or changed
+
+The census: every pipeline the preparation sends that changes the database, while it holds the lock
+  0: EVAL closing-fenced:v1 nl:store:lock:… nl:host:claims:…
+  1: EVAL closing-fenced:v1 nl:store:lock:… nl:host:claims:…
+  2: EVAL closing-fenced:v1 nl:store:lock:… nl:team:of:… nl:team:… nl:team:log:…
+  3: EVAL closing-fenced:v1 nl:store:lock:… nl:api:k:…
+  4: EVAL closing-fenced:v1 nl:store:lock:… nl:api:keys:… nl:api:hold:… nl:api:used:…
+  5: EVAL closing-fenced:v1 nl:store:lock:… nl:hooks:cfg:… nl:hooks:stores nl:hooks:anchor:… nl:hooks:wait:… nl:hooks:wait:…:eps:20765 nl:hooks:wait:…:eps:20764 nl:hooks:wait:…:eps:20763 nl:hooks:log:…
+  6: EVAL closing-fenced:v1 nl:store:lock:… nl:esync:cfg:… nl:esync:tags:… nl:esync:bad:… nl:esync:log:…
+  7: EVAL closing-fenced:v1 nl:store:lock:… nl:phone:cfg:… nl:phone:st:…
+  8: EVAL path-forget-held:v1 nl:data:… nl:path:… nl:path:board:v1 nl:path:board:owners:v1 nl:store:lock:…
+  9: EVAL closing-fenced:v1 nl:store:lock:… nl:hostcal:cfg:… nl:hostcal:good:… nl:hostcal:err:… nl:hostcal:lock:… nl:hostcal:cfg:… nl:hostcal:good:… nl:hostcal:err:… nl:hostcal:lock:…
+  10: EVAL closing-fenced:v1 nl:store:lock:… nl:closing:final
+  11: EVAL closing-fenced:v1 nl:store:lock:… nl:store:handle:fenceshop nl:store:owner:… nl:store:before-catalog:… nl:store:id:… nl:account:stores:… nl:plan:ended nl:share:stores
+  ok    it reaches every step that deletes
+
+The lock runs out just before step 0 (EVAL closing-fenced:v1 nl:store:lock:… nl:host:claims:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 1 (EVAL closing-fenced:v1 nl:store:lock:… nl:host:claims:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 2 (EVAL closing-fenced:v1 nl:store:lock:… nl:team:of:… nl:team:… nl:team:log:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 3 (EVAL closing-fenced:v1 nl:store:lock:… nl:api:k:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 4 (EVAL closing-fenced:v1 nl:store:lock:… nl:api:keys:… nl:api:hold:… nl:api:used:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 5 (EVAL closing-fenced:v1 nl:store:lock:… nl:hooks:cfg:… nl:hooks:stores nl:hooks:anchor:… nl:hooks:wait:… nl:hooks:wait:…:eps:20765 nl:hooks:wait:…:eps:20764 nl:hooks:wait:…:eps:20763 nl:hooks:log:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 6 (EVAL closing-fenced:v1 nl:store:lock:… nl:esync:cfg:… nl:esync:tags:… nl:esync:bad:… nl:esync:log:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 7 (EVAL closing-fenced:v1 nl:store:lock:… nl:phone:cfg:… nl:phone:st:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 8 (EVAL path-forget-held:v1 nl:data:… nl:path:… nl:path:board:v1 nl:path:board:owners:v1 nl:store:lock:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 9 (EVAL closing-fenced:v1 nl:store:lock:… nl:hostcal:cfg:… nl:hostcal:good:… nl:hostcal:err:… nl:hostcal:lock:… nl:hostcal:cfg:… nl:hostcal:good:… nl:hostcal:err:… nl:hostcal:lock:…), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 10 (EVAL closing-fenced:v1 nl:store:lock:… nl:closing:final), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The lock runs out just before step 11 (EVAL closing-fenced:v1 nl:store:lock:… nl:store:handle:fenceshop nl:store:owner:… nl:store:before-catalog:… nl:store:id:… nl:account:stores:… nl:plan:ended nl:share:stores), and the plan starts again
+  ok    the plan started again at that step
+  ok    the walk stops there
+  ok    the store runs
+  ok    nothing of the store that runs again is deleted or changed
+
+The record's last step: what the walk sends closes the record exactly as lib/store.ts's closeStoreRecord does
+  ok    the store had two addresses, an id and a place in both lists
+  ok    what is left is the same
+  ok    and the record is gone
+  ok    its addresses are held back for the quarantine
+
+55 checks, all passing.
+M_ADMISSIONS {"nested":2996,"pipeline":2347,"mockHTTP":0}

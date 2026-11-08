@@ -1,0 +1,44 @@
+
+A store with every family closes, and another stays
+  ok    the billing-coverage index fixture uses the sorted-set type its actual reader requires
+  ok    the closing store has a key in every family the walk erases (262)
+  ok    and its records are many (586), some of them in what the other store keeps too (56)
+  ok    every key it made has a name no longer than the registry prices (128): nl:cm:9ab72f8e2cde4081844fac486df1f1ae:dm:r:0bdbca3f13411af56af7a689ef6ef707.cbff7a134563eeed7c9f517e616332fb
+  ok    its plan ended after October 18, 2026, so the whole store closes
+  ok    three notices, on their days
+  ok    each names the day, what goes, that no copy of its sales is kept, its students' certificates and where to download everything
+  ok    before the day nothing is touched, but its members' charges were held on the day its plan ended, on its own Stripe account only
+  ok    its buyer was told once, by Marktmorgen, at least seven days before its day
+  ok    on its day its files go and it is put in line for the walk
+  ok    its memberships end at once on its day, not at the end of a period, on its own Stripe account only
+  ok    the walk reads the database to its end and finishes the store
+  ok    nothing of it is in the file store: nothing was copied anywhere
+  (kept as the company's: nl:closed:walk, nl:closing:shut:…, nl:free:in:2026-11:…, nl:plan:closing:…, nl:sender:2026-11, nl:ship:done:cs_test_…, nl:ship:done:cs_test_…, nl:store:handle:closing-shop)
+  (gone by themselves later: 124, of nl:ab:paid:, nl:adsrv:ctx:, nl:adsrv:sent:, nl:adsrv:sub:, nl:aff:leads:lock:, nl:aff:link:, nl:aff:seen:, nl:aff:session:, nl:affhub:, nl:agent:book:lock:, nl:agree:lock:, nl:amem:lock:, nl:ask:a:, nl:assist:c:, nl:assist:next:, nl:assist:nextlock:, nl:assist:remind:, nl:assist:remindwho:, nl:cal:chg:, nl:call:confirmed:, nl:call:moved:, nl:call:reminded:, nl:card:link:, nl:card:opens:, nl:cm:evmail:, nl:cm:link:, nl:cm:mail:, nl:confirm:, nl:copy:lock:, nl:crm:tasklock:, nl:crm:taskrecount:, nl:dc:state:, nl:esync:j:, nl:esync:seen:, nl:flow-rotate:, nl:free:uses:, nl:fshare:n:, nl:gift:, nl:gift:pi:, nl:grp:pi:, nl:grp:take:, nl:heard:done:, nl:hooks:evt:, nl:import:, nl:learn:link:, nl:learn:rate:addr:, nl:learn:rate:ip:, nl:letters:link:, nl:letters:ok:, nl:letters:rl:addr:, nl:letters:rl:ip:, nl:lib:, nl:lib:joined:, nl:lib:link:, nl:listed:, nl:lostdispute:cursor:, nl:manage:link:, nl:manage:opens:, nl:meet:state:, nl:metaads:state:, nl:orders:link:, nl:orders:seen:, nl:payreq:lock:, nl:payreq:w:, nl:person:find:, nl:phone:seen:, nl:pictures:doors:, nl:pod:n:, nl:pp:item:, nl:pre:give:, nl:pre:pi:, nl:recover:sent:, nl:rev:ask:sent:, nl:rl:aff:addr:, nl:rl:aff:click:, nl:rl:aff:ip:, nl:rl:cm:addr:, nl:rl:cm:ip:, nl:rl:free:addr:, nl:rl:free:ip:, nl:rl:licence:, nl:rl:manage:addr:, nl:rl:manage:ip:, nl:rl:orders:addr:, nl:rl:orders:ip:, nl:sale:told:, nl:ship:done:, nl:stamp:copy:, nl:stamp:problem:, nl:storage:pending:, nl:tasks:taken:, nl:taxobs:v1:, nl:team:invite:, nl:teams:state:, nl:tier:, nl:tier:resume:, nl:upd:job:, nl:upsell-slots:, nl:upsell:, nl:vault:up:, nl:wf:abandoned:, nl:withdraw:, nl:yearly:fallback:try:, nl:yearly:link:)
+  ok    of what the closed store made, and of what names it, only the company's records and what is gone by itself within its days are left
+  ok    and what is left by itself that holds an address, but what a sale left under its own reference, is gone within sixty days
+  ok    what was reached only through its records is gone
+  ok    what each sale left under its own reference is left to run out, within its family's days
+  ok    the store is gone, and its address is held back from anybody else
+  ok    a person's records the other store is in keep it, and gain only the closed store's id
+  ok    everything the other store had before the closing store came is exactly as it was, the lists both were in included
+  ok    the shared buyer's library shows the other store alone: the closed one's id points at nothing
+  ok    the shared helper is on the other store's team alone
+  ok    and everything reached through the other store's records is there
+  ok    its files are where they were
+  ok    its owner was never written to
+  ok    the closed store's owner was told three times before its day, and not written to again
+  ok    a walk again finds nothing to do
+  ok    and the daily job does not look at it again
+
+28 checks, all passing.
+M_ADMISSIONS {"nested":8210,"pipeline":7816,"mockHTTP":21}
+listing a closing store's open plan checkouts failed BillingError: Stripe billing failed (404 invalid_request_error): no stand-in for GET /checkout/sessions
+    at onPlatform (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store.test.ts.cjs:43234:11)
+    at async expirePlanCheckouts (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store.test.ts.cjs:120581:18)
+    at async closingDay (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store.test.ts.cjs:125412:5)
+    at async runClosingJourney (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store.test.ts.cjs:166047:16)
+    at async main (/workspace/scratch/d1ece80b1417/m-3156-fenced-focal/proofs/m/3156-focal/logs/head-closed-store.test.ts.cjs:166144:3) {
+  status: 404,
+  code: 'invalid_request_error'
+}

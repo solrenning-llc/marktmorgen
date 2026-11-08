@@ -7,13 +7,17 @@
  * guard; a refund in another currency than its sale's was added to the
  * sale's cents as if it were the same money. Both now leave the book's
  * refunds unchecked, so nothing is paid on them, as the Stripe side does
- * (#3189). The same payment listed twice counts once. An amount or currency
- * that does not read is the reader's (claude4/paypal-cents-exact), not here.
+ * (#3189). The same payment listed twice counts once. A refund whose cents
+ * are not the sale's whole positive amount (0, negative, a part, not a whole
+ * number, missing) is unknown too, never a refund of less. A reading that
+ * did not cover every refund since the oldest line (more than
+ * PAYPAL_REFUNDS_READ listed, or a listed refund whose record is gone)
+ * leaves the book unchecked, so a refund past the cut is never paid on.
  * Synthetic only: the Redis stub, no provider call.
  */
 import { creditPayPalSale, readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
-import type { Paid } from "@/lib/paypal-sales";
+import { PAYPAL_REFUNDS_READ, type Paid } from "@/lib/paypal-sales";
 import { payableLines } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -110,6 +114,44 @@ async function main(): Promise<void> {
   await held("A capture that is empty", { ...paid, capture: "" });
   await held("A capture that is not text", { ...paid, capture: 12345 });
   await held("A refund in another currency than the sale's", { ...paid, currency: "eur" });
+
+  await held("A refund of no cents", { ...paid, cents: 0 });
+  await held("A refund of negative cents", { ...paid, cents: -5000 });
+  await held("A refund of a part of the sale", { ...paid, cents: 100 });
+  await held("A refund in cents that are not a whole number", { ...paid, cents: 4999.5 });
+  await held("A refund in cents that are not a number", { ...paid, cents: "abc" });
+  await held("A refund with no cents", { ...paid, cents: undefined });
+
+  part("A listed refund whose kept record is gone: the read is partial, nothing is paid");
+  await setup(null, true);
+  const gone = await offered();
+  is("the book is not checked", gone.checked, false);
+  is("nothing passes the refund guard", gone.through, 0);
+
+  // `others` refunds of other sales, each with its record, listed before this sale's own refund.
+  const crowd = async (others: number): Promise<void> => {
+    await setup(paid, true);
+    const commands: (string | number)[][] = [];
+    for (let i = 0; i < others; i += 1) {
+      const order = `7O${String(i).padStart(15, "0")}`;
+      commands.push(["SET", `nl:ppsell:paid:${order}`, JSON.stringify({ ...paid, order, capture: `5C${String(i).padStart(14, "0")}`, via: undefined })]);
+      commands.push(["ZADD", `nl:ppsell:refunded:${SID}`, String(AT - 1800), order]);
+    }
+    await redis.pipeline(commands);
+  };
+
+  part(`Control: ${PAYPAL_REFUNDS_READ} refunds in all, this sale's the last: read whole, its commission taken back`);
+  await crowd(PAYPAL_REFUNDS_READ - 1);
+  const whole = await offered();
+  is("checked", whole.checked, true);
+  is("no commission", whole.commission, 0);
+  is("nothing offered", whole.through, 0);
+
+  part(`More than ${PAYPAL_REFUNDS_READ} refunds, this sale's past the cut: the read is partial, nothing is paid`);
+  await crowd(PAYPAL_REFUNDS_READ);
+  const cut = await offered();
+  is("the book is not checked", cut.checked, false);
+  is("nothing passes the refund guard", cut.through, 0);
 
   part("The same refund listed twice counts once, and the book stays checked");
   await setup(paid, true);

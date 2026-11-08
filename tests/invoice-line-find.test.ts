@@ -164,11 +164,6 @@ async function main(): Promise<void> {
     kept: false,
   });
   is("a top-level subscription that is the same: found", await retryWith(() => list([oursWith({ subscription: SUBSCRIPTION })])), { posts: 0, state: "billed", kept: false });
-  is("only a top-level subscription, no parent (an older version): found", await retryWith(() => list([oursWith({ parent: undefined, subscription: SUBSCRIPTION })])), {
-    posts: 0,
-    state: "billed",
-    kept: false,
-  });
   is("other lines that are not ours are not checked: asked for once", await retryWith(() => list([{ ...other(1), customer: "cus_Another0001", currency: "eur" }])), {
     posts: 1,
     state: "billed",
@@ -211,6 +206,8 @@ async function main(): Promise<void> {
     ["our mark with subscription details null", () => list([oursWith({ parent: { type: "subscription_details", subscription_details: null } })])],
     ["our mark with the subscription null", () => list([oursWith({ parent: parent(null) })])],
     ["our mark with a parent of another type", () => list([oursWith({ parent: { type: "other", subscription_details: { subscription: SUBSCRIPTION } } })])],
+    ["our mark with only a top-level subscription, no parent (not the pinned version's shape)", () => list([oursWith({ parent: undefined, subscription: SUBSCRIPTION })])],
+    ["our mark with a top-level subscription null beside the parent", () => list([oursWith({ subscription: null })])],
     ["our mark with a top-level subscription that differs", () => list([oursWith({ subscription: "sub_Another0001" })])],
     ["our mark with a top-level subscription that differs, no parent", () => list([oursWith({ parent: undefined, subscription: "sub_Another0001" })])],
     ["our mark with the amount 1 cent less", () => list([oursWith({ amount: 499 })])],

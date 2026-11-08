@@ -61,11 +61,19 @@ export async function welcomeFor(store: Store, claim: Pick<Claim, "e" | "p" | "a
   const start = Number.isFinite(asked) && asked > 0 && asked <= nowSeconds ? asked : nowSeconds;
   const key = startKey(store.statsId, claim.e);
   const ttl = endsAt(start, store.welcomeOffer.hours) - nowSeconds + KEEP_AFTER_SECONDS;
-  const [made, kept] = await redisPipeline([
-    ["SET", key, String(start), "NX", "EX", Math.max(60, ttl)],
-    ["GET", key],
-  ]);
-  if (made !== null) await redisPipeline([["INCR", countKey(store.statsId)]]).catch(() => undefined);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["SET", key, String(start), "NX", "EX", Math.max(60, ttl)],
+      ["GET", key],
+    ]),
+    2,
+  );
+  const made = replies ? replies[0] : undefined;
+  const kept = replies ? replies[1] : undefined;
+  // Counted only on an exact "OK" (CX-123 rule 24): nil is a person whose offer already began; any other answer is
+  // unknown, so nobody is counted on it, and it is said.
+  if (made === "OK") await redisPipeline([["INCR", countKey(store.statsId)]]).catch(() => undefined);
+  else if (made !== null) console.error("starting a welcome offer answered in no known shape; not counted");
   const began = Number(kept) || start;
   const until = endsAt(began, store.welcomeOffer.hours);
   return { product: product as Listing, percent: store.welcomeOffer.percent, until, ended: nowSeconds >= until };

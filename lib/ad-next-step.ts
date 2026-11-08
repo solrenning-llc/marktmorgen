@@ -12,15 +12,21 @@
  *     (paybackOf) reads a channel, with refunds taken off, and only once at
  *     least VERDICT_MIN_CENTS was spent.
  *   - Unknown: the numbers are partial, the store's sales, the campaign's
- *     sales or its refunds were not read in full, or no spend (or too little)
- *     was recorded. Then it says it is unknown, gives no figure and suggests
- *     nothing; an unknown is never read as zero.
+ *     sales or its refunds were not read in full, a figure is not a whole
+ *     number of cents (or sales) at or above zero, an active campaign has no
+ *     daily budget of its own (0), or no spend (or too little) was recorded.
+ *     Then it says it is unknown, gives no figure and suggests nothing; an
+ *     unknown is never read as zero.
+ *   - Only a campaign the creator's limits cover (its platform and product
+ *     approved, lib/ad-autopilot-rules.ts inScope) gets a change, as the
+ *     autopilot touches no other.
  *   - A raise is prepared only for an active campaign that paid for itself
- *     with at least MIN_SALES_TO_RAISE sales, each costing at most the
- *     creator's most per sale, and only as far as every limit the creator
- *     approved holds (lib/ad-autopilot-rules.ts, withinLimits: daily budgets,
- *     the platforms' worst week and the worst total) and never by more than
- *     RAISE_PERCENT. Without approved limits nothing is raised.
+ *     and that the autopilot's own raise rule allows (raiseRefusal: judged,
+ *     at least MIN_SALES_TO_RAISE sales, its cost per sale, spent so far over
+ *     sales so far, at most RAISE_BELOW_PERCENT of the creator's most), and
+ *     only as far as every limit the creator approved holds (withinLimits:
+ *     daily budgets, the platforms' worst week and the worst total) and never
+ *     by more than RAISE_PERCENT. Without approved limits nothing is raised.
  *   - A pause is prepared only for an active campaign that did not pay for
  *     itself once it spent JUDGE_AFTER_TIMES the creator's most per sale.
  *   - Every prepared change waits for the creator ("ask"): this rule changes
@@ -31,7 +37,7 @@
  * (lib/ad-creative-check.ts): no promise of gain and no urgency
  * (tests/ad-next-step.test.ts).
  */
-import { type AutopilotRules, type CampaignNow, type CampaignSetting, JUDGE_AFTER_TIMES, MIN_SALES_TO_RAISE, RAISE_PERCENT, checkRules, withinLimits } from "@/lib/ad-autopilot-rules";
+import { type AutopilotRules, type CampaignNow, type CampaignSetting, JUDGE_AFTER_TIMES, MIN_SALES_TO_RAISE, RAISE_BELOW_PERCENT, RAISE_PERCENT, checkRules, costPerSale, inScope, raiseRefusal, withinLimits } from "@/lib/ad-autopilot-rules";
 import { dailyBudgetAllowed } from "@/lib/ad-campaign-plan";
 import type { CampaignResults } from "@/lib/campaign-results";
 import { type AdSpend, VERDICT_MIN_CENTS, daysBetween, spendWithin } from "@/lib/ad-spend-rules";
@@ -61,7 +67,7 @@ export type NextStepInput = {
   all: readonly CampaignNow[];
 };
 
-export type NextStepUnknown = "days" | "partial" | "sales" | "refunds" | "spend" | "little";
+export type NextStepUnknown = "days" | "partial" | "sales" | "refunds" | "campaign" | "budget" | "spend" | "little";
 
 /** What the creator reads when a figure is unknown: no number, no suggestion. */
 export const NEXT_STEP_UNKNOWN: Readonly<Record<NextStepUnknown, string>> = {
@@ -69,6 +75,8 @@ export const NEXT_STEP_UNKNOWN: Readonly<Record<NextStepUnknown, string>> = {
   partial: "Unknown: the numbers for these days are not complete, so no change is suggested.",
   sales: "Unknown: this campaign's sales were not fully read, so no change is suggested.",
   refunds: "Unknown: refunds were not fully read, so no change is suggested.",
+  campaign: "Unknown: this campaign's figures from the ad account were not fully read, so no change is suggested.",
+  budget: "Unknown: this campaign has no daily budget of its own, so no change is suggested.",
   spend: "Unknown: no ad spend is recorded for this campaign, so no change is suggested.",
   little: "Unknown: too little was spent on its ads to judge, so no change is suggested.",
 };
@@ -104,7 +112,13 @@ export type NextStep = {
 };
 
 const DAY_MS = 86_400_000;
+/** A figure this rule reads: a whole number at or above zero; anything else is unknown, never a figure. */
+const whole = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+const allWhole = (byDay: Readonly<Record<string, number>>) => Object.values(byDay).every(whole);
 const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + DAY_MS).toISOString().slice(0, 10);
+
+const OUT_OF_SCOPE = "Your ad limits do not include this ad platform or product, so no change is suggested.";
+const tooEarly = (amount: string) => `It is too early to judge: wait until it spends ${amount}.`;
 
 /** The next step for one campaign; nothing is changed by it. */
 export function nextStepFor(input: NextStepInput): NextStep {
@@ -113,13 +127,18 @@ export function nextStepFor(input: NextStepInput): NextStep {
   const span = daysBetween(input.from, input.to);
   if (!span || span > 400) return unknown("days");
   if (input.results.partial) return unknown("partial");
-  if (!input.results.salesKnown || input.salesByDay === null || input.campaign.sales === null) return unknown("sales");
-  if (input.refundsByDay === null) return unknown("refunds");
+  const c = input.campaign;
+  if (!input.results.salesKnown || input.salesByDay === null || !allWhole(input.salesByDay) || !whole(c.sales)) return unknown("sales");
+  if (input.refundsByDay === null || !allWhole(input.refundsByDay)) return unknown("refunds");
+  if (!whole(c.spentCents) || !whole(c.dailyBudgetCents) || !Number.isSafeInteger(c.daysLeft) || !Number.isSafeInteger(c.today)) return unknown("campaign");
+  const active = c.status === "ACTIVE" && c.daysLeft > 0;
+  if (active && c.dailyBudgetCents === 0) return unknown("budget");
 
   let spent = 0;
   let first = input.to;
   for (const entry of input.spends) {
     if (entry.campaign !== input.name) continue;
+    if (!whole(entry.cents)) return unknown("spend");
     const cents = spendWithin(entry, input.from, input.to);
     if (cents <= 0) continue;
     spent += cents;
@@ -142,8 +161,6 @@ export function nextStepFor(input: NextStepInput): NextStep {
   }
 
   const money = (cents: number) => formatMoney(cents, input.currency);
-  const c = input.campaign;
-  const active = c.status === "ACTIVE" && c.daysLeft > 0;
   const rules = input.limits && checkRules(input.limits).ok ? input.limits : null;
   const facts = { campaign: name, unknown: null, spentCents: spent, backCents: back };
 
@@ -153,12 +170,18 @@ export function nextStepFor(input: NextStepInput): NextStep {
     if (c.status !== "ACTIVE") return step("It is paused, so no change is suggested.");
     if (!active) return step(null);
     if (!rules) return step("Choose your ad limits first, so any change stays inside them.");
-    const sales = c.sales ?? 0;
-    if (sales < MIN_SALES_TO_RAISE) return step(`It has ${sales} ${sales === 1 ? "sale" : "sales"} so far. A raise is suggested only once it has ${MIN_SALES_TO_RAISE}.`);
-    if (spent > rules.maxCostPerSaleCents * sales) return step(`Each sale cost more in ads than your most of ${money(rules.maxCostPerSaleCents)}, so no raise is suggested.`);
+    if (!inScope(rules, c)) return step(OUT_OF_SCOPE);
+    const refusal = raiseRefusal(c, rules);
+    const sales = c.sales;
+    const most = rules.maxCostPerSaleCents;
+    if (refusal === "unmeasured") return unknown("sales");
+    if (refusal === "early") return step(tooEarly(money(JUDGE_AFTER_TIMES * most)));
+    if (refusal === "sales") return step(`It has ${sales} ${sales === 1 ? "sale" : "sales"} so far. A raise is suggested only once it has ${MIN_SALES_TO_RAISE}.`);
+    if (refusal === "over") return step(`Each sale cost ${money(Math.ceil(costPerSale(c)))} in ads after refunds, above your most of ${money(most)}, so no raise is suggested.`);
+    if (refusal === "margin") return step(`Each sale cost ${money(Math.ceil(costPerSale(c)))} in ads after refunds. A raise is suggested only at ${money(Math.floor((most * RAISE_BELOW_PERCENT) / 100))} or less.`);
     const from = c.dailyBudgetCents;
     const to = largestRaise(rules, input.all, c);
-    if (to * 100 < from * 101) return step("Your ad limits leave no room to raise its budget.");
+    if (!dailyBudgetAllowed(from) || !(to > from) || to * 100 < from * 101) return step("Your ad limits leave no room to raise its budget.");
     const percent = Math.floor(((to - from) * 100) / from);
     return {
       ...step(null),
@@ -177,8 +200,9 @@ export function nextStepFor(input: NextStepInput): NextStep {
   const says = `This campaign has not paid for itself yet: ${money(spent)} of ads, ${money(back)} back after refunds.`;
   const step = (note: string | null): NextStep => ({ ...facts, state: "not_paid_back", days: null, says, note, ask: null, change: null });
   if (!active || !rules) return step(null);
+  if (!inScope(rules, c)) return step(OUT_OF_SCOPE);
   const judgeAt = JUDGE_AFTER_TIMES * rules.maxCostPerSaleCents;
-  if (spent < judgeAt) return step(`It is too early to judge: wait until it spends ${money(judgeAt)}.`);
+  if (spent < judgeAt) return step(tooEarly(money(judgeAt)));
   return {
     ...step(null),
     ask: "Pause this campaign?",

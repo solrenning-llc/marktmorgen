@@ -123,14 +123,39 @@ export function withinLimits(rules: AutopilotRules, campaigns: readonly Campaign
   return day <= rules.maxDailyCents && week <= rules.maxWeekCents && total <= rules.maxTotalCents;
 }
 
-const costPerSale = (c: CampaignNow) => (c.sales && c.sales > 0 ? c.spentCents / c.sales : Infinity);
+/** Its cost per sale: what it spent so far over its sales so far, the same period; Infinity with no sale. */
+export const costPerSale = (c: Pick<CampaignNow, "spentCents" | "sales">) => (c.sales && c.sales > 0 ? c.spentCents / c.sales : Infinity);
 const judged = (c: CampaignNow, rules: AutopilotRules) => c.sales !== null && c.spentCents >= JUDGE_AFTER_TIMES * rules.maxCostPerSaleCents;
+
+/** Whether the creator's limits cover a campaign: its platform and its product are among those approved. */
+export function inScope(rules: Pick<AutopilotRules, "platforms" | "products">, c: Pick<CampaignNow, "platform" | "product">): boolean {
+  return rules.platforms.includes(c.platform) && rules.products.includes(c.product);
+}
+
+/** Why a campaign's own numbers allow no raise, or null when they allow one. */
+export type RaiseRefusal = "unmeasured" | "early" | "sales" | "over" | "margin";
+
+/**
+ * The raise rule on a campaign's own numbers, the one autopilotChanges uses:
+ * judged (spent at least JUDGE_AFTER_TIMES the most a sale may cost), at least
+ * MIN_SALES_TO_RAISE sales, and a cost per sale of at most RAISE_BELOW_PERCENT
+ * of that most. The limits on budgets are checked apart (withinLimits).
+ */
+export function raiseRefusal(c: CampaignNow, rules: AutopilotRules): RaiseRefusal | null {
+  if (c.sales === null) return "unmeasured";
+  if (!judged(c, rules)) return "early";
+  if (!(c.sales >= MIN_SALES_TO_RAISE)) return "sales";
+  const cps = costPerSale(c);
+  if (!(cps <= rules.maxCostPerSaleCents)) return "over";
+  if (!(cps * 100 <= rules.maxCostPerSaleCents * RAISE_BELOW_PERCENT)) return "margin";
+  return null;
+}
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
 /** What to change today, within the approved limits; the campaigns it does not own are never in it. */
 export function autopilotChanges(rules: AutopilotRules, campaigns: readonly CampaignNow[]): AutopilotChange[] {
   if (!checkRules(rules).ok) return [];
-  const own = campaigns.filter((c) => rules.platforms.includes(c.platform) && rules.products.includes(c.product) && c.daysLeft > 0);
+  const own = campaigns.filter((c) => inScope(rules, c) && c.daysLeft > 0);
   const daily = new Map(own.map((c) => [c.id, live(c)] as const));
   const why = new Map<string, string>();
 
@@ -157,7 +182,7 @@ export function autopilotChanges(rules: AutopilotRules, campaigns: readonly Camp
 
   // 3. Raise what pays for itself best, each only as far as every limit still holds.
   const winners = own
-    .filter((c) => (daily.get(c.id) ?? 0) > 0 && !why.has(c.id) && judged(c, rules) && (c.sales ?? 0) >= MIN_SALES_TO_RAISE && costPerSale(c) * 100 <= rules.maxCostPerSaleCents * RAISE_BELOW_PERCENT)
+    .filter((c) => (daily.get(c.id) ?? 0) > 0 && !why.has(c.id) && raiseRefusal(c, rules) === null)
     .sort((a, b) => costPerSale(a) - costPerSale(b) || a.id.localeCompare(b.id));
   for (const c of winners) {
     const from = daily.get(c.id)!;

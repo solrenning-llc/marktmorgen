@@ -10,10 +10,10 @@ Code read: `origin/main` at `88dedad3b` (8 November 2026): `lib/backup-cost.ts`,
 | --- | --- |
 | upstash.com (pricing page and documentation) | **read** |
 | vercel.com (pricing documentation and changelog) | **read** |
-| developers.cloudflare.com, www.cloudflare.com (R2, Workers, bucket locks) | **blocked, not read** (the session's network proxy refuses the connection; the fetch tool cannot resolve the host) |
-| bunny.net, docs.bunny.net (Stream pricing, egress) | **blocked, not read** |
+| developers.cloudflare.com (R2 pricing, bucket locks, error codes, lifecycles; Workers pricing, limits, Cron Triggers) | **read** (20:59 UTC, after the network allowed the host; blocked at 20:27) |
+| bunny.net, docs.bunny.net (pricing pages; Stream pricing, encoding, storage structure, Stream API) | **read** (20:59 UTC; docs.bunny.net redirects to bunny.net/docs) |
 
-Where a Cloudflare or bunny figure is used below, it is the figure the repository already records, with the date and the person who read it; it was **not** reread today. No price is invented: what nobody has read stays unknown.
+Every Cloudflare and bunny figure below was read today on the page named beside it. No price is invented: what no page states stays unknown.
 
 ## 2. Official sources read today
 
@@ -29,17 +29,21 @@ Where a Cloudflare or bunny figure is used below, it is the figure the repositor
 | https://vercel.com/docs/functions/limitations | read 2026-11-08 | Pro maximum duration 300 s default, **800 s maximum** (1,800 s extended, beta); 4 GB maximum memory on Pro; functions run in `iad1` by default, the region can be changed in the project's settings. |
 | https://vercel.com/docs/manage-cdn-usage and https://vercel.com/docs/pricing/regional-pricing | read 2026-11-08 | Fast Origin Transfer is the function's own HTTP request (in) and response (out); priced "1 GB for $0.06 – $0.43" by region. Private Data Transfer ($0.15 – $0.31 a GB) applies with Static IPs. Neither page lists a charge for a function's outbound requests to other services. |
 
-Recorded earlier, **not reread today** (blocked):
+Cloudflare and bunny, read today (8 November 2026, 20:59 UTC):
 
-| Rate | Figure | Read by, on | Recorded in |
+| Source (URL) | Page date | What it says, as used here | Against the earlier record |
 | --- | --- | --- | --- |
-| R2 Standard storage | $0.015 a decimal GB-month, average of the daily peaks, usage rounded up to the next unit | Claude 1, 2026-11-04 (inbox C4-27, C4-38) | `lib/spend-cost-table.ts`, docs/backup-cost-2026-11-04.md §2, §5 item 2 |
-| R2 Class A / Class B | $4.50 / $0.36 a million; DeleteObject, DeleteBucket, AbortMultipartUpload free; a PutObject answered 412 is Class A | same | same |
-| R2 egress | free | same | same |
-| R2 lifecycle expiry | "within 24 hours", billed until deleted; whether the deletion is billed is not said (taken as one Class A) | same | docs/backup-cost-2026-11-04.md §5 item 2 |
-| Bunny Stream delivery | $0.005 a GB on the Volume tier; Standard tier billed by region, **up to $0.060 a GB** | 2026-10-18 | docs/pack-cost-decomposition-2026-10-18.md, `STREAM_DELIVERY_PER_GB` in tests/plan-cost-registry.ts |
-| Cloudflare Workers (plan price, requests, CPU time, cron limits, subrequests) | **never read by anyone in this repository**; the inbox (C4-37) mentions "free plan x US$ 5" without a source | — | — |
-| R2 bucket locks (409 on a locked delete, how a lock is set, billing) | **never read from an official page here**; the 409 comes from the inbox (C4-36) | — | — |
+| https://developers.cloudflare.com/r2/pricing/ | "Last updated Oct 30, 2026" | Standard storage **$0.015 / GB-month**; Class A **$4.50 / million**; Class B **$0.36 / million**; egress **free**; buckets: first 100,000 included, then $0.10 a bucket a month. GB-month = "averaging the *peak* storage per day over a billing period (30 days)". "Cloudflare rounds up your usage to the next billing unit" (1,000,001 operations bill as 2 million; 1.1 GB-month as 2). Free tier (10 GB-month, 1 million Class A, 10 million Class B a month): **not credited here** (MR rule). Class A includes `ListObjects`, `PutObject`, `CopyObject`, `CreateMultipartUpload`, `UploadPart`, `CompleteMultipartUpload`, `ListParts`, `PutBucketLifecycleConfiguration`; Class B includes `HeadObject`, `GetObject`; free: `DeleteObject`, `DeleteBucket`, `AbortMultipartUpload`. A request refused at authentication (401, 403) is not billed; a `PutObject` answered 412 or 400 `BadDigest` is billed as Class A. | **Same values** as Claude 1's reading of 2026-11-04 (`lib/spend-cost-table.ts`, docs/backup-cost-2026-11-04.md §2): nothing to recompute. |
+| https://developers.cloudflare.com/r2/buckets/object-lifecycles/ | "Last updated Oct 26, 2026" | Objects "typically removed from a bucket within 24 hours" of their expiry; "An object is no longer billable once it has been deleted." Whether the lifecycle deletion itself is billed is still not said. | Same as recorded; the deletion stays priced as one Class A (docs/backup-cost-2026-11-04.md §5 item 2). |
+| https://developers.cloudflare.com/r2/buckets/bucket-locks/ and https://developers.cloudflare.com/r2/api/error-codes/ | "Last updated Oct 28, 2026" (locks) | Section 4a below: the exact 409 answer. A lock rule (by prefix; an age, a date or indefinite; up to 1,000 rules) blocks overwrites, deletes, completing uploads started earlier and **removal by lifecycle rules**; it does not block new objects. No charge for a lock rule is listed (the owner sets it once in the dashboard; at most one operation, inside the rounding million already counted). | New: never read here before (the 409 came from inbox C4-36). |
+| https://developers.cloudflare.com/workers/platform/pricing/ | "Last updated Oct 2, 2026" | Workers Paid: **minimum $5 a month an account**; Standard model: requests **$0.30 per additional million** (10 million included), CPU time **$0.02 per additional million CPU ms** (30 million included), **no charge for duration**; "Cloudflare does not bill for subrequests"; no egress charge. Included amounts **not credited here**. Workers Logs: 20 million events included, then $0.60 a million, and "Beginning December 1, 2026, Workers Logs will use Cloudflare Observability pricing" (that page not read: **unknown**). The page states no rounding for Workers requests or CPU (only for Durable Objects): one block of each is added, as for R2. | New: never read here before (C4-37 said "US$ 5" without a source; the $5 is now sourced). |
+| https://developers.cloudflare.com/workers/platform/limits/ | "Last updated Oct 29, 2026" | Paid: CPU time per Cron Trigger **30 s for an interval under 1 hour, 15 min for an interval of 1 hour or more**; Cron Trigger **wall time 15 min**; memory **128 MB** an isolate; subrequests **10,000 an invocation** by default (up to 10 million); 6 simultaneous outgoing connections; **250 Cron Triggers an account**. Waiting on `fetch()` does not count as CPU time. | New. |
+| https://developers.cloudflare.com/workers/configuration/cron-triggers/ and https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/ | "Last updated Oct 17, 2026" | Crons run on UTC; changes take up to 15 minutes to propagate; a scheduled handler can call `controller.noRetry()`. **How many times a failed cron is retried is not stated** (unknown), so the proposal below calls `noRetry()` on every outcome and the run count stays the schedule's. | New. |
+| https://developers.cloudflare.com/r2/api/workers/workers-api-reference/ | "Last updated Nov 4, 2026" | A `put()` of a `ReadableStream` needs a known length (`FixedLengthStream`), otherwise it throws. **What the Workers binding returns for a locked object is not stated** (the 409 above is written for the S3 API). | New. |
+| https://bunny.net/pricing/ and https://bunny.net/docs/stream/pricing.md | undated (read 2026-11-08) | CDN and Stream delivery, Standard network: Europe & North America **$0.010**, South America **$0.045**, Asia & Oceania **$0.030**, **Middle East & Africa $0.060 a GB** (dearest); Volume network $0.005 a GB to 500 TB. Stream storage $0.01 a GB (Frankfurt), +$0.01 for a 2nd region, +$0.005 from the 3rd; $1 monthly minimum. "Storage is billed on what a video generates during encoding [...] **Keep original files** [...] add more on top". | **Same** as the 2026-10-18 record ($0.060 dearest Standard region): the Bunny egress lines do not move. |
+| https://bunny.net/pricing/storage/ | undated (read 2026-11-08) | Bunny Storage (storage zones, not Stream libraries): Standard HDD $0.01 a GB a region; "Free API egress", "No API fees". Not used here: the videos are in a Stream library, read through its pull zone (`https://{pull_zone}.b-cdn.net/{video_id}/original`, https://bunny.net/docs/stream/storage-structure.md), which is CDN delivery. | New. |
+| https://bunny.net/docs/stream/encoding.md, https://bunny.net/docs/api-reference/stream/manage-videos/get-video.md and .../get-video-storage-size-info.md | undated (read 2026-11-08) | Section 5b: `storageSize` and the originals. | New. |
+| https://vercel.com/docs/vercel-blob/usage-and-pricing and https://vercel.com/docs/pricing/regional-pricing | `last_updated: 2026-09-23` (read 2026-11-08) | Blob: storage $0.023 – $0.041 a GB-month; Simple Operations (a read on cache miss, a metadata read) $0.35 – $0.56 a million; Advanced Operations (upload, copy, **list**) $4.50 – $7.00 a million; Blob Data Transfer $0.05 – **$0.117 a GB**; plus Fast Origin Transfer on every cache miss (up to $0.43 a GB, section 2 above) and a CDN Request per access (rate not read). Delete is free. | New: bounds the Blob fallback files of section 5b per GB; how many bytes Blob holds is still not known. |
 
 ## 3. The nine items of `BACKUP_COST_UNKNOWNS`
 
@@ -55,7 +59,7 @@ The coordinator's brief says eight; the constant in `lib/backup-cost.ts` on `88d
 | 6 | `refused-calls` | Depends on the route (item 1). With `CRON_SECRET` checked by `lib/request-guard.ts` before any database command (C4-36), an unauthenticated call costs one Vercel invocation and no Upstash command; authenticated calls are the crons' (C4-36 asks for two a day, matching `BACKUP_RUNS_PER_DAY` = 2). | Authenticated calls = the scheduled ones (2 a day, 64 a month, already priced); unauthenticated calls refused at **zero database commands**, their invocation counted with the site's ordinary traffic, not the backup. Needs a test that a call without the secret sends no command. | **Still open** until the route and that test are on main. |
 | 7 | `report-reads` | Nothing schedules the report on main. | Two reads a day, as assumed; closes when the report's schedule exists. | **Still open** (code agent). |
 | 8 | `billing-units` | Upstash: "billed per request", no rounding stated (billing page, 2026-11-08). Vercel: invocations per unit since 2026-05-29 (changelog); CPU measured in milliseconds; no rounding stated. Silence is not a statement of "no rounding". | Add **one block of each** to the worst month, as R2 does: +100,000 Upstash commands ($0.20), +1 GB of bandwidth ($0.03), +1 GB of storage ($0.25), +1 CPU-hour ($0.221) and +1 GB-hour ($0.0183) on Vercel. | **Bounded by a ceiling**; can leave the list once the code prices it. |
-| 9 | `restore-reads` | Reading a set back costs one R2 Class B per object (parts + 1) at $0.36 a million (Claude 1's reading of 2026-11-04) and no egress. The monthly restore test (C4-35) reads the verified set in memory only. Where that test runs (a machine of the owner's, a CI runner) is not decided, and a CI runner's minutes are not priced here. | Per test, at most `maxParts + 1` Class B operations, inside the million of Class B rounding already counted below. | **Partly closed**: the R2 part is priced; the runner is open until the owner decides where the test runs. |
+| 9 | `restore-reads` | Reading a set back costs one R2 Class B per object (parts + 1) at $0.36 a million and no egress (R2 pricing page, reread 2026-11-08, same values as Claude 1's reading of 2026-11-04). The monthly restore test (C4-35) reads the verified set in memory only. Where that test runs (a machine of the owner's, a CI runner) is not decided, and a CI runner's minutes are not priced here. | Per test, at most `maxParts + 1` Class B operations, inside the million of Class B rounding already counted below. | **Partly closed**: the R2 part is priced; the runner is open until the owner decides where the test runs. |
 
 So, of nine: **2 closed or bounded with a source today (2, 4), 3 bounded by a proposed ceiling (3, 8, and 9 for its R2 part), 4 still open (1, 5, 6, 7)**, three of them waiting only for the route and the report's schedule, which are the code agent's.
 
@@ -69,6 +73,17 @@ From the official pages read on 8 November 2026 (section 2):
 - **Whether the production database has the switch on cannot be seen from here**: no agent enters the Upstash account. The owner can check the Backups tab and say which (on or off, 1 or 3 days).
 - These backups live in the same Upstash account: they do not protect against losing the account, and a restore through the console **deletes the target database's data first** (official warning above). Never restore over the live database.
 
+## 4a. The bucket lock: what R2 answers (official pages, 8 November 2026)
+
+From https://developers.cloudflare.com/r2/buckets/bucket-locks/ ("Notes") and https://developers.cloudflare.com/r2/api/error-codes/ (code 10069), verbatim where quoted:
+
+- **Delete of a locked object, single-object S3 request (`DeleteObject`)**: "fails with HTTP `409` and the `ObjectLockedByBucketPolicy` error code" (error code **10069**, "Object is protected by a bucket lock rule and cannot be modified or deleted"). The existing object is not modified. This **matches** what #3273 (`claude4/bk1-cron-lock`, `lib/backup-store.ts` `delete`) assumes: a 409 throws `BackupObjectLockedError` and is never a done delete. The error-codes page lists no other 409 for an object delete (`BucketNotEmpty` and `BucketConflict` are bucket operations), so reading any 409 there as the lock is consistent with the page; checking the `ObjectLockedByBucketPolicy` code in the body would be a stricter reading, not a correction.
+- **Multi-object delete (`DeleteObjects`)**: "R2 returns HTTP `200` and reports `ObjectLockedByBucketPolicy` for each locked key in the response body". #3273 does not use it; if a later unit switches to it, a 200 must never be read as "all deleted".
+- **Write onto a locked name, including a create-only `PutObject` with `If-None-Match: *`**: "The lock check runs before conditions on the object being written, such as `If-None-Match` or `If-Match`, so a write that fails both checks returns `ObjectLockedByBucketPolicy`, not `PreconditionFailed` (`412`)." **This differs from what #3273 says**: `lib/backup-store.ts` (`putNew`, and its header comment "the other is answered 412") expects 412 for a name that already exists; under the lock, a name that exists and is locked answers **409**. #3273's code still throws on it (any status other than 200 or 412 is "Backup write failed"), so nothing is taken as written; only the message and the comment are wrong for that case. Names are random ids, so it needs a collision or a retried write. Not changed by this unit (it belongs to #3273).
+- **Lifecycle and lock**: "Bucket lock rules take precedence over lifecycle rules": a locked object is not removed by the lifecycle rule until its lock ends. A bucket cannot be emptied while any lock rule is configured.
+- **Billing of a refused request**: a `DeleteObject` is free; whether a `PutObject` refused with 409 is billed is not said (the FAQ bills a 412 and a 400 `BadDigest` as Class A): it is taken as one Class A, inside the rounding million already counted.
+- **The Worker (files and videos)** would write through the Workers binding, for which the pages read today do not state the lock's answer: **unknown** until read; the Worker must treat any error from a delete or a write as not done.
+
 ## 5. The design priced (inbox C4-37)
 
 - A **separate Cloudflare account** for backups only, created by the owner; agents never enter it. Three buckets: `marktmorgen-backup` (database), `marktmorgen-files-backup` (files), `marktmorgen-videos-backup` (videos).
@@ -77,7 +92,7 @@ From the official pages read on 8 November 2026 (section 2):
 
 ### 5a. Worst month and year: the company line (fixed cost, 100% Marktmorgen, FX275)
 
-The database copy, as built plus the proposals of section 3 (one part of 4 MiB, 10,000 keys, 20,210 commands a run, 64 runs a month (two a day on 32 UTC days), 800 s a run at `gru1` rates, `DUMP` batch 1, 3 monthly copies added to the stored ceiling). R2 rates of 2026-11-04 (not reread); Upstash and Vercel read today.
+The database copy, as built plus the proposals of section 3 (one part of 4 MiB, 10,000 keys, 20,210 commands a run, 64 runs a month (two a day on 32 UTC days), 800 s a run at `gru1` rates, `DUMP` batch 1, 3 monthly copies added to the stored ceiling). R2, Upstash and Vercel rates read today (the R2 values did not change since 2026-11-04, so the database lines below are as before).
 
 | Line | Per month | How |
 | --- | ---: | --- |
@@ -90,11 +105,25 @@ The database copy, as built plus the proposals of section 3 (one part of 4 MiB, 
 | Vercel compute | $3.9030 | 64 × (2 GB × 800 s at $0.0183 + 800 s of CPU at $0.221 + $0.0000006), + 1 CPU-hour + 1 GB-hour |
 | Vercel transfer (ceiling, item 3) | $7.4223 | 17.26 GB a month (every byte above, plus the write and the read-back) at $0.43 |
 | Provider allowance, 10% (`PROVIDER_CHARGES_BPS`) | $1.9774 | |
-| **Total, known lines** | **$21.7517 a month** | **$261.02 a year** (12 worst months) |
+| **Total, database copy** | **$21.7517 a month** | **$261.02 a year** (12 worst months) |
 
 With the code's current batch of up to 500 keys the same month would carry up to $128.00 of Upstash bandwidth and $1,834.67 of the transfer ceiling more: that is why item 4 proposes batch 1.
 
-Still outside this total, and **each one keeps the line unapproved**: the **Cloudflare Workers plan and usage** (not read; section 2); the `SCAN` page size (item 5); the restore test's runner (item 9); and the R2 rates, which were read on 4 November and not today. In a separate Cloudflare account, the minimum billing unit of each R2 class (the "+1 million" and "+1 GB-month" above) falls entirely on the backup; it is counted **once**, here, and not again in the per-plan lines.
+**The files-and-videos Worker (Cloudflare Workers Paid, read today).** Its cost does not grow with the bytes it moves, only with how often it runs: duration is not billed, subrequests are not billed, R2 egress is free, and the CPU of one cron run is capped by Cloudflare itself at 15 minutes (the limit for an interval of 1 hour or more, and the run's wall time). So the ceiling is the schedule. Proposed: **one hourly cron** (one "lane"), `controller.noRetry()` on every outcome (the retry count is not stated, section 2), Workers Logs **off** (its price from 1 December 2026 is not read), and none of the included amounts credited:
+
+| Line | Per month | How |
+| --- | ---: | --- |
+| Workers Paid plan | $5.0000 | the account's minimum charge |
+| Requests | $0.3000 | 24 × 32 = 768 cron runs, inside one million at $0.30 (one block; no rounding rule stated, so a whole block) |
+| CPU time | $13.8440 | 768 × 900,000 ms = 691.2 million CPU ms at $0.02 a million, + one million of rounding |
+| Provider allowance, 10% | $1.9144 | |
+| **Total, Worker (one lane)** | **$21.0584 a month** | **$252.70 a year** |
+
+Each further lane (another hourly cron, if one does not copy every store in time) adds 768 × 900,000 ms more: **$15.21 a month** with the allowance. How many bytes one lane copies in its 15 minutes is **not on any page** (it depends on the speed of the sources and of R2): the number of lanes a given number of stores needs is unknown until it is measured in the owner's account. The Worker never buffers a file (128 MB of memory): it streams each one with a known length (`FixedLengthStream`), uses multipart above 5 GiB, stays under 10,000 subrequests a run, and alarms when the copy falls behind instead of claiming it is done.
+
+**Company line, both parts: $42.8101 a month, $513.72 a year** (database copy $21.7517 + one Worker lane $21.0584).
+
+Still outside this total, and **each one keeps the line unapproved**: the number of Worker lanes (throughput not stated); Workers Logs from 1 December 2026, if turned on; the lock's answer through the Workers binding (section 4a); the `SCAN` page size (item 5); the restore test's runner (item 9). In a separate Cloudflare account, the minimum billing unit of each R2 class (the "+1 million" and "+1 GB-month" above) falls entirely on the backup; it is counted **once**, here, and not again in the per-plan lines.
 
 ### 5b. Worst month and year per plan (files and videos, variable cost of each plan)
 
@@ -102,7 +131,7 @@ Per store at 100% of its plan, from the code's own limits: the plan's storage (`
 
 - **Peak bytes in the copy = 3 × what the store may keep**: what is live, plus what was deleted in the last 30 days (kept that long). A store's new uploads are capped at its whole storage a month (`AUTOMATIC_UPLOAD_CAPS`, `lib/upload-budget-policy.ts`), and 30 days can touch two of its months, so at most twice its room was deleted and is still kept. *Assumption to verify:* the students' room and the community pictures are taken as churning no faster than that; no monthly byte cap for them was found.
 - **R2 operations**: the source and the copy listed once a day each, at most 10 pages of 1,000 names a store (proposed cap: the Worker refuses and alarms past it); up to 10,000 objects written a month, 3 Class A each (create, one part, complete), plus one Class A per 5 MiB part; one Class B per object and part read from the source.
-- **Bunny egress**: every video byte the store may keep downloaded once a month, at $0.060 a GB (dearest Standard region, 2026-10-18, not reread). Today direct uploads to Bunny are closed (`reserveStoreUpload` accepts only R2), so after the first copy a month should move little; the worst month still counts all of it.
+- **Bunny egress**: every video byte the store may keep downloaded once a month through the library's pull zone, at $0.060 a GB (dearest Standard region, Middle East & Africa, reread 2026-11-08 on https://bunny.net/docs/stream/pricing.md: unchanged). A Cloudflare cron runs wherever Cloudflare places it, so the dearest region is used. Today direct uploads to Bunny are closed (`reserveStoreUpload` accepts only R2), so after the first copy a month should move little; the worst month still counts all of it.
 
 | Plan | Copy peak | R2 storage | R2 Class A | R2 Class B | Bunny egress | **Per month, + 10%** | **Per year** | One month after the plan ends |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -112,17 +141,23 @@ Per store at 100% of its plan, from the code's own limits: the plan's storage (`
 
 The monthly and annual intervals have the same worst month; the year is 12 of them. The last column is the copy kept 30 days after a closed store's files are deleted: it belongs to the after-the-end cost each plan already carries. These lines go into each plan's worst month (`tests/plan-cost-registry.ts`), with the Worker's own automatic ceiling before each copy; whether each plan still clears the MR rule with them is MR2/MR3's to compute, not this document's.
 
-**Still unknown for the per-plan lines, so they are not approvable yet:** the Workers rates (CPU time, requests, subrequests, the cron's duration limit for multi-gigabyte videos); whether Bunny's `storageSize` includes the original once "Keep Original Files" is on, and what keeping originals costs on Bunny; Vercel Blob's own read charges for the fallback files (`lib/blob.ts`), and whether the Blob store holds anything (C4-37 asks for that inventory); product and email pictures (`PICTURE_R2_CEILING` is `null`, and no per-plan count of email pictures was found), which may sit outside the store's measured folder.
+None of the rates read today changed the table: R2 and Bunny are as before, and the Worker is a company line (5a), not a per-store one.
+
+**Bunny's `storageSize` and "Keep original files" (read 2026-11-08).** The Get Video API describes `storageSize` as "Total storage used by this video, in bytes" (https://bunny.net/docs/api-reference/stream/manage-videos/get-video.md). The encoding page's per-video storage breakdown lists "Codec", "MP4 (MP4 fallback)", "**Original (Keep original files)**", "Other" and "Total" (https://bunny.net/docs/stream/encoding.md#video-storage-usage), and the Stream pricing page says keeping originals adds to the storage billed. So the reading of the pages is that the total includes the original when it is kept; but **no page says in words that the `storageSize` field equals that breakdown's total**. The storage-size endpoint (`GET /library/{libraryId}/videos/{videoId}/storage`, https://bunny.net/docs/api-reference/stream/manage-videos/get-video-storage-size-info.md) returns the parts separately, `originals` among them. Proposal for the code agent, not done here: where `storageUsed` counts a video, take the larger of `storageSize` and the sum of the storage endpoint's parts, so an original outside `storageSize` could never be uncounted; until then the per-plan bound rests on that reading. An original is kept only when the option was on before the upload; its cost on Bunny is the library's storage rate, $0.01 a GB a region (more with replication), a production cost of the plan's storage, not of the backup. The backup copies the original when it exists (one file a video), never every rendition.
+
+**Still unknown for the per-plan lines, so they are not approvable yet:** whether `storageSize` includes the original in every case (above); the Vercel Blob fallback files (`lib/blob.ts`): a GB read from Blob by the Worker costs up to $0.117 of Blob Data Transfer plus up to $0.43 of Fast Origin Transfer on a cache miss, a read $0.56 a million, a list $7.00 a million (read today), plus a CDN Request whose rate was not read, against $0 of R2 egress, and how many bytes Blob holds is not known (C4-37 asks for that inventory); product and email pictures (`PICTURE_R2_CEILING` is `null`, and no per-plan count of email pictures was found), which may sit outside the store's measured folder.
 
 ### 5c. What to bring to the owner
 
 | | Per month | Per year |
 | --- | ---: | ---: |
-| Company line (database copy), known lines | $21.75 | $261.02 |
+| Company line: database copy | $21.75 | $261.02 |
+| Company line: files-and-videos Worker, one lane | $21.06 | $252.70 |
+| **Company line, total** | **$42.81** | **$513.72** |
+| + each further Worker lane, if needed | $15.21 | $182.48 |
 | + per store on Store / Studio / Scale | $0.80 / $5.26 / $10.42 | $9.65 / $63.18 / $125.10 |
-| + Cloudflare Workers | **unknown** (page blocked) | **unknown** |
 
-None of this is a total the owner can approve yet: the unknowns listed above fail it, and the lowest-cost settings proposed (batch 1, 800 s priced, the transfer ceiling, the Worker's caps) are code that does not exist. Only the owner approves the cost; nobody fills `BACKUP_COST_REVIEW` before that.
+None of this is a total the owner can approve yet: the unknowns listed above fail it (the number of Worker lanes above all), and the lowest-cost settings proposed (batch 1, 800 s priced, the transfer ceiling, the Worker's hourly schedule with `noRetry()` and logs off) are code that does not exist. Only the owner approves the cost; nobody fills `BACKUP_COST_REVIEW` before that.
 
 ## 6. Hazelsong and the shared database
 
@@ -150,4 +185,4 @@ Numbers to read from constants when it is published: 30 (daily retention), 3 and
 
 ## 8. Limits of this document
 
-Research and proposal, not a review: no figure here is admitted, no constant changed, no gate or flag touched. No price, limit, commission, flag or gate is changed. Not verified: the live Vercel region, the Upstash plan and backup switch, Hazelsong's key prefix, anything in the Cloudflare or Bunny accounts.
+Research and proposal, not a review: no figure here is admitted, no constant changed, no gate or flag touched. No price, limit, commission, flag or gate is changed. Not verified: the live Vercel region, the Upstash plan and backup switch, Hazelsong's key prefix, anything in the Cloudflare or Bunny accounts, and how fast a Worker copies in practice. Official pages describe a service; they do not prove what an account was billed.

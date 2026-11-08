@@ -39,6 +39,12 @@
  *   nl:dir:build  the build mark (lib/directory-index.ts, DIRECTORY_BUILD):
  *                 one build at a time, and none for 10 minutes after one
  *                 that could not finish
+ *   nl:dir:builds the builds counted in the window's 10 minutes, at most
+ *                 DIRECTORY_BUILDS_PER_TEN_MINUTES (DIRECTORY_BUILDS)
+ *   nl:dir:last   the last good build's rows with the sid of each, kept
+ *                 LAST_KEEP_SECONDS and never dropped by a save: past the
+ *                 ceiling, a visit is shown them without every store no
+ *                 longer listed (DIRECTORY_LAST)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeForId } from "@/lib/store";
@@ -49,11 +55,11 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
-import { DIRECTORY_BUILD, DIRECTORY_CACHE, listedStores, wouldList } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, DIRECTORY_LAST, listedStores, stillListed, wouldList } from "@/lib/directory-index";
 import type { LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export { MIN_CLICKS_FOR_RATES };
 
@@ -76,6 +82,35 @@ const BUILD_HOLD_SECONDS = 60;
  * failure that persists costs one build in it, as a kept page does.
  */
 const FAILED_SECONDS = KEEP_SECONDS;
+
+/**
+ * The most builds of the directory in a window of BUILD_WINDOW_SECONDS, for the whole site (MR: a ceiling before
+ * every spend). #2921's mark lets one build run at a time, but a save of a listed program drops the kept page and the
+ * next visit builds at once, so without a count one creator saving in a loop built the whole directory once a save.
+ * Each build reserves its place (DIRECTORY_BUILDS, INCR) once it holds the mark and before it reads anything; past
+ * the ceiling, or with a count whose reply is unknown, nothing is built and the visit is shown the last good build,
+ * filtered (lastDirectory). 10 in ten minutes: at most 43,200 builds in 30 days, priced in tests/plan-cost-registry.ts
+ * (NOT_A_COST.DIRECTORY_BUILDS_PER_TEN_MINUTES).
+ */
+export const DIRECTORY_BUILDS_PER_TEN_MINUTES = 10;
+
+/** The window the builds are counted in: the kept page's own ten minutes, set once on a count that has no end. */
+const BUILD_WINDOW_SECONDS = 600;
+
+/**
+ * How long the last good build is kept (nl:dir:last): the kept page's ten minutes and one more window, so a visit
+ * past the ceiling has it whenever in the window the ceiling was reached. Older than that, the visit is told the
+ * list is unavailable rather than shown rows from longer ago.
+ */
+const LAST_KEEP_SECONDS = KEEP_SECONDS + BUILD_WINDOW_SECONDS;
+
+/** Past the window's ceiling with no last good build kept: the page says the list is unavailable just now. */
+export class DirectoryBusyError extends Error {
+  constructor() {
+    super("The affiliate directory was built as often as a window allows and no last build is kept: unavailable just now");
+    this.name = "DirectoryBusyError";
+  }
+}
 
 /** The most programs read for the page: far past what one page lists. */
 const MAX_ROWS = 2_000;
@@ -264,6 +299,13 @@ export function sortRows(rows: DirectoryRow[]): DirectoryRow[] {
  * and drops the mark; one that could not finish sets the mark to "failed" for
  * FAILED_SECONDS. A failed numbers read still shows that build's rows without
  * those numbers to the one request that built them, and keeps no page.
+ *
+ * Once the mark is taken, the build reserves its place in the window's count
+ * (reserveBuild). Past DIRECTORY_BUILDS_PER_TEN_MINUTES, or when the count's
+ * reply is unknown (rule 24: never room to build), nothing is built: the mark is
+ * dropped in the same pipeline as the last good build is read, and the visit is
+ * shown that build without every store no longer listed (lastDirectory). A
+ * finished build keeps that last build too, with the sid of each row.
  */
 export async function readDirectory(): Promise<DirectoryRow[]> {
   if (!isRedisConfigured()) return [];
@@ -279,7 +321,9 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
   const [claim] = await redisPipeline([["SET", DIRECTORY_BUILD, "building", "EX", BUILD_HOLD_SECONDS, "NX"]]);
   // null: another build is running, or one could not finish FAILED_SECONDS ago. Any other shape is unknown, and builds nothing either.
   if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
-  let built: { rows: DirectoryRow[]; partial: boolean };
+  const room = await reserveBuild().catch(() => "unknown" as const);
+  if (room !== "build") return lastDirectory(room);
+  let built: { rows: DirectoryRow[]; sids: string[]; partial: boolean };
   try {
     built = await buildDirectory();
   } catch (error) {
@@ -290,8 +334,60 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
     await markFailed();
     return built.rows;
   }
-  await redisPipeline([["SET", DIRECTORY_CACHE, JSON.stringify(built.rows), "EX", KEEP_SECONDS], ["DEL", DIRECTORY_BUILD]]).catch(() => null);
+  await redisPipeline([
+    ["SET", DIRECTORY_CACHE, JSON.stringify(built.rows), "EX", KEEP_SECONDS],
+    ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows }), "EX", LAST_KEEP_SECONDS],
+    ["DEL", DIRECTORY_BUILD],
+  ]).catch(() => null);
   return built.rows;
+}
+
+/**
+ * This build's place in the window's count: "build" inside DIRECTORY_BUILDS_PER_TEN_MINUTES, "full" past it,
+ * "unknown" for any reply not in the exact shape asked for (a count that is a positive whole number, a TTL that is a
+ * whole number of -1 or more; -2, the count gone, is unknown). A count with no end (TTL -1: just made, or left so by
+ * a write cut short) gets the window's seconds, and an EXPIRE that does not answer 1 is unknown.
+ */
+async function reserveBuild(): Promise<"build" | "full" | "unknown"> {
+  const counted = repliesFor(await redisPipeline([["INCR", DIRECTORY_BUILDS], ["TTL", DIRECTORY_BUILDS]]), 2);
+  if (!counted) return "unknown";
+  const [count, left] = counted;
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
+  if (typeof left !== "number" || !Number.isSafeInteger(left) || left < -1) return "unknown";
+  if (left === -1) {
+    const ended = repliesFor(await redisPipeline([["EXPIRE", DIRECTORY_BUILDS, BUILD_WINDOW_SECONDS]]), 1);
+    if (!ended || ended[0] !== 1) return "unknown";
+  }
+  return count <= DIRECTORY_BUILDS_PER_TEN_MINUTES ? "build" : "full";
+}
+
+/**
+ * The last good build, without every store no longer in the listed set, for a visit that may not build: nothing is
+ * kept from it. The build mark is dropped in the same pipeline, so the next visit is not held by a build that never
+ * ran (the DEL's own reply changes nothing: a mark it did not drop ends by its BUILD_HOLD_SECONDS). No last build is
+ * DirectoryBusyError past the ceiling and UnknownReplyError after an unknown count; a reply in any other shape, or
+ * rows that do not match their sids, is UnknownReplyError, never the rows unfiltered or an empty list.
+ */
+async function lastDirectory(room: "full" | "unknown"): Promise<DirectoryRow[]> {
+  const replies = repliesFor(await redisPipeline([["DEL", DIRECTORY_BUILD], ["GET", DIRECTORY_LAST]]), 2);
+  if (!replies) throw new UnknownReplyError("the directory's last build (GET)");
+  const reply = replies[1];
+  if (reply === null) {
+    if (room === "full") throw new DirectoryBusyError();
+    throw new UnknownReplyError("the directory's build count");
+  }
+  let last: unknown = null;
+  try {
+    last = typeof reply === "string" ? JSON.parse(reply) : null;
+  } catch {
+    last = null;
+  }
+  const { sids, rows } = (last ?? {}) as { sids?: unknown; rows?: unknown };
+  if (!Array.isArray(sids) || !Array.isArray(rows) || sids.length !== rows.length || sids.some((sid) => typeof sid !== "string" || !sid)) {
+    throw new UnknownReplyError("the directory's last build (GET)");
+  }
+  const listed = await stillListed(sids as string[]);
+  return (rows as DirectoryRow[]).filter((_, at) => listed[at]);
 }
 
 /** A build that could not finish: the next ones wait FAILED_SECONDS. A mark that cannot be written still ends by its BUILD_HOLD_SECONDS. */
@@ -299,8 +395,8 @@ async function markFailed(): Promise<void> {
   await redisPipeline([["SET", DIRECTORY_BUILD, "failed", "EX", FAILED_SECONDS]]).catch(() => null);
 }
 
-/** One build of the rows from the listed set and the stores; `partial` when a numbers read failed. */
-async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: boolean }> {
+/** One build of the rows from the listed set and the stores, with each row's sid; `partial` when a numbers read failed. */
+async function buildDirectory(): Promise<{ rows: DirectoryRow[]; sids: string[]; partial: boolean }> {
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
@@ -319,20 +415,28 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; partial: boolea
   // A failed numbers read still shows the row without numbers, but that page is
   // not kept for the next visitors.
   let partial = false;
+  // Each row's sid, kept with the last good build so a visit past the ceiling can drop a store taken out.
+  const sidOf = new Map<DirectoryRow, string>();
   const rows = sortRows(
     (
       await Promise.all(
         stores.map(async (store) => {
           const row = store ? directoryRow(store) : null;
-          if (!row || !store || !store.affiliates.numbers) return row;
+          if (!row || !store) return row;
+          if (!store.affiliates.numbers) {
+            sidOf.set(row, store.sid);
+            return row;
+          }
           const numbers = await programNumbers(store).catch(() => {
             partial = true;
             return null;
           });
-          return { ...row, numbers: directoryNumbers(numbers) };
+          const counted = { ...row, numbers: directoryNumbers(numbers) };
+          sidOf.set(counted, store.sid);
+          return counted;
         }),
       )
     ).filter((row): row is DirectoryRow => row !== null),
   );
-  return { rows, partial };
+  return { rows, sids: rows.map((row) => sidOf.get(row) ?? ""), partial };
 }

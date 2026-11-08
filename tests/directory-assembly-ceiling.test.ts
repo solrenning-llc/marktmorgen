@@ -55,7 +55,7 @@ async function attempt(): Promise<string[] | string> {
 }
 
 /** Every command sent, by its first word, while `run` runs; `answer` may replace a command's reply. */
-async function counted<T>(run: () => Promise<T>, answer?: (commands: Commands) => unknown[] | undefined): Promise<{ result: T; words: Record<string, number> }> {
+async function counted<T>(run: () => Promise<T>, answer?: (commands: Commands) => unknown[] | Promise<unknown[]> | undefined): Promise<{ result: T; words: Record<string, number> }> {
   const words: Record<string, number> = {};
   redis.pipeline = (async (commands: Commands) => {
     for (const command of commands) words[String(command[0])] = (words[String(command[0])] ?? 0) + 1;
@@ -222,7 +222,10 @@ async function main(): Promise<void> {
   }
   for (const [label, reply] of [["a number", 5], ["a list", []], ["text that is not the build", "{oops"], ["sids that do not match the rows", JSON.stringify({ sids: ["x"], rows: [] })], ["an empty sid", JSON.stringify({ sids: [""], rows: [{}] })]] as const) {
     await listed("baker@example.com", true);
-    const read = await counted(() => attempt(), (c) => (c.some((command) => command[0] === "GET" && command[1] === LAST) ? c.map((command) => (command[0] === "GET" ? reply : 1)) : undefined));
+    // The pipeline still runs, so its DEL drops the mark; only the GET's reply is replaced.
+    const read = await counted(() => attempt(), (c) =>
+      c.some((command) => command[0] === "GET" && command[1] === LAST) ? original(c).then((replies) => c.map((command, at) => (command[0] === "GET" ? reply : replies[at]))) : undefined,
+    );
     is(`a last build answering ${label} is unknown, and nothing is filtered from it`, [read.result, read.words.SMISMEMBER ?? 0], ["UnknownReplyError", 0]);
   }
   await listed("baker@example.com", true);

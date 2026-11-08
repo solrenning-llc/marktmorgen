@@ -28,7 +28,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { POST } from "@/app/api/store/course/certificate/route";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
-import { doneLessons, doneLessonsOrUnknown, markLesson, mintPass, passCookieName, recordEnrollment } from "@/lib/learn";
+import { courseProgress, doneLessons, doneLessonsOrUnknown, markLesson, mintPass, passCookieName, recordEnrollment, touchStudent } from "@/lib/learn";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 
@@ -188,4 +188,51 @@ test("the data copy reads the lessons done with no fallback, so an unknown read 
   const copy = readFileSync("lib/person-copy.ts", "utf8");
   assert.match(copy, /doneLessons\(c\.courseId, s\.email\)\]\);/);
   assert.doesNotMatch(copy, /doneLessons\([^)]*\)\.catch/);
+});
+
+// courseProgress (a workflow's condition on a course, lib/flows.ts; the sample in app/api/store/mail/route.ts) reads the
+// students' rows and their lessons done in one round trip. An unknown answer used to read as "not started" or "not
+// finished", so a student who finished could be sent the "hasn't finished" email on a guess (Claude 2 on #3202). Now
+// it throws UnknownReplyError: the workflow step is put back for a later run (lib/flows.ts), nothing is sent.
+const OTHER = "other@example.com";
+
+/** The one course-progress pipeline (HMGET then SMEMBERS) answers `reply(real)`; everything else reaches the stand-in Redis. */
+function progressReadAnswers(reply: (real: unknown[]) => unknown): void {
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "HMGET" && commands[1]?.[0] === "SMEMBERS") return reply(await realPipeline(commands)) as unknown[];
+    return realPipeline(commands);
+  };
+}
+
+const PROGRESS_MALFORMED: [string, (real: unknown[]) => unknown][] = [
+  ["a missing envelope", () => []],
+  ["one reply short", (real) => real.slice(0, -1)],
+  ["one reply too many", (real) => [...real, []]],
+  ["a null in place of the students' rows", (real) => [null, ...real.slice(1)]],
+  ["students' rows one short", (real) => [(real[0] as unknown[]).slice(0, -1), ...real.slice(1)]],
+  ["a number in a student's row", (real) => [[7, null], ...real.slice(1)]],
+  ["a null in place of the lessons done", (real) => [real[0], null, real[2]]],
+  ["a text in place of the lessons done", (real) => [real[0], "lesson", real[2]]],
+  ["a list of lessons holding a number", (real) => [real[0], [7], real[2]]],
+];
+
+for (const [label, reply] of PROGRESS_MALFORMED) {
+  test(`courseProgress: ${label} is unknown, never "not started" or "not finished"`, async () => {
+    const w = await world(`cp${PROGRESS_MALFORMED.findIndex(([l]) => l === label)}reader`);
+    await touchStudent(w.courseId, BUYER, Math.floor(Date.now() / 1000) - 60, w.store);
+    await markLesson(w.courseId, BUYER, w.lessonId, true, w.store);
+    progressReadAnswers(reply);
+    await assert.rejects(() => courseProgress(w.store, w.productId, [BUYER, OTHER]), UnknownReplyError);
+  });
+}
+
+test("courseProgress control: a finished student reads finished, one never seen reads not started and not finished", async () => {
+  const w = await world("cpcontrol");
+  const before = await courseProgress(w.store, w.productId, [BUYER, OTHER]);
+  assert.deepEqual(before.get(BUYER), { started: false, finished: false });
+  await touchStudent(w.courseId, BUYER, Math.floor(Date.now() / 1000) - 60, w.store);
+  await markLesson(w.courseId, BUYER, w.lessonId, true, w.store);
+  const after = await courseProgress(w.store, w.productId, [BUYER, OTHER]);
+  assert.deepEqual(after.get(BUYER), { started: true, finished: true });
+  assert.deepEqual(after.get(OTHER), { started: false, finished: false });
 });

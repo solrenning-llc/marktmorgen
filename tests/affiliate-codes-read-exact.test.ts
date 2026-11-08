@@ -6,15 +6,19 @@
  * a list with a non-string member, an odd list, an object, a lost reply) used to read as "no code given to anybody".
  * noteSession then fell through to the buyer's bond and the lead, and a sale made with Ben's code was written for
  * Ana with HSETNX (the first write stands for ever): the commission went to the wrong affiliate and Ben got nothing.
- * Now codeOwners throws UnknownReplyError, noteSession writes no sale, and the next pass reads it again.
- * A confirmed empty hash still means "no codes", and the healthy read is unchanged.
+ * Now codeOwners throws UnknownReplyError and noteSession writes no sale for that order. It is written once a later
+ * call reads the codes: the thanks page called again, or the checkout sweep (lib/checkout-sweep.ts), which counts the
+ * order as failed and reads it again on its next pass, but only within its window (CONFIRM_WITHIN_SECONDS, a day).
+ * A sale with no code never depends on the codes read (Claude 2, first money review of #3238, MEDIUM 1): it still
+ * goes to the buyer's bond or lead when the codes reply is unknown. A confirmed empty hash still means "no codes",
+ * and the healthy read is unchanged.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { noteSession, readBook } from "@/lib/affiliates";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
-import { codeOwners, giveCode } from "@/lib/affiliate-codes";
+import { codeOwnerCount, codeOwners, giveCode } from "@/lib/affiliate-codes";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -39,10 +43,12 @@ const BUYER = "kai@example.com";
 
 type Shape = { name: string; reply: () => unknown } | null;
 let shape: Shape = null;
+let hlen: (() => unknown) | null = null;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const one = commands.length === 1 ? commands[0] : null;
   if (shape && one?.[0] === "HGETALL" && /^nl:aff:[^:]+:promo$/.test(String(one[1]))) return shape.reply();
+  if (hlen && one?.[0] === "HLEN" && /^nl:aff:[^:]+:promo$/.test(String(one[1]))) return hlen();
   return real(commands);
 }) as typeof redis.pipeline;
 
@@ -125,6 +131,28 @@ async function main(): Promise<void> {
     is(`${one.name}: the buyer's bond is unchanged`, await bondFor(store, BUYER), ANA);
   }
 
+  part("A sale with no code never reads the codes: an unknown reply leaves the bond's credit alone (MEDIUM 1)");
+  for (const one of shapes) {
+    await rememberBuyer(store, BUYER, ANA, "last");
+    shape = one;
+    const ref = `cs_nocode_${one.name.replace(/[^a-z]/g, "")}`;
+    is(`${one.name}: a sale with no code is written`, await thrown(() => noteSession(store, order(ref, []))), "no error");
+    shape = null;
+    is(`${one.name}: it goes to the bonded affiliate`, [(await line(ref))?.aff, (await line(ref))?.how], [ANA, "buyer"]);
+  }
+  // A bare coupon the creator applied (no promotion code) is no code either.
+  await rememberBuyer(store, BUYER, ANA, "last");
+  shape = shapes[4];
+  is("a bare coupon with an unknown codes reply: written", await thrown(() => noteSession(store, order("cs_coupon", [{ coupon: "co_x", promotion_code: null }]))), "no error");
+  shape = null;
+  is("a bare coupon: the sale goes to the bond", [(await line("cs_coupon"))?.aff, (await line("cs_coupon"))?.how], [ANA, "buyer"]);
+  // The owners a caller passed in are used as given, without a read: the sweep reads them once for many orders.
+  await rememberBuyer(store, BUYER, ANA, "last");
+  shape = shapes[4];
+  is("owners passed in: no read, the code's owner is credited", await thrown(() => noteSession(store, order("cs_given", [{ promotion_code: PROMO }]), new Map([[PROMO, BEN]]))), "no error");
+  shape = null;
+  is("owners passed in: the sale is Ben's, through his code", [(await line("cs_given"))?.aff, (await line("cs_given"))?.how], [BEN, "code"]);
+
   part("The next pass reads the codes exactly and credits the code's owner");
   shape = null;
   is("healthy read: the code belongs to Ben", [...(await codeOwners(store)).entries()], [[PROMO, BEN]]);
@@ -133,11 +161,23 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", `nl:aff:${statsId}:promo`, "not-a-promo-id", ANA]]);
   is("a field that is not a promotion code id is still passed over", [...(await codeOwners(store)).entries()], [[PROMO, BEN]]);
 
+  part("The count read before the affiliate page reads the codes: unknown is null (refused), never 0 (LOW 1)");
+  is("healthy count: the two fields", await codeOwnerCount(store), 2);
+  for (const [name, reply] of [["null", [null]], ["an empty string", [""]], ["false", [false]], ["a numeric string", ["2"]], ["a negative", [-1]], ["a fraction", [1.5]], ["a lost reply", [undefined]], ["no reply", []], ["two replies", [2, 2]]] as [string, unknown][]) {
+    hlen = () => reply;
+    is(`${name}: the count is null, so the page is refused rather than under-reserved`, await codeOwnerCount(store), null);
+  }
+  hlen = null;
+  is("the count reads again once the reply is whole", await codeOwnerCount(store), 2);
+
   part("The callers that decide a sale never turn the refusal into an empty map");
   const sweep = readFileSync(join(process.cwd(), "lib/checkout-sweep.ts"), "utf8");
-  is("the sweep reads the codes without catching them to nothing", /await Promise\.all\(\[codeOwners\(store\), listPartners\(store\)\]\)/.test(sweep) && !/codeOwners\(store\)\.catch/.test(sweep), true);
+  // The sweep reads them only when an order on the page carries a code, and a failed read is null there, never an
+  // empty map: those orders are counted as failed and wait (tests/affiliate-codes-sweep.test.ts drives it).
+  is("the sweep never catches the codes read to an empty map", /codeOwners\(store\)\.catch\(\([^)]*\)\s*=>\s*new Map/.test(sweep), false);
+  is("the sweep reads the codes only for a page with a code on it, an unread one as null", /coded \? codeOwners\(store\)\.catch\(unread\(/.test(sweep), true);
   const affiliates = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
-  is("noteSession reads them without a catch", /owners \?\? \(await codeOwners\(store\)\);/.test(affiliates), true);
+  is("noteSession reads them without a catch, and only for a sale with a code", /promoCodesOn\(session\)\.length \? \(owners \?\? \(await codeOwners\(store\)\)\)/.test(affiliates), true);
 }
 
 main().then(done, (error) => {

@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { applyTaskDrop, forgetTasksPerson, handIn, readTaskDrop } from "@/lib/assignment";
 import type { Task } from "@/lib/assignment-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
 const COURSE = "crs_dbl";
@@ -129,10 +130,16 @@ for (const [label, reply] of [["null", null], ["text", "1"], ["2", 2], ["-1", -1
       return batch.map((c, i) => (c[0] === "HDEL" ? reply : answers[i]));
     }) as typeof redis.pipeline;
     try {
-      const { value, lines } = await logged(() => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM));
-      assert.deepEqual(value.files, ["a.pdf"], "the erasure that happened still returns its files");
+      if (typeof reply === "number" && reply >= 0) {
+        // A count, but not 0 or 1: the erasure finishes and gives nothing back for that file.
+        const { value, lines } = await logged(() => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM));
+        assert.deepEqual(value.files, ["a.pdf"], "the erasure that happened still returns its files");
+        assert.ok(lines.some((l) => l.includes("unknown")), "the unknown answer is said in the log");
+      } else {
+        // Not a count: the erasure is told it could not finish (Codex P on #2847), never "done".
+        await assert.rejects(logged(() => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM)), (e: unknown) => e instanceof UnknownReplyError);
+      }
       assert.equal(counter(), 1100, "an unknown removal is never given back");
-      assert.ok(lines.some((l) => l.includes("unknown")), "the unknown answer is said in the log");
     } finally {
       redis.pipeline = original;
     }

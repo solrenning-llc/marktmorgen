@@ -117,6 +117,61 @@ async function main(): Promise<void> {
   is("nothing failed, and no confirmation went twice", [counts.failed, sentTo("kai@example.com"), sentTo("lee@example.com")], [0, 1, 1]);
   counts = await sweepCheckouts(Date.now() + 20_000);
   is("another pass writes no second line", (await readBook(store)).lines.filter((l) => l.ref === CODED).length, 1);
+
+  // Codex H2, second money review of #3238: a click wins over a code (noteSession never reads the codes when the
+  // checkout's `via` is an affiliate id), so an order with both is decided without the codes and never waits on them.
+  console.error = () => undefined;
+  part("Ana's link and Ben's code on one order, the codes unreadable: the click decides, nothing waits");
+  const BOTH = "cs_test_sweepcodesBoth0001";
+  sessions = [paid(BOTH, "mia@example.com", { via: ANA, discounts: [{ promotion_code: PROMO }] })];
+  unknown = true;
+  codeReads = 0;
+  counts = await sweepCheckouts(Date.now() + 20_000);
+  is("the sale is written for Ana, through her link", [(await line(BOTH))?.aff, (await line(BOTH))?.how], [ANA, "click"]);
+  is("nothing is counted as failed", counts.failed, 0);
+  is("the codes were not even read: every order with a code has a click", codeReads, 0);
+  is("the buyer's confirmation went", sentTo("mia@example.com"), 1);
+
+  part("A mixed page, the codes unreadable: only the order with a code and no click waits");
+  const CODE_ONLY = "cs_test_sweepcodesCodeOnly1";
+  const CLICK_ONLY = "cs_test_sweepcodesClickOnl1";
+  const CLICK_CODE = "cs_test_sweepcodesClickCod1";
+  sessions = [
+    paid(CODE_ONLY, "noa@example.com", { discounts: [{ promotion_code: PROMO }] }),
+    paid(CLICK_ONLY, "oli@example.com", { via: ANA }),
+    paid(CLICK_CODE, "pia@example.com", { via: ANA, discounts: [{ promotion_code: PROMO }] }),
+  ];
+  codeReads = 0;
+  counts = await sweepCheckouts(Date.now() + 20_000);
+  is("the codes were read (and answered in an unknown shape)", codeReads > 0, true);
+  is("the code-only order is not written for anybody", await line(CODE_ONLY), undefined);
+  is("it alone is counted as failed", counts.failed, 1);
+  is("the click-only order is Ana's", [(await line(CLICK_ONLY))?.aff, (await line(CLICK_ONLY))?.how], [ANA, "click"]);
+  is("the click-and-code order is Ana's, through her link", [(await line(CLICK_CODE))?.aff, (await line(CLICK_CODE))?.how], [ANA, "click"]);
+  is("every buyer's confirmation went", [sentTo("noa@example.com"), sentTo("oli@example.com"), sentTo("pia@example.com")], [1, 1, 1]);
+
+  part("A `via` that is not an affiliate id is no click: with a code and the codes unreadable, that order waits");
+  const BAD_VIA = "cs_test_sweepcodesBadVia01";
+  sessions = [...sessions, paid(BAD_VIA, "quin@example.com", { via: "not-an-affiliate", discounts: [{ promotion_code: PROMO }] })];
+  codeReads = 0;
+  counts = await sweepCheckouts(Date.now() + 20_000);
+  is("the codes were read", codeReads > 0, true);
+  is("the order is not written for anybody", await line(BAD_VIA), undefined);
+  is("it and the code-only order wait, the clicks stay written once", [counts.failed, (await readBook(store)).lines.filter((l) => l.ref === CLICK_CODE || l.ref === CLICK_ONLY).length], [2, 2]);
+
+  part("The codes read again: the code-only orders are Ben's, once, and nothing is written or sent twice");
+  unknown = false;
+  counts = await sweepCheckouts(Date.now() + 20_000);
+  is("nothing failed", counts.failed, 0);
+  is("the code-only order is Ben's, through his code", [(await line(CODE_ONLY))?.aff, (await line(CODE_ONLY))?.how], [BEN, "code"]);
+  is("the order with the bad `via` is Ben's, through his code", [(await line(BAD_VIA))?.aff, (await line(BAD_VIA))?.how], [BEN, "code"]);
+  is("the clicks stay Ana's", [(await line(CLICK_ONLY))?.aff, (await line(CLICK_CODE))?.aff], [ANA, ANA]);
+  counts = await sweepCheckouts(Date.now() + 20_000);
+  console.error = errors;
+  const refs = [CODE_ONLY, CLICK_ONLY, CLICK_CODE, BAD_VIA];
+  const book = (await readBook(store)).lines;
+  is("one line per order, after another pass", refs.map((ref) => book.filter((l) => l.ref === ref).length), [1, 1, 1, 1]);
+  is("no confirmation went twice", ["noa", "oli", "pia", "quin"].map((n) => sentTo(`${n}@example.com`)), [1, 1, 1, 1]);
   done();
 }
 

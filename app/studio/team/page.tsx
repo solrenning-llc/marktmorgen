@@ -161,7 +161,7 @@ export default async function StudioTeamPage({
   );
 }
 
-function LogList({ lines }: { lines: Awaited<ReturnType<typeof readLog>> }) {
+function LogList({ lines }: { lines: NonNullable<Awaited<ReturnType<typeof readLog>>> }) {
   return (
     <ol className="mt-4 divide-y divide-line">
       {lines.map((line, i) => (

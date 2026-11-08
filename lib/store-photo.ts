@@ -14,6 +14,7 @@
  * SVG is not on the list.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 import { MAX_PHOTO_BYTES, PHOTO_ID_PATTERN } from "@/lib/photo-limits";
 
@@ -58,12 +59,21 @@ export function decodePhoto(raw: unknown): { bytes: Uint8Array; type: PhotoType 
   return { bytes, type };
 }
 
-/** Keeps a photo under a fresh id and returns the id. */
-export async function writePhoto(bytes: Uint8Array, type: PhotoType): Promise<string> {
-  const id = crypto.randomUUID().replace(/-/g, "");
-  await redisPipeline([
+/** A fresh id for a photo, to be named in the store record before anything is written under it. */
+export function newPhotoId(): string {
+  return crypto.randomUUID().replace(/-/g, "");
+}
+
+/**
+ * Keeps a photo under an id (a fresh one unless given) and returns the id.
+ * Written only on Redis's exact "OK" (rule 24): any other answer throws, and
+ * the photo is not taken as written.
+ */
+export async function writePhoto(bytes: Uint8Array, type: PhotoType, id = newPhotoId()): Promise<string> {
+  const replies = repliesFor(await redisPipeline([
     ["SET", photoKey(id), `${type};${Buffer.from(bytes).toString("base64")}`],
-  ]);
+  ]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("writing a store photo: SET");
   return id;
 }
 
@@ -81,8 +91,22 @@ export async function readPhoto(
   return { bytes: new Uint8Array(Buffer.from(raw.slice(cut + 1), "base64")), type };
 }
 
-/** Forgets a photo nothing points at any more. */
+/**
+ * Deletes photos nothing points at any more. Done only on each DEL's exact
+ * count, 0 (already gone) or 1 (rule 24): any other answer, or a failure,
+ * throws, and whoever keeps their names keeps them until a later try is
+ * confirmed (lib/store.ts, photoLeft).
+ */
+export async function deletePhotos(ids: (string | null)[]): Promise<void> {
+  const ours = [...new Set(ids.filter((id): id is string => typeof id === "string" && PHOTO_ID_PATTERN.test(id)))];
+  if (ours.length === 0) return;
+  const replies = repliesFor(await redisPipeline(ours.map((id) => ["DEL", photoKey(id)])), ours.length);
+  if (!replies || replies.some((reply) => { const n = countOf(reply); return n !== 0 && n !== 1; })) {
+    throw new UnknownReplyError("deleting a store photo: DEL");
+  }
+}
+
+/** Deletes one photo nothing points at any more; throws when that is not confirmed. */
 export async function deletePhoto(id: string | null): Promise<void> {
-  if (!id || !PHOTO_ID_PATTERN.test(id)) return;
-  await redisPipeline([["DEL", photoKey(id)]]);
+  await deletePhotos([id]);
 }

@@ -35,6 +35,7 @@ const MESSAGES: Record<string, string> = {
   empty: "That picture could not be read. Try a JPEG, PNG or WebP.",
   unreadable: "That picture could not be read. Try a JPEG, PNG or WebP.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  photo_wait: "Your photo could not be saved just now. Try again in a few minutes.",
 };
 
 type Status =

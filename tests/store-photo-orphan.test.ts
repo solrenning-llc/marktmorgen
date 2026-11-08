@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   is("and is one of the marks the closing walk erases", photoKeys().every((key) => marks.includes(key.slice(PHOTO.length))), true);
 
   part("The retry after the waiting time deletes it");
-  shift += 11 * 60_000;
+  shift += 16 * 60_000;
   is("the retry is put on", await upload(), [200, ""]);
   const third = await shown();
   is("only the photo shown is kept", photoKeys(), [`${PHOTO}${third}`]);
@@ -139,13 +139,14 @@ async function main(): Promise<void> {
   is("an unknown answer to the photo's write is not a photo put on", await upload(), [500, "server_error"]);
   fault = null;
   is("and nothing is kept unnamed", await unnamed(), []);
-  shift += 11 * 60_000;
+  shift += 16 * 60_000;
   const before = await shown();
   fault = (commands) => (touches(commands, "DEL", PHOTO) ? "odd" : null);
   is("a deletion answered in an unknown shape keeps the name", await upload(), [200, ""]);
   fault = null;
   is("nothing is kept unnamed", await unnamed(), []);
-  is("the replaced photo's key is still named", photoKeys().includes(`${PHOTO}${before}`), true);
+  // The DEL ran and its answer was lost: the record keeps naming the photo until a deletion is confirmed.
+  is("the replaced photo is still named in the store record", ((await storeForEmail(OWNER))?.photoLeft ?? []).some((left) => left.id === before), true);
   is("the next upload deletes it", await upload(), [200, ""]);
   is("only the photo shown is kept", photoKeys(), [`${PHOTO}${await shown()}`]);
 
@@ -165,7 +166,7 @@ async function main(): Promise<void> {
   fault = null;
   is("with two waiting, a third is asked to wait a few minutes", await upload(), [503, "photo_wait"]);
   is("nothing more was written for it", photoKeys().length, 3);
-  shift += 11 * 60_000;
+  shift += 16 * 60_000;
   is("after the wait the upload goes through", await upload(), [200, ""]);
   is("only the photo shown is kept", photoKeys(), [`${PHOTO}${await shown()}`]);
   is("the store record names no photo waiting", (await storeForEmail(OWNER))?.photoLeft ?? [], []);

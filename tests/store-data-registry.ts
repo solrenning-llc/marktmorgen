@@ -57,7 +57,7 @@ import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { TASK_COUNT_WEIGHT } from "@/lib/crm";
-import { MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
@@ -930,7 +930,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:recount:state@lib/data-recount.ts": company("Where the one-time count is", "One key, the company's job."),
   "nl:recount:sum@lib/data-recount.ts": company("What the count measured of each store, until it is set in its room", "The company's job, deleted when it is done."),
   "nl:join:t:@lib/store-join.ts": short("A link to join the list, sent by email", "access", 7, LINK_BYTES, MAIL("join")),
-  "nl:store:photo:@lib/store-photo.ts": { what: "The store's photo", parts: [capped(2 * (MAX_PHOTO_BYTES * 4) / 3 + KB, "One photo, and the one it replaces while it is written.", src("lib/photo-limits.ts", "MAX_PHOTO_BYTES"))] },
+  "nl:store:photo:@lib/store-photo.ts": { what: "The store's photo", parts: [capped((1 + PHOTO_LEFT_MAX) * (MAX_PHOTO_BYTES * 4) / 3 + KB, "The photo shown, and at most PHOTO_LEFT_MAX the store record names while their deletion waits (one being written, one replaced).", src("lib/photo-limits.ts", "MAX_PHOTO_BYTES"), src("lib/store.ts", "PHOTO_LEFT_MAX"))] },
   "nl:account:stores:@lib/store.ts": company("An account's other stores", "An account's."),
   "nl:catalog:move:cursor@lib/store.ts": company("Where the catalog move stopped", "One key, the company's job."),
   "nl:store:before-catalog:@lib/store.ts": { what: "A store record kept aside while it moved, thirty days", parts: [capped(MAX_STORE_BYTES + KB, "Once, at most the record.", src("lib/store.ts", "MAX_STORE_BYTES"))] },

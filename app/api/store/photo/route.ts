@@ -1,11 +1,6 @@
 import type { NextRequest } from "next/server";
-import { setPhotoId, storeForEmail } from "@/lib/store";
-import {
-  MAX_PHOTO_BYTES,
-  decodePhoto,
-  deletePhoto,
-  writePhoto,
-} from "@/lib/store-photo";
+import { dropPhotoUpload, notePhotoUpload, setPhotoId, settlePhotos, storeForEmail } from "@/lib/store";
+import { MAX_PHOTO_BYTES, decodePhoto, deletePhoto, newPhotoId, writePhoto } from "@/lib/store-photo";
 import { guardStoreWrite } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
@@ -17,8 +12,12 @@ import { lockedFor } from "@/lib/two-step";
  * to clear it. The size cap is checked before the body is read, and what the
  * bytes are is decided by the bytes themselves.
  *
- * The new picture is written and the store pointed at it before the old one is
- * deleted, so the page never points at a photo that is not there.
+ * The new picture is named in the store record before it is written, then
+ * written, then the store pointed at it, and only then is the old one deleted,
+ * so the page never points at a photo that is not there, and a photo left by a
+ * step that failed is never kept where nothing finds it: the record names it
+ * until its deletion is confirmed (Store.photoLeft in lib/store.ts), the next
+ * upload deletes it, and the closing walk erases it with the store.
  */
 export async function POST(request: NextRequest) {
   // Base64 is a third bigger than the bytes it carries, plus the JSON around it.
@@ -34,7 +33,7 @@ export async function POST(request: NextRequest) {
       if (!result.ok) {
         return Response.json({ ok: false, error: result.reason }, { status: 400 });
       }
-      await deletePhoto(result.was);
+      await settleAfter(guarded.ref);
       return Response.json({ ok: true, photoId: null });
     }
 
@@ -52,16 +51,42 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "none" }, { status: 400 });
     }
 
-    const id = await writePhoto(decoded.bytes, decoded.type);
+    const id = newPhotoId();
+    const noted = await notePhotoUpload(guarded.ref, id);
+    if (!noted.ok) {
+      // Photos from earlier tries are still waiting to be deleted: nothing is written for this one.
+      return noted.reason === "busy"
+        ? Response.json({ ok: false, error: "photo_wait" }, { status: 503 })
+        : Response.json({ ok: false, error: noted.reason }, { status: 400 });
+    }
+    try {
+      await writePhoto(decoded.bytes, decoded.type, id);
+    } catch (error) {
+      // The store was never pointed at it: deleted now when that is confirmed, else still named for later.
+      await dropPhotoUpload(guarded.ref, id).catch((drop) => console.error("deleting an unsaved store photo failed", drop));
+      throw error;
+    }
+    // When this throws the photo stays named as waiting, whether or not the store was pointed at it: never deleted
+    // here, as the store may show it; the next upload deletes it past the wait if the store does not.
     const result = await setPhotoId(guarded.ref, id);
     if (!result.ok) {
-      await deletePhoto(id);
+      // The record that named it is gone: nothing else can find this photo, so it goes now.
+      await deletePhoto(id).catch((drop) => console.error("deleting a store photo with no store failed", drop));
       return Response.json({ ok: false, error: result.reason }, { status: 400 });
     }
-    await deletePhoto(result.was);
+    await settleAfter(guarded.ref);
     return Response.json({ ok: true, photoId: id });
   } catch (error) {
     console.error("saving the store photo failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
+}
+
+/**
+ * Deletes the photo the store just stopped showing. The page is already right,
+ * so a deletion that is not confirmed is only logged: the record still names
+ * the photo, and the next upload or the closing walk deletes it.
+ */
+async function settleAfter(ref: string): Promise<void> {
+  await settlePhotos(ref).catch((error) => console.error("deleting a replaced store photo failed; it stays named", error));
 }

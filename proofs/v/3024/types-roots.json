@@ -26,5 +26,6 @@
   "tests/community-unsub-erasure-after-cas.test.ts",
   "tests/community-unsub-erasure-orphan.test.ts",
   "tests/community-unsub-token-race.test.ts",
-  "proofs/v/3024/profile-links.proof.ts"
+  "proofs/v/3024/profile-links.proof.ts",
+  "tests/g3123-token-race-canonical.proof.ts"
 ]

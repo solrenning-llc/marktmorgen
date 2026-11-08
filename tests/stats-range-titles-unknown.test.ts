@@ -123,3 +123,72 @@ test("healthy page control: no unavailable notes", () => {
   const html = render({ marks: [], titlesUnavailable: false }, named);
   assert.ok(!html.includes("could not be loaded"));
 });
+
+/**
+ * Codex M's MÉDIO on 23fb254a: the campaign reader under the marks turned a
+ * malformed list or record reply into no campaigns, so the route said
+ * "no marks" (marks: []) when they were unknown. Each malformed reply below now
+ * reaches the page as unavailable (null); a record Redis answers as its own nil
+ * is a campaign that expired, known, and is left out.
+ */
+const listKey = `nl:mail:bcs:${store.listId}`;
+const sentId = "0123456789abcdef01234567";
+const withReply = async <T>(rewrite: (command: unknown[], reply: unknown) => unknown, run: () => Promise<T>) => {
+  const original = redis.pipeline;
+  redis.pipeline = async (commands: unknown[][]) => {
+    const replies = (await original(commands as never)) as unknown[];
+    return commands.map((command, i) => rewrite(command, replies[i]));
+  };
+  try { return await run(); } finally { redis.pipeline = original; }
+};
+const isRange = (c: unknown[]) => c[0] === "LRANGE" && c[1] === listKey;
+const isRecord = (c: unknown[]) => c[0] === "GET" && c[1] === `nl:mail:bc:${sentId}`;
+const sentRecord = JSON.stringify({
+  id: sentId, listId: store.listId, handle: store.handle, subject: "Fictional spring letter", body: "Hello from a fictional store.",
+  productId: null, status: "sent", createdAt: 1772409600, sendAt: 1772409600, finishedAt: 1772413200, total: 3, sent: 3, failures: 0, listed: true, note: "",
+});
+const withCampaign = async <T>(run: () => Promise<T>) => {
+  await redis.pipeline([["SET", `nl:mail:bc:${sentId}`, sentRecord], ["RPUSH", listKey, sentId]]);
+  try { return await run(); } finally { await redis.pipeline([["DEL", `nl:mail:bc:${sentId}`], ["DEL", listKey]]); }
+};
+
+test("campaign control: a sent campaign is read for real and marks its day", async () => {
+  await seeded;
+  await withCampaign(async () => {
+    const body = await answer();
+    assert.ok(Array.isArray(body.marks) && (body.marks as { kind: string }[]).some((m) => m.kind === "email"), JSON.stringify(body.marks));
+  });
+});
+
+for (const [name, rewrite] of [
+  ["a campaign list reply of another type", (c: unknown[], r: unknown) => (isRange(c) ? 42 : r)],
+  ["a campaign list with a nil slot", (c: unknown[], r: unknown) => (isRange(c) ? [null] : r)],
+  ["a campaign list member that is not a campaign id", (c: unknown[], r: unknown) => (isRange(c) ? ["not-an-id"] : r)],
+  ["a campaign record reply of another type", (c: unknown[], r: unknown) => (isRecord(c) ? 42 : r)],
+  ["a campaign record that is not JSON", (c: unknown[], r: unknown) => (isRecord(c) ? "{broken" : r)],
+] as const) {
+  test(`${name} makes the marks unavailable, never none`, async () => {
+    await seeded;
+    await withCampaign(async () => {
+      const body = await withReply(rewrite, answer);
+      assert.equal(body.marks, null);
+    });
+  });
+}
+
+test("a campaign pipeline that answers with too few replies makes the marks unavailable", async () => {
+  await seeded;
+  await withCampaign(async () => {
+    const original = redis.pipeline;
+    redis.pipeline = async (commands: unknown[][]) => (commands.some(isRange) ? [] : original(commands as never));
+    try { assert.equal((await answer()).marks, null); } finally { redis.pipeline = original; }
+  });
+});
+
+test("a campaign whose record expired (its own nil) is left out, known", async () => {
+  await seeded;
+  await withCampaign(async () => {
+    const body = await withReply((c, r) => (isRecord(c) ? null : r), answer);
+    assert.deepEqual(body.marks, []);
+  });
+});

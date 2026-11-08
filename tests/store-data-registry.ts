@@ -397,7 +397,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:plan:closing:@lib/closed-store-data.ts": { what: "The closing job's record of a store, read again before the walk prepares it", parts: [capped(0, "Read only: counted with lib/plan-closing.ts.")] },
   "nl:account:stores:@lib/closed-store-data.ts": { what: "An account's other stores, read before the walk deletes what a closing store's Stripe account names", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:store:owner:@lib/closed-store-data.ts": { what: "A store's record, compared in one step before the walk takes a closing store's lock, and before it deletes what a closing store's key or account names", parts: [capped(0, "Read only: the same record lib/store.ts keeps, counted there.")] },
-  "nl:store:lock:@lib/closed-store-data.ts": short("The same store lock as lib/store.ts's, held by the walk while it prepares a closing store and let go of at once (CLOSING_LOCK_SECONDS at the most); no second lock", "studio", 1, 128),
+  "nl:store:lock:@lib/closed-store-data.ts": { what: "The same store lock as lib/store.ts's, held by the walk while it prepares a closing store and let go of at once (CLOSING_LOCK_SECONDS at the most); no second lock", parts: [capped(0, "The same physical key as lib/store.ts's lock, one a store, counted there.")] },
   "nl:call:remindq@lib/call-records.ts": company("Call reminders due", "One sorted set for every store, members gone when sent: each a booked call's, an order's."),
   "nl:call:creator-reminded:@lib/call-reminders.ts": short("The creator reminded of a call", "call", 430, 2 * MARK),
   "nl:call:reminded:@lib/call-reminders.ts": short("A buyer reminded of a call", "call", 430, 2 * MARK),

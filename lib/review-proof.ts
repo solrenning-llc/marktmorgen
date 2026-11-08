@@ -34,6 +34,7 @@ import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
@@ -216,8 +217,11 @@ export async function mintReviewLink(store: Store, reference: string, email: str
 
 async function readLink(store: Store, token: string): Promise<LinkGrant | null> {
   if (!REVIEW_LINK_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  // Absent (null) is a link that ran out; any other answer is not known and throws, never "expired" (rule 24).
+  const reply = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("a review link");
+  const raw = reply[0];
+  if (!raw) return null;
   try {
     const grant = JSON.parse(raw) as Partial<LinkGrant>;
     if (grant.s !== store.statsId || typeof grant.r !== "string" || typeof grant.e !== "string") return null;
@@ -239,7 +243,9 @@ export async function openDoor(store: Store, door: Door, nowSeconds = Date.now()
     return nowSeconds - result.proof.paidAt > DOWNLOAD_WINDOW_SECONDS ? { state: "expired" } : result;
   }
   const expected = door.via === "orders" ? await ordersGrant(store, door.token) : null;
-  const link = door.via === "ask" ? await readLink(store, door.token) : null;
+  // A link that cannot be read just now is an error the page says as such, never an expired link.
+  const link = door.via === "ask" ? await readLink(store, door.token).catch((error: unknown) => (error instanceof UnknownReplyError ? "error" as const : Promise.reject(error))) : null;
+  if (link === "error") return { state: "error" };
   const email = door.via === "orders" ? expected : link?.e ?? null;
   const reference = door.via === "orders" ? door.reference : link?.r ?? "";
   if (!email || !reference) return { state: "expired" };

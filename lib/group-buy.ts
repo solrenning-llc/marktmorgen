@@ -45,6 +45,7 @@ import { allowanceUsed } from "@/lib/store-allowance";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { claimMark } from "@/lib/claim-mark";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
@@ -227,8 +228,13 @@ export async function settleGroup(input: {
   const group = await readGroup(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
   if (group.paid) return "already";
-  const [claimed] = await redisPipeline([["SET", `${groupKey(id)}:settling`, "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // Settled by one run only: the mark is this run's only on Redis's own "OK",
+  // or on its own value read back (CX-123 rule 24, lib/claim-mark.ts). Any
+  // other shape is unknown: nothing is marked paid or sent, and the
+  // confirmation is tried again.
+  const claimed = await claimMark(`${groupKey(id)}:settling`, 300);
+  if (claimed === "taken") return "already";
+  if (claimed === "unknown") throw new UnknownReplyError("a purchase's settling");
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   // Stripe gives the payment as its id, or whole when the caller asked for it.

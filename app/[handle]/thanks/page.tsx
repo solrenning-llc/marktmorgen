@@ -114,6 +114,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   failed: { always: false },
   checking: { always: false },
   unavailable: { always: true },
+  retry: { always: true },
 };
 
 /**

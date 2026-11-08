@@ -173,6 +173,39 @@ async function main(): Promise<void> {
   is("and when who was started on them fails", [unreadOf(noStarts), noStarts.sequences], [["sequences"], []]);
   is("the purchases are still there", noStarts.orders.length, 2);
 
+  part("A PayPal record kept in another shape is not read as no record (Claude 6 on #3159)");
+  const paypalRecord = { store: STATS, order: PAYPAL_ORDER, capture: "CAP1", email: EMAIL, product: "kit1", cents: 1200, currency: "usd", at: NOW - 50, meta: {} };
+  for (const [label, raw] of [
+    ["text that is not JSON", "not json {"],
+    ["cents written as text", JSON.stringify({ ...paypalRecord, cents: "1200" })],
+    ["a record of another order", JSON.stringify({ ...paypalRecord, order: "PAYPAL0RDER0009" })],
+  ] as const) {
+    await seed();
+    await redis.pipeline([["SET", `nl:ppsell:paid:${PAYPAL_ORDER}`, raw]]);
+    const odd = await buyerProfile(store, EMAIL);
+    is(
+      `${label}: the PayPal part is named, the sale listed without an amount, and nothing counted`,
+      [unreadOf(odd), odd.orders.find((o) => o.title === "Starter Kit")?.cents, odd.paid, typeof odd.paid],
+      [["paypal"], 0, 0, "number"],
+    );
+  }
+
+  part("Who was started on a sequence, answered in another shape, is not \"started on none\"");
+  for (const [label, reply] of [["no entry per sequence", []], ["a word", ["yes"]], ["a count of 2", [2]], ["a null", [null]]] as [string, unknown[]][]) {
+    await seed();
+    const original = redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.some((c) => c[0] === "EXISTS" && String(c[1]).startsWith("nl:mail:enr:")) ? [...reply] : original.call(redis, commands)) as typeof redis.pipeline;
+    const odd = await buyerProfile(store, EMAIL).finally(() => {
+      redis.pipeline = original;
+    });
+    is(`${label}: the sequences are named, none shown`, [unreadOf(odd), odd.sequences], [["sequences"], []]);
+  }
+  await seed();
+  await redis.pipeline([["DEL", `nl:mail:enr:${FLOW}:${addressHash(EMAIL)}`]]);
+  const notStarted = await buyerProfile(store, EMAIL);
+  is("control: a sequence they were not started on (EXISTS 0) is no sequence, read in full", [unreadOf(notStarted), notStarted.sequences], [[], []]);
+
   part("The calls could not be read");
   callsDown = true;
   const noCalls = await buyerProfile(store, EMAIL);
@@ -267,6 +300,13 @@ async function main(): Promise<void> {
   }
   const page = readFileSync("app/studio/people/page.tsx", "utf8");
   is("the studio page shows the sentence as a status", /profile\.unread\.length[\s\S]{0,200}role="status"[\s\S]{0,200}profileUnreadWords\(profile\.unread\)/.test(page), true);
+  const tilesBlock = page.slice(page.indexOf("const tiles = ["), page.indexOf("];", page.indexOf("const tiles = [")));
+  is(
+    "the purchase tiles never say \"nothing bought yet\" while purchases could not all be read",
+    (tilesBlock.match(/"nothing bought yet"/g) ?? []).length === 2 && (tilesBlock.match(/purchasesUnread \? "purchases could not all be loaded" : "nothing bought yet"/g) ?? []).length === 2,
+    true,
+  );
+  is("and purchasesUnread covers Stripe, the handed-over purchases and the PayPal amounts", /const purchasesUnread = profile\.stripeError \|\| profile\.unread\.includes\("imported"\) \|\| profile\.unread\.includes\("paypal"\);/.test(page), true);
   const notesSection = page.slice(page.indexOf('aria-labelledby="notes-title"'), page.indexOf("</section>", page.indexOf('aria-labelledby="notes-title"')));
   is(
     "notes not read: the notes box (and its \"No notes yet.\") is not drawn; a status says they could not be loaded",

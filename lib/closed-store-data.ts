@@ -259,7 +259,10 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   };
   // The walk's entry is written before the record goes: once the record is gone, only this entry names the store's
   // keys. A write that fails throws with the record still there, and the walk tries the store again later.
-  await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);
+  // Only HSET's own count (0 for an entry rewritten, 1 for a new one) is a write; any other answer is not known to
+  // have landed and throws before the record goes (Codex T on #3181).
+  const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1)?.[0];
+  if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
   await closeStoreRecord(store);
   return entry;
 }

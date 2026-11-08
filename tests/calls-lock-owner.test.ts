@@ -188,7 +188,7 @@ async function main(): Promise<void> {
   const first = await sell(a, T);
   is("control: a first buyer opens a checkout for the time", [first.result, opened - before], ["opened", 1]);
   is("control: …its hold is in the diary", (await diaryFields(a)).includes(String(first.session)), true);
-  is("control: …and its lock is let go afterwards", await lockValue(a), null);
+  is("control: …and its lock is let go afterward", await lockValue(a), null);
   is("while it worked, the lock held the time it was taken and a random part only it writes", typeof seen === "string" && /^\d{13}\.\d{9}$/.test(seen), true);
   before = opened;
   is("control: a second buyer for the same time is told it is taken, with no checkout", [(await sell(a, T)).result, opened - before], ["taken", 0]);
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
   before = opened;
   const alone = await sell(a, T);
   is("control: a lock left 20 seconds ago is taken over by one buyer, who opens a checkout", [alone.result, opened - before], ["opened", 1]);
-  is("control: …and lets it go afterwards", await lockValue(a), null);
+  is("control: …and lets it go afterward", await lockValue(a), null);
   await clear(a);
 
   part("Two buyers who find the same lock left behind: only one takes it over");
@@ -282,7 +282,7 @@ async function main(): Promise<void> {
 
   const moved = await moveBooking({ store: m.store, product: m.call, session, booked: { start: M, end: M + HOUR, email: "buyer@example.com", buyerTz: NY }, start: later, origin: "https://marktmorgen.com" });
   is("control: the same move with the lock its own is done", moved.ok ? [moved.start, moved.end] : moved, [later, later + HOUR]);
-  is("control: …and its lock is let go afterwards", await lockValue(m), null);
+  is("control: …and its lock is let go afterward", await lockValue(m), null);
 
   part("Each script's reply is read exactly: anything but 1 or 0 refuses");
   const odd: [string, unknown][] = [

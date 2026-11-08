@@ -24,6 +24,11 @@
  *     did not read, was taken for a store that is not there by the tolerant
  *     readers of lib/store.ts. The card, the sign-up form, the library and
  *     the link request now read that key exactly first (lib/store-exact.ts).
+ *   - Since Claude 3's second review of #2910: the product's own record out
+ *     of shape (no reply, a number) still said "no longer on sale"; the
+ *     card's "not on sale" box did not carry the store's language (3.1.2);
+ *     and the store's address key was read twice per view. Since Claude 4's
+ *     finding: a key pool whose count could not be read showed "Buy".
  *
  * Each unknown case is checked against a control where the same thing is
  * truly absent, which keeps its old answer. Synthetic store; one reply
@@ -35,7 +40,8 @@ import { NextRequest } from "next/server";
 import EmbedCard from "@/app/embed/[handle]/[product]/page";
 import EmbedJoin from "@/app/embed/[handle]/join/page";
 import LibraryPage from "@/app/library/page";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setLanguage, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { DEFAULT_KEYS } from "@/lib/key-setup";
 import { readListing } from "@/lib/catalog";
 import { requestLibraryLink, storesBoughtFrom } from "@/lib/buyer-library";
 import { personWrite } from "@/lib/joined-stores";
@@ -49,7 +55,10 @@ import { answering } from "./security/next-headers";
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
 let inject: { when: (c: Command) => boolean; reply: () => unknown[] | Promise<unknown[]> } | null = null;
+/** Every command sent while set, to count what one view reads. */
+let log: Command[] | null = null;
 redis.pipeline = (async (batch: Command[]) => {
+  if (log) log.push(...batch);
   if (inject && batch.some(inject.when)) return inject.reply();
   return real(batch);
 }) as typeof redis.pipeline;
@@ -141,6 +150,27 @@ async function main(): Promise<void> {
   is("never says the product is no longer on sale", productUnread.includes(w.noLongerOnSale), false);
   is("says it could not be loaded just now", productUnread.includes("could not be loaded just now"), true);
   is("and still leads to the store", productUnread.includes(w.seeStore(store.name)), true);
+
+  part("The card: a product whose own record answered out of shape (Claude 3, second review of #2910)");
+  const productRead = getOf(`nl:catalog:${store.catalog.id}:l:${ownRecord}`);
+  inject = { when: productRead, reply: () => [null] };
+  is("control: a product record confirmed absent says the product is no longer on sale", (await card("emblibunknown", ownRecord)).includes(w.noLongerOnSale), true);
+  inject = null;
+  is("control: the product's own record, read as asked, shows its buy button", (await card("emblibunknown", ownRecord)).includes(w.buyFor("$40")), true);
+  for (const [name, reply] of [
+    ["no reply for the product's record", () => []],
+    ["a number for the product's record", () => [7]],
+    ["a list for the product's record", () => [["x"]]],
+    ["a record that is not JSON", () => ["{"]],
+    ["a record of another product", () => [JSON.stringify({ ...listing, id: fromHead })]],
+  ] as const) {
+    inject = { when: productRead, reply };
+    const shown = await card("emblibunknown", ownRecord);
+    inject = null;
+    is(`${name}: never says the product is no longer on sale`, shown.includes(w.noLongerOnSale), false);
+    is(`${name}: says it could not be loaded just now`, shown.includes("could not be loaded just now"), true);
+    is(`${name}: no buy button`, shown.includes(w.buyFor("$40")), false);
+  }
 
   part("The card: whether it is coming soon could not be read");
   const soonRead = (c: Command) => c[0] === "SISMEMBER" && c[1] === `nl:wl:${store.statsId}:soon`;
@@ -294,6 +324,84 @@ async function main(): Promise<void> {
     inject = null;
     is(`${name}: never says nothing is listed`, shown.includes("Nothing is listed for this address"), false);
     is(`${name}: says one store could not be read just now`, shown.includes("1 store could not be read just now"), true);
+  }
+
+  part("What one view reads (Claude 3, second review of #2910): the store's key once");
+  const handleKeyOf = getOf("nl:store:handle:emblibunknown");
+  log = [];
+  await card("emblibunknown", fromHead);
+  const cardRead = log;
+  log = [];
+  answering(new NextRequest("https://marktmorgen.com/embed/emblibunknown/join"));
+  await html((await EmbedJoin({ params: Promise.resolve({ handle: "emblibunknown" }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement);
+  const joinRead = log;
+  log = [];
+  await library();
+  const libraryRead = log;
+  log = null;
+  is("a card view reads the store's address key once", cardRead.filter(handleKeyOf).length, 1);
+  is("a card view sends at most 5 commands", cardRead.length <= 5 ? "at most 5" : `${cardRead.length}: ${cardRead.map((c) => c[0]).join(", ")}`, "at most 5");
+  is("a sign-up form view reads the store's address key once", joinRead.filter(handleKeyOf).length, 1);
+  is("a sign-up form view sends at most 7 commands", joinRead.length <= 7 ? "at most 7" : `${joinRead.length}: ${joinRead.map((c) => c[0]).join(", ")}`, "at most 7");
+  is("a library view reads each store's id key once", libraryRead.filter(getOf(`nl:store:id:${store.sid}`)).length, 1);
+
+  part("The card's \"not on sale\" box speaks the store's language (Claude 3, second review of #2910; 3.1.2)");
+  await setLanguage(owner, "de");
+  const de = wordsIn("de");
+  const rawCard = async (product: string) => {
+    answering(new NextRequest(`https://marktmorgen.com/embed/emblibunknown/${product}`));
+    return html((await EmbedCard({ params: Promise.resolve({ handle: "emblibunknown", product }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement);
+  };
+  /** The lang of the element that holds this sentence: the innermost element with a lang that opens before it and holds it. */
+  const langAround = (markup: string, sentence: string): string | null => {
+    const at = text(markup).indexOf(sentence) >= 0 ? markup.indexOf(sentence.slice(0, 12)) : -1;
+    if (at < 0) return null;
+    const opened = [...markup.slice(0, at).matchAll(/<([a-z]+)[^>]*\blang="([^"]+)"[^>]*>/g)];
+    for (let i = opened.length - 1; i >= 0; i -= 1) {
+      const tag = opened[i][1];
+      const between = markup.slice(opened[i].index! + opened[i][0].length, at);
+      const opens = (between.match(new RegExp(`<${tag}[\\s>]`, "g")) ?? []).length;
+      const closes = (between.match(new RegExp(`</${tag}>`, "g")) ?? []).length;
+      if (closes <= opens) return opened[i][2];
+    }
+    return null;
+  };
+  is("control: a German card itself carries the store's lang", langAround(await rawCard(fromHead), listing.title.slice(0, 12))?.startsWith("de") ?? false, true);
+  inject = { when: productRead, reply: failed };
+  const unreadDe = await rawCard(ownRecord);
+  inject = null;
+  is("control: the German 'could not be loaded' sentence is drawn", text(unreadDe).includes(de.cardUnread), true);
+  is("the German 'could not be loaded' sentence sits inside an element whose lang is German", langAround(unreadDe, de.cardUnread)?.startsWith("de") ?? false, true);
+  const goneDe = await rawCard("p_missing_product");
+  is("control: the German 'no longer on sale' sentence is drawn", text(goneDe).includes(de.noLongerOnSale), true);
+  is("the German 'no longer on sale' sentence sits inside an element whose lang is German", langAround(goneDe, de.noLongerOnSale)?.startsWith("de") ?? false, true);
+  await setLanguage(owner, "en");
+
+  part("The card: a key pool whose count could not be read (Claude 4 on #2910)");
+  const app = await addProduct(owner, "Desktop app", "A synthetic app.", "40", null);
+  if (!app.ok) throw new Error("key product fixture");
+  await setProductLink(owner, app.product.id, "https://example.test/app");
+  is("the product hands out keys from a pool", (await setProductKeys(owner, app.product.id, { ...DEFAULT_KEYS, source: "pool" })).ok, true);
+  const poolKey = `nl:keys:${store.statsId}:${app.product.id}:pool`;
+  const poolRead = (c: Command) => c[0] === "LLEN" && c[1] === poolKey;
+  await real([["RPUSH", poolKey, "KEY-ONE"]]);
+  is("control: a key left shows the buy button", (await card("emblibunknown", app.product.id)).includes(w.buyFor("$40")), true);
+  inject = { when: poolRead, reply: () => [0] };
+  const emptyPool = await card("emblibunknown", app.product.id);
+  inject = null;
+  is("control: an empty pool shows no buy button", emptyPool.includes(w.buyFor("$40")), false);
+  for (const [name, reply] of [
+    ["a failed request", failed],
+    ["no reply at all", () => []],
+    ["a word for the count", () => ["QUEUED"]],
+    ["a negative count", () => [-1]],
+  ] as const) {
+    inject = { when: poolRead, reply };
+    const shown = await card("emblibunknown", app.product.id);
+    inject = null;
+    is(`${name}: no buy button for something that may be sold out`, shown.includes(w.buyFor("$40")), false);
+    is(`${name}: says buying is not available just now`, shown.includes("Buying is not available just now"), true);
+    is(`${name}: the product's title is still shown`, shown.includes("Desktop app"), true);
   }
 
   done();

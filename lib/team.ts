@@ -319,10 +319,10 @@ export async function roleIn(store: Store, email: string): Promise<Role | null> 
  * read from each store's own record. An entry in the index the record no
  * longer agrees with is dropped from the index on the way, only on confirmed
  * absence (rule 24): the team record, read exactly, has no such member (or no
- * record at all), or the store's own record names them its owner. An index or
- * team that answers in an unknown shape throws; a store whose record could not
- * be found is left out of the list but kept in the index, since storeForId
- * answers null for an unknown reply too.
+ * record at all), or the store's own record names them its owner. An index
+ * that answers in an unknown shape throws; a store whose team answers in an
+ * unknown shape, or whose record could not be found, is left out of the list
+ * but kept in the index, since storeForId answers null for an unknown reply too.
  */
 export async function memberStores(email: string): Promise<{ store: Store; role: TeamRole }[]> {
   if (!isRedisConfigured()) return [];
@@ -333,7 +333,14 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
   const found: { store: Store; role: TeamRole }[] = [];
   const stale: string[] = [];
   for (const sid of list.slice(0, 50)) {
-    const member = (await readTeam(sid)).members.find((m) => m.email === address);
+    // A store whose team answers in an unknown shape is left out of this answer and kept in the index: it is
+    // neither "on it" nor "gone", and one other store's unreadable record never stops the person's own studio.
+    const team = await readTeam(sid).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    });
+    if (!team) continue;
+    const member = team.members.find((m) => m.email === address);
     if (!member) {
       stale.push(sid);
       continue;
@@ -691,12 +698,22 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   return { ok: true, store, member: joined.member };
 }
 
-/** Forgets a store's team, its invitations and its log, when the store itself goes. */
+/**
+ * Forgets a store's team, its invitations and its log, when the store itself goes. A team that answers in an
+ * unknown shape (rule 24) is still forgotten, so the store's deletion goes on; only the teammates' index entries,
+ * which could not be read, are left, and memberStores drops each on the confirmed absence that follows.
+ */
 export async function dropTeam(store: Store): Promise<void> {
   if (!store.sid) return;
-  const team = await readTeam(store.sid);
+  const members = await readTeam(store.sid).then(
+    (team) => team.members,
+    (error: unknown) => {
+      if (error instanceof UnknownReplyError) return [];
+      throw error;
+    },
+  );
   await redisPipeline([
-    ...team.members.map((m) => ["SREM", indexKey(m.email), store.sid]),
+    ...members.map((m) => ["SREM", indexKey(m.email), store.sid]),
     ["DEL", teamKey(store.sid)],
     ["DEL", logKey(store.sid)],
   ]);

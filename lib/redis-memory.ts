@@ -125,6 +125,30 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
+        if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, hold, token] = args;
+          return this.run(["GET", hold]) === token ? this.run(["DEL", hold]) : 0;
+        }
+        // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
+        if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, members, field, json] = args;
+          const now = this.run(["HGET", members, field]);
+          if (now === null || now === undefined) {
+            this.run(["HSET", members, field, json]);
+            return 2;
+          }
+          let mark: unknown;
+          try {
+            mark = JSON.parse(String(now));
+          } catch {
+            return -1;
+          }
+          if (!mark || typeof mark !== "object") return -1;
+          if ((mark as { d?: unknown }).d === 1) return 0;
+          this.run(["HSET", members, field, json]);
+          return 1;
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;
@@ -545,6 +569,13 @@ export class MemoryRedis {
           if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
           if (held instanceof Map && !held.has(args[2]) && held.size >= Number(args[4])) return 0;
           this.hash(target).set(args[2], args[3]);
+          return 1;
+        }
+        // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
+        if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, people, field, expected, next] = args;
+          if (this.run(["HGET", people, field]) !== expected) return 0;
+          this.run(["HSET", people, field, next]);
           return 1;
         }
         // Models only the explicitly supported application scripts. Not a Lua interpreter.

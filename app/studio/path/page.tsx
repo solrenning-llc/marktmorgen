@@ -1,4 +1,6 @@
 import {PathCertificates} from "@/components/path-certificates";
+import {PathWeeklySummary} from "@/components/path-weekly-summary";
+import {pathWeeklySummary} from "@/lib/path-weekly-summary";
 import {PathAiWording} from "@/components/path-ai-wording";
 import {aiAvailableFor} from "@/lib/ai";
 import {currentWordingSource} from "@/lib/path-wording-source";
@@ -29,7 +31,7 @@ import { allowanceFor } from "@/lib/store-allowance-rules";
 import { pathPlanLine } from "@/lib/path-plan";
 import { largerPlanFor } from "@/lib/larger-plan";
 import { chargeStudio, readPath, visitPath,returnMissionFor } from "@/lib/path";
-import { LEVEL_NAMES, LEVELS, PATH_SLOGAN, PATH_TITLE, goalWords, localDay, pathProgress, streakOf, type Place } from "@/lib/path-rules";
+import { KEPT_CHECKINS, LEVEL_NAMES, LEVELS, PATH_SLOGAN, PATH_TITLE, goalWords, localDay, pathProgress, streakOf, validPathDay, type Place } from "@/lib/path-rules";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PathOnboarding } from "@/components/path-onboarding";
@@ -52,6 +54,7 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
  const returnMission=record?returnMissionFor(store,record,now):null;
  const returning=returnMission?.state==="open";
  const streak=record?streakOf(record.checkins,localDay(record.answers.timeZone,now)):null;
+ const weeklySummary=progress&&record&&!failed?pathWeeklySummary({timeZone:record.answers.timeZone,checkins:record.checkins},now):null;
  const boardRows=record?.board?await readPathBoardRows(record.board.token).catch(()=>null):[];
  const growth=record&&progress?.complete&&!returning?await readPathGrowth(store,record.money,chargeStudio(store)).catch(()=>null):null;
  const growthMissions=growth?pathGrowthMissions(growth.facts):[];
@@ -75,11 +78,12 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
       <svg viewBox="0 0 100 100" className="h-full w-full" aria-hidden="true"><circle cx="50" cy="50" r="44" fill="none" stroke="#e5e1eb" strokeWidth="6"/><circle cx="50" cy="50" r="44" fill="none" stroke="#6d28d9" strokeWidth="6" pathLength="100" strokeDasharray={(progress.done/progress.of*100)+" 100"} transform="rotate(-90 50 50)"/><path d="M28 62a22 22 0 0 1 44 0" fill="#f5b942"/><path d="M23 63h54M50 25v9M25 39l7 6M75 39l-7 6" stroke="#5b3c09" strokeWidth="3" strokeLinecap="round"/></svg>
      </div>
      <h2 className="text-xl font-semibold">{record.best>=0?LEVEL_NAMES[LEVELS[record.best]]:"Your first step is ready"}</h2>
-     {!returning?<p className="mt-2">{streak?.days || 0} check-in days in your current streak. {streak?.restLeft || 0} rest days left this week.</p>:null}
      <p className="mt-2 text-sm text-ink-soft">{goalWords(record.answers,store.currency)}</p>
      <p className="mt-2 text-sm text-ink-soft">Progress comes from your store&apos;s records. Readings refresh at most once every ten minutes when your studio allowance has room.</p>
      <p className="mt-2 text-sm text-ink-soft">{record.counts?"Visits and leads last read: "+new Date(record.counts.at).toISOString()+".":"Visits and leads have not been read yet."} {record.money?"Orders last read: "+new Date(record.money.at).toISOString()+".":"Orders have not been read yet."}</p>
+     {!failed&&!returning&&weeklySummary?.state==="unavailable"&&streak&&record.checkins.length<=KEPT_CHECKINS&&Array.from(record.checkins).every(validPathDay)?<p className="mt-2">Current streak: {streak.days} check-in {streak.days===1?"day":"days"}. {streak.restLeft} rest {streak.restLeft===1?"day":"days"} left this week.</p>:null}
     </section>
+    {!failed&&weeklySummary?<PathWeeklySummary summary={weeklySummary} streak={returning?null:streak}/>:null}
     <section className="mt-8" aria-labelledby="path-next"><h2 id="path-next" className="t-h3">{returning?RETURN_HEADING:progress.complete?"Your first real sale is recorded":"Your next mission"}</h2>
      {mission?<div className="mt-4 rounded-2xl border border-line bg-white p-6"><h3 className="text-xl font-semibold">{mission.title}</h3><p className="mt-3">{mission.why}</p><ol className="mt-4 list-decimal space-y-2 pl-6">{mission.steps.map(step=><li key={step}>{step}</li>)}</ol><p className="mt-4 text-sm text-ink-soft">Recorded when: {mission.closesOn}</p><a className="btn btn-primary mt-5" href={hrefFor(mission.place)}>{mission.place.label}</a></div>:<p className="mt-3">Keep listening to your customers and improving what you offer. Your reached level stays with you.</p>}
      {wording?<PathAiWording key={store.sid+"|"+wording.mission+"|"+wording.step} source={wording} endpoint={"/api/store/path?store="+encodeURIComponent(store.sid)}/>:null}

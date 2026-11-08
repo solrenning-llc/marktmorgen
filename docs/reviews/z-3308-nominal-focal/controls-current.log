@@ -1,0 +1,48 @@
+
+FILE z-3308-tail.proof.ts
+Z_FINAL_AFTER100 {"batches":100,"reads":101,"final":1,"result":0,"physicalRedisExecution":false}
+✔ after exactly100 batches the final checked step is allowed (41.876386ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47.523755
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3308-type-guard.proof.ts
+Z_TYPE_GUARD {"wrong":"index","answer":[-1],"recordRetained":true,"typeMarkerRetained":true,"nativeRedis":false}
+Z_TYPE_GUARD {"wrong":"notes","answer":[-1],"recordRetained":true,"typeMarkerRetained":true,"nativeRedis":false}
+✔ PARTv2 index wrong type refuses before deleting actual model record (9.576154ms)
+✔ PARTv2 notes wrong type refuses before deleting actual model record (1.595156ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17.603863
+Z_VOLUME {"runs":18,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3296-erasure-read-race.proof.ts
+Z_INHERITED_READ_RACE {"returnedToken":true,"grantBytes":0,"notes":[],"ttl":-2,"retainedAfterSecondErasure":false,"commands":["SMEMBERS","ZRANGEBYSCORE","SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","SMEMBERS","ZRANGEBYSCORE","EVAL"],"jsonPipelineBytes":2547}
+✔ inherited MEDIUM: an in-flight erasure must not delete the new index while leaving the new address grant (7.326982ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 23.929405
+Z_VOLUME {"runs":24,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3308focal-Erk2Xq

@@ -1,0 +1,118 @@
+
+FILE z-3308-batch-bound.proof.ts
+Z_BATCH_BOUND {"batches":100,"reads":101,"commands":302,"jsonRequestBytes":2758578,"errorName":"UnknownReplyError","physicalRedisExecution":false}
+✔ LOW: the stated maximum of one hundred batch requests must be enforced before the next request (68.140404ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 74.794972
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3308-batch-receipt.proof.ts
+Z_BATCH_RECEIPT {"mode":"nested","batches":1,"errorName":"UnknownReplyError","remainingRecords":1,"productCommands":3,"jsonPipelineBytes":21561}
+Z_BATCH_RECEIPT {"mode":"oversized","batches":1,"errorName":"UnknownReplyError","remainingRecords":1,"productCommands":3,"jsonPipelineBytes":21561}
+Z_BATCH_RECEIPT {"mode":"throw","batches":1,"errorName":"Error","remainingRecords":1,"productCommands":3,"jsonPipelineBytes":21561}
+Z_BATCH_RECEIPT {"mode":"zero control","batches":1,"result":0,"errorName":null,"remainingRecords":0,"productCommands":6,"jsonPipelineBytes":22443}
+✔ batch acknowledgment nested: never falsely completes an uncertain deletion (52.192551ms)
+✔ batch acknowledgment oversized: never falsely completes an uncertain deletion (29.714614ms)
+✔ batch acknowledgment throw: never falsely completes an uncertain deletion (27.723641ms)
+✔ batch acknowledgment zero control: never falsely completes an uncertain deletion (15.216279ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 133.742734
+Z_VOLUME {"runs":7070,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE erasure-forget-atomic.test.ts
+
+a writer's note landing between the read and the delete: the erasure reads again and deletes it too
+  ok    the writer did land between the read and the delete
+  ok    the record that was there before is deleted
+  ok    the late record is deleted by the same erasure
+  ok    and the notes are gone
+  ok    both records counted, each once
+  ok    a second erasure finds nothing left
+
+notes that change after every read: 3 tries, then the step fails with nothing deleted
+  ok    it fails as not finished
+  ok    nothing was deleted: every record and the notes kept
+  ok    the next erasure deletes them all
+
+the healthy erasure: every noted record and the notes, and the same count
+  ok    three records, both notes
+  ok    answers the records deleted, each once (index and notes not counted)
+  ok    every noted record is gone
+  ok    both notes are gone
+  ok    a member that is not an nl: key is never deleted
+  ok    no stats id: 0, Redis not asked
+
+as Redis counts: a missing note is not a key, and a note of another type is refused before any delete
+  ok    one record noted in the scored note only: 1
+  ok    a note whose record already expired: the note goes, 0 records
+  ok    nothing noted: 0
+  ok    an index of another type: Redis refuses the read, the step fails
+  ok    and nothing was deleted: the notes, the index and the record kept
+  ok    an index turned to another type after the read: the script refuses, the step fails
+  ok    and nothing was deleted
+
+more than 1000 records: in batches, each with its own note entries, all counted once
+  ok    two batches, then the rest in the checked step
+  ok    2,500 records and one noted during the batches: all deleted, each counted once
+
+an index turned to another type during the batches: refused before any delete
+  ok    the batch is refused: the step fails as not finished
+  ok    and nothing was deleted: the records and the notes kept
+
+notes refilled after every batch: at most 100 batches, then the step fails as not finished
+  ok    the step fails as not finished, after exactly 100 batches
+
+a reply not in its exact shape: the step fails, never 'nothing to delete'
+  ok    the step answered nothing: UnknownReplyError
+  ok    the step answered null: UnknownReplyError
+  ok    the step answered "OK": UnknownReplyError
+  ok    the step answered "Changed": UnknownReplyError
+  ok    the step answered 0: UnknownReplyError
+  ok    the step answered 2: UnknownReplyError
+  ok    the step answered {}: UnknownReplyError
+  ok    the step answered []: UnknownReplyError
+  ok    the step answered [1]: UnknownReplyError
+  ok    the step answered [1,1,0]: UnknownReplyError
+  ok    the step answered ["1","0"]: UnknownReplyError
+  ok    the step answered [-1,0]: UnknownReplyError
+  ok    the step answered [1.5,0]: UnknownReplyError
+  ok    the step answered [null,0]: UnknownReplyError
+  ok    the step answered [null,0]: UnknownReplyError
+  ok    the step answered [1,3]: UnknownReplyError
+  ok    the step answered [0,1]: UnknownReplyError
+  ok    the step answered [1,0]: UnknownReplyError
+  ok    the step answered [1,2]: UnknownReplyError
+  ok    the step answered [5,1]: UnknownReplyError
+  ok    the step answered [1,-1]: UnknownReplyError
+  ok    the step answered {"0":1,"1":0}: UnknownReplyError
+  ok    the notes read as nothing: fails, the notes and the record kept
+  ok    the notes read as null: fails, the notes and the record kept
+  ok    the notes read as "nl:x": fails, the notes and the record kept
+  ok    the notes read as {}: fails, the notes and the record kept
+  ok    the notes read as ["nl:x",7]: fails, the notes and the record kept
+  ok    the notes read as [null]: fails, the notes and the record kept
+  ok    no reply for the step: UnknownReplyError
+  ok    one reply too many: UnknownReplyError
+  ok    a pipeline that throws: the step fails
+
+58 checks, all passing.
+Z_VOLUME {"runs":18495,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3308focal-b9QFA6

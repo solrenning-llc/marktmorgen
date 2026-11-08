@@ -179,6 +179,43 @@ async function relist(ids: string[], sid: string, bonusCents: number): Promise<n
   return made;
 }
 
+/** The most pages of a customer's paid invoices read; a list longer than that is not known whole. */
+const INVOICE_PAGES = 10;
+
+/**
+ * Every paid invoice of a customer, newest first, read exactly (CX-123 rule 24; Claude 6's audit, B1): each page
+ * Stripe's list, `has_more` true or false, at most the hundred asked for, each row an invoice with its own id and
+ * paid. The older pages are read to the end, since they hold the payment that shows a store paid us before it was
+ * invited. Anything else, a page that says there is more but has no rows, or a list still going on after the last
+ * page read, is not "these are all": it throws UnknownReplyError, so the store fails this run, earns nothing, is not
+ * marked, and the next run reads again.
+ */
+async function paidInvoices(customer: string): Promise<Invoice[]> {
+  const invoices: Invoice[] = [];
+  let after = "";
+  for (let page = 0; page < INVOICE_PAGES; page += 1) {
+    const query = new URLSearchParams({ customer, status: "paid", limit: "100" });
+    query.append("expand[]", "data.payments");
+    if (after) query.set("starting_after", after);
+    const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/invoices?${query}`);
+    const rows = list && list.object === "list" && typeof list.has_more === "boolean" && Array.isArray(list.data) && list.data.length <= 100
+      ? (list.data as unknown[])
+      : null;
+    if (!rows) throw new UnknownReplyError("invite credits: a customer's paid invoices");
+    for (const row of rows) {
+      const inv = row && typeof row === "object" && !Array.isArray(row) ? (row as Invoice) : null;
+      if (!inv || typeof inv.id !== "string" || !INVOICE_PATTERN.test(inv.id) || inv.status !== "paid") {
+        throw new UnknownReplyError("invite credits: a paid invoice");
+      }
+      invoices.push(inv);
+    }
+    if (list.has_more === false) return invoices;
+    if (!rows.length) throw new UnknownReplyError("invite credits: a customer's paid invoices");
+    after = String(invoices[invoices.length - 1].id);
+  }
+  throw new UnknownReplyError("invite credits: more paid invoices than read");
+}
+
 /** Step 1 for one invited store. Returns how many credits it wrote. */
 async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   const [rawBy] = await redisPipeline([["GET", byKey(sid)]]);
@@ -191,14 +228,9 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
   const customer = await customerFor(store);
   if (!customer) return 0;
 
-  const query = new URLSearchParams({ customer, status: "paid", limit: "100" });
-  query.append("expand[]", "data.payments");
-  const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/invoices?${query}`);
-  const invoices = ((list.data as Invoice[] | undefined) ?? []).filter(
-    (inv) => typeof inv.id === "string" && INVOICE_PATTERN.test(inv.id) && inv.status === "paid",
-  );
+  const invoices = await paidInvoices(customer);
 
-  // Paid us before the invite: not brought to us by anyone.
+  // Paid us before the invite: not brought to us by anyone. Decided only on every paid invoice, read whole above.
   if (invoices.some((inv) => num(inv.amount_paid) > 0 && num(inv.created) < by.at)) {
     await redisPipeline([["SET", byKey(sid), JSON.stringify({ ...by, back: true })]]);
     return 0;

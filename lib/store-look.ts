@@ -300,6 +300,13 @@ export type LookColours = {
    * on it all still read.
    */
   band: string;
+  /**
+   * The colour of a link on that band (274 [AX1]; C1-20261106-0100-TODOS-1): black or white, whichever reads more
+   * on it, so it keeps 7:1 (WCAG 1.4.6) whatever accent the creator picked; it is always underlined (app/globals.css).
+   * The band keeps the page's text at 7:1, and that text is near black or near white, so one of the two always does
+   * better than it (tests/band-link-contrast.test.ts).
+   */
+  bandLink: string;
   dark: boolean;
 };
 
@@ -327,24 +334,29 @@ export function lookColours(look: LookPaint): LookColours {
     (c) => contrast(c, palette.card) >= 3 && contrast(c, onAccent) >= 7,
   );
 
+  // Text in the creator's colour ("3 left", "Sold out", "Coming soon") is small text: 7:1 (WCAG 1.4.6 AAA, 274 [AX1])
+  // on the card, an item and the page behind them, which the page's own text always reaches, so it only grows darker
+  // (or lighter on Night) to pass. It was 4.5:1: the default violet read 6.56:1 (tests/product-page-accessibility.test.ts).
   const accentText = nearestPassing(
     picked,
     palette.text,
-    (c) => contrast(c, palette.card) >= 4.5 && contrast(c, palette.item) >= 4.5,
+    (c) => contrast(c, palette.card) >= 7 && contrast(c, palette.item) >= 7 && contrast(c, palette.bg) >= 7,
   );
 
   const accentSoft = nearestPassing(
     mix(fill, palette.card, palette.dark ? 0.72 : 0.86),
     palette.card,
-    // Muted words sit on it too (a chosen or highlighted thing's note): 7:1, which the card always reaches.
-    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7,
+    // Muted words sit on it too (a chosen or highlighted thing's note), and words in the creator's color (the buyer's
+    // own chat bubble, an icon's disc, a picked pill): 7:1, which the card always reaches.
+    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 7,
   );
 
   const band = nearestPassing(
     mix(fill, palette.card, palette.dark ? 0.78 : 0.87),
     palette.card,
-    // Muted words on a band are small text too: 7:1, which the card always reaches, so a band only grows paler to pass.
-    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 4.5,
+    // Muted words on a band are small text too, and so are words in the creator's color: 7:1, which the card always
+    // reaches, so a band only grows paler to pass.
+    (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 7,
   );
 
   // The band behind the name on the Colour theme runs from the fill to a
@@ -366,6 +378,7 @@ export function lookColours(look: LookPaint): LookColours {
     accentSoft,
     accent2,
     band,
+    bandLink: contrast(BLACK, band) >= contrast(WHITE, band) ? BLACK : WHITE,
     dark: palette.dark,
   };
 }
@@ -388,6 +401,7 @@ export function lookStyle(look: LookPaint): Record<string, string> {
     "--st-accent-soft": c.accentSoft,
     "--st-accent-2": c.accent2,
     "--st-band": c.band,
+    "--st-band-link": c.bandLink,
     ...fontStyle(look.font),
     ...backdropStyle(look.backdrop),
     colorScheme: c.dark ? "dark" : "light",

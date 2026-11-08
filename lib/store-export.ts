@@ -72,6 +72,9 @@ export function exportUnits(shape: ExportShape): number {
 /** What exporting this store reads, counted before it is read: the room's bytes, and its products, lessons, posts, forms and contacts. */
 export async function exportShape(store: Store): Promise<ExportShape> {
   const used = await dataUsed(store);
+  // The full export is paid for from this measurement. Unknown room usage
+  // cannot be priced as an empty room before the remaining reads begin.
+  if (!used) throw new Error("The data-room size could not be read");
   const listings = await readAllListings(store);
   const ids = listings.flatMap((l) => (l.course ? [l.course.id] : []));
   const courses = ids.length ? await readCourses(ids) : new Map();
@@ -81,12 +84,23 @@ export async function exportShape(store: Store): Promise<ExportShape> {
   const forms = (await readForms(store.statsId)).length;
   const contacts = (await listSize(store)).total;
   return {
-    bytes: used?.used ?? 0,
+    bytes: used.used,
     commands: Math.ceil(EXPORT_COMMANDS.fixed + 3 * Math.ceil(listings.length / 100) + Math.ceil(courses.size / 100) + Math.ceil(lessons / BODIES_PER_READ) + Math.ceil(posts / 100) + EXPORT_COMMANDS.form * forms + contacts / 1000),
   };
 }
 
 const encoder = new TextEncoder();
+
+/** Said for a part that could not be read, after what it is. */
+const UNREAD_LATER = "could not be read just now. Download the file again in a few minutes.";
+
+/** A failed read of one part of every product: logged, and null so the part is left out and said once. */
+function unread(part: string): (error: unknown) => null {
+  return (error) => {
+    console.error(`a store export could not read the products' ${part}`, error);
+    return null;
+  };
+}
 
 /**
  * The whole export, as a stream of JSON. Each part is read just before it
@@ -100,16 +114,24 @@ export function storeExport(store: Store, now = Date.now()): ReadableStream<Uint
     async () => {
       const listings = await readAllListings(store);
       const ids = listings.map((listing) => listing.id);
-      const pages = await readPages(statsId, ids).catch(() => ids.map(() => null));
-      const abouts = await readAbouts(statsId, ids).catch(() => ids.map(() => ""));
-      const notes = await readThanksNotes(statsId, ids).catch(() => ids.map(() => null));
-      const out = listings.map((listing, i) => ({ product: listing, page: statsId ? pages[i] : null, about: abouts[i] ?? "", thanks: notes[i] ?? null }));
+      // A part that cannot be read is left out of every product and said once, by name: never written as "no page",
+      // "no description" or "no note", which is what an empty value would tell the creator (C4-2630, Codex T's 64b3a0a9).
+      const pages = await readPages(statsId, ids).catch(unread("pages"));
+      const abouts = await readAbouts(statsId, ids).catch(unread("abouts"));
+      const notes = await readThanksNotes(statsId, ids).catch(unread("thanks"));
+      const out = listings.map((listing, i) => ({
+        product: listing,
+        ...(pages ? { page: statsId ? pages[i] : null } : {}),
+        ...(abouts ? { about: abouts[i] ?? "" } : {}),
+        ...(notes ? { thanks: notes[i] ?? null } : {}),
+      }));
+      const notesOut = [pages ? "" : `,"pagesNote":"The products' sales pages ${UNREAD_LATER}"`, abouts ? "" : `,"aboutsNote":"The products' long descriptions ${UNREAD_LATER}"`, notes ? "" : `,"thanksNote":"The products' thank-you notes ${UNREAD_LATER}"`].join("");
       const courseIds = listings.flatMap((l) => (l.course ? [l.course.id] : []));
       const courses = courseIds.length ? await readCourses(courseIds) : new Map();
       const list = [...courses.values()];
       const bodies = await readAllBodies(list.map((course) => ({ id: course.id, lessons: course.modules.flatMap((unit: { lessons: { id: string }[] }) => unit.lessons.map((lesson) => lesson.id)) })));
       const withText: unknown[] = list.map((course) => ({ ...course, lessonText: bodies.get(course.id) ?? {} }));
-      return `,"products":${JSON.stringify(out)},"courses":${JSON.stringify(withText)}`;
+      return `,"products":${JSON.stringify(out)}${notesOut},"courses":${JSON.stringify(withText)}`;
     },
     async () => {
       const posts = await readPosts(statsId, await allPosts(statsId));

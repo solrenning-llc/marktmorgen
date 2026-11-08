@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { checkClientBundles } from "./client-bundles.mjs";
 import {testAliases,testEnvironment} from "./test-config.mjs";
+import {runTestFiles,runBundle,TEST_FILE_TIMEOUT_MS} from "./test-runner.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -25,7 +26,7 @@ try {
     console.log("No tests found.");
     process.exit(0);
   }
-  for (const file of files) {
+  failed = await runTestFiles({files, compileTimeoutMs: TEST_FILE_TIMEOUT_MS, compile: async file => {
     const bundle = join(out, `${file}.cjs`);
     await build({
       entryPoints: [join(here, file)],
@@ -36,14 +37,11 @@ try {
       logLevel: "error",
       alias: testAliases(file,root,here),
     });
+    return bundle;
+  }, run: async (file, bundle, next) => {
     console.log(`\n=== ${file} ===`);
-    const { spawnSync } = await import("node:child_process");
-    const run = spawnSync(process.execPath, [bundle], {
-      stdio: "inherit",
-      env: testEnvironment(process.env),
-    });
-    if (run.status !== 0) failed += 1;
-  }
+    return runBundle(bundle, testEnvironment(process.env), process.execPath, {timeoutMs: TEST_FILE_TIMEOUT_MS, label: file, diagnose: () => `next compile ${next()}`});
+  }});
 } finally {
   rmSync(out, { recursive: true, force: true });
 }
@@ -53,8 +51,13 @@ console.log(`\nBrowser bundles: ${clientBundles.total - clientBundles.failed}/${
 for (const failure of clientBundles.failures) console.error(failure);
 failed += clientBundles.failed;
 
+// Ends by its exit code, like tests/check.ts done(): Node 24 can deadlock inside process.exit() (nodejs/node#64274).
+// The unref'd timer only fires if something (an esbuild service, a stray handle) still holds the process.
 if (failed) {
   console.log(`\n${failed} test file(s) failed.`);
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log("\nEverything passing.");
+  process.exitCode = 0;
 }
-console.log("\nEverything passing.");
+setTimeout(() => process.exit(process.exitCode), 5_000).unref();

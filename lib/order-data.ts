@@ -32,6 +32,7 @@
  * as it is; tests/order-data.test.ts holds them to the constants below.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, dataKey, giveData } from "@/lib/store-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 
@@ -198,13 +199,24 @@ function scriptOf(room: string, commands: Command[]): (string | number)[] {
   return ["EVAL", ORDER_WRITE, keys.length, ...keys, ...argv];
 }
 
-/** What one script answered: what it charged, and each command's reply. Throws for a malformed call or a refused command, as redisPipeline does. */
-function readScript(reply: unknown, count: number): { charged: number; replies: unknown[] } {
-  if (!Array.isArray(reply) || reply.length !== count + 1 || !Number.isFinite(Number(reply[0])) || Number(reply[0]) < 0) throw new Error("an order's records could not be written");
-  const replies = reply.slice(1);
+/**
+ * What one script answered: what it charged, and each command's reply. Throws for a malformed call or a refused
+ * command, as redisPipeline does. An HSETNX answers exactly 0 or 1; any other receipt of one is unknown and throws,
+ * so a caller never reads "set" from a reply that says nothing (Codex G on #2809; CX-123 rule 24).
+ */
+function readScript(reply: unknown, commands: Command[]): { charged: number; replies: unknown[] } {
+  const count = commands.length;
+  // What was charged is the script's Lua integer, which Redis and Upstash's REST API answer as a number: a whole
+  // number from zero up, and nothing else (CX-123 rule 24). Null, text or a fraction is not "charged 0".
+  const charged = Array.isArray(reply) && reply.length === count + 1 ? countOf(reply[0]) : null;
+  if (charged === null) throw new Error("an order's records could not be written");
+  const replies = (reply as unknown[]).slice(1);
   const failed = replies.find((r) => typeof r === "string" && r.startsWith(ORDER_WRITE_ERROR));
   if (failed) throw new Error(`Redis error: ${String(failed).slice(ORDER_WRITE_ERROR.length)}`);
-  return { charged: Number(reply[0]), replies: replies.map((r) => (r === false ? null : r)) };
+  for (let i = 0; i < count; i += 1) {
+    if (String(commands[i]?.[0]).toUpperCase() === "HSETNX" && replies[i] !== 0 && replies[i] !== 1) throw new Error("an order's records could not be written");
+  }
+  return { charged, replies: replies.map((r) => (r === false ? null : r)) };
 }
 
 /**
@@ -223,8 +235,9 @@ export async function orderWriteCharged(owner: DataOwner, commands: Command[]): 
   const replies: unknown[] = [];
   for (let at = 0; at < commands.length; at += ORDER_WRITE_MAX) {
     const some = commands.slice(at, at + ORDER_WRITE_MAX);
-    const [reply] = await redisPipeline([scriptOf(room, some)]);
-    const read = readScript(reply, some.length);
+    // Exactly one reply for the one script sent (Codex G on #2809): an answer of another length is unknown, never its first item.
+    const reply = repliesFor(await redisPipeline([scriptOf(room, some)]), 1)?.[0];
+    const read = readScript(reply, some);
     charged += read.charged;
     replies.push(...read.replies);
   }

@@ -44,6 +44,8 @@ import { storeKeysOf } from "@/lib/delivery";
 import { WINDOW_ID, allowanceWindow, calendarWindow } from "@/lib/allowance-window";
 import { storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { PLAYER_SECONDS, isStreamConfigured, streamWatched } from "@/lib/stream";
 import { MEASURE_EVERY_MS, MEASURE_SOON_MS } from "@/lib/watch-rules";
 
@@ -82,22 +84,25 @@ export async function opened(folder: string, now = Date.now()): Promise<void> {
   }
 }
 
-/** The seconds of video a store's students watched in a month ("2026-10"); this month by default. */
+/**
+ * The seconds of video a store's students watched in a month ("2026-10");
+ * this month by default. Throws (UnknownReplyError, or the database's own
+ * error) when the count cannot be read in its exact shape: an unknown month
+ * is never 0 seconds (audit SG2, CX-123 rule 24). The hourly job's loop over
+ * stores catches it and leaves that store for the next round.
+ */
 export async function watchedIn(folder: string, month = calendarWindow().id): Promise<number> {
   if (!isRedisConfigured() || !folder) return 0;
-  try {
-    const [raw] = await redisPipeline([["GET", secondsKey(folder, month)]]);
-    const seconds = Number(raw);
-    return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
-  } catch (error) {
-    console.error("could not read how long a store's video was watched", error);
-    return 0;
-  }
+  const seconds = textCountOf(repliesFor(await redisPipeline([["GET", secondsKey(folder, month)]]), 1)?.[0]);
+  if (seconds === null) throw new UnknownReplyError("a month's video seconds");
+  // No key is the meter's way of saying nothing was watched that month yet.
+  return seconds === "absent" ? 0 : seconds;
 }
 
 /** Admission reads must distinguish an acknowledged unused month from a failed
- * lookup. The forgiving watchedIn reader is only for displays/billing history;
- * its zero fallback is never permission to issue a limited playback token.
+ * lookup. The watchedIn reader (the hourly job's notices, billing history)
+ * throws on a failed lookup and is never permission to issue a limited
+ * playback token; this one answers null instead.
  * A missing monthly key is the existing meter's representation of no recorded
  * usage; this reader does not prove meter freshness or protect against key loss.
  */
@@ -140,25 +145,45 @@ async function windowOfFolder(folder: string, now: number): Promise<string> {
 
 /**
  * Reads one store at the video service and adds what was watched since the
- * reading before. Answers the seconds added; null when the service could not
- * be read, and then nothing was changed.
+ * reading before. Answers the seconds added; null when the service, or the
+ * last totals kept here, could not be read, and then nothing was changed.
  */
 export async function measure(folder: string, now = Date.now()): Promise<number | null> {
   if (!isRedisConfigured() || !FOLDER_PATTERN.test(folder)) return 0;
   const videos = await streamWatched(folder);
   if (videos === null) return null;
 
-  const [flat] = await redisPipeline([["HGETALL", lastKey(folder)]]);
+  // Each video's last total, only in its exact shape (audit SG2, CX-123 rule
+  // 24). A total read as 0 would count the whole video again, so a reply
+  // that is not a list of text fields and values measures nothing this
+  // round: null, read again soon, as when the service could not be read.
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", lastKey(folder)]]), 1)?.[0]);
+  if (flat === null || flat.length % 2 !== 0) return null;
   const last = new Map<string, number>();
-  if (Array.isArray(flat)) {
-    for (let i = 0; i + 1 < flat.length; i += 2) last.set(String(flat[i]), Number(flat[i + 1]) || 0);
+  // A well-formed reply can still hold one entry that is not a whole number
+  // ("12.5", an old format, a deleted video's). It is persisted and never
+  // expires, so refusing the whole store on it would stop the metering for
+  // good (review 1 of SG2 L8). That entry alone is dropped: its previous
+  // total is not known, so nothing is added for it this round (never counted
+  // from 0) and it is rewritten with the current total below, or let go with
+  // the videos that are gone. At most one interval of one video goes uncounted.
+  const resync = new Set<string>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const seconds = textCountOf(flat[i + 1]);
+    if (typeof seconds === "number") last.set(flat[i], seconds);
+    else resync.add(flat[i]);
   }
+  if (resync.size) console.error(`a store's last watch totals held ${resync.size} malformed entr${resync.size === 1 ? "y" : "ies"}; resynced without counting them (watch ${folder})`);
 
   let added = 0;
   const writes: (string | number)[][] = [];
   const there = new Set<string>();
   for (const video of videos) {
     there.add(video.id);
+    if (resync.has(video.id)) {
+      writes.push(["HSET", lastKey(folder), video.id, video.seconds]);
+      continue;
+    }
     const before = last.get(video.id);
     // A video seen for the first time was put there since the reading before
     // (or before any reading was made): all of its watching is new.
@@ -166,7 +191,7 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
     if (before === undefined || video.seconds !== before) writes.push(["HSET", lastKey(folder), video.id, video.seconds]);
   }
   // A video that is gone is forgotten, so this does not grow for ever.
-  const gone = [...last.keys()].filter((id) => !there.has(id));
+  const gone = [...last.keys(), ...resync].filter((id) => !there.has(id));
   if (gone.length) writes.push(["HDEL", lastKey(folder), ...gone]);
 
   if (added > 0) {
@@ -204,8 +229,11 @@ export async function measureDue(deadline: number, now = Date.now()): Promise<{ 
     }
     counts.read += 1;
     counts.seconds += added;
-    const [openedAt] = await redisPipeline([["GET", openedKey(folder)]]);
-    const still = now - (Number(openedAt) || 0) < WATCHING_FOR_MS;
+    // No key: no lesson of theirs opened for a week. A reply of any other
+    // shape is unknown, and keeps the store in line rather than letting
+    // its watching go unread (audit SG2, CX-123 rule 24).
+    const openedAt = textCountOf(repliesFor(await redisPipeline([["GET", openedKey(folder)]]), 1)?.[0]);
+    const still = openedAt === null || (openedAt !== "absent" && now - openedAt < WATCHING_FOR_MS);
     // Read once more after the last token has run out, and then left alone
     // until a lesson is opened again.
     await redisPipeline([still ? ["ZADD", DUE, now + MEASURE_EVERY_MS, folder] : ["ZREM", DUE, folder]]);

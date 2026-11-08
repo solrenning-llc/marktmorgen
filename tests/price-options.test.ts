@@ -36,7 +36,7 @@ import {
   handsOver,
   parseDetails,
   parseOptions,
-  startingOption,
+  optionsInPickOrder,
 } from "@/lib/product-option";
 import { canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { optionRemovalWords } from "@/lib/price-review";
@@ -69,8 +69,9 @@ async function main(): Promise<void> {
   ]);
   is("only the first pick counts", read.map((o) => o.best), [true, false, false]);
   is("an old option has no details", read[2].details, []);
-  is("the page opens on the pick", startingOption(read)?.id, "a");
-  is("with no pick, on the first", startingOption(read.map((o) => ({ ...o, best: false })))?.id, "a");
+  // Changed by 487 [IT4] (C1-20261106-0100-TODOS-1, rule 23): the pick is listed first and no longer opens chosen.
+  is("the pick is listed first", optionsInPickOrder(read)[0]?.id, "a");
+  is("with no pick, the creator's order", optionsInPickOrder(read.map((o) => ({ ...o, best: false }))).map((o) => o.id), ["a", "b", "c"]);
   is("compared once something is listed", comparable(read), true);
   is("not compared when nothing is", comparable(read.map((o) => ({ ...o, details: [] }))), false);
 
@@ -103,7 +104,8 @@ async function main(): Promise<void> {
   let sold = (await readProduct(store, course.product.id))!;
   is("every price is offered, with no file of its own", sellableOptions(sold).map((o) => o.label), ["The course", "With live Q&A"]);
   is("and the course can be sold", canSellProduct(store, sold), true);
-  is("the pick is the one marked", startingOption(sellableOptions(sold))?.label, "With live Q&A");
+  // Changed by 487 [IT4] (rule 23): the marked pick is listed first, not chosen for the buyer.
+  is("the pick is the one marked, listed first", optionsInPickOrder(sellableOptions(sold))[0]?.label, "With live Q&A");
 
   part("Choosing the pick");
   const first = sold.options[0];

@@ -61,6 +61,7 @@ import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import {
   type DraftProduct,
   type Store,
@@ -299,9 +300,16 @@ function parseJob(raw: unknown): ImportJob | null {
   }
 }
 
+/**
+ * One import, or null when there is none. The GET in its exact shape (sweep A3, CX-123 rule 24): only an answer of
+ * nothing is "no such import"; any other shape throws UnknownReplyError, never read as gone, so the five-minute job
+ * keeps the import on its list and tries again (advanceImports).
+ */
 export async function readJob(id: string): Promise<ImportJob | null> {
   if (!IMPORT_ID_PATTERN.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", jobKey(id)]]);
+  const replies = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1);
+  const raw = replies?.[0];
+  if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("an import");
   return parseJob(raw);
 }
 
@@ -315,13 +323,20 @@ function saveJob(job: ImportJob): Command {
   return ["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS];
 }
 
-/** The store's last imports, newest first, and the one running now if any. */
+/**
+ * The store's last imports, newest first, and the one running now if any. Every read in its exact shape (sweep A3,
+ * CX-123 rule 30): an unknown list, or an import on it answering in an unknown shape, throws UnknownReplyError rather
+ * than tell the creator there is no import (none running, "None yet"); only an import whose GET answered nothing is
+ * left out.
+ */
 export async function storeImports(store: Store): Promise<ImportJob[]> {
   if (!store.sid || !isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]);
-  const list = Array.isArray(ids) ? ids.map(String).filter((id) => IMPORT_ID_PATTERN.test(id)) : [];
+  const ids = stringList(repliesFor(await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]), 1)?.[0]);
+  if (ids === null) throw new UnknownReplyError("the store's imports");
+  const list = ids.filter((id) => IMPORT_ID_PATTERN.test(id));
   if (!list.length) return [];
-  const raws = await redisPipeline(list.map((id) => ["GET", jobKey(id)]));
+  const raws = repliesFor(await redisPipeline(list.map((id) => ["GET", jobKey(id)])), list.length);
+  if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("one of the store's imports");
   return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
 }
 
@@ -388,16 +403,29 @@ export async function startImport(
   if ((kind === "purchases" || kind === "products" || kind === "members") && !store.statsId) await ensureStatsId(ref);
 
   const id = randomBytes(12).toString("hex");
-  const [claimed] = await redisPipeline([["SET", busyKey(store.sid), id, "NX", "EX", KEEP_SECONDS]]);
+  // The slot's SET NX in its exact shape (sweep A3, CX-123 rule 24): "OK" is claimed, nothing is held by another;
+  // any other answer throws, so an unknown one never starts a second import of the store.
+  const claim = repliesFor(await redisPipeline([["SET", busyKey(store.sid), id, "NX", "EX", KEEP_SECONDS]]), 1);
+  const claimed = claim?.[0];
+  if (!claim || (claimed !== "OK" && claimed !== null)) throw new UnknownReplyError("the store's import slot");
   if (claimed === null) {
     // A slot held by an import that has since finished, or was given up, is freed.
-    const [holder] = await redisPipeline([["GET", busyKey(store.sid)]]);
+    const held = repliesFor(await redisPipeline([["GET", busyKey(store.sid)]]), 1);
+    const holder = held?.[0];
+    if (!held || (holder !== null && typeof holder !== "string")) throw new UnknownReplyError("the import holding the store's slot");
     const other = typeof holder === "string" ? await readJob(holder) : null;
     if (other && !finished(other.state) && !(other.state === "receiving" && Date.now() - other.at > RECEIVING_MS)) {
       return { ok: false, reason: "busy" };
     }
     if (other && other.state === "receiving") await cancelJob(other);
-    await redisPipeline([["SET", busyKey(store.sid), id, "EX", KEEP_SECONDS]]);
+    // Freed only while it is still that holder's, in one step on the Redis side, and then claimed with NX again: of
+    // two starts that both read the same finished holder, one claims the slot and the other is told the store is
+    // busy (independent review on #2881, L2). Before, each took it with a plain SET and both ran.
+    if (typeof holder === "string") await freeSlotOf(store.sid, holder);
+    const again = repliesFor(await redisPipeline([["SET", busyKey(store.sid), id, "NX", "EX", KEEP_SECONDS]]), 1);
+    const reclaimed = again?.[0];
+    if (!again || (reclaimed !== "OK" && reclaimed !== null)) throw new UnknownReplyError("the store's import slot");
+    if (reclaimed === null) return { ok: false, reason: "busy" };
   }
   const job: ImportJob = {
     id,
@@ -494,8 +522,16 @@ async function cancelJob(job: ImportJob): Promise<ImportJob> {
 
 /** Lets go of the store's slot, when it is this import's: a newer import's hold is kept. */
 async function releaseBusy(job: ImportJob): Promise<void> {
-  const [holder] = await redisPipeline([["GET", busyKey(job.sid)]]);
-  if (holder === job.id) await redisPipeline([["DEL", busyKey(job.sid)]]);
+  await freeSlotOf(job.sid, job.id);
+}
+
+/**
+ * Deletes the store's slot only while `holder` still holds it, read and deleted in one step on the Redis side
+ * (lib/redis-lock.ts, rule 30 on #2881 L2): never a GET then a DEL, between which another import can take it. When
+ * the step cannot run, the slot is kept, so a start that wanted it is told the store is busy.
+ */
+async function freeSlotOf(sid: string, holder: string): Promise<void> {
+  await releaseLock({ key: busyKey(sid), token: holder, ttlSeconds: KEEP_SECONDS });
 }
 
 /**
@@ -527,8 +563,11 @@ type Problem = { line: number; column: string; problem: string; value: string };
 async function note(job: ImportJob, problems: Problem[], kind: "errors" | "skipped"): Promise<void> {
   if (!problems.length) return;
   job.counts[kind] += problems.length;
-  const [length] = await redisPipeline([["LLEN", errorsKey(job.id)]]);
-  const room = Math.max(0, MAX_REPORT_ROWS - (Number(length) || 0));
+  // LLEN in its exact shape (CX-123 rule 24): an unknown length is not an empty report. Thrown, the step is left
+  // as it was and starts again from the last saved place (runImport).
+  const length = countOf(repliesFor(await redisPipeline([["LLEN", errorsKey(job.id)]]), 1)?.[0]);
+  if (length === null) throw new UnknownReplyError("the length of an import's report");
+  const room = Math.max(0, MAX_REPORT_ROWS - length);
   const kept = problems.slice(0, room).map((p) => JSON.stringify([p.line, p.column, `${kind === "skipped" ? "Left out: " : ""}${p.problem}`, p.value.slice(0, 300)]));
   if (kept.length) await redisPipeline([["RPUSH", errorsKey(job.id), ...kept], ["EXPIRE", errorsKey(job.id), KEEP_SECONDS]]);
 }
@@ -1141,8 +1180,11 @@ export async function movedEmail(store: Store, job: ImportJob, email: string): P
 }
 
 async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" | "retry"> {
-  const [waiting] = await redisPipeline([["SCARD", mailKey(job.id)]]);
-  if (!(Number(waiting) > 0)) return "done";
+  // SCARD in its exact shape (CX-123 rule 24): an unknown count is not "nobody left to email". Thrown, the step is
+  // left as it was (runImport).
+  const waiting = countOf(repliesFor(await redisPipeline([["SCARD", mailKey(job.id)]]), 1)?.[0]);
+  if (waiting === null) throw new UnknownReplyError("the addresses an import still has to email");
+  if (waiting <= 0) return "done";
   // These addresses are the creator's word alone. Once too many of them have
   // bounced, or been answered with a spam report, the rest are not written
   // to (lib/mail-health.ts): they are counted as not emailed, and the report
@@ -1151,11 +1193,29 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   // And until then they go out in portions that double, a hundred buyers
   // first, so that a file of dead addresses is found while few have been
   // written to. A portion not yet open is waited for; nobody is dropped.
-  const portion = paused ? MAIL_CHUNK : await rampRoom(job.sid, Math.min(MAIL_CHUNK, Number(waiting)));
+  const portion = paused ? MAIL_CHUNK : await rampRoom(job.sid, Math.min(MAIL_CHUNK, waiting));
   if (portion <= 0) return "retry";
-  const [popped] = await redisPipeline([["SPOP", mailKey(job.id), portion]]);
-  const emails = (Array.isArray(popped) ? popped : typeof popped === "string" ? [popped] : []).map(String);
-  if (emails.length === 0) return "done";
+  // The portion is read first and taken off by name after (independent review on #2881, L3): SPOP took addresses
+  // on the server even when its reply came back unreadable, and nobody knew which, so they were neither emailed
+  // nor counted. SRANDMEMBER changes nothing: an answer in any shape but a list of addresses gives the portion back
+  // and throws, the addresses still queued. Only SCARD says the queue is empty: an empty read waits for the next
+  // pass to count again.
+  const read = repliesFor(await redisPipeline([["SRANDMEMBER", mailKey(job.id), portion]]), 1);
+  const emails = read ? stringList(read[0]) : null;
+  if (emails === null || emails.length === 0) {
+    if (!paused) await rampBack(job.sid, portion);
+    if (emails === null) throw new UnknownReplyError("the addresses an import took to email");
+    return "retry";
+  }
+  // Then SREM of exactly those, in its exact shape: all of them gone. Any other answer, or a reply lost on the way
+  // back, puts the same addresses back (SADD of one still there changes nothing), gives the portion back and
+  // throws, so the step is left as it was, still mailing (runImport), with every address queued.
+  const taken = countOf(repliesFor(await redisPipeline([["SREM", mailKey(job.id), ...emails]]), 1)?.[0]);
+  if (taken !== emails.length) {
+    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    if (!paused) await rampBack(job.sid, portion);
+    throw new UnknownReplyError("the addresses an import took to email");
+  }
   if (paused) {
     job.counts.unmailed += emails.length;
     return "more";
@@ -1227,6 +1287,20 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
  * Returns the import as it stands. An import someone else is working on is
  * left to them.
  */
+/** A kept batch of rows: JSON of a list of rows, each a list of cells as text; null for anything else. */
+function batchOf(raw: unknown): string[][] | null {
+  if (typeof raw !== "string") return null;
+  let batch: unknown;
+  try {
+    batch = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(batch)) return null;
+  for (const row of batch) if (!Array.isArray(row) || row.some((cell) => typeof cell !== "string")) return null;
+  return batch as string[][];
+}
+
 export async function runImport(id: string, deadline: number): Promise<ImportJob | null> {
   let held;
   try {
@@ -1235,7 +1309,14 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
     if (error instanceof LockBusyError) return readJob(id);
     throw error;
   }
-  const job = await readJob(id);
+  let job: ImportJob | null;
+  try {
+    job = await readJob(id);
+  } catch (error) {
+    // An import that cannot be read (UnknownReplyError) is not worked on: its lock is let go and the caller hears it.
+    await releaseLock(held);
+    throw error;
+  }
   try {
     if (!job) return null;
     if (job.state === "receiving" && Date.now() - job.at > RECEIVING_MS) return await cancelJob(job);
@@ -1260,8 +1341,10 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
       if (holder === id) await redisPipeline([["EXPIRE", busyKey(job.sid), KEEP_SECONDS]]);
       return job;
     }
-    const [batches] = await redisPipeline([["LLEN", rowsKey(id)]]);
-    const count = Number(batches) || 0;
+    // LLEN in its exact shape (CX-123 rule 24): read as 0, an unknown length failed the import as rows let go and
+    // deleted the rows still to bring in. Thrown, the job is left as it was (the catch below).
+    const count = countOf(repliesFor(await redisPipeline([["LLEN", rowsKey(id)]]), 1)?.[0]);
+    if (count === null) throw new UnknownReplyError("the batches of an import");
     while (Date.now() < deadline) {
       if (job.state === "queued") job.state = "running";
       if (job.state === "running") {
@@ -1282,19 +1365,19 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
           // past buyers, when they are to be emailed, by how many those are.
           if (job.kind === "contacts") await startRamp(job.sid, job.counts.added);
           else if (job.options.email) {
-            const [toMail] = await redisPipeline([["SCARD", mailKey(job.id)]]);
-            await startRamp(job.sid, Number(toMail) || 0);
+            // SCARD in its exact shape (CX-123 rule 24); thrown, the job is left as it was.
+            const toMail = countOf(repliesFor(await redisPipeline([["SCARD", mailKey(job.id)]]), 1)?.[0]);
+            if (toMail === null) throw new UnknownReplyError("the addresses an import is to email");
+            await startRamp(job.sid, toMail);
           }
           await redisPipeline([saveJob(job)]);
           continue;
         }
-        const [raw] = await redisPipeline([["LINDEX", rowsKey(id), job.cursor.batch]]);
-        let batch: string[][] = [];
-        try {
-          batch = typeof raw === "string" ? (JSON.parse(raw) as string[][]) : [];
-        } catch {
-          batch = [];
-        }
+        // The batch in its exact shape (Claude 4, second review of #2717; CX-123 rule 24): a list of rows, each a list of
+        // cells as text. Read as empty, one of another shape was passed over and, at the end, the import failed and its
+        // rows were deleted. Thrown, the job is left as it was (the catch below).
+        const batch = batchOf(repliesFor(await redisPipeline([["LINDEX", rowsKey(id), job.cursor.batch]]), 1)?.[0]);
+        if (!batch) throw new UnknownReplyError("a batch of an import's rows");
         const rows = batch.slice(job.cursor.row, job.cursor.row + CHUNK[job.kind]);
         if (rows.length) {
           // The store as it is now: a chunk of products changes it.
@@ -1352,22 +1435,42 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
 /**
  * The job's pass: every import with work left, oldest first, until the
  * deadline. Uploads given up halfway are cancelled here too.
+ *
+ * Every read in its exact shape (sweep A3, CX-123 rules 24 and 30): an unknown list of imports throws before
+ * anything is taken off it; only an import whose GET answered nothing leaves the list. One that could not be read
+ * stays on it, the others are worked on, and the pass then throws (the first error), so the five-minute job says it
+ * did not finish (app/api/cron/imports/route.ts) and the next pass reads it again.
  */
 export async function advanceImports(deadline: number): Promise<{ worked: number; finished: number }> {
   const counts = { worked: 0, finished: 0 };
   if (!isRedisConfigured()) return counts;
-  const [members] = await redisPipeline([["SMEMBERS", ACTIVE_KEY]]);
-  const ids = (Array.isArray(members) ? members.map(String) : []).filter((id) => IMPORT_ID_PATTERN.test(id));
-  const jobs = (await Promise.all(ids.map(readJob))).filter((job): job is ImportJob => job !== null).sort((a, b) => a.at - b.at);
-  for (const id of ids) {
-    if (!jobs.some((job) => job.id === id)) await redisPipeline([["SREM", ACTIVE_KEY, id]]);
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", ACTIVE_KEY]]), 1)?.[0]);
+  if (members === null) throw new UnknownReplyError("the imports still running");
+  const ids = members.filter((id) => IMPORT_ID_PATTERN.test(id));
+  let failure: { error: unknown } | null = null;
+  const jobs: ImportJob[] = [];
+  const read = await Promise.allSettled(ids.map(readJob));
+  for (const [i, result] of read.entries()) {
+    if (result.status === "rejected") {
+      console.error("an import could not be read; it stays on the list", result.reason);
+      failure ??= { error: result.reason };
+    } else if (result.value) jobs.push(result.value);
+    else await redisPipeline([["SREM", ACTIVE_KEY, ids[i]]]);
   }
+  jobs.sort((a, b) => a.at - b.at);
   for (const job of jobs) {
     if (Date.now() >= deadline) break;
-    const after = await runImport(job.id, deadline);
-    counts.worked += 1;
-    if (after && finished(after.state)) counts.finished += 1;
+    try {
+      const after = await runImport(job.id, deadline);
+      counts.worked += 1;
+      if (after && finished(after.state)) counts.finished += 1;
+    } catch (error) {
+      // Its read again failed: it stays on the list, untouched, for the next pass.
+      console.error("an import could not be read; it stays on the list", error);
+      failure ??= { error };
+    }
   }
+  if (failure) throw failure.error;
   return counts;
 }
 

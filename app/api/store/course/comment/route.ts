@@ -6,7 +6,7 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, storeKey } from "@/lib/learn";
-import { heldBack, passedQuizzes } from "@/lib/quiz";
+import { heldBack, passedForGate } from "@/lib/quiz";
 import { limited, withinLimit } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { addComment, commentsOn, deleteComment, readComment, setHidden } from "@/lib/lesson-comments";
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
   const owner = access.learner.owner;
   const by = owner ? CREATOR_AUTHOR : emailKey(access.learner.email);
   if (!owner) {
-    const passed = await passedQuizzes(course.id, by);
+    const passed = await passedForGate(course.id, by);
     if (heldBack(course, passed).has(lessonId)) return new Response(null, { status: 303, headers: { Location: base } });
   }
   if (!(await commentsOn(course.id))) return back("off");

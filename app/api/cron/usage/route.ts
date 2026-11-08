@@ -234,7 +234,19 @@ export async function GET(request: NextRequest) {
   const visits = await visitsRun();
   const orders = await ordersRun();
 
-  const over = await storesOverAllowance();
+  // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
+  // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
+  // other parts above have run whatever it does, and the run answers an error only here, at the end.
+  let over: Awaited<ReturnType<typeof storesOverAllowance>>;
+  try {
+    over = await storesOverAllowance();
+  } catch (error) {
+    console.error("usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it", error);
+    return Response.json(
+      { ok: false, unread: ["delivery"], video, visits, orders },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const allowance = bytesWords(DELIVERY_ALLOWANCE_BYTES);
 
   console.log(
@@ -253,7 +265,18 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const owners = await ownersOf(fresh.map((s) => s.folder));
+  // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". Then nobody is
+  // written to about the allowance, support is told nothing, the told list is left as it was, and the part is unknown.
+  let owners: (string | null)[];
+  try {
+    owners = await ownersOf(fresh.map((s) => s.folder));
+  } catch (error) {
+    console.error("usage-watch: who the stores over the delivery allowance belong to is unknown today; nobody was written to about it", error);
+    return Response.json(
+      { ok: false, unread: ["delivery"], video, visits, orders },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   let told = 0;
   const unknown: string[] = [];
 

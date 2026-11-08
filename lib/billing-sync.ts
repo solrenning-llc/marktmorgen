@@ -13,8 +13,9 @@
  *      and the way back did not arrive — is written down, if it is plainly
  *      that store's (lib/billing.ts, ownedBy).
  *   2. Every store that still counts as paid up, and whose subscription the
- *      first step did not see, is asked about on its own. That covers the one
- *      Stripe does not have at all: an id from another key, or another mode.
+ *      first step did not settle, is asked about on its own. That covers the
+ *      one Stripe does not have at all (an id from another key, or another
+ *      mode), and one the first step failed to apply or could not read.
  *
  * Bounded by a deadline, safe to run as often as it is called, and it only
  * writes where the snapshot is actually wrong. The walk through the stores
@@ -185,10 +186,12 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
     if (Date.now() > deadline) return stop();
     const { data, hasMore } = await listSubscriptions("all", after);
     for (const subscription of data) {
-      if (typeof subscription.id === "string") seen.add(subscription.id);
       counts.seen += 1;
       try {
         await applyListed(subscription, counts);
+        // Seen only once its state is applied: one whose apply failed is
+        // asked about again by step 2, in this same run, not a lap later.
+        if (typeof subscription.id === "string") seen.add(subscription.id);
       } catch (error) {
         counts.failed += 1;
         console.error("settling a store's subscription failed", error);
@@ -247,7 +250,17 @@ export async function syncSubscriptions(deadline: number): Promise<SyncCounts> {
   const seen = new Set<string>();
   // Stripe's list gets at most two thirds of the time, so the stores that
   // count as paid up are always asked about too.
-  const listed = await syncListed(Date.now() + ((deadline - Date.now()) * 2) / 3, seen, counts);
+  // A page Stripe answered with a row that cannot be read is refused whole
+  // (lib/billing.ts, listSubscriptions): nothing on it is taken as paying or
+  // as not paying, the saved place in the list stays on it so the next run
+  // reads it again, and it is counted as a failure. Step 2 runs regardless.
+  let listed = false;
+  try {
+    listed = await syncListed(Date.now() + ((deadline - Date.now()) * 2) / 3, seen, counts);
+  } catch (error) {
+    counts.failed += 1;
+    console.error("reading the list of subscriptions failed", error);
+  }
   const walked = await syncStores(deadline, seen, counts);
   counts.complete = listed && walked;
   return counts;

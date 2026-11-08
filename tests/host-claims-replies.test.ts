@@ -16,6 +16,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const HOST = "0123456789abcdef01234567";
+const HOST2 = "fedcba9876543210fedcba98";
 const now = Date.UTC(2026, 10, 10, 12, 0, 0);
 const start = now + 3 * 86_400_000;
 const end = start + 3_600_000;
@@ -73,6 +74,7 @@ async function logged(run: () => Promise<unknown>): Promise<{ threw: boolean; er
   }
 }
 const storeB = (at: number) => claimHosts({ hosts: [host], start, end, claim: newClaimId(), until: 0, ref: "callsB:p9", now: at });
+const storeB2 = (at: number) => claimHosts({ hosts: [{ ...host, id: HOST2 }], start, end, claim: newClaimId(), until: 0, ref: "callsB:p9", now: at });
 
 async function main(): Promise<void> {
   part("confirmClaim: an HSET never answered as asked, on the write and on its one retry, throws");
@@ -150,6 +152,47 @@ async function main(): Promise<void> {
     redis.clear();
     instead("PEXPIRE", shape);
     is(`PEXPIRE answered ${JSON.stringify(shape)} and never ran: confirmClaim throws`, await rejects(() => confirmClaim([HOST], newClaimId(), start, end, "callsA:p1")), true);
+  }
+
+  part("(d) a group booking: the 1st host's write and its retry fail; the 2nd host is still confirmed, then the call throws");
+  {
+    redis.clear();
+    const claim = newClaimId();
+    const both = [host, { ...host, id: HOST2 }];
+    await claimHosts({ hosts: both, start, end, claim, until: now + 40 * 60_000, ref: "callsA:p1", now });
+    // The first pipeline (both hosts) is lost and does not land; every HSET for host 1 alone fails too.
+    const sent = scripted(async (commands, run) =>
+      commands[0]?.[0] === "HSET" && (commands.length > 1 || commands[0][1] === claimsKey(HOST)) ? [] : run(),
+    );
+    const logs = await logged(() => confirmClaim([HOST, HOST2], claim, start, end, "callsA:p1"));
+    is("confirmClaim throws UnknownReplyError", logs.error instanceof UnknownReplyError, true);
+    is("the 2nd host's write is retried once", sent.filter((v) => v === "HSET").length, 4);
+    is("the 2nd host's paid claim is kept with until 0", ((await readClaims([HOST2], now + 41 * 60_000)).get(HOST2) ?? []).filter((c) => c.claim === claim).map((c) => c.until).join(), "0");
+    is("store B is refused on the 2nd host after the hold's time", (await storeB2(now + 41 * 60_000)).ok, false);
+    const [ttl] = await real([["PTTL", claimsKey(HOST2)]]);
+    is("the 2nd host's list has a lifetime", typeof ttl === "number" && ttl > 0, true);
+    is("the 1st host is still a hold, not taken for paid", ((await readClaims([HOST], now)).get(HOST) ?? []).filter((c) => c.claim === claim).map((c) => c.until).join(), String(now + 40 * 60_000));
+
+    // The caller's retry, on healthy replies: idempotent for the host already confirmed, and it confirms the rest.
+    const again = scripted(async (_, run) => run());
+    const retry = await logged(() => confirmClaim([HOST, HOST2], claim, start, end, "callsA:p1"));
+    is("retry: confirmClaim resolves", retry.threw, false);
+    is("retry: one write per host, no read-back", `${again.filter((v) => v === "HSET").length}/${again.includes("HGET")}`, "2/false");
+    const after = await readClaims([HOST, HOST2], now + 41 * 60_000);
+    is("retry: both hosts' paid claims kept with until 0, once each", [HOST, HOST2].map((id) => (after.get(id) ?? []).filter((c) => c.claim === claim).map((c) => c.until).join()).join(";"), "0;0");
+    is("retry: store B is refused on the 1st host after the hold's time", (await storeB(now + 41 * 60_000)).ok, false);
+  }
+
+  part("(e) a group booking: the 1st host's PEXPIRE and its retry fail; the 2nd host still gets its lifetime, then the call throws");
+  {
+    redis.clear();
+    scripted(async (commands, run) =>
+      commands[0]?.[0] === "PEXPIRE" && (commands.length > 1 || commands[0][1] === claimsKey(HOST)) ? [] : run(),
+    );
+    const logs = await logged(() => confirmClaim([HOST, HOST2], newClaimId(), start, end, "callsA:p1"));
+    is("confirmClaim throws UnknownReplyError", logs.error instanceof UnknownReplyError, true);
+    const [ttl] = await real([["PTTL", claimsKey(HOST2)]]);
+    is("the 2nd host's list has a lifetime", typeof ttl === "number" && ttl > 0, true);
   }
 
   part("control: confirmClaim on healthy replies keeps the host taken, with a lifetime");

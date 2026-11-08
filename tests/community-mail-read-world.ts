@@ -1,4 +1,5 @@
 import { MemoryRedis } from "@/lib/redis-memory";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Member, CommunityConfig } from "@/lib/community";
 import type { CommunityEvent } from "@/lib/community-events";
 import type { Store } from "@/lib/store";
@@ -27,13 +28,30 @@ export const store = { handle: "synthetic", name: "Synthetic store", email: "own
 export const readConfig = async () => config;
 export const readMembers = async (_community: string, keys: string[]) => new Map(members.filter(m => keys.includes(m.k)).map(m => [m.k, m]));
 export const mailableMembers = async () => members;
-export const readMember = async () => null;
+/** The member as the record holds it (lib/community.ts): tokenFor reads it again after writing a stop-link record. */
+export const readMember = async (_community: string, key: string) => members.find(m => m.k === key) ?? null;
 export const setMail = async () => {};
-export const setMemberToken = async () => {};
+/** Whether a member's stop-link token write is refused, as patchMember refuses an unknown read (lib/community.ts). */
+export let tokenWriteFails = false;
+export const setTokenWriteFails = (fails: boolean) => { tokenWriteFails = fails; };
+/** As lib/community.ts answers it: the token the record holds afterwards, kept only while the record has none. */
+export const setMemberToken = async (_community: string, member: Member, token: string) => {
+  if (tokenWriteFails) throw new Error("synthetic unknown member read");
+  const record = members.find(m => m.k === member.k);
+  if (!record) return null;
+  if (!record.t) record.t = token;
+  return record.t;
+};
 export const holdsTicket = async () => true;
 export const mayAttend = async () => true;
 export const readEvent = async () => event;
-export const rsvpList = async () => members.map(m => ({ key: m.k }));
+/** The next reading of who is coming answers in an unknown shape, as lib/community-events.ts then throws. */
+export let rsvpUnknown = false;
+export const setRsvpUnknown = (on: boolean) => { rsvpUnknown = on; };
+export const rsvpList = async () => {
+  if (rsvpUnknown) { rsvpUnknown = false; throw new UnknownReplyError("who is coming to an event"); }
+  return members.map(m => ({ key: m.k }));
+};
 export const rsvpNumbers = async () => ({ going: 2 });
 export const stillGoing = async () => new Set(members.map(m => m.k));
 export const EVENT_QUEUE = "nl:cm:evq";
@@ -50,12 +68,14 @@ export const fromLine = () => "Synthetic <sender@example.com>";
 export const storeSender = fromLine;
 export const monthlyAllowance = () => 100;
 export const reserve = async () => "ok";
-export const release = async () => {};
+export const released: number[] = [];
+export const release = async (_store: unknown, n: number) => { released.push(n); };
 export const render = (_store: unknown, subject: string, text: string) => ({ subject, text, html: text, headers: {} });
 export const bodyHtml = (text: string) => text;
-export const orderWrite = async () => {};
+/** As lib/order-data.ts answers it: each command run, its reply in order (the room is not modelled here). */
+export const orderWrite = async (_owner: unknown, commands: (string | number)[][]) => db.pipeline(commands);
 export const alertCreator = async () => false;
 
 export function reset(): void {
-  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null;
+  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; released.length = 0; tokenWriteFails = false; rsvpUnknown = false;
 }

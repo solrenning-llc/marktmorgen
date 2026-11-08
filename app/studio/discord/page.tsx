@@ -21,6 +21,10 @@ const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
   connected: { tone: "ok", text: "Your Discord server is connected. Now choose which products give which roles." },
   declined: { tone: "error", text: "Nothing was connected: the bot was not added on Discord's page." },
   error: { tone: "error", text: "The server could not be connected just now. Nothing was changed; try again in a moment." },
+  // The server connected now could not be read (app/api/discord/callback/route.ts): nothing was switched.
+  unchecked: { tone: "error", text: "We could not check the server connected now. Nothing was changed; try again in a moment." },
+  // The old server's forget failed and what it left could not be read (app/api/discord/callback/route.ts): unknown.
+  unconfirmed: { tone: "error", text: "We could not tell whether your old server was disconnected. Reload this page to see what is connected now, then try again." },
   limited: { tone: "error", text: "That is a lot of tries in a few minutes. Wait a little and try again." },
   // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.
   funding: { tone: "error", text: "Connections can't be made just now. Nothing was changed; try again later." },

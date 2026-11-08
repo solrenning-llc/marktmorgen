@@ -49,7 +49,7 @@ import { canGiveProduct } from "@/lib/free";
 import { outOfKeys } from "@/lib/licence-keys";
 import { paypalReady } from "@/lib/paypal-sales";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { soonState } from "@/lib/preorders";
+import { knownNotSoon, soonState, type SoonState } from "@/lib/preorders";
 import { stockLeft } from "@/lib/stock";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
 import { saleOff } from "@/lib/store-sale";
@@ -68,13 +68,14 @@ export async function productsBuyableNow(store: Store, products: readonly Listin
       !(p.call && !hasDateOnSale(p.call, now)),
   );
   if (open.length === 0) return new Set();
-  let soon: Set<string>;
+  let coming: SoonState;
   try {
-    soon = (await soonState(store)).soon;
+    coming = await soonState(store);
   } catch {
     return new Set();
   }
-  const ready = open.filter((p) => !soon.has(p.id));
+  // Only a product known not to be coming soon: with the reading in part, one outside it is unknown and left out.
+  const ready = open.filter((p) => knownNotSoon(coming, p.id));
   const bundles = ready.filter((p) => p.bundle);
   const inside = bundles.length ? await offeredItems(store, bundles).catch(() => new Map<string, Listing[]>()) : new Map<string, Listing[]>();
   const kept = await Promise.all(

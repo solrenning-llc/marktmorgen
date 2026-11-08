@@ -1,0 +1,40 @@
+✖ profile links survive the current handle protocol, including a committed write with lost acknowledgement (31.718071ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.732516
+
+✖ failing tests:
+
+test at ../../../tmp/v3024-S8I1Yd/test.cjs:46142:27
+✖ profile links survive the current handle protocol, including a committed write with lost acknowledgement (31.718071ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + []
+  - [
+  -   {
+  -     network: 'github',
+  -     url: 'https://github.com/member'
+  -   }
+  - ]
+  
+      at TestContext.<anonymous> (/tmp/v3024-S8I1Yd/test.cjs:46163:31)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+V3024_CHILD {"status":1,"signal":null,"error":null}
+V3024_VOLUME {"redis":50,"http":0}
+V3024_VOLUME {"redis":0,"http":0}
+
+V3024_STATUS {"status":1,"signal":null,"error":null}

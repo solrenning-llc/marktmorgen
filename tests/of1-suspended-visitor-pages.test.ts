@@ -15,7 +15,8 @@
  * head (manifest, name, icons, theme color), as for an address with no store.
  * The picture a shared product link unfolds into (app/[handle]/p/[product]/opengraph-image.tsx)
  * and the store's home-screen icon (app/[handle]/app-icon/[size]/route.tsx) answer 404, kept by
- * no cache, as the manifest does.
+ * no cache, as the manifest does. The product page's own head (app/[handle]/p/[product]/page.tsx,
+ * generateMetadata) names nothing of the store or the product: no title, description, link card or address.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -34,6 +35,7 @@ import { affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
 import { GET as manifest } from "@/app/[handle]/manifest.webmanifest/route";
 import { GET as robots } from "@/app/[handle]/store-robots/route";
 import ProductCard from "@/app/[handle]/p/[product]/opengraph-image";
+import { generateMetadata as productMeta } from "@/app/[handle]/p/[product]/page";
 import { GET as appIcon } from "@/app/[handle]/app-icon/[size]/route";
 import { iconUrl } from "@/lib/store-app";
 import { drawings } from "./of1-next-og";
@@ -175,6 +177,12 @@ async function main(): Promise<void> {
     return [response.status, response.headers.get("cache-control")];
   };
 
+  /** The product page's head for the paid product, as Next.js would put it in the page. */
+  const productHead = async () => {
+    ask(`/p/${paid.product.id}`, {});
+    return productMeta({ params: Promise.resolve({ handle, product: paid.product.id }) });
+  };
+
   part("A store switched off after a report (lib/takedown.ts)");
   await noteTakedown(owner, null, true);
   for (const page of pages) {
@@ -191,6 +199,11 @@ async function main(): Promise<void> {
   is("nor the picture a shared product link unfolds into, which names nothing of the store or the product", await card(), [404, "no-store", false]);
   is("nor the store's home-screen icon, drawn from its photo or its name, kept by no cache", await icon(), [404, "no-store"]);
   is("nor at the icon's bare address, which is not sent on to the icon", await icon(true), [404, "no-store"]);
+  const productTags = await productHead();
+  const productTagsText = JSON.stringify(productTags);
+  is("the product page's head names neither the product nor the store", [titles.some((t) => productTagsText.includes(t)), productTagsText.includes("Glaze Works"), productTagsText.includes("glazeworks")], [false, false, false]);
+  is("and gives no description, link card, address or picture for a shared link", [productTags.description, productTags.openGraph, productTags.twitter, productTags.alternates, productTagsText.includes("images")].map((v) => v !== undefined && v !== false && v !== null), [false, false, false, false, false]);
+  is("and asks search engines not to list it", (productTags.robots as { index?: boolean } | null | undefined)?.index, false);
   const visitor = await affiliates({});
   is("the affiliate page says the store is not available to a visitor, as the store's page does", suspendedPage(visitor), true);
   is("and shows none of the program's terms or its form to apply", [(await html(visitor)).includes("Earn by sharing"), (await html(visitor)).includes("<form")], [false, false]);
@@ -251,6 +264,8 @@ async function main(): Promise<void> {
   is("the shared card names the product and the store again", await card(), [200, "public, immutable, no-transform, max-age=31536000", true]);
   is("and the store's icon is drawn again, kept for good at its own address", await icon(), [200, "public, max-age=31536000, immutable"]);
   is("the affiliate page shows the program to a visitor again", (await html(await affiliates({}))).includes("Earn by sharing Glaze Works"), true);
+  const productAgain = await productHead();
+  is("the product page's head names the product and the store again, with its description and link card", [String(productAgain.title), Boolean(productAgain.description), Boolean(productAgain.openGraph), Boolean(productAgain.twitter), Boolean(productAgain.alternates)], ["Glaze Workshop Replay — Glaze Works", true, true, true, true]);
   const again = await head();
   is("the store's layout names the store in the head again, with its manifest", [again.includes("/@glazeworks/manifest.webmanifest"), again.includes("Glaze Works")], [true, true]);
 

@@ -66,7 +66,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, HANDLE, "Mara's Club", "");
   await ensureStatsId(OWNER); await ensureStoreId(OWNER); await ensureListId(OWNER);
   await setSubscription(OWNER, { customerId: `cus_${HANDLE}`, subscriptionId: `sub_${HANDLE}`, active: true, tier: "pro", period: paidPeriod() });
-  await setStripeAccount(OWNER, "acct_1TestLetterGrant1", true);
+  await setStripeAccount(OWNER, "acct_1TestLetterGr", true);
   const made = await addProduct(OWNER, "Butter Club", "", "49", null);
   if (!made.ok) throw new Error("no product");
   club = made.product.id;

@@ -1,3 +1,37 @@
+# Authoritative progress — 8 November 2026, 19:20 Fortaleza
+
+SAME canonical checkpoint. Prior5f5d4b0d06693eb9ce113ec698eee13b62d08354/blob6a183b03203c29a7f712e5677320a6dcef74e219/FULL662279 retained COMPLETE below. r17 ACTIVE, SERIAL Medium/root only/zero agents. Five own authored units/heads/REDs/WIPs/R2-C1holds and consumedCIretentatives unchanged. Reviews don't create sixth ownproductunit. No CIquery/poll/retry/cancel/queue/merge/foreignref/productpush. No duplicate inferred from checkpoint recency.
+
+## #3296 MEDIUM delivered; author correcting
+
+Exactbcf989117987e37320c935de399f5362f49a9643. Formal technical request for changes COMMENT5819908433 BODY+commit exactreadback. REQUEST_CHANGES action first rejected422 by GitHub because shared Appidentity isalsoPRauthor. No review submitted in failed action; safeCOMMENTfallbackexplicitlydiscloses limitation/noaccountcredentialidentityswitch/bypass. It is NOT approval norGitHubREQUEST_CHANGESstate. Code/evidence durable BEFOREeitherattempt.
+
+MEDIUM lib/review-proof.ts:218,cleanup222 unreachable ifinitialawaitthrows afterpartialgrantSET beforeerasure-noteconfirmation. SAME new desiredinvariant OLDandheadFAIL: actualSET199serializedJSONbytes→107-byte syntheticaddressgrant/TTL5184000s, initialpipelinethrows, NOcleanupDELattempt, actualforgetNoteddoesnotdeletegrant(explicitGETretained). Originalprivacyfindingincompletelyclosed, NOTnewintroducedregression. Author shouldrouteinitialexceptionintocleanup/errororappropriateatomicindexedwrite/addregression/qualifycleanupitselfunknown. Modelpartialoutcome, notliveUpstashincident. forgetNotedreturn2isMemoryRedisemptyset/zset-on-readcontainerartifact, not2personsdeleted; primaryoracleindependentGETretained. Caller#3211claimsissuealreadyC6disclosed/creditretained/C1nowauthor, notnewZfinding.
+
+SAME author11 OLD9FAIL/2controls→11PASS; independent10 OLD9FAIL/1control→9PASS/1remainingMEDFAIL. Head78PASS AND1FAIL across6roots overlap11+9+6+19+26+7. Types3roots988sources strictES2017Bundler0/lint0/scanner4660/0/diff0. Max2009nestedRedis38HTTP;no cap/raise/reset/partition/retry. Dependency454match/0mismatch/0requiredmissing BEFOREsemantics; Next16.4.5/Node24.22.1. Beforechild20knestedMemoryRedis100HTTP120s512MiB256KiB/types120s1024/networkDENIEDbeforegraph/SERIALclosedchildren.
+
+Evidence codex/z-3296-first-review@ddf320402ee6da7913381098e24ba2919692c2ab/treee181d5fff601291a9f6b5cf32f1e1e9fcd31f486 EXACT native25840a2300f48e9e41341f4caa4ef429d37b81b8 in z-3296-review.17newownpaths. Reporta38d8ef088f12c9314749cafaf27826a829b6992/FULL6729 exactreadback BEFOREverdict. Wholeinitial/finalsource/immutableauthor/rawreversiblelogs/gatespreserved. Claim6727822899 +ROOTa3d3f9bea8e7d01e03a05bbe499e9518eb79c510/blob325fdd5b5fd715b6fc19b6d9d7ce89c1a8108f6c/FULL6684362 exactreadback BEFOREsource/tests. Its1913emitterlabel waspreparation, actualtoolclockafterdelivery22:11:36UTC/19:11:36Fortaleza, notfaketimeproof. No paidprovider/realPII/account/payment/term/key/externalcontact.
+
+## C1 directives and priority change
+
+C1-TODOS42/43 andCODEX44 originalsFULLread. C1NOWactivelytakes nominalreviewsTODOS39 andnamedC4authorship; doNOTduplicate merelybecauseoldZqueue. #3171Zfocal ALREADY5819737440 at90fb5f74fb4e20dccfeb3f9060673ee8188e8733 delivered21:27UTC; newGETconfirmsSAMEheadOPEN/updated21:27:25. ROOT80793688explicitlynotifiesC1firstresultalreadyexists; well-shaped-cookie/unpairedLOWstillOPEN/notglobalclean. #2839Znotstarted, SKIPforC1(no2964chase). #3146M/#3216H2correctionreturnsalreadyclosedDEIRS, receiptsforwardedC1beforehisscopeauthorrecreation. #3211C1author/callerfollowup3296forwarded; store.tsCX86releaseCODEX44B2/N,nopermissionZforeignauthorship/sixth.
+
+C6-1917/6727891219 RETURN receivedFULL: #3294LOWfix exact664827fceb59620276627712b88bd0109b7d5569, authorclaimsZADDCHchecked+oneextra read+max80GET/40processed. REQUESTEDNOMINALZfocaltakesPRIORITYoverNEW3292review. C6alsoexplicitlyactivelycorrects3296MEDwithourregression; waitforcompletedhead/focalrequestbeforelaterreturn, no duplicatefix.
+
+#3292 preflight ONLY: exactc99030fa107f14019a4b1f56c55727346cb9468e/OPEN/branchclaude6/r24-invite-credit-store-exact/base44f4. FirstC2/6727627989 FULLread and3LOWscredited; nosecondclaim. Claim6727902353 BODYexactreadback. ROOT80793688869cc8d2868f0a88d906773808e0d1c6 explicitlyreservesPREPARATIONONLY, no source/test/worktree/fetch3292started. Not activeexecution; after3294focal/freshclaimsresumeorallowcoorddisposition. Do not countasownproductunit or treatCPasactive3292execution.
+
+## ACTIVE #3294 nominal queue focal — no source/tests yet at checkpoint
+
+Newclaim6727922086 BODYexactreadbackBEFOREsource; requested6727891219 readFULL. Exact664827fceb59620276627712b88bd0109b7d5569, delta39d790d9e1..664827. ONLY NEWdocs/reviews/z-3294-queue-focal/* inownbranchcodex/z-3294-queue-focal; original3294firstevidenceedf980239/reportLOW5819877532 remainsimmutable. SAMEfrozenown10 finalsource fromold3294review(mediumgradeotherfileNOTinthisroot), authorcurrent24OLD39/head; bound/fairness/commandmeasurements. No thirdglobalreview.
+
+ROOT combined3296finding+C1reconciliation+3292PREP+PRIORITY3294FOCAL delivered80793688869cc8d2868f0a88d906773808e0d1c6/bloba6cc2b61dd1dfb87b27760a0b1681d56ab1f8961/FULL6710005, readbackFULL EXACT BEFOREfocalsource/tests. One earlierprewriteadvance abortedWITHOUTwrite (not409/backoff); allfullprefixesanddeltas read/reconstructedSHAverified. Claim3292preparationisNOTsourceexecution. Nativefetch664827 launchedsession56463, mustCLOSEfinalexit beforeworktree/semanticgraphs. No nativefocalworktree/source/proofyet. BeforeEACHchild20knestedRedis100HTTP120s512MiB256KiB/types120s1024/networkDENIED/SERIALzeroagents; noraise/reset/partition/retry/budgetloan. Checknewextra-readboundagainstcostregistryratherthanassumeold40boundcovers80. Do not inferproductfindingwithoutcausalproof.
+
+CurrentchannelFULL6684362→6702084 delta17722readFULL/SHA d8e95886b2e7b9060d3c7103eb77a469a9564652;→6704755? exactlengthstoredr17ch1919Full(notguessedCPvalueauthority),deltaC6BK1MED+3282fila+C1CODEX44readFULL/SHA35fc24e2064c205a807b9c25aaab081aafca3d38;C6return3294+3296active/SHA b19dbb107670443cccff4b189948288f030aed06 readFULL;C6fila3258/SHA44630e5363af9dbe3a410d28964aac013c01f01f readFULL;FINAL6710005exact. No newbudget3260/3283found; C6claims3297and3271, S3215decompositionreserved, peerM/H2/V/CXC2scopesretained. NoActionsroundpolls/largerepoinventories/quotaprobe/automationchanges.
+
+Ownfive2741/2819/reminder/askModel/summary-readstillR2/C1; #3260PARTIALcap115attempts/#3283PARTIALcap103attempts correctedobserverNOTexecuted/NEW200budgetrequestsUNAPPROVED. Neverrepeatoldcapenvelopes/noborrowCXC2/S/Tgrant. All old2484/2615/2741/2800consumedretentativesbelowremainconsumed. Main44f4normsreadprior/unchanged,no mainchase/integration/CIcert. r17continuesACTIVEto3294nominalthen3296causalreturnwhenready;3292prepONLYnext. Preserve all history below, no finalhandoff yet.
+
+---
+
 # Authoritative progress — 8 November 2026, 19:09 Fortaleza
 
 SAME canonical checkpoint. Previous2cd5125aa3fa1b75108293e5ffe38437b373dc46/blob3e35a6c88cf038a1b9d5108f7eaa027b7e310341/FULL655002 retained COMPLETE below. Execution r17 remains ACTIVE, root only, SERIAL Medium, zero agents. Five own authored units/heads/REDs/WIPs/R2-C1holds and consumed retries remain unchanged. Review evidence is not a sixth authored product unit. No CI query/poll/retry/cancel/queue/merge/foreign ref/product push performed.

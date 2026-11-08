@@ -154,11 +154,20 @@ const isOwnReply = (reply: unknown, id: string): boolean =>
 const idOf = (value: unknown): unknown => (value !== null && typeof value === "object" ? (value as { id?: unknown }).id : value);
 
 /**
+ * The invoice-payment statuses that prove a row was not paid: Stripe documents an invoice payment's status as one of
+ * "open", "paid" or "canceled"; "failed" moves no money either, and the existing controls (#3097) already read it as not
+ * paid. Anything else is unknown.
+ */
+const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled", "failed"]);
+
+/**
  * The payment intent an invoice was paid by, whichever way this account's API version names it; "" only when this
  * invoice's own whole list of payments holds none paid. A reply for another invoice, a list that is not one, a row of
  * another invoice, a list that is not whole, or a paid row whose payment does not read as a payment intent (missing,
  * null, off-pattern, or of another type: Codex G on #3120, Claude 6 on #3097) is unknown and throws, so the member is
- * counted failed and tried again, never refunded on another payment and never settled as owed nothing.
+ * counted failed and tried again, never refunded on another payment and never settled as owed nothing. So is a row whose
+ * status is not one this code knows (missing, null, not a string, or a value Stripe does not document: Codex G's residual
+ * finding on #3120): only "paid" decides paid, and only KNOWN_UNPAID decides not paid.
  */
 async function intentOf(account: string, invoice: string, count: () => void): Promise<string> {
   count();
@@ -172,16 +181,22 @@ async function intentOf(account: string, invoice: string, count: () => void): Pr
   if (!Array.isArray(rows)) throw new Error("an invoice's payments did not come as a list");
   // A paid row is a payment made, whatever it reads as: one that does not name a readable intent proves no absence.
   // A readable paid intent of this invoice is still found whatever the row order.
+  // A status this code does not know proves nothing either, so it never lets the list settle none.
   let unread = false;
+  let unknownStatus = false;
   for (const item of rows) {
     const row = objectOf(item);
     if (!row || idOf(row.invoice) !== invoice) throw new Error("a payment listed is not this invoice's");
-    if (row.status !== "paid") continue;
+    if (row.status !== "paid") {
+      if (!KNOWN_UNPAID.has(row.status)) unknownStatus = true;
+      continue;
+    }
     const id = idOf(objectOf(row.payment)?.payment_intent);
     if (typeof id === "string" && INTENT_ID.test(id)) return id;
     unread = true;
   }
   if (unread) throw new Error("an invoice's paid payment did not read as a payment intent");
+  if (unknownStatus) throw new Error("an invoice's payment has a status that does not read as paid or not paid");
   // "None" only from a whole list: one that says, exactly, that there is no more.
   if (objectOf(listed)?.has_more !== false) throw new Error("an invoice's payments could not be read whole");
   return "";

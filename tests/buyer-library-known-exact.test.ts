@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
-import { rememberBuyers, storesBoughtFrom, storesKnownFor } from "@/lib/buyer-library";
+import { forgetLibraryPerson, rememberBuyers, storesBoughtFrom, storesKnownFor } from "@/lib/buyer-library";
 import { askErasureLink } from "@/lib/erasure-request";
 import { COPIERS } from "@/lib/person-copy";
 import type { ErasureScope } from "@/lib/erasure-rules";
@@ -115,4 +115,51 @@ test("healthy control and confirmed absence: the store is known to its buyer, no
   assert.deepEqual(await storesKnownFor(STRANGER), []);
   assert.deepEqual(await storesBoughtFrom(STRANGER), []);
   await withUnion(() => [[]], async () => assert.deepEqual(await storesKnownFor(BUYER), []));
+});
+
+/** Every pipeline made only of SREM answers `reply(commands)`; every other pipeline is the stub's. */
+async function withForget<T>(reply: (count: number) => unknown, run: () => Promise<T>): Promise<T> {
+  const original = redis.pipeline;
+  redis.pipeline = async (commands: (string | number)[][]) =>
+    (commands.length && commands.every((c) => c[0] === "SREM") ? reply(commands.length) : original.call(redis, commands)) as Awaited<
+      ReturnType<typeof original>
+    >;
+  try {
+    return await run();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+const FORGET_MALFORMED: [string, (count: number) => unknown][] = [
+  ["no reply at all", () => []],
+  ["one reply short", (count) => new Array(count - 1).fill(0)],
+  ["one reply too many", (count) => new Array(count + 1).fill(0)],
+  ["a null in a slot", (count) => [null, ...new Array(count - 1).fill(0)]],
+  ["an error object in a slot", (count) => [{ error: "ERR" }, ...new Array(count - 1).fill(0)]],
+  ["a string in a slot", (count) => ["1", ...new Array(count - 1).fill(0)]],
+  ["a negative number in a slot", (count) => [-1, ...new Array(count - 1).fill(0)]],
+  ["more than one member removed by one SREM", (count) => [2, ...new Array(count - 1).fill(0)]],
+  ["a hole in the list", (count) => new Array(count)],
+];
+
+for (const [label, reply] of FORGET_MALFORMED) {
+  test(`forgetting a library's store: ${label} is unknown, never 0 records erased`, async () => {
+    const sid = await fixture;
+    await withForget(reply, () => assert.rejects(() => forgetLibraryPerson(sid, BUYER), UnknownReplyError));
+    // Nothing was removed by the odd answer: the store is still known to its buyer.
+    assert.deepEqual(await storesKnownFor(BUYER), [sid]);
+  });
+}
+
+test("forgetting a library's store: healthy control and confirmed nothing to forget", async () => {
+  const sid = await fixture;
+  const erased = "erased@library-exact.example";
+  await rememberBuyers(sid, [erased]);
+  assert.deepEqual(await storesKnownFor(erased), [sid]);
+  assert.equal(await forgetLibraryPerson(sid, erased), 1);
+  assert.deepEqual(await storesKnownFor(erased), []);
+  // Exact zeros: confirmed nothing left to forget.
+  assert.equal(await forgetLibraryPerson(sid, erased), 0);
+  assert.equal(await forgetLibraryPerson(sid, STRANGER), 0);
 });

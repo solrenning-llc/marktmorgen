@@ -501,10 +501,14 @@ async function main() {
         ["status_transitions null", (row) => { row.status_transitions = null; }],
         ["paid_at as text", (row) => { row.status_transitions = { paid_at: "soon" }; }],
         ["payment_intent a number", (row) => { row.payment_intent = 42; }],
+        // Its status outside the ones Stripe gives an invoice (draft, open, paid, uncollectible, void) is not known:
+        // never skipped as "no payment", never settled with a letter saying none was taken.
+        ["status transport_unknown", (row) => { row.status = "transport_unknown"; }],
+        ["status an empty text", (row) => { row.status = ""; }],
       ];
       const fieldStores: Awaited<ReturnType<typeof closingStore>>[] = [];
       for (const [index, [what, change]] of invoiceFields.entries()) {
-        const one = await closingStore(`invf${"abcdefgh"[index]}`, day);
+        const one = await closingStore(`invf${"abcdefghij"[index]}`, day);
         fieldStores.push(one);
         const before = refundPosts;
         garble = (path, url, page) => {
@@ -515,6 +519,7 @@ async function main() {
         const outcome = await refusePlanIfClosing({ store: (await storeForEmail(one.email))!, handle: one.email.split("@")[0], subscriptionId: one.id, customerId: one.customer });
         garble = null;
         is(`a paid invoice with ${what}: kept in line, nothing settled, nobody told`, [outcome, refundPosts - before, Boolean((await undo(one.id))?.done), sent.filter((m) => m.to === one.email).length], ["returning", 0, false, 0]);
+        is(`a paid invoice with ${what}: no letter says no payment was taken`, sent.some((m) => m.to === one.email && m.text.includes("No payment was taken")), false);
       }
 
       // Each field the paid charge is read by: one that does not read never settles it with no refund.
@@ -563,6 +568,24 @@ async function main() {
         const outcome = await refusePlanIfClosing({ store: (await storeForEmail(one.email))!, handle: one.email.split("@")[0], subscriptionId: one.id, customerId: one.customer });
         garble = null;
         is(`refunds of a charge answered with ${what}: no refund is made on it, kept in line`, [outcome, refundPosts - before, refundsOf(one.pi).length, Boolean((await undo(one.id))?.done), sent.filter((m) => m.to === one.email).length], ["returning", 0, 0, false, 0]);
+      }
+      // Each refund row read in its exact domain (CX-123 rule 24): an amount Stripe never gives a refund (zero or
+      // below) or a status outside its own (pending, requires_action, succeeded, failed, canceled) is not known, and
+      // no refund is asked for on it: a negative one would ask for more than was paid, an unknown one for a second.
+      const refundRows: [string, string, number][] = [
+        ["succeeded with an amount below zero", "succeeded", -6_900],
+        ["succeeded with an amount of zero", "succeeded", 0],
+        ["status transport_unknown", "transport_unknown", 6_900],
+        ["status an empty text", "", 6_900],
+      ];
+      for (const [index, [what, status, amount]] of refundRows.entries()) {
+        const one = await closingStore(`refr${"abcd"[index]}`, day);
+        refundStores.push(one);
+        const before = refundPosts;
+        garble = (path, url) => (path === "/refunds" && url.searchParams.get("charge") === `ch_${one.pi.slice(3)}` ? { object: "list", data: [{ id: `re_refr${"abcd"[index]}row001`, object: "refund", status, amount, currency: "usd" }], has_more: false } : undefined);
+        const outcome = await refusePlanIfClosing({ store: (await storeForEmail(one.email))!, handle: one.email.split("@")[0], subscriptionId: one.id, customerId: one.customer });
+        garble = null;
+        is(`a refund row ${what}: no refund is asked for, kept in line, nobody told`, [outcome, refundPosts - before, refundsOf(one.pi).length, Boolean((await undo(one.id))?.done), sent.filter((m) => m.to === one.email).length], ["returning", 0, 0, false, 0]);
       }
       await retryPlanUndos(Number.POSITIVE_INFINITY);
       is("once the refunds read in full, each payment is refunded once", await Promise.all(refundStores.map(async (one) => [refundsOf(one.pi).map((row) => row.amount), sent.filter((m) => m.to === one.email).length, Boolean((await undo(one.id))?.done)])), refundStores.map(() => [[6_900], 1, true]));

@@ -305,6 +305,8 @@ export const it: BuyerWords = {
   askTermsCut: () => "Qui non ho le condizioni complete. Chiedi al creatore prima di acquistare.",
 
   noLongerOnSale: "Questo prodotto non è più in vendita.",
+  cardUnread: "Non è stato possibile caricare questo prodotto ora. Riprova tra un momento.",
+  cardBuyUnread: "L'acquisto non è disponibile ora. Riprova tra un momento.",
   seeStore: (store) => `Vedi ${store}`,
   cardTestMode: "Modalità di prova: nessuna carta reale viene addebitata.",
   cardCheckout: "Pagamento sicuro con Stripe, in una nuova scheda.",

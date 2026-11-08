@@ -6,10 +6,12 @@
  * audit R24 round 8, item 7). A door given without its listing lets a file
  * stay in the paid file store for ever, and its place never comes back.
  *
- * - A reply in another shape, or none: no door; the path is listed again, so
- *   the sweep gives its place back once, a day on.
+ * - A reply in another shape, or none: no door; the place this request took
+ *   comes back once, a day on, through the sweep.
  * - A path that already had a door: no door, and the place this request took
  *   goes back at once; the earlier door is left as it was.
+ * - A path already in a post (its door used): a failed request for it again
+ *   never makes the sweep delete the post's picture (Codex Z on #3305, M1).
  */
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/community/upload/route";
@@ -18,7 +20,7 @@ import { communityFolder } from "@/lib/community-image";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { COMMUNITY_ID, MEMBER, deleted, tokens } from "./community-upload-door-exact-world";
+import { COMMUNITY_ID, MEMBER, deleted, files, tokens } from "./community-upload-door-exact-world";
 
 type Command = (string | number)[];
 const original: typeof redis.pipeline = redis.pipeline.bind(redis);
@@ -28,12 +30,29 @@ let n = 0;
 const freshPath = () => `community/${folder}/${(++n).toString(16).padStart(32, "0")}.jpg`;
 const isNote = (commands: Command[]) => commands.length === 2 && commands[0][0] === "SET" && commands[1][0] === "ZADD";
 const listed = async (path: string) => (await original([["ZSCORE", "nl:cimg:doors", path]]))[0] !== null;
+const throwsBeforeSending = () =>
+  ((async (commands: Command[]) => {
+    if (isNote(commands)) throw new Error("the connection failed before the note was sent");
+    return original(commands);
+  }) as typeof redis.pipeline);
 
 function reset(): void {
   redis.pipeline = original;
   redis.clear();
   tokens.length = 0;
   deleted.length = 0;
+  files.clear();
+}
+
+/** A picture already in a post: its door was given, its file sent, and the post took it (takeCommunityUpload). */
+async function inAPost(): Promise<string> {
+  const path = freshPath();
+  is("a place is taken for the picture", await takePicturePlace(path, 50), true);
+  is("its door is noted", await noteCommunityUpload(path, MEMBER), true);
+  files.add(path);
+  is("the post takes it", await takeCommunityUpload(path, MEMBER), true);
+  is("no longer a door to sweep", [await listed(path), await picturesKept(folder)], [false, 1]);
+  return path;
 }
 
 async function ask(path: string): Promise<{ status: number; error: string | null; door: boolean }> {
@@ -98,8 +117,9 @@ async function main(): Promise<void> {
       const result = await ask(path);
       redis.pipeline = original;
       is(`${label}: no door`, [result.status, result.error, result.door], [500, "server_error", false]);
-      is(`${label}: listed for the sweep, its place still counted`, [await listed(path), await picturesKept(folder)], [true, 1]);
-      is(`${label}: a day on its place comes back`, [await sweptADayOn(), await picturesKept(folder)], [1, 0]);
+      is(`${label}: its place still counted`, await picturesKept(folder), 1);
+      await sweptADayOn();
+      is(`${label}: a day on its place comes back`, await picturesKept(folder), 0);
     }
 
     part("A note that throws gives no door; the place comes back through the sweep");
@@ -114,7 +134,62 @@ async function main(): Promise<void> {
       const result = await ask(path);
       redis.pipeline = original;
       is("no door", [result.status, result.door], [500, false]);
-      is("listed, its place counted, given back a day on", [await listed(path), await picturesKept(folder), await sweptADayOn(), await picturesKept(folder)], [true, 1, 1, 0]);
+      is("its place counted", await picturesKept(folder), 1);
+      await sweptADayOn();
+      is("given back a day on", await picturesKept(folder), 0);
+    }
+    {
+      reset();
+      const path = freshPath();
+      redis.pipeline = throwsBeforeSending();
+      const result = await ask(path);
+      redis.pipeline = original;
+      is("never sent: no door", [result.status, result.door], [500, false]);
+      is("never sent: its place counted", await picturesKept(folder), 1);
+      await sweptADayOn();
+      is("never sent: given back a day on", await picturesKept(folder), 0);
+    }
+
+    part("Two failed requests for the same new path: each place comes back once, a day on");
+    {
+      reset();
+      const path = freshPath();
+      redis.pipeline = throwsBeforeSending();
+      const first = await ask(path);
+      const second = await ask(path);
+      redis.pipeline = original;
+      is("no door either time", [first.status, first.door, second.status, second.door], [500, false, 500, false]);
+      is("both places counted", await picturesKept(folder), 2);
+      await sweptADayOn();
+      is("both given back a day on, once each", await picturesKept(folder), 0);
+      is("a later sweep gives nothing more back", [await sweptADayOn(), await picturesKept(folder)], [0, 0]);
+    }
+
+    part("A path already in a post: a failed request for it again never makes the sweep delete its picture");
+    const again: [string, () => typeof redis.pipeline][] = [
+      ["the note never sent", throwsBeforeSending],
+      [
+        "the note answered nothing, nothing carried out",
+        () =>
+          ((async (commands: Command[]) => (isNote(commands) ? [] : original(commands))) as typeof redis.pipeline),
+      ],
+      [
+        "only the note's SET carried out, answered in another shape",
+        () =>
+          ((async (commands: Command[]) => (isNote(commands) ? [(await original([commands[0]]))[0], "1"] : original(commands))) as typeof redis.pipeline),
+      ],
+    ];
+    for (const [label, pipeline] of again) {
+      reset();
+      const path = await inAPost();
+      redis.pipeline = pipeline();
+      const result = await ask(path);
+      redis.pipeline = original;
+      is(`${label}: no door`, [result.status, result.error, result.door], [500, "server_error", false]);
+      is(`${label}: the post's place and this request's are counted`, await picturesKept(folder), 2);
+      await sweptADayOn();
+      is(`${label}: a day on, the post's picture is still there`, [files.has(path), deleted.includes(path)], [true, false]);
+      is(`${label}: only this request's place came back`, await picturesKept(folder), 1);
     }
 
     part("A path that already had a door: no door, and this request's place goes back at once");

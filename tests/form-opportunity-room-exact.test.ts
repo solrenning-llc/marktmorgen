@@ -109,8 +109,36 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = original;
     }
-    is("the write says it exists", [failed, state], [true, "existing"]);
+    is("the read failed, and nothing new was made", [failed, state !== "created"], [true, true]);
     is("and its room is still counted", await used(room), taken);
+  }
+  {
+    // Codex Z on #3305 (M2): the deal kept is larger than the draft sent again.
+    const { statsId, ref, room, draft } = fresh();
+    const larger = { ...draft, note: "x".repeat(500) } as Deal;
+    is("a larger deal is created first", await create(statsId, ref, larger, room), "created");
+    const before = await used(room);
+    const id = ref.slice(0, 10);
+    const [kept] = await original([["HGET", "nl:crm:deals:" + statsId, id]]);
+    is("its room is more than a small draft's", before > taken, true);
+    let failed = false;
+    redis.pipeline = (async (commands) => {
+      if (!failed && commands.some(isRead)) {
+        failed = true;
+        throw new Error("the database did not answer in time");
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    let state: string;
+    try {
+      state = await create(statsId, ref, { ...draft, note: "x" } as Deal, room);
+    } finally {
+      redis.pipeline = original;
+    }
+    const [still] = await original([["HGET", "nl:crm:deals:" + statsId, id]]);
+    is("the read failed, and nothing new was made", [failed, state !== "created"], [true, true]);
+    is("the deal kept is unchanged", still, kept);
+    is("and the larger deal's whole room is still counted", await used(room), before);
   }
   console.error = quiet;
   done();

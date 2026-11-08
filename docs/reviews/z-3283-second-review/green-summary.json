@@ -1,0 +1,56 @@
+[
+  {
+    "file": "r24-link-grant-write.test.ts",
+    "result": "57 checks, all passing.",
+    "volume": {
+      "runs": 668,
+      "mocks": 30,
+      "over": false
+    }
+  },
+  {
+    "file": "buyer-library.test.ts",
+    "result": "10 checks, all passing.",
+    "volume": {
+      "runs": 148,
+      "mocks": 5,
+      "over": false
+    }
+  },
+  {
+    "file": "recovery-address.test.ts",
+    "result": "47 checks, all passing.",
+    "volume": {
+      "runs": 301,
+      "mocks": 22,
+      "over": false
+    }
+  },
+  {
+    "file": "reset-notices.test.ts",
+    "result": "11 checks, all passing.",
+    "volume": {
+      "runs": 343,
+      "mocks": 21,
+      "over": false
+    }
+  },
+  {
+    "file": "plan-cost-registry.test.ts",
+    "result": null,
+    "volume": {
+      "runs": 0,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "store-data-registry.test.ts",
+    "result": null,
+    "volume": {
+      "runs": 0,
+      "mocks": 0,
+      "over": false
+    }
+  }
+]

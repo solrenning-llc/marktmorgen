@@ -1,0 +1,392 @@
+
+FILE r24-link-grant-write.test.ts
+
+requestLibraryLink: the library link's grant
+  ok    "OK": the link is emailed, and one store email is taken
+  ok    "OK" through the route: sent
+  ok    the reply missing (null): fails closed, no email, no store email taken
+  ok    the reply missing (null): the library form answers error
+  ok    the pipeline itself missing (null): fails closed, no email, no store email taken
+  ok    the pipeline itself missing (null): the library form answers error
+  ok    a short pipeline ([]): fails closed, no email, no store email taken
+  ok    a short pipeline ([]): the library form answers error
+  ok    QUEUED: fails closed, no email, no store email taken
+  ok    QUEUED: the library form answers error
+  ok    a number (1): fails closed, no email, no store email taken
+  ok    a number (1): the library form answers error
+  ok    Redis throwing: fails closed, no email, no store email taken
+  ok    Redis throwing: the library form answers error
+
+sendLink: the purchases link's grant, written after requestOrdersLink answers
+  ok    "OK": sent, the link is emailed, and one store email is taken
+  ok    the reply missing (null): still answers sent, no email, no store email taken, the failure logged
+  ok    the pipeline itself missing (null): still answers sent, no email, no store email taken, the failure logged
+  ok    a short pipeline ([]): still answers sent, no email, no store email taken, the failure logged
+  ok    QUEUED: still answers sent, no email, no store email taken, the failure logged
+  ok    a number (1): still answers sent, no email, no store email taken, the failure logged
+  ok    Redis throwing: still answers sent, no email, no store email taken, the failure logged
+
+ordersLinkFor: a link handed out without asking
+  ok    "OK": a link with its token
+  ok    the reply missing (null): null, never a link whose grant is unconfirmed
+  ok    the pipeline itself missing (null): null, never a link whose grant is unconfirmed
+  ok    a short pipeline ([]): null, never a link whose grant is unconfirmed
+  ok    QUEUED: null, never a link whose grant is unconfirmed
+  ok    a number (1): null, never a link whose grant is unconfirmed
+  ok    Redis throwing: null, never a link whose grant is unconfirmed
+
+A PayPal purchase's email (lib/paypal-sales.ts deliverPayPal), whose link comes from ordersLinkFor
+  ok    "OK": the purchase email carries the link with its token
+  ok    the reply missing (null): the purchase email still goes, with the generic orders link and no token
+  ok    the pipeline itself missing (null): the purchase email still goes, with the generic orders link and no token
+  ok    a short pipeline ([]): the purchase email still goes, with the generic orders link and no token
+  ok    QUEUED: the purchase email still goes, with the generic orders link and no token
+  ok    a number (1): the purchase email still goes, with the generic orders link and no token
+  ok    Redis throwing: the purchase email still goes, with the generic orders link and no token
+
+sendLostEmailLink: a login link to the recovery address
+  ok    "OK": the link goes to the recovery address and the sign-in address is told
+  ok    "OK" through the route: sent
+  ok    the reply missing (null): fails closed, neither the link nor the notice is sent
+  ok    the reply missing (null): the lost-inbox form still answers sent, telling nothing
+  ok    the pipeline itself missing (null): fails closed, neither the link nor the notice is sent
+  ok    the pipeline itself missing (null): the lost-inbox form still answers sent, telling nothing
+  ok    a short pipeline ([]): fails closed, neither the link nor the notice is sent
+  ok    a short pipeline ([]): the lost-inbox form still answers sent, telling nothing
+  ok    QUEUED: fails closed, neither the link nor the notice is sent
+  ok    QUEUED: the lost-inbox form still answers sent, telling nothing
+  ok    a number (1): fails closed, neither the link nor the notice is sent
+  ok    a number (1): the lost-inbox form still answers sent, telling nothing
+  ok    Redis throwing: fails closed, neither the link nor the notice is sent
+  ok    Redis throwing: the lost-inbox form still answers sent, telling nothing
+
+startRecoveryAddress: the pending code is written before the code is emailed
+  ok    "OK": the code is sent to the new address
+  ok    "OK": and that code confirms it
+  ok    the reply missing (null): no code is emailed, and the form is told it was not sent
+  ok    the pipeline itself missing (null): no code is emailed, and the form is told it was not sent
+  ok    a short pipeline ([]): no code is emailed, and the form is told it was not sent
+  ok    QUEUED: no code is emailed, and the form is told it was not sent
+  ok    a number (1): no code is emailed, and the form is told it was not sent
+  ok    Redis throwing: no code is emailed, and the form is told it was not sent
+
+57 checks, all passing.
+Z_VOLUME {"runs":668,"mocks":30,"over":false}
+sending a library link failed UnknownReplyError: Redis answered a library link's grant in an unknown shape
+    at requestLibraryLink ([stdin]:16153:46)
+    at async POST ([stdin]:62808:17)
+    at async viaRoute ([stdin]:63028:22)
+    at async main ([stdin]:63041:20)
+sending a library link failed UnknownReplyError: Redis answered a library link's grant in an unknown shape
+    at requestLibraryLink ([stdin]:16153:46)
+    at async POST ([stdin]:62808:17)
+    at async viaRoute ([stdin]:63028:22)
+    at async main ([stdin]:63041:20)
+sending a library link failed UnknownReplyError: Redis answered a library link's grant in an unknown shape
+    at requestLibraryLink ([stdin]:16153:46)
+    at async POST ([stdin]:62808:17)
+    at async viaRoute ([stdin]:63028:22)
+    at async main ([stdin]:63041:20)
+sending a library link failed UnknownReplyError: Redis answered a library link's grant in an unknown shape
+    at requestLibraryLink ([stdin]:16153:46)
+    at async POST ([stdin]:62808:17)
+    at async viaRoute ([stdin]:63028:22)
+    at async main ([stdin]:63041:20)
+sending a library link failed UnknownReplyError: Redis answered a library link's grant in an unknown shape
+    at requestLibraryLink ([stdin]:16153:46)
+    at async POST ([stdin]:62808:17)
+    at async viaRoute ([stdin]:63028:22)
+    at async main ([stdin]:63041:20)
+sending a library link failed Error: synthetic Redis error for a link's grant
+    at store.pipeline ([stdin]:62979:37)
+    at redisPipeline ([stdin]:4342:41)
+    at requestLibraryLink ([stdin]:16152:36)
+    at async POST ([stdin]:62808:17)
+    at async viaRoute ([stdin]:63028:22)
+    at async main ([stdin]:63041:20)
+sending a purchases link failed UnknownReplyError: Redis answered a purchases link's grant in an unknown shape
+    at sendLink ([stdin]:62544:46)
+    at async ask ([stdin]:63077:48)
+    at async main ([stdin]:63088:19)
+sending a purchases link failed UnknownReplyError: Redis answered a purchases link's grant in an unknown shape
+    at sendLink ([stdin]:62544:46)
+    at async ask ([stdin]:63077:48)
+    at async main ([stdin]:63088:19)
+sending a purchases link failed UnknownReplyError: Redis answered a purchases link's grant in an unknown shape
+    at sendLink ([stdin]:62544:46)
+    at async ask ([stdin]:63077:48)
+    at async main ([stdin]:63088:19)
+sending a purchases link failed UnknownReplyError: Redis answered a purchases link's grant in an unknown shape
+    at sendLink ([stdin]:62544:46)
+    at async ask ([stdin]:63077:48)
+    at async main ([stdin]:63088:19)
+sending a purchases link failed UnknownReplyError: Redis answered a purchases link's grant in an unknown shape
+    at sendLink ([stdin]:62544:46)
+    at async ask ([stdin]:63077:48)
+    at async main ([stdin]:63088:19)
+sending a purchases link failed Error: synthetic Redis error for a link's grant
+    at store.pipeline ([stdin]:62979:37)
+    at redisPipeline ([stdin]:4342:41)
+    at sendLink ([stdin]:62543:36)
+    at async ask ([stdin]:63077:48)
+    at async main ([stdin]:63088:19)
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant could not be written; the generic orders link is used Error: synthetic Redis error for a link's grant
+    at store.pipeline ([stdin]:62979:37)
+    at redisPipeline ([stdin]:4342:41)
+    at ordersLinkFor ([stdin]:62580:32)
+    at [stdin]:63100:39
+    at outcome ([stdin]:63000:18)
+    at main ([stdin]:63100:25)
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant was not confirmed; the generic orders link is used
+a purchases link's grant could not be written; the generic orders link is used Error: synthetic Redis error for a link's grant
+    at store.pipeline ([stdin]:62979:37)
+    at redisPipeline ([stdin]:4342:41)
+    at ordersLinkFor ([stdin]:62580:32)
+    at Object.ordersLink ([stdin]:63119:36)
+    at deliverPayPal ([stdin]:53529:28)
+    at async outcome ([stdin]:63000:12)
+    at async deliver ([stdin]:63110:21)
+    at async main ([stdin]:63130:47)
+sending a recovery-address link failed UnknownReplyError: Redis answered a recovery-address login link's grant in an unknown shape
+    at sendLostEmailLink ([stdin]:45278:46)
+    at async POST2 ([stdin]:62905:5)
+    at async viaRoute ([stdin]:63146:22)
+    at async main ([stdin]:63158:20)
+sending a recovery-address link failed UnknownReplyError: Redis answered a recovery-address login link's grant in an unknown shape
+    at sendLostEmailLink ([stdin]:45278:46)
+    at async POST2 ([stdin]:62905:5)
+    at async viaRoute ([stdin]:63146:22)
+    at async main ([stdin]:63158:20)
+sending a recovery-address link failed UnknownReplyError: Redis answered a recovery-address login link's grant in an unknown shape
+    at sendLostEmailLink ([stdin]:45278:46)
+    at async POST2 ([stdin]:62905:5)
+    at async viaRoute ([stdin]:63146:22)
+    at async main ([stdin]:63158:20)
+sending a recovery-address link failed UnknownReplyError: Redis answered a recovery-address login link's grant in an unknown shape
+    at sendLostEmailLink ([stdin]:45278:46)
+    at async POST2 ([stdin]:62905:5)
+    at async viaRoute ([stdin]:63146:22)
+    at async main ([stdin]:63158:20)
+sending a recovery-address link failed UnknownReplyError: Redis answered a recovery-address login link's grant in an unknown shape
+    at sendLostEmailLink ([stdin]:45278:46)
+    at async POST2 ([stdin]:62905:5)
+    at async viaRoute ([stdin]:63146:22)
+    at async main ([stdin]:63158:20)
+sending a recovery-address link failed Error: synthetic Redis error for a link's grant
+    at store.pipeline ([stdin]:62979:37)
+    at redisPipeline ([stdin]:4342:41)
+    at sendLostEmailLink ([stdin]:45277:36)
+    at async POST2 ([stdin]:62905:5)
+    at async viaRoute ([stdin]:63146:22)
+    at async main ([stdin]:63158:20)
+
+Z_STATUS 0 null
+
+FILE buyer-library.test.ts
+
+What is kept
+  ok    the store's id, under the address whatever its capitals
+  ok    and the address itself is nowhere in the key
+  ok    a purchase handed over another way puts its store in too
+  ok    a purchase brought over from another platform does not
+  ok    kept in its quarter's set, which ends three years and at most a quarter on
+
+Signing in by email
+  ok    an address that bought nothing: the same answer, and no email
+  ok    not an address
+  ok    a buyer: a link to their library
+  ok    the link opens it for that address, and a made-up one for nobody
+  ok    a few times an hour per address, then no more
+
+10 checks, all passing.
+Z_VOLUME {"runs":148,"mocks":5,"over":false}
+
+Z_STATUS 0 null
+
+FILE recovery-address.test.ts
+
+Setting it
+  ok    not the sign-in address itself
+  ok    a code goes to it
+  ok    a wrong code keeps nothing
+  ok    the right one keeps it
+
+Asking for a way in
+  ok    an address with no account: the same answer, and nobody emailed
+  ok    an account with one: the link goes to the recovery address, and the sign-in address is told
+
+In at once, with what matters locked
+  ok    in, at the studio
+  ok    locked for a week
+  ok    exports and payments wait; products do not
+  ok    the link works once
+
+The sign-in inbox answers
+  ok    logging in with it logs the locked session out
+  ok    and the next recovery login starts a new week
+
+A week unanswered
+  ok    still locked a day before
+  ok    after it, the recovery address opens everything
+
+With two-step login on
+  ok    the address confirmed while turning it on is the account's recovery address
+  ok    the link leads to the code page
+  ok    which cannot send it to the recovery address again
+  ok    and a right code opens everything
+
+Moving the sign-in address
+  ok    the recovery address goes with it
+  ok    moved onto the recovery address itself, there is none left
+
+Codes drawn evenly
+  ok    the six digits come from randomInt, never a random value modulo a number
+  ok    each code sent is exactly six digits, zeros kept in front
+  ok    and a code sent is the one taken
+
+The security warning tells only what the sender confirmed
+  ok    accepted: no result exposes the account or provider outcome
+  ok    accepted: one recovery POST and one security warning, without retries
+  ok    accepted: both existing subjects stay unchanged
+  ok    accepted: the warning is accepted even when recovery acceptance is unknown
+  ok    accepted: the existing UTC warning time stays present
+  ok    accepted: exact security message, with the old accepted text unchanged
+  ok    accepted: one original token remains, with its original fifteen-minute TTL
+  ok    accepted: no token is deleted or replaced after a refused or uncertain send
+  ok    refused: no result exposes the account or provider outcome
+  ok    refused: one recovery POST and one security warning, without retries
+  ok    refused: both existing subjects stay unchanged
+  ok    refused: the warning is accepted even when recovery acceptance is unknown
+  ok    refused: the existing UTC warning time stays present
+  ok    refused: exact security message, with the old accepted text unchanged
+  ok    refused: one original token remains, with its original fifteen-minute TTL
+  ok    refused: no token is deleted or replaced after a refused or uncertain send
+  ok    unknown: no result exposes the account or provider outcome
+  ok    unknown: one recovery POST and one security warning, without retries
+  ok    unknown: both existing subjects stay unchanged
+  ok    unknown: the warning is accepted even when recovery acceptance is unknown
+  ok    unknown: the existing UTC warning time stays present
+  ok    unknown: exact security message, with the old accepted text unchanged
+  ok    unknown: one original token remains, with its original fifteen-minute TTL
+  ok    unknown: no token is deleted or replaced after a refused or uncertain send
+
+47 checks, all passing.
+Z_VOLUME {"runs":301,"mocks":22,"over":false}
+email rejected 400
+
+Z_STATUS 0 null
+
+FILE reset-notices.test.ts
+
+A confirmed recovery address hears what its sign-in inbox hears
+  ok    each of the three, to both addresses
+  ok    the recovery address is told whose account it is
+  ok    and is not told a link was sent to it
+  ok    the passkey notice tells it which account to log in to
+
+The sign-in address's notices are the ones it always got
+  ok    opened without two-step
+  ok    a passkey removed
+  ok    two-step login off
+
+An address not yet confirmed hears nothing
+  ok    the address waits for its code
+  ok    only the sign-in address is told
+
+An account from before: its record's own recovery address
+  ok    each of the three, to both, the last read before the record goes
+
+One address for both: one notice
+  ok    never twice to the same inbox
+
+11 checks, all passing.
+Z_VOLUME {"runs":343,"mocks":21,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (69.699ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (80.044813ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (33.233678ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (4.902354ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.143186ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.112339ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.426883ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (63.912795ms)
+✔ every store figure taken in the code is a kind a line prices (41.431794ms)
+✔ every email sent names a meter, and each file only the meters it may use (67.986151ms)
+✔ the units a figure is taken in cost at least what they stand for (7.925578ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.625108ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.15263ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.267843ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.107472ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.080291ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.288154ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.139219ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.875609ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.07972ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (1.894974ms)
+✔ Path push fits its reserved studio requests (0.081152ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.310157ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.110166ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.121693ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (27.982246ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 423.751185
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (111.427149ms)
+✔ each family is bounded one way at least, and what it says can be checked (45.835663ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.879338ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (0.956869ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.368198ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.117092ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.168676ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 175.103122
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3283-KPSggV

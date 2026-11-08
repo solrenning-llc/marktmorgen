@@ -1,0 +1,412 @@
+
+FILE r24-link-grant-write.test.ts
+
+requestLibraryLink: the library link's grant
+  ok    "OK": the link is emailed, and one store email is taken
+  ok    "OK" through the route: sent
+  FAIL  the reply missing (null): fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  the reply missing (null): the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  the pipeline itself missing (null): fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  the pipeline itself missing (null): the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  a short pipeline ([]): fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  a short pipeline ([]): the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  QUEUED: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  QUEUED: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  a number (1): fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  a number (1): the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  ok    Redis throwing: fails closed, no email, no store email taken
+  ok    Redis throwing: the library form answers error
+
+sendLink: the purchases link's grant, written after requestOrdersLink answers
+  ok    "OK": sent, the link is emailed, and one store email is taken
+  FAIL  the reply missing (null): still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  the pipeline itself missing (null): still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  a short pipeline ([]): still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  QUEUED: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  a number (1): still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  ok    Redis throwing: still answers sent, no email, no store email taken, the failure logged
+
+ordersLinkFor: a link handed out without asking
+  ok    "OK": a link with its token
+  FAIL  the reply missing (null): null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=d2687998e8ea0d4c5608092e72c5cbdc5e332f99a2e96881e29df7392f5ee8ef"
+  FAIL  the pipeline itself missing (null): null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=210aa81b1e2b957f5ef29aad39d0bde37b4d1aa7048fc78a34a5858beb0e824e"
+  FAIL  a short pipeline ([]): null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=67c2ab6fe9aba29700ca4aeb37770e4efbf3495c8f8b787b7e00bd251ae9ccc2"
+  FAIL  QUEUED: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=ca0d2b0cb71d8db6f30e7cd2042e59b7ce31fef8e1097cefe02bcec5cc44a5bc"
+  FAIL  a number (1): null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=16c67e500a290526354760e04c17f6ab7363c477c91586b9f055cf589ced346e"
+  FAIL  Redis throwing: null, never a link whose grant is unconfirmed
+        expected null
+        got      "threw"
+
+A PayPal purchase's email (lib/paypal-sales.ts deliverPayPal), whose link comes from ordersLinkFor
+  ok    "OK": the purchase email carries the link with its token
+  FAIL  the reply missing (null): the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  the pipeline itself missing (null): the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  a short pipeline ([]): the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  QUEUED: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  a number (1): the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  Redis throwing: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      ["threw",false,null,null]
+
+sendLostEmailLink: a login link to the recovery address
+  ok    "OK": the link goes to the recovery address and the sign-in address is told
+  ok    "OK" through the route: sent
+  FAIL  the reply missing (null): fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    the reply missing (null): the lost-inbox form still answers sent, telling nothing
+  FAIL  the pipeline itself missing (null): fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    the pipeline itself missing (null): the lost-inbox form still answers sent, telling nothing
+  FAIL  a short pipeline ([]): fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    a short pipeline ([]): the lost-inbox form still answers sent, telling nothing
+  FAIL  QUEUED: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    QUEUED: the lost-inbox form still answers sent, telling nothing
+  FAIL  a number (1): fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    a number (1): the lost-inbox form still answers sent, telling nothing
+  ok    Redis throwing: fails closed, neither the link nor the notice is sent
+  ok    Redis throwing: the lost-inbox form still answers sent, telling nothing
+
+startRecoveryAddress: the pending code is written before the code is emailed
+  ok    "OK": the code is sent to the new address
+  ok    "OK": and that code confirms it
+  FAIL  the reply missing (null): no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  the pipeline itself missing (null): no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  a short pipeline ([]): no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  QUEUED: no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  a number (1): no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  Redis throwing: no code is emailed, and the form is told it was not sent
+        expected ["threw",0]
+        got      ["threw",1]
+
+57 checks, 38 failing.
+Z_VOLUME {"runs":903,"mocks":70,"over":false}
+sending a library link failed Error: synthetic Redis error for a link's grant
+    at store.pipeline ([stdin]:62962:37)
+    at redisPipeline ([stdin]:4342:41)
+    at requestLibraryLink ([stdin]:16152:9)
+    at async POST ([stdin]:62791:17)
+    at async viaRoute ([stdin]:63011:22)
+    at async main ([stdin]:63024:20)
+sending a purchases link failed Error: synthetic Redis error for a link's grant
+    at store.pipeline ([stdin]:62962:37)
+    at redisPipeline ([stdin]:4342:41)
+    at sendLink ([stdin]:62537:9)
+    at async ask ([stdin]:63060:48)
+    at async main ([stdin]:63071:19)
+sending a recovery-address link failed Error: synthetic Redis error for a link's grant
+    at store.pipeline ([stdin]:62962:37)
+    at redisPipeline ([stdin]:4342:41)
+    at sendLostEmailLink ([stdin]:45273:9)
+    at async POST2 ([stdin]:62888:5)
+    at async viaRoute ([stdin]:63129:22)
+    at async main ([stdin]:63141:20)
+
+Z_STATUS 1 null
+
+FILE z-3283-committed-grants.proof.ts
+
+requestLibraryLink: the library link's grant
+  ok    "OK": the link is emailed, and one store email is taken
+  ok    "OK" through the route: sent
+  FAIL  hole: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  hole: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  inherited slot: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  inherited slot: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  getter: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  getter: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  extra: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  extra: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  boxed: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  boxed: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  nested: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  nested: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  frozen malformed: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  frozen malformed: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  FAIL  lowercase: fails closed, no email, no store email taken
+        expected ["unknown",0,0]
+        got      ["sent",2,2]
+  FAIL  lowercase: the library form answers error
+        expected "https://marktmorgen.com/library?status=error"
+        got      "https://marktmorgen.com/library?status=sent"
+  ok    Redis throwing AFTER commit: fails closed, no email, no store email taken
+  ok    Redis throwing AFTER commit: the library form answers error
+
+sendLink: the purchases link's grant, written after requestOrdersLink answers
+  ok    "OK": sent, the link is emailed, and one store email is taken
+  FAIL  hole: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  inherited slot: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  getter: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  extra: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  boxed: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  nested: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  frozen malformed: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  FAIL  lowercase: still answers sent, no email, no store email taken, the failure logged
+        expected ["sent",0,0,true]
+        got      ["sent",1,1,false]
+  ok    Redis throwing AFTER commit: still answers sent, no email, no store email taken, the failure logged
+
+ordersLinkFor: a link handed out without asking
+  ok    "OK": a link with its token
+  FAIL  hole: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=937d49080bb66e1da958295a7a01c17a09d71474f17285aea6afd60b34ab4cfb"
+  FAIL  inherited slot: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=b35deed47cbd3dfa7d576b2b0285a5ae24d104bc6ea341b1f316a4f9e3ae2866"
+  FAIL  getter: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=71731a760f3a759b8ae3b6235ab32963e1a9639d2104fe4e319d6b8009e9db2e"
+  FAIL  extra: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=dc87ffbe18b0f95332a634c533bdb203b7de50415db6db38f4c61d5be4919875"
+  FAIL  boxed: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=f29e1c2e737dceacf6e2c8374204c9020b6a3dfd6869314260bd4fd4fa21397c"
+  FAIL  nested: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=573334c0083b1ba2f1e62cf90ce3bca84341f1d4e829e34988cdfcf118ad8150"
+  FAIL  frozen malformed: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=1620141bbfb04c8f7f109acccfc9c620fcfdfc436d87e4eab74d90271091731c"
+  FAIL  lowercase: null, never a link whose grant is unconfirmed
+        expected null
+        got      "https://marktmorgen.com/@moss/orders?token=25668dd159c1cfe882c15c9fa47b086e45228f4d8bb949dffd35828c98429e1d"
+  FAIL  Redis throwing AFTER commit: null, never a link whose grant is unconfirmed
+        expected null
+        got      "threw"
+
+A PayPal purchase's email (lib/paypal-sales.ts deliverPayPal), whose link comes from ordersLinkFor
+  ok    "OK": the purchase email carries the link with its token
+  FAIL  hole: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  inherited slot: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  getter: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  extra: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  boxed: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  nested: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  frozen malformed: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  lowercase: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      [null,true,true,true]
+  FAIL  Redis throwing AFTER commit: the purchase email still goes, with the generic orders link and no token
+        expected [null,true,true,false]
+        got      ["threw",false,null,null]
+
+sendLostEmailLink: a login link to the recovery address
+  ok    "OK": the link goes to the recovery address and the sign-in address is told
+  ok    "OK" through the route: sent
+  FAIL  hole: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    hole: the lost-inbox form still answers sent, telling nothing
+  FAIL  inherited slot: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    inherited slot: the lost-inbox form still answers sent, telling nothing
+  FAIL  getter: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    getter: the lost-inbox form still answers sent, telling nothing
+  FAIL  extra: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    extra: the lost-inbox form still answers sent, telling nothing
+  FAIL  boxed: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    boxed: the lost-inbox form still answers sent, telling nothing
+  FAIL  nested: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    nested: the lost-inbox form still answers sent, telling nothing
+  FAIL  frozen malformed: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    frozen malformed: the lost-inbox form still answers sent, telling nothing
+  FAIL  lowercase: fails closed, neither the link nor the notice is sent
+        expected ["unknown",0]
+        got      [null,4]
+  ok    lowercase: the lost-inbox form still answers sent, telling nothing
+  ok    Redis throwing AFTER commit: fails closed, neither the link nor the notice is sent
+  ok    Redis throwing AFTER commit: the lost-inbox form still answers sent, telling nothing
+
+startRecoveryAddress: the pending code is written before the code is emailed
+  ok    "OK": the code is sent to the new address
+  ok    "OK": and that code confirms it
+  FAIL  hole: no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  inherited slot: no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  getter: no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  extra: no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  boxed: no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  FAIL  nested: no code is emailed, and the form is told it was not sent
+        expected ["unsent",0]
+        got      ["sent",1]
+  ok    frozen malformed: no code is emailed, and the form is told it was not sent
+  ok    lowercase: no code is emailed, and the form is told it was not sent
+  FAIL  Redis throwing AFTER commit: no code is emailed, and the form is told it was not sent
+        expected ["threw",0]
+        got      ["unsent",0]
+  ok    independent producer: all acknowledged-unknown writes really committed before their receipt changed
+  FAIL  independent sender boundary: every disclosed token/code has an already persisted grant
+        expected true
+        got      false
+  FAIL  independent sender boundary: no unknown-ACK token/code is disclosed
+        expected []
+        got      [{"mode":"hole","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false},{"mode":"nested","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"lowercase","existed":false},{"mode":"lowercase","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"lowercase","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"lowercase","existed":false},{"mode":"hole","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false},{"mode":"nested","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"lowercase","existed":false},{"mode":"lowercase","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false}]
+Z_COMMITTED {"writes":69,"batchBytes":8758,"byPrefix":{"nl:lib:link:":18,"nl:orders:link:":27,"nl:auth:rec:link:":18,"nl:auth:rec:set:":6},"grantObservations":[{"mode":"healthy","existed":false},{"mode":"healthy","existed":false},{"mode":"hole","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false},{"mode":"nested","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"lowercase","existed":false},{"mode":"lowercase","existed":false},{"mode":"healthy","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"lowercase","existed":false},{"mode":"healthy","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"lowercase","existed":false},{"mode":"healthy","existed":false},{"mode":"healthy","existed":false},{"mode":"hole","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false},{"mode":"nested","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"frozen malformed","existed":false},{"mode":"lowercase","existed":false},{"mode":"lowercase","existed":false},{"mode":"healthy","existed":false},{"mode":"hole","existed":false},{"mode":"inherited slot","existed":false},{"mode":"getter","existed":false},{"mode":"extra","existed":false},{"mode":"boxed","existed":false},{"mode":"nested","existed":false}]}
+
+84 checks, 59 failing.
+Z_VOLUME {"runs":1462,"mocks":103,"over":true}
+sending a library link failed Error: synthetic Redis error AFTER committed grant SET
+    at store.pipeline ([stdin]:62979:37)
+    at async requestLibraryLink ([stdin]:16152:3)
+    at async POST ([stdin]:62791:17)
+    at async viaRoute ([stdin]:63033:22)
+    at async main ([stdin]:63047:20)
+sending a purchases link failed Error: synthetic Redis error AFTER committed grant SET
+    at store.pipeline ([stdin]:62979:37)
+    at async sendLink ([stdin]:62537:3)
+    at async ask ([stdin]:63084:48)
+    at async main ([stdin]:63096:19)
+sending a recovery-address link failed Error: synthetic Redis error AFTER committed grant SET
+    at store.pipeline ([stdin]:62979:37)
+    at async sendLostEmailLink ([stdin]:45273:3)
+    at async POST2 ([stdin]:62888:5)
+    at async viaRoute ([stdin]:63159:22)
+    at async main ([stdin]:63172:20)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3283-jscPpB

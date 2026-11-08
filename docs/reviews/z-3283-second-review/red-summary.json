@@ -1,0 +1,20 @@
+[
+  {
+    "file": "r24-link-grant-write.test.ts",
+    "result": "57 checks, 38 failing.",
+    "volume": {
+      "runs": 903,
+      "mocks": 70,
+      "over": false
+    }
+  },
+  {
+    "file": "z-3283-committed-grants.proof.ts",
+    "result": "84 checks, 59 failing.",
+    "volume": {
+      "runs": 1462,
+      "mocks": 103,
+      "over": true
+    }
+  }
+]

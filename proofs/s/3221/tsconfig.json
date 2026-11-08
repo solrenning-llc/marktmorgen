@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/creator-invite-credit.ts",
+    "../../../tests/l9-invite-invoice-list.test.ts",
+    "../../../tests/s-3221-invoice-fields.proof.ts",
+    "../../../tests/s-3221-balance.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

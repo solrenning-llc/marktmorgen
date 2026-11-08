@@ -1,0 +1,10 @@
+{
+  "file": "tests/store-data-registry.ts",
+  "mode": "exact-head",
+  "head": "e1a08e630f71ab734d49569d8779fa4701914f7a",
+  "stdout": "S_VOLUME {\"runs\":0,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

@@ -1,0 +1,15 @@
+{
+  "head": "fe4063d640602daf0ddba19ee592421b8e73ea6b",
+  "args": [
+    "timeout",
+    "120s",
+    "node",
+    "--max-old-space-size=1024",
+    "node_modules/typescript/bin/tsc",
+    "-p",
+    "proofs/s/3221/tsconfig.json"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

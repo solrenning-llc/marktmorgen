@@ -1,0 +1,10 @@
+{
+  "file": "tests/l9-invite-credit-exact.test.ts",
+  "mode": "exact-head",
+  "head": "e1a08e630f71ab734d49569d8779fa4701914f7a",
+  "stdout": "\nThe credit's record is written, then the write that lists it as owed fails once\n  ok    the write that lists it failed, after the record was kept\n\nAn unknown EXISTS result is never a complete successful settlement\n  ok    unknown existence is reported for retry and remains unpaid\n\nAn unreadable stored credit is unknown, never a complete successful settlement\n  ok    unknown credit is reported for retry and remains unpaid\n\nA relisting write answered oddly, without landing, is unknown too (Codex N on #2722)\n  ok    an odd relisting reply is reported for retry and pays nothing\n\nLater runs still pay it, once\n  ok    Ana's half of Bea's first payment reaches her plan, once\n\nThe credits already written are read back together, not one trip each (Claude 4 on #2722)\n  ok    one read for the five credits written before and the bonus\n\n6 checks, all passing.\nS_VOLUME {\"runs\":181,\"attempts\":22,\"forwarded\":22}\n",
+  "stderr": "reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: EXISTS in an unknown shape\n    at earnFrom ([stdin]:11487:90)\n    at async settleInvites ([stdin]:11595:24)\n    at async main ([stdin]:11740:21)\nreading an invited creator's payments failed UnknownReplyError: Redis answered relisting invite credits: in_BeaFirst01 does not read back in an unknown shape\n    at [stdin]:11420:24\n    at Array.forEach (<anonymous>)\n    at relist ([stdin]:11413:8)\n    at async earnFrom ([stdin]:11488:12)\n    at async settleInvites ([stdin]:11595:24)\n    at async main ([stdin]:11752:16)\nreading an invited creator's payments failed UnknownReplyError: Redis answered relisting invite credits: the write in an unknown shape\n    at relist ([stdin]:11437:71)\n    at async earnFrom ([stdin]:11488:12)\n    at async settleInvites ([stdin]:11595:24)\n    at async main ([stdin]:11764:16)\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

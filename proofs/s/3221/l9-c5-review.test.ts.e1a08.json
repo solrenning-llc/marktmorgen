@@ -1,0 +1,10 @@
+{
+  "file": "tests/l9-c5-review.test.ts",
+  "mode": "exact-head",
+  "head": "e1a08e630f71ab734d49569d8779fa4701914f7a",
+  "stdout": "✔ A: an unknown claim on an invite credit is not a complete run, and the bonus is still paid, once (40.788963ms)\n✔ B: an unreadable balance history after a failed done write never sends the credit again (9.13285ms)\n✔ B: a history still going on after the last page read is unknown, not 'not sent' (7.109926ms)\n✔ B: a history row without a string id, or with an odd credit mark, is unknown (16.437446ms)\n✔ C: an unknown first-sale claim is retried later, and the yearly offer goes out exactly once (16.390885ms)\n✔ C: an unknown once-per-subscription claim is retried at the next pass, once (6.421356ms)\n✔ C: an unknown review-request claim is retried later, and the request is sent exactly once (33.968734ms)\nℹ tests 7\nℹ suites 0\nℹ pass 7\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 141.312492\nS_VOLUME {\"runs\":729,\"attempts\":72,\"forwarded\":72}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

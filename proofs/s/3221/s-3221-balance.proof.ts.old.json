@@ -1,0 +1,10 @@
+{
+  "file": "tests/s-3221-balance.proof.ts",
+  "mode": "old-module-overlay",
+  "head": "fe4063d640602daf0ddba19ee592421b8e73ea6b",
+  "stdout": "  ok    healthy credit\n  ok    debit is no credit\n  FAIL  text balance unknown\n        expected null\n        got      {\"cents\":0,\"currency\":\"usd\"}\n  FAIL  fraction balance unknown\n        expected null\n        got      {\"cents\":1450.5,\"currency\":\"usd\"}\n  FAIL  numeric currency unknown\n        expected null\n        got      {\"cents\":1450,\"currency\":\"usd\"}\n  FAIL  missing balance unknown\n        expected null\n        got      {\"cents\":0,\"currency\":\"usd\"}\n\n6 checks, 4 failing.\nS_VOLUME {\"runs\":16,\"attempts\":6,\"forwarded\":6}\n",
+  "stderr": "",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

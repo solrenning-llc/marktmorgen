@@ -1,0 +1,10 @@
+{
+  "file": "tests/s-3221-balance.proof.ts",
+  "mode": "exact-head",
+  "head": "fe4063d640602daf0ddba19ee592421b8e73ea6b",
+  "stdout": "  ok    healthy credit\n  ok    debit is no credit\n  ok    text balance unknown\n  ok    fraction balance unknown\n  ok    numeric currency unknown\n  ok    missing balance unknown\n\n6 checks, all passing.\nS_VOLUME {\"runs\":16,\"attempts\":6,\"forwarded\":6}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

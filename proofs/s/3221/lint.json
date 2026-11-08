@@ -1,0 +1,17 @@
+{
+  "head": "fe4063d640602daf0ddba19ee592421b8e73ea6b",
+  "args": [
+    "timeout",
+    "120s",
+    "node",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings",
+    "0",
+    "tests/s-3221-invoice-fields.proof.ts",
+    "tests/s-3221-balance.proof.ts",
+    "proofs/s/3221/run.mjs"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

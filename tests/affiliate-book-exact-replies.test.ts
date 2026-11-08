@@ -2,7 +2,7 @@
  * An affiliate program's kept book reads Redis only in its exact shape (CX-123 rules 24 and 30; Claude 6, MÉDIO).
  *
  *   - forgetBookSnapshot, the step of a person's erasure that deletes the kept book holding their masked address
- *     (lib/affiliate-leads.ts, forgetLeadPerson): an EXISTS, a draft pointer or a version raise in another shape
+ *     (lib/affiliate-leads.ts, forgetLeadPerson): an EXISTS, a draft pointer, or the version's start or raise in another shape
  *     was read as "no book" (Number(null) === 0, a pointer not text taken as none), so the erasure ended as done
  *     while the book stayed, shown on the affiliate page for up to a day and kept for eight. Now it throws
  *     UnknownReplyError and the erasure is tried again.
@@ -42,10 +42,10 @@ async function base(commands: (string | number)[][]): Promise<unknown[]> {
   const out: unknown[] = [];
   for (const c of commands) {
     if (c[0] === "EVAL" && c[1] === BOOK_FORGET) {
-      const [book, draft, version, pointer, token, keep] = c.slice(3).map(String);
+      const [book, draft, version, pointer, token, keep, now] = c.slice(3).map(String);
       const seen = await one(["GET", pointer]);
       if ((seen ?? "") !== token) { out.push(2); continue; }
-      await memory([["DEL", book, draft], ["INCR", version], ["EXPIRE", version, keep]]);
+      await memory([["DEL", book, draft], ["SET", version, now, "NX", "EX", keep], ["INCR", version], ["EXPIRE", version, keep]]);
       out.push(1);
     } else if (c[0] === "HSTRLEN") {
       const value = await one(["HGET", c[1], c[2]]);
@@ -73,7 +73,8 @@ const bookLeft = async () => Number(await one(["EXISTS", BOOK]));
 
 // --- forgetBookSnapshot ---------------------------------------------------------------------------------------
 
-const isForgetRead = (batch: (string | number)[][]) => batch.length === 4 && batch[3]?.[0] === "EXISTS";
+// The erasure's first read (main's #3081 shape): SET NX EX, INCR, EXPIRE (the version's raise), GET pointer, EXISTS.
+const isForgetRead = (batch: (string | number)[][]) => batch.length === 5 && batch[0]?.[0] === "SET" && batch[4]?.[0] === "EXISTS";
 const isForgetScript = (batch: (string | number)[][]) => batch.length === 1 && batch[0][0] === "EVAL" && batch[0][1] === BOOK_FORGET;
 
 test("forget, healthy: the book is deleted and the version raised", async () => {
@@ -88,7 +89,16 @@ test("forget, confirmed empty: no book and no draft, nothing to delete, done", a
   redis.clear();
   const result = await withReplies(healthy, () => forgetBookSnapshot(SID));
   assert.ok("value" in result, "no error");
-  assert.equal(await one(["GET", VERSION]), "1", "the version is raised all the same");
+  assert.ok(Number(await one(["GET", VERSION])) >= 1, "the version is raised all the same");
+});
+
+test("forget, the version already kept: its start answers null (not set again), the book is deleted, done", async () => {
+  await seedBook();
+  await memory([["SET", VERSION, "41", "EX", 600]]);
+  const result = await withReplies(healthy, () => forgetBookSnapshot(SID));
+  assert.ok("value" in result, "no error");
+  assert.equal(await bookLeft(), 0);
+  assert.ok(Number(await one(["GET", VERSION])) > 41, "raised from where it was");
 });
 
 const FORGET_SHAPES: [string, unknown][] = [
@@ -97,7 +107,7 @@ const FORGET_SHAPES: [string, unknown][] = [
 for (const [label, odd] of FORGET_SHAPES) {
   test(`forget, EXISTS answered ${label}: unknown, the erasure is not called done and is tried again`, async () => {
     await seedBook();
-    const result = await withReplies((batch, answers) => (isForgetRead(batch) ? answers.map((a, i) => (i === 3 ? odd : a)) : answers), () => forgetBookSnapshot(SID));
+    const result = await withReplies((batch, answers) => (isForgetRead(batch) ? answers.map((a, i) => (i === 4 ? odd : a)) : answers), () => forgetBookSnapshot(SID));
     assert.ok("error" in result && result.error instanceof UnknownReplyError, `${label}: throws UnknownReplyError`);
   });
 }
@@ -107,17 +117,20 @@ for (const [label, odd] of POINTER_SHAPES) {
   test(`forget, the draft pointer answered ${label}: unknown, never taken as "no draft"`, async () => {
     redis.clear();
     await memory([["SET", POINTER, "tok_two"], ["HSET", `nl:aff:${SID}:book:new:tok_two`, AFF, PART]]);
-    const result = await withReplies((batch, answers) => (isForgetRead(batch) ? answers.map((a, i) => (i === 2 ? odd : i === 3 ? 0 : a)) : answers), () => forgetBookSnapshot(SID));
+    const result = await withReplies((batch, answers) => (isForgetRead(batch) ? answers.map((a, i) => (i === 3 ? odd : i === 4 ? 0 : a)) : answers), () => forgetBookSnapshot(SID));
     assert.ok("error" in result && result.error instanceof UnknownReplyError, `${label}: throws UnknownReplyError`);
   });
 }
 
 const READ_SHAPES: [string, Alter][] = [
-  ["the version raise answered null", (batch, answers) => (isForgetRead(batch) ? [null, ...answers.slice(1)] : answers)],
-  ["the version raise answered the text 1", (batch, answers) => (isForgetRead(batch) ? ["1", ...answers.slice(1)] : answers)],
-  ["the expiry answered null", (batch, answers) => (isForgetRead(batch) ? [answers[0], null, ...answers.slice(2)] : answers)],
-  ["the read answered three replies", (batch, answers) => (isForgetRead(batch) ? answers.slice(0, 3) : answers)],
-  ["the read answered five replies", (batch, answers) => (isForgetRead(batch) ? [...answers, 0] : answers)],
+  ["the version start answered 1", (batch, answers) => (isForgetRead(batch) ? [1, ...answers.slice(1)] : answers)],
+  ["the version start answered true", (batch, answers) => (isForgetRead(batch) ? [true, ...answers.slice(1)] : answers)],
+  ["the version start answered an empty list", (batch, answers) => (isForgetRead(batch) ? [[], ...answers.slice(1)] : answers)],
+  ["the version raise answered null", (batch, answers) => (isForgetRead(batch) ? [answers[0], null, ...answers.slice(2)] : answers)],
+  ["the version raise answered the text 1", (batch, answers) => (isForgetRead(batch) ? [answers[0], "1", ...answers.slice(2)] : answers)],
+  ["the expiry answered null", (batch, answers) => (isForgetRead(batch) ? [answers[0], answers[1], null, ...answers.slice(3)] : answers)],
+  ["the read answered four replies", (batch, answers) => (isForgetRead(batch) ? answers.slice(0, 4) : answers)],
+  ["the read answered six replies", (batch, answers) => (isForgetRead(batch) ? [...answers, 0] : answers)],
   ["the read answered no list", (batch, answers) => (isForgetRead(batch) ? (null as unknown as unknown[]) : answers)],
 ];
 for (const [label, alter] of READ_SHAPES) {

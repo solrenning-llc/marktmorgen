@@ -1,0 +1,324 @@
+
+FILE calls-busy-shape.test.ts
+
+A time paid at Stripe, while Stripe's list answers in another shape
+  ok    control: a list read to its end with no booking offers the time
+  ok    control: the paid time is not offered, the others are
+  ok    control: the paid time is not sold again
+  ok    a page that is a list, not an object: no time is offered
+  ok    a page that is a list, not an object: the paid time is not sold, and no checkout is opened
+  ok    data that is null: no time is offered
+  ok    data that is null: the paid time is not sold, and no checkout is opened
+  ok    data that is text: no time is offered
+  ok    data that is text: the paid time is not sold, and no checkout is opened
+  ok    has_more missing: no time is offered
+  ok    has_more missing: the paid time is not sold, and no checkout is opened
+  ok    has_more as text: no time is offered
+  ok    has_more as text: the paid time is not sold, and no checkout is opened
+  ok    a row that is text: no time is offered
+  ok    a row that is text: the paid time is not sold, and no checkout is opened
+  ok    a row with no id: no time is offered
+  ok    a row with no id: the paid time is not sold, and no checkout is opened
+  ok    more said, with no row to go on from: no time is offered
+  ok    more said, with no row to go on from: the paid time is not sold, and no checkout is opened
+  ok    once Stripe answers in its shape again, the paid time is still not offered
+
+A time held in Redis, while its HGETALL answers in another shape
+  ok    control: an empty diary offers the time
+  ok    control: an HGETALL confirmed empty offers the time
+  ok    a first buyer opens a checkout for the time
+  ok    control: the held time is not offered, the others are
+  ok    HGETALL as text: no time is offered
+  ok    HGETALL as text: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    HGETALL as a number: no time is offered
+  ok    HGETALL as a number: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    HGETALL as an object: no time is offered
+  ok    HGETALL as an object: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    HGETALL as null: no time is offered
+  ok    HGETALL as null: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    HGETALL as a list holding a number: no time is offered
+  ok    HGETALL as a list holding a number: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    once Redis answers in its shape again, the held time is still not offered
+
+35 checks, all passing.
+Z_VOLUME {"runs":298,"mocks":26,"over":false}
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage ([stdin]:49880:33)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async slotsForProduct ([stdin]:53179:47)
+    at async offered ([stdin]:53308:17)
+    at async main ([stdin]:53355:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage ([stdin]:49880:33)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async holdAndCheckout ([stdin]:53114:22)
+    at async sell ([stdin]:53312:16)
+    at async main ([stdin]:53356:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:49883:77)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async slotsForProduct ([stdin]:53179:47)
+    at async offered ([stdin]:53308:17)
+    at async main ([stdin]:53355:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:49883:77)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async holdAndCheckout ([stdin]:53114:22)
+    at async sell ([stdin]:53312:16)
+    at async main ([stdin]:53356:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:49883:77)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async slotsForProduct ([stdin]:53179:47)
+    at async offered ([stdin]:53308:17)
+    at async main ([stdin]:53355:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:49883:77)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async holdAndCheckout ([stdin]:53114:22)
+    at async sell ([stdin]:53312:16)
+    at async main ([stdin]:53356:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:49884:43)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async slotsForProduct ([stdin]:53179:47)
+    at async offered ([stdin]:53308:17)
+    at async main ([stdin]:53355:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:49884:43)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async holdAndCheckout ([stdin]:53114:22)
+    at async sell ([stdin]:53312:16)
+    at async main ([stdin]:53356:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:49884:43)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async slotsForProduct ([stdin]:53179:47)
+    at async offered ([stdin]:53308:17)
+    at async main ([stdin]:53355:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:49884:43)
+    at readCallSessions ([stdin]:52864:18)
+    at async readBusy ([stdin]:52898:36)
+    at async holdAndCheckout ([stdin]:53114:22)
+    at async sell ([stdin]:53312:16)
+    at async main ([stdin]:53356:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52872:36)
+    at async readBusy ([stdin]:52898:36)
+    at async slotsForProduct ([stdin]:53179:47)
+    at async offered ([stdin]:53308:17)
+    at async main ([stdin]:53355:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52872:36)
+    at async readBusy ([stdin]:52898:36)
+    at async holdAndCheckout ([stdin]:53114:22)
+    at async sell ([stdin]:53312:16)
+    at async main ([stdin]:53356:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52872:36)
+    at async readBusy ([stdin]:52898:36)
+    at async slotsForProduct ([stdin]:53179:47)
+    at async offered ([stdin]:53308:17)
+    at async main ([stdin]:53355:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52872:36)
+    at async readBusy ([stdin]:52898:36)
+    at async holdAndCheckout ([stdin]:53114:22)
+    at async sell ([stdin]:53312:16)
+    at async main ([stdin]:53356:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: more checkouts, with no row to read on from
+    at readCallSessions ([stdin]:52873:45)
+    at async readBusy ([stdin]:52898:36)
+    at async slotsForProduct ([stdin]:53179:47)
+    at async offered ([stdin]:53308:17)
+    at async main ([stdin]:53355:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: more checkouts, with no row to read on from
+    at readCallSessions ([stdin]:52873:45)
+    at async readBusy ([stdin]:52898:36)
+    at async holdAndCheckout ([stdin]:53114:22)
+    at async sell ([stdin]:53312:16)
+    at async main ([stdin]:53356:75)
+
+Z_STATUS 0 null
+
+FILE call-team-read-failure.test.ts
+
+Confirming a paid team booking while its team cannot be read
+  ok    the hold claims its host's time for as long as the checkout can be paid
+  ok    a failed team read throws and leaves the booking unconfirmed, for the next confirmation
+  ok    confirmed once the team can be read, its host's claim is kept for good
+
+Moving a team booking while its team cannot be read
+  ok    the booking is confirmed with its host's claim for good
+  ok    the move is refused, and the host keeps the booked time
+  ok    once the team can be read, the move keeps its host at the new time
+
+6 checks, all passing.
+Z_VOLUME {"runs":284,"mocks":5,"over":false}
+reading a moved booking's team failed Error: Redis request failed with status 503
+    at store.pipeline ([stdin]:56177:111)
+    at redisPipeline ([stdin]:2355:41)
+    at readTeams ([stdin]:55108:23)
+    at teamForMove ([stdin]:55874:22)
+    at moveBooking ([stdin]:55711:18)
+    at main ([stdin]:56258:23)
+
+Z_STATUS 0 null
+
+FILE call-lengths-booking.test.ts
+
+The setup keeps them only in the shape the rules allow
+  ok    two lengths, shortest first, the first the setup's own
+  ok    one length, or none, is no list
+  ok    out of order, not the setup's own first, twice, no price, a part of a cent, an unknown length, four, a group, too long for the hours, a deposit not below every price, one that is not the setup's own, not a list
+  ok    the setup and the rules allow the same number of lengths
+  ok    read back from storage, lengths the rules no longer allow are dropped, never the call: it sells at its own length alone
+  ok    a setup broken elsewhere is still refused from storage
+  ok    a deposit below every price is kept
+
+The length of a new booking
+  ok    none sent is the setup's own; one of the list at its own price
+  ok    a length the call does not have is refused
+  ok    a product whose price was changed elsewhere sells only the setup's own length, at the price now
+  ok    a call with one length: its own length at the product's price, and nothing else
+  ok    dated sessions have their own lengths
+  ok    a paid booking keeps its own length when it moves, with or without the list
+
+Booked and charged at the length chosen
+  ok    the product carries them
+  ok    the hour is charged at the hour's price, said on the line and kept on the sale
+  ok    its whole hour is held: half an hour inside it cannot be booked
+  ok    none chosen is the setup's own, at the product's price
+  ok    refused before anything is opened: an unknown length, a price changed since, another length from a package, with a deposit or with a code
+  ok    a call with one length is charged its own price, whatever is passed
+  ok    back from Stripe's page, the length chosen is still chosen; the call's own length needs nothing said
+
+A paid booking moves at its own length
+  ok    an hour stays an hour, though the setup's own is half of one
+  ok    a booking whose length is not one a call may have is never moved at a guess
+  ok    the times offered to move it are a whole hour each: none starts after 4 p.m.
+  ok    the studio's save route refuses several lengths for now
+
+Once the list is gone, a paid hour still moves as an hour
+  ok    the setup's own is half an hour, the booking stays an hour
+
+25 checks, all passing.
+Z_VOLUME {"runs":181,"mocks":8,"over":false}
+
+Z_STATUS 0 null
+
+FILE call-team-read-job-retry.test.ts
+  ok    healthy real job confirms once, preserves permanent host claim, and consumes queue
+  ok    confirmation entry written by real hold is due before fault
+  ok    unknown team is never counted as a confirmed booking
+  ok    unconfirmed paid booking stays queued for retry
+  ok    failed team read does not mark booking confirmed
+  ok    healthy next mail run confirms booking and retains its host
+  ok    confirmation queue is clear after next run
+  ok    paid host claim stays permanent beyond the original hold margin
+
+8 checks, all passing.
+Z_VOLUME {"runs":257,"mocks":7,"over":false}
+sending a call reminder failed Error: reading a team booking's hosts failed; confirmed later
+    at confirmBooking ([stdin]:55696:11)
+    at async sendCallReminders ([stdin]:56028:13)
+    at async main ([stdin]:56195:20) {
+  [cause]: Error: Redis request failed with status 503
+      at store.pipeline ([stdin]:56112:111)
+      at redisPipeline ([stdin]:2355:41)
+      at readTeams ([stdin]:55024:23)
+      at bookingTeam ([stdin]:55823:23)
+      at confirmBooking ([stdin]:55694:18)
+      at sendCallReminders ([stdin]:56028:19)
+      at async main ([stdin]:56195:20)
+}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (38.138474ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (150.541734ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (30.485778ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.92357ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.172049ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.116645ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.420393ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (70.259828ms)
+✔ every store figure taken in the code is a kind a line prices (43.306221ms)
+✔ every email sent names a meter, and each file only the meters it may use (71.821142ms)
+✔ the units a figure is taken in cost at least what they stand for (8.816448ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (3.118833ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.174543ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.248824ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.171659ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.142475ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.359351ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.155024ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.967466ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.093591ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.320312ms)
+✔ Path push fits its reserved studio requests (0.084567ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.058248ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.095103ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.128584ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (37.096315ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 484.214797
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (136.671153ms)
+✔ each family is bounded one way at least, and what it says can be checked (157.758628ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (17.020544ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (3.511574ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.539502ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (7.688ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.176836ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 330.732703
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3240f-jUh84G

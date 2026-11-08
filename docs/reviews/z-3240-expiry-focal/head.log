@@ -1,0 +1,232 @@
+
+FILE z-3240-diary-domain.proof.ts
+
+A real producer's held entry with a semantically unreadable reply
+  ok    zero duration: healthy actual producer hold blocks its time
+  ok    zero duration: unreadable semantics refuse the whole offer
+  ok    zero duration: no second checkout
+  ok    zero duration: a malformed response never deletes the healthy stored producer hold
+  ok    end before start: healthy actual producer hold blocks its time
+  ok    end before start: unreadable semantics refuse the whole offer
+  ok    end before start: no second checkout
+  ok    end before start: a malformed response never deletes the healthy stored producer hold
+  ok    negative hold expiry: healthy actual producer hold blocks its time
+  ok    negative hold expiry: unreadable semantics refuse the whole offer
+  ok    negative hold expiry: no second checkout
+  ok    negative hold expiry: a malformed response never deletes the healthy stored producer hold
+  ok    healthy exact empty diary still offers times
+  ok    healthy positive expiry passed: target can be offered
+  ok    healthy positive expiry passed: real stale hold is removed
+
+15 checks, all passing.
+Z_VOLUME {"runs":160,"mocks":13,"over":false}
+
+Z_STATUS 0 null
+
+FILE calls-lock-shape.test.ts
+
+The lock's SET NX in another shape: no checkout, and never two for one time
+  ok    control: a first buyer opens a checkout for the time
+  ok    control: a second buyer for the same time is told it is taken, with no checkout
+  ok    SET NX as nothing (undefined): refused, no checkout is opened
+  ok    SET NX as an object: refused, no checkout is opened
+  ok    SET NX as a number: refused, no checkout is opened
+  ok    SET NX as other text: refused, no checkout is opened
+  ok    SET NX as a list holding OK: refused, no checkout is opened
+  ok    two buyers of one time while SET NX answers in another shape: neither opens a checkout
+
+A held lock read in another shape is never taken over
+  ok    control: a lock held right now turns the buyer away, with no checkout
+  ok    control: a lock left 20 seconds ago by a request that died is taken over
+  ok    GET of a held lock as a list: not taken over, no checkout is opened
+  ok    GET of a held lock as an object: not taken over, no checkout is opened
+  ok    GET of a held lock as a number: not taken over, no checkout is opened
+  ok    GET of a held lock as text that is not a time: not taken over, no checkout is opened
+  ok    GET of a held lock as nothing (undefined): not taken over, no checkout is opened
+  ok    a held lock whose GET says it is gone, while SET NX still says held: not taken over
+  ok    taking over a lock that ran out, its SET answering nothing (undefined): refused, no checkout
+  ok    taking over a lock that ran out, its SET answering other text: refused, no checkout
+
+A move under a lock in another shape is not written
+  ok    SET NX in another shape: the move is refused
+  ok    …and the diary is as it was
+
+After a move is written, a diary in another shape deletes nothing and the move is done
+  ok    the move is reported as done
+  ok    the old entry is not deleted on a reply it could not read
+  ok    the booking's own entry is at the new time
+
+A Stripe reading cut short after its last page refuses to offer or sell
+  ok    control: the booking on the fifth page is read, its time not offered, the others are
+  ok    control: …and not sold again
+  ok    five full pages and more said: no time is offered
+  ok    five full pages and more said: the time is not sold, no checkout is opened
+
+A diary entry that cannot be read is unknown: nothing is offered, sold or deleted
+  ok    control: an entry filed by its start before group calls keeps its time, the others are offered
+  ok    an entry as JSON that does not parse: no time is offered
+  ok    an entry as JSON that does not parse: the time is not sold, no checkout is opened
+  ok    an entry as JSON that does not parse: it is not deleted
+  ok    an entry as null: no time is offered
+  ok    an entry as null: the time is not sold, no checkout is opened
+  ok    an entry as null: it is not deleted
+  ok    an entry as an end in text: no time is offered
+  ok    an entry as an end in text: the time is not sold, no checkout is opened
+  ok    an entry as an end in text: it is not deleted
+  ok    an entry as a start in text: no time is offered
+  ok    an entry as a start in text: the time is not sold, no checkout is opened
+  ok    an entry as a start in text: it is not deleted
+  ok    an entry as no start, filed under a field that is not one: no time is offered
+  ok    an entry as no start, filed under a field that is not one: the time is not sold, no checkout is opened
+  ok    an entry as no start, filed under a field that is not one: it is not deleted
+  ok    an entry as until in text: no time is offered
+  ok    an entry as until in text: the time is not sold, no checkout is opened
+  ok    an entry as until in text: it is not deleted
+  ok    an entry as a list: no time is offered
+  ok    an entry as a list: the time is not sold, no checkout is opened
+  ok    an entry as a list: it is not deleted
+  ok    an entry as a hold that ran out before 1970 (until -1): no time is offered
+  ok    an entry as a hold that ran out before 1970 (until -1): the time is not sold, no checkout is opened
+  ok    an entry as a hold that ran out before 1970 (until -1): it is not deleted
+  ok    an entry as until that is not a whole number: no time is offered
+  ok    an entry as until that is not a whole number: the time is not sold, no checkout is opened
+  ok    an entry as until that is not a whole number: it is not deleted
+  ok    an entry as until past the largest safe whole number: no time is offered
+  ok    an entry as until past the largest safe whole number: the time is not sold, no checkout is opened
+  ok    an entry as until past the largest safe whole number: it is not deleted
+  ok    an entry as no length (its end at its start): no time is offered
+  ok    an entry as no length (its end at its start): the time is not sold, no checkout is opened
+  ok    an entry as no length (its end at its start): it is not deleted
+  ok    an entry as an end before its start: no time is offered
+  ok    an entry as an end before its start: the time is not sold, no checkout is opened
+  ok    an entry as an end before its start: it is not deleted
+  ok    an entry as a start at zero: no time is offered
+  ok    an entry as a start at zero: the time is not sold, no checkout is opened
+  ok    an entry as a start at zero: it is not deleted
+  ok    an entry as a start that is not a whole number: no time is offered
+  ok    an entry as a start that is not a whole number: the time is not sold, no checkout is opened
+  ok    an entry as a start that is not a whole number: it is not deleted
+  ok    an entry as no start, filed under zero: no time is offered
+  ok    an entry as no start, filed under zero: the time is not sold, no checkout is opened
+  ok    an entry as no start, filed under zero: it is not deleted
+  ok    once the diary reads again, times are offered
+
+A real hold read back with times no writer makes is unknown: nothing is offered, sold or deleted
+  ok    no length: control, the real hold keeps its time
+  ok    no length: no time is offered
+  ok    no length: the time is not sold, no second checkout is opened
+  ok    no length: the real hold is not deleted
+  ok    an end before its start: control, the real hold keeps its time
+  ok    an end before its start: no time is offered
+  ok    an end before its start: the time is not sold, no second checkout is opened
+  ok    an end before its start: the real hold is not deleted
+  ok    a negative end of hold: control, the real hold keeps its time
+  ok    a negative end of hold: no time is offered
+  ok    a negative end of hold: the time is not sold, no second checkout is opened
+  ok    a negative end of hold: the real hold is not deleted
+  ok    control: a real hold whose time ran out gives its time back
+  ok    control: …and is tidied away
+
+88 checks, all passing.
+Z_VOLUME {"runs":966,"mocks":44,"over":false}
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's SET NX in an unknown shape
+    at take ([stdin]:54793:11)
+    at async takeLock2 ([stdin]:54797:9)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55459:63)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's SET NX in an unknown shape
+    at take ([stdin]:54793:11)
+    at async takeLock2 ([stdin]:54797:9)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55459:63)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's SET NX in an unknown shape
+    at take ([stdin]:54793:11)
+    at async takeLock2 ([stdin]:54797:9)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55459:63)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's SET NX in an unknown shape
+    at take ([stdin]:54793:11)
+    at async takeLock2 ([stdin]:54797:9)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55459:63)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's SET NX in an unknown shape
+    at take ([stdin]:54793:11)
+    at async takeLock2 ([stdin]:54797:9)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55459:63)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's SET NX in an unknown shape
+    at take ([stdin]:54793:11)
+    at async takeLock2 ([stdin]:54797:9)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async Promise.all (index 0)
+    at async main ([stdin]:55465:16)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's SET NX in an unknown shape
+    at take ([stdin]:54793:11)
+    at async takeLock2 ([stdin]:54797:9)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async Promise.all (index 1)
+    at async main ([stdin]:55465:16)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's GET in an unknown shape
+    at takeLock2 ([stdin]:54801:79)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55488:82)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's GET in an unknown shape
+    at takeLock2 ([stdin]:54801:79)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55488:82)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's GET in an unknown shape
+    at takeLock2 ([stdin]:54801:79)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55488:82)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's GET in an unknown shape
+    at takeLock2 ([stdin]:54801:79)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55488:82)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's GET in an unknown shape
+    at takeLock2 ([stdin]:54801:79)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55488:82)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's take-over in an unknown shape
+    at takeLock2 ([stdin]:54804:11)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55502:94)
+taking a call's lock failed UnknownReplyError: Redis answered a call lock's take-over in an unknown shape
+    at takeLock2 ([stdin]:54804:11)
+    at async holdAndCheckout ([stdin]:54939:14)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55502:94)
+taking a call's lock for a move failed UnknownReplyError: Redis answered a call lock's SET NX in an unknown shape
+    at take ([stdin]:54793:11)
+    at async takeLock2 ([stdin]:54797:9)
+    at async moveBooking ([stdin]:55077:14)
+    at async main ([stdin]:55514:20)
+reading a moved booking's old entries failed; left in place UnknownReplyError: Redis answered a call diary's holds in an unknown shape
+    at readDiary ([stdin]:54610:45)
+    at async moveBooking ([stdin]:55123:25)
+    at async main ([stdin]:55528:17)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: more completed checkouts than 5 pages; paid bookings not all read
+    at readBusy ([stdin]:54745:24)
+    at async slotsForProduct ([stdin]:55028:47)
+    at async offered ([stdin]:55421:17)
+    at async main ([stdin]:55562:60)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: more completed checkouts than 5 pages; paid bookings not all read
+    at readBusy ([stdin]:54745:24)
+    at async holdAndCheckout ([stdin]:54963:22)
+    at async sell ([stdin]:55425:16)
+    at async main ([stdin]:55564:86)
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3240f-RlKX5e

@@ -29,5 +29,5 @@ is(
 is("the jump target exists", /id="task-text"/.test(tasks), true);
 is("the count sentence stays for a list with tasks", tasks.includes("`${open} open, ${tasks.length - open} done.`"), true);
 is("the count line stays the focus anchor in both cases", tasks.includes("<p ref={countLine} tabIndex={-1}"), true);
-is("the old bare empty text is not the visible count line", tasks.includes('{tasks.length ? `${open} open, ${tasks.length - open} done.` : "No tasks yet."}'), false);
+is("an empty list keeps its status text for screen readers only, never as the visible bare line", tasks.includes('className={tasks.length ? "mt-1 text-sm text-ink-soft" : "sr-only focus:not-sr-only mt-1 text-sm text-ink-soft"}'), true);
 done();

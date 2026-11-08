@@ -142,7 +142,8 @@ async function main(): Promise<void> {
   is("a change whose replies came back cut short: unknown", threwUnknown(cut), true);
   shape = null;
   is("and neither wrote", await raw(ANA), list(task(1)));
-  const fine = await changePersonTasks(stats, ANA, room, (tasks) => addTask(tasks, { text: "Call back", due: "", assignee: "" }, id(9), NOW));
+  // The store has no count yet (its tasks were put there by hand): the recount it needs is paid for.
+  const fine = await changePersonTasks(stats, ANA, room, (tasks) => addTask(tasks, { text: "Call back", due: "", assignee: "" }, id(9), NOW), async () => ({ ok: true }));
   is("a list read whole still changes", fine.ok ? fine.tasks.map((t) => t.id) : fine, [id(1), id(9)]);
 
   part("Everyone's tasks: an unreadable person is never counted as none");

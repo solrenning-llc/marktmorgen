@@ -1,0 +1,14 @@
+{
+  "args": [
+    "timeout",
+    "120s",
+    "node",
+    "--max-old-space-size=1024",
+    "node_modules/typescript/bin/tsc",
+    "-p",
+    "proofs/s/numbers-link-counter/tsconfig.json"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

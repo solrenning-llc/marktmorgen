@@ -1,0 +1,15 @@
+{
+  "args": [
+    "timeout",
+    "120s",
+    "node",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings",
+    "0",
+    "tests/s-numbers-link-counter.proof.ts",
+    "proofs/s/numbers-link-counter/run.mjs"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

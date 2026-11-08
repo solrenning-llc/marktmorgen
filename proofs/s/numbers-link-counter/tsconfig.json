@@ -1,0 +1,14 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/numbers-links.ts",
+    "../../../tests/s-numbers-link-counter.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

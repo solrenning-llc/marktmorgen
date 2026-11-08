@@ -1,0 +1,16 @@
+{
+  "command": [
+    "git",
+    "grep",
+    "-n",
+    "-E",
+    "return Number\\((n|count|raw)\\) *<=",
+    "HEAD",
+    "--",
+    "lib"
+  ],
+  "status": 0,
+  "stdout": "HEAD:lib/membership-manage.ts:101:  return Number(count) <= limit;\nHEAD:lib/numbers-links.ts:150:  return Number(n) <= OPENS_PER_DAY;\n",
+  "stderr": "",
+  "scope": "Exact small pattern only; not a complete semantic repository audit."
+}

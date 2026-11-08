@@ -228,25 +228,55 @@ async function save(b: Broadcast): Promise<void> {
  * their records hold, before they are read: for a reading that pays for its
  * size first (lib/mcp-tools.ts, emailsTool). Null when a size did not come back.
  */
+/** The ids LRANGE answered, when they are exactly a list of ids this code writes (rule 24); null otherwise. Pure. */
+function listedIds(response: unknown, limit: number): string[] | null {
+  const ids: unknown = Array.isArray(response) && response.length === 1 ? response[0] : null;
+  if (!Array.isArray(ids) || ids.length > limit || !ids.every((id) => typeof id === "string" && BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) return null;
+  return ids as string[];
+}
+
 export async function broadcastSizes(listId: string | null, limit = 30): Promise<{ count: number; bytes: number } | null> {
   if (!listId || !isRedisConfigured()) return { count: 0, bytes: 0 };
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  // Only Redis's own list of ids: any other answer is unknown, never "no campaigns".
+  const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
+  if (!list) return null;
   if (!list.length) return { count: 0, bytes: 0 };
-  const lengths = (await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)]))).map(Number);
+  const replies = await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)]));
+  if (!Array.isArray(replies) || replies.length !== list.length) return null;
+  const lengths = replies.map((n) => (typeof n === "number" ? n : NaN));
   if (lengths.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
   // A broadcast added between this and the reading is a few bytes more, bounded by how fast a store writes them.
   return { count: list.length, bytes: lengths.reduce((a, b) => a + b, 0) };
 }
 
-/** The store's broadcasts, newest first. */
+export class BroadcastsUnreadable extends Error {
+  constructor(what: string) {
+    super(`The store's campaigns could not be read: ${what}`);
+    this.name = "BroadcastsUnreadable";
+  }
+}
+
+/**
+ * The store's broadcasts, newest first, read exactly (rule 24). A record Redis answers as its own nil is a campaign
+ * whose record expired (it is written before its id is listed, and kept RECORD_DAYS): left out, known. A list of
+ * ids in another shape, a record that does not read, or one of another id or list throws BroadcastsUnreadable, never
+ * read as fewer or no campaigns. Records read as before (parse, with its documented defaults).
+ */
 export async function listBroadcasts(listId: string | null, limit = 30): Promise<Broadcast[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
+  if (!list) throw new BroadcastsUnreadable("the list of campaigns");
   if (!list.length) return [];
   const rows = await redisPipeline(list.map((id) => ["GET", bcKey(id)]));
-  return rows.map(parse).filter((b): b is Broadcast => b !== null);
+  if (!Array.isArray(rows) || rows.length !== list.length) throw new BroadcastsUnreadable("the campaigns' records");
+  const out: Broadcast[] = [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (rows[i] === null) continue;
+    const b = parse(rows[i]);
+    if (!b || b.id !== list[i] || b.listId !== listId) throw new BroadcastsUnreadable("a campaign's record");
+    out.push(b);
+  }
+  return out;
 }
 
 

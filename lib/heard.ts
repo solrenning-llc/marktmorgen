@@ -44,12 +44,17 @@ const ANSWER_WITHIN_SECONDS = 30 * 86400;
  */
 export async function heardOff(handle: string): Promise<boolean> {
   if (!isRedisConfigured()) return true;
-  const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
-  const member = replies ? countOf(replies[0]) : null;
-  if (member === 0) return false;
-  if (member === 1) return true;
+  const off = await readHeardOff(handle);
+  if (off !== "unknown") return off;
   console.error("heard-off: whether the store asks where buyers heard about it is unknown; not asked this time");
   return true;
+}
+
+/** The mark read exactly: true or false only on a reply of 1 or 0, "unknown" on any other shape. */
+async function readHeardOff(handle: string): Promise<boolean | "unknown"> {
+  const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
+  const member = replies ? countOf(replies[0]) : null;
+  return member === 0 ? false : member === 1 ? true : "unknown";
 }
 
 export async function setHeardOff(handle: string, off: boolean): Promise<void> {
@@ -66,7 +71,13 @@ export type HeardResult = "counted" | "already" | "invalid" | "off" | "unavailab
 export async function recordHeard(store: Store, sessionId: unknown, answer: unknown, now = Date.now()): Promise<HeardResult> {
   if (!isHeardAnswer(answer) || typeof sessionId !== "string" || !SESSION.test(sessionId)) return "invalid";
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return "unavailable";
-  if (await heardOff(store.handle)) return "off";
+  // A mark that cannot be read is not "off" (Claude 6 on #3115): nothing is counted now and the reply says so.
+  const off = await readHeardOff(store.handle);
+  if (off === "unknown") {
+    console.error("heard-off: whether the store asks where buyers heard about it is unknown; the answer is not counted now");
+    return "unavailable";
+  }
+  if (off) return "off";
   let session: Record<string, unknown>;
   try {
     session = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(sessionId)}`)) as Record<string, unknown>;

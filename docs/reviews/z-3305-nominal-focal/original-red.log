@@ -1,0 +1,73 @@
+
+FILE z-3305-live-image.proof.ts
+Z_LIVE_PICTURE {"status":500,"error":"server_error","tokens":0,"listed":true,"placesBeforeSweep":2,"swept":1,"deleted":true,"fileStillPresent":false,"placesAfterSweep":1,"commands":["INCR","SET","ZADD","ZADD"],"jsonPipelineBytes":361}
+✖ MEDIUM regression: uncertain new door must not queue an already-consumed live picture for deletion (23.877253ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.85802
+
+✖ failing tests:
+
+test at [stdin]:6917:27
+✖ MEDIUM regression: uncertain new door must not queue an already-consumed live picture for deletion (23.877253ms)
+  AssertionError [ERR_ASSERTION]: a failed re-request for a path already consumed by a post must not make the sweep delete its existing picture
+
+  false !== true
+
+      at TestContext.<anonymous> ([stdin]:6948:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":14,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3305-room-size-captured.proof.ts
+Z_ROOM_SIZE {"missed":true,"state":"existing","errorName":null,"beforeUsed":1040,"afterUsed":544,"actualDealBytes":976,"actualRecordBytes":829,"recordUnchanged":true,"reservedSlot":"480","commands":["HGET","EVAL","EVAL"],"jsonPipelineBytes":3644}
+✖ inherited MEDIUM: unread existing deal must keep its actual larger room when the retry draft is smaller (9.343965ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14.359946
+
+✖ failing tests:
+
+test at [stdin]:10695:27
+✖ inherited MEDIUM: unread existing deal must keep its actual larger room when the retry draft is smaller (9.343965ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'existing'
+  - undefined
+
+      at TestContext.<anonymous> ([stdin]:10724:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'existing',
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":10,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3305focal-xHNV62

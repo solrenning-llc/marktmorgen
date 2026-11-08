@@ -1,0 +1,216 @@
+
+FILE z-3305-live-image.proof.ts
+Z_LIVE_PICTURE {"status":500,"error":"server_error","tokens":0,"listed":false,"placesBeforeSweep":2,"swept":0,"deleted":false,"fileStillPresent":true,"placesAfterSweep":1,"commands":["INCR","SET","ZADD","ZADD"],"jsonPipelineBytes":379}
+✔ MEDIUM regression: uncertain new door must not queue an already-consumed live picture for deletion (13.78909ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.359014
+Z_VOLUME {"runs":15,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3305-room-size-captured.proof.ts
+Z_ROOM_SIZE {"missed":true,"errorName":"Error","beforeUsed":1040,"afterUsed":1040,"actualDealBytes":976,"actualRecordBytes":829,"recordUnchanged":true,"reservedSlot":"976","commands":["HGET"],"jsonPipelineBytes":54}
+✔ inherited MEDIUM: unread existing deal must keep its actual larger room when the retry draft is smaller (6.899292ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11.154962
+Z_VOLUME {"runs":8,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-upload-door-exact.test.ts
+
+Control: a confirmed note gives the door, and the sweep finds it
+  ok    the door is given
+  ok    listed, and its place taken
+  ok    never used, it is swept a day on and its place comes back
+
+A note answered in another shape gives no door; the place comes back through the sweep
+  ok    ZADD landed, answered as text: no door
+  ok    ZADD landed, answered as text: its place still counted
+  ok    ZADD landed, answered as text: a day on its place comes back
+  ok    ZADD landed, answered true: no door
+  ok    ZADD landed, answered true: its place still counted
+  ok    ZADD landed, answered true: a day on its place comes back
+  ok    ZADD landed, answered 2: no door
+  ok    ZADD landed, answered 2: its place still counted
+  ok    ZADD landed, answered 2: a day on its place comes back
+  ok    ZADD not carried out, answered as text: no door
+  ok    ZADD not carried out, answered as text: its place still counted
+  ok    ZADD not carried out, answered as text: a day on its place comes back
+  ok    ZADD not carried out, answered null: no door
+  ok    ZADD not carried out, answered null: its place still counted
+  ok    ZADD not carried out, answered null: a day on its place comes back
+  ok    SET landed, answered 1: no door
+  ok    SET landed, answered 1: its place still counted
+  ok    SET landed, answered 1: a day on its place comes back
+  ok    SET landed, answered true: no door
+  ok    SET landed, answered true: its place still counted
+  ok    SET landed, answered true: a day on its place comes back
+  ok    SET landed, answered lowercase: no door
+  ok    SET landed, answered lowercase: its place still counted
+  ok    SET landed, answered lowercase: a day on its place comes back
+  ok    one reply for two commands: no door
+  ok    one reply for two commands: its place still counted
+  ok    one reply for two commands: a day on its place comes back
+  ok    three replies: no door
+  ok    three replies: its place still counted
+  ok    three replies: a day on its place comes back
+  ok    not a list: no door
+  ok    not a list: its place still counted
+  ok    not a list: a day on its place comes back
+  ok    nothing carried out, answered empty: no door
+  ok    nothing carried out, answered empty: its place still counted
+  ok    nothing carried out, answered empty: a day on its place comes back
+
+A note that throws gives no door; the place comes back through the sweep
+  ok    no door
+  ok    its place counted
+  ok    given back a day on
+  ok    never sent: no door
+  ok    never sent: its place counted
+  ok    never sent: given back a day on
+
+Two failed requests for the same new path: each place comes back once, a day on
+  ok    no door either time
+  ok    both places counted
+  ok    both given back a day on, once each
+  ok    a later sweep gives nothing more back
+
+A note that landed and then threw: its place comes back once, whatever order the sweep reads it in
+  ok    a place is taken for the picture
+  ok    its door is noted
+  ok    the post takes it
+  ok    no longer a door to sweep
+  ok    read one at a time: no door
+  ok    read one at a time: the note listed the path, and both places are counted
+  ok    read one at a time: its place came back once; the post's picture and place are kept
+  ok    a place is taken for the picture
+  ok    its door is noted
+  ok    the post takes it
+  ok    no longer a door to sweep
+  ok    read together: no door
+  ok    read together: the note listed the path, and both places are counted
+  ok    read together: its place came back once; the post's picture and place are kept
+  ok    a place is taken for the picture
+  ok    its door is noted
+  ok    the post takes it
+  ok    no longer a door to sweep
+  ok    the doubt's removal never sent, then read again: no door
+  ok    the doubt's removal never sent, then read again: the note listed the path, and both places are counted
+  ok    the doubt's removal never sent, then read again: its place came back once; the post's picture and place are kept
+  ok    a place is taken for the picture
+  ok    its door is noted
+  ok    the post takes it
+  ok    no longer a door to sweep
+  ok    the doubt's removal carried out, then no answer: no door
+  ok    the doubt's removal carried out, then no answer: the note listed the path, and both places are counted
+  ok    the doubt's removal carried out, then no answer: its place came back once; the post's picture and place are kept
+
+A path already in a post: a failed request for it again never makes the sweep delete its picture
+  ok    a place is taken for the picture
+  ok    its door is noted
+  ok    the post takes it
+  ok    no longer a door to sweep
+  ok    the note never sent: no door
+  ok    the note never sent: the post's place and this request's are counted
+  ok    the note never sent: a day on, the post's picture is still there
+  ok    the note never sent: only this request's place came back
+  ok    a place is taken for the picture
+  ok    its door is noted
+  ok    the post takes it
+  ok    no longer a door to sweep
+  ok    the note answered nothing, nothing carried out: no door
+  ok    the note answered nothing, nothing carried out: the post's place and this request's are counted
+  ok    the note answered nothing, nothing carried out: a day on, the post's picture is still there
+  ok    the note answered nothing, nothing carried out: only this request's place came back
+  ok    a place is taken for the picture
+  ok    its door is noted
+  ok    the post takes it
+  ok    no longer a door to sweep
+  ok    only the note's SET carried out, answered in another shape: no door
+  ok    only the note's SET carried out, answered in another shape: the post's place and this request's are counted
+  ok    only the note's SET carried out, answered in another shape: a day on, the post's picture is still there
+  ok    only the note's SET carried out, answered in another shape: only this request's place came back
+
+A path that already had a door: no door, and this request's place goes back at once
+  ok    no door for this member
+  ok    only the earlier door's place is counted
+  ok    the earlier door is left as it was
+  ok    and this member cannot use it
+
+noteCommunityUpload reads its two replies exactly
+  ok    noted and listed
+  ok    noted, already listed
+  ok    a door there already
+  ok    a door there already, listed now
+  ok    SET as text
+  ok    ZADD as text
+  ok    ZADD negative
+  ok    ZADD fraction
+  ok    ZADD missing
+  ok    an object
+
+115 checks, all passing.
+Z_VOLUME {"runs":317,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE form-opportunity-room-exact.test.ts
+
+Controls: created, existing and full keep their room as before
+  ok    a new deal is created
+  ok    its room is taken
+  ok    asked again, it is the existing one
+  ok    and its room is unchanged
+  ok    one deal kept
+  ok    a full CRM says full
+  ok    and the room it took goes back
+
+A write answered in another shape keeps the room it took (it may have landed)
+  ok    code as text: refused as unknown
+  ok    code as text: the deal landed, and its room is still counted
+  ok    code alone: refused as unknown
+  ok    code alone: the deal landed, and its room is still counted
+  ok    a third slot: refused as unknown
+  ok    a third slot: the deal landed, and its room is still counted
+  ok    not a pair: refused as unknown
+  ok    not a pair: the deal landed, and its room is still counted
+  ok    two replies: refused as unknown
+  ok    two replies: the deal landed, and its room is still counted
+  ok    no reply: refused as unknown
+  ok    no reply: the deal landed, and its room is still counted
+  ok    a plain OK: refused as unknown
+  ok    a plain OK: the deal landed, and its room is still counted
+  ok    the full code with a record: refused as unknown
+  ok    the full code with a record: the deal landed, and its room is still counted
+  ok    code 2: refused as unknown
+  ok    code 2: the deal landed, and its room is still counted
+
+A read before the write that fails never zeroes the room of a deal that exists
+  ok    the deal is created first
+  ok    its room is taken
+  ok    the read failed, and it is refused before the room is touched
+  ok    and its room is still counted
+  ok    a larger deal is created first
+  ok    its room is more than a small draft's
+  ok    the read failed, and it is refused before the room is touched
+  ok    the deal kept is unchanged
+  ok    and the larger deal's whole room is still counted
+
+34 checks, all passing.
+Z_VOLUME {"runs":1070,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3305focal-DsfcZI

@@ -1,0 +1,60 @@
+
+FILE z-3305-read-envelope.proof.ts
+Z_UNFUNDED_SHAPE {"shape":"inherited","state":"created","errorName":null,"getters":0,"actualRecordBytes":338,"actualUsed":0,"productCommands":["HGET","EVAL"],"jsonPipelineBytes":799}
+Z_UNFUNDED_SHAPE {"shape":"getter","state":"created","errorName":null,"getters":3,"actualRecordBytes":338,"actualUsed":0,"productCommands":["HGET","EVAL"],"jsonPipelineBytes":793}
+✖ inherited MEDIUM sibling: inherited read slot cannot bypass deal room (9.712592ms)
+✖ inherited MEDIUM sibling: getter read slot cannot bypass deal room (0.7224ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17.21179
+
+✖ failing tests:
+
+test at [stdin]:10695:72
+✖ inherited MEDIUM sibling: inherited read slot cannot bypass deal room (9.712592ms)
+  AssertionError [ERR_ASSERTION]: a structurally unknown initial read must refuse before an unreserved deal is actually created
+  + actual - expected
+
+  + '{"id":"cccccccccc","title":"Synthetic form response","email":"synthetic@example.com","note":"Synthetic","cents":0,"stage":"lead00","nextAction":"Review","dueDate":"2026-10-16","assignee":"owner@example.com","createdAt":1800000000,"updatedAt":1800000000,"formResponseRef":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:10729:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"id":"cccccccccc","title":"Synthetic form response","email":"synthetic@example.com","note":"Synthetic","cents":0,"stage":"lead00","nextAction":"Review","dueDate":"2026-10-16","assignee":"owner@example.com","createdAt":1800000000,"updatedAt":1800000000,"formResponseRef":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:10695:72
+✖ inherited MEDIUM sibling: getter read slot cannot bypass deal room (0.7224ms)
+  AssertionError [ERR_ASSERTION]: a structurally unknown initial read must refuse before an unreserved deal is actually created
+  + actual - expected
+
+  + '{"id":"cccccccccc","title":"Synthetic form response","email":"synthetic@example.com","note":"Synthetic","cents":0,"stage":"lead00","nextAction":"Review","dueDate":"2026-10-16","assignee":"owner@example.com","createdAt":1800000000,"updatedAt":1800000000,"formResponseRef":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:10729:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"id":"cccccccccc","title":"Synthetic form response","email":"synthetic@example.com","note":"Synthetic","cents":0,"stage":"lead00","nextAction":"Review","dueDate":"2026-10-16","assignee":"owner@example.com","createdAt":1800000000,"updatedAt":1800000000,"formResponseRef":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":8,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3305focal-d0z7nL

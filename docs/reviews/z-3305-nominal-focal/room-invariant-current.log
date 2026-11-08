@@ -1,0 +1,16 @@
+
+FILE z-3305-room-size-captured.proof.ts
+Z_ROOM_SIZE {"missed":true,"errorName":"Error","beforeUsed":1040,"afterUsed":1040,"actualDealBytes":976,"actualRecordBytes":829,"recordUnchanged":true,"reservedSlot":"976","commands":["HGET"],"jsonPipelineBytes":54}
+✔ inherited MEDIUM: unread existing deal must keep its actual larger room when the retry draft is smaller (8.905467ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14.445066
+Z_VOLUME {"runs":8,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3305focal-Iew98d

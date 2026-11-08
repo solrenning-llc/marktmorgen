@@ -34,6 +34,7 @@ import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { orderWrite } from "@/lib/order-data";
@@ -934,11 +935,19 @@ export async function sendDripEmails(
       for (const unit of dripping) {
         const at = opensAt(course, unit, student.since);
         if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
-        const [claimed] = await redisPipeline([["SET", dripMailKey(course.id, student.email, unit.id), "1", "NX", "EX", 400 * 86_400]]);
-        if (claimed === null) continue;
+        // Sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an email already sent;
+        // "unknown" sends nothing this pass, and a later pass tries again when the mark did not land.
+        const mark = dripMailKey(course.id, student.email, unit.id);
+        const claimed = await claimMark(mark, 400 * 86_400);
+        if (claimed === "unknown") console.error("a drip email's mark could not be confirmed; not sent this run", course.id, unit.id);
+        if (claimed !== "ours") continue;
         const ok = await sendDripEmail(store, product, unit, student.email, origin);
         if (ok) counts.sent += 1;
-        else await redisPipeline([["DEL", dripMailKey(course.id, student.email, unit.id)]]);
+        else {
+          // Taken back by its own count: a DEL that did not say 1 leaves the mark, so the email is never sent twice.
+          const gone = repliesFor(await redisPipeline([["DEL", mark]]), 1);
+          if (!gone || countOf(gone[0]) !== 1) console.error("a drip email's mark could not be confirmed taken back after a failed send", course.id, unit.id);
+        }
       }
     }
   }

@@ -22,6 +22,8 @@
  * So is kept text that is neither an address nor "#<store id>" (an account's
  * other store): "", whitespace, "not-an-owner". It is not a delivered notice
  * and not "no address on file": support is not told, nothing is recorded.
+ * One store's unknown owner postpones that store only; the other stores in
+ * the run are written to and recorded as usual.
  *
  * Synthetic only: the Redis stub and the SES mail fixture, no real IO.
  */
@@ -63,11 +65,11 @@ const realPipeline = redis.pipeline.bind(redis);
 
 const request = { headers: new Headers(), nextUrl: new URL("https://marktmorgen.com/api/cron/usage") } as unknown as Parameters<typeof GET>[0];
 
-async function run(): Promise<{ status: number; told: unknown; emails: string[] }> {
+async function run(): Promise<{ status: number; told: unknown; emails: string[]; unreadOwners: unknown }> {
   const from = delivered().length;
   const response = await GET(request);
   const body = (await response.json()) as Record<string, unknown>;
-  return { status: response.status, told: body.told, emails: delivered().slice(from) };
+  return { status: response.status, told: body.told, emails: delivered().slice(from), unreadOwners: body.unreadOwners };
 }
 
 async function toldList(): Promise<string[]> {
@@ -162,9 +164,11 @@ async function main(): Promise<void> {
     ownerRead = failure;
     const u1 = await run();
     ownerRead = "ok";
-    // The owners are read exactly (lib/delivery.ts ownersOf, from main): an unread owner answers the delivery part
-    // 503, unknown, so the cron is tried again; nobody is written to and nothing is recorded.
-    is("first run: nobody is written to (not the owner, not support)", [u1.status, u1.told, u1.emails], [503, undefined, []]);
+    // The owners are read exactly (lib/delivery.ts ownersOf). A read that fails as a whole answers the delivery part
+    // 503; one owner's answer off-shape postpones that store only (Claude 1's decision on 1975a5cd). Either way
+    // nobody is written to about it and nothing is recorded.
+    is("first run: nobody is written to (not the owner, not support)", [u1.status, u1.told, u1.emails],
+      failure === "throw" ? [503, undefined, []] : [200, 0, []]);
     is("the store is not in the told list", (await toldList()).includes(folder("g")), false);
     const u2 = await run();
     is("next run, owner read back: the owner gets the notice", [u2.told, u2.emails], [1, ["owner@example.com"]]);
@@ -183,14 +187,14 @@ async function main(): Promise<void> {
     ownerRead = { text };
     const t1 = await run();
     ownerRead = "ok";
-    is("first run: the part is unknown and nobody is written to (not support)", [t1.status, t1.told, t1.emails], [503, undefined, []]);
+    is("first run: the store is postponed and nobody is written to (not support)", [t1.status, t1.told, t1.emails, t1.unreadOwners], [200, 0, [], 1]);
     is("the store is not in the told list", (await toldList()).includes(folder("h")), false);
     const t2 = await run();
     is("next run, owner read back: the owner gets the notice", [t2.told, t2.emails], [1, ["owner@example.com"]]);
     is("now the store is in the told list", (await toldList()).includes(folder("h")), true);
   }
 
-  part("the owner's key holds such text: every run is unknown, support is never told, nothing recorded");
+  part("the owner's key holds such text: every run postpones it, support is never told, nothing recorded");
   redis.clear();
   fixture.reset();
   refused.clear();
@@ -198,7 +202,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:store:folder-owner:${folder("i")}`, "not-an-owner"]]);
   const k1 = await run();
   const k2 = await run();
-  is("both runs are unknown and write to nobody", [k1.status, k1.emails, k2.status, k2.emails], [503, [], 503, []]);
+  is("both runs postpone it and write to nobody", [k1.status, k1.emails, k1.unreadOwners, k2.status, k2.emails, k2.unreadOwners], [200, [], 1, 200, [], 1]);
   is("the store is not in the told list", (await toldList()).includes(folder("i")), false);
 
   part("control: an account's other store (key \"#<store id>\") is still ownerless, and support is told once");
@@ -212,6 +216,27 @@ async function main(): Promise<void> {
   is("and the store is in the told list", (await toldList()).includes(folder("j")), true);
   const s2 = await run();
   is("support is not told again", s2.emails, []);
+
+  // Claude 1's decision on 1975a5cd: one store's unknown owner postpones that store only. The other stores in the
+  // same run are written to and recorded as usual; the unknown one is neither, and is tried again next run.
+  part("one store with an unreadable owner key and one healthy store in the same run: only the healthy one is told");
+  redis.clear();
+  fixture.reset();
+  refused.clear();
+  await overAllowance(folder("k"), null);
+  await redis.pipeline([["SET", `nl:store:folder-owner:${folder("k")}`, "not-an-owner"]]);
+  await overAllowance(folder("l"), "healthy@example.com");
+  const b1 = await run();
+  is("the healthy owner is written to, the other store is postponed", [b1.status, b1.told, b1.emails, b1.unreadOwners], [200, 1, ["healthy@example.com"], 1]);
+  const both = await toldList();
+  is("only the healthy store is in the told list", [both.includes(folder("l")), both.includes(folder("k"))], [true, false]);
+  const b2 = await run();
+  is("next run: the healthy owner is not written to again, the other store is still postponed", [b2.status, b2.told, b2.emails, b2.unreadOwners], [200, 0, [], 1]);
+  await redis.pipeline([["SET", `nl:store:folder-owner:${folder("k")}`, "fixed@example.com"]]);
+  const b3 = await run();
+  is("once its key reads, the postponed owner gets the notice", [b3.told, b3.emails, b3.unreadOwners], [1, ["fixed@example.com"], 0]);
+  const after = await toldList();
+  is("and both stores are now in the told list", [after.includes(folder("l")), after.includes(folder("k"))], [true, true]);
 
   fixture.restore();
   done();

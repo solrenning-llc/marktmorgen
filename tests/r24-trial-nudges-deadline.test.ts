@@ -103,6 +103,32 @@ test("a walk stops at its deadline and the next run resumes where it stopped, ea
   assert.equal(await redis.pipeline([["GET", CURSOR]]).then(([v]) => v), null, "a walk that reached the end lets the cursor go");
 });
 
+test("a deadline that passes during a trial's reads leaves it unmarked, and the next run starts at it", async () => {
+  const emails = await trialStores(3);
+  await redis.pipeline([["DEL", CURSOR]]);
+  sends.length = 0;
+  listedAfter.length = 0;
+  const original = redis.pipeline.bind(redis);
+  let reads = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The second trial's first-sale read is slow: the deadline passes while it is read.
+    if (commands.some((cmd) => cmd[0] === "GET" && String(cmd[1]).startsWith("nl:firstsale:")) && ++reads === 2) shift += 60_000;
+    return original(commands);
+  }) as typeof redis.pipeline;
+  let first: Awaited<ReturnType<typeof sendTrialNudges>>;
+  try {
+    first = await sendTrialNudges(START + 3 * DAY, Date.now() + 15_000);
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.deepEqual({ sends: sends.map((s) => s.to), sent: first.sent }, { sends: emails.slice(0, 1), sent: 1 });
+  assert.equal(await redis.pipeline([["GET", CURSOR]]).then(([v]) => v), trials[0].id, "the cursor stays on the last one handled");
+  listedAfter.length = 0;
+  const second = await sendTrialNudges(START + 3 * DAY, Date.now() + 15_000);
+  assert.equal(listedAfter[0], trials[0].id);
+  assert.deepEqual({ sends: sends.map((s) => s.to), sent: second.sent }, { sends: emails, sent: 2 }, "the one cut short goes, once");
+});
+
 test("a deadline already passed sends nothing and claims nothing", async () => {
   await trialStores(1);
   sends.length = 0;
@@ -184,7 +210,7 @@ test("a run killed while the provider had the email: the next run never sends it
   sends.length = 0;
   let reached!: () => void;
   const atSend = new Promise<void>((resolve) => { reached = resolve; });
-  const held = { reached: () => reached(), fail: (_: Error) => {} };
+  const held: { reached: () => void; fail: (error: Error) => void } = { reached: () => reached(), fail: () => {} };
   hang = held;
   const killed = sendTrialNudges(START + 3 * DAY, Date.now() + 15_000);
   await atSend;

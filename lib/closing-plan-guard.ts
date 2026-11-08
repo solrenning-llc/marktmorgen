@@ -96,13 +96,17 @@ async function allRows(path: string, query: URLSearchParams, legible: (row: Reco
 
 const textField = (row: Record<string, unknown>, name: string) => typeof ownField(row, name) === "string";
 const wholeAtLeast = (value: unknown, least: number): value is number => Number.isSafeInteger(value) && (value as number) >= least;
+/** Every status Stripe gives an invoice: another one is not known, never taken as "no payment". */
+const INVOICE_STATUSES: ReadonlySet<unknown> = new Set(["draft", "open", "paid", "uncollectible", "void"]);
+/** Every status Stripe gives a refund: another one is not known, never taken as "no refund". */
+const REFUND_STATUSES: ReadonlySet<unknown> = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
 /**
- * An invoice row read in its exact shape (CX-123 rule 24): its status, and for a paid one every field a refund is
- * decided by. One that does not read is never taken as "no payment".
+ * An invoice row read in its exact shape (CX-123 rule 24): its status, one of Stripe's own, and for a paid one every
+ * field a refund is decided by. One that does not read is never taken as "no payment".
  */
 const invoiceKnown = (row: Record<string, unknown>) => {
   const status = ownField(row, "status");
-  if (typeof status !== "string") return false;
+  if (!INVOICE_STATUSES.has(status)) return false;
   if (status !== "paid") return true;
   const transitions = ownField(row, "status_transitions");
   if (!plainObject(transitions)) return false;
@@ -417,7 +421,9 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
   // A disputed charge cannot be refunded: the bank's dispute takes it back to the creator.
   if (isDisputed) return { settled: true, returned: 0, disputed: amount, currency };
   // Read in full or not at all: a refund missed on an unknown list would be asked for twice (settleOne keeps it on the throw).
-  const refunds = await allRows("/refunds", new URLSearchParams({ charge: charge.id, limit: "100" }), (row) => textField(row, "status") && Number.isSafeInteger(ownField(row, "amount")), 5);
+  // Each row in Stripe's own domain: a refund's amount is above zero and its status one of Stripe's. A negative one
+  // would ask for more than was paid, an unknown one for a second refund: either throws before anything is asked for.
+  const refunds = await allRows("/refunds", new URLSearchParams({ charge: charge.id, limit: "100" }), (row) => REFUND_STATUSES.has(ownField(row, "status")) && wholeAtLeast(ownField(row, "amount"), 1), 5);
   const sum = (status: string) => refunds.filter((row) => row.status === status).reduce((total, row) => total + (Number(row.amount) || 0), 0);
   const succeeded = sum("succeeded");
   const pending = sum("pending") + sum("requires_action");

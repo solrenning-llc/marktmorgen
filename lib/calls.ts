@@ -157,12 +157,18 @@ export const confirmedKey = (session: string) => `nl:call:confirmed:${session}`;
  */
 export const CONFIRMED_SECONDS = 430 * 86_400;
 
+/** A time as the diary's writers make it: a whole number of milliseconds since 1970, after 1970. */
+const diaryTime = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+
 /**
- * One diary entry, read exactly (CX-123 rule 24): a JSON object whose `until`
- * and `e` are finite numbers, and whose start is a finite number, as `s` or,
- * for an entry filed by its start before group calls, as its field. Anything
- * else throws UnknownReplyError: an entry that cannot be read could be a held
- * or booked seat, so it is never read as free, and never deleted as stale.
+ * One diary entry, read exactly (CX-123 rule 24): a JSON object whose start
+ * (`s` or, for an entry filed by its start before group calls, its field) and
+ * end `e` are diary times with the end after the start, and whose `until` is 0
+ * (a booking) or a diary time (a hold: holdAndCheckout writes Date.now() plus
+ * the hold). Anything else throws UnknownReplyError: an entry that cannot be
+ * read could be a held or booked seat, so it is never read as free, and never
+ * deleted as stale (a negative `until` once read as a hold that ran out, and
+ * the real hold was deleted and its time sold again: Codex Z on #3240).
  */
 function entryOf(field: string, value: string): Entry & { start: number } {
   let entry: unknown;
@@ -174,7 +180,7 @@ function entryOf(field: string, value: string): Entry & { start: number } {
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new UnknownReplyError("a call diary entry that is not an object");
   const { s, e, until } = entry as Entry;
   const start = s === undefined ? Number(field) : s;
-  if (typeof until !== "number" || !Number.isFinite(until) || typeof e !== "number" || !Number.isFinite(e) || typeof start !== "number" || !Number.isFinite(start)) {
+  if ((until !== 0 && !diaryTime(until)) || !diaryTime(start) || !diaryTime(e) || e <= start) {
     throw new UnknownReplyError("a call diary entry whose times cannot be read");
   }
   return { ...(entry as Entry), start };

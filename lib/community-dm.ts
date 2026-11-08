@@ -161,7 +161,7 @@ function parseMessage(raw: unknown): Message | null {
 
 export type SendResult =
   | { ok: true; asked: boolean }
-  | { ok: false; reason: "off" | "between" | "self" | "declined" | "empty" | "full" };
+  | { ok: false; reason: "off" | "between" | "self" | "declined" | "empty" | "full" | "slow" };
 
 /**
  * Whether these two may exchange messages at all, before anything is written.
@@ -195,6 +195,10 @@ export async function send(
   to: string,
   text: string,
   room: DataStore,
+  // false when the sender is past the day's openings (the route's dmNew
+  // window): a new request is refused before anything is written. A follow-up
+  // to one already waiting, and a message in a conversation, still go.
+  options: { mayAsk?: boolean } = {},
 ): Promise<SendResult> {
   const blocked = mayMessage(setting, from, to);
   if (blocked) return blocked;
@@ -245,6 +249,7 @@ export async function send(
   const asking = setting.ask && !talking && from !== CREATOR && to !== CREATOR;
   // Only a request that is not in the list yet takes a place in it.
   const fresh = asking && queued === null;
+  if (fresh && options.mayAsk === false) return { ok: false, reason: "slow" };
 
   // Its room first (DataRoomError when it does not fit). A conversation at
   // MAX_MESSAGES lets its oldest go, and that one's room comes back.

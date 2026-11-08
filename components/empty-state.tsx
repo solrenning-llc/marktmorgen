@@ -15,11 +15,13 @@ function works(action: EmptyAction | undefined): action is EmptyAction {
   return /^\/(?!\/)/.test(action.href) && !/^\/\\/.test(action.href);
 }
 
-export function EmptyState({ title, body, action, className = "" }: { title: string; body: string; action?: EmptyAction; className?: string }) {
+/** `level` keeps the page's outline: 2 right under the page's h1, 3 under a section's h2. */
+export function EmptyState({ title, body, action, level = 2, className = "" }: { title: string; body: string; action?: EmptyAction; level?: 2 | 3; className?: string }) {
   if (!title.trim() || !body.trim()) return null;
+  const Heading = level === 3 ? "h3" : "h2";
   return (
     <div className={`st-note text-center ${className}`.trim()} data-empty-state="">
-      <h2 className="text-base font-bold" style={{ color: "var(--st-text)" }}>{title}</h2>
+      <Heading className="text-base font-bold" style={{ color: "var(--st-text)" }}>{title}</Heading>
       <p className="mt-2 text-sm">{body}</p>
       {works(action) ? (
         <Link href={action.href} className="btn st-btn mt-4">

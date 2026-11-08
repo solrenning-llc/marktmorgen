@@ -71,7 +71,9 @@ export const canWrite = () => true;
 export const fromLine = () => "Synthetic <sender@example.com>";
 export const storeSender = fromLine;
 export const monthlyAllowance = () => 100;
-export const reserve = async () => "ok";
+/** Every reservation taken, as release records every one given back: what is held is their difference. */
+export const reserved: number[] = [];
+export const reserve = async (_store: unknown, n: number) => { reserved.push(n); return "ok"; };
 export const released: number[] = [];
 export const release = async (_store: unknown, n: number) => { released.push(n); };
 export const render = (_store: unknown, subject: string, text: string) => ({ subject, text, html: text, headers: {} });
@@ -81,5 +83,5 @@ export const orderWrite = async (_owner: unknown, commands: (string | number)[][
 export const alertCreator = async () => false;
 
 export function reset(): void {
-  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; released.length = 0; tokenWriteFails = false; rsvpUnknown = false;
+  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; reserved.length = 0; released.length = 0; tokenWriteFails = false; rsvpUnknown = false;
 }

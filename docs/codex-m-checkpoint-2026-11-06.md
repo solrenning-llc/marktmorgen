@@ -6365,3 +6365,771 @@ C1-20261108-0051-CODEX24 FULL lida: M recebe focal2840e336cf62; ASSUME2857 e3028
 2857official85e32750eba464a392874a6d0234766ef1768fb5 OPEN/DRAFT/HOLD branchcodex/k-form-store-siblings-exact; metadata/timelineFULLread, SEMdiff/fonte/testeM. Identidade29/5 b0657bf..., parser41/4 52ef902...,KEEP79/7 3e53fa66... requeremexec/classificaçãoR2 histórica; G6699734439 SÓWIPG7a190e28e740fbed1fc6c31aeb732508bfc56f696 limpo. NãoaprovaroficialporWIP. NovaassunçãoC1 nãoapagaessesachados. 3028acfda4b06489d8572a3f6d4654745dc4d282d6bf OPEN/DRAFT branchcodex/k-form-historical-choice-feedback; C25808294084limpoexato. Holdsantigos2931/2894 precisamreconciliaçãoatual; nãoCIpolled/mergeado/pushnenhum. No momentoapenasmetadata/timelinestrêspedidos.
 
 Próximo focal2840exato: reproduzir3testespermanentes RED2995→e336 mantendooráculos, ligados6pagecopy+32storecopy; conferirstrictreaderdependênciassemnovoauditglobal. Depois2857/3028 emramoscodex/m-*preservados, verificarreserva/CIsatuaisantesúnicopush. C1coord, mediumserial0agentes; nenhumvivowatcherprometido/automaçãoinalterada.
+
+
+## Codex M — 08/11/2026 01h19 Fortaleza: focal2840 clear;3151expiry residual;3028 integrated/published
+
+Esta seção prevalece; toda história anterior é preservada. C1coord/C4executor, serialMédioZEROagentes. MV acaboupelaC1TODOS22/C4MAINVERDE;3139antigaOPENnãoéveto. C4-0100autoHOLD516queuedNÃOéMVgeral; C1TODOS16apenasdizqueelepausaráoutravez, semnovaordemgeralobservada atéC2-0116/C6-0114/C4-0111. Semfecharissue/repetirCI/fila/merge.
+
+CanalRES0055entregue6841d73f2abc16d7c6124bb83a4dc214340ecf5f/blob95aafac868eb55efd7b4885b1253de5bddcfe03f/FULL5141104EXATO, depoisCAS120s eclaimPRanterior. RES0104entreguea1b7bf6504a7a2f6ca85c7bec316340f96c3f255/blob85acc8539c6d837bc977af68179af29b38f4473c/FULL5152919EXATO. Relatório0111entregue02536e2920d14a1d7d8fde89a1c4d9c4d281bbd8/blob787458514c1ab84d6b869c51b5a1ec16999ee3e8 (readbackaindapendenteestaúltima; próximoFULL5174590preservaprefixo5163151+adendo0111 exatamente pelaúltimaleitura). Nãoconfundirpreparaçãodatadacomhorarealdelivery.
+
+### #2840 focal COMPLETO
+
+C1CODEX24nominal. EXATOe336cf626f178c81fb9160832d7966f7d1c06f03; evidência6717006211 FULL41840 antesCOMMENT5816538422; ambosFULLreadbackEXATOS. C1MÉDIO6712259569FECHADOna causa; semnovoachadomaterialnos2paths, não3ªauditglobal. SAME3Node3FAILRED2995c0fe88f5115b3b4c199ba8469b8a8b775c12móduloea3726e8nofinalgraph→3PASS; ligados6Node+32customPASS. Types4/1207/0;509repoTYPEinputsGitpinsEXATOS;lint0;scanner3943/0PARCIAL324;diffsemwhitespace. Erroscacheexportmissing/6typediag e preflightpins ocorreramantesexecuçãoligados, fontesexatasrestauradas, oráculosintactos; wiring3aliases+envBYTEequivalentecomparadoantesconfigcanônicarestaurado. Z5806683887escopopreservado. Produto/refautor/CI/fila semopM. Evidência completaabaixo.
+
+Codex M — nominal focal evidence BEFORE verdict for #2840, exact e336cf626f178c81fb9160832d7966f7d1c06f03, assigned C1-20261108-0051-CODEX-24.
+
+Claim6716937146 BEFORE diff/source/tests. Channel0055 subsequently delivered6841d73f2abc16d7c6124bb83a4dc214340ecf5f/blob95aafac868eb55efd7b4885b1253de5bddcfe03f/FULL5141104 exact after CAS409+120s retries; that late receipt is not claimed prior to the work. Author branch/source/CI/queue untouched.
+
+Focal scope: complete corrective delta616370769b3cd08ebe305e03e58ecd76710e280e..e336cf626f178c81fb9160832d7966f7d1c06f03, exactly lib/store-copy.ts + tests/page-copy-about-unknown.test.ts. Preserve Z5806683887's earlier content review and C1's6712259569 medium. No third global audit.
+
+C1's description-read finding is closed in this delta: readAbout is replaced by readAboutExact, and all descriptions flagged by source records are awaited alongside the preloaded pages BEFORE addCopiedProducts. The subsequent write loop uses the already-loaded map; failure cannot create that step's target drafts or advance its product cursor. The same single GET per described product is relocated; no pricing/limit/flag/key/provider change. Existing upstream admission and copy lock retained. Export readAbouts/readMany remains #2831's separate scope, not certified here.
+
+Causal reproduction with unchanged author test blob e4054c3a193e941c5fa45310f4786806d6a3bce6:
+- RED2995c0fe88f5115b3b4c199ba8469b8a8b775c12 source lib/store-copy.ts ea3726e868bc233148e3501f63abec13f88cfb87 loaded into FINAL graph:3 Node tests/3FAIL (thrown read leaves draft; number answered200; healthy retry sees lost empty description).
+- Exact final module5307290f2623b9a9853b31701ad00d37bafaa20e:3/3PASS, including all four malformed values and healthy retry preserving the source words.
+- Linked page-copy-unknown-2:6/6NodePASS; store-copy:32/32custom checksPASS. These are9Node tests +32custom checks, not41identical coverage units. Prior Z990 checks were NOT replayed or claimed as M's.
+- Actual directed types4roots/1207sources/0diagnostics;509repo type inputs independently Git-blob pinned,0mismatch. Lint4files0errors0warnings; corrective noindexdiff checks exit1 with no diagnostics (files differ, no whitespace defect).
+- Scanner3943exacthead indexed files/0findings, PARTIAL324head files not scanned (253missing+71stale excluded). Not full-tree/publication certification.
+
+Preparation transparency: reused cache initially mixed versions, producing an export-missing build error for linked tests BEFORE their execution and6type diagnostics in a stale store-cart; raw diagnostics retained. Exact head blobs restored, not product edits; only previously unexecuted linked tests and affected type check were then run. Two pin-preflight stops also found additional stale components and registry fixtures BEFORE children ran. The completed focal3/3 and linked6/6 were not repeated. tests/test-config.mjs itself differed outside these tests; compared all three actual alias maps and the exact invocation environment, byte-equivalent, then replaced cached config with canonical head blob. Runtime inputs are Git pinned. No weakened assertion, timeout or new product oracle.
+
+Budget BEFORE test graph:20k pipeline commands+20k nested MemoryRedis.run,100mockHTTP,120s512MiB256KiB child,types1024MiB. Initial fetch denied then synthetic fixture replacement only; net.connect/createConnection,tls.connect,dgram.createSocket denied. Max2352pipeline2720nested0mockHTTP, no ceiling hit. Real modules/copy route with in-memory Redis, synthetic stores/session/request boundary; NOT native Redis/Lua/browser/AT/build/full suite/global MR/nine CI/merge certification. No service credential or real personal data. No author ref/CI operation.
+
+Reproduce in exact final head view with existing dependencies, head-pins.json from its Git tree and ONLY pinned RED lib/store-copy.ts under before/, before-pins.json naming its hash. Canonical tests/test-config.mjs/sidecars are used. Run node run.mjs before:page-copy-about-unknown.test.ts after:page-copy-about-unknown.test.ts after:page-copy-unknown-2.test.ts after:store-copy.test.ts. Runner's dependency path is environment-specific; use existing read-only dependencies. The attached runner pin-preflight refuses execution on mismatched graph; BUILD_INCOMPLETE is not PASS. Full essential logs follow.
+
+<details><summary>run.mjs</summary>
+
+```js
+import{readFileSync,writeFileSync,mkdirSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');mkdirSync('logs',{recursive:true});
+
+for(const job of process.argv.slice(2)){const[mode,test]=job.split(':'),view=join(root,'view');
+ const bootstrap=`import net from'node:net';import tls from'node:tls';import dgram from'node:dgram';const deny=()=>{throw Error('NO_EXTERNAL_NETWORK')};net.connect=net.createConnection=tls.connect=dgram.createSocket=deny;import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=deny;Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>100)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before'){for(const name of ['lib/store-copy'])alias['@/'+name]=join(root,'before',name+'.ts');}if(test==='m-3141-library-render.proof.ts')alias['@/lib/buyer-library']=join(view,'tests/m-3141-library-world.ts');
+ let b;try{b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,jsx:'automatic',jsxImportSource:'@/lib/content-jsx',platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});}catch(e){console.log('BUILD_INCOMPLETE',job);continue}
+ const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0,missing=[];for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const bytes=readFileSync(resolve(view,input)),hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(hash!==(input.startsWith('../before/')?JSON.parse(readFileSync('before-pins.json','utf8'))[input.slice(10)]:pin[input]))missing.push({input,expected:(input.startsWith('../before/')?JSON.parse(readFileSync('before-pins.json','utf8'))[input.slice(10)]:pin[input])});checked++;}
+ if(missing.length){writeFileSync('needed.json',JSON.stringify(missing));console.log('MISSING',JSON.stringify(missing));break;}
+ const f=resolve('logs/'+mode+'-'+test+'.cjs');writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,checked,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1000)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+</details>
+
+<details><summary>verify.cjs</summary>
+
+```js
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/store-copy.ts','tests/page-copy-about-unknown.test.ts','tests/page-copy-unknown-2.test.ts','tests/store-copy.test.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+</details>
+
+<details><summary>logs/before-page-copy-about-unknown.test.ts.cjs.log</summary>
+
+```text
+✖ a copy step whose description read throws leaves no draft product (74.67558ms)
+✖ a copy step whose description read is in an unknown shape fails and leaves no draft product (15.992367ms)
+✖ the same copy, tried again with the read known, copies the description (5.779194ms)
+M_BUDGET {"pipelineCommands":150,"memoryRun":194,"httpMockDispatch":0,"exceeded":false}
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 106.117546
+
+✖ failing tests:
+
+test at ../logs/before-page-copy-about-unknown.test.ts.cjs:52278:31
+✖ a copy step whose description read throws leaves no draft product (74.67558ms)
+  AssertionError [ERR_ASSERTION]: no draft product without its description is left in the other store
+  + actual - expected
+  
+  + [
+  +   '31f37531ab'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:52288:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../logs/before-page-copy-about-unknown.test.ts.cjs:52291:31
+✖ a copy step whose description read is in an unknown shape fails and leaves no draft product (15.992367ms)
+  AssertionError [ERR_ASSERTION]: a number: the step is not answered done with the description missing
+  
+  200 !== 500
+  
+      at TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:52301:35)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 200,
+    expected: 500,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at ../logs/before-page-copy-about-unknown.test.ts.cjs:52308:31
+✖ the same copy, tried again with the read known, copies the description (5.779194ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + ''
+  - 'Every fictional recipe takes half an hour.'
+  
+      at TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:52313:33)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '',
+    expected: 'Every fictional recipe takes half an hour.',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+copying a store failed Error: synthetic network failure
+    at store.pipeline (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:52240:70)
+    at redisPipeline (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:2128:41)
+    at readAbout (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:19720:24)
+    at copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:20682:31)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:52193:20)
+    at async copy2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:52270:26)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/before-page-copy-about-unknown.test.ts.cjs:52283:18)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+```
+</details>
+
+<details><summary>logs/after-page-copy-about-unknown.test.ts.cjs.log</summary>
+
+```text
+✔ a copy step whose description read throws leaves no draft product (70.862559ms)
+✔ a copy step whose description read is in an unknown shape fails and leaves no draft product (19.978748ms)
+✔ the same copy, tried again with the read known, copies the description (33.40198ms)
+M_BUDGET {"pipelineCommands":231,"memoryRun":279,"httpMockDispatch":0,"exceeded":false}
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 131.797708
+copying a store failed Error: synthetic network failure
+    at store.pipeline (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52248:70)
+    at redisPipeline (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:2128:41)
+    at readAboutExact (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:19724:23)
+    at copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:20680:84)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52201:20)
+    at async copy2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52278:26)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52291:18)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+copying a store failed Error: a description was answered in an unknown shape
+    at readAboutExact (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:19726:11)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:20680:78)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52201:20)
+    at async copy2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52278:26)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52305:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+copying a store failed Error: a description was answered in an unknown shape
+    at readAboutExact (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:19726:11)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:20680:78)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52201:20)
+    at async copy2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52278:26)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52305:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+copying a store failed Error: a description was answered in an unknown shape
+    at readAboutExact (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:19726:11)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:20680:78)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52201:20)
+    at async copy2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52278:26)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52305:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+copying a store failed Error: a description was answered in an unknown shape
+    at readAboutExact (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:19726:11)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:20680:78)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52201:20)
+    at async copy2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52278:26)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-about-unknown.test.ts.cjs:52305:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+```
+</details>
+
+<details><summary>logs/after-page-copy-unknown-2.test.ts.cjs.log</summary>
+
+```text
+✔ a copy step whose product page read is unknown writes nothing of the step, and says to try again (72.656713ms)
+✔ the same copy, tried again with the read known, copies the product page (6.845859ms)
+✔ a copy step whose store page read is unknown adds no store page and writes no page, and is tried again (22.964198ms)
+✔ a funnel's file is never collected from an unknown page read (14.546753ms)
+✔ a funnel's file from a known read carries the page's blocks (7.920906ms)
+✔ the demo seed does not take an unknown page read for no page and overwrite it (134.353429ms)
+M_BUDGET {"pipelineCommands":1151,"memoryRun":1545,"httpMockDispatch":0,"exceeded":false}
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 267.559397
+copying a store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51924:11)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:53551:76)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96032:20)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96948:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+copying a store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:53551:76)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96032:20)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96948:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+copying a store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:53551:76)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96032:20)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96948:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+copying a store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51924:11)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:53596:45)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96032:20)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96981:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+copying a store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:53596:45)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96032:20)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96981:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+copying a store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async copyStep (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:53596:45)
+    at async POST (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96032:20)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96981:20)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sharing or bringing in a funnel failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51924:11)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async collectBundle (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:52962:18)
+    at async POST2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96794:27)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97008:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sharing or bringing in a funnel failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51924:11)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async collectBundle (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:52962:18)
+    at async POST2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96713:25)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97010:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sharing or bringing in a funnel failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async collectBundle (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:52962:18)
+    at async POST2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96794:27)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97008:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sharing or bringing in a funnel failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async collectBundle (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:52962:18)
+    at async POST2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96713:25)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97010:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sharing or bringing in a funnel failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async collectBundle (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:52962:18)
+    at async POST2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96794:27)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97008:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+sharing or bringing in a funnel failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async collectBundle (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:52962:18)
+    at async POST2 (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96713:25)
+    at async /workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:96933:26
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97010:26)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+making the demo store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51924:11)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async ensurePage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93188:31)
+    at async build (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93316:12)
+    at async ensureDemoStore (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93347:18)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97057:18)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+making the demo store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async ensurePage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93188:31)
+    at async build (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93316:12)
+    at async ensureDemoStore (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93347:18)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97057:18)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+making the demo store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51920:87)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async ensurePage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93188:31)
+    at async build (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93316:12)
+    at async ensureDemoStore (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93347:18)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97057:18)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+making the demo store failed UnknownReplyError: Redis answered a kept page in an unknown shape
+    at pageOf (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51924:11)
+    at readPage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:51916:10)
+    at async ensurePage (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93188:31)
+    at async build (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93316:12)
+    at async ensureDemoStore (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:93347:18)
+    at async TestContext.<anonymous> (/workspace/scratch/d1ece80b1417/m-review-2840/logs/after-page-copy-unknown-2.test.ts.cjs:97068:22)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+```
+</details>
+
+<details><summary>logs/after-store-copy.test.ts.cjs.log</summary>
+
+```text
+
+Only the account's owner, only into its own stores
+  ok    a teammate is refused
+  ok    a store of anyone else is not a destination
+  ok    nor the store it is in
+
+What is copied, and what is not, is decided by the rules
+  ok    a call, a course, a podcast, options or keys are not copied
+
+The preview writes nothing
+  ok    it fits, names the other store, and counts what it makes
+  ok    it says the file and the pictures stay, and what is never copied
+  ok    and makes nothing there
+
+A copy that does not fit as a whole is refused before anything is written
+  ok    another currency
+  ok    a data room too full
+  ok    nothing was written there
+
+The copy, step by step
+  ok    it ends, having made each part
+  ok    every product a draft, with the first store's words and prices
+  ok    all thirty, every one a draft
+  ok    the box at checkout offers the copy of the product it offered
+  ok    without the file it delivers or its picture
+  ok    its long description comes across
+  ok    its page: the words, no pictures, the product named mapped, kept back
+  ok    the quiz, its result pointing at the copy, and none of its answers
+  ok    the store's own page: out of the menu, kept back, its form mapped
+  ok    the funnel: off, through the copies
+  ok    the setup: about line, sections and news mapped, the link without its picture, no email profile
+
+Nothing personal and nothing of the first store's comes across
+  ok    no buyer, review, Stripe account or first store id
+  ok    no contact, review or answer kept in the other store
+  ok    the other store's own payment account is untouched
+
+Done twice, or after its progress is lost, it makes nothing twice
+  ok    the same copy again says it is done
+  ok    run from the start again, it finds everything already there
+
+Charged before it writes, and its store commands measured
+  ok    what one studio request of a copy stands for costs no more than a studio request is priced at
+  ok    every step took studio requests of the other store
+  ok    each step's commands are inside what it was charged for
+  ok    a whole copy of this store, thirty products, stays under a hundred studio requests
+store commands per step, measured: 233/56u, 52/7u, 19/5u, 29/5u, 21/5u, 24/6u
+  ok    refused, and nothing made
+  ok    a copy's id from another store is not taken for this one
+
+32 checks, all passing.
+M_BUDGET {"pipelineCommands":2352,"memoryRun":2720,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>types.log</summary>
+
+```text
+{"roots":4,"sources":1207,"diagnostics":0}
+```
+</details>
+
+<details><summary>lint.log</summary>
+
+```text
+
+```
+</details>
+
+<details><summary>scanner.log</summary>
+
+```text
+Public data check: 3943 tracked files; 0 file(s) require correction.
+
+```
+</details>
+
+<details><summary>types-cache-mismatch.log</summary>
+
+```text
+[96mcomponents/store-cart.tsx[0m:[93m307[0m:[93m10[0m - [91merror[0m[90m TS2339: [0mProperty 'retry' does not exist on type '{ add: string; added: string; full: (max: number) => string; open: (count: number) => string; title: string; remove: (title: string) => string; dealRow: (percent: number) => string; dealNext: (more: number, percent: number) => string; ... 34 more ...; noRoom: (max: number) => string; }'.
+
+[7m307[0m       {c.retry}
+[7m   [0m [91m         ~~~~~[0m
+[96mcomponents/store-cart.tsx[0m:[93m321[0m:[93m40[0m - [91merror[0m[90m TS2339: [0mProperty 'uncheckedSome' does not exist on type '{ add: string; added: string; full: (max: number) => string; open: (count: number) => string; title: string; remove: (title: string) => string; dealRow: (percent: number) => string; dealNext: (more: number, percent: number) => string; ... 34 more ...; noRoom: (max: number) => string; }'.
+
+[7m321[0m       <div className="mt-3">{trouble(c.uncheckedSome(unchecked.length), "data-cart-unchecked")}</div>
+[7m   [0m [91m                                       ~~~~~~~~~~~~~[0m
+[96mcomponents/store-cart.tsx[0m:[93m378[0m:[93m85[0m - [91merror[0m[90m TS2339: [0mProperty 'storeClosed' does not exist on type '{ add: string; added: string; full: (max: number) => string; open: (count: number) => string; title: string; remove: (title: string) => string; dealRow: (percent: number) => string; dealNext: (more: number, percent: number) => string; ... 34 more ...; noRoom: (max: number) => string; }'.
+
+[7m378[0m             <p className="st-note mt-3 text-sm" role="alert" data-cart-closed="">{c.storeClosed}</p>
+[7m   [0m [91m                                                                                    ~~~~~~~~~~~[0m
+[96mcomponents/store-cart.tsx[0m:[93m508[0m:[93m31[0m - [91merror[0m[90m TS2339: [0mProperty 'unchecked' does not exist on type '{ add: string; added: string; full: (max: number) => string; open: (count: number) => string; title: string; remove: (title: string) => string; dealRow: (percent: number) => string; dealNext: (more: number, percent: number) => string; ... 34 more ...; noRoom: (max: number) => string; }'.
+
+[7m508[0m                     trouble(c.unchecked, "data-cart-unpriced")
+[7m   [0m [91m                              ~~~~~~~~~[0m
+[96mcomponents/store-cart.tsx[0m:[93m512[0m:[93m90[0m - [91merror[0m[90m TS2339: [0mProperty 'unchecked' does not exist on type '{ add: string; added: string; full: (max: number) => string; open: (count: number) => string; title: string; remove: (title: string) => string; dealRow: (percent: number) => string; dealNext: (more: number, percent: number) => string; ... 34 more ...; noRoom: (max: number) => string; }'.
+
+[7m512[0m                     <p className="st-note text-sm" role="alert" data-cart-unpriced="">{c.unchecked}</p>
+[7m   [0m [91m                                                                                         ~~~~~~~~~[0m
+[96mcomponents/store-cart.tsx[0m:[93m517[0m:[93m116[0m - [91merror[0m[90m TS2339: [0mProperty 'checkoutUnpriced' does not exist on type '{ add: string; added: string; full: (max: number) => string; open: (count: number) => string; title: string; remove: (title: string) => string; dealRow: (percent: number) => string; dealNext: (more: number, percent: number) => string; ... 34 more ...; noRoom: (max: number) => string; }'.
+
+[7m517[0m                   <button type="submit" className="btn st-btn btn-block">{current && total ? c.checkout(total) : c.checkoutUnpriced}</button>
+[7m   [0m [91m                                                                                                                   ~~~~~~~~~~~~~~~~[0m
+{"roots":4,"sources":1207,"diagnostics":6}
+```
+</details>
+
+<details><summary>wiring-equivalence.log</summary>
+
+```text
+All three alias maps and exact invocation environment byte-equivalent; replaced cache with canonical head config without replaying unchanged green tests.
+
+```
+</details>
+
+<details><summary>types-input-pins.json</summary>
+
+```text
+{"checked":509,"bad":[]}
+```
+</details>
+
+
+Codex M — nominal focal return assigned by C1-0051-CODEX-24, exact e336cf626f178c81fb9160832d7966f7d1c06f03.
+
+**FOCAL CLEAR: Claude1's MEDIUM6712259569 is closed in the cause. No new material finding in this two-path corrective delta.** Each source long description is now read through readAboutExact before addCopiedProducts, alongside the page preload; the write loop uses that captured text. An unknown/thrown read leaves no target draft and no advanced product cursor; a healthy retry copies the source words. The single GET is moved, with existing admission retained. Separate export readers remain #2831's scope.
+
+Independent SAMEauthor test e4054c3a:3Node/3FAIL with ONLY RED2995c0fe8 module ea3726e8 in final graph →3/3PASS exacthead. Linked page-copy-unknown-2:6/6Node;store-copy32/32custom. Types4roots1207sources0diag,509repo type inputs all exacthead pins;lint0;scanner3943/0 PARTIAL324filesexcluded;whitespacechecks no diagnostics. No ordinary green replay just for waiting.
+
+Evidence ANTESverdict: issuecomment6717006211 FULL41840, exact readback; full runner/logs, stale-cache build/type failures explicitly retained and excluded. Claim6716937146 preceded source/diff/tests; channel6841d73f subsequently delivered after409 waits, not claimed pre-work. Budget20k/20k/100mock/120s512MiB256KiB beforegraph, max2352pipeline2720nested0mockHTTP; no provider/nativeRedis/browser/build/globalMR/nineCI/merge certification. Author source/ref/CI/queue unchanged.
+
+This closes the specified corrective focal on exacthead and preserves Z5806683887's earlier review scope. Normal stack, conflict, current-head CI and merge gates remain with the author/coordinator; this COMMENT is content clearance, not a performed merge or nine-green claim.
+
+### #3151 PRIMEIRO FOCAL COMPLETO; SEGUNDO CORRETIVO RECEBIDO
+
+C6-0104 trouxeaea242395c6f4a5936dcbc2e281db1926e0cae3a; claim6717038265antesdelta/teste.3pathsdeltainteiroslidos. FocalCOMMENT5816559661/readbackEXATO; evidência6717058037 FULL17581ANTESverdict/readbackEXATO. Janela normalfechou; NOVOresíduoproposicionalCONDICIONALrealexpires10spermanecedemonstrado. originalf8dc52dcINTOCADO, NÃOGREEN: novocontratoautorlegitbusy/incomplete. DerivaçãoSEPARADAc3a733284923f9074cbf9b93c5da9c7723964741: sóredis.advance(11000) anteseraser;7checks3FAILnosDOISMÓDULOS/4controlesPASS. Escritorvelhosemfencetokenressuscitaregistroapósexpiração e retryresponde0+registrofica. 10/4FAIL→10PASSautor;ordinary142PASS;types5/1084/0,lint0,scanner4changed+own0,diffsemwhitespace. C1R2classificam/C6dono. Nenhumcusteio-globalaprovado; boundautor4n+2agoranosdeletes. Budget20k/20k/100mock120s512MiB256KiB, max3131/3332/9mock; semprovider.
+
+Codex M — focal evidence BEFORE verdict for #3151 exact aea242395c6f4a5936dcbc2e281db1926e0cae3a, received C6-0104; claim6717038265 before corrective diff/source/tests.
+
+The normal unexpired-lock window is now handled: the eraser waits for the same per-agreement lock and a busy attempt throws while leaving the person's index for a healthy retry. SAME permanent new testac4b2cab33d6f0462eb43e60b64c28ac61bfe0e2:10checks4FAIL with parent module280ec0bb1f68bf77a5579e6be7d0b14bc0f77726 in final graph →10PASS exact corrective module799e93496244e2b42e4689a792ef1bea6ee0c20e. These are10, not a count inferred from the author's notice.
+
+MEDIUM proposed current-path CONDITIONAL RESIDUAL remains: an already-running signAgreement whose ten-second lock expires while its version GET is pending can still recreate the erased record. forgetAgreementsPerson takes a NEW lock, DELs the record/versions and person's set and reports1; saveAgreement later SETs its cached signed record without checking the old signer's lock/token. Retry answers0 and leaves name/email/signature stored. Taking a TTL lock in the eraser alone does not fence that stale writer. Current library documents this exact lock-expiry hazard in lib/redis-lock.ts; signAgreement/saveAgreement does not use its fenced writer.
+
+Derivation c3a733284923f9074cbf9b93c5da9c7723964741 is a SEPARATE proof copied from originalf8dc52dc596a77f601d7458e56db364a7ba5525f, with ONE inserted redis.advance(11_000) before the eraser runs. Same seven assertions, same control and real signer/ERASERS path; the stand-in's normal TTL expiration is used, not a fabricated deletion reply. This models a request paused longer than its ten-second lock, not a measured production incident/nativeRedis/server-time guarantee. Original proof remains byte-identical and is NOT claimed green on a new contract that legitimately says busy/incomplete.
+
+SAME derived7checks3FAIL on BOTH parent and corrective modules,4controlsPASS. The first two control cases refuse a fresh signature after completed erasure and leave no data. The in-flight interleaving reaches the real version GET and the real eraser reports1; stale signer returnsok:true, record returns, retry[0,true]. This is not an introduced regression claim. C1/R2 classify the demonstrated residual/continuation; C6 retains source ownership. No author ref/source/CI/queue edits.
+
+Selected ordinary on corrective: newpending10 + priorunknown41 + agreements59 + person-erasure32 =142PASS; ownderived7/3FAIL separate. Agreements measurement is now78commands for19erased agreements (was40): author raised its test bound2n+2→4n+2 for acquiring/releasing locks; I have NOT certified global erasure admission/bytes/retry-wait funding or business limits. Such limits/allowances are not changed by M. Final types/lint/scanner still pending at this evidence publication; no claim of completed verification for them yet.
+
+Budget BEFORE graph20k pipeline20k nested MemoryRedis.run100mockHTTP120s512MiB256KiB per child; types1024MiB. Initial fetch denied then test synthetic replacement; net.connect/createConnection,tls.connect/dgram.createSocket denied. Max observed3131pipeline3332nested9mockHTTP in the completed selected tests; expiryproof82pipeline113nested0HTTP. No ceiling hit. No real provider/Redis/person/account/payment/credential; no browser/AT/Lua/build/fullsuite/globalMR/nineCI/merge certification.
+
+Reproduce with exact corrective graph/pins and ONLY parent lib/agreement-store.ts280ec0... under before/. Keep the originalf8dc proof immutable and add the separate expired proof shown here to head-pins.json. Run node run.mjs before:agreements-erase-pending-sign.test.ts after:agreements-erase-pending-sign.test.ts before:m-3151-expired-sign-erasure.proof.ts after:m-3151-expired-sign-erasure.proof.ts. Dependency path in runner is environment-specific and points to existing read-only installation; no new install or provider use. Complete new proof/runner/logs follow.
+
+<details><summary>view/tests/m-3151-expired-sign-erasure.proof.ts</summary>
+
+```ts
+/** Synthetic real-writer interleaving; no provider or real person. */
+import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { readDraft } from "@/lib/agreement-rules";
+import { agreementKeys, createAgreement, forgetAgreementsPerson, readAgreement, signAgreement } from "@/lib/agreement-store";
+import { ERASERS, erasureScope } from "@/lib/person-erasure";
+import { store as redis } from "./redis-stub";
+import { done, is } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+
+globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
+const original = redis.pipeline.bind(redis);
+const PERSON = "person@example.com";
+
+async function world(): Promise<{ store: Store; id: string; sha: string }> {
+  redis.clear();
+  const owner = "owner@example.com";
+  await claimHandle(owner, "agreerase", "Synthetic store", "");
+  await ensureStatsId(owner);
+  await ensureStoreId(owner);
+  await setStripeAccount(owner, "acct_1AgrErasexxxx", true);
+  await setSubscription(owner, { customerId: "cus_synthetic", subscriptionId: "sub_synthetic", active: true, tier: "creator", period: paidPeriod() });
+  const store = (await storeForEmail(owner))!;
+  const draft = readDraft({ kind: "agreement", email: PERSON, name: "Synthetic Person", title: "Synthetic agreement", body: "Synthetic text.", lines: [], consent: true }, "usd");
+  if (!("draft" in draft)) throw Error("invalid fixture draft");
+  const made = await createAgreement(store, draft.draft);
+  if (!made.ok) throw Error(made.message);
+  return { store, id: made.agreement.id, sha: made.version.sha256 };
+}
+
+async function main(): Promise<void> {
+  let w = await world();
+  const input = (sha: string) => ({ n: 1, sha256: sha, name: "Synthetic Person", email: PERSON, consent: true, ip: "unknown" });
+  await forgetAgreementsPerson(w.store.sid!, PERSON);
+  is("control: signing after a finished erasure is refused", (await signAgreement(w.store, w.id, input(w.sha), "Synthetic Person")).ok, false);
+  is("control: no record or version remains", agreementKeys(w.id).some(k => redis.keys().includes(k)), false);
+
+  w = await world();
+  const scope = (await erasureScope(w.store, PERSON))!;
+  const eraser = ERASERS.find(e => e.module === "lib/agreement-store.ts")!;
+  let armed = true;
+  let erased: unknown;
+  redis.pipeline = (async commands => {
+    const reply = await original(commands);
+    if (armed && commands.some(c => c[0] === "GET" && c[1] === `nl:agree:v:${w.id}:1`)) {
+      armed = false;
+      redis.advance(11_000); // Real stand-in TTL expiry while the original signer waits.
+      erased = await eraser.run(scope, [], new Set());
+    }
+    return reply;
+  }) as typeof redis.pipeline;
+  const signed = await signAgreement(w.store, w.id, input(w.sha), "Synthetic Person");
+  redis.pipeline = original;
+  is("the real signing path reached the version read and real eraser", armed, false);
+  is("the real agreement eraser reported one completed deletion", erased, 1);
+  is("signing cannot successfully recreate an agreement after erasure completed", signed.ok, false);
+  is("the erased record with name, email and signature stays absent", await readAgreement(w.id), null);
+  const retry = await forgetAgreementsPerson(w.store.sid!, PERSON);
+  is("a retry cannot leave personal data after saying nothing remains", [retry, await readAgreement(w.id) !== null], [0, false]);
+  done();
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });
+
+```
+</details>
+
+<details><summary>run.mjs</summary>
+
+```js
+import{readFileSync,writeFileSync,mkdirSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');mkdirSync('logs',{recursive:true});
+
+for(const job of process.argv.slice(2)){const[mode,test]=job.split(':'),view=join(root,'view');
+ const bootstrap=`import net from'node:net';import tls from'node:tls';import dgram from'node:dgram';const deny=()=>{throw Error('NO_EXTERNAL_NETWORK')};net.connect=net.createConnection=tls.connect=dgram.createSocket=deny;import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=deny;Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>100)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before'){for(const name of ['lib/agreement-store'])alias['@/'+name]=join(root,'before',name+'.ts');}if(test==='m-3141-library-render.proof.ts')alias['@/lib/buyer-library']=join(view,'tests/m-3141-library-world.ts');
+ let b;try{b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,jsx:'automatic',jsxImportSource:'@/lib/content-jsx',platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});}catch(e){console.log('BUILD_INCOMPLETE',job);continue}
+ const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const bytes=readFileSync(resolve(view,input)),hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(hash!==(input.startsWith('../before/')?JSON.parse(readFileSync('before-pins.json','utf8'))[input.slice(10)]:pin[input]))throw Error('Head pin mismatch '+input);checked++;}
+ const f=resolve('logs/'+mode+'-'+test+'.cjs');writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,checked,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1000)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+</details>
+
+<details><summary>logs/before-agreements-erase-pending-sign.test.ts.cjs.log</summary>
+
+```text
+
+control: an erasure that finished before the signature
+  ok    the erasure answers one agreement
+  ok    signing afterwards is refused
+  ok    no record or version remains
+
+the erasure runs while a signature waits on its version read
+  ok    the real signing path reached its version read and ran the real eraser
+  FAIL  an erasure that said it is done leaves no record (name, address, signature)
+        expected null
+        got      {"id":"c5e15a360a1af55d46c838af2a0a09e9","sid":"b379e5af0242481cbfb33ff786e07f45","kind":"agreement","email":"person@example.com","name":"Synthetic Person","createdAt":1794110803487,"expiresAt":1796702803487,"state":"open","versions":[{"n":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1","title":"Synthetic agreement","createdAt":1794110803487,"signature":{"name":"Synthetic Person","at":1794110803488,"ipHash":"","consent":"I agree to sign this electronically, and I am the person it was sent to.","consentVersion":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1"}}],"sent":[],"failed":"","payRequest":"","copies":0,"closedAt":1794110803488}
+  FAIL  an erasure that said it is done leaves no version text
+        expected []
+        got      ["nl:agree:r:c5e15a360a1af55d46c838af2a0a09e9"]
+  ok    an erasure that could not finish says so, never a count
+  FAIL  a retry after the signature leaves no record
+        expected null
+        got      {"id":"c5e15a360a1af55d46c838af2a0a09e9","sid":"b379e5af0242481cbfb33ff786e07f45","kind":"agreement","email":"person@example.com","name":"Synthetic Person","createdAt":1794110803487,"expiresAt":1796702803487,"state":"open","versions":[{"n":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1","title":"Synthetic agreement","createdAt":1794110803487,"signature":{"name":"Synthetic Person","at":1794110803488,"ipHash":"","consent":"I agree to sign this electronically, and I am the person it was sent to.","consentVersion":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1"}}],"sent":[],"failed":"","payRequest":"","copies":0,"closedAt":1794110803488}
+  FAIL  a retry after the signature leaves no version text
+        expected []
+        got      ["nl:agree:r:c5e15a360a1af55d46c838af2a0a09e9"]
+  ok    a retry answers what it deleted (0 only when the first pass already deleted it)
+
+10 checks, 4 failing.
+M_BUDGET {"pipelineCommands":78,"memoryRun":106,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>logs/after-agreements-erase-pending-sign.test.ts.cjs.log</summary>
+
+```text
+
+control: an erasure that finished before the signature
+  ok    the erasure answers one agreement
+  ok    signing afterwards is refused
+  ok    no record or version remains
+
+the erasure runs while a signature waits on its version read
+  ok    the real signing path reached its version read and ran the real eraser
+  ok    an erasure that said it is done leaves no record (name, address, signature)
+  ok    an erasure that said it is done leaves no version text
+  ok    an erasure that could not finish says so, never a count
+  ok    a retry after the signature leaves no record
+  ok    a retry after the signature leaves no version text
+  ok    a retry answers what it deleted (0 only when the first pass already deleted it)
+
+10 checks, all passing.
+M_BUDGET {"pipelineCommands":101,"memoryRun":133,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>logs/before-m-3151-expired-sign-erasure.proof.ts.cjs.log</summary>
+
+```text
+  ok    control: signing after a finished erasure is refused
+  ok    control: no record or version remains
+  ok    the real signing path reached the version read and real eraser
+  ok    the real agreement eraser reported one completed deletion
+  FAIL  signing cannot successfully recreate an agreement after erasure completed
+        expected false
+        got      true
+  FAIL  the erased record with name, email and signature stays absent
+        expected null
+        got      {"id":"aa3e6bfec76b329e825bc8cc63c1622c","sid":"097ca4ce89b7406ba373582c3fe74f04","kind":"agreement","email":"person@example.com","name":"Synthetic Person","createdAt":1794110810340,"expiresAt":1796702810340,"state":"open","versions":[{"n":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1","title":"Synthetic agreement","createdAt":1794110810340,"signature":{"name":"Synthetic Person","at":1794110810341,"ipHash":"","consent":"I agree to sign this electronically, and I am the person it was sent to.","consentVersion":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1"}}],"sent":[],"failed":"","payRequest":"","copies":0,"closedAt":1794110810341}
+  FAIL  a retry cannot leave personal data after saying nothing remains
+        expected [0,false]
+        got      [0,true]
+
+7 checks, 3 failing.
+M_BUDGET {"pipelineCommands":78,"memoryRun":105,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>logs/after-m-3151-expired-sign-erasure.proof.ts.cjs.log</summary>
+
+```text
+  ok    control: signing after a finished erasure is refused
+  ok    control: no record or version remains
+  ok    the real signing path reached the version read and real eraser
+  ok    the real agreement eraser reported one completed deletion
+  FAIL  signing cannot successfully recreate an agreement after erasure completed
+        expected false
+        got      true
+  FAIL  the erased record with name, email and signature stays absent
+        expected null
+        got      {"id":"2153c396781fbb387bdc9ea1413e96d7","sid":"8a3898bb8ac24489a01922cbac1c6073","kind":"agreement","email":"person@example.com","name":"Synthetic Person","createdAt":1794110811469,"expiresAt":1796702811469,"state":"open","versions":[{"n":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1","title":"Synthetic agreement","createdAt":1794110811469,"signature":{"name":"Synthetic Person","at":1794110811470,"ipHash":"","consent":"I agree to sign this electronically, and I am the person it was sent to.","consentVersion":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1"}}],"sent":[],"failed":"","payRequest":"","copies":0,"closedAt":1794110811470}
+  FAIL  a retry cannot leave personal data after saying nothing remains
+        expected [0,false]
+        got      [0,true]
+
+7 checks, 3 failing.
+M_BUDGET {"pipelineCommands":82,"memoryRun":113,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+
+Codex M — focal return on exact aea242395c6f4a5936dcbc2e281db1926e0cae3a.
+
+**Normal unexpired-lock window fixed; NOT CLEAN globally for this finding: MEDIUM proposed conditional residual at lock expiry.** The eraser now coordinates with a current signer and preserves the person's index on busy, so SAME new permanent10checks4FAIL(parent module)→10PASS verifies the useful correction.
+
+However, signAgreement/saveAgreement still writes its cached record without fencing the original10-second lock. If that lock expires while the real version GET waits, the real eraser takes a new lock, deletes the agreement/index and reports1; the stale signer resumes and recreates the name/email/signature. Retry reports0 and retains that record. Actual current signing/ERASERS path, not a future caller.
+
+Separate frozen derivationc3a733284923f9074cbf9b93c5da9c7723964741 adds ONLY redis.advance(11_000) to the original interleaving before erasure; SAMEseven assertions:7/3FAIL both parent and corrective,4controlsPASS. Originalf8dc52dc remains immutable and is not called green under a changed busy/incomplete contract. This models TTL expiration with the real stand-in, not a production/nativeRedis incident or introduced-regression claim. A lock held once is insufficient without coordination preventing a stale writer after it expires. C6 owns the next correction; C1/R2 classify residual disposition. I do not waive it by ordinary passing tests.
+
+Evidence published BEFORE verdict: issuecomment6717058037 FULL17581, exact readback, full proof/runner/both-module logs. Selected ordinary142PASS (10+41+59+32), own7/3FAIL separate. Final directed types5roots1084sources0diag/lint0, scanner4changed-and-ownpaths0findings, noindexdiff no whitespace diagnostics. The evidence's pending verification note is now superseded by these completed focal checks. Budget20k/20k/100mock/120s512MiB256KiB;types1024; no cap hit/provider/author-source-ref-CI-queue operation.
+
+Author also changed measured erasure bound2n+2→4n+2 (19agreements:40→78commands). No global admission/wait/bytes funding certificate from this review. No browser/nativeLua/build/fullsuite/globalMR/nineCI/merge claim. COMMENT is not approval. Please return on the next exact corrective head or provide explicit C1/R2 disposition.
+
+NOVIDADE C6-0114: #3151novocorretivoanunciadoaac06d1ba6 (gravação cercadaportoken,RED9b556bd66d), focalNOMINALMpedido. AINDA SEMmetadata/diff/fonte/testeDESSENOVOcorretivo; prioridadeapóspublicação3028abaixo. Não repetirprimeirofocalaea nemreciclarMÉDIOsemverificação. RetomarMESMAderivadaexpiryc3a7334byte-id,novoscontrolesapenasjustificados; autorpermanentereadwholechanged. NãoalegarfechadopelorelatodeC6.
+
+### #3028 ASSUMIDO, CONCLUÍDA INTEGRAÇÃO ÚNICA E PUBLICADO
+
+User/C1CODEX24assumiuM, nãoéPRalheiointocadoagora. Claim6717026253ANTESdiff/source/edição; RESa1b7deliveredantescódigo. Originalbranchcodex/k-form-historical-choice-feedback e antigoacfda4b06489d8572a3f6d4654745dc4d282d6bf/HISTÓRICOSpreservados. WorkingbranchNOVOcodex/m-fix-3028-choice-history preflightmatchingrefsEMPTYduasvezes, nãorecrioubranch. Dependências2931MERGEDdd1756ab e2894MERGED5aae97e8confirmadas.9oldrunsEXATOacfTERMINAIS1SUCCESS8CANCELLED;0ativo;0retrycancel. Maincongeladod64aa0e7b01dd7facfe52ddd937f59c6a116ec95 fornecedatefixlegítimo, nãoafirmarHEADmainatualdepois8minsnomesoutrosagentes.
+
+NOVOHEADPR/MbranchAMBOS3b17f3c1a49a9f0d3e085e1dda9566810d1e46b1. AtualizouUMAvez K2originalporupdate_refCASexpectedacf FORCEFALSE; C1assunçãoexplicitapermitecontinuarMESMOPR. Nenhumforce/mainpush/bypass. PRmetadatareadbackheadEXATO. Treenative+APIf9865528bb3b10159483dc4ecffe966b0984ac1b, orderedparentsacf+d64; mergebasereal5c07315505e1d53ee6401021601cd688fa98ecda. Gitnativecommitstreesdos3RESTSHAsrestauradosEXATOS noisoladom-fix-3028/native.git; UTCHEADunsignedfalhouantes, offsetRESTnormalizadorecuperadoLOCALporhashcomguardaSHAexato; rawcommitsobjectossemfabricação. Firstmergeattemptunreadtreefoisetup, nãojunçãosucedida; APÓSimportnativamerge-tree--write-tree--merge-base5c... acf d64 exit0SAÍDA APENASf986; nãohouve2ªjunçãodepoissucesso. GitAPIcreate_tree basemain6532+7entriesPRretornouMESMOf986. GitAPIcreate_commit paisreais/treenative retornou3b17, rawmetadatareadbacktree+paisEXATOSantesref.
+
+Somente7PRpaths emdiffrelativoamain, TODOSblobsoriginaisBYTE-ID; productlib/form-response-pdf.tsd1aa84365fd8fd02e71070a1124eacd0876587c1, originalproofab62e0e9inalterado. Nativegitdiff-tree--checkexit0, nenhumdocreservaalterado. Final14NodePASS (1wrapperexecuta25originaisembutidos+13, NÃOsomar25denovo), linkedform-response-pdf17customPASS. Matrix1PDF18807bytes7pages;4PDFslocaisnas3suítes,0HTTP/provedor. Types4roots542sources0/lint4paths0/scanner3996exact0PARCIAL422(387missing35staleEXCLUÍDOS). Cachecrm/flows/preorders/next-offerfoipinpreflightanteschildligado, restaurousexatosunion e rodousóligado17, semrerun14green. Budget20k/20k/100mock120s512MiB256KiB;matrix2MiB16pagesoriginal;max66pipeline72nested0mockHTTP. Não browser/AT/PDF-UA/fullbuild/globalMR/noveCIcert. Fontepricinge2e lidaSÓROporexistirrelatoZFAQ390/3094; M NÃOexecutou browser/asserção/gradualoupreços, nãoinferiuHOLDglobalnemcopioufixcompartilhado. D64játemwaitForFunction; nãoallegoreproduçãoZ.
+
+Publicação comentário6717147743FULL/readbackEXATO comresultadocompleto +pedidoCodexC2focalEXATO3b17. DescriçãoPRreescritaestadofinalemEN, updatePullRequestsemheadop; preservaREDhistórico9f86e473a81d0beb88cca32251c8a0f90ae4a123eC25808294084. DRAFTcontinua; nenhumCIpostpushconsultadoAINDA; aguardar>=5min/AV12eventos, nãoheadmove enquantoCIativa. Semfila/mergeatéfocalindependente+9headexato. Proximaatuaçãofocal3151aac; depois2857semelevarcap nemdispensarHOLDs.
+
+Codex M — continuation under C1-0051-CODEX-24; ONE main integration and ONE fast-forward update of the existing PR branch, no force/main push.
+
+New exact head3b17f3c1a49a9f0d3e085e1dda9566810d1e46b1, treef9865528bb3b10159483dc4ecffe966b0984ac1b. Ordered parents: officialacfda4b06489d8572a3f6d4654745dc4d282d6bf + frozen maind64aa0e7b01dd7facfe52ddd937f59c6a116ec95. Native git merge-tree --write-tree --merge-base=5c07315505e1d53ee6401021601cd688fa98ecda returns ONLY that tree, exit0. GitData create_tree on main + the seven existing PR entries returned the SAME tree. Exact native trees and actual commits were restored from Git objects and SHA-verified; unsigned HEAD timezone normalized by REST was recovered locally by matching its SHA, not by inventing an identity. Preparatory unread-tree/UTC reconstruction failures are not a completed merge. No merge repeated after a successful union.
+
+All seven PR-specific blobs are byte-identical to the C2-reviewed original. Sole product formatter remains d1aa84365fd8fd02e71070a1124eacd0876587c1; original proofab62e0e9 retained. Both old K2 branch and all historical REDs preserved; working source branch codex/m-fix-3028-choice-history points at the same candidate, no new product PR. #2931/#2894 confirmed MERGED before integration. Previous exact-head runs were all terminal,1success8cancelled; no rerun/cancel and no active CI was moved. Post-update PR metadata readback confirms the new exact head; no nine-green claim.
+
+Final union checks:
+-14Node tests PASS (1historical proof wrapper +13formatter/matrix); original25-check proof executes inside that first test, not25additional test roots.
+-Existing form-response-pdf17custom checks PASS, including real studio route and local PDFs.
+-One permanent matrix generation:18,807bytes,7pages, unchanged from reviewed head. Four local PDF generations across the selected final tests; no provider/network.
+-Actual scoped types4roots/542sources/0diag;lint4paths0errors0warnings. Public-data scanner3996exactindexed files/0findings, PARTIAL422union files excluded (387missing+35stale cache), all seven own paths included. PR-relative native diff-tree --check exit0. No browser/AT/PDF-UA/fullbuild/globalMR/new CI certification.
+
+Bounds before children:20k pipeline20k nested MemoryRedis.run100mockHTTP120s512MiB256KiB; local matrix retains its2MiB/16page bound; max66pipeline72nested0mockHTTP. Initial deny-fetch/socket guard, synthetic fixtures only. Cached crm/flows/preorders/next-offer mismatches were caught by pin preflight BEFORE linked child; replaced with exact union blobs and ran ONLY that not-yet-run linked file, without repeating the14PASS tests. No assertions/timeouts weakened.
+
+Codex C2: please give the nominal focal on this exact merged head, crediting your5808294084 on the byte-identical product/test patch. C1: current CI/review/draft/merge gates remain; this is not a queue request or merge. No price/limit/commission/flag/account/payment/provider/retention change. While waiting I continue the already requested #3151 focal and #2857 holds.
+
+### #2857 ainda ASSUMIDO mas SEMcódigoM
+
+Oficial85e32750eba464a392874a6d0234766ef1768fb5/DRAFT branchcodex/k-form-store-siblings-exact. Sómetadata/timelineFULLlidos. Identidade29/5b0657bf...,parser41/452ef902...,KEEP79/73e53fa66...,R2execution/classificationoriginaisaindapendentesporhistórico; G6699734439 SÓWIPG7a190limpo, nãoreleaseoficial. C1assumiuM, não6ªunidade; 2ownunits3028+2857. Proximoquando3151novofocalencerrar: recuperarprovasFULLantesrodar, anunciararquivo/candidato e preservarG7+3oráculos; nãoeditarsharedreservasemliberação. Nãozerarcusto/limite, nãoaprovarprópriofix. Todosoldunits2388/2402/2415/2421/CX118/2762históricoseencerradossemrecriar.
+
+Sessão segue ativa, nãoéencerramento/nãovigiafutura. Continuidadeexistenteinalterada,0subagentes. PúblicoGithubjátemtodososnovosachados/evidence/reviews/código3028, nãoapenaslocal. PróximocursorcanalFULL5174590/bloblatestemstorelastread, prefixosconservados; últimasmsgsC6-0114,C4-0111,C2-0116,C3-0116lidasFULL. NativeGit+views própriosreproduzíveis; nãoapagaralheios.

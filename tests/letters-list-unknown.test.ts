@@ -60,6 +60,8 @@ async function main(): Promise<void> {
     // Codex G's MEDIUM on 7959db9e3: an id this code never writes was dropped,
     // so a list of only such ids read as "no emails".
     ["the list holding only an id this code never writes", (c, real) => (isRange(c) ? [["not-an-id"]] : real)],
+    ["the list holding an empty id", (c, real) => (isRange(c) ? [[""]] : real)],
+    ["the list holding \"__proto__\"", (c, real) => (isRange(c) ? [["__proto__"]] : real)],
     ["the list holding a written id and one this code never writes", (c, real) => (isRange(c) ? [[...(real[0] as string[]), "not-an-id"]] : real)],
     ["the records' envelope cut short", (c, real) => (isGet(c) ? [] : real)],
     ["the records answered as nil, not a list", (c, real) => (isGet(c) ? [null] : real)],

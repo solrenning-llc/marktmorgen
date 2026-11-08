@@ -127,12 +127,49 @@ export async function forgetPictures(communityFolder: string): Promise<void> {
   await redisPipeline([["DEL", countKey(communityFolder)]]);
 }
 
-/** Notes who was given the door for a picture's path, when it is given. */
-export async function noteCommunityUpload(path: string, author: string, now = Date.now()): Promise<void> {
-  await redisPipeline([
-    ["SET", uploadKey(path), author, "NX", "EX", UPLOAD_TTL_SECONDS],
-    ["ZADD", DOORS_KEY, "NX", Math.floor(now / 1000), path],
-  ]);
+/**
+ * Notes who was given the door for a picture's path, and lists the path for the sweep, read exactly (CX-123 rule 24):
+ * true once this member's door is noted ("OK") and the path is on the sweep's list (ZADD NX: 1 added, 0 there
+ * already); false when the path already had a door ("OK" not given: SET NX answered null). Any other answer throws
+ * UnknownReplyError: the door may or may not be noted, and the path may or may not be listed.
+ */
+export async function noteCommunityUpload(path: string, author: string, now = Date.now()): Promise<boolean> {
+  const replies = repliesFor(
+    await redisPipeline([
+      ["SET", uploadKey(path), author, "NX", "EX", UPLOAD_TTL_SECONDS],
+      ["ZADD", DOORS_KEY, "NX", Math.floor(now / 1000), path],
+    ]),
+    2,
+  );
+  const added = replies ? countOf(replies[1]) : null;
+  if (!replies || (replies[0] !== "OK" && replies[0] !== null) || (added !== 0 && added !== 1)) throw new UnknownReplyError("a community picture's door");
+  return replies[0] === "OK";
+}
+
+/**
+ * Notes a door for a picture's path before it is given (app/api/store/community/upload): true only when it is
+ * noted for this member and listed for the sweep, so a file sent through it is deleted, and its place given back, if
+ * it is never put in a post. The caller has taken the door's place (takePicturePlace) and gives no door otherwise.
+ *
+ * - The path already had a door: that one keeps its own place and listing; the place taken for this one goes back.
+ * - The note answered in another shape, or threw: the path is listed again, read exactly, so the sweep gives its
+ *   place back once, a day on; never given back here, where the listing may already be there for the sweep to give it
+ *   back as well. A listing that cannot be confirmed either leaves the place counted: never fewer than kept. The
+ *   note's error is thrown on, so no door is given.
+ */
+export async function openCommunityDoor(path: string, author: string, now = Date.now()): Promise<boolean> {
+  let noted: boolean;
+  try {
+    noted = await noteCommunityUpload(path, author, now);
+  } catch (error) {
+    console.error("could not confirm a community picture's door; none given", error);
+    const answered = await redisPipeline([["ZADD", DOORS_KEY, "NX", Math.floor(now / 1000), path]]).then((replies) => repliesFor(replies, 1), () => null);
+    const added = answered ? countOf(answered[0]) : null;
+    if (added !== 0 && added !== 1) console.error("could not list an unconfirmed community picture door for the sweep; its place stays counted");
+    throw error;
+  }
+  if (!noted) await givePicturePlace(path);
+  return noted;
 }
 
 /**

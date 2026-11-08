@@ -43,6 +43,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, giveData, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
@@ -486,26 +487,38 @@ export async function restoreFlowVersion(store: Store, id: string, at: number): 
 export async function removeFlow(store: Store, id: string): Promise<FlowResult> {
   if (!store.listId) return { ok: false, reason: "unknown" };
   const listId = store.listId;
-  const removed = await changing(async () => {
+  // Paused first, so nobody new starts it and nothing more of it is sent while its runs are erased; then its runs,
+  // their history, starts and queued steps, so nothing of the people in it is kept; and only once that is confirmed
+  // is it taken off the list. An erasure that cannot be confirmed throws with the workflow still listed (paused), so a
+  // removal tried again, a person's erasure request (forgetWorkflowPerson) or the store's deletion
+  // (forgetStoreWorkflows), which walk the listed workflows, still reach its runs (CX-123 rule 24). Each write of the
+  // list goes only over the text it was read from (writeFlows), read afresh when it changed in between (changing).
+  const flow = await changing(async () => {
+    const { flows, raw } = await readFlowListRaw(listId);
+    const found = flows.find((f) => f.id === id);
+    if (!found) return null;
+    if (found.active) await writeFlows(store, listId, flows.map((f) => (f.id === id ? { ...f, active: false } : f)), raw);
+    return found;
+  });
+  if (!flow) return { ok: false, reason: "unknown" };
+  await purgeFlow(store, flow);
+  const next = await changing(async () => {
     const { flows, raw } = await readFlowListRaw(listId);
     if (!flows.some((f) => f.id === id)) return null;
-    const next = flows.filter((f) => f.id !== id);
-    await writeFlows(store, listId, next, raw);
-    return { flows, next };
+    const left = flows.filter((f) => f.id !== id);
+    await writeFlows(store, listId, left, raw);
+    return left;
   });
-  if (!removed) return { ok: false, reason: "unknown" };
-  const { flows, next } = removed;
+  if (!next) return { ok: false, reason: "unknown" };
   // Its earlier versions: a deletion that is not confirmed is said, never taken for done (Codex G on #1927); they stay in
   // the list's index, so the store's forgetting still finds and deletes them.
-  const versionsGone = await dropFlowVersions(store, store.listId, id).then(
+  const versionsGone = await dropFlowVersions(store, listId, id).then(
     () => true,
     (error: unknown) => {
       console.error("forgetting a removed workflow's versions failed", error);
       return false;
     },
   );
-  // Its runs, their history, starts and queued steps: nothing of the people in it is kept.
-  await purgeFlow(store, flows.find((f) => f.id === id)!).catch((error) => console.error("erasing a removed workflow's runs failed", error));
   return versionsGone ? { ok: true, flows: next } : { ok: false, reason: "history_unconfirmed" };
 }
 
@@ -525,25 +538,22 @@ function queuedOf(store: Store, flow: Pick<Flow, "id">, emails: string[]): (stri
 }
 
 /**
- * Confirms a pipeline of deletions (DEL, ZREM) was answered in full, each
- * command with its own count, a whole number from zero up to the keys (DEL)
- * or members (ZREM) it named, read from the reply's own place without running
- * a getter: anything else (a missing, null or other reply in any place) is not
- * an erasure, and throws (Codex G and Revisor 2 on #1927: a null in the place
- * of the workflows' DEL was taken for done).
+ * Confirms a pipeline of deletions (DEL and ZREM only) was answered in full, read as a fresh list from the reply's own
+ * data slots (repliesFor: a Proxy, a hole, an inherited slot or a getter is refused, nothing of the reply is run),
+ * each reply the count its command answers, a whole number from zero up (countOf) and no more than the keys (DEL)
+ * or members (ZREM) it named; anything else, a null included, is not an erasure (Codex G and Revisor 2 on #1927;
+ * Codex M on #3083, CX-123 rule 24) and throws, so the workflow stays listed and its runs findable.
  */
 async function erase(commands: (string | number)[][]): Promise<void> {
   for (let i = 0; i < commands.length; i += 500) {
     const chunk = commands.slice(i, i + 500);
-    const reply: unknown = await redisPipeline(chunk);
-    if (!Array.isArray(reply) || reply.length !== chunk.length) throw new FlowWriteUnconfirmed();
+    const replies = repliesFor(await redisPipeline(chunk), chunk.length);
+    if (!replies) throw new FlowWriteUnconfirmed();
     for (let j = 0; j < chunk.length; j += 1) {
-      // The descriptor's own value only (an inherited `value` on a polluted prototype is not one), never a getter.
-      const place = Object.getOwnPropertyDescriptor(reply, String(j));
-      const count: unknown = place && Object.hasOwn(place, "value") ? place.value : undefined;
+      const count = countOf(replies[j]);
       // No more than what the command named: a DEL counts at most its keys, a ZREM at most its members.
       const most = chunk[j][0] === "ZREM" ? chunk[j].length - 2 : chunk[j].length - 1;
-      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0 || count > most) throw new FlowWriteUnconfirmed();
+      if (count === null || count > most) throw new FlowWriteUnconfirmed();
     }
   }
 }

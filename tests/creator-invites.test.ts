@@ -109,7 +109,7 @@ function invoice(id: string, cents: number, createdDaysAgo: number, paidDaysAgo:
     created: nowS - createdDaysAgo * DAY,
     status_transitions: { paid_at: nowS - paidDaysAgo * DAY },
     parent: { type: "subscription_details", subscription_details: { subscription: "sub_x" } },
-    payments: { data: [{ payment: { type: "payment_intent", payment_intent: pi } }] },
+    payments: { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: pi } }], has_more: false },
     ...extra,
   };
 }
@@ -183,7 +183,7 @@ async function main(): Promise<void> {
   is("half of it, rounded down", inviteShare(2900), 1450);
   is("an odd cent is not rounded up", inviteShare(2901), 1450);
   is("nothing paid, nothing earned", inviteShare(0), 0);
-  is("a refund comes off first", paidOn({ amount_paid: 2900 }, 900), 2000);
+  is("a refund comes off first", paidOn({ amount_paid: 2900, post_payment_credit_notes_amount: 0 }, 900), 2000);
   is("so does a credit note", paidOn({ amount_paid: 2900, post_payment_credit_notes_amount: 2900 }, 0), 0);
 
   // Everyone who has started paying has a customer.

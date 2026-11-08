@@ -28,7 +28,7 @@ import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, releaseMark } from "@/lib/claim-mark";
-import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, deleteIfHeldOnly, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
@@ -598,24 +598,26 @@ export async function forgetAgreementsPerson(sid: string, email: string): Promis
   const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))].sort();
   for (let at = 0; at < ids.length; at += FORGET_BATCH) {
     const batch = ids.slice(at, at + FORGET_BATCH);
-    // Each agreement's lock first, the one a signature or a new version holds while it reads the record and writes it
-    // back (Codex M on #3151): a signature already in progress finishes before its agreement is deleted, so it cannot
-    // write the record back after this says done. A lock still taken after the wait throws LockBusyError: the erasure is
-    // not finished, the person's set is kept, and a retry finds everything.
-    const held: Held[] = [];
-    try {
-      for (const id of batch) held.push(await takeLock(lockKey(id), 10, ERASE_LOCK_WAIT_MS));
-      const commands = batch.flatMap((id) => [["DEL", ...agreementKeys(id)], ["ZREM", storeKey(sid), id]]);
-      const replies = repliesFor(await redisPipeline(commands), commands.length);
-      // DEL answers how many of the agreement's keys went (its record and up to MAX_VERSIONS texts), ZREM 0 or 1.
-      const counted = replies?.every((reply, i) => {
-        const n = countOf(reply);
-        return n !== null && n <= (i % 2 === 0 ? 1 + MAX_VERSIONS : 1);
-      });
-      if (!counted) throw new UnknownReplyError("deleting a person's agreements");
-    } finally {
-      for (const h of held) await letGo(h);
+    // One agreement at a time: its lock (the one a signature, a new version or a change holds while it reads the record
+    // and writes it back), then its record and texts deleted in one script only while that lock is still this
+    // erasure's own (deleteIfHeldOnly), then the lock let go (Codex M on #3151). A writer in progress finishes first;
+    // a writer held up past its own lock cannot write (saveAgreement is fenced the same way); and an erasure held up
+    // past its lock deletes nothing. A lock still taken after the wait, or lost before the delete, throws: the erasure
+    // is not finished, the person's set is kept, and a retry finds everything.
+    for (const id of batch) {
+      const held = await takeLock(lockKey(id), 10, ERASE_LOCK_WAIT_MS);
+      try {
+        if (!(await deleteIfHeldOnly(held, agreementKeys(id)))) throw new LockBusyError("an agreement's lock was lost before its erasure");
+      } finally {
+        await letGo(held);
+      }
     }
+    // Then out of the store's list (ZREM answers 0 or 1); the records it names are already gone.
+    const replies = repliesFor(await redisPipeline(batch.map((id) => ["ZREM", storeKey(sid), id])), batch.length);
+    if (!replies?.every((reply) => {
+      const n = countOf(reply);
+      return n !== null && n <= 1;
+    })) throw new UnknownReplyError("deleting a person's agreements");
   }
   const dropped = repliesFor(await redisPipeline([["DEL", person]]), 1);
   const gone = dropped ? countOf(dropped[0]) : null;

@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     const id = await make(store, CLIENT, "Dana Reyes", "Coaching", now);
     let lost = true;
     setPipeline(async (commands) => {
-      if (lost && commands.some((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:agree:r:"))) {
+      if (lost && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-del:v1") && c.some((x) => String(x).startsWith("nl:agree:r:")))) {
         lost = false;
         return [undefined];
       }
@@ -139,7 +139,7 @@ async function main(): Promise<void> {
     let cut = true;
     setPipeline(async (commands) => {
       const replies = await realPipeline(commands);
-      if (cut && commands.some((c) => c[0] === "DEL" && String(c[1]).startsWith("nl:agree:r:"))) {
+      if (cut && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:fenced-del:v1") && c.some((x) => String(x).startsWith("nl:agree:r:")))) {
         cut = false;
         return replies.map((r, i) => (i === 0 ? "OK" : r));
       }

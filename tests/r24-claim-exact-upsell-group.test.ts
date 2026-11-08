@@ -28,10 +28,11 @@ import { readListing } from "@/lib/catalog";
 import { newUpsellKey, readUpsell, takeUpsell } from "@/lib/upsell";
 import { readGroup, settleGroup, startGroup } from "@/lib/group-buy";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { confirmPurchase } from "@/lib/purchase-email";
 import { THANKS_WORDS } from "@/lib/buyer-words/thanks";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { paidPeriod } from "./billing-period-fixture";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_claim_exact";
@@ -88,6 +89,30 @@ async function oddClaim<T>(pick: (command: (string | number)[]) => boolean, repl
       if (how === "landed") await original(commands);
       return reply === SHORT ? [] : [reply];
     }
+    return original(commands);
+  }) as typeof redis.pipeline;
+  try {
+    return await run();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+/**
+ * The SET NX that `pick` names lands but answers `reply`, and reading it back fails too (Claude 2 and Claude 6 on
+ * #3275): claimMark says "unknown" although the mark is there. With `releaseFails`, letting it go fails as well.
+ */
+async function landedUnreadable<T>(pick: (command: (string | number)[]) => boolean, reply: unknown, releaseFails: boolean, run: () => Promise<T>): Promise<T> {
+  const original = redis.pipeline.bind(redis);
+  let key = "";
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.length === 1 && commands[0][0] === "SET" && commands[0].includes("NX") && pick(commands[0])) {
+      key = String(commands[0][1]);
+      await original(commands);
+      return [reply];
+    }
+    if (key && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === key) throw new Error("synthetic Redis outage");
+    if (key && releaseFails && commands.length === 1 && commands[0][0] === "EVAL" && commands[0].includes(key)) throw new Error("synthetic Redis outage");
     return original(commands);
   }) as typeof redis.pipeline;
   try {
@@ -168,6 +193,17 @@ async function offers() {
     is(`${label}, but the write landed (read back as this claim's own): charged once`, [landed.kind, charged - landedBefore], ["done", 1]);
   }
 
+  part("Offer after paying, the claim landed but could not be read back (Claude 6 LOW 1, Claude 2 LOW 3 on #3275)");
+  for (const [label, reply] of ODD.filter(([, r]) => r !== SHORT)) {
+    const id = newOrder();
+    const before = charged;
+    const first = await landedUnreadable(theClaim(id), reply, false, () => press(id));
+    is(`${label}: nothing charged, the buyer is told to press again`, [first.kind, charged - before], ["retry", 0]);
+    is(`${label}: this press's own claim is let go, so no answer is kept`, await readUpsell(id), null);
+    const again = await press(id);
+    is(`${label}: pressed again, charged once (not a "done" with nothing charged)`, [again.kind, charged - before], ["done", 1]);
+  }
+
   part("What the buyer reads when the claim could not be confirmed");
   is("in US English, honest: nothing charged, try again", THANKS_WORDS.en.upsellNotes.retry, "We could not confirm that offer just now, so nothing was charged for it. Press the button again in a moment.");
   is("in every store language", Object.values(THANKS_WORDS).every((w) => typeof w.upsellNotes.retry === "string" && w.upsellNotes.retry.length > 20), true);
@@ -199,7 +235,10 @@ async function groups() {
       customer_details: { email: "buyer@example.com" },
     };
     const settle = () => settleGroup({ store, session, product, base: "https://marktmorgen.com/@r24grp", from: '"Groups" <hello@marktmorgen.com>' });
-    return { id, settle };
+    // The whole confirmation, as the thanks page and the sweep run it, on the checkout as Stripe gives it.
+    const known = { ...session, status: "complete", payment_status: "paid" };
+    const confirm = () => confirmPurchase(store, session.id, known as unknown as Parameters<typeof confirmPurchase>[2]);
+    return { id, settle, confirm, sessionId: session.id };
   };
   const theMark = (id: string) => (command: (string | number)[]) => command[1] === `nl:grp:${id}:settling`;
   const failure = (run: () => Promise<unknown>) => run().then((value) => `resolved ${String(value)}`, (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : `threw ${String(error)}`));
@@ -214,8 +253,41 @@ async function groups() {
   {
     const { id, settle } = await newGroup();
     const before = emails;
-    const nil = await oddClaim(theMark(id), null, "lost", settle);
-    is("a nil mark (another settling): already, nothing marked paid or sent", [nil, Boolean((await readGroup(id))?.paid), emails - before], ["already", false, 0]);
+    const nil = await oddClaim(theMark(id), null, "lost", () => failure(settle));
+    // Taken is "another run holds the mark", not "paid" (Claude 2 and Claude 6 on #3275): never "already" on it.
+    is("a nil mark, the group not paid: unknown, nothing marked paid or sent", [nil, Boolean((await readGroup(id))?.paid), emails - before], ["unknown", false, 0]);
+  }
+  {
+    const { id, settle } = await newGroup();
+    const before = emails;
+    // The other run marks the group paid between this run's first read and its claim.
+    const original = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 1 && commands[0][0] === "SET" && commands[0].includes("NX") && commands[0][1] === `nl:grp:${id}:settling`) {
+        const [raw] = await original([["GET", `nl:grp:${id}`]]);
+        await original([["SET", `nl:grp:${id}`, JSON.stringify({ ...JSON.parse(String(raw)), paid: Date.now() }), "EX", 3600]]);
+        return [null];
+      }
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const raced = await failure(settle).finally(() => {
+      redis.pipeline = original;
+    });
+    is("a nil mark, the group paid by the other run: already, nothing sent again", [raced, emails - before], ["resolved already", 0]);
+  }
+  {
+    const { id, settle } = await newGroup();
+    // Another run's mark written just before this run lets its own go (Claude 2 LOW 2): compare and delete.
+    const key = `nl:grp:${id}:settling`;
+    const original = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => (c[0] === "DEL" || c[0] === "EVAL") && c.includes(key))) await original([["SET", key, "another-run", "EX", 300]]);
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const own = await failure(settle).finally(() => {
+      redis.pipeline = original;
+    });
+    is("settled, and another run's mark is never deleted", [own, (await redis.pipeline([["GET", key]]))[0]], ["resolved settled", "another-run"]);
   }
 
   for (const [label, reply] of ODD) {
@@ -231,6 +303,27 @@ async function groups() {
     const landedBefore = emails;
     const ours = await oddClaim(theMark(landed.id), reply, "landed", landed.settle);
     is(`${label}, but the write landed (read back as this mark's own): settled once`, [ours, emails - landedBefore], ["settled", 1]);
+  }
+
+  // Claude 2 and Claude 6 on #3275 (MEDIUM): the mark lands, its reply and read-back fail, and the buyer reloads the
+  // thanks page within the mark's 300 seconds. The confirmation must never keep its "sent" mark on a group not paid.
+  const outcome = (run: () => Promise<unknown>) => failure(run);
+  for (const releaseFails of [false, true]) {
+    part(`Through the confirmation: a landed mark not read back, letting it go ${releaseFails ? "failing too" : "working"}`);
+    const { id, confirm, sessionId } = await newGroup();
+    const before = emails;
+    const confirmMark = async () => (await redis.pipeline([["GET", `nl:confirm:${sessionId}`]]))[0];
+    const first = await landedUnreadable(theMark(id), "QUEUED", releaseFails, () => outcome(confirm));
+    is("first run: unknown, not paid, no receipt, no confirmation mark", [first, Boolean((await readGroup(id))?.paid), emails - before, await confirmMark()], ["unknown", false, 0, null]);
+    const second = await outcome(confirm);
+    if (!releaseFails) {
+      is("reloaded at once: the mark was this run's and let go, so settled once", [second, Boolean((await readGroup(id))?.paid), emails - before], ["resolved sent", true, 1]);
+    } else {
+      is("reloaded within 300 s: still unknown, no confirmation mark kept", [second, Boolean((await readGroup(id))?.paid), emails - before, await confirmMark()], ["unknown", false, 0, null]);
+      advance(301_000);
+      is("after the mark ran out: settled once", [await outcome(confirm), Boolean((await readGroup(id))?.paid), emails - before], ["resolved sent", true, 1]);
+    }
+    is("and confirmed again: already, nothing sent twice", [await outcome(confirm), emails - before], ["resolved already", 1]);
   }
 }
 

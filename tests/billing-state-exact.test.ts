@@ -5,6 +5,9 @@
  * exactly one line, its price with a whole positive `unit_amount` and a
  * `recurring.interval` of month or year (agreeing with a named price), and
  * typed `cancel_at` (null or a time) and `cancel_at_period_end` (a boolean).
+ * A line Stripe sends with a quantity other than 1, a currency other than
+ * USD or an interval_count other than 1 is off the plan's design (every
+ * plan price is made by ensurePrice that way) and is unknown too.
  * Any other 200 reply is "unknown", and every caller keeps what the store has
  * written down: no write to the lowest plan, monthly, with no period
  * (readSubscription → recordState, the daily sync's applyListed and
@@ -120,6 +123,11 @@ function unknownShapes(period: { start: number; end: number }): [string, Reply][
     ["unit_amount 0", edit((r) => { r.items.data[0].price.unit_amount = 0; })],
     ["unit_amount not whole", edit((r) => { r.items.data[0].price.unit_amount = 999.5; })],
     ["price without recurring", edit((r) => { delete r.items.data[0].price.recurring; })],
+    ["line with quantity 0", edit((r) => { r.items.data[0].quantity = 0; })],
+    ["line with quantity 2", edit((r) => { r.items.data[0].quantity = 2; })],
+    ["line with quantity null", edit((r) => { r.items.data[0].quantity = null; })],
+    ["price in another currency", edit((r) => { r.items.data[0].price.currency = "jpy"; })],
+    ["price billed every 12 intervals", edit((r) => { r.items.data[0].price.recurring.interval_count = 12; })],
     ["recurring without interval", edit((r) => { r.items.data[0].price.recurring = { interval_count: 1 }; })],
     ["recurring weekly", edit((r) => { r.items.data[0].price.recurring.interval = "week"; })],
     ["named yearly price billed monthly", edit((r) => { r.items.data[0].price.recurring.interval = "month"; })],

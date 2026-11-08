@@ -674,6 +674,24 @@ async function readLifeFlat(life: string): Promise<string[]> {
   return flat;
 }
 
+/** Fields the all-time record keeps as dates, not counts. */
+const LIFE_DATES = new Set(["started", "since", "filled"]);
+
+/**
+ * The all-time record's fields as counts, read exactly (CX-123 rule 24): every count a whole number, or it throws.
+ * Its dates stay in the map as 0, as they did, so the record's size still counts them. A loose read took a count in
+ * any other shape for 0, so the studio lost those views and the path showed zeros where it keeps the last reading.
+ */
+function lifeCounts(flat: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const count = LIFE_DATES.has(flat[i]) ? 0 : /^\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    if (!Number.isSafeInteger(count)) throw new UnknownReplyError("the all-time record's counts");
+    out.set(flat[i], count);
+  }
+  return out;
+}
+
 /**
  * The store's all-time record. The first time it is read it is filled from
  * the days still kept from before it started counting — once, under a lock,
@@ -683,7 +701,7 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
   const statsId = store.statsId as string;
   const life = lifeKey(statsId);
   let flat = await readLifeFlat(life);
-  let fields = new Map(pairs(flat));
+  let fields = lifeCounts(flat);
   const text = (name: string) => {
     const at = flat.indexOf(name);
     return at >= 0 && at % 2 === 0 ? flat[at + 1] : "";
@@ -750,7 +768,7 @@ async function readLife(store: Store, now: number): Promise<(WindowStats & { sin
       // Let go only while it holds this read's value: a fill that outlasted its 60 seconds never frees another's.
       await releaseMark(lifeLockKey(statsId), mine);
       flat = await readLifeFlat(life);
-      fields = new Map(pairs(flat));
+      fields = lifeCounts(flat);
     }
   }
 
@@ -1490,12 +1508,12 @@ export function readStoreRefunds(store: Store, since: number, pages: number): Pr
  * The store's all-time record as it is kept, in one command and without
  * filling it from the days (readLife does that, from the studio's numbers):
  * where visits came from (r:<source>), the addresses asked for (fs:<channel>)
- * and the visitors (u). Empty when there is none.
+ * and the visitors (u). Empty when there is none; an answer in any other
+ * shape throws (CX-123 rule 24), so readPathCounts keeps the last reading.
  */
 export async function readLifeRecord(statsId: string | null): Promise<Map<string, number>> {
   if (!statsId || !isRedisConfigured()) return new Map();
-  const [raw] = await redisPipeline([["HGETALL", lifeKey(statsId)]]);
-  return new Map(pairs(raw));
+  return lifeCounts(await readLifeFlat(lifeKey(statsId)));
 }
 
 /** Sales in the last STATS_DAYS days, by day, by product, and for each window. */

@@ -40,8 +40,15 @@ export async function GET(request: NextRequest) {
       console.error("could not sweep unused assignment uploads", error);
       return [] as string[];
     });
-    const pictures = await sweepCommunityUploads().catch(() => 0);
-    return Response.json({ ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures }, { headers: { "Cache-Control": "no-store" } });
+    // Not swept (the list could not be read exactly): said in the log and the answer, never "0 swept"; the next run sweeps.
+    const pictures = await sweepCommunityUploads().catch((error: unknown) => {
+      console.error("could not sweep unused community pictures", error);
+      return null;
+    });
+    return Response.json(
+      { ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures, ...(pictures === null ? { picturesFailed: true } : {}) },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("sending course emails failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

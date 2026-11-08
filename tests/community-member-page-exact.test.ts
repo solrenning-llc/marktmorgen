@@ -214,7 +214,6 @@ async function main() {
 
   part("The announcement route: an unread member list says the post went up and the email did not");
   const route = source("app/api/store/community/route.ts");
-  is("the route tells an unread list apart", /error instanceof UnknownReplyError\) return back\(`\$\{home\}\/post\/\$\{made\.post\.id\}`, "notemailed"\)/.test(route), true);
   is("the route tells an unread list apart however the read failed, and only the read", /error instanceof RecipientsUnreadError\) return back\(`\$\{home\}\/post\/\$\{made\.post\.id\}`, "notemailed"\)/.test(route), true);
   const notEmailed = LANGUAGE_CODES.map((l) => communityNotices(l).notemailed);
   is("its notice is in all seven languages, each its own, said as a warning", [notEmailed.every((n) => typeof n?.text === "string" && n.text.length > 20 && n.tone === "warn"), new Set(notEmailed.map((n) => n?.text)).size], [true, 7]);

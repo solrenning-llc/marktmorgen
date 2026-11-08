@@ -25,6 +25,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -106,10 +107,31 @@ export function postAddress(store: Store, post: string): string {
 export type QueueResult = { ok: true; job: AnnouncementJob } | { ok: false; reason: "plan" | "empty" };
 
 /** Writes down an announcement's email to go now, to everyone who asked. */
+/**
+ * Who asked for a community's emails could not be read: a reply in another shape (lib/community.ts memberPage, rule
+ * 24) or no answer at all. Raised before anything of the send is written, so the caller can say the post went up and
+ * was not emailed (Codex M on #3213), and only for that read: a failure while writing the job is not this.
+ */
+export class RecipientsUnreadError extends UnknownReplyError {
+  /** What the read failed with. */
+  readonly why: unknown;
+  constructor(cause: unknown) {
+    super("the read of who asked for the community's emails");
+    this.name = "RecipientsUnreadError";
+    if (!(cause instanceof UnknownReplyError)) this.message = "The read of who asked for the community's emails did not answer";
+    this.why = cause;
+  }
+}
+
 export async function queueAnnouncement(store: Store, config: CommunityConfig, post: Post): Promise<QueueResult> {
   const communityId = store.community?.id;
   if (!communityId || !canAnnounceByEmail(store)) return { ok: false, reason: "plan" };
-  const members = await mailableMembers(communityId);
+  let members: Awaited<ReturnType<typeof mailableMembers>>;
+  try {
+    members = await mailableMembers(communityId);
+  } catch (error) {
+    throw new RecipientsUnreadError(error);
+  }
   if (members.length === 0) return { ok: false, reason: "empty" };
   const w = communityWords(store.language);
   const subject = (post.title || w.announceSubject(config.name)).slice(0, 150);

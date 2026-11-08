@@ -1,0 +1,16 @@
+
+FILE z-3305-live-image.proof.ts
+Z_LIVE_PICTURE {"status":500,"error":"server_error","tokens":0,"listed":false,"placesBeforeSweep":2,"swept":0,"deleted":false,"fileStillPresent":true,"placesAfterSweep":2,"commands":["INCR","SET","ZADD"],"jsonPipelineBytes":245}
+✔ MEDIUM regression: uncertain new door must not queue an already-consumed live picture for deletion (17.351337ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 22.842904
+Z_VOLUME {"runs":11,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3305-SnUAY2

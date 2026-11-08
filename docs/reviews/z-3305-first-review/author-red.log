@@ -1,0 +1,207 @@
+
+FILE community-upload-door-exact.test.ts
+
+Control: a confirmed note gives the door, and the sweep finds it
+  ok    the door is given
+  ok    listed, and its place taken
+  ok    never used, it is swept a day on and its place comes back
+
+A note answered in another shape gives no door; the place comes back through the sweep
+  FAIL  ZADD landed, answered as text: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    ZADD landed, answered as text: listed for the sweep, its place still counted
+  ok    ZADD landed, answered as text: a day on its place comes back
+  FAIL  ZADD landed, answered true: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    ZADD landed, answered true: listed for the sweep, its place still counted
+  ok    ZADD landed, answered true: a day on its place comes back
+  FAIL  ZADD landed, answered 2: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    ZADD landed, answered 2: listed for the sweep, its place still counted
+  ok    ZADD landed, answered 2: a day on its place comes back
+  FAIL  ZADD not carried out, answered as text: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  FAIL  ZADD not carried out, answered as text: listed for the sweep, its place still counted
+        expected [true,1]
+        got      [false,1]
+  FAIL  ZADD not carried out, answered as text: a day on its place comes back
+        expected [1,0]
+        got      [0,1]
+  FAIL  ZADD not carried out, answered null: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  FAIL  ZADD not carried out, answered null: listed for the sweep, its place still counted
+        expected [true,1]
+        got      [false,1]
+  FAIL  ZADD not carried out, answered null: a day on its place comes back
+        expected [1,0]
+        got      [0,1]
+  FAIL  SET landed, answered 1: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    SET landed, answered 1: listed for the sweep, its place still counted
+  ok    SET landed, answered 1: a day on its place comes back
+  FAIL  SET landed, answered true: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    SET landed, answered true: listed for the sweep, its place still counted
+  ok    SET landed, answered true: a day on its place comes back
+  FAIL  SET landed, answered lowercase: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    SET landed, answered lowercase: listed for the sweep, its place still counted
+  ok    SET landed, answered lowercase: a day on its place comes back
+  FAIL  one reply for two commands: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    one reply for two commands: listed for the sweep, its place still counted
+  ok    one reply for two commands: a day on its place comes back
+  FAIL  three replies: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    three replies: listed for the sweep, its place still counted
+  ok    three replies: a day on its place comes back
+  FAIL  not a list: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  ok    not a list: listed for the sweep, its place still counted
+  ok    not a list: a day on its place comes back
+  FAIL  nothing carried out, answered empty: no door
+        expected [500,"server_error",false]
+        got      [200,null,true]
+  FAIL  nothing carried out, answered empty: listed for the sweep, its place still counted
+        expected [true,1]
+        got      [false,1]
+  FAIL  nothing carried out, answered empty: a day on its place comes back
+        expected [1,0]
+        got      [0,1]
+
+A note that throws gives no door; the place comes back through the sweep
+  ok    no door
+  ok    listed, its place counted, given back a day on
+
+A path that already had a door: no door, and this request's place goes back at once
+  FAIL  no door for this member
+        expected [400,"invalid",false]
+        got      [200,null,true]
+  FAIL  only the earlier door's place is counted
+        expected 1
+        got      2
+  ok    the earlier door is left as it was
+  ok    and this member cannot use it
+
+noteCommunityUpload reads its two replies exactly
+  FAIL  noted and listed
+        expected true
+        got      undefined
+  FAIL  noted, already listed
+        expected true
+        got      undefined
+  FAIL  a door there already
+        expected false
+        got      undefined
+  FAIL  a door there already, listed now
+        expected false
+        got      undefined
+  FAIL  SET as text
+        expected "unknown"
+        got      undefined
+  FAIL  ZADD as text
+        expected "unknown"
+        got      undefined
+  FAIL  ZADD negative
+        expected "unknown"
+        got      undefined
+  FAIL  ZADD fraction
+        expected "unknown"
+        got      undefined
+  FAIL  ZADD missing
+        expected "unknown"
+        got      undefined
+  FAIL  an object
+        expected "unknown"
+        got      undefined
+
+55 checks, 30 failing.
+Z_VOLUME {"runs":127,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE form-opportunity-room-exact.test.ts
+
+Controls: created, existing and full keep their room as before
+  ok    a new deal is created
+  ok    its room is taken
+  ok    asked again, it is the existing one
+  ok    and its room is unchanged
+  ok    one deal kept
+  ok    a full CRM says full
+  ok    and the room it took goes back
+
+A write answered in another shape keeps the room it took (it may have landed)
+  FAIL  code as text: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  FAIL  code as text: the deal landed, and its room is still counted
+        expected [1,544]
+        got      [1,0]
+  FAIL  code alone: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  ok    code alone: the deal landed, and its room is still counted
+  FAIL  a third slot: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  ok    a third slot: the deal landed, and its room is still counted
+  FAIL  not a pair: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  FAIL  not a pair: the deal landed, and its room is still counted
+        expected [1,544]
+        got      [1,0]
+  FAIL  two replies: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  ok    two replies: the deal landed, and its room is still counted
+  FAIL  no reply: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  FAIL  no reply: the deal landed, and its room is still counted
+        expected [1,544]
+        got      [1,0]
+  FAIL  a plain OK: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  FAIL  a plain OK: the deal landed, and its room is still counted
+        expected [1,544]
+        got      [1,0]
+  FAIL  the full code with a record: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  FAIL  the full code with a record: the deal landed, and its room is still counted
+        expected [1,544]
+        got      [1,0]
+  FAIL  code 2: refused as unknown
+        expected "unknown"
+        got      "threw: Form opportunity write unconfirmed"
+  FAIL  code 2: the deal landed, and its room is still counted
+        expected [1,544]
+        got      [1,0]
+
+A read before the write that fails never zeroes the room of a deal that exists
+  ok    the deal is created first
+  ok    its room is taken
+  ok    the write says it exists
+  FAIL  and its room is still counted
+        expected 544
+        got      0
+
+29 checks, 16 failing.
+Z_VOLUME {"runs":1072,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3305-ONDYcG

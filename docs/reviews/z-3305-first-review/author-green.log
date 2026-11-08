@@ -1,0 +1,115 @@
+
+FILE community-upload-door-exact.test.ts
+
+Control: a confirmed note gives the door, and the sweep finds it
+  ok    the door is given
+  ok    listed, and its place taken
+  ok    never used, it is swept a day on and its place comes back
+
+A note answered in another shape gives no door; the place comes back through the sweep
+  ok    ZADD landed, answered as text: no door
+  ok    ZADD landed, answered as text: listed for the sweep, its place still counted
+  ok    ZADD landed, answered as text: a day on its place comes back
+  ok    ZADD landed, answered true: no door
+  ok    ZADD landed, answered true: listed for the sweep, its place still counted
+  ok    ZADD landed, answered true: a day on its place comes back
+  ok    ZADD landed, answered 2: no door
+  ok    ZADD landed, answered 2: listed for the sweep, its place still counted
+  ok    ZADD landed, answered 2: a day on its place comes back
+  ok    ZADD not carried out, answered as text: no door
+  ok    ZADD not carried out, answered as text: listed for the sweep, its place still counted
+  ok    ZADD not carried out, answered as text: a day on its place comes back
+  ok    ZADD not carried out, answered null: no door
+  ok    ZADD not carried out, answered null: listed for the sweep, its place still counted
+  ok    ZADD not carried out, answered null: a day on its place comes back
+  ok    SET landed, answered 1: no door
+  ok    SET landed, answered 1: listed for the sweep, its place still counted
+  ok    SET landed, answered 1: a day on its place comes back
+  ok    SET landed, answered true: no door
+  ok    SET landed, answered true: listed for the sweep, its place still counted
+  ok    SET landed, answered true: a day on its place comes back
+  ok    SET landed, answered lowercase: no door
+  ok    SET landed, answered lowercase: listed for the sweep, its place still counted
+  ok    SET landed, answered lowercase: a day on its place comes back
+  ok    one reply for two commands: no door
+  ok    one reply for two commands: listed for the sweep, its place still counted
+  ok    one reply for two commands: a day on its place comes back
+  ok    three replies: no door
+  ok    three replies: listed for the sweep, its place still counted
+  ok    three replies: a day on its place comes back
+  ok    not a list: no door
+  ok    not a list: listed for the sweep, its place still counted
+  ok    not a list: a day on its place comes back
+  ok    nothing carried out, answered empty: no door
+  ok    nothing carried out, answered empty: listed for the sweep, its place still counted
+  ok    nothing carried out, answered empty: a day on its place comes back
+
+A note that throws gives no door; the place comes back through the sweep
+  ok    no door
+  ok    listed, its place counted, given back a day on
+
+A path that already had a door: no door, and this request's place goes back at once
+  ok    no door for this member
+  ok    only the earlier door's place is counted
+  ok    the earlier door is left as it was
+  ok    and this member cannot use it
+
+noteCommunityUpload reads its two replies exactly
+  ok    noted and listed
+  ok    noted, already listed
+  ok    a door there already
+  ok    a door there already, listed now
+  ok    SET as text
+  ok    ZADD as text
+  ok    ZADD negative
+  ok    ZADD fraction
+  ok    ZADD missing
+  ok    an object
+
+55 checks, all passing.
+Z_VOLUME {"runs":147,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE form-opportunity-room-exact.test.ts
+
+Controls: created, existing and full keep their room as before
+  ok    a new deal is created
+  ok    its room is taken
+  ok    asked again, it is the existing one
+  ok    and its room is unchanged
+  ok    one deal kept
+  ok    a full CRM says full
+  ok    and the room it took goes back
+
+A write answered in another shape keeps the room it took (it may have landed)
+  ok    code as text: refused as unknown
+  ok    code as text: the deal landed, and its room is still counted
+  ok    code alone: refused as unknown
+  ok    code alone: the deal landed, and its room is still counted
+  ok    a third slot: refused as unknown
+  ok    a third slot: the deal landed, and its room is still counted
+  ok    not a pair: refused as unknown
+  ok    not a pair: the deal landed, and its room is still counted
+  ok    two replies: refused as unknown
+  ok    two replies: the deal landed, and its room is still counted
+  ok    no reply: refused as unknown
+  ok    no reply: the deal landed, and its room is still counted
+  ok    a plain OK: refused as unknown
+  ok    a plain OK: the deal landed, and its room is still counted
+  ok    the full code with a record: refused as unknown
+  ok    the full code with a record: the deal landed, and its room is still counted
+  ok    code 2: refused as unknown
+  ok    code 2: the deal landed, and its room is still counted
+
+A read before the write that fails never zeroes the room of a deal that exists
+  ok    the deal is created first
+  ok    its room is taken
+  ok    the write says it exists
+  ok    and its room is still counted
+
+29 checks, all passing.
+Z_VOLUME {"runs":1065,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3305-kputXl

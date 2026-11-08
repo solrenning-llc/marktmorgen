@@ -1,0 +1,615 @@
+
+FILE community-picture-place-evidence.test.ts
+
+Only an exact increment reply opens the upload door
+  ok    a confirmed first place opens
+  ok    a confirmed last place opens
+  ok    missing increment evidence keeps the door closed
+  ok    missing increment evidence is not compensated without a confirmed count
+  ok    extra increment evidence keeps the door closed
+  ok    extra increment evidence is not compensated without a confirmed count
+  ok    null increment evidence keeps the door closed
+  ok    null increment evidence is not compensated without a confirmed count
+  ok    boolean increment evidence keeps the door closed
+  ok    boolean increment evidence is not compensated without a confirmed count
+  ok    Redis text instead of integer increment evidence keeps the door closed
+  ok    Redis text instead of integer increment evidence is not compensated without a confirmed count
+  ok    zero increment evidence keeps the door closed
+  ok    zero increment evidence is not compensated without a confirmed count
+  ok    negative increment evidence keeps the door closed
+  ok    negative increment evidence is not compensated without a confirmed count
+  ok    fractional increment evidence keeps the door closed
+  ok    fractional increment evidence is not compensated without a confirmed count
+  ok    unsafe increment evidence keeps the door closed
+  ok    unsafe increment evidence is not compensated without a confirmed count
+  ok    an inherited slot cannot open the door
+  ok    an accessor slot cannot open the door
+  ok    validation does not execute the accessor
+  ok    an inherited descriptor value cannot open the door
+  ok    validation still does not execute the polluted accessor
+  ok    a proxy reply cannot open the door
+  ok    validation does not read proxy payload fields
+  ok    a decorated reply cannot open the door
+
+Only a confirmed count past the limit is compensated
+  ok    the first confirmed place past the limit is returned
+
+29 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE task-upload-sweep.test.ts
+✔ healthy: a stale upload is deleted once, a fresh one is left, and a second run deletes nothing again (14.755842ms)
+✔ healthy: a hand-in that won the door before the sweep keeps its file (1.036365ms)
+✔ the sweep does not hand the cron a file a hand-in already took (2.121602ms)
+✔ a leftover whose deletion failed is found again by the next run (2.935961ms)
+✔ a ZREM answered the text "1" deletes nothing (0.826397ms)
+✔ a ZREM answered 2 deletes nothing (0.687097ms)
+✔ a ZREM answered -1 deletes nothing (1.242385ms)
+✔ a ZREM answered null deletes nothing (0.955862ms)
+✔ a ZREM answered true deletes nothing (0.831245ms)
+✔ a ZREM answered 1.5 deletes nothing (0.867299ms)
+✔ a ZREM answered an object deletes nothing (0.70871ms)
+✔ a ZREM answered a list deletes nothing (0.896363ms)
+✔ the list read answered as a list holding a number deletes nothing (0.996214ms)
+✔ the list read answered as an object, not a list deletes nothing (0.859237ms)
+✔ the list read answered as no reply at all deletes nothing (0.811405ms)
+✔ the list read answered as two replies for one command deletes nothing (0.805716ms)
+✔ one ZREM won and one in an unknown shape: only the won file is deleted, and the job still answers (1.31199ms)
+✔ cost: the healthy sweep is one list read and one pipeline of one ZREM per stale path, nothing more (1.793036ms)
+✔ MEDIUM: a path whose deletion always fails holds only itself, never the rest of the batch (3.256625ms)
+✔ LOW: with one ZREM unknown and one won, the cron still counts the won file deleted (1.082885ms)
+✔ LOW: the ZREMs go in pipelines of 25, so a reply lost after they ran leaves at most 25 doors off the list (11.241178ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 78.52433
+Z_VOLUME {"runs":399,"mocks":48,"over":false}
+could not delete an unused assignment upload; it is put back for the next run Error: a file could not be deleted
+    at deleteFile ([stdin]:75775:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:79062:7)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async TestContext.<anonymous> ([stdin]:79252:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+could not sweep unused assignment uploads UnknownReplyError: Redis answered the uploads never handed in in an unknown shape
+    at sweepTaskUploads ([stdin]:79035:69)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async watching ([stdin]:79205:12)
+    at async TestContext.<anonymous> ([stdin]:79285:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not sweep unused assignment uploads UnknownReplyError: Redis answered the uploads never handed in in an unknown shape
+    at sweepTaskUploads ([stdin]:79035:69)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async watching ([stdin]:79205:12)
+    at async TestContext.<anonymous> ([stdin]:79285:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not sweep unused assignment uploads UnknownReplyError: Redis answered the uploads never handed in in an unknown shape
+    at sweepTaskUploads ([stdin]:79035:69)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async watching ([stdin]:79205:12)
+    at async TestContext.<anonymous> ([stdin]:79285:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not sweep unused assignment uploads UnknownReplyError: Redis answered the uploads never handed in in an unknown shape
+    at sweepTaskUploads ([stdin]:79035:69)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async watching ([stdin]:79205:12)
+    at async TestContext.<anonymous> ([stdin]:79285:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+could not delete an unused assignment upload; it is put back for the next run Error: a file could not be deleted
+    at deleteFile ([stdin]:75775:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:79062:7)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async TestContext.<anonymous> ([stdin]:79317:21)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not delete an unused assignment upload; it is put back for the next run Error: a file could not be deleted
+    at deleteFile ([stdin]:75775:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:79062:7)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async TestContext.<anonymous> ([stdin]:79317:34)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+could not delete an unused assignment upload; it is put back for the next run Error: a file could not be deleted
+    at deleteFile ([stdin]:75775:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:79062:7)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async TestContext.<anonymous> ([stdin]:79317:47)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+1 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+taking 25 unused assignment uploads off their list: no reply, their files are kept Error: the reply was lost after the ZREMs ran
+    at [stdin]:79349:13
+    at store.pipeline ([stdin]:79202:18)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async sweepTaskUploads ([stdin]:79043:26)
+    at async GET ([stdin]:79137:20)
+    at async run ([stdin]:79169:30)
+    at async watching ([stdin]:79205:12)
+    at async TestContext.<anonymous> ([stdin]:79346:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+25 unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept
+
+Z_STATUS 0 null
+
+FILE form-opportunity.test.ts
+
+Stable identities and concurrent conversions
+  ok    identity is scoped to the store and form
+  ok    answer key order does not change response identity
+  ok    simultaneous requests create one deal and return the same ID
+  ok    ordinary edits preserve the server-owned origin
+  ok    retry returns existing opportunity without undoing later edits
+  ok    a made-up response cannot create an opportunity
+
+Unknown replies are recoverable without duplication
+  ok    lost confirmation does not claim failure before write
+  ok    retry after a lost reply finds the saved deal
+  ok    unsupported script or unknown result never falls back to an ordinary write
+  ok    unsupported script or unknown result never falls back to an ordinary write
+  ok    support cannot convert form answers without export permission
+  ok    signed-out conversion is refused
+
+Capacity and collisions fail closed
+  ok    new conversions respect the whole CRM hash capacity
+  ok    existing conversions can still be retrieved at capacity
+  ok    identifier collisions never return or overwrite an unrelated deal
+  ok    unconverted responses outside the visible window remain unavailable
+  ok    committed conversions remain recoverable after the source ages out without replaying draft edits
+  ok    recovery remains scoped to the store
+  ok    unconfirmed or conflicting reads never claim recovery
+  ok    unconfirmed or conflicting reads never claim recovery
+  ok    unconfirmed or conflicting reads never claim recovery
+  ok    unconfirmed or conflicting reads never claim recovery
+  ok    unconfirmed or conflicting reads never claim recovery
+  ok    removing the source form does not hide a committed opportunity
+  ok    a removed form cannot create an opportunity from an unknown reference
+
+Distinct submission identities
+  ok    equal answers in the same second remain distinct for different server IDs
+  ok    a stored submission keeps its identity independently of answer key order
+  ok    server IDs are scoped by store and form
+  ok    invalid IDs retain the legacy fingerprint
+  ok    identical distinct submissions can create separate reviewed opportunities
+
+30 checks, all passing.
+Z_VOLUME {"runs":1473,"mocks":0,"over":false}
+Converting form response could not be confirmed Error: Injected lost commit reply
+    at store.pipeline ([stdin]:53124:15)
+    at async createFormOpportunity ([stdin]:52581:30)
+    at async POST ([stdin]:52892:20)
+    at async main ([stdin]:53128:74)
+Converting form response could not be confirmed Error: Script unavailable
+    at store.pipeline ([stdin]:53141:45)
+    at redisPipeline ([stdin]:7000:41)
+    at createFormOpportunity ([stdin]:52581:36)
+    at async POST ([stdin]:52892:20)
+    at async main ([stdin]:53146:98)
+Converting form response could not be confirmed UnknownReplyError: Redis answered the form opportunity write in an unknown shape
+    at createFormOpportunity ([stdin]:52583:41)
+    at async POST ([stdin]:52892:20)
+    at async main ([stdin]:53146:98)
+
+Z_STATUS 0 null
+
+FILE form-response-unavailable.test.ts
+✔ one unknown form keeps both editable cards usable without a false count (26.25618ms)
+✔ CSV reports unavailable rather than an empty file or response gone (3.461584ms)
+✔ PDF reports unavailable rather than an empty file or response gone (1.07974ms)
+✔ opportunity reports unavailable rather than an empty file or response gone (1.118568ms)
+✔ confirmed known CSV and PDF keep their successful downloads (5.617599ms)
+✔ permission refusal stays before the response read (0.764284ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 44.778446
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE crm-deal-writes.test.ts
+
+Unknown capacity/existence reads never authorize writes
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+  ok    unconfirmed preflight is distinguished
+  ok    no deal write after unavailable preflight
+  ok    deal collection remains absent
+
+Deal saves and removals require exact numeric acknowledgements
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    unconfirmed save throws
+  ok    save is not retried
+  ok    unconfirmed removal throws
+  ok    removal is not retried
+  ok    unapplied removal preserves record
+  ok    applied save with lost reply is uncertain
+  ok    applied save is not rolled back
+  ok    no repeated write after lost reply
+  ok    applied deletion with lost reply is uncertain
+  ok    deleted record is not recreated
+  ok    no repeated deletion
+
+Confirmed capacity and absence retain existing behavior
+  ok    confirmed creation succeeds
+  ok    confirmed update succeeds
+  ok    full collection refuses new deal
+  ok    capacity refusal writes nothing
+  ok    existing deal can still be edited at capacity
+  ok    confirmed deletion succeeds
+  ok    confirmed absence returns false
+  ok    invalid removal id refused
+  ok    invalid id sends no deletion
+
+API and client distinguish prewrite read failure from uncertain change
+  ok    read failure is explicit HTTP 503
+  ok    client keeps read failure actionable
+  ok    route writes nothing after unknown preflight
+  ok    uncertain save is explicit HTTP 502
+  ok    client enters uncertain-write recovery
+  ok    route does not retry applied save
+  ok    applied opportunity remains stored
+  ok    uncertain deletion is explicit HTTP 502
+  ok    deleted record stays absent
+  ok    route does not repeat deletion
+
+Concurrent manual saves and form conversions share the same capacity
+  ok    only one of 64 competing manual/form creations can occupy the last slot
+  ok    existing records remain editable at capacity
+  ok    editing at capacity leaves the count unchanged
+  ok    deleting a record frees one slot for a new manual deal
+  ok    capacity remains bounded after slot reuse
+
+125 checks, all passing.
+Z_VOLUME {"runs":1467,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE crm-pipelines-unknown.test.ts
+
+Control: an absent record is the board the store always had; a saved one reads as saved
+  ok    nothing saved: the default stages
+  ok    only the board's old record: its stages, as the first pipeline
+  ok    saved pipelines: exactly those
+
+The read: every unknown shape is unknown, never the default stages
+  ok    the whole reply not a list: refused
+  ok    the reply missing: refused
+  ok    one answer for two reads: refused
+  ok    saved pipelines that do not read (Claude 6's proof): readPipelines refused
+  ok    saved pipelines that do not read (Claude 6's proof): readStages refused
+  ok    saved pipelines not a string: readPipelines refused
+  ok    saved pipelines not a string: readStages refused
+  ok    saved pipelines not a list: readPipelines refused
+  ok    saved pipelines not a list: readStages refused
+  ok    the old board record not a string: readPipelines refused
+  ok    the old board record not a string: readStages refused
+  ok    the old board record that does not read: readPipelines refused
+  ok    the old board record that does not read: readStages refused
+  ok    the old board record with a stage that does not read: readPipelines refused
+  ok    the old board record with a stage that does not read: readStages refused
+
+saveFlow: a sequence is never checked against stages that are not the store's (Claude 6's proof, part (b))
+  ok    setup: a sequence on the store's own stage saves
+  ok    the defaults' lead00 and won000, with the pipelines unknown: refused, never saved
+  ok    nothing written
+  ok    control: the same stages, now known not to be the store's, are turned away as a stage
+
+The email route says the pipelines could not be read, and writes nothing
+  ok    saving the sequence on the defaults' stages: 503, unavailable
+  ok    nothing written
+
+The form-to-deal route says the pipelines could not be read
+  ok    turning a form answer into a deal: 503, unavailable
+
+A workflow's deal step waits while the pipelines are unknown, and runs once they read
+  ok    setup: a sequence with a deal step on the store's own stage
+  ok    while unknown: no deal written
+  ok    while unknown: the step is queued again, not ended
+  ok    once they read: the deal is made in the store's own stage
+
+Fields read in an unknown shape are unknown too, never none (review of #2981, LEVE 2; rule 30)
+  ok    fields that do not read: a sequence setting a field is refused as unavailable, not as a bad step
+  ok    fields not a string: a sequence setting a field is refused as unavailable, not as a bad step
+  ok    fields not a list: a sequence setting a field is refused as unavailable, not as a bad step
+  ok    fields with one that does not read: a sequence setting a field is refused as unavailable, not as a bad step
+  ok    nothing written
+  ok    the email route: 503, unavailable
+  ok    nothing written by the route
+  ok    control: with the fields known, the same sequence saves
+
+A workflow's field step waits while the fields are unknown, and runs once they read
+  ok    while unknown: no value written
+  ok    while unknown: the field step is queued again, not ended as removed
+  ok    once they read: the field is set
+
+40 checks, all passing.
+Z_VOLUME {"runs":332,"mocks":0,"over":false}
+an email action failed CrmSchemaReadUnavailable: CRM configuration preflight could not be confirmed
+    at pipelineSnapshot ([stdin]:55213:11)
+    at async readPipelines ([stdin]:55190:11)
+    at async readStages ([stdin]:55193:20)
+    at async Promise.all (index 1)
+    at async saveFlow ([stdin]:65948:31)
+    at async POST ([stdin]:68908:22)
+    at async post ([stdin]:69524:22)
+    at async main ([stdin]:69532:72)
+an email action failed CrmSchemaReadUnavailable: CRM configuration preflight could not be confirmed
+    at readFieldsWhole ([stdin]:55151:11)
+    at async Promise.all (index 0)
+    at async saveFlow ([stdin]:65948:31)
+    at async POST ([stdin]:68908:22)
+    at async post ([stdin]:69524:22)
+    at async main ([stdin]:69574:44)
+
+Z_STATUS 0 null
+
+FILE pipeline-access.test.ts
+
+The rules
+  ok    the owner and Admins edit every pipeline, whatever is set
+  ok    a teammate edits until restricted
+  ok    a record that cannot be read opens nothing
+  ok    only real pipelines, only view or none, are kept
+  ok    a stage's pipeline
+  ok    what a teammate sees, and how
+
+Through the deal routes
+  ok    the owner adds a second pipeline
+  ok    unrestricted, a teammate adds a deal anywhere, as before
+  ok    on view, a change is refused, saying why
+  ok    a deal is not moved out of it either
+  ok    nor a new one put into it
+  ok    nor removed from it
+  ok    nor its stages changed, nor the pipeline removed
+  ok    the other pipeline is still theirs
+  ok    an Admin is never restricted
+  ok    nor the owner
+  ok    on none, the first pipeline's old stage route is refused too
+  ok    while the pipeline they may still change stays theirs
+  ok    removing a pipeline into one they cannot change is refused
+  ok    nor are a removed stage's deals sent into one they cannot change
+  ok    a record that cannot be read refuses every change
+
+Found in review: every other way in
+  ok    a removed stage's deals sent by one stage for all (a string) into a pipeline they cannot change: refused
+  ok    and the deal did not move
+  ok    a deal that is not there, or cannot be read, is never removed by someone limited
+  ok    the room the restrictions take moves with them: the old address gives its own back, the new one takes its own
+  ok    moving their sign-in to another address keeps exactly their restrictions
+  ok    and the new address is refused where the old one was
+  ok    with the store's data room full, the new address still gets the store and exactly its restrictions
+
+Moving one's sign-in when the database fails
+  ok    when every store stays on the old address, nothing is sent that the real database refuses: the move finishes
+  ok    the new address never gets the store without its restrictions: it is not on the team at all
+  ok    and the old address keeps its membership and its restrictions
+  ok    the old address still works, still restricted
+
+Leaving the team
+  ok    (their restrictions take room)
+  ok    their restrictions go with them
+  ok    and so does the room they took: none is left held
+
+The form route too
+  ok    a deal made from a form: someone who can be restricted cannot make one at all (export is the owner's and Admins'), so a pipeline they may not change is never reached
+  ok    and the route still checks the pipeline, should that ever change
+
+Found in review of units 2 and 3
+  ok    a pipeline they add comes back without the names and stages of the ones they may not see
+  ok    an empty pipeline they may change can be removed, with no destination to check
+  ok    a change refused by access is a refusal the board shows as such, never an unconfirmed write
+
+40 checks, all passing.
+Z_VOLUME {"runs":779,"mocks":0,"over":false}
+copying pipeline access or the maker of their API keys failed; the membership stays on the old address Error: stand-in failure
+    at store.pipeline ([stdin]:53896:118)
+    at redisPipeline ([stdin]:6687:41)
+    at copyPipelineAccess ([stdin]:21860:23)
+    at [stdin]:50148:15
+    at async withLock ([stdin]:6802:12)
+    at async moveMemberships ([stdin]:50144:18)
+    at async main ([stdin]:53901:3)
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (79.640979ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (160.984061ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (31.598913ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.90263ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.149085ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.114844ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.434215ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (71.408926ms)
+✔ every store figure taken in the code is a kind a line prices (42.323787ms)
+✔ every email sent names a meter, and each file only the meters it may use (66.832861ms)
+✔ the units a figure is taken in cost at least what they stand for (7.983707ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.618542ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.176797ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.316647ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.114903ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.090517ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.250458ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.176256ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.717993ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.142736ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (1.910964ms)
+✔ Path push fits its reserved studio requests (0.078058ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.060021ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.134473ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.150688ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (29.925458ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 523.025972
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (118.828116ms)
+✔ each family is bounded one way at least, and what it says can be checked (50.099607ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.791665ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.201534ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.599335ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.834931ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.166772ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 188.758994
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3305-C98vF8

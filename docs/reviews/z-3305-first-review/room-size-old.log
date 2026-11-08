@@ -1,0 +1,33 @@
+
+FILE z-3305-room-size.proof.ts
+Z_ROOM_SIZE {"missed":true,"state":"existing","beforeUsed":1040,"afterUsed":0,"actualDealBytes":976,"actualRecordBytes":829,"recordUnchanged":true,"reservedSlot":null,"commands":["HGET","EVAL","EVAL","EVAL"],"jsonPipelineBytes":6507}
+✖ inherited MEDIUM: unread existing deal must keep its actual larger room when the retry draft is smaller (9.567567ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 14.622375
+
+✖ failing tests:
+
+test at [stdin]:10666:27
+✖ inherited MEDIUM: unread existing deal must keep its actual larger room when the retry draft is smaller (9.567567ms)
+  AssertionError [ERR_ASSERTION]: an unchanged stored deal must not lose its existing reserved room merely because a smaller retry draft could not read it
+      at TestContext.<anonymous> ([stdin]:10695:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":11,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3305-6oTNpT

@@ -25,6 +25,8 @@ let executions = 0;
 /** The Idempotency-Key header of every charging update sent, "" when none. */
 const keysSent: string[] = [];
 const kept = new Map<string, { body: string; running: boolean; status: number; reply: string }>();
+/** Redis time the next subscription read takes, and the next charging update before it is given up, in ms. */
+let slowRead = 0, slowCharge = 0;
 
 const row = () => ({
   id: subscription, object: "subscription", status: "active", customer, created: now - 90 * 86400,
@@ -54,6 +56,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, ""), body = new URLSearchParams(String(init?.body ?? ""));
   if (method === "GET" && path === "/customers") return json({ object: "list", data: [{ id: customer, created: 1 }], has_more: false });
   if (method === "GET" && path === `/customers/${customer}`) return json({ id: customer, email: "member@example.test" });
+  if (method === "GET" && path === "/subscriptions" && slowRead) { redis.advance(slowRead); slowRead = 0; }
   if (method === "GET" && path === "/subscriptions") return json({ object: "list", data: [row()], has_more: false });
   if (method === "POST" && path === "/prices") return json({ id: body.get("recurring[interval]") === "year" ? "price_IdemYearly0001" : "price_IdemTarget0001" });
   if (method === "POST" && path === `/subscriptions/${subscription}`) {
@@ -68,6 +71,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       if (before.body !== sent) return json({ error: { type: "idempotency_error", message: "Synthetic: keys for idempotent requests can only be used with the same parameters" } }, 400);
       return new Response(before.reply, { status: before.status });
     }
+    if (slowCharge) { redis.advance(slowCharge); slowCharge = 0; }
     const done = run(body);
     if (key) kept.set(key, { body: sent, running: done.status === 0, status: done.status, reply: done.reply });
     // The update was sent; its answer never reaches onAccount (a timeout or a cut connection).
@@ -173,6 +177,24 @@ async function main() {
     mode = "applied";
     const fresh = await attempt(now + 30, now + 30);
     is(`${flow}: new preview right after an unconfirmed switch — busy, nothing sent`, [reasonOf(fresh), executions, keysSent.length], ["busy", 1, 1]);
+    // 5. Slow reads before the charge (Claude 2 on #3287): the kept lock's term starts again at the unconfirmed answer,
+    //    so it covers a full term after the client gave up however long the reads before it took.
+    const lockKey = `nl:tier:${subscription}:lock`;
+    for (const [reads, label] of [[30_000, "the lock had 10 s left"], [45_000, "the lock had already run out"]] as const) {
+      await reset("in flight");
+      slowRead = reads;
+      slowCharge = 20_000;
+      const slow = await attempt(now, now);
+      slowRead = 0;
+      slowCharge = 0;
+      mode = "applied";
+      const [left] = await redis.pipeline([["PTTL", lockKey]]);
+      is(`${flow}: slow reads, ${label} — unconfirmed, and held a full term from that answer`, [reasonOf(slow), typeof left === "number" && left > 59_000], ["unconfirmed", true]);
+      redis.advance(30_000);
+      // Another preview of the same switch (its own second, so its own key).
+      const later = await attempt(now - 1, now + 1);
+      is(`${flow}: slow reads, ${label} — a new preview 30 s on is busy, nothing sent again`, [reasonOf(later), executions], ["busy", 1]);
+    }
     is(`${flow}: busy is said honestly`, membershipWords("en").manageNotices.busy.body.includes("look at your membership"), true);
   }
   done();

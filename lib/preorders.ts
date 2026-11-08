@@ -27,6 +27,8 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
+// On its own line, so open pull requests that change the redis-reply import above still merge cleanly.
+import { listSlots } from "@/lib/redis-reply";
 import { type Listing, type Store, saleHandles, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -58,7 +60,11 @@ const INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
 
 // ------------------------------------------------------------------ the pages
 
-export type SoonState = { soon: Set<string>; days: Map<string, string> };
+/**
+ * `partial` is set when some member of the coming-soon set could not be read: the products read stay coming soon,
+ * and whether any other product is coming soon is unknown (CX-123 rule 24), so a page draws no way to buy it.
+ */
+export type SoonState = { soon: Set<string>; days: Map<string, string>; partial?: true };
 
 function knownSoonMember(raw: unknown): boolean {
   if (raw === 1 || raw === "1") return true;
@@ -66,11 +72,21 @@ function knownSoonMember(raw: unknown): boolean {
   throw new UnknownReplyError("coming-soon membership");
 }
 
-/** The products coming soon, and the day each pre-ordered one is expected: one request, for the store page. */
+/**
+ * The products coming soon, and the day each pre-ordered one is expected: one request, for the store page. A reply
+ * that is not a list is unknown, never "none coming soon" (CX-123 rule 24): it throws, and each page then draws no way
+ * to buy. A list with a member that is not a product id keeps the ones that are, marked `partial`. A day that cannot
+ * be read only takes its pre-order away (preorderDay).
+ */
 export async function soonState(store: Store): Promise<SoonState> {
   if (!store.statsId || !isRedisConfigured()) return { soon: new Set(), days: new Map() };
-  const [members, raw] = await redisPipeline([["SMEMBERS", soonKey(store.statsId)], ["HGETALL", dayKey(store.statsId)]]);
-  return { soon: new Set(Array.isArray(members) ? (members as string[]) : []), days: daysOf(raw) };
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", soonKey(store.statsId)], ["HGETALL", dayKey(store.statsId)]]), 2);
+  if (!replies) throw new UnknownReplyError("coming-soon products");
+  const slots = listSlots(replies[0]);
+  if (!slots) throw new UnknownReplyError("coming-soon products");
+  const members = slots.filter((member): member is string => typeof member === "string");
+  const days = daysOf(replies[1]);
+  return members.length === slots.length ? { soon: new Set(members), days } : { soon: new Set(members), days, partial: true };
 }
 
 /** One product: coming soon or not, and the day it is expected when it takes pre-orders. One request. */

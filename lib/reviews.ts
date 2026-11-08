@@ -452,15 +452,23 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       // refunded was never counted, and takes none away.
       ...(counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
     ];
-    // Every reply in its exact shape, or the deletion is unknown: no room given back, and it throws after the numbers
-    // are counted again from what is there.
+    // Every reply in its exact shape, or the deletion is unknown: no room given back, and the field is read again
+    // (below) before it is said as deleted or thrown.
     const replies = exactWriteReplies(await redisPipeline(deletion), deletion);
     // Its room given back only once its own HDEL answered that it removed the review: never twice for two
     // deletions racing. A request that failed may still have run the HDEL (an error on another command); the room
     // then stays counted, more than is used, never less.
     if (replies?.[0] === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
+    // Replies in an unknown shape: the field is read again, exactly. Confirmed absent means its HDEL ran, so the review
+    // is deleted (the caller drops or hands over its photo; its room stays counted, as above). Still there, or read
+    // again in another shape, throws.
+    let removed = replies !== null;
+    if (!removed) {
+      const again = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+      removed = again !== null && again[0] === null;
+    }
     await recount(statsId, productId);
-    if (!replies) throw new UnknownReplyError(what);
+    if (!removed) throw new UnknownReplyError(what);
     return "deleted" as const;
   });
   return result;
@@ -735,9 +743,16 @@ async function dropReviewRecords(statsId: string, productId: string, members: st
 /**
  * Deletes every review one buyer wrote in this store (lib/person-erasure.ts),
  * as their own delete does: its stars leave the average with it. Returns the
- * photos to delete from the picture folder.
+ * photos to delete from the picture folder; each also goes into `files`, when
+ * given, before its review's delete is tried.
  */
-export async function forgetReviewsPerson(statsId: string | null, productIds: string[], email: string, room: DataStore): Promise<{ records: number; photos: string[] }> {
+export async function forgetReviewsPerson(
+  statsId: string | null,
+  productIds: string[],
+  email: string,
+  room: DataStore,
+  files?: string[],
+): Promise<{ records: number; photos: string[] }> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return { records: 0, photos: [] };
   const wanted = productIds.filter((p) => PRODUCT_ID_PATTERN.test(p));
   const ids = wanted.map((p) => reviewId(statsId, p, email));
@@ -765,9 +780,14 @@ export async function forgetReviewsPerson(statsId: string | null, productIds: st
       const change: (string | number)[][] = [rest.length ? ["HSET", payKey(statsId), review.pi, rest.join(";")] : ["HDEL", payKey(statsId), review.pi]];
       if (!exactWriteReplies(await redisPipeline(change), change)) throw new UnknownReplyError(`${what} (its payment's list)`);
     }
+    // Its photo is handed to the eraser's files before the delete is tried: the review is being erased anyway, and a
+    // delete that ran but answered in an unknown shape leaves nothing for the retry to find the photo by.
+    if (review.photo?.path) {
+      photos.push(review.photo.path);
+      files?.push(review.photo.path);
+    }
     if ((await deleteReview(statsId, wanted[i], ids[i], room)) !== "deleted") throw new Error("a review could not be deleted just now");
     records += 1;
-    if (review.photo?.path) photos.push(review.photo.path);
   }
   return { records, photos };
 }

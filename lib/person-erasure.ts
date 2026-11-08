@@ -192,8 +192,8 @@ export const ERASERS: Eraser[] = [
     module: "lib/reviews.ts",
     only: "person",
     run: async (s, files) => {
-      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store);
-      files.push(...done.photos);
+      // Each photo goes into `files` before its review's delete is tried, so a run that throws still deletes it.
+      const done = await forgetReviewsPerson(s.statsId, s.productIds, s.email, s.store, files);
       return done.records;
     },
   },

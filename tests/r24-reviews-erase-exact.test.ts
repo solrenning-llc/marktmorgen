@@ -164,12 +164,11 @@ const zremAsText = (r: unknown[]) => r.map((x, i) => (i === 1 ? String(x) : x));
 async function eraseTwice(): Promise<{ first: unknown; handed: Set<string> }> {
   const files: string[] = [];
   const handed = new Set<string>();
-  const forget = forgetReviewsPerson as (...args: unknown[]) => Promise<{ records: number; photos: string[] }>;
-  const first = await forget(STATS, [P1], BUYER, ROOM, files).catch((error: unknown) => error);
+  const first = await forgetReviewsPerson(STATS, [P1], BUYER, ROOM, files).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
   if (!(first instanceof Error)) for (const path of first.photos) handed.add(path);
   for (const path of files) handed.add(path);
   redis.pipeline = realPipeline;
-  const again = await forget(STATS, [P1], BUYER, ROOM, files);
+  const again = await forgetReviewsPerson(STATS, [P1], BUYER, ROOM, files);
   for (const path of [...again.photos, ...files]) handed.add(path);
   return { first, handed };
 }

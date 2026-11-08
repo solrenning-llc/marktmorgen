@@ -95,6 +95,21 @@ async function allRows(path: string, query: URLSearchParams, legible: (row: Reco
 }
 
 const textField = (row: Record<string, unknown>, name: string) => typeof ownField(row, name) === "string";
+const wholeAtLeast = (value: unknown, least: number): value is number => Number.isSafeInteger(value) && (value as number) >= least;
+/**
+ * An invoice row read in its exact shape (CX-123 rule 24): its status, and for a paid one every field a refund is
+ * decided by. One that does not read is never taken as "no payment".
+ */
+const invoiceKnown = (row: Record<string, unknown>) => {
+  const status = ownField(row, "status");
+  if (typeof status !== "string") return false;
+  if (status !== "paid") return true;
+  const transitions = ownField(row, "status_transitions");
+  if (!plainObject(transitions)) return false;
+  const paidAt = ownField(transitions, "paid_at");
+  const intent = ownField(row, "payment_intent");
+  return wholeAtLeast(ownField(row, "amount_paid"), 0) && wholeAtLeast(ownField(row, "created"), 1) && (paidAt === null || wholeAtLeast(paidAt, 1)) && (intent === null || typeof intent === "string");
+};
 const metadataKnown = (row: Record<string, unknown>) => {
   const meta = ownField(row, "metadata");
   return meta === null || plainObject(meta);
@@ -280,8 +295,9 @@ async function expireSession(id: string): Promise<boolean> {
     const done = await onPlatform("POST", `/checkout/sessions/${encodeURIComponent(id)}/expire`, new URLSearchParams(), { version: AT, idempotencyKey: `closing-expire:${id}` });
     return done.status === "expired";
   } catch (error) {
+    // Stripe failing or not answering is not "it was not open": thrown, so the closing day tries it again.
+    if (!(error instanceof BillingError) || error.status >= 500 || error.status === 429) throw error;
     // Only an open session can be expired: one finished meanwhile is undone when it comes to light.
-    if (!(error instanceof BillingError) || error.status >= 500) console.error("expiring a closing store's plan checkout failed", error);
     return false;
   }
 }
@@ -318,7 +334,12 @@ export async function expirePlanCheckouts(store: Store, customerIds: string[]): 
         const meta = row.metadata as Record<string, string> | null | undefined;
         const id = row.id;
         if (row.mode !== "subscription" || !SESSION.test(id) || typeof meta?.store !== "string" || !handles.has(meta.store)) continue;
-        if (await expireSession(id)) expired += 1;
+        try {
+          if (await expireSession(id)) expired += 1;
+        } catch (error) {
+          console.error("expiring a closing store's plan checkout failed", error);
+          unknown = error;
+        }
       }
       if (listed.unreadable > 0) {
         unknown = new StripeListUnreadable(`${listed.unreadable} open checkouts could not be read`);
@@ -384,10 +405,17 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
   const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
   const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
   if (!charge || typeof charge.id !== "string" || !OBJECT_ID.test(charge.id)) return { settled: false, returned: 0, disputed: 0, currency: "" };
-  const amount = Number(charge.amount) || 0;
-  const currency = typeof charge.currency === "string" ? charge.currency : "usd";
+  // Each field the refund is decided by, in its exact shape (CX-123 rule 24): one that does not read throws, and
+  // settleOne keeps the plan in line, never settled as refunded with nothing given back.
+  const amount = ownField(charge, "amount");
+  const onCharge = ownField(charge, "amount_refunded");
+  const isDisputed = ownField(charge, "disputed");
+  const currency = ownField(charge, "currency");
+  if (!wholeAtLeast(amount, 1) || !wholeAtLeast(onCharge, 0) || typeof isDisputed !== "boolean" || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
+    throw new Error(`Stripe answered the charge of ${invoiceId} in another shape`);
+  }
   // A disputed charge cannot be refunded: the bank's dispute takes it back to the creator.
-  if (charge.disputed === true) return { settled: true, returned: 0, disputed: amount, currency };
+  if (isDisputed) return { settled: true, returned: 0, disputed: amount, currency };
   // Read in full or not at all: a refund missed on an unknown list would be asked for twice (settleOne keeps it on the throw).
   const refunds = await allRows("/refunds", new URLSearchParams({ charge: charge.id, limit: "100" }), (row) => textField(row, "status") && Number.isSafeInteger(ownField(row, "amount")), 5);
   const sum = (status: string) => refunds.filter((row) => row.status === status).reduce((total, row) => total + (Number(row.amount) || 0), 0);
@@ -399,7 +427,6 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
   if (pending > 0) return { settled: false, returned: succeeded, disputed: 0, currency };
   // The charge itself says it was refunded although the list does not show it yet: never a second one. (Only
   // while no refund of it has failed: a failed refund's amount goes back, and the list is then what counts.)
-  const onCharge = Number(charge.amount_refunded) || 0;
   if (failed === 0 && onCharge >= amount) return { settled: false, returned: succeeded, disputed: 0, currency };
   const made = await onPlatform(
     "POST",
@@ -448,7 +475,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     const cutoff = before ? entry.since : (entry.ended ?? entry.since);
     // Every page read before anything is voided, deleted or refunded; a list not known in full throws, and the
     // plan is kept in line (catch below), never settled as having had no payment.
-    const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), (row) => textField(row, "status"), 10, OBJECT_ID);
+    const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), invoiceKnown, 10, OBJECT_ID);
     let settled = true;
     let returned = 0;
     let disputed = 0;
@@ -464,9 +491,10 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
         await onPlatform("DELETE", `/invoices/${encodeURIComponent(invoiceId)}`, undefined, { version: AT });
         continue;
       }
-      if (invoice.status !== "paid" || !(Number(invoice.amount_paid) > 0)) continue;
-      const paidAt = Number((invoice.status_transitions as { paid_at?: unknown } | null | undefined)?.paid_at) || 0;
-      const created = Number(invoice.created) || 0;
+      // Read by invoiceKnown: a paid one's amount and dates are whole numbers, its payment time null or one.
+      if (invoice.status !== "paid" || !((invoice.amount_paid as number) > 0)) continue;
+      const paidAt = ((invoice.status_transitions as { paid_at: number | null }).paid_at) ?? 0;
+      const created = invoice.created as number;
       // Paid before the closing day began: a payment for a plan the store had, not this one.
       if (Math.max(paidAt, created) * 1000 < cutoff) continue;
       const outcome = await giveBack(id, invoice);

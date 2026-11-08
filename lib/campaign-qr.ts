@@ -1,5 +1,5 @@
 import QRCode from "qrcode";
-import { postName, qrFileName, qrSvg } from "@/lib/share-links";
+import { postName, qrFileName, qrSvg, withTags } from "@/lib/share-links";
 
 /**
  * A campaign QR code for events and printed material (632 [AA2](q)).
@@ -22,17 +22,28 @@ export const CAMPAIGN_QR_MEDIUM = "qr-code";
 /** An email address, or seven or more digits in a row with only spaces, dots, dashes, brackets or a plus between them. */
 const PERSONAL = /@|\d(?:[\s().+-]*\d){6,}/;
 
+/**
+ * A calendar date written year first with one separator (2026-11-27,
+ * 2026.11.27, 2026/11/27): at most four digits in a row, so it is set aside
+ * before the digit count. Not when more digits are joined to it, so a phone
+ * number written beside or around a date is still counted whole.
+ */
+const DATE = /(?<!\d[\s().+-]*)(?:19|20)\d\d([-./])(?:0?[1-9]|1[0-2])\1(?:0?[1-9]|[12]\d|3[01])(?![\s().+-]*\d)/g;
+
 /** The campaign tag as it is counted, or why it is refused. */
 export function campaignQrTag(name: string): { tag: string } | { refused: "empty" | "personal" } {
-  if (PERSONAL.test(name)) return { refused: "personal" };
+  if (PERSONAL.test(name.replace(DATE, " "))) return { refused: "personal" };
   const tag = postName(name);
   return tag ? { tag } : { refused: "empty" };
 }
 
 /**
- * The page's address with only the QR tags: the page's own path, with other
- * query values and anchors left out, so nothing from the creator's address bar
- * is printed. Null when the page is not a web address or a name is refused.
+ * The page's address with the QR tags, made exactly as the campaign link is
+ * (lib/share-links.ts withTags): the utm_* tags are set, a stale utm_content
+ * is removed, and everything else the page's address carries is kept, above
+ * all an affiliate's ?via= (proxy.ts credits the affiliate only from it) and
+ * a discount ?code=. Every caller passes an address built on the server.
+ * Null when the page is not a web address or a name is refused.
  */
 export function campaignQrLink(pageUrl: string, campaign: string, content = ""): string | null {
   let page: URL;
@@ -50,9 +61,7 @@ export function campaignQrLink(pageUrl: string, campaign: string, content = ""):
     if (!("tag" in own)) return null;
     variant = own.tag;
   }
-  const query = new URLSearchParams({ utm_source: CAMPAIGN_QR_SOURCE, utm_medium: CAMPAIGN_QR_MEDIUM, utm_campaign: name.tag });
-  if (variant) query.set("utm_content", variant);
-  return `${page.origin}${page.pathname}?${query.toString()}`;
+  return withTags(pageUrl, { utm_source: CAMPAIGN_QR_SOURCE, utm_medium: CAMPAIGN_QR_MEDIUM, utm_campaign: name.tag, utm_content: variant });
 }
 
 const xml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");

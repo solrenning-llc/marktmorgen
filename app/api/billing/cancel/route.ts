@@ -54,8 +54,10 @@ export async function POST(request: NextRequest) {
     // Leaving outright: a break that was set has nothing left to start again.
     if (intent === "cancel") await dropPause(store).catch((error) => console.error("dropping a break failed", error));
     if (state.state !== "active") {
-      await setSubscription(ref, { active: false });
-      return away(origin, studio("billing=ended"));
+      // Stripe has ended it; a store record not written (null) still holds the
+      // plan, so the creator is not told it ended. A throw lands in the catch.
+      const written = await setSubscription(ref, { active: false });
+      return away(origin, studio(written ? "billing=ended" : "billing=cancel-error"));
     }
     return away(origin, studio(intent === "cancel" ? "billing=canceling" : "billing=resumed"));
   } catch (error) {
@@ -65,8 +67,11 @@ export async function POST(request: NextRequest) {
     if (error instanceof BillingError && (error.status === 400 || error.status === 404)) {
       const now = await readSubscription(store.subscriptionId);
       if (now.state === "inactive") {
-        await setSubscription(ref, { active: false });
-        return away(origin, studio("billing=ended"));
+        const written = await setSubscription(ref, { active: false }).catch((failure) => {
+          console.error("recording the ended subscription failed", failure);
+          return null;
+        });
+        return away(origin, studio(written ? "billing=ended" : "billing=cancel-error"));
       }
     }
     console.error("changing the cancellation failed", error);

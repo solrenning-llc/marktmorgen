@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioEmptyState } from "@/components/empty-state";
 import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -386,7 +387,7 @@ export function AgreementsStudio({
       <section aria-labelledby="agreements-heading">
         <h2 id="agreements-heading" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Agreements (${rows.length.toLocaleString("en-US")} of ${MAX_KEPT_AGREEMENTS} kept)`}</h2>
         <p className="mt-1 text-sm text-ink-soft">{`Each is kept for ${KEEP_DAYS} days from when it was made, then deleted by itself. Keep the signed copy you are emailed.`}</p>
-        {rows.length === 0 ? <p className="mt-3 text-ink-soft">No agreements yet.</p> : null}
+        {rows.length === 0 ? <StudioEmptyState title="No agreements yet" body="An agreement you send shows here, with whether it was signed." action={canSend && open ? { href: "#ag-kind", label: "Write your first agreement" } : undefined} className="mt-3" /> : null}
         <ul className="mt-4 space-y-3">
           {rows.map((r) => {
             const status = statusOf(r, now);

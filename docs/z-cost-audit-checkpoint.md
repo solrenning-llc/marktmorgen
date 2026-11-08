@@ -1,3 +1,37 @@
+# FINAL AUTHORITATIVE RECEIPT — 8 November 2026, 05:06 Fortaleza
+
+SAME docs/z-cost-audit-checkpoint.md / codex/z-cost-audit-checkpoint. This supersedes ONLY the interim pending-channel status below; every character of that FULL519049 checkpoint and its previous FULL506691 canonical history remains intact verbatim. Current execution ENDED with no watcher/background process/subagent. No automation creation/update/disable; ongoing project continuity preserved.
+
+## New delivery: second financial review #3204, NOT CLEAN
+Exact3074b6bc34860d7f509e36504d1967ae58b8f73c; COMMENT5817104195/FULL3070/body+commit_id readback EXACT. FirstC2/6718170873 credited. SAME inherited HIGH lib/affiliates2936 partial-refund coverage lost (501st current refund or missing indexed record ->checkedtrue/1000eligiblecents) and MEDIUM2941 invalid/inconsistent full-refund cents(0/-5000->1000,100->980,text/missing->NaN withtrueflag butZEROeligible in those NaNfixtures), not new regressions or sevenbugs. Full500 boundary/no-refund/healthyfullrefund controls pass. Actual real book/coverage/payableLines; actual guards paypal-payouts379/affiliate-payday190 inspected, authenticated payout not executed. Author/C1 disposition remains; no merge approval or real money/loss/bill/incident certificate.
+
+Durable own evidence BEFORE review codex/z-review-3204-paypal-refunds@0043b9a4fcf5590fc20abd7177def568f4ab7220/tree6a44925a2b6ffd87791bd0795b79d0b24b145345=NATIVE696eee248d1dd9ba8f4cbabc6271ae6166be727d, reportaaafaaaa59e48759cb7bc7ac86f062bf1a77bb0a/FULL5332EXACT,12ownpaths only, CLEAN /workspace/scratch/z-review-3204-paypal-refunds. All proof/runner/typedriver/logs/rawSHA256 retained. Source2path150+/2- whole diff/callersread; no authorref/sourceedit.
+
+SAMEauthor22/blob98c22036cb3a1fb728f5c20cddd9b429fcdbb582 inREDbfac5f332/head:old7FAIL->head22PASS.
+NEW independentZ19 selectedfixture+actualreaders, notC2throwaway:old7FAIL->head7FAIL/12controlsPASS, SAME oracles. OLD overlays ONLYlib/affiliates.ts fromauthorRED into finalgraph, nothistoricalcheckout. Dedupeauthor alsoPASSbefore due settlementcap, notdedupeRED. No frozenoracleweakened/no retry/capraise.
+Beforegraph20knestedMemoryRedis/100mockHTTP/120s512MiB256KiB/fetchsocketdeny;author161commands0HTTP,own2181/0HTTP includingsetup, no caphit.
+Scopedtypes3roots840sources actualES2017strictBundler0diag/120s1024;lint3exit0/scanner4458tracked0corrections(+2receiptsafter)/stageddiff0. FIRST GLOBALtsc OOM1024MiB/exit-6/10.143s INCONCLUSIVE/rawpreserved/no highercapretry; later scopedgraph NOTglobalgreen.
+Claim6718868111/RES27c583a31fa7f4ced3ae2d9904f469baa715711e/blob681ca0a1/FULL5555661 EXACTbeforecode/tests.
+
+## Final channel DELIVERED and verified, pending status CLOSED
+CXZ-20261108-0453-C1-1 (prepared04:53, delivered05:06Fortaleza):
+commitdfe496669272520d4f32fa53b9a00167f4f94152
+blobc2e3f6fd6d21bf4dca108ced44caf8b29de4687e
+FULL5578663 EXACT immutable byte-for-byte readback.
+Source5070c0be44672230ef9eacf594fc1da758420c4e/treecb09373f1203dc7e6876523a53c8a5920012a57e/blobc55e36e10479504ad2eca1384a15c97b906e2910/FULL5573357; allprefix preserved, IDabsent verified. Git-data single-path tree352e34e607d1a5fc3c1272324d6e22323ad30502 thencommit parent5070; update_ref expected5070 +forceFALSE succeeded. This is ONLY explicit authorized channel append, notmain/product/foreignagentbranch mutation. No concurrent message lost.
+Prior bindingmissingSHA error madeNOrequest/write; THREE contentsAPI40907:53/07:55/08:00UTC madeNOmutation. Each causal retry waited>=120s and nextFULL>=5min. Fourth attempt used expected-head lease, notforce/bypass. Interim checkpoint e5c61ea63f41508dd51a9a562b7892a2288e1a7c/blob1ad43d789a2793537feda6dfdb49049f3e058d51/FULL519049 was verified while waiting, now supersededbyTHISfinalprefix. Don't reappend already delivered CXZ0453.
+
+Latest FULLchannel delta throughJ0455/CXC20457/C60459-0500/G79-80/C60504 read; G1927focal5817134702 delivered/claimed, G3120failedfocal/C63120queue theirs, C63092reportedmain/3119needsauthorintegration theirs. No new Z/R2/C1 own disposition. #3210C2alreadyclaimed, Zdidnotduplicate. No globalqueueempty claim.
+
+## Next continuation / preserved ownership
+FOUR own units ONLY, reviews excluded:2741officialab5818b75c73ae66fffa1365677e46e0a2c3c400/WIP85dbf64079c4113fd4f827db73b695a6cc0e7230/310PASS wait3094legitimateMERGED+R2counter;2819official3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac R2callbacks;reminder27bb340aefaadf544e91ae5c3737d92b9497c7a2 reportonlyR2C1attribution;askModele274993fe90f426eeaa0ab6f45bdf9dcc77a5e04 proofonlyR2C1retentionclassification. company300<fixture1000 means SAME-store availability only, not globalexhaustion. No releasecontractorpermanenttestchanged.
+Own2741/2819directedtimelines no new>06:35Z inthisrun;3094nativee051 unchanged, MERGEDnotqueried/inferred. EarlierOPEN snapshot historical. HistoricalAIreport14ce/assistant5f28branches intact, not extraunits. ALLheads/REDs/WIPs/consumedretieshistory below authoritative. NEVERrepeat2484verify127130387972,2615verify127143841589/mac127144213372 orotherlistedconsumedjobs. NoCIquery/retry/cancel/queue/merge thisrun.
+
+Next realauthorfocal3204 withSHA/request, ownR2/C1disposition, or requestedunclaimedreview after freshownership/claim+RESbeforecode. No replay unchangedGREEN/conditionalproofbyclock. No arbitrary sixthunit/thirdreview/duplicateabsorption basedonlyrecentCP.
+C1coord/C4executor/SERIALmedium0agents;TODOS22generalMVlifted/old3139notfreeze;TODOS29APIquotaUNKNOWN/no>=500claim/≥3minPR/noActionsloops/no broadAPIlot/no unsupportedendpointprobe/accountkeys. Mainc5d1726d1b38867d1da1cd9b19e4b526dded3a5c fetched, ALL10norm/inbox/queue/reservationsBYTE-IDbb3. No mainchase. FirstreadremoteCPFULL506691, priorrunENDED, no recency-as-active inference. No account/payment/term/vendorcredential/contact/PII/price/limit/commission/flag/gate changes. Every process finished. Execution ENDED; transientholds are not completedproject or grounds to disablecontinuity.
+
+---
+
 # Review delivered; channel receipt pending — 8 November 2026, 05:02 Fortaleza
 
 Authoritative continuation of SAME docs/z-cost-audit-checkpoint.md / codex/z-cost-audit-checkpoint.

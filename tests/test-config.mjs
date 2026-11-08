@@ -88,6 +88,7 @@ function centralAliases(file,root,here){
  if(file==='cron-checks-exact.test.ts')for(const name of ['email','verify-mail','verify-stripe'])aliases['@/lib/'+name]=join(here,'cron-checks-exact-world.ts');
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
  if(file==='numbers-email-claim.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats'])aliases['@/lib/'+name]=join(here,'numbers-email-claim-world.ts');
+ if(file==='numbers-email-retry.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats','chat-summary','ad-spend'])aliases['@/lib/'+name]=join(here,'numbers-email-retry-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
  if(file==='plan-refund-page.test.ts'){

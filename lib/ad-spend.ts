@@ -11,6 +11,9 @@
  * cannot be removed one by one: they go with the connection.
  *
  *   nl:stats:<statsId>:spend   hash: <id> → JSON { channel, campaign, cents, from, to }
+ *
+ * <id> is the add's operation id from the studio (OP: 32 hex characters, kept across the tries of one add, new for a
+ * new add), or, for a request without one, 8 hex characters chosen here.
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -19,7 +22,9 @@ import { type AdSpend, MAX_SPEND_ENTRIES, readSpend } from "@/lib/ad-spend-rules
 import { metaLines } from "@/lib/meta-ads";
 
 const key = (statsId: string) => `nl:stats:${statsId}:spend`;
-const ID = /^[a-f0-9]{8}$/;
+const ID = /^(?:[a-f0-9]{8}|[a-f0-9]{32})$/;
+/** An add's operation id, as components/ad-spend-editor.tsx makes it (Codex Z on #2924; C1-20261107-2118-C4-1 item 5). */
+const OP = /^[a-f0-9]{32}$/;
 const KEEP_SECONDS = 400 * 86_400;
 
 /**
@@ -151,9 +156,30 @@ async function written(statsId: string, id: string, value: string): Promise<bool
   return false;
 }
 
+/**
+ * Keeps one add's line under its operation id, once (Codex Z on #2924): HSETNX never writes a second line for an id
+ * already kept, so a try of the same add that lands late, or is sent again, adds nothing. Saved only on the exact
+ * receipt: [1, 1] (written now) or [0, 1] (another try of this same add was kept first), EXPIRE setting the time. Any
+ * other receipt, or none, is unknown and throws (UnknownReplyError), and the line is never undone: under an id the
+ * tries share, an undoing could take away a try that saved. Trying the same add again is what is safe.
+ */
+async function keptOnce(statsId: string, op: string, value: string): Promise<void> {
+  const receipt = await redisPipeline([
+    ["HSETNX", key(statsId), op, value],
+    ["EXPIRE", key(statsId), KEEP_SECONDS],
+  ]).then(
+    (replies) => repliesFor(replies, 2),
+    (error: unknown) => {
+      console.error("writing an ad spend line answered no receipt", error);
+      return null;
+    },
+  );
+  if (!receipt || (receipt[0] !== 1 && receipt[0] !== 0) || receipt[1] !== 1) throw new UnknownReplyError("writing an ad spend line");
+}
+
 export async function addSpend(
   statsId: string,
-  input: { channel: unknown; campaign?: unknown; cents: unknown; from: unknown; to: unknown },
+  input: { channel: unknown; campaign?: unknown; cents: unknown; from: unknown; to: unknown; op?: unknown },
   now = Date.now(),
 ): Promise<({ ok: true } & SpendRead) | { ok: false; reason: "channel" | "amount" | "days" | "unavailable" }> {
   const read = readSpend(input, now);
@@ -162,11 +188,20 @@ export async function addSpend(
   // What is kept is read exactly before anything is written (Claude 5 on #2924): a list that cannot be read refuses
   // the add, so a refusal always means nothing was saved and the creator is never led to save the same line again.
   const before = await keptSpends(statsId);
-  // A fresh id no kept line has, so this add's write and its undoing below touch only this add's own line.
-  let id = randomBytes(4).toString("hex");
-  while (before.some((s) => s.id === id)) id = randomBytes(4).toString("hex");
-  if (!(await written(statsId, id, JSON.stringify(read.spend)))) return { ok: false, reason: "unavailable" };
-  const known = [...before, { id, ...read.spend }].sort(byDay);
+  const op = typeof input.op === "string" && OP.test(input.op) ? input.op : null;
+  let id: string;
+  if (op) {
+    // An add with the studio's operation id: kept once under it, and not written again once it is kept.
+    id = op;
+    if (!before.some((s) => s.id === op)) await keptOnce(statsId, op, JSON.stringify(read.spend));
+  } else {
+    // No operation id (an older page): a fresh id no kept line has, so this add's write and its undoing touch only
+    // this add's own line.
+    id = randomBytes(4).toString("hex");
+    while (before.some((s) => s.id === id)) id = randomBytes(4).toString("hex");
+    if (!(await written(statsId, id, JSON.stringify(read.spend)))) return { ok: false, reason: "unavailable" };
+  }
+  const known = (before.some((s) => s.id === id) ? before : [...before, { id, ...read.spend }]).sort(byDay);
   const keep = known.slice(-MAX_SPEND_ENTRIES);
   const drop = known.slice(0, known.length - keep.length).map((s) => s.id);
   if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);

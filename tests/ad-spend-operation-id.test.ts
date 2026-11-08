@@ -184,3 +184,14 @@ test("the route passes the add's operation id: a late first write and the retry 
   assert.equal((await post(cookie, { action: "add", ...LINE, op: OP })).status, 200);
   assert.deepEqual(await rows(statsId), [1200], "the same add sent again through the route is still one line");
 });
+
+test("the editor keeps one operation id across the tries of one add and makes a new one for a new add", async () => {
+  const { addOperation } = await import("@/components/ad-spend-editor");
+  const body = JSON.stringify({ action: "add", ...LINE });
+  const first = addOperation(null, body);
+  assert.match(first.op, /^[a-f0-9]{32}$/, "the shape lib/ad-spend.ts takes as an operation id");
+  assert.equal(addOperation(first, body), first, "tried again unchanged: the same id");
+  const changed = addOperation(first, JSON.stringify({ action: "add", ...LINE, cents: 1300 }));
+  assert.notEqual(changed.op, first.op, "a changed add is a new add");
+  assert.notEqual(addOperation(null, body).op, first.op, "after an add saved (null), the next add has a new id");
+});

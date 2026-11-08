@@ -45,7 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -588,20 +588,29 @@ export async function directorySize(id: string): Promise<number> {
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
 export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
-  const [reply, total] = await redisPipeline([
-    ["HSCAN", membersKey(id), cursor, "COUNT", count],
-    ["HLEN", membersKey(id)],
-  ]);
-  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0, bytes: 0 };
-  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  const both = repliesFor(
+    await redisPipeline([
+      ["HSCAN", membersKey(id), cursor, "COUNT", count],
+      ["HLEN", membersKey(id)],
+    ]),
+    2,
+  );
+  // HSCAN answers [cursor, [field, value, ...]] and HLEN a count (CX-123 rule 24): a page in any other shape is
+  // unknown, never a last or empty page, so no list, export or send takes a part of the members for all of them.
+  const page = repliesFor(both?.[0], 2);
+  const at = page?.[0];
+  const next = typeof at === "string" && /^\d{1,20}$/.test(at) ? at : countOf(at) !== null ? String(at) : null;
+  const flat = stringList(page?.[1]);
+  const total = countOf(both?.[1]);
+  if (next === null || !flat || flat.length % 2 !== 0 || total === null) throw new UnknownReplyError("a page of a community's members");
   const members: Member[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const member = parseMember(flat[i + 1]);
     if (member) members.push(member);
   }
   // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
-  const bytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
-  return { members, next: String(reply[0]), total: Number(total) || 0, bytes };
+  const bytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);
+  return { members, next, total, bytes };
 }
 
 /** Every member who asked for announcement emails and is still here. */

@@ -4,6 +4,7 @@ import { photoUrl } from "@/lib/photo-limits";
 import { isFree, type Listing, type Store } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { communityWords, pollWhenIn, whenIn } from "@/lib/buyer-words/community";
+import { communityUnreadWords } from "@/lib/buyer-words/community-unread";
 import { LANGUAGES } from "@/lib/store-language";
 import { CREATOR, type CommunityConfig, type Member, type Post } from "@/lib/community";
 import { communityImageFile } from "@/lib/community-image";
@@ -31,12 +32,15 @@ const WARN = new Set([
   "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
   "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "out", "off", "error", "locked",
+  "notemailed",
 ]);
 
 /** What happened after a button, in the store's language (lib/buyer-words/community.ts). */
 export function communityNotices(language: unknown): Record<string, { text: string; tone?: "warn" }> {
   const w = communityWords(language);
-  return Object.fromEntries(Object.entries(w.notices).map(([key, text]) => [key, WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
+  // A post that went up while who asked for its email could not be read (lib/buyer-words/community-unread.ts).
+  const notices = { ...w.notices, notemailed: communityUnreadWords(language).notEmailed };
+  return Object.fromEntries(Object.entries(notices).map(([key, text]) => [key, WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
 }
 
 /** After asking for a link to come in, in the store's language. */

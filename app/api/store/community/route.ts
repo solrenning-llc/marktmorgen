@@ -53,6 +53,7 @@ import { alertCreator } from "@/lib/phone-alerts";
 import { award, levelOf, pointsOf } from "@/lib/community-points";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /** The most a form here may weigh: a full post with its picture's details. */
 const MAX_FORM_BYTES = 40_000;
@@ -239,7 +240,16 @@ export async function POST(request: NextRequest) {
         );
       }
       if (announce && form.get("email") === "1") {
-        const queued = await queueAnnouncement(store, config, made.post);
+        // The post is up either way. Who asked for the emails is read whole or not at all (lib/community.ts
+        // memberPage, rule 24): a list that could not be read queues nothing, and the creator is told the post went
+        // up without the email, never "nothing was changed" and never a send to part of the members.
+        let queued: Awaited<ReturnType<typeof queueAnnouncement>>;
+        try {
+          queued = await queueAnnouncement(store, config, made.post);
+        } catch (error) {
+          if (error instanceof UnknownReplyError) return back(`${home}/post/${made.post.id}`, "notemailed");
+          throw error;
+        }
         if (queued.ok) {
           const jobId = queued.job.id;
           after(() => advanceAnnouncement(jobId, storeForHandle, Date.now() + 25_000).then(() => undefined, (error) => console.error("sending an announcement failed", error)));

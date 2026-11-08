@@ -20,7 +20,7 @@ import {
 } from "@/lib/community";
 import { announcementReach, canAnnounceByEmail } from "@/lib/community-mail";
 import { can } from "@/lib/team-roles";
-import { CommunityStudio, type QueueRow, type StudioMember } from "@/components/community-studio";
+import { CommunityStudio, type QueueRow, type StudioMember, type StudioTotals } from "@/components/community-studio";
 import { CommunityEventsStudio, type StudioEvent } from "@/components/community-events-studio";
 import { VIDEO_ROOM_NOTE } from "@/lib/call-rooms";
 import { configuredProviders } from "@/lib/meet-providers";
@@ -74,8 +74,9 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   const config = id ? await readConfig(id) : null;
 
   let queue: QueueRow[] | null = [];
-  let members: StudioMember[] = [];
-  let totals = { members: 0, listed: 0, posts: 0, reach: 0 };
+  // Null where it could not be read (rule 24): shown as not loaded, never as none.
+  let members: StudioMember[] | null = [];
+  let totals: StudioTotals = { members: 0, listed: 0, posts: 0, reach: 0 };
   let rewards: Reward[] = [];
   let coming: StudioEvent[] = [];
   let over: StudioEvent[] = [];
@@ -135,25 +136,35 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     coming = soon.map((e, i) => shape(e, i));
     over = past.events.map((e, i) => shape(e, soon.length + i));
 
-    const [reports, first, listed, posts, reach] = await Promise.all([
+    // Everyone, when the community is small; the most recently seen when it is not. A page of the list that does
+    // not read (lib/community.ts memberPage, rule 24) leaves the list and its count unknown, said so on the page,
+    // never shown as "Nobody has come in yet" or as a shorter list.
+    const roster = async (): Promise<{ all: Member[]; total: number }> => {
+      const first = await memberPage(id, "0", 1000);
+      let all: Member[] = first.members;
+      let cursor = first.next;
+      for (let page = 0; cursor !== "0" && page < 60; page += 1) {
+        const next = await memberPage(id, cursor, 1000);
+        all = all.concat(next.members);
+        cursor = next.next;
+      }
+      return { all, total: first.total };
+    };
+    const unread = (what: string) => (error: unknown) => {
+      console.error(`studio community: ${what} could not be read`, error);
+      return null;
+    };
+    const [reports, read, listed, posts, reach] = await Promise.all([
       reportQueue(id, 100).catch(() => null),
-      memberPage(id, "0", 1000),
+      roster().catch(unread("the member list")),
       directorySize(id),
       postCount(id),
-      announcementReach(id),
+      announcementReach(id).catch(unread("the announcement reach")),
     ]);
-    // Everyone, when the community is small; the most recently seen when it is not.
-    let all: Member[] = first.members;
-    let cursor = first.next;
-    for (let page = 0; cursor !== "0" && page < 60; page += 1) {
-      const next = await memberPage(id, cursor, 1000);
-      all = all.concat(next.members);
-      cursor = next.next;
-    }
-    all.sort((a, b) => b.seen - a.seen);
+    const all = read ? [...read.all].sort((a, b) => b.seen - a.seen) : [];
     const points = await pointsOf(id, all.slice(0, MEMBERS_SHOWN).map((m) => m.k));
     rewards = await readRewards(id);
-    members = all.slice(0, MEMBERS_SHOWN).map((m) => ({
+    members = read === null ? null : all.slice(0, MEMBERS_SHOWN).map((m) => ({
       key: m.k,
       email: m.e,
       name: m.n,
@@ -166,7 +177,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       points: points.get(m.k) ?? 0,
       answers: m.qa ? m.qq.map((q, i) => ({ q, a: m.q[i] ?? "" })) : [],
     }));
-    totals = { members: first.total, listed, posts, reach };
+    totals = { members: read === null ? null : read.total, listed, posts, reach };
 
     queue = reports === null ? null : await (async () => {
       const rows = await Promise.all(

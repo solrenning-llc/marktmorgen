@@ -57,6 +57,18 @@ export type StudioMember = {
   answers: { q: string; a: string }[];
 };
 
+/** The community's figures; a count that could not be read (rule 24) is null, shown as not loaded, never as 0. */
+export type StudioTotals = { members: number | null; listed: number; posts: number; reach: number | null };
+
+/** One figure of the community, or "Not loaded" in its place when it could not be read. */
+function Figure({ value }: { value: number | null }) {
+  return value === null ? (
+    <p className="text-sm font-semibold text-ink">Not loaded</p>
+  ) : (
+    <p className="text-xl font-semibold tabular-nums">{value}</p>
+  );
+}
+
 type ProductChoice = { id: string; title: string; free: boolean; kind: string };
 
 const MESSAGES: Record<string, string> = {
@@ -125,8 +137,9 @@ export function CommunityStudio({
   config: CommunityConfig | null;
   products: ProductChoice[];
   queue: QueueRow[] | null;
-  members: StudioMember[];
-  totals: { members: number; listed: number; posts: number; reach: number };
+  /** Null when the member list could not be read (rule 24): said so, never shown as nobody. */
+  members: StudioMember[] | null;
+  totals: StudioTotals;
   canEmail: boolean;
   /**
    * Whether this person may set the community up (lib/team-roles.ts,
@@ -244,7 +257,7 @@ function Basics({
   busy: string | null;
   run: Runner;
   problem: Problem;
-  totals: { members: number; listed: number; posts: number; reach: number };
+  totals: StudioTotals;
   canEmail: boolean;
 }) {
   const [name, setName] = useState(config.name);
@@ -264,18 +277,21 @@ function Basics({
       </p>
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.members}</p>
+          <Figure value={totals.members} />
           <p className="text-xs text-ink-soft">have come in</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.posts}</p>
+          <Figure value={totals.posts} />
           <p className="text-xs text-ink-soft">posts</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.reach}</p>
+          <Figure value={totals.reach} />
           <p className="text-xs text-ink-soft">want the community&apos;s emails</p>
         </div>
       </div>
+      {totals.members === null || totals.reach === null ? (
+        <p role="status" className="mt-3 text-sm text-ink">Some of these figures could not be loaded. Reload this page to check them.</p>
+      ) : null}
       {!canEmail ? (
         <p className="mt-3 text-sm text-ink-soft">
           Announcements show in the community on every plan. Emailing them is part of Pro, from your Email settings, and
@@ -1109,14 +1125,25 @@ function Members({
   run,
   problem,
 }: {
-  members: StudioMember[];
-  total: number;
+  members: StudioMember[] | null;
+  total: number | null;
   busy: string | null;
   run: Runner;
   problem: Problem;
 }) {
   const [filter, setFilter] = useState("");
   const q = filter.trim().toLowerCase();
+  if (members === null || total === null) {
+    return (
+      <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-members-title">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="cm-members-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Members</h2>
+          <span className="tag">Not loaded</span>
+        </div>
+        <p role="status" className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">Members could not be loaded. Reload this page to see them.</p>
+      </section>
+    );
+  }
   const shown = q ? members.filter((m) => m.email.includes(q) || m.name.toLowerCase().includes(q)) : members;
   return (
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-members-title">

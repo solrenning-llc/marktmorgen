@@ -23,6 +23,7 @@ import {
   ticketKind,
 } from "@/components/community-parts";
 import { communityWords, composerWords } from "@/lib/buyer-words/community";
+import { communityUnreadWords } from "@/lib/buyer-words/community-unread";
 import { MAX_POLL_OPTIONS } from "@/lib/community-polls";
 import { LANGUAGES } from "@/lib/store-language";
 import { CommunityComposer, ConfirmDeletes } from "@/components/community-composer";
@@ -110,7 +111,9 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const levels = new Map([...points].map(([k, n]) => [k, levelOf(n)]));
   const myLevel = levels.get(key) ?? 1;
   const locked = (s: { level: number }) => !owner && s.level >= 2 && myLevel < s.level;
-  const reach = owner ? await announcementReach(id) : 0;
+  // Who asked for announcement emails, for the owner's composer: a list that could not be read (rule 24) is
+  // unknown, and the composer turns its email box off and says so, never counting fewer members or none.
+  const reach = owner ? await announcementReach(id).catch(() => null) : 0;
   // The badge on the Messages link: nothing to read, nothing shown.
   const waiting = config.dm.on ? await requestCount(id, key) : 0;
   const news = await unreadCount(id, key);
@@ -212,8 +215,9 @@ export default async function CommunityPage({ params, searchParams }: Params) {
                 from={from}
                 canEmail={owner && canAnnounceByEmail(store)}
                 reach={reach}
+                reachUnknown={communityUnreadWords(store.language).reachUnknown}
                 named={Boolean(member?.n)}
-                words={composerWords(store.language, MAX_POLL_OPTIONS, reach)}
+                words={composerWords(store.language, MAX_POLL_OPTIONS, reach ?? 0)}
               />
             </div>
           ) : null}

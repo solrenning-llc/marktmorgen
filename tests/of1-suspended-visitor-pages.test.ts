@@ -31,7 +31,9 @@ import { affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
 import { GET as manifest } from "@/app/[handle]/manifest.webmanifest/route";
 import { GET as robots } from "@/app/[handle]/store-robots/route";
 import { StoreResting } from "@/components/store-resting";
+import { StoreTracking } from "@/components/store-tracking";
 import { readSetup, type CallSetup } from "@/lib/call-setup";
+import { waitlistTokenKey } from "@/lib/waitlist-tokens";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setAffiliateSetting, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -67,6 +69,30 @@ async function html(out: Out): Promise<string> {
   const stream = await renderToReadableStream(out.node as React.ReactElement, { onError: () => {} });
   await stream.allReady;
   return new Response(stream).text();
+}
+
+/**
+ * Whether a page's tree carries the creator's ad pixels and the visit count (StoreTracking). The
+ * page's own components (the booking page's MovePage and Shell) are drawn to see inside them; a
+ * component that cannot be drawn outside React (a hook) is left as it is. Its HTML cannot say:
+ * the pixels and the beacon draw nothing on the server, only in the browser.
+ */
+async function tracks(node: unknown): Promise<boolean> {
+  if (Array.isArray(node)) {
+    for (const child of node) if (await tracks(child)) return true;
+    return false;
+  }
+  if (!node || typeof node !== "object") return false;
+  const el = node as { type?: unknown; props?: { children?: unknown } };
+  if (el.type === StoreTracking) return true;
+  if (typeof el.type === "function") {
+    try {
+      if (await tracks(await (el.type as (props: unknown) => unknown)(el.props))) return true;
+    } catch {
+      // A client component: nothing of the store's tracking is drawn from inside it.
+    }
+  }
+  return tracks(el.props?.children ?? null);
 }
 
 async function main(): Promise<void> {
@@ -160,6 +186,29 @@ async function main(): Promise<void> {
   is("an affiliate the store already has keeps their own page", [suspendedPage(own), (await html(own)).includes("partner@example.test")], [false, true]);
   const back = await affiliates({ token: await emailed("partner@example.test", "c".repeat(64)) });
   is("and the emailed link that signs them back in", [suspendedPage(back), (await html(back)).includes("Continue as partner@example.test")], [false, true]);
+  // What stays open names nothing a product's id in the address asks for: anyone who saw an old link has the id.
+  const left = await open(waitlist, { status: "left", product: paid.product.id });
+  const leftDrawn = await html(left);
+  is("the page that says an address was taken off names no product from the address", [titles.some((t) => leftDrawn.includes(t)), leftDrawn.includes("See Glaze")], [false, false]);
+  const badLeave = await open(waitlist, { leave: "x".repeat(24), product: paid.product.id });
+  is("nor does a link to leave that is not one", [(await html(badLeave)).includes("Glaze Workshop Replay"), (await html(badLeave)).includes("See Glaze")], [false, false]);
+  const badToken = await open(waitlist, { leave: "a".repeat(48), product: paid.product.id });
+  is("nor one shaped like a link to leave that the list does not know", [suspendedPage(badToken), (await html(badToken)).includes("Glaze Workshop Replay")], [false, false]);
+  // Leaving failed (app/api/store/waitlist/leave/route.ts): the person is told the address is still on the list.
+  const expired = await open(waitlist, { status: "expired", product: paid.product.id });
+  const expiredDrawn = await html(expired);
+  is("a failed leave still says the link has expired, naming no product", [suspendedPage(expired), expiredDrawn.includes("This link has expired"), expiredDrawn.includes("Glaze Workshop Replay")], [false, true, false]);
+  // A real link to leave still takes the address off, and says what it is for, from the link itself.
+  const leaveToken = "b".repeat(48);
+  const stats = (await ensureStatsId(owner))!.statsId;
+  await redis.pipeline([["SET", waitlistTokenKey(leaveToken), JSON.stringify({ s: stats, h: "glazeworks", p: paid.product.id, e: "buyer@example.test", k: "leave" })]]);
+  const realLeave = await open(waitlist, { leave: leaveToken, product: free.product.id });
+  const realDrawn = await html(realLeave);
+  is("a real link to leave still offers its button, naming the product it was for", [realDrawn.includes("<form"), realDrawn.includes("Glaze Workshop Replay"), realDrawn.includes("Free Glaze Guide")], [true, true, false]);
+  is("and links to no product page of a store switched off", realDrawn.includes("See Glaze"), false);
+  // Nothing of the creator's ad pixels or the visit count runs on what stays open.
+  is("the waitlist's open pages carry no ad pixels or visit count", [await tracks((left as { node: unknown }).node), await tracks((badLeave as { node: unknown }).node), await tracks((expired as { node: unknown }).node), await tracks((realLeave as { node: unknown }).node)], [false, false, false, false]);
+  is("nor does moving a booking, even from a link that is not one", await tracks((await open(pages[0], { move: "cs_test_of1move000000" }) as { node: unknown }).node), false);
 
   part("Switched back on, every page is as it was");
   await noteTakedown(owner, null, false);
@@ -169,6 +218,9 @@ async function main(): Promise<void> {
   is("the booking page shows the call again", (await html(await open(pages[0]))).includes("Studio Call With Ana"), true);
   is("the way back from checkout shows the product again", (await html(await open(pages[3]))).includes("Glaze Workshop Replay"), true);
   is("the booking page's title names the call again", String((await pages[0].meta()).title).includes("Studio Call With Ana"), true);
+  is("the waitlist's page carries the store's tracking again", await tracks((await open(waitlist, { status: "left", product: paid.product.id }) as { node: unknown }).node), true);
+  is("and names the product again", (await html(await open(waitlist, { status: "left", product: paid.product.id }))).includes("Glaze Workshop Replay"), true);
+  is("as does moving a booking", await tracks((await open(pages[0], { move: "cs_test_of1move000000" }) as { node: unknown }).node), true);
   is("the manifest is given again", (await file(manifest, "/manifest.webmanifest"))[0], 200);
   is("and the rules for crawlers", (await file(robots, "/store-robots"))[0], 200);
   is("the affiliate page shows the program to a visitor again", (await html(await affiliates({}))).includes("Earn by sharing Glaze Works"), true);

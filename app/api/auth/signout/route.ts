@@ -9,11 +9,13 @@ export async function POST(request: NextRequest) {
   // Sec-Fetch-Site (lib/request-guard.ts).
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
 
-  await endSession(request.cookies.get(SESSION_COOKIE)?.value);
+  // This browser's cookie goes whatever happens; "logged out" is said only when the session is known gone at the
+  // server too. Otherwise the page says it may still be open (CX-123 rule 24; tests/auth-sessions-exact.test.ts).
+  const ended = await endSession(request.cookies.get(SESSION_COOKIE)?.value);
 
   const response = new Response(null, {
     status: 303,
-    headers: { Location: `${originFrom(request)}/signin?status=out` },
+    headers: { Location: `${originFrom(request)}/signin?status=${ended ? "out" : "out-unknown&to=login"}` },
   });
   response.headers.append(
     "Set-Cookie",

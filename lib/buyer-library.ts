@@ -37,10 +37,12 @@
  * somebody, a pre-order, a PayPal purchase; not what a creator brings over
  * from another platform or gives through the API.
  */
-import { storeForId } from "@/lib/store";
+import { type Store } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -89,11 +91,16 @@ export async function rememberBuyers(sid: string, emails: string[]): Promise<voi
   }
 }
 
-/** The ids of the stores an address bought from, closed ones among them until they run out (a closed store no longer resolves). */
+/**
+ * The ids of the stores an address bought from, closed ones among them until they run out (a closed store no longer
+ * resolves). Read in its exact shape (CX-123 rule 24): one list of strings, or UnknownReplyError, never "none".
+ */
 export async function storesBoughtFrom(email: string): Promise<string[]> {
   if (!isRedisConfigured()) return [];
-  const [all] = await redisPipeline([["SUNION", ...libraryKeys(email)]]);
-  return [...new Set(ids(all))].slice(0, MAX_LIBRARY_STORES);
+  const replies = repliesFor(await redisPipeline([["SUNION", ...libraryKeys(email)]]), 1);
+  const all = replies ? stringList(replies[0]) : null;
+  if (!all) throw new UnknownReplyError("a library's stores");
+  return [...new Set(all.filter((id) => STORE_ID.test(id)))].slice(0, MAX_LIBRARY_STORES);
 }
 
 export type LibraryRequest = "sent" | "email" | "limited" | "error";
@@ -111,14 +118,18 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!(await withinLimit("library-address", sha(email), 5, 3_600))) return "limited";
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
-  let charged: Awaited<ReturnType<typeof storeForId>> = null;
+  let charged: Store | null = null;
+  // A store whose record could not be read, or answered out of shape, is not a closed one (CX-123 rule 24): when none
+  // read and one did not, nothing was sent, so the page never says a link is on its way (Claude 5 and Codex J on #2910).
+  let unread = 0;
   for (const sid of await storesBoughtFrom(email)) {
-    const store = await storeForId(sid).catch(() => null);
-    if (!store) continue;
+    const store = await storeForIdExactly(sid).catch(() => "unknown" as const);
+    if (store === "unknown") unread += 1;
+    if (store === "unknown" || store === "none") continue;
     stores.push(sid);
     charged ??= store;
   }
-  if (!stores.length) return "sent";
+  if (!stores.length) return unread ? "error" : "sent";
   if (!charged) return "error";
   const token = randomBytes(32).toString("hex");
   await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]);
@@ -141,9 +152,15 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   return sent ? "sent" : "error";
 }
 
-/** The address a live library link was sent to, or null. */
+/**
+ * The address a live library link was sent to, or null when the link is confirmed gone. Read in its exact shape
+ * (CX-123 rule 24): any other reply throws UnknownReplyError, never "expired" (Claude 5 on #2910).
+ */
 export async function libraryOwner(token: string): Promise<string | null> {
   if (!LIBRARY_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [email] = await redisPipeline([["GET", linkKey(token)]]);
-  return typeof email === "string" && email ? email : null;
+  const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+  const email = replies ? replies[0] : undefined;
+  if (email === null) return null;
+  if (typeof email !== "string" || !email) throw new UnknownReplyError("a library link's address");
+  return email;
 }

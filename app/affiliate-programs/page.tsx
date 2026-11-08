@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { cache } from "react";
 import Link from "next/link";
 import { connection } from "next/server";
+import { cache } from "react";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
 import { AffiliateDirectory } from "@/components/affiliate-directory";
@@ -13,15 +13,15 @@ const DESCRIPTION =
   "Creators' own affiliate programs, each with its share of a sale, how long a click counts, the day the creator pays and what one sale of each product, or one payment of a membership, earns. Apply to the ones you would recommend anyway.";
 
 /**
- * The rows, read once a request: the page and its title share this one read (React cache), so a visit builds the
- * directory at most once. null when it could not be read, or was built too recently to build again
- * (lib/affiliate-directory.ts, DIRECTORY_BUILD_SECONDS): the page then says the list is unavailable just now.
+ * One directory read a request: the metadata and the page share it, so a visit
+ * that finds no kept page builds it once, not twice (#2921, CX-116 A1). Any
+ * failure is null, the page's "unavailable just now" state.
  */
-const directoryRows = cache(() => readDirectory().catch(() => null));
+const directory = cache(() => readDirectory().catch(() => null));
 
 export async function generateMetadata(): Promise<Metadata> {
   await connection();
-  const rows = await directoryRows();
+  const rows = await directory();
   return {
     title: TITLE,
     description: DESCRIPTION,
@@ -48,7 +48,7 @@ const HONEST = [
 
 export default async function AffiliateProgramsPage() {
   await connection();
-  const rows = await directoryRows();
+  const rows = await directory();
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
       <SiteNav />

@@ -100,6 +100,16 @@ export type PlanRefundFlow =
 
 type Row = Record<string, unknown>;
 const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).filter((r): r is Row => Boolean(r) && typeof r === "object") : []);
+/**
+ * A refund's amount as Stripe sends it: whole cents above zero, or null. Rule 24: an amount missing, as text, zero,
+ * fractional or negative does not read, so a refund of ours carrying one is unknown, never a refund of $0 and never
+ * "nothing given back" (which would take the stop back and tell the creator nothing was refunded).
+ */
+const refundCents = (value: unknown): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null);
+/** A refund's currency as Stripe sends it: three lowercase letters, or null (never assumed to be US dollars). */
+const refundCurrency = (value: unknown): string | null => (typeof value === "string" && /^[a-z]{3}$/.test(value) ? value : null);
+/** Our refund given back or on its way (not failed or canceled): the ones whose amounts say what was given. */
+const counts = (status: unknown): boolean => status === "succeeded" || status === "pending" || status === "requires_action";
 
 function readNote(raw: unknown): Note | null {
   if (typeof raw !== "string") return null;
@@ -144,13 +154,14 @@ async function takeBackStop(id: string): Promise<boolean> {
   }
 }
 
-type Found = { kind: "found"; refund: Row; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
+/** `cents` and `currency` are what was given back, as read exactly: a found refund never carries a guessed amount. */
+type Found = { kind: "found"; refund: Row; cents: number; currency: string; settled: boolean } | { kind: "partial" } | { kind: "none" } | { kind: "unknown" };
 
 /**
  * What became of the charges a note says were about to be given back, read from each charge's own refunds (ours:
  * `metadata.plan_refund` = the store's id): all given ("found", settled), all given or on their way ("found", not
  * settled), some given and some not ("partial": never ended on, never taken back, until it is whole), none, or not
- * readable.
+ * readable, which includes one of ours given back or on its way whose amount or currency does not read.
  */
 /**
  * The charges to judge a refund by: an earlier request's and this one's. A charge in both keeps the larger amount,
@@ -179,18 +190,22 @@ export async function partsOutcome(sid: string, parts: NotedPart[]): Promise<Fou
     }
     if (listed.has_more !== false) return { kind: "unknown" };
     const ours = rows(listed).filter((r) => (r.metadata as Row | null | undefined)?.plan_refund === sid && typeof r.id === "string" && REFUND_ID.test(r.id));
-    const sum = (ok: (status: unknown) => boolean) => ours.filter((r) => ok(r.status)).reduce((n, r) => n + (Number(r.amount) || 0), 0);
+    // One of ours whose amount or currency does not read: not decided, never counted as nothing given (rule 24).
+    if (ours.some((r) => counts(r.status) && (refundCents(r.amount) === null || refundCurrency(r.currency) === null))) return { kind: "unknown" };
+    const sum = (ok: (status: unknown) => boolean) => ours.filter((r) => ok(r.status)).reduce((n, r) => n + (refundCents(r.amount) ?? 0), 0);
     const given = sum((x) => x === "succeeded");
     const coming = sum((x) => x === "pending" || x === "requires_action");
     if (given + coming > 0) anyOurs = true;
     if (given < part.a) succeededAll = false;
     if (given + coming < part.a) coveredAll = false;
-    first ??= ours.find((r) => r.status === "succeeded" || r.status === "pending" || r.status === "requires_action") ?? null;
+    first ??= ours.find((r) => counts(r.status)) ?? null;
     total += part.a;
   }
   if (!anyOurs) return { kind: "none" };
   if (!coveredAll || !first) return { kind: "partial" };
-  return { kind: "found", refund: { ...first, amount: total, status: succeededAll ? "succeeded" : "pending" }, settled: succeededAll };
+  const currency = refundCurrency(first.currency);
+  if (currency === null) return { kind: "unknown" };
+  return { kind: "found", refund: { ...first, amount: total, status: succeededAll ? "succeeded" : "pending" }, cents: total, currency, settled: succeededAll };
 }
 /**
  * Our refund for this store made between `at` and `until` (seconds), found by its metadata among the platform's
@@ -210,9 +225,14 @@ export async function findPlanRefund(sid: string, at: number, until: number): Pr
       return { kind: "unknown" };
     }
     const data = rows(listed);
-    const ours = data.find((r) => (r.metadata as Row | null | undefined)?.plan_refund === sid && typeof r.id === "string" && REFUND_ID.test(r.id) &&
-      (r.status === "succeeded" || r.status === "pending" || r.status === "requires_action"));
-    if (ours) return { kind: "found", refund: ours, settled: ours.status === "succeeded" };
+    const ours = data.find((r) => (r.metadata as Row | null | undefined)?.plan_refund === sid && typeof r.id === "string" && REFUND_ID.test(r.id) && counts(r.status));
+    if (ours) {
+      // Ours, but its amount or currency does not read: not decided (rule 24), never ended on with a letter of $0.
+      const cents = refundCents(ours.amount);
+      const currency = refundCurrency(ours.currency);
+      if (cents === null || currency === null) return { kind: "unknown" };
+      return { kind: "found", refund: ours, cents, currency, settled: ours.status === "succeeded" };
+    }
     if (listed.has_more !== true) return listed.has_more === false ? { kind: "none" } : { kind: "unknown" };
     const last = data[data.length - 1];
     if (!last || typeof last.id !== "string") return { kind: "unknown" };
@@ -299,12 +319,12 @@ async function tell(store: Store, r: { cents: number; currency: string; refundId
   await mail(store, planRefundLetter({ store: store.name || store.handle, cents: r.cents, currency: r.currency, pending: r.status === "pending", assistant: Boolean(store.assistantPlan?.active) }), `plan-refund-told:${r.refundId}`);
 }
 
-const refundOf = (r: Row, earlier: boolean, ended: boolean): PlanRefundFlow => ({
+const refundOf = (found: Extract<Found, { kind: "found" }>, earlier: boolean, ended: boolean): PlanRefundFlow => ({
   ok: true,
-  cents: Number(r.amount) || 0,
-  currency: typeof r.currency === "string" ? r.currency : "usd",
-  refundId: String(r.id),
-  status: r.status === "succeeded" ? "succeeded" : "pending",
+  cents: found.cents,
+  currency: found.currency,
+  refundId: String(found.refund.id),
+  status: found.refund.status === "succeeded" ? "succeeded" : "pending",
   ended,
   earlier,
 });
@@ -375,7 +395,7 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     // Not made now: one made before (an earlier request, or this one whose answer was lost) is looked for.
     const found = note.p ? await partsOutcome(store.sid, note.p) : await findPlanRefund(store.sid, note.at, nowSeconds);
     if (found.kind === "found") {
-      const result = refundOf(found.refund, made.reason !== "failed", await finish(found.settled));
+      const result = refundOf(found, made.reason !== "failed", await finish(found.settled));
       if (result.ok && result.ended) await tell(store, result);
       return result;
     }
@@ -428,7 +448,7 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         // Still pending: looked at again tomorrow, the stop kept, so nothing renews meanwhile.
         if (found.settled && (await endPlanNow(store, note.s))) {
           await dropNote(sid);
-          const result = refundOf(found.refund, false, true);
+          const result = refundOf(found, false, true);
           if (result.ok) await tell(store, result);
           counts.ended += 1;
         } else counts.left += 1;

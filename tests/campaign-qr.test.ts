@@ -11,12 +11,16 @@
  * download of at least 44 px, readable tokens and no meaning by color alone.
  */
 import { readFileSync } from "node:fs";
+import { NextRequest } from "next/server";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import QRCode from "qrcode";
 import { cameFrom } from "@/lib/came-from";
 import { campaignResultsFrom } from "@/lib/campaign-results";
-import { postName } from "@/lib/share-links";
+import { campaignLink, postName } from "@/lib/share-links";
+import { viaCookieName } from "@/lib/affiliate-setting";
+import { codeCookieName } from "@/lib/code-link";
+import { proxy } from "@/proxy";
 import { campaignQr, campaignQrLink, campaignQrTag, CAMPAIGN_QR_MEDIUM, CAMPAIGN_QR_SOURCE } from "@/lib/campaign-qr";
 import { CampaignQr } from "@/components/campaign-qr";
 import { done, is, part } from "./check";
@@ -39,7 +43,28 @@ is("checkout reads back the same campaign", read.campaign, "spring-fair-2026");
 is("checkout reads back the QR source", read.source, "qr");
 const withVariant = campaignQrLink(page, "Spring Fair 2026", "Flyer A");
 is("optional printed variant is the content tag", new URL(withVariant ?? "https://x.invalid/").searchParams.get("utm_content"), "flyer-a");
-is("existing tags and other values are replaced, not kept", campaignQrLink(page + "?utm_campaign=old&ref=someone#buy", "Spring Fair 2026"), link);
+const entries = (address: string | null) => [...new URL(address ?? "https://x.invalid/").searchParams.entries()].sort();
+is("existing tracking tags are replaced, a stale variant removed", entries(campaignQrLink(page + "?utm_campaign=old&utm_content=stale", "Spring Fair 2026")), entries(link));
+
+part("The link keeps what the campaign link keeps: the affiliate code and the discount code");
+const untracked = (address: string | null) => {
+  const out = new URL(address ?? "https://x.invalid/");
+  for (const key of [...out.searchParams.keys()]) if (key.startsWith("utm_")) out.searchParams.delete(key);
+  return out.toString();
+};
+const affiliatePage = page + "?via=ana7";
+const affiliateQr = campaignQrLink(affiliatePage, "Spring Fair");
+is("an affiliate's QR keeps ?via=", new URL(affiliateQr ?? "https://x.invalid/").searchParams.get("via"), "ana7");
+is("an affiliate's QR keeps what the campaign link keeps", untracked(affiliateQr), untracked(campaignLink(affiliatePage, "instagram", "Spring Fair")));
+is("an affiliate's QR still carries the QR tags", ["utm_source", "utm_medium", "utm_campaign"].map(key => new URL(affiliateQr ?? "https://x.invalid/").searchParams.get(key)), ["qr", "qr-code", "spring-fair"]);
+const codePage = page + "?code=SPRING&via=ana7";
+const codeQr = campaignQrLink(codePage, "Spring Fair", "Flyer A");
+is("a discount link's QR keeps ?code=", new URL(codeQr ?? "https://x.invalid/").searchParams.get("code"), "SPRING");
+is("a discount link's QR keeps what the campaign link keeps", untracked(codeQr), untracked(campaignLink(codePage, "instagram", "Spring Fair", "post", "Flyer A")));
+const otherValues = page + "?utm_campaign=old&ref=someone";
+is("other values: exactly what the campaign link keeps, no more, no less", untracked(campaignQrLink(otherValues, "Spring Fair")), untracked(campaignLink(otherValues, "instagram", "Spring Fair")));
+is("an affiliate's QR is the same every time", campaignQrLink(affiliatePage, "spring-fair"), affiliateQr);
+
 is("a page that is not a web address makes no link", campaignQrLink("javascript:alert(1)", "Spring Fair 2026"), null);
 is("an empty campaign makes no link", campaignQrLink(page, "  !!!  "), null);
 
@@ -53,6 +78,16 @@ is("an email address is refused", campaignQrTag("Fair for ana.silva@example.com"
 is("a phone number is refused", campaignQrTag("Call 555-201-4477"), { refused: "personal" });
 is("a long run of digits is refused", campaignQrTag("member 123456789"), { refused: "personal" });
 is("a plain campaign name with a year is kept", campaignQrTag("Spring Fair 2026"), { tag: "spring-fair-2026" });
+is("a name with a dashed date is kept", campaignQrTag("sale-2026-11-27"), { tag: "sale-2026-11-27" });
+is("a name with a dotted date is kept", campaignQrTag("launch 2026.11.27"), { tag: "launch-2026.11.27" });
+is("a name with a slashed date is kept", campaignQrTag("Fair 2026/11/27"), { tag: "fair-2026-11-27" });
+is("a dated name makes a link", new URL(campaignQrLink(page, "sale-2026-11-27") ?? "https://x.invalid/").searchParams.get("utm_campaign"), "sale-2026-11-27");
+is("a phone number without separators is refused", campaignQrTag("Call 5552014477"), { refused: "personal" });
+is("seven digits in a row are refused", campaignQrTag("sale 2026112"), { refused: "personal" });
+is("a phone written with dots is refused", campaignQrTag("Call 555.201.4477"), { refused: "personal" });
+is("a phone beside a date is still refused", campaignQrTag("sale-2026-11-27 555-201-4477"), { refused: "personal" });
+is("a date followed by more digits is not a date", campaignQrTag("2026-11-2744"), { refused: "personal" });
+is("an email address beside a date is still refused", campaignQrTag("sale-2026-11-27 ana@example.com"), { refused: "personal" });
 is("no link from a personal name", campaignQrLink(page, "ana.silva@example.com"), null);
 is("no link from a personal variant", campaignQrLink(page, "Spring Fair", "ana.silva@example.com"), null);
 is("the link holds no @ and no store or account id", /@harbor\/p\/knife-skills\?utm/.test(link ?? "") && !/acct_|store=|email|%40/.test(link ?? ""), true);
@@ -111,4 +146,10 @@ const panel = readFileSync("components/share-panel.tsx", "utf8");
 is("the share panel shows it beside the campaign link", panel.includes('import { CampaignQr } from "@/components/campaign-qr";') && panel.includes("<CampaignQr url={url} title={title} campaign={post} content={postContent} />"), true);
 const lib = readFileSync("lib/campaign-qr.ts", "utf8") + readFileSync("components/campaign-qr.tsx", "utf8");
 is("drawn locally: no network, no store write", !/fetch\(|@\/lib\/redis|https:\/\/api\./.test(lib), true);
-done();
+
+part("A scan of the affiliate's QR credits the affiliate, through the real proxy");
+void proxy(new NextRequest(codeQr ?? "https://x.invalid/", { headers: { host: "marktmorgen.com", "x-vercel-ip-country": "US" } })).then(scan => {
+  is("the affiliate cookie is set from the scanned link", scan.cookies.get(viaCookieName("harbor"))?.value?.split("~")[0]?.split(".")[0] ?? null, "ana7");
+  is("the discount code cookie is set from the scanned link", scan.cookies.get(codeCookieName("harbor"))?.value ?? null, "SPRING");
+  done();
+});

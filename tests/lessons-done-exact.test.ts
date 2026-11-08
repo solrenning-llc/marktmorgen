@@ -28,7 +28,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { POST } from "@/app/api/store/course/certificate/route";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
-import { doneLessons, markLesson, mintPass, passCookieName, recordEnrollment } from "@/lib/learn";
+import { doneLessons, doneLessonsOrUnknown, markLesson, mintPass, passCookieName, recordEnrollment } from "@/lib/learn";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 
@@ -112,6 +112,15 @@ for (const [label, reply] of MALFORMED) {
   });
 }
 
+test("doneLessonsOrUnknown: unknown reads as null for a page to say so; a real list and a confirmed empty one read as they are", async () => {
+  const w = await world("ldorunknown");
+  assert.deepEqual([...((await doneLessonsOrUnknown(w.courseId, BUYER)) ?? ["null"])], []);
+  await markLesson(w.courseId, BUYER, w.lessonId, true, w.store);
+  assert.deepEqual([...((await doneLessonsOrUnknown(w.courseId, BUYER)) ?? ["null"])], [w.lessonId]);
+  doneReadAnswers(w, () => [null]);
+  assert.equal(await doneLessonsOrUnknown(w.courseId, BUYER), null);
+});
+
 test("doneLessons control: lessons marked done read back; a student who marked none reads an empty set", async () => {
   const w = await world("ldcontrolreader");
   assert.deepEqual([...(await doneLessons(w.courseId, BUYER))], []);
@@ -126,7 +135,7 @@ test("certificate: an unreadable progress answers an honest 503 in the store's l
   const response = await askCertificate(w);
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("cache-control"), "no-store");
-  assert.equal(await response.text(), COURSES_WORDS.en.progressUnknown);
+  assert.equal(await response.text(), COURSES_WORDS.en.certProgressUnknown);
   assert.ok(!String(response.headers.get("location") ?? "").includes("cert=unfinished"));
 });
 
@@ -152,21 +161,27 @@ test("every buyer language says the progress could not be checked, in plain word
     assert.equal(typeof words.certProgressUnknown, "string", code);
     assert.ok(words.certProgressUnknown.length > 20, code);
     assert.notEqual(words.progressUnknown, words.certProgressUnknown, code);
+    assert.equal(typeof words.openFirst, "string", code);
+    assert.notEqual(words.openFirst, words.startFirst, code);
   }
   assert.equal(COURSES_WORDS.en.progressUnknown, "We could not check your progress just now. Your lessons are all here. Reload the page to try again.");
 });
 
 test("the course's front door says the progress is unknown, never 0 of N done", () => {
   const page = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
-  assert.match(page, /catch \(error\) \{\s*if \(error instanceof UnknownReplyError\) return null;/);
+  assert.match(page, /doneLessonsOrUnknown\(course\.id, access\.learner\.email\)/);
+  assert.doesNotMatch(page, /\bdoneLessons\(/);
   assert.match(page, /done === null \? \(\s*<p className="st-note[^"]*" role="status">\{w\.progressUnknown\}<\/p>/);
+  assert.match(page, /const finished = studying && done !== null && hasFinished\(/);
+  assert.match(page, /done === null \? w\.openFirst :/);
   assert.match(page, /\{w\.certProgressUnknown\}/);
 });
 
 test("a lesson page says the progress is unknown and offers no done/not-done toggle on a guess", () => {
   const page = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
-  assert.match(page, /catch \(error\) \{\s*if \(error instanceof UnknownReplyError\) return null;/);
-  assert.match(page, /done === null \? \(\s*<p className="st-note[^"]*" role="status">\{w\.progressUnknown\}<\/p>/);
+  assert.match(page, /doneLessonsOrUnknown\(course\.id, student\.email\)/);
+  assert.doesNotMatch(page, /\bdoneLessons\(/);
+  assert.match(page, /student && open && done === null \? \(\s*<p className="st-note[^"]*" role="status">\{w\.progressUnknown\}<\/p>/);
 });
 
 test("the data copy reads the lessons done with no fallback, so an unknown read fails the copy", () => {

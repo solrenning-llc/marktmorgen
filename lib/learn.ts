@@ -489,10 +489,27 @@ export async function lastSeenMany(courseId: string, emails: string[]): Promise<
   return out;
 }
 
+/**
+ * The lessons one student marked done. An empty list is a student who marked
+ * none; any other reply than one list of names is unknown, never "no lesson
+ * done": it would refuse a finished student's certificate, show 0% and leave
+ * the lessons out of the person's data copy (CX-123 rule 24).
+ */
 export async function doneLessons(courseId: string, email: string): Promise<Set<string>> {
   if (!isRedisConfigured()) return new Set();
-  const [raw] = await redisPipeline([["SMEMBERS", doneKey(courseId, email)]]);
-  return new Set(Array.isArray(raw) ? (raw as string[]) : []);
+  const names = stringList(repliesFor(await redisPipeline([["SMEMBERS", doneKey(courseId, email)]]), 1)?.[0]);
+  if (!names) throw new UnknownReplyError("a student's lessons done");
+  return new Set(names);
+}
+
+/** For a course page: the lessons done, or null when they could not be read just now, said as such on the page (rule 24). */
+export async function doneLessonsOrUnknown(courseId: string, email: string): Promise<Set<string> | null> {
+  try {
+    return await doneLessons(courseId, email);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  }
 }
 
 /** Where lessons marked done are counted in the store's data room (lib/store-data.ts). */

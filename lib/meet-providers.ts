@@ -689,7 +689,8 @@ export const MAX_READ_CALENDARS = 10;
  * When the host is busy on each calendar given, from `from` to `to`: busy
  * stretches only, never a title, a guest or a place. Asked in pieces of
  * FREEBUSY_CHUNK_DAYS. A calendar Google answers with an error for makes the
- * whole reading fail, so a calendar that could not be read never looks free.
+ * whole reading fail, so a calendar that could not be read never looks free;
+ * so does an answer in any other shape than Google's (tests/r24-google-freebusy-exact.test.ts).
  */
 export async function googleFreeBusy(token: string, calendars: string[], from: number, to: number): Promise<[number, number][]> {
   const ids = (calendars.length ? calendars : ["primary"]).slice(0, MAX_READ_CALENDARS);
@@ -702,18 +703,29 @@ export async function googleFreeBusy(token: string, calendars: string[], from: n
       body: JSON.stringify({ timeMin: iso(at), timeMax: iso(until), items: ids.map((id) => ({ id })) }),
     });
     if (answer.status !== 200) throw problem(answer, "reading free/busy");
-    const found = (answer.json.calendars ?? {}) as Record<string, { busy?: { start?: unknown; end?: unknown }[]; errors?: { reason?: unknown }[] }>;
+    const found = (answer.json.calendars ?? {}) as Record<string, unknown>;
     for (const id of ids) {
-      const entry = found[id];
+      const entry = found[id] as { busy?: unknown; errors?: unknown } | undefined;
       if (!entry) throw new ProviderError("bad", 200, `Google did not answer for one of your calendars`);
+      // Read in its exact shape (CX-123 rule 24): only an absent `busy` or a confirmed empty list is
+      // "nothing busy"; any other shape is unknown and throws, so a calendar never reads as free.
+      const unreadable = () => new ProviderError("bad", 200, `Google answered for one of your calendars in a shape we cannot read`);
+      if (typeof entry !== "object" || Array.isArray(entry)) throw unreadable();
+      if (entry.errors !== undefined && !Array.isArray(entry.errors)) throw unreadable();
       if (Array.isArray(entry.errors) && entry.errors.length) {
-        const reason = String(entry.errors[0]?.reason ?? "error").slice(0, 60);
+        const first = entry.errors[0] as { reason?: unknown } | null | undefined;
+        const reason = String(first?.reason ?? "error").slice(0, 60);
         throw new ProviderError(reason === "notFound" ? "gone" : "server", 200, `Google could not read one of your calendars (${reason})`);
       }
-      for (const b of Array.isArray(entry.busy) ? entry.busy.slice(0, 5_000) : []) {
-        const s = Date.parse(String(b.start ?? ""));
-        const e = Date.parse(String(b.end ?? ""));
-        if (Number.isFinite(s) && Number.isFinite(e) && e > s) busy.push([s, e]);
+      if (entry.busy === undefined) continue;
+      if (!Array.isArray(entry.busy) || entry.busy.length > 5_000) throw unreadable();
+      for (const b of entry.busy as unknown[]) {
+        if (!b || typeof b !== "object" || Array.isArray(b)) throw unreadable();
+        const { start, end } = b as { start?: unknown; end?: unknown };
+        const s = typeof start === "string" ? Date.parse(start) : Number.NaN;
+        const e = typeof end === "string" ? Date.parse(end) : Number.NaN;
+        if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) throw unreadable();
+        busy.push([s, e]);
       }
     }
   }

@@ -546,6 +546,8 @@ async function forget(a: Agreement): Promise<void> {
 
 /** How many agreements one pass of an erasure deletes: their DEL and ZREM go in one pipeline. */
 const FORGET_BATCH = MAX_PER_PERSON * 2;
+/** How long an erasure waits for a signature or a new version in progress to let go of an agreement's lock. */
+const ERASE_LOCK_WAIT_MS = 5_000;
 
 /**
  * Deletes every agreement a store keeps for one person (lib/person-erasure.ts),
@@ -566,17 +568,28 @@ export async function forgetAgreementsPerson(sid: string, email: string): Promis
   const listed = repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
   const members = listed ? stringList(listed[0]) : null;
   if (!members) throw new UnknownReplyError("listing a person's agreements");
-  const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))];
+  // Sorted, so two erasures of the same person take the locks in the same order.
+  const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))].sort();
   for (let at = 0; at < ids.length; at += FORGET_BATCH) {
     const batch = ids.slice(at, at + FORGET_BATCH);
-    const commands = batch.flatMap((id) => [["DEL", ...agreementKeys(id)], ["ZREM", storeKey(sid), id]]);
-    const replies = repliesFor(await redisPipeline(commands), commands.length);
-    // DEL answers how many of the agreement's keys went (its record and up to MAX_VERSIONS texts), ZREM 0 or 1.
-    const counted = replies?.every((reply, i) => {
-      const n = countOf(reply);
-      return n !== null && n <= (i % 2 === 0 ? 1 + MAX_VERSIONS : 1);
-    });
-    if (!counted) throw new UnknownReplyError("deleting a person's agreements");
+    // Each agreement's lock first, the one a signature or a new version holds while it reads the record and writes it
+    // back (Codex M on #3151): a signature already in progress finishes before its agreement is deleted, so it cannot
+    // write the record back after this says done. A lock still taken after the wait throws LockBusyError: the erasure is
+    // not finished, the person's set is kept, and a retry finds everything.
+    const held: Held[] = [];
+    try {
+      for (const id of batch) held.push(await takeLock(lockKey(id), 10, ERASE_LOCK_WAIT_MS));
+      const commands = batch.flatMap((id) => [["DEL", ...agreementKeys(id)], ["ZREM", storeKey(sid), id]]);
+      const replies = repliesFor(await redisPipeline(commands), commands.length);
+      // DEL answers how many of the agreement's keys went (its record and up to MAX_VERSIONS texts), ZREM 0 or 1.
+      const counted = replies?.every((reply, i) => {
+        const n = countOf(reply);
+        return n !== null && n <= (i % 2 === 0 ? 1 + MAX_VERSIONS : 1);
+      });
+      if (!counted) throw new UnknownReplyError("deleting a person's agreements");
+    } finally {
+      for (const h of held) await letGo(h);
+    }
   }
   const dropped = repliesFor(await redisPipeline([["DEL", person]]), 1);
   const gone = dropped ? countOf(dropped[0]) : null;

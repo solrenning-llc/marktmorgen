@@ -27,7 +27,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "benefitcopy", "Benefit Copy", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
-  const product = await addProduct(OWNER, "Inner circle", "", "10", { interval: "month" as const, payments: 0 });
+  const product = await addProduct(OWNER, "Inner circle", "", "10", { interval: "month" as const, trialDays: 0, payments: 0 });
   if (!product.ok) throw new Error("no product");
   const store = (await storeForEmail(OWNER))!;
   const print = await addBenefit(store, { product: product.product.id, text: "A signed print", cadence: "once" }, SINCE);

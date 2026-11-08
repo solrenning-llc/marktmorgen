@@ -7,11 +7,14 @@
  * whose access ended took them as already out of the server: the removal the creator asked for was skipped and
  * the person was forgotten while the bot never took their role back.
  *
+ * leaveServer reads the same code the same way: a 404 says the bot is already out of the server only with Discord's
+ * whole number 10004; "10004" or [10004] is not known, so the disconnect is not said done while the bot may be in.
+ *
  * Synthetic store, synthetic Stripe and Discord stand-ins; nothing real is called.
  */
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { emailKey, storeKey } from "@/lib/learn";
-import { giveRole, removeMember, takeRole } from "@/lib/discord";
+import { giveRole, leaveServer, removeMember, takeRole } from "@/lib/discord";
 import { checkMember, joinServer } from "@/lib/discord-access";
 import { readMember, saveServer, setProductRoles } from "@/lib/discord-store";
 import { store as redis } from "./redis-stub";
@@ -51,6 +54,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return new Response(null, { status: 204 });
     }
     if (/^\/guilds\/\d+\/members\/\d+\/roles\/\d+$/.test(path)) return reply ? json(reply.body, reply.status) : new Response(null, { status: 204 });
+    if (/^\/users\/@me\/guilds\/\d+$/.test(path) && method === "DELETE") return reply ? json(reply.body, reply.status) : new Response(null, { status: 204 });
     return json({ message: "no stand-in" }, 404);
   }
   const path = url.pathname.replace(/^\/v1/, "");
@@ -112,6 +116,18 @@ async function main(): Promise<void> {
   is("control: 403 fails", await takeRole(SERVER, ANA, R1, "t"), "failed");
   reply = null;
   is("control: 204 is ok", await takeRole(SERVER, ANA, R1, "t"), "ok");
+
+  part("The bot leaving a server, by the shape of Discord's answer (rule 30: the same read in leaveServer)");
+  for (const [what, code] of [["the string \"10004\"", "10004"], ["the list [10004]", [10004]], ["the padded string \" 10004 \"", " 10004 "]] as [string, unknown][]) {
+    reply = { status: 404, body: { message: "Unknown Guild", code } };
+    is(`404 with ${what}: the bot is not known to be out`, await leaveServer(SERVER), false);
+  }
+  reply = { status: 404, body: { message: "Unknown Guild", code: 10004 } };
+  is("control: 404 with the number 10004 means the bot is out", await leaveServer(SERVER), true);
+  reply = { status: 404, body: { message: "Unknown Member", code: 10007 } };
+  is("control: 404 with another number is not out", await leaveServer(SERVER), false);
+  reply = null;
+  is("control: 204 means the bot left", await leaveServer(SERVER), true);
 
   part("The check of a person whose access ended, on an answer of another shape");
   await claimHandle(OWNER, "exactclub", "Exact Club", "");

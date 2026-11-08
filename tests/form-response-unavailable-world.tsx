@@ -23,6 +23,7 @@ export async function readCards(){return new Map();}
 export async function readOpportunityReview(){return {available:false,stages:[],deals:[],pipelines:[],versions:{}};}
 export async function readStages(){return [];}
 export async function readPipelines(){return [];}
+export class CrmSchemaReadUnavailable extends Error{constructor(){super('CRM configuration preflight could not be confirmed');this.name='CrmSchemaReadUnavailable';}}
 export async function readTeam(){return {members:[]};}
 export async function readPipelineAccess(){return {};}
 export const MAX_CONVERTIBLE_FORM_RESPONSES=20;

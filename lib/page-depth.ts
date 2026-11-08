@@ -93,13 +93,13 @@ export async function readDepth(statsId: string | null, productId: string): Prom
   return depthOf(pairs);
 }
 
-/** A count as HINCRBY keeps it: a whole number, as text. */
-const COUNT_TEXT = /^-?\d{1,15}$/;
+/** A count as countDepth keeps it with HINCRBY by one: a whole number, never below zero, as text (Codex T on #3225). */
+const COUNT_TEXT = /^\d{1,15}$/;
 
 /**
  * What was counted for a product, read only in its exact shape (CX-123 rule 24): the hash as a list of field and
  * count pairs, where an empty list is a product nobody was counted for. A reply of another shape, a count that is not
- * a whole number or no Redis throws UnknownReplyError, never zero visitors. readDepth stays as it is for the studio's
+ * a whole number of zero or more, or no Redis throws UnknownReplyError, never zero visitors. readDepth stays as it is for the studio's
  * own page.
  */
 export async function readDepthExact(statsId: string, productId: string): Promise<Depth> {

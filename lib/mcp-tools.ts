@@ -25,6 +25,7 @@ import { readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
 import { readAboutExact } from "@/lib/product-about";
 import { type Course, findLesson, readBodyExact, readCourseExact } from "@/lib/course";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { readQuizForExact } from "@/lib/quiz";
 import { readTaskForExact } from "@/lib/assignment";
 import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";

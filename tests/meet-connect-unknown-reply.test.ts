@@ -333,6 +333,13 @@ async function main(): Promise<void> {
     /role="status"[^>]*>\s*Your Google Calendar and Zoom connections could not be checked just now, so they are not offered here\. Reload this page in a moment\./.test(eventsSource),
     true,
   );
+  // An event saved with Zoom keeps its Zoom choice on screen (with its own "could not check" note): "not offered
+  // here" beside it would contradict what the page shows, and say the same thing twice (VR item 2; AX274 3.3.5).
+  is(
+    "that status is drawn only when no Google or Zoom choice is on screen above it",
+    [/const meetChoices = \(\["google", "zoom"\] as const\)\.filter\(/.test(eventsSource), /\{meetChoices\.map\(/.test(eventsSource), /\{meetUnread && meetChoices\.length === 0 \? \(\s*<p className="mt-1 text-sm text-ink-soft" role="status">/.test(eventsSource)],
+    [true, true, true],
+  );
 
   restore();
   done();

@@ -15,7 +15,7 @@
  * race is made by running the other stranger's send when the follow-up reads
  * its conversation's length (the step after its checks).
  */
-import { MAX_REQUESTS, conversationsOf, forgetDmPerson, inbox, parseDmSetting, requestCount, send } from "@/lib/community-dm";
+import { MAX_REQUESTS, accept, conversationsOf, forgetDmPerson, inbox, parseDmSetting, requestCount, send, thread } from "@/lib/community-dm";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
@@ -95,6 +95,30 @@ async function main(): Promise<void> {
     is("cal's next message is a request again", await send(id, setting, "cal", "dee", "again", ROOM), { ok: true, asked: true });
     is("it is in dee's request list", (await inbox(id, "dee", true)).some((c) => c.other === "cal"), true);
     is("not in her conversations", (await inbox(id, "dee")).some((c) => c.other === "cal"), false);
+  }
+
+  part("An accept inside the window leaves the pair in both lists: a later trim never deletes the accepted conversation");
+  {
+    redis.clear();
+    tick();
+    await send(id, setting, "eli", "fay", "hello fay", ROOM);
+    is("fay accepts", await accept(id, "fay", "eli.fay"), true);
+    // What a follow-up's ZADD NX leaves when the accept landed inside its window: the line is back beside the inbox.
+    tick();
+    await redis.pipeline([["ZADD", `nl:cm:${id}:dm:q:fay`, Math.floor(clock / 1000), "eli.fay"]]);
+    is("the thread is not pending: she accepted it", (await thread(id, "fay", "eli.fay"))?.pending, false);
+    for (let i = 1; i <= MAX_REQUESTS; i += 1) {
+      tick();
+      await send(id, setting, name("g", i), "fay", `hi ${i}`, ROOM);
+    }
+    const [chat, line, listed] = await redis.pipeline([
+      ["EXISTS", `nl:cm:${id}:dm:eli.fay`],
+      ["ZSCORE", `nl:cm:${id}:dm:q:fay`, "eli.fay"],
+      ["ZSCORE", `nl:cm:${id}:dm:i:fay`, "eli.fay"],
+    ]);
+    is("the trim took only the stray request line", [chat, line === null, typeof listed === "string"], [1, true, true]);
+    is("the accepted conversation keeps its message", (await thread(id, "fay", "eli.fay"))?.messages.map((m) => m.text), ["hello fay"]);
+    is("fay's request list holds the newest MAX_REQUESTS", await requestCount(id, "fay"), MAX_REQUESTS);
   }
 
   Date.now = realNow;

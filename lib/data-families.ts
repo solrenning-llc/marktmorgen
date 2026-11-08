@@ -18,7 +18,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:call:busy:", "nl:call:confirmed:", "nl:call:series:", "nl:callteam:", "nl:callteam:rr:", "nl:catalog:", "nl:cert:",
   "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
   "nl:dc:mem:", "nl:dc:prod:", "nl:depth:", "nl:erased:", "nl:esync:tags:", "nl:form:r:", "nl:imp:buy:",
-  "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:",
+  "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:withdraw:",
   "nl:lib:", "nl:mail:bc:", "nl:mail:bcs:", "nl:mail:enr:", "nl:mail:flowq", "nl:mail:flows:", "nl:mail:mk:",
   "nl:path:board:v1", "nl:path:board:owners:v1",
   "nl:mail:unsub:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
@@ -108,7 +108,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:store:owner:", "nl:store:owner:*", "nl:store:photo:", "nl:stream:auto:", "nl:stream:autoowed:", "nl:stream:autoq",
   "nl:stream:col:", "nl:stream:due", "nl:stream:gone", "nl:stream:lock", "nl:stream:peek:",
   "nl:rsum:", "nl:rsum:last:", "nl:rsum:lock:", "nl:rsum:ver:", "nl:status:views:", "nl:stripe-check:last", "nl:stripe-check:lock", "nl:stripe-check:runs", "nl:sweep:cursor", "nl:tasks:bytes:", "nl:tasks:doors", "nl:tasks:taken:",
-  "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:",
+  "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:x:", "nl:upd:job:",
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
   "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
@@ -330,6 +330,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:letters:s:": E, "nl:letters:i:": T("nl:letters:s:", 400),
   // Who may read an email kept for members (lib/letter-access.ts): an answer kept for minutes, a link and the counts of links asked, an hour each.
   "nl:letters:ok:": X(1), "nl:letters:link:": X(1), "nl:letters:rl:addr:": X(1), "nl:letters:rl:ip:": X(1),
+  // A buyer's withdrawal from an order (lib/withdrawal.ts, 588 [KB9]): the order and the time, gone by itself after 400 days.
+  "nl:withdraw:": X(400),
   // The owner's Path (lib/path.ts): deleted by the prepare step (forgetPath).
   "nl:path:": E,
   // Shared indexes survive; prepare/forgetPath removes only this store's member and reverse field.
@@ -410,7 +412,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:teams:state:": X(1),
   "nl:tasks:bytes:": E, "nl:tasks:doors": C, "nl:tasks:taken:": X(1),
   "nl:team:": E, "nl:team:invite:": X(7), "nl:team:lock:": E, "nl:team:log:": E, "nl:team:of:": D("prepare"),
-  "nl:tier:": X(1), "nl:tier:price:": E,
+  "nl:tier:": X(1), "nl:tier:price:": E, "nl:tier:resume:": X(128),
   "nl:traffic:c:": E, "nl:traffic:day:": E, "nl:traffic:folders:": I, "nl:traffic:n:": E, "nl:traffic:r:": E, "nl:traffic:x:": E,
   "nl:upd:job:": X(120), "nl:upd:last:": E, "nl:upd:latest:": E, "nl:upd:off:": E, "nl:upd:stop:": T("nl:erase:ix:", 400), "nl:updq": I,
   // The creator's business card (lib/creator-card.ts): goes with the store.

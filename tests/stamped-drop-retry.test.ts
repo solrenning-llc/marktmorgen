@@ -178,6 +178,22 @@ async function main() {
   is("and the folder left over is deleted and taken off the list", [left(seventh), await queued()], [0, []]);
   is("control: the second download of the sale is the same copy", (await stamp.stampedCopy(file, sale, shop))?.pathname, copy?.pathname);
 
+  // Codex M on #3312 (review 5820239497): a removal that failed queued this file's own folder while a download was
+  // stamping it; the retry after the write must never delete the copy it is about to hand over.
+  part("A new copy never deletes itself: its own folder waits on the list for a later try");
+  const own = original("Ledger.pdf");
+  const ownDoc = await PDFDocument.create();
+  ownDoc.addPage([300, 400]);
+  const ownPdf = await ownDoc.save();
+  world.files.set(own.pathname, ownPdf);
+  const ownFile: ProductFile = { ...own, bytes: ownPdf.byteLength };
+  await redis.pipeline([["SADD", QUEUE, stamp.copyFolder(ownFile)]]);
+  const ownSale = { reference: "cs_test_r9S7t5A3m1P1", email: "ana@example.com", paidAt: Date.UTC(2026, 10, 8) / 1000 };
+  const ownCopy = await stamp.stampedCopy(ownFile, ownSale, shop);
+  is("the copy handed over still exists", [Boolean(ownCopy), ownCopy ? world.files.has(ownCopy.pathname) : false], [true, true]);
+  is("and its folder stays on the list for a later try", await queued(), [stamp.copyFolder(ownFile)]);
+  await redis.pipeline([["DEL", QUEUE]]);
+
   console.error = quiet;
 }
 

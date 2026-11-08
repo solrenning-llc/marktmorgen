@@ -183,3 +183,29 @@ test("1.2 control: a sent update's stop link is found and deleted by the buyer's
   } finally { r.restore(); }
 });
 
+// ---- 2.1: the queue of updates
+
+const unknownQueues: [string, unknown[] | "throw"][] = [
+  ["an empty answer", []], ["a null", [null]], ["a number", [0]], ["an object", [{}]], ["a non-text member", [[7]]],
+  ["a hole", [new Array(1)]], ["two answers", [[], []]],
+];
+for (const [name, reply] of unknownQueues) {
+  test(`2.1 a queue that answers ${name} is unknown, never "no updates"`, async () => {
+    const r = await setup();
+    try {
+      redis.pipeline = (async (cs: Command[]) => cs.some((c) => c[0] === "SMEMBERS" && c[1] === "nl:updq") ? reply : r.original(cs)) as typeof redis.pipeline;
+      await assert.rejects(advanceUpdates(storeForHandle, Date.now() + 20000), UnknownReplyError);
+      assert.equal(r.batches.length, 0);
+    } finally { r.restore(); }
+  });
+}
+
+test("2.1 control: an empty queue is no updates, and a waiting one is moved on", async () => {
+  const r = await setup();
+  try {
+    assert.equal(await advanceUpdates(storeForHandle, Date.now() + 20000), 1);
+    assert.equal(r.batches.flat().length, 1);
+    assert.equal(await advanceUpdates(storeForHandle, Date.now() + 20000), 0);
+  } finally { r.restore(); }
+});
+

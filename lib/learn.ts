@@ -574,12 +574,10 @@ export async function studentsOf(course: Course, limit = 500): Promise<{ student
   const [raw, blockedRaw] = replies;
   const rows: StudentRow[] = [];
   const pairs: [string, string][] = [];
-  if (Array.isArray(raw)) {
-    if (raw.length % 2 !== 0) return null;
-    for (let i = 0; i + 1 < raw.length; i += 2) pairs.push([String(raw[i]), String(raw[i + 1])]);
-  } else if (raw && typeof raw === "object") {
-    for (const [k, v] of Object.entries(raw as Record<string, string>)) pairs.push([k, v]);
-  } else return null;
+  // HGETALL answers a flat list of strings (the REST client and lib/redis-memory.ts alike); anything else is unknown.
+  const flat = stringList(raw);
+  if (!flat || flat.length % 2 !== 0) return null;
+  for (let i = 0; i + 1 < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
   const blockedList = stringList(blockedRaw);
   if (!blockedList) return null;
   for (const [, value] of pairs) {
@@ -904,9 +902,13 @@ export async function sendDripEmails(
     }
     const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);
     if (dripping.length === 0) continue;
-    counts.courses += 1;
     const read = await studentsOf(course, 5000);
-    if (!read) continue;
+    if (!read) {
+      // Unknown, not none: this course waits for the next run, which reads it again.
+      console.error("reading a course's students for its drip emails failed", course.id);
+      continue;
+    }
+    counts.courses += 1;
     const { students } = read;
     for (const student of students) {
       if (student.blocked) continue;

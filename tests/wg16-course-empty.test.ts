@@ -38,7 +38,7 @@ is(
 );
 is(
   "its sentence says who is listed, the same whether or not the course is on sale (a free course is never sold, yet students open it)",
-  course.includes('body="Each buyer who opens the course is listed here, with the lessons they marked done."'),
+  course.includes('body="Each student who opens the course is listed here, with the lessons they marked done."'),
   true,
 );
 is(
@@ -51,8 +51,8 @@ is("no bare sentence left where nobody opened it", course.includes(">Nobody has 
 
 part("The course's completions: no certificate issued");
 is(
-  "no certificate: the studio empty state, an h3 like the list's own heading",
-  course.includes(' certificates.list.length === 0 ? (\n            <StudioEmptyState\n              level={3}\n              compact\n              className="mt-3"\n              title={course.certificate ? "No certificates yet" : "Certificates are off"}'),
+  "no certificate: the studio empty state, an h4 under the list's own h3, Completions",
+  course.includes(' certificates.list.length === 0 ? (\n            <StudioEmptyState\n              level={4}\n              compact\n              className="mt-3"\n              title={course.certificate ? "No certificates yet" : "Certificates are off"}'),
   true,
 );
 is(
@@ -80,12 +80,12 @@ const students = renderToStaticMarkup(
     compact: true,
     className: "mt-5",
     title: "No students yet",
-    body: "Each buyer who opens the course is listed here, with the lessons they marked done.",
+    body: "Each student who opens the course is listed here, with the lessons they marked done.",
     action: { href: "/@harbor/p/first-course-c1", label: "Open the sale page to share it" },
   }),
 );
-is("a heading, one sentence and one real link to the sale page, at least 44 px tall (.btn is 48 px)", /^<div class="mt-5" data-empty-state=""><h3 class="text-base font-semibold text-ink">No students yet<\/h3><p class="mt-1 text-sm text-ink-soft">Each buyer who opens the course is listed here, with the lessons they marked done\.<\/p><a class="btn btn-secondary mt-4" href="\/@harbor\/p\/first-course-c1">Open the sale page to share it<\/a><\/div>$/.test(students), true);
-const notOnSale = renderToStaticMarkup(createElement(StudioEmptyState, { level: 3, compact: true, title: "No students yet", body: "Each buyer who opens the course is listed here, with the lessons they marked done." }));
+is("a heading, one sentence and one real link to the sale page, at least 44 px tall (.btn is 48 px)", /^<div class="mt-5" data-empty-state=""><h3 class="text-base font-semibold text-ink">No students yet<\/h3><p class="mt-1 text-sm text-ink-soft">Each student who opens the course is listed here, with the lessons they marked done\.<\/p><a class="btn btn-secondary mt-4" href="\/@harbor\/p\/first-course-c1">Open the sale page to share it<\/a><\/div>$/.test(students), true);
+const notOnSale = renderToStaticMarkup(createElement(StudioEmptyState, { level: 3, compact: true, title: "No students yet", body: "Each student who opens the course is listed here, with the lessons they marked done." }));
 is("not on sale: no link, no button", /<a |<button/.test(notOnSale), false);
 
 done();

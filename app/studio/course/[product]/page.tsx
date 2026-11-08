@@ -262,7 +262,7 @@ export default async function StudioCoursePage({
             </p>
           ) : certificates.list.length === 0 ? (
             <StudioEmptyState
-              level={3}
+              level={4}
               compact
               className="mt-3"
               title={course.certificate ? "No certificates yet" : "Certificates are off"}
@@ -341,7 +341,7 @@ export default async function StudioCoursePage({
               compact
               className="mt-5"
               title="No students yet"
-              body="Each buyer who opens the course is listed here, with the lessons they marked done."
+              body="Each student who opens the course is listed here, with the lessons they marked done."
               action={selling ? { href: `/@${store.handle}/p/${productSegment(product)}`, label: "Open the sale page to share it" } : undefined}
             />
           ) : (

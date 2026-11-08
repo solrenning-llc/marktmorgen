@@ -67,6 +67,7 @@ async function main(): Promise<void> {
   for (const [name, answer] of [
     ["the list answered as a number", replace("HGETALL", 5)],
     ["the list cut short (an odd number of fields)", replace("HGETALL", ["only-a-field"])],
+    ["the list with numbers where strings belong", replace("HGETALL", [1, 2])],
     ["the blocked list answered as text", replace("SMEMBERS", "x")],
     ["no reply at all to the first read", ((commands, real) => (String(commands[0][0]) === "HGETALL" ? [] : real)) as Answer],
   ] as [string, Answer][]) {
@@ -130,7 +131,7 @@ async function main(): Promise<void> {
     true,
   );
   const learn = readFileSync("lib/learn.ts", "utf8");
-  is("the drip schedule skips a course whose students it could not read this round", learn.includes("const read = await studentsOf(course, 5000);\n    if (!read) continue;"), true);
+  is("the drip schedule skips a course whose students it could not read this round, says so, and does not count it", /const read = await studentsOf\(course, 5000\);\n    if \(!read\) \{\n[^}]*console\.error\([^}]*\n      continue;\n    \}\n    counts\.courses \+= 1;/.test(learn), true);
 
   done();
 }

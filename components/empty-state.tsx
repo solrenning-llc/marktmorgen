@@ -38,15 +38,15 @@ function inPage(action: EmptyAction | undefined): EmptyAction | null {
 /**
  * The same pattern in the studio, drawn with the studio's own colors (--ink
  * 16:1 and --ink-soft 10:1 on white and on ivory) and left-aligned like the
- * lists it replaces. `level` keeps the page's outline: 3 under a list's h2,
+ * lists it replaces. `level` keeps the page's outline: 3 under a list's h2, 4 under an h3,
  * 2 beside other boxes headed h2. The action is a path on this site, or a jump
  * to a named place on the same page, kept a plain link so the browser moves
  * the focus there; the .btn class is 48 px tall. `compact` is for a narrow
  * box under a visible heading: smaller type, so it does not outrank it.
  */
-export function StudioEmptyState({ title, body, action, level = 3, compact = false, className = "" }: { title: string; body: string; action?: EmptyAction; level?: 2 | 3; compact?: boolean; className?: string }) {
+export function StudioEmptyState({ title, body, action, level = 3, compact = false, className = "" }: { title: string; body: string; action?: EmptyAction; level?: 2 | 3 | 4; compact?: boolean; className?: string }) {
   if (!title.trim() || !body.trim()) return null;
-  const Heading = level === 2 ? "h2" : "h3";
+  const Heading = level === 2 ? "h2" : level === 4 ? "h4" : "h3";
   const jump = inPage(action);
   return (
     <div className={className || undefined} data-empty-state="">

@@ -1,4 +1,4 @@
-import { applyCourseTaskDrops, dropCourseTasks, readCourseTaskDrops } from "@/lib/assignment";
+import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -29,11 +29,16 @@ import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { dropPage } from "@/lib/sales-page-store";
+import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
+import { finishLandingsDrop } from "@/lib/campaign-landing-store";
+
+/** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
+const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { dropCourse, filesInCourse, readCourse } from "@/lib/course";
+import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
+import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
@@ -100,6 +105,7 @@ async function silenced(email: string, changedId: string): Promise<string[]> {
 const STATUS: Record<string, number> = {
   too_many: 409,
   unknown: 404,
+  unavailable: 503,
 };
 
 /**
@@ -238,6 +244,8 @@ export async function POST(request: NextRequest) {
 
   try {
     let result: Outcome;
+    // A removal whose campaign landings could not be confirmed gone (lib/sales-page-store.ts PageDropIncomplete).
+    let cleanupPending = false;
     if (action === "add" || action === "edit") {
       const done =
         action === "add"
@@ -281,44 +289,74 @@ export async function POST(request: NextRequest) {
       // options holds one file per option as well as its own.
       // A course's handed-in work is read before the product goes (Revisor 1 on #2810): a read that fails answers 503
       // and removes nothing, so the work, its files and the room they take stay findable for the next try.
-      // A product or course that cannot be read is unknown, never "not a course" (Revisor 1 on #2810).
       let before: Awaited<ReturnType<typeof readListing>>;
-      let beforeCourse: Awaited<ReturnType<typeof readCourse>> = null;
+      let preparedCourse: Awaited<ReturnType<typeof readCourseExact>> = null;
+      let taskDrops: Awaited<ReturnType<typeof readCourseTaskDrops>> = [];
       try {
         before = await readListing(guarded.store, id);
-        if (before?.course) beforeCourse = await readCourse(before.course.id);
+        if (before?.course) {
+          preparedCourse = await readCourseExact(before.course.id);
+          if (preparedCourse) taskDrops = await readCourseTaskDrops(preparedCourse);
+        }
       } catch (error) {
         console.error("could not read a product or its course before removing it", error);
         return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       }
-      const taskDrops = beforeCourse
-        ? await readCourseTaskDrops(beforeCourse).catch((error: unknown) => (console.error("could not read a course's handed-in work", error), null))
-        : [];
-      if (!taskDrops) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-      const removed = await removeProduct(ref, id);
+      let course: Awaited<ReturnType<typeof readCourseExact>> = null;
+      const removed = await removeProduct(ref, id, async (going, store) => {
+        if (!going.course) return true;
+        try {
+          const found = await readCourseExact(going.course.id);
+          if (found) {
+            if (!preparedCourse || JSON.stringify(found) !== JSON.stringify(preparedCourse)) return false;
+            course = found;
+            await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
+          } else {
+            if (preparedCourse) return false;
+            await dropCommentsAfterCourseGone(going.course.id, store);
+          }
+          return true;
+        } catch {
+          return false;
+        }
+      });
       result = removed.ok ? { ok: true, product: null } : removed;
+      // Asked again for a product already removed whose campaign landings were not confirmed gone then (Codex G,
+      // #1947): they are deleted now; not confirmed again, it is said, and can be asked again.
+      // Only a product's own id (never "<product>:gone" or any other key of the family: Codex G, #1947).
+      if (!removed.ok && removed.reason === "unknown" && id && PRODUCT_ID.test(id)) {
+        const finished = await finishLandingsDrop(guarded.store.statsId, id, guarded.store).catch(() => null);
+        if (finished === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
+        if (finished === "dropped") result = { ok: true, product: null };
+      }
       if (removed.ok) {
         const going = removed.product;
+        const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
         had.push(...imagePaths(going.image).map((pathname) => ({ pathname })));
         // A course takes its lessons with it: their records, and their files.
-        const course = going.course ? await readCourse(going.course.id).catch(() => null) : null;
-        if (course) had.push(...filesInCourse(course));
+        if (removedCourse) had.push(...filesInCourse(removedCourse));
         // And the work its students handed in for its assignments (lib/assignment.ts).
-        if (course) {
-          // As read before the removal; a course that changed in between is read again here, and logged if it cannot be.
-          const handed = beforeCourse && beforeCourse.id === course.id
-            ? await applyCourseTaskDrops(beforeCourse, taskDrops, storeKey(removed.store), removed.store)
-            : await dropCourseTasks(course, storeKey(removed.store), removed.store).catch((error: unknown) => (console.error("could not read a removed course's handed-in work", error), [] as string[]));
+        if (removedCourse) {
+          // Prepared from the same exact course snapshot that removal accepted,
+          // before that course identity can be detached.
+          const handed = await applyCourseTaskDrops(removedCourse, taskDrops, storeKey(removed.store), removed.store);
           had.push(...handed.map((pathname) => ({ pathname })));
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
         if (going.note) await dropThanksNote(removed.store.statsId, id, removed.store).catch(() => {});
-        // Its page of blocks, and the reviews of a product nobody can buy any more.
-        if (going.page) {
+        // Its page of blocks, and the reviews of a product nobody can buy any more. Dropped whether or not the
+        // product still shows a page: one emptied first keeps its versions and its campaigns' landings, which are
+        // kept by the product, not by its page (Claude 5 on #1947).
+        {
           // And the pictures on that page (lib/sales-page-store.ts).
-          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch(() => [] as string[]);
+          // Anything not confirmed gone is said to the caller (cleanupPending), never a removal finished: the same
+          // removal asked again finishes its landings (finishLandingsDrop below), and a closed store's walk erases them.
+          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch((error: unknown) => {
+            cleanupPending = true;
+            return picturesOfFailedDrop(error);
+          });
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).
@@ -329,7 +367,9 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
-        if (course) await dropCourse(course, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        if (removedCourse) {
+          await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).
           if (await dropStream(file.pathname, removed.store).catch(() => false)) continue;
@@ -407,7 +447,7 @@ export async function POST(request: NextRequest) {
     // everything that offered it does).
     const quiet =
       (action === "edit" || action === "visibility" || action === "remove") && id ? await silenced(ref, id) : [];
-    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined });
+    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined, cleanupPending: cleanupPending || undefined });
   } catch (error) {
     if (error instanceof StoreFullError) {
       return Response.json({ ok: false, error: "store_full" }, { status: 409 });

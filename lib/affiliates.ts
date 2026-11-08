@@ -1043,8 +1043,8 @@ export async function invitePartner(input: {
   const statsId = store.statsId as string;
   const [known] = await redisPipeline([["HGET", emailsKey(statsId), email]]);
   if (typeof known !== "string") {
-    const [count] = await redisPipeline([["HLEN", peopleKey(statsId)]]);
-    if (Number(count) >= MAX_AFFILIATES) return "full";
+    // Read exactly (rule 24): an unknown count throws before anything is written or sent, never "room left".
+    if ((await peopleCount(store)) >= MAX_AFFILIATES) return "full";
   }
 
   const named = share.products.map((id) => input.titles.get(id) ?? "a product").slice(0, 12);
@@ -1208,8 +1208,8 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
     affiliate = changed.next;
   }
   if (!affiliate) {
-    const [count] = await redisPipeline([["HLEN", peopleKey(statsId)]]);
-    if (Number(count) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
+    // Read exactly (rule 24): an unknown count throws before anything is written, never "room left".
+    if ((await peopleCount(store)) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
     const id = randomBytes(6).toString("hex");
     // One application per address, however many links are opened at once.
     const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), grant.e, id]]);
@@ -1441,8 +1441,8 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
       affiliate = changed?.next ?? changed?.before ?? affiliate;
     }
   } else {
-    const [count] = await redisPipeline([["HLEN", peopleKey(statsId)]]);
-    if (Number(count) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
+    // Read exactly (rule 24): an unknown count throws before anything is written, never "room left".
+    if ((await peopleCount(store)) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
     const id = randomBytes(6).toString("hex");
     const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), email, id]]);
     if (Number(won) !== 1) {
@@ -2151,7 +2151,11 @@ export async function addPayout(
   // What the creator writes down takes room in the store's data room first (DataRoomError when it does not fit).
   const json = JSON.stringify(payout);
   await needData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }]);
-  await redisPipeline([["HSET", payoutsKey(store.statsId as string), payout.id, json]]);
+  // Written only on HSET's exact 1, a new field (rule 24): a reply missing or of another shape may have written
+  // nothing, and a book still owing what was paid pays it again (the next payout file, PayPal on payday); 0 means
+  // another payout under the same id was overwritten. Thrown either way; the room stays counted (more, never less).
+  const reply = repliesFor(await redisPipeline([["HSET", payoutsKey(store.statsId as string), payout.id, json]]), 1);
+  if (!reply || reply[0] !== 1) throw new UnknownReplyError("a payout written down");
   return payout;
 }
 
@@ -2875,7 +2879,7 @@ export async function bookSize(store: Store): Promise<{ fields: number; rows: nu
   if (!store.statsId || !isRedisConfigured()) return { fields: 0, rows: 0 };
   const statsId = store.statsId;
   try {
-    const counts = (await redisPipeline([
+    const replies = await redisPipeline([
       ["HLEN", peopleKey(statsId)],
       ["HLEN", clicksKey(statsId)],
       ["HLEN", salesKey(statsId)],
@@ -2884,8 +2888,10 @@ export async function bookSize(store: Store): Promise<{ fields: number; rows: nu
       ["HLEN", paidClicksKey(statsId)],
       ["HLEN", leadsKey(statsId)],
       ["ZCARD", paypalRefundedKey(statsId)],
-    ])).map(Number);
-    if (counts.length !== 8 || counts.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+    ]);
+    // Each count exactly (rule 24): null or a list is not 0 or a number, and one not known reads nothing.
+    const counts = replies.map(countOf).filter((n): n is number => n !== null);
+    if (replies.length !== 8 || counts.length !== 8) return null;
     const fields = counts.slice(0, 7).reduce((sum, n) => sum + n, 0);
     return { fields, rows: Math.min(counts[7], 500) + Math.min(counts[6], 200) };
   } catch {
@@ -3399,32 +3405,63 @@ export type ProgramNumbers = {
   since: number;
 };
 
+/**
+ * A HGETALL reply as pairs, read exactly: a list of strings with an even
+ * count, or UnknownReplyError. Never an empty hash from a reply that is
+ * missing, cut short or of another shape (lib/redis-reply.ts).
+ */
+function exactPairs(reply: unknown, what: string): [string, string][] {
+  const list = stringList(reply);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+  const out: [string, string][] = [];
+  for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
+  return out;
+}
+
+/**
+ * Throws UnknownReplyError when a reply is not in its exact shape, so the
+ * directory shows the program without numbers, never with zeros
+ * (lib/affiliate-directory.ts, readDirectory).
+ */
 export async function programNumbers(store: Store): Promise<ProgramNumbers | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const statsId = store.statsId;
-  const [people, clicks, sales, payouts] = await redisPipeline([
-    ["HGETALL", peopleKey(statsId)],
-    ["HGETALL", clicksKey(statsId)],
-    ["HGETALL", salesKey(statsId)],
-    ["HGETALL", payoutsKey(statsId)],
-  ]);
-  const approved = pairs(people)
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HGETALL", peopleKey(statsId)],
+      ["HGETALL", clicksKey(statsId)],
+      ["HGETALL", salesKey(statsId)],
+      ["HGETALL", payoutsKey(statsId)],
+    ]),
+    4,
+  );
+  if (!replies) throw new UnknownReplyError("a program's numbers");
+  const people = exactPairs(replies[0], "a program's affiliates");
+  const clicks = exactPairs(replies[1], "a program's clicks").map(([, n]) => {
+    // Written only by HINCRBY: a whole number from zero up, or of an unknown shape.
+    const count = /^\d+$/.test(n) ? countOf(Number(n)) : null;
+    if (count === null) throw new UnknownReplyError("a program's click count");
+    return count;
+  });
+  const sales = exactPairs(replies[2], "a program's sales");
+  const payouts = exactPairs(replies[3], "a program's payments");
+  const approved = people
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null && a.status === "approved");
   const currency = store.currency.toLowerCase();
-  const referrals = pairs(sales)
+  const referrals = sales
     .map(([, raw]) => parseReferral(raw))
     .filter((r): r is Referral => r !== null && !r.self && (r.currency || "usd").toLowerCase() === currency);
   const earned = (r: Referral) => commissionOn(r.base, r.rate);
   const byClick = referrals.filter((r) => r.how === "click");
   return {
     affiliates: approved.length,
-    clicks: pairs(clicks).reduce((sum, [, n]) => sum + (Number(n) || 0), 0),
+    clicks: clicks.reduce((sum, n) => sum + n, 0),
     clickSales: byClick.length,
     clickEarnedCents: byClick.reduce((sum, r) => sum + earned(r), 0),
     sales: referrals.length,
     earnedCents: referrals.reduce((sum, r) => sum + earned(r), 0),
-    paidCents: pairs(payouts)
+    paidCents: payouts
       .map(([, raw]) => parsePayout(raw))
       .filter((p): p is Payout => p !== null && (p.currency || "usd").toLowerCase() === currency)
       .reduce((sum, p) => sum + p.cents, 0),

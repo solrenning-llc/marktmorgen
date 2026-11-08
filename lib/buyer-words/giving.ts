@@ -179,6 +179,10 @@ const en = {
       title: "We could not send that just now",
       body: "No place was taken or lost. Try again in a moment.",
     },
+    opening: {
+      title: "We could not finish opening your place",
+      body: "Open the link again in a moment. If it was already yours, nothing changes.",
+    },
     expired: {
       title: "That link has expired",
       body: "It works for 24 hours. Type your address again below and a new one comes right away.",
@@ -520,6 +524,10 @@ const es: GivingWords = {
       title: "No hemos podido enviarlo ahora mismo",
       body: "No se ha ocupado ni perdido ninguna plaza. Vuelve a intentarlo en un momento.",
     },
+    opening: {
+      title: "No hemos podido terminar de abrir tu plaza",
+      body: "Vuelve a abrir el enlace en un momento. Si ya era tuya, no cambia nada.",
+    },
     expired: {
       title: "Ese enlace ha caducado",
       body: "Funciona durante 24 horas. Vuelve a escribir tu dirección abajo y te llegará uno nuevo enseguida.",
@@ -843,6 +851,10 @@ const fr: GivingWords = {
       title: "Nous n'avons pas pu l'envoyer pour le moment",
       body: "Aucune place n'a été prise ni perdue. Réessayez dans un instant.",
     },
+    opening: {
+      title: "Nous n'avons pas pu finir d'ouvrir votre place",
+      body: "Rouvrez le lien dans un instant. Si elle était déjà à vous, rien ne change.",
+    },
     expired: {
       title: "Ce lien a expiré",
       body: "Il fonctionne pendant 24 heures. Saisissez de nouveau votre adresse ci-dessous et un nouveau lien arrive aussitôt.",
@@ -1164,6 +1176,10 @@ const de: GivingWords = {
       title: "Wir konnten das gerade nicht senden",
       body: "Es wurde kein Platz vergeben oder verloren. Versuchen Sie es gleich noch einmal.",
     },
+    opening: {
+      title: "Wir konnten Ihren Platz nicht fertig öffnen",
+      body: "Öffnen Sie den Link gleich noch einmal. Wenn der Platz schon Ihrer war, ändert sich nichts.",
+    },
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Er funktioniert 24 Stunden lang. Geben Sie Ihre Adresse unten erneut ein, und ein neuer kommt sofort.",
@@ -1483,6 +1499,10 @@ const it: GivingWords = {
     unavailable: {
       title: "Non siamo riusciti a inviarlo in questo momento",
       body: "Nessun posto è stato preso o perso. Riprova tra un momento.",
+    },
+    opening: {
+      title: "Non siamo riusciti a finire di aprire il tuo posto",
+      body: "Riapri il link tra un momento. Se era già tuo, non cambia nulla.",
     },
     expired: {
       title: "Quel link è scaduto",
@@ -1806,6 +1826,10 @@ const nl: GivingWords = {
       title: "We konden dat nu niet versturen",
       body: "Er is geen plek ingenomen of verloren gegaan. Probeer het zo opnieuw.",
     },
+    opening: {
+      title: "We konden je plek niet helemaal openen",
+      body: "Open de link zo opnieuw. Was de plek al van jou, dan verandert er niets.",
+    },
     expired: {
       title: "Die link is verlopen",
       body: "Hij werkt 24 uur. Vul je adres hieronder opnieuw in en er komt meteen een nieuwe.",
@@ -2124,6 +2148,10 @@ const pt: GivingWords = {
     unavailable: {
       title: "Não foi possível enviá-la neste momento",
       body: "Nenhum lugar foi ocupado nem perdido. Tente novamente daqui a pouco.",
+    },
+    opening: {
+      title: "Não foi possível terminar de abrir o seu lugar",
+      body: "Abra a ligação novamente daqui a pouco. Se o lugar já era seu, nada muda.",
     },
     expired: {
       title: "Essa ligação expirou",

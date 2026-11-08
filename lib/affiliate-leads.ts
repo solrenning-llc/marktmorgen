@@ -239,10 +239,10 @@ export async function recordLead(
  * Every lead of the program, as kept, read exactly (CX-123 rule 24): one HGETALL answered with an even list of
  * strings (an empty list is a program with no leads), and every lead in it read whole (parseLeadExact). Throws
  * UnknownReplyError otherwise, never a shorter list: a lead left out would leave the month's budget, the day's cap
- * and the hour's limit summed without it, so a decision could approve a lead over them (decideLeads), and a
- * person's copy of their data would come out without their lead (lib/person-copy.ts). Both callers already say
- * "not done" on a throw: the studio's decision answers 503 "unavailable" and is tried again
- * (app/api/store/affiliates/route.ts), and copyPerson fails the whole copy. A lead that does not read cannot be
+ * and the hour's limit summed without it, so a decision could approve a lead over them (decideLeads).
+ * The caller already says "not done" on a throw: the studio's decision answers 503 "unavailable" and is tried
+ * again (app/api/store/affiliates/route.ts). A person's copy of their data reads only their own lead (leadOf), so
+ * another person's lead that does not read never blocks it. A lead that does not read cannot be
  * counted conservatively instead: its affiliate, day, month, currency and amount are exactly what is not known.
  */
 export async function readLeads(store: Pick<Store, "statsId">): Promise<LeadRecord[]> {
@@ -256,6 +256,25 @@ export async function readLeads(store: Pick<Store, "statsId">): Promise<LeadReco
     out.push(lead);
   }
   return out;
+}
+
+/**
+ * A person's own lead in the program, read exactly (CX-123 rule 24), for their copy of their data
+ * (lib/person-copy.ts): one HGET of their field, leadId(statsId, address), since a person is one lead, ever. Only an
+ * exact nil is no lead. A reply of another shape, or a kept lead that does not read whole (parseLeadExact), throws
+ * UnknownReplyError, and copyPerson fails the whole copy instead of handing one over without it. Only this one
+ * field is read, so another person's lead that does not read never blocks this person's copy (review of #3157);
+ * a decision still reads, and fails closed on, every lead (readLeads).
+ */
+export async function leadOf(store: Pick<Store, "statsId">, email: string): Promise<LeadRecord | null> {
+  if (!store.statsId || !isRedisConfigured() || !email) return null;
+  const replies = repliesFor(await redisPipeline([["HGET", leadsKey(store.statsId), leadId(store.statsId, email)]]), 1);
+  if (!replies) throw new UnknownReplyError("a person's affiliate lead");
+  const [raw] = replies;
+  if (raw === null) return null;
+  const lead = parseLeadExact(raw);
+  if (!lead) throw new UnknownReplyError("a person's affiliate lead");
+  return lead;
 }
 
 /** Where open bookings' calls end now, read from their moves, in seconds. */

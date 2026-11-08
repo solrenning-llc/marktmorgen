@@ -60,6 +60,12 @@ const INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
 
 export type SoonState = { soon: Set<string>; days: Map<string, string> };
 
+function knownSoonMember(raw: unknown): boolean {
+  if (raw === 1 || raw === "1") return true;
+  if (raw === 0 || raw === "0") return false;
+  throw new UnknownReplyError("coming-soon membership");
+}
+
 /** The products coming soon, and the day each pre-ordered one is expected: one request, for the store page. */
 export async function soonState(store: Store): Promise<SoonState> {
   if (!store.statsId || !isRedisConfigured()) return { soon: new Set(), days: new Map() };
@@ -70,8 +76,19 @@ export async function soonState(store: Store): Promise<SoonState> {
 /** One product: coming soon or not, and the day it is expected when it takes pre-orders. One request. */
 export async function soonOne(store: Store, productId: string): Promise<{ soon: boolean; day: string | null }> {
   if (!store.statsId || !isRedisConfigured()) return { soon: false, day: null };
-  const [member, day] = await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId], ["HGET", dayKey(store.statsId), productId]]);
-  return { soon: member === 1 || member === "1", day: keptDay(day) };
+  const replies = repliesFor(await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId], ["HGET", dayKey(store.statsId), productId]]), 2);
+  if (!replies) throw new UnknownReplyError("coming-soon product");
+  const day = replies[1];
+  if (day !== null && typeof day !== "string") throw new UnknownReplyError("coming-soon day");
+  return { soon: knownSoonMember(replies[0]), day: keptDay(day) };
+}
+
+/** One exact membership read for callers that do not need the pre-order day. */
+export async function isComingSoon(store: Store, productId: string): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  const replies = repliesFor(await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId]]), 1);
+  if (!replies) throw new UnknownReplyError("coming-soon product");
+  return knownSoonMember(replies[0]);
 }
 
 function daysOf(raw: unknown): Map<string, string> {
@@ -394,7 +411,14 @@ export async function runPreorderReleases(
       continue;
     }
     // Put back to "coming soon" since: it waits for its next release.
-    const { soon } = await soonOne(store, pid);
+    let soon: boolean;
+    try {
+      ({ soon } = await soonOne(store, pid));
+    } catch (error) {
+      // Keep this release queued for the next pass; another store can still be delivered now.
+      console.error("reading a pre-order release state failed", store.handle, error);
+      continue;
+    }
     if (soon) {
       await redisPipeline([["SREM", JOBS, member]]);
       continue;

@@ -128,7 +128,7 @@ const en = {
   notOnListBody: "It was removed already, or the waitlist has done its job and its addresses are gone.",
   almostThere: "Almost there",
   waitSentBody: (title: string, store: string) =>
-    `We emailed you a button to confirm your spot on the waitlist for ${title || "it"}. It comes from ${store} via Marktmorgen and usually arrives within a minute; if it is not there, look in spam.`,
+    `We emailed you a button to confirm your spot on the waitlist for ${title || "it"}. It comes from ${store} via Marktmorgen. If it is not there, look in spam.`,
   waitSentNote: "Your spot counts once you press it, so a mistyped address is never told anything.",
   onTheList: "You are on the list",
   tellWhenOut: (title: string) => `We will tell you when ${title || "it"} is out`,
@@ -178,6 +178,10 @@ const en = {
     unavailable: {
       title: "We could not send that just now",
       body: "No place was taken or lost. Try again in a moment.",
+    },
+    opening: {
+      title: "We could not finish opening your place",
+      body: "Open the link again in a moment. If it was already yours, nothing changes.",
     },
     expired: {
       title: "That link has expired",
@@ -473,7 +477,7 @@ const es: GivingWords = {
   notOnListBody: "Ya se quitó, o la lista de espera ya cumplió su función y sus direcciones se han borrado.",
   almostThere: "Ya casi está",
   waitSentBody: (title, store) =>
-    `Te hemos enviado por email un botón para confirmar tu plaza en la lista de espera${title ? ` de ${title}` : ""}. Llega de ${store} a través de Marktmorgen y suele tardar menos de un minuto; si no está, mira en spam.`,
+    `Te hemos enviado por email un botón para confirmar tu plaza en la lista de espera${title ? ` de ${title}` : ""}. Llega de ${store} a través de Marktmorgen. Si no está, mira en spam.`,
   waitSentNote: "Tu plaza cuenta cuando lo pulsas, así que a una dirección mal escrita nunca se le avisa de nada.",
   onTheList: "Estás en la lista",
   tellWhenOut: (title) => (title ? `Te avisaremos cuando salga ${title}` : "Te avisaremos cuando salga"),
@@ -519,6 +523,10 @@ const es: GivingWords = {
     unavailable: {
       title: "No hemos podido enviarlo ahora mismo",
       body: "No se ha ocupado ni perdido ninguna plaza. Vuelve a intentarlo en un momento.",
+    },
+    opening: {
+      title: "No hemos podido terminar de abrir tu plaza",
+      body: "Vuelve a abrir el enlace en un momento. Si ya era tuya, no cambia nada.",
     },
     expired: {
       title: "Ese enlace ha caducado",
@@ -796,7 +804,7 @@ const fr: GivingWords = {
   notOnListBody: "Elle a déjà été retirée, ou la liste d'attente a rempli son rôle et ses adresses ont été supprimées.",
   almostThere: "Presque terminé",
   waitSentBody: (title, store) =>
-    `Nous vous avons envoyé par e-mail un bouton pour confirmer votre place sur la liste d'attente${title ? ` de ${title}` : ""}. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute${S}; s'il n'y est pas, regardez dans les spams.`,
+    `Nous vous avons envoyé par e-mail un bouton pour confirmer votre place sur la liste d'attente${title ? ` de ${title}` : ""}. Il vient de ${store} via Marktmorgen. S'il n'y est pas, regardez dans les spams.`,
   waitSentNote: "Votre place compte dès que vous appuyez dessus, une adresse mal saisie ne reçoit donc jamais rien.",
   onTheList: "Vous êtes sur la liste",
   tellWhenOut: (title) => `Nous vous préviendrons à la sortie${title ? ` de ${title}` : ""}`,
@@ -842,6 +850,10 @@ const fr: GivingWords = {
     unavailable: {
       title: "Nous n'avons pas pu l'envoyer pour le moment",
       body: "Aucune place n'a été prise ni perdue. Réessayez dans un instant.",
+    },
+    opening: {
+      title: "Nous n'avons pas pu finir d'ouvrir votre place",
+      body: "Rouvrez le lien dans un instant. Si elle était déjà à vous, rien ne change.",
     },
     expired: {
       title: "Ce lien a expiré",
@@ -1117,7 +1129,7 @@ const de: GivingWords = {
   notOnListBody: "Sie wurde bereits entfernt, oder die Warteliste hat ihren Zweck erfüllt und ihre Adressen sind gelöscht.",
   almostThere: "Fast geschafft",
   waitSentBody: (title, store) =>
-    `Wir haben Ihnen per E-Mail eine Schaltfläche geschickt, mit der Sie Ihren Platz auf der Warteliste${title ? ` für ${title}` : ""} bestätigen. Sie kommt von ${store} über Marktmorgen und ist meist innerhalb einer Minute da; falls nicht, sehen Sie im Spam-Ordner nach.`,
+    `Wir haben Ihnen per E-Mail eine Schaltfläche geschickt, mit der Sie Ihren Platz auf der Warteliste${title ? ` für ${title}` : ""} bestätigen. Sie kommt von ${store} über Marktmorgen. Falls sie nicht da ist, sehen Sie im Spam-Ordner nach.`,
   waitSentNote: "Ihr Platz zählt erst, wenn Sie darauf drücken, damit eine vertippte Adresse nie benachrichtigt wird.",
   onTheList: "Sie stehen auf der Liste",
   tellWhenOut: (title) => `Wir sagen Ihnen Bescheid, wenn ${title || "es"} erscheint`,
@@ -1163,6 +1175,10 @@ const de: GivingWords = {
     unavailable: {
       title: "Wir konnten das gerade nicht senden",
       body: "Es wurde kein Platz vergeben oder verloren. Versuchen Sie es gleich noch einmal.",
+    },
+    opening: {
+      title: "Wir konnten Ihren Platz nicht fertig öffnen",
+      body: "Öffnen Sie den Link gleich noch einmal. Wenn der Platz schon Ihrer war, ändert sich nichts.",
     },
     expired: {
       title: "Dieser Link ist abgelaufen",
@@ -1437,7 +1453,7 @@ const it: GivingWords = {
   notOnListBody: "È già stato rimosso, oppure la lista d'attesa ha fatto il suo lavoro e i suoi indirizzi sono stati cancellati.",
   almostThere: "Ci sei quasi",
   waitSentBody: (title, store) =>
-    `Ti abbiamo inviato via email un pulsante per confermare il tuo posto nella lista d'attesa${title ? ` per ${title}` : ""}. Arriva da ${store} tramite Marktmorgen, di solito entro un minuto; se non la trovi, guarda nello spam.`,
+    `Ti abbiamo inviato via email un pulsante per confermare il tuo posto nella lista d'attesa${title ? ` per ${title}` : ""}. Arriva da ${store} tramite Marktmorgen. Se non la trovi, guarda nello spam.`,
   waitSentNote: "Il tuo posto conta solo quando lo premi, così un indirizzo scritto male non riceve mai niente.",
   onTheList: "Sei nella lista",
   tellWhenOut: (title) => (title ? `Ti avviseremo quando uscirà ${title}` : "Ti avviseremo quando uscirà"),
@@ -1483,6 +1499,10 @@ const it: GivingWords = {
     unavailable: {
       title: "Non siamo riusciti a inviarlo in questo momento",
       body: "Nessun posto è stato preso o perso. Riprova tra un momento.",
+    },
+    opening: {
+      title: "Non siamo riusciti a finire di aprire il tuo posto",
+      body: "Riapri il link tra un momento. Se era già tuo, non cambia nulla.",
     },
     expired: {
       title: "Quel link è scaduto",
@@ -1759,7 +1779,7 @@ const nl: GivingWords = {
   notOnListBody: "Het is al verwijderd, of de wachtlijst heeft haar werk gedaan en de adressen zijn gewist.",
   almostThere: "Bijna klaar",
   waitSentBody: (title, store) =>
-    `We hebben je een knop gemaild om je plek op de wachtlijst${title ? ` voor ${title}` : ""} te bevestigen. De e-mail komt van ${store} via Marktmorgen en is er meestal binnen een minuut; staat hij er niet, kijk dan in je spam.`,
+    `We hebben je een knop gemaild om je plek op de wachtlijst${title ? ` voor ${title}` : ""} te bevestigen. De e-mail komt van ${store} via Marktmorgen. Staat hij er niet, kijk dan in je spam.`,
   waitSentNote: "Je plek telt pas als je erop drukt, dus een verkeerd getypt adres krijgt nooit iets te horen.",
   onTheList: "Je staat op de lijst",
   tellWhenOut: (title) => `We laten het je weten als ${title || "het"} uit is`,
@@ -1805,6 +1825,10 @@ const nl: GivingWords = {
     unavailable: {
       title: "We konden dat nu niet versturen",
       body: "Er is geen plek ingenomen of verloren gegaan. Probeer het zo opnieuw.",
+    },
+    opening: {
+      title: "We konden je plek niet helemaal openen",
+      body: "Open de link zo opnieuw. Was de plek al van jou, dan verandert er niets.",
     },
     expired: {
       title: "Die link is verlopen",
@@ -2078,7 +2102,7 @@ const pt: GivingWords = {
   notOnListBody: "Já foi removido, ou a lista de espera já cumpriu a sua função e os endereços foram apagados.",
   almostThere: "Está quase",
   waitSentBody: (title, store) =>
-    `Enviámos-lhe por email um botão para confirmar o seu lugar na lista de espera${title ? ` de ${title}` : ""}. Chega de ${store} através da Marktmorgen e costuma demorar menos de um minuto; se não estiver lá, veja na pasta de spam.`,
+    `Enviámos-lhe por email um botão para confirmar o seu lugar na lista de espera${title ? ` de ${title}` : ""}. Chega de ${store} através da Marktmorgen. Se não estiver lá, veja na pasta de spam.`,
   waitSentNote: "O seu lugar só conta quando carregar nele, por isso um endereço mal escrito nunca recebe nada.",
   onTheList: "Está na lista",
   tellWhenOut: (title) => (title ? `Receberá um aviso quando ${title} sair` : "Receberá um aviso quando sair"),
@@ -2124,6 +2148,10 @@ const pt: GivingWords = {
     unavailable: {
       title: "Não foi possível enviá-la neste momento",
       body: "Nenhum lugar foi ocupado nem perdido. Tente novamente daqui a pouco.",
+    },
+    opening: {
+      title: "Não foi possível terminar de abrir o seu lugar",
+      body: "Abra a ligação novamente daqui a pouco. Se o lugar já era seu, nada muda.",
     },
     expired: {
       title: "Essa ligação expirou",

@@ -32,6 +32,7 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { LOCKED_LIST } from "@/lib/locked-words";
 
@@ -158,7 +159,10 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
   const address = await recoveryAddress(email);
   if (!address) return;
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]);
+  // A login link is only as good as its grant: only a SET answered exactly "OK" is one (CX-123 rule 24). Any other
+  // reply sends neither the link nor the notice to the sign-in address; the route still answers "sent", telling nothing.
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a recovery-address login link's grant");
   const sent = await mail(address, "Get back into your Marktmorgen account", [
     `This is the recovery address of the Marktmorgen account ${email}. Somebody said they can no longer open that inbox and asked for a way in.`,
     "",

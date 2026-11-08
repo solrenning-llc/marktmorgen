@@ -252,9 +252,10 @@ async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Lis
     const product = listed.find((p) => p.id === id);
     return product && cartable(product) && canSellProduct(store, product) ? [product] : [];
   });
-  // A limited one with none left is not reminded of, as for one product below (513 [PF1], unit 3).
-  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product).catch(() => null) : Promise.resolve(null))));
-  return kept.filter((_, i) => left[i] !== 0);
+  // A limited one with none left is not reminded of, as for one product below (513 [PF1], unit 3); nor one whose count cannot be
+  // read, which is never taken for "some left" (CX-123, rule 24; review of 5 November 2026).
+  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product).catch(() => undefined) : Promise.resolve(null))));
+  return kept.filter((_, i) => left[i] !== 0 && left[i] !== undefined);
 }
 
 /**

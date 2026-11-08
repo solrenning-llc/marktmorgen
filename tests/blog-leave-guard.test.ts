@@ -24,7 +24,8 @@ is("adding, editing and a long description read late all move what was opened wi
 const course = readFileSync("components/course-editor.tsx", "utf8");
 is("a module asks with its own measure of unsaved, and takes back what the server kept", course.includes("useLeaveGuard(changed);") && course.includes("answer.course?.modules.find((m) => m.id === unit.id)"), true);
 is("a lesson asks for its name, link, preview or text, and while a file is still going up", course.includes('const unsaved = title !== lesson.title || preview !== lesson.preview || link !== (lesson.link ?? "") || text !== savedText;') && course.includes("useLeaveGuard(unsaved || uploading !== null);"), true);
-is("the lesson's text counts as saved once read and once saved", (course.match(/setSavedText\(/g) ?? []).length, 3);
+// Once read and once saved: a failed read no longer marks an empty box as saved, it leaves the box closed (tests/course-lesson-text-exact.test.ts).
+is("the lesson's text counts as saved once read and once saved", (course.match(/setSavedText\(/g) ?? []).length, 2);
 is("a field changed while a module or lesson was saving keeps what was typed", (course.match(/\(now\) => \(now === \w+ \?/g) ?? []).length, 5);
 const task = readFileSync("components/task-editor.tsx", "utf8");
 is("an assignment asks like a quiz, from what was opened", task.includes("useLeaveGuard(draft !== null && JSON.stringify(draft) !== opened && !busy);") && (task.match(/setOpened\(JSON\.stringify\((fresh|read)\)\);/g) ?? []).length === 2, true);

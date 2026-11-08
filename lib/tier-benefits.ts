@@ -370,12 +370,15 @@ export async function undoGiven(store: Store, benefit: unknown, sub: unknown, pe
 
 export type BenefitMarkCopy = { benefit: string; membership: string; subscription: string; period: string; given: string };
 
+/** "once" as it is; a month as the date it began ("m<seconds>" is only the key it is kept under). */
+const periodCopy = (period: string) => (period === "once" ? period : new Date(Number(period.slice(1)) * 1000).toISOString());
+
 /**
  * A person's marks, for their copy (lib/person-copy.ts, 619 [SZ3]): the benefit's
- * words, its membership, the period and when it was marked. Who on the team
- * marked it is theirs, left out. Only reading. Throws when a mark or the
- * benefits cannot be read in their exact shape: a copy that leaves one out is
- * not the copy.
+ * words, its membership, the period (a month as the date it began) and when
+ * it was marked. Who on the team marked it is theirs, left out. Only reading.
+ * Throws when a mark or the benefits cannot be read in their exact shape: a
+ * copy that leaves one out is not the copy.
  */
 export async function benefitMarksOf(store: Store, person: string): Promise<BenefitMarkCopy[]> {
   if (!store.statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
@@ -387,9 +390,12 @@ export async function benefitMarksOf(store: Store, person: string): Promise<Bene
   const byId = new Map(benefits.map((b) => [b.id, b]));
   const out: BenefitMarkCopy[] = [];
   for (const [f, given] of marks) {
-    const [benefit = "", subscription = "", period = ""] = f.split(":");
+    const parts = f.split(":");
+    const [benefit = "", subscription = "", period = ""] = parts;
+    // Read in its exact shape or not at all: an odd key is never copied raw.
+    if (parts.length !== 3 || !SUB_ID.test(subscription) || !PERIOD.test(period)) throw new UnknownReplyError("a person's benefit mark, for their copy");
     const kept = byId.get(benefit);
-    out.push({ benefit: kept?.text ?? "", membership: kept?.product ?? "", subscription, period, given: new Date(given.at * 1000).toISOString() });
+    out.push({ benefit: kept?.text ?? "", membership: kept?.product ?? "", subscription, period: periodCopy(period), given: new Date(given.at * 1000).toISOString() });
   }
   return out.sort((a, b) => a.given.localeCompare(b.given) || a.subscription.localeCompare(b.subscription));
 }

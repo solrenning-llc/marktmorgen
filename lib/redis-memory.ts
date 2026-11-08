@@ -1459,20 +1459,33 @@ export class MemoryRedis {
 
       case "ZADD": {
         const z = this.zset(key);
-        // "NX": a member already there keeps the score it has. "XX": only a member already there is moved.
-        const onlyNew = args[0] === "NX";
-        const onlyOld = args[0] === "XX";
-        const pairs = onlyNew || onlyOld ? args.slice(1) : args;
+        // Flags before the first score, in any order, as Redis reads them. "NX": a member already there keeps the
+        // score it has. "XX": only a member already there is moved. "CH": count the members changed too.
+        let flags = 0;
+        while (flags < args.length && ["NX", "XX", "CH"].includes(String(args[flags]).toUpperCase())) flags += 1;
+        const set = new Set(args.slice(0, flags).map((flag) => String(flag).toUpperCase()));
+        const onlyNew = set.has("NX");
+        const onlyOld = set.has("XX");
+        const pairs = args.slice(flags);
+        // Redis's answer: the members added, or with CH the members added or whose score changed.
+        let added = 0;
+        let changed = 0;
         for (let i = 0; i + 1 < pairs.length; i += 2) {
           const score = Number(pairs[i]);
           const member = pairs[i + 1];
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) {
-            if (!onlyNew) z[at].score = score;
-          } else if (!onlyOld) z.push({ score, member });
+            if (!onlyNew && z[at].score !== score) {
+              z[at].score = score;
+              changed += 1;
+            }
+          } else if (!onlyOld) {
+            z.push({ score, member });
+            added += 1;
+          }
         }
         z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
-        return 1;
+        return set.has("CH") ? added + changed : added;
       }
       case "ZREM": {
         const z = this.zset(key);

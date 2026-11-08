@@ -1,0 +1,79 @@
+
+FILE chat-counter-admission.test.ts
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown missing refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown null refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown object refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown empty refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown partial refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown unknown SET refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown null count refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown text count refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown zero refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown negative refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown NaN refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown infinite refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown fraction refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown unsafe refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown extra refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown sparse refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown inherited refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown getter refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS counter timeout refuses before actual chat POST/write
+{"status":429,"counterCommands":0,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS missing counter configuration refuses without commands
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS lost acknowledgement retains the committed counter
+PASS confirmed counter posts and seals once after exactly two counter commands
+PASS ten confirmed saves succeed and the eleventh refuses
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS confirmed exceeded counter keeps its refusal
+PASS sales toggle remains outside provider-test counter
+PASS authorization refusal precedes counter and provider
+PASS invalid provider URL retains known refusal
+PASS confirmed removal deletes the sealed address without a provider POST
+28 passed; 0 failed
+Z_VOLUME {"runs":71,"mocks":20,"over":false}
+
+Z_STATUS 0 null
+✘ [ERROR] Could not resolve "/workspace/scratch/z-2741-main-integration-20261108/tests/chat-summary.test.ts"
+
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+error: Could not resolve "/workspace/scratch/z-2741-main-integration-20261108/tests/chat-summary.test.ts"
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at runOnEndCallbacks (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1592:45)
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1

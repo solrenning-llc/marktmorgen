@@ -92,14 +92,18 @@ export async function POST(request: NextRequest) {
       const who = text(body.email, 300).trim().toLowerCase();
       // Somebody the log shows taken off, or leaving, before: a removal repeated, which sweeps their API keys
       // again (lib/team.ts removeMember). Anybody else not on the team is not found, and nothing is touched.
-      const gone = (await readLog(store.sid)).some((line) => line.what === `Took ${who} off the team` || (line.who === who && line.what === "Left the team"));
+      // A log that could not be read (rule 24) says nothing either way: someone on the team is taken off as ever, and
+      // an address not on it is "unsure", with nothing swept, written or emailed, since a repeated removal and a mistyped
+      // address cannot be told apart.
+      const log = await readLog(store.sid).catch(() => null);
+      const gone = log !== null && log.some((line) => line.what === `Took ${who} off the team` || (line.who === who && line.what === "Left the team"));
       const removed = await removeMember(store, who, { repeat: gone }).catch((error: unknown) => (error instanceof KeysNotSwept ? "repeat" : Promise.reject(error)));
       if (removed === "repeat") {
         // Off the team already: written in the log now, so pressing again is known for a repeat.
         await logTeam(store.sid, { who: email, role, what: `Took ${who} off the team` });
         return repeat();
       }
-      if (!removed) return gone ? Response.json({ ok: true, already: true }) : fail("not_found");
+      if (!removed) return log === null ? fail("unsure") : gone ? Response.json({ ok: true, already: true }) : fail("not_found");
       await forgetDevices(store, who);
       await logTeam(store.sid, { who: email, role, what: `Took ${who.toLowerCase()} off the team` });
       return Response.json({ ok: true });

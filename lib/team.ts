@@ -38,7 +38,7 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
@@ -301,14 +301,19 @@ export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<v
   }
 }
 
-/** The activity log, newest first. */
-export async function readLog(sid: string): Promise<LogLine[]> {
+/**
+ * The activity log, newest first; null when Redis answered in a shape that cannot be read (rule 24), so the Team page
+ * never says "nothing yet" and a removal never reads "never taken off" from a log it could not read. Only Redis's own
+ * empty list is none; a line that is itself not readable is skipped, as before.
+ */
+export async function readLog(sid: string): Promise<LogLine[] | null> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]);
+  const rows = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]), 1)?.[0]);
+  if (!rows) return null;
   const lines: LogLine[] = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
+  for (const row of rows) {
     try {
-      const value = JSON.parse(String(row)) as Partial<LogLine>;
+      const value = JSON.parse(row) as Partial<LogLine>;
       if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") continue;
       const role: Role = value.role === "owner" ? "owner" : parseTeamRole(value.role) ?? "support";
       lines.push({ at: value.at, who: value.who, role, what: value.what });

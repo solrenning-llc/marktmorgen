@@ -173,12 +173,19 @@ export function ProductFacts({
   product,
   linkCourse = true,
   bundleItems = null,
+  videoLine = null,
 }: {
   store: Store;
   product: Listing;
   linkCourse?: boolean;
   /** For a bundle: what it hands over now (lib/bundles.ts, offeredItems). */
   bundleItems?: Listing[] | null;
+  /**
+   * For a course: how long its video runs, worked out by the code
+   * (lib/course-facts.ts, 292 [SQ3]); only the page that read it passes it,
+   * and null when any video's length is unknown.
+   */
+  videoLine?: string | null;
 }) {
   const pwyw = activePwyw(product);
   const options = sellableOptions(product);
@@ -227,6 +234,7 @@ export function ProductFacts({
       {course ? (
         <p className="mt-1 text-sm font-semibold">
           <span className="st-muted">{w.course(course.lessons)}</span>
+          {videoLine ? <span className="st-muted">{` · ${videoLine}`}</span> : null}
           {linkCourse ? (
             <>
               <span className="st-muted">{" · "}</span>
@@ -472,7 +480,7 @@ export function WaitlistForm({ store, product, writes = false }: { store: Store;
         {w.yourEmail}
       </label>
       <EmailField id={`w-${product.id}`} name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
-      <label htmlFor={`wc-${product.id}`} className="st-muted flex cursor-pointer items-start gap-3 text-sm">
+      <label htmlFor={`wc-${product.id}`} className="st-muted flex min-h-11 cursor-pointer items-start gap-3 text-sm">
         <input id={`wc-${product.id}`} type="checkbox" name="consent" value="yes" data-joins="" className="mt-0.5 h-4 w-4 shrink-0" />
         <span>{w.alsoOtherEmails(store.name)}</span>
       </label>
@@ -537,7 +545,7 @@ export function PreorderForm({ store, product, day, writes = false, consentAgain
  */
 export function ClicksBox({ id, label, className = "", always = false }: { id: string; label: string; className?: string; always?: boolean }) {
   return (
-    <label htmlFor={id} className={`st-muted cursor-pointer items-start gap-3 text-sm ${always ? "flex" : "ask-clicks"} ${className}`} data-clicks-box="">
+    <label htmlFor={id} className={`st-muted min-h-11 cursor-pointer items-start gap-3 text-sm ${always ? "flex" : "ask-clicks"} ${className}`} data-clicks-box="">
       <input id={id} type="checkbox" name="clicks" value="yes" className="mt-0.5 h-4 w-4 shrink-0" />
       <span>{label}</span>
     </label>
@@ -656,7 +664,7 @@ export function BuyBox({
           {w.yourEmail}
         </label>
         <EmailField id={`e-${place}${product.id}`} name="email" className="st-field" required autoComplete="email" placeholder={w.emailPlaceholder} language={store.language} />
-        <label htmlFor={`c-${place}${product.id}`} className="st-muted flex cursor-pointer items-start gap-3 text-sm">
+        <label htmlFor={`c-${place}${product.id}`} className="st-muted flex min-h-11 cursor-pointer items-start gap-3 text-sm">
           <input id={`c-${place}${product.id}`} type="checkbox" name="consent" value="yes" data-joins="" className="mt-0.5 h-4 w-4 shrink-0" />
           <span>{w.alsoEmails(store.name)}</span>
         </label>
@@ -893,7 +901,7 @@ export function BuyBox({
            Offered where the creator writes to their list here, or sends this
            product's buyers to their own email platform (lib/email-sync.ts). */
         <>
-          <label htmlFor={`n-${product.id}`} className="st-muted mb-4 flex cursor-pointer items-start gap-3 text-sm">
+          <label htmlFor={`n-${product.id}`} className="st-muted mb-4 flex min-h-11 cursor-pointer items-start gap-3 text-sm">
             <input id={`n-${product.id}`} type="checkbox" name="news" value="yes" data-joins="" className="mt-0.5 h-4 w-4 shrink-0" />
             <span>{w.alsoEmails(store.mail?.fromName || store.name)}</span>
           </label>

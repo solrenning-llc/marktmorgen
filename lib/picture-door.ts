@@ -92,6 +92,8 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
     return [["ZSCORE", key, path], ["ZREM", key, path]];
   }));
   if (!Array.isArray(answers) || answers.length !== 2 * unique.length) throw new Error("could not confirm the pictures taken from the door");
+  // Each reply only in its exact shape (CX-123, rule 24): ZREM the whole number 0 or 1, ZSCORE null or a score (a
+  // number, or the numeric string the REST API sends). Anything else is unknown and throws, never "taken".
   unique.forEach((path, i) => {
     // Read exactly (Codex P on #2156): the score is absent (null) or a number Redis wrote, the removal an exact 0 or
     // 1; anything else is not a confirmed take, and throws as an unconfirmed take does.

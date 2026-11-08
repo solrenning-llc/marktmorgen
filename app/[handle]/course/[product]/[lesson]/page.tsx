@@ -13,7 +13,7 @@ import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, lessonVideo } from "@/lib/learn";
-import { type Attempt, attemptOf, heldBack, passedQuizzes, readQuizFor, studentQuiz } from "@/lib/quiz";
+import { type Attempt, attemptOf, heldBack, passedForGate, readQuizFor, studentQuiz } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -30,7 +30,11 @@ import { type CoursesWords, coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
+import { LessonPlayer } from "@/components/lesson-player";
+import { devicePlaceKey } from "@/lib/lesson-position";
+import { resumeWordsOf } from "@/lib/lesson-position-rules";
 import { videoStampText } from "@/lib/video-stamp";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -108,7 +112,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
   if (student && (await isResting(store, undefined, "buyer"))) redirect(`/@${store.handle}/resting`);
   if (student) await countDay(store);
   const [done, passed] = student
-    ? await Promise.all([doneLessons(course.id, student.email), passedQuizzes(course.id, who)])
+    ? await Promise.all([doneLessons(course.id, student.email), passedForGate(course.id, who)])
     : [new Set<string>(), new Set<string>()];
   // A quiz that has to be passed holds the lessons after it shut, for a student.
   const held = student ? heldBack(course, passed) : new Map<string, string>();
@@ -157,6 +161,11 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const previous = order.slice(0, at).reverse().find(reachable) ?? null;
   const next = order.slice(at + 1).find(reachable) ?? null;
   const isDone = done.has(lesson.id);
+  // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
+  // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
+  const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
+  // Plain text only: a function cannot cross to the client player (Claude 5 on #2728).
+  const resumeWords = resumeWordsOf(w);
   const moduleNumber = course.modules.findIndex((m) => m.id === unit.id) + 1;
 
   return (
@@ -238,7 +247,11 @@ export default async function LessonPage({ params, searchParams }: Params) {
                         picture are turned off where the browser allows it,
                         and the button under it puts the video and the mark
                         in full screen together. */}
-                    <video
+                    <LessonPlayer
+                      courseId={course.id}
+                      lessonId={lesson.id}
+                      learner={placeKey}
+                      words={resumeWords}
                       src={video.src}
                       controls
                       playsInline
@@ -252,7 +265,11 @@ export default async function LessonPage({ params, searchParams }: Params) {
                   <div className="relative mt-6 overflow-hidden rounded-2xl bg-black">
                     {/* Vertical videos stay vertical: the player takes the
                         shape of the video instead of forcing it wide. */}
-                    <video
+                    <LessonPlayer
+                      courseId={course.id}
+                      lessonId={lesson.id}
+                      learner={placeKey}
+                      words={resumeWords}
                       src={video.src}
                       controls
                       playsInline
@@ -310,7 +327,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
             ) : null}
 
             {!lesson.video && !body && !lesson.link && lesson.files.length === 0 && !quiz && !task ? (
-              <p className="st-muted mt-6">{w.emptyLesson}</p>
+              <EmptyState title={said.w.nothingYet} body={w.emptyLesson} className="mt-6" />
             ) : null}
 
             {quiz ? (

@@ -2345,3 +2345,51 @@ Project ongoing, serialMediumZEROagents/quotaUNKNOWN/smalldirectedqueries, no Ac
 ### Receipt — 2026-11-08 19:49 Fortaleza
 
 PONTO CXP-20261108-1946-C1-1 DELIVERED: channel commit1ebeb9eb7f4becc2fcd49688c51fcf0dcfb78dec/blob95d4ee0b47763c8db6bbc6ae0c09cebec7fffaa2/FULL6786516, exact FULL readback of complete expected prefix+own entry. First CAS409 NOWRITE at22:46:46UTC; waited128s to22:48:54 before fresh SHA-only metadata+FULLUTF8 read. FreshFULL6779130/blobb137fe7d024881ce0aa62722b15ef82b62ff0cdd preserved6776114 exactly, complete3016delta read, deduplicated ownID then append. Delta only C6#3296focal/new3299-3300 and C2#2884/#3266/#3277/#2048 claims; no new P direction, peer ownership preserved. Do not repost this stop. Formal P3263review5820002652 plus proof comments6728154388/6728176456 all had exact body readbacks. No further runtime work/foreign mutation/CI action. Project ongoing; next focal only with fresh preflight and current source.
+
+
+## 2026-11-08 20:40 Fortaleza — #3263 focused closure delivered
+
+FIRST latest canonical444e7f44c0d8a4e16e497e5e82d4687f5547e0f4/blob337d4e0a34f0fd0d13d237e5a3224c8d07b40295/FULL437274 read. Previous PONTO1946 DELIVERED1ebeb9eb7f4becc2fcd49688c51fcf0dcfb78dec/FULL6786516 confirmed in current FULLchannel6877658/blob8f9198229709062d5c6f36cbf8a3c05d29de3b28. Last stop read in full, all77 subsequent headers indexed; directed C4-2001/C4-2030/C6-2002corrective/V2022/T2018+2026/G2030/model-Redis proposal read FULL. An initial combined output truncated T/G; both reopened separately FULL. Not all peer technical payloads claimed read. No new C1 blanket takeover/grant. C4ONLYbackup confirmed; C1 owns author3107/financial3160. Old four P products remainMERGED/historical references, never recreated.
+
+Author C6 requested focal6728384017: exact3263 b161d66edf6731426b8b55b379c89807529ce777, delta7c2735a03ac49dbb407dd51175ae7bdbcbaac786..b161. Complete discussion no competing focused return. P claim6728709483 BEFORE source. RES CXP-20261108-2033-RES DELIVERED04ed024dcb88b13ea27a14af6f37877ec80e981a/blobd9273724d04b836989f801bec08903357677c7aa/FULL6879734 exact FULLreadback BEFORE source/diff/tests. OneCAS409NOWRITE then>=127s from23:32:27UTC to23:34:34 before freshFULL/delta read/retry, no overwrite. Own detached p3263-focal, prior p3263-review/proofs retained. Only ownproof/docs edits, no author product/ref/index mutation.
+
+FOCAL COMMENT5820210559 DELIVERED exacthead and FULLbodyreadbackEXACT. SAME two C4/P MEDIUM findings CLOSED in corrective delta; no newHIGH/MEDIUM/LOW demonstrated. Preserve C4 attribution, not third full financial review. Existing financial review chain+nine exact required completed/success aggregators+legitimatequeue remain required; noP CIquery/retry/cancel/queue/merge certificate. Fullscope outside corrective delta not recertified.
+
+Proof BEFOREopinion: comment6728763431 exact FULL53062bodychars readback;32-artifact gzip/base64UTF8JSON149097bytes/SHA256126660d3c21a9185aa1d3da17c9e8414060ce924afcf5b164e198eaadfc7d057/per-filehashes. ALL sources/unchanged priorP probes/runners/overlays/raw child logs/report/focaldiff/heads included, not recreated old logs. Recover base64->gzip->JSON files[path].utf8; adjust absolute map paths to recovered reviewer files, never overwrite author sources.
+
+Author original35 unchanged: old production-module overlay12FAIL→final35PASS. SAME P supplemental6 EXACT oldprobe bytes4FAIL→final6PASS. Complementary controls13PASS; linkedl10b16+searchceiling13+communityreads110+rsvplist19+costregistry26+dataregistry7PASS. Total245 final assertions with overlap, not245distinct cases. Real strict852-source closure0diag, lint2changedlibs+original+ownprobes0, officialscanner4639/0, extraartifactscan0, diffclean. No clientbundles rerun; author275/0 credited as AUTHOR evidence only, notP. No browser/build/globaltypes/provider/nativeRedisLua/CI9cert.
+
+Full corrective delta read: course readCourseExact/nil only absent; lesson readBodyExact/nil=>emptystring/unread=>null, ordered Promise.all before lessonEntries; charge remainsbeforeIO. Calendar count exact n; paired string list exact envelope/row count, nilrow absent, malformed parse throws. Existing loose eventCount/readEvents/flatIds BYTE-ID unchanged; allEvents only production callerwalk. Sourcehelpers/parseEvent/lessonBodies and caller search/image qualifications preserved. Main787c notintegrated. AGENTS diff a36ed→787c only MV(a) newtextFULLread; CLAUDE/inbox/reservations diff0. Initial extra80line AGENTS output truncated, no claimfullnewAGENTSread; actualnewhunkFULLread earlier. C6memoryRedis divergence is C6/C1reportedfollowup, no shared-model repair/realLua certification byP.
+
+Beforeeverychild120souter/512MiB/types1024/256KiBoutput/20000 nestedMemoryRedis.run/100mockHTTP, external fetch/net/tls/http/https deniedbeforeimports/compiler/lint. Max3213 nested/0mock, no cap hit/raise/reset/replay. ROdeps lock ee4ba5640d542cb07c7ed382f256c816b076026d739bbe30d906870f351e67df exact; Node24.22.1, no install/credentials/paidIO. Sole source changes reside in author's existingREDc73e5200068c94eb9fa7d5bacad60f4c0b5d5d57+fixb161; own unchangedprod.
+
+Fresh directed native23pullrefs+main identity ONLY:
+```
+787c8748ab9124fb861235c59e8e6b221c101bdc	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+daaf5306187d4aa43c9f47590d429dcb10656519	refs/pull/2843/head
+66dfd8a571a734d6b787b4552b7b53759d239a48	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+aae8fcf5f8ce7118007f58d371c2b6c722dd2d18	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+b5dd4dc3791ed83c60cdc59bd1a38e95f9420b1d	refs/pull/3014/head
+0cdb49725fbb78d341e648ae4758a5f0ab88f0f4	refs/pull/3034/head
+9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+442a057113c87b8728e1a23711510fa852bd0e6d	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+ac303f3066ed56e800d37da11a60e45f8382094f	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+```
+No silentclosedPRrequery/merge-state inference. 2514offPR8a lastconfirmedpriorrun, no newnativeconfirmation; candidate2843/2922/3014/2868 unchanged dispositions/foreignpromotionprohibited. V2892same6c307 andC2/N3135sameac303 requestsRECEIVED/PENDINGfreshclaims, notdone. G3024reconciledONLYoracle5820167145, NOTfullintegrationcert; T2916done5820165795, bothcredited. T2852still2843baseoffPR+C1serialstack disposition, noPforeignbranchpush. C1-owned3107conditionalMED/R2 remainspendingauthorrequestedfocal; metadata alone no closure. P3054LOWretained, no replay; #3245priorclean3c307/queueclaimnotPmergedcert.
+
+No new product unit/price/limit/commission/flags/accounts/payments/terms/PII/externalcontact/reservationdoc/automation changes/subagents. Project ongoing, existing continuity unchanged, no background watcher. Next freshauthorreturn or pending V2892/C23135 preflight; no repeated full3263review. PONTO20:40 to be appended after freshFULL channel/dedup/readback.

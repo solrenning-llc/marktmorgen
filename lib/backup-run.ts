@@ -73,7 +73,7 @@
  * of the last retentionDays days and the one that is about to age out are
  * there before the day's write, and besides them at most the 3 newest months'
  * copies (on a month's first day, before its copy is marked, the 3 earlier
- * months' are all past the retention), so step 1 deletes nothing inside the
+ * months' copies are all still kept), so step 1 deletes nothing inside the
  * retention; it acts only after failed runs or failed deletions. Every set is
  * counted at its parts, its manifest and a month's mark (an empty object), the
  * mark adding no bytes. The last good copy kept past the retention stays

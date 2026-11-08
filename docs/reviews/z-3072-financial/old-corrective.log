@@ -1,0 +1,136 @@
+
+FILE usage-told-sent-only.test.ts
+
+healthy control: a notice that went out is recorded once and not sent again
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 200 GB
+  ok    the owner is written to
+  ok    and the store is in the told list
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 200 GB
+  ok    the next run writes to nobody
+
+a notice the provider refused is not recorded, and is sent on the next run
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 200 GB
+  ok    first run: nothing went out
+  ok    the store is not in the told list
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 200 GB
+  ok    next run, mail back: the owner is written to
+  ok    now the store is in the told list
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 200 GB
+  ok    and the run after writes to nobody
+
+two stores, one refused: only the one written to is recorded
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 2 over 200 GB — cccccccccccccccccccccccccccccccc 200 GB, dddddddddddddddddddddddddddddddd 200 GB
+  ok    one notice went out
+  ok    the told list holds the sent one only
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 2 over 200 GB — cccccccccccccccccccccccccccccccc 200 GB, dddddddddddddddddddddddddddddddd 200 GB
+  ok    next run: only the refused one is written to
+
+no sender configured: nothing is recorded as told
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee 200 GB
+  ok    nothing went out
+  ok    the store is not in the told list
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee 200 GB
+  ok    once a sender is there, the owner is written to
+
+an ownerless store: recorded once support was told, retried when support was not
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — ffffffffffffffffffffffffffffffff 200 GB
+  ok    the support notice failed: nothing went out
+  ok    the ownerless store is not in the told list
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — ffffffffffffffffffffffffffffffff 200 GB
+  ok    next run: support is told
+  ok    now the ownerless store is in the told list
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — ffffffffffffffffffffffffffffffff 200 GB
+  ok    and support is not told again
+
+the owners' read fails: nobody is told, nothing recorded, the owner is written to next run
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — gggggggggggggggggggggggggggggggg 200 GB
+  FAIL  first run: nobody is written to (not the owner, not support)
+        expected [200,0,[]]
+        got      [200,0,["support@marktmorgen.com"]]
+  FAIL  the store is not in the told list
+        expected false
+        got      true
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — gggggggggggggggggggggggggggggggg 200 GB
+  FAIL  next run, owner read back: the owner gets the notice
+        expected [1,["owner@example.com"]]
+        got      [0,[]]
+  ok    now the store is in the told list
+
+the owners' read answers off-shape: nobody is told, nothing recorded, the owner is written to next run
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — gggggggggggggggggggggggggggggggg 200 GB
+  FAIL  first run: nobody is written to (not the owner, not support)
+        expected [200,0,[]]
+        got      [200,0,["support@marktmorgen.com"]]
+  FAIL  the store is not in the told list
+        expected false
+        got      true
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — gggggggggggggggggggggggggggggggg 200 GB
+  FAIL  next run, owner read back: the owner gets the notice
+        expected [1,["owner@example.com"]]
+        got      [0,[]]
+  ok    now the store is in the told list
+
+27 checks, 6 failing.
+Z_VOLUME {"runs":278,"mocks":19,"over":false}
+Amazon SES refused an email; trying the other sender 400 BadRequestException synthetic confirmed message refusal
+Amazon SES refused an email; trying the other sender 400 BadRequestException synthetic confirmed message refusal
+Amazon SES refused an email; trying the other sender 400 BadRequestException synthetic confirmed message refusal
+could not read who a folder belongs to Error: synthetic: Redis request failed with status 503
+    at MemoryRedis.pipeline ([stdin]:17314:66)
+    at redisPipeline ([stdin]:8456:41)
+    at ownersOf ([stdin]:8632:23)
+    at GET ([stdin]:16862:24)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async run ([stdin]:17321:20)
+    at async main ([stdin]:17408:16)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3072-u78lN8

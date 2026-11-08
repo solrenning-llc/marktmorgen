@@ -1,0 +1,145 @@
+
+FILE z-3072-owner-text.proof.ts
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+{"vector":"throw","firstStatus":200,"firstRecipients":["support@marktmorgen.com"],"toldBeforeRetry":true,"retryStatus":200,"retryRecipients":[],"firstProviderBodyBytes":[528]}
+  FAIL  "throw" unknown owner sends nobody
+        expected [200,[]]
+        got      [200,["support@marktmorgen.com"]]
+  FAIL  "throw" unknown owner is not marked told
+        expected false
+        got      true
+  FAIL  "throw" healthy recovery reaches the real owner
+        expected [200,["owner@example.com"],true]
+        got      [200,[],true]
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+{"vector":"missing","firstStatus":200,"firstRecipients":["support@marktmorgen.com"],"toldBeforeRetry":true,"retryStatus":200,"retryRecipients":[],"firstProviderBodyBytes":[528]}
+  FAIL  "missing" unknown owner sends nobody
+        expected [200,[]]
+        got      [200,["support@marktmorgen.com"]]
+  FAIL  "missing" unknown owner is not marked told
+        expected false
+        got      true
+  FAIL  "missing" healthy recovery reaches the real owner
+        expected [200,["owner@example.com"],true]
+        got      [200,[],true]
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+{"vector":42,"firstStatus":200,"firstRecipients":["support@marktmorgen.com"],"toldBeforeRetry":true,"retryStatus":200,"retryRecipients":[],"firstProviderBodyBytes":[528]}
+  FAIL  42 unknown owner sends nobody
+        expected [200,[]]
+        got      [200,["support@marktmorgen.com"]]
+  FAIL  42 unknown owner is not marked told
+        expected false
+        got      true
+  FAIL  42 healthy recovery reaches the real owner
+        expected [200,["owner@example.com"],true]
+        got      [200,[],true]
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+{"vector":"","firstStatus":200,"firstRecipients":["support@marktmorgen.com"],"toldBeforeRetry":true,"retryStatus":200,"retryRecipients":[],"firstProviderBodyBytes":[528]}
+  FAIL  "" unknown owner sends nobody
+        expected [200,[]]
+        got      [200,["support@marktmorgen.com"]]
+  FAIL  "" unknown owner is not marked told
+        expected false
+        got      true
+  FAIL  "" healthy recovery reaches the real owner
+        expected [200,["owner@example.com"],true]
+        got      [200,[],true]
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+{"vector":" ","firstStatus":200,"firstRecipients":["support@marktmorgen.com"],"toldBeforeRetry":true,"retryStatus":200,"retryRecipients":[],"firstProviderBodyBytes":[528]}
+  FAIL  " " unknown owner sends nobody
+        expected [200,[]]
+        got      [200,["support@marktmorgen.com"]]
+  FAIL  " " unknown owner is not marked told
+        expected false
+        got      true
+  FAIL  " " healthy recovery reaches the real owner
+        expected [200,["owner@example.com"],true]
+        got      [200,[],true]
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+{"vector":"not-an-owner","firstStatus":200,"firstRecipients":["support@marktmorgen.com"],"toldBeforeRetry":true,"retryStatus":200,"retryRecipients":[],"firstProviderBodyBytes":[528]}
+  FAIL  "not-an-owner" unknown owner sends nobody
+        expected [200,[]]
+        got      [200,["support@marktmorgen.com"]]
+  FAIL  "not-an-owner" unknown owner is not marked told
+        expected false
+        got      true
+  FAIL  "not-an-owner" healthy recovery reaches the real owner
+        expected [200,["owner@example.com"],true]
+        got      [200,[],true]
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+  ok    healthy control reaches owner
+  ok    healthy control marked told
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+  ok    healthy control is not repeated
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+  ok    confirmed absent owner key tells support
+  ok    confirmed absent owner key marked handled
+video-watch: every store inside its hours
+visits-watch: every store inside its visits
+orders-watch: every store inside its orders
+usage-watch: 1 over 200 GB — zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz 200 GB
+  ok    confirmed absent control is not repeated
+
+24 checks, 18 failing.
+Z_VOLUME {"runs":265,"mocks":17,"over":false}
+could not read who a folder belongs to Error: synthetic unknown owner read
+    at store.pipeline ([stdin]:17302:34)
+    at redisPipeline ([stdin]:8456:41)
+    at ownersOf ([stdin]:8632:23)
+    at GET ([stdin]:16862:24)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main ([stdin]:17324:19)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3072-avVTao

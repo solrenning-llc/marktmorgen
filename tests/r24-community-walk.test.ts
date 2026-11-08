@@ -103,6 +103,62 @@ async function main(): Promise<void> {
     is(`${shape}: the next search walks it whole`, [await walkCommunity(store, pay), await needsWalk(id), await indexed(id, "event", eventId)], [true, false, true]);
   }
 
+  // Claude 4 on #3263 (review 6728128004): a reply that is not a throw, in a shape that is neither the course nor nil,
+  // was still taken for a course that is gone, and the community was marked without its lessons.
+  part("A course read in an unknown shape stops the walk unmarked");
+  for (const [shape, reply] of [
+    ["no reply at all", () => []],
+    ["a number", () => [42]],
+    ["an object", () => [{}]],
+    ["text that is not a course", () => ["{oops"]],
+  ] as const) {
+    const { store, id, productId } = await setup();
+    answer(getOf(`nl:course:${COURSE_ID}`), reply as (real: unknown[]) => unknown, { run: false });
+    const walked = await walkCommunity(store, pay).catch(() => "threw");
+    is(`the course answered with ${shape}: not taken as walked, still to be walked, its lesson not claimed as indexed`, [walked === true, await needsWalk(id), await indexed(id, "lesson", lessonRef(productId, LESSON_ID))], [false, true, false]);
+  }
+  {
+    const { store, id, productId } = await setup();
+    answer(getOf(`nl:course:${COURSE_ID}:body:`), () => [7], { run: false });
+    const walked = await walkCommunity(store, pay).catch(() => "threw");
+    is("a lesson's text answered with a number: not taken as walked, still to be walked, its lesson not claimed as indexed", [walked === true, await needsWalk(id), await indexed(id, "lesson", lessonRef(productId, LESSON_ID))], [false, true, false]);
+    clearAnswers();
+    is("the next search walks it whole", [await walkCommunity(store, pay), await needsWalk(id), await indexed(id, "lesson", lessonRef(productId, LESSON_ID))], [true, false, true]);
+  }
+  {
+    const { store, id, productId, eventId } = await setup();
+    answer(getOf(`nl:course:${COURSE_ID}`), () => [null], { run: false });
+    is("a course confirmed gone (nil) is passed over: walked and marked, its lesson not indexed, the event indexed", [await walkCommunity(store, pay), await needsWalk(id), await indexed(id, "lesson", lessonRef(productId, LESSON_ID)), await indexed(id, "event", eventId)], [true, false, false, true]);
+  }
+
+  // The same review: an unknown count, list or event row was read as an empty calendar, and the community was marked.
+  part("A calendar read in an unknown shape stops the walk unmarked");
+  const zcard = (c: (string | number)[]) => c[0] === "ZCARD" && String(c[1]).endsWith(":evs");
+  const zrange = (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && String(c[1]).endsWith(":evs");
+  const eventGet = (c: (string | number)[]) => c[0] === "GET" && String(c[1]).includes(":ev:");
+  for (const [shape, match, reply] of [
+    ["its count with no reply at all", zcard, () => []],
+    ["its count as text", zcard, () => ["abc"]],
+    ["its list with no reply at all", zrange, () => []],
+    ["its list as a number", zrange, () => [7]],
+    ["its event as a number", eventGet, () => [7]],
+    ["its event as text that is not an event", eventGet, () => ["{oops"]],
+  ] as const) {
+    const { store, id, eventId } = await setup();
+    answer(match, reply as (real: unknown[]) => unknown, { run: false });
+    const walked = await walkCommunity(store, pay).catch(() => "threw");
+    is(`${shape}: not taken as walked, still to be walked, the event not claimed as indexed`, [walked === true, await needsWalk(id), await indexed(id, "event", eventId)], [false, true, false]);
+  }
+  for (const [shape, match, reply] of [
+    ["a count confirmed 0", zcard, () => [0]],
+    ["a list confirmed empty", zrange, () => [[]]],
+    ["its one event confirmed gone (nil)", eventGet, () => [null]],
+  ] as const) {
+    const { store, id, productId, eventId } = await setup();
+    answer(match, reply as (real: unknown[]) => unknown, { run: false });
+    is(`${shape}: an empty calendar, walked and marked, the lesson indexed, the event not`, [await walkCommunity(store, pay), await needsWalk(id), await indexed(id, "lesson", lessonRef(productId, LESSON_ID)), await indexed(id, "event", eventId)], [true, false, true, false]);
+  }
+
   part("The marker read exactly: only nil or another version walks");
   {
     const { store, id } = await setup();

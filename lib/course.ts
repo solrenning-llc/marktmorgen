@@ -14,6 +14,7 @@
  * Pure rules at the top, storage at the bottom.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { readShelf } from "@/lib/course-shelf-rules";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -97,6 +98,12 @@ export type Course = {
    * (lib/certificate.ts). Off until the creator switches it on.
    */
   certificate: boolean;
+  /**
+   * The products shown to students on the course's home page under "More
+   * from <store>" (628 [HN4](b), lib/course-shelf-rules.ts), in the creator's
+   * order. Absent is none.
+   */
+  shelf?: string[];
   /**
    * How long a certificate issued from now on stays valid, in months
    * (639 [GL7](32)), for a training that has to be renewed; absent is for
@@ -203,8 +210,9 @@ export function parseCourse(raw: unknown): Course | null {
       : [];
     const startsAt =
       typeof value.startsAt === "number" && Number.isFinite(value.startsAt) ? Math.floor(value.startsAt) : null;
+    const shelf = readShelf(value.shelf);
     const months = readCertificateMonths(value.certificateMonths);
-    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}) };
+    return { id: value.id, modules, certificate: value.certificate === true, ...(months ? { certificateMonths: months } : {}), startsAt, ...(value.stampVideo === true ? { stampVideo: true } : {}), ...(shelf.length ? { shelf } : {}) };
   } catch {
     return null;
   }
@@ -297,6 +305,8 @@ export type CourseEdit =
   | { op: "quiz"; lessonId: string; quiz: QuizSetup | null }
   | { op: "task"; lessonId: string; task: TaskSetup | null }
   | { op: "certificate"; on: boolean }
+  /** The "More from" shelf (628 [HN4](b)): product ids, the course's own product left out. */
+  | { op: "shelf"; products: unknown; courseProductId: string }
   /** How long certificates issued from now on stay valid: 1 to 120 months, or null for good. */
   | { op: "certificate-months"; months: unknown }
   | { op: "start"; at: unknown }
@@ -495,6 +505,12 @@ export function editCourse(course: Course, edit: CourseEdit): EditResult {
     }
     case "certificate":
       return { ok: true, course: { ...course, certificate: edit.on }, removed: [] };
+    case "shelf": {
+      const shelf = readShelf(edit.products, edit.courseProductId);
+      const { shelf: _was, ...rest } = course;
+      void _was;
+      return { ok: true, course: shelf.length ? { ...rest, shelf } : rest, removed: [] };
+    }
     case "certificate-months": {
       if (edit.months === null || edit.months === 0 || edit.months === "") {
         const rest = { ...course };

@@ -6,11 +6,15 @@
  *   - The public product page says "Not available right now." in a status line, keeps itself out of search (noindex)
  *     and offers no checkout, instead of showing the product as if it had no page.
  *   - The studio's page editors (a product's, a store page's) say the page could not be read and show no editor, so
- *     nothing empty can be saved over the page.
+ *     nothing empty can be saved over the page. The product editor keeps its list of products, to choose another, and
+ *     the note a buyer reads after paying, which is read on its own (Claude 6's review of #2832, LIGHT 1).
  *   - The studio's reach and page-test numbers answer 503 page_unread, not a server error.
  *   - The page after a free sign-up shows no "next" product it could not confirm, and says nothing is missing.
  *   - The store assistant's facts and the affiliate kit's read refuse, so no model is asked from facts with the page
  *     left out.
+ * The store can sell (a stand-in Stripe account and subscription, a product that hands over a link), so the read-as-it-is
+ * controls show the buy box and the "next" card, and their absence on an unknown read means something (Claude 6's
+ * review of #2832, LIGHT 2). Nothing reaches Stripe: `fetch` is a stand-in that refuses.
  */
 import { NextRequest } from "next/server";
 import { renderToReadableStream } from "react-dom/server";
@@ -23,16 +27,22 @@ import { GET as abRoute } from "@/app/api/store/ab/route";
 import { readAssistantFacts } from "@/lib/store-assistant";
 import * as kit from "@/lib/affiliate-kit";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, setProductPage, setSitePages, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setProductPage, setSitePages, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { writePage } from "@/lib/sales-page-store";
 import { emptyBlock, parsePage, type PageBlock } from "@/lib/sales-page";
 import { siteKey } from "@/lib/site-page-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { PageEditor } from "@/components/page-editor";
+import { ThanksNoteEditor } from "@/components/thanks-note-editor";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_page_show_only";
+// Nothing here may reach Stripe or any other service: every request is refused.
+globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 })) as typeof fetch;
 
 const OWNER = "page-show@example.com";
 const ORIGIN = "https://marktmorgen.com";
@@ -71,9 +81,12 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "pageshow", "Page show", "");
   await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1PageShow01", true);
+  await setSubscription(OWNER, { customerId: "cus_PageShow0001", subscriptionId: "sub_PageShow0001", active: true, period: paidPeriod() });
   const paid = await addProduct(OWNER, "Guide", "A guide.", "19", null);
   const free = await addProduct(OWNER, "Sampler", "A free sampler.", "0", null);
   if (!paid.ok || !free.ok) throw new Error("setup");
+  if (!(await setProductLink(OWNER, paid.product.id, "https://example.com/guide")).ok) throw new Error("setup");
   const shop = (await storeForEmail(OWNER))!;
   const statsId = shop.statsId!;
   const hero = (id: string, headline: string) => ({ id, kind: "hero", headline, sub: "For busy parents", media: "none", video: null });
@@ -112,6 +125,7 @@ async function main(): Promise<void> {
   answering(new Request(`${ORIGIN}/@pageshow/p/${paid.product.id}`));
   const shown = await html(() => ProductPage(productParams));
   is("its headline is shown", shown.includes("Forty dinners") || shown.includes("Dinner, sorted"), true);
+  is("with its buy box (so its absence below means something)", shown.includes("/api/store/checkout"), true);
   is("in search", (await productMeta(productParams)).robots, { index: true, follow: true });
 
   for (const mode of ["no reply", "not a page"] as const) {
@@ -126,6 +140,8 @@ async function main(): Promise<void> {
     const editor = await unknown(mode, () => StudioPagesPage({ searchParams: Promise.resolve({ product: paid.product.id }) }).catch((error: Error) => `thrown ${error.name}`));
     is(`${mode}: the studio's page editor says the page could not be read`, holds(editor, { text: STUDIO_MESSAGES.page_unread }), true);
     is(`${mode}: and mounts no editor that could save over it`, holds(editor, { component: PageEditor }), false);
+    is(`${mode}: and keeps the list of products, to choose another`, holds(editor, { text: "Sampler" }), true);
+    is(`${mode}: and the note a buyer reads after paying, which is read on its own`, holds(editor, { component: ThanksNoteEditor }), true);
 
     answering(new Request(`${ORIGIN}/studio/site?page=${SITE}`, { headers }));
     const site = await unknown(mode, () => StudioSitePage({ searchParams: Promise.resolve({ page: SITE }) }).catch((error: Error) => `thrown ${error.name}`));
@@ -155,7 +171,7 @@ async function main(): Promise<void> {
   is("the store page editor, read as it is, mounts the editor", holds(await StudioSitePage({ searchParams: Promise.resolve({ page: SITE }) }), { component: PageEditor }), true);
   answering(new Request(`${ORIGIN}/@pageshow/free`));
   const fine = await html(() => FreePage({ params: Promise.resolve({ handle: "@pageshow" }), searchParams: Promise.resolve({ status: "sent", product: free.product.id }) }));
-  is("after a free sign-up, the next product the page names, when it is for sale (here it is not: no Stripe)", fine.includes('id="next-title"'), false);
+  is("after a free sign-up, the next product the page names, for sale here (so its absence above means something)", fine.includes('id="next-title"'), true);
   is("the assistant's facts are read with the page: its questions are in them", (await readAssistantFacts(now)).includes("Is it a PDF?"), true);
   done();
 }

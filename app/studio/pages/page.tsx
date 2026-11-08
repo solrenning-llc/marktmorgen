@@ -151,11 +151,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
         </p>
 
         {templateNotice ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{templateNotice}</p> : null}
-        {unread ? (
-          <div className="card mt-8 p-6 sm:p-8">
-            <p role="status" className="text-lg font-semibold tracking-[-0.02em] text-ink">{STUDIO_MESSAGES.page_unread}</p>
-          </div>
-        ) : products.length === 0 || !selected || !page || !action ? (
+        {products.length === 0 || !selected || (!page && !unread) || !action ? (
           <div className="card mt-8 p-6 sm:p-8">
             <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to build a page for yet</p>
             <p className="mt-2 text-ink-soft">Add a product in the studio and its page can be built here.</p>
@@ -212,6 +208,13 @@ export default async function StudioPagesPage({ searchParams }: Params) {
             </nav>
 
             <div className="min-w-0">
+            {/* A page whose read is not known is said so in place of its editor only: the list beside it and the note
+                after paying, read on their own, stay, so the creator can choose another product (#2832, review). */}
+            {!page ? (
+              <div className="card p-6 sm:p-8">
+                <p role="status" className="text-lg font-semibold tracking-[-0.02em] text-ink">{STUDIO_MESSAGES.page_unread}</p>
+              </div>
+            ) : (
             <AiOn value={aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}>
             <PageEditor
               // One editor per product: a save keeps the editor as it is, with the
@@ -247,7 +250,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
               summary={summary && summary.visible + summary.hidden > 0 ? summary : null}
               reviews={reviews}
               lang={store.language}
-              facts={await readPageFacts(store, selected)}
+              {...(await readPageFacts(store, selected))}
               outline={
                 selected.course
                   ? ((await readCourse(selected.course.id).catch(() => null))?.modules ?? []).map((m) => ({ title: m.title, lessons: m.lessons.map((l) => l.title) }))
@@ -263,6 +266,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
                 .catch(() => null)}
             />
             </AiOn>
+            )}
             {/* What a buyer reads after paying (lib/thanks-note.ts). Something free has its own page after a sign-up. */}
             {!isFree(selected) ? (
               <ThanksNoteEditor

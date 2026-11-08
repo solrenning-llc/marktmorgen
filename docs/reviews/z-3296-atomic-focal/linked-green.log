@@ -1,0 +1,222 @@
+
+FILE review-link-exact.test.ts
+
+Unknown answers are never 'expired'
+  ok    no reply
+  ok    undefined
+  ok    a number
+  ok    an object
+  ok    two replies
+
+Control: a link Redis no longer holds has expired
+  ok    null
+
+6 checks, all passing.
+Z_VOLUME {"runs":1,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE l9-review-request-exact.test.ts
+✔ a mark read in an unknown shape sends nothing and keeps the order due (59.638393ms)
+✔ a claim answered oddly that did not land sends nothing; the next run sends it once (11.499682ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 76.250599
+Z_VOLUME {"runs":256,"mocks":5,"over":false}
+
+Z_STATUS 0 null
+
+FILE review-request-erasure-evidence.test.ts
+✔ empty recipient evidence retains the erased buyer's review request for retry (50.97763ms)
+✔ short recipient evidence retains the erased buyer's review request for retry (7.631445ms)
+✔ missing suppression recipient evidence retains the erased buyer's review request for retry (6.423762ms)
+✔ extra recipient evidence retains the erased buyer's review request for retry (6.111943ms)
+✔ null opt-out recipient evidence retains the erased buyer's review request for retry (5.613656ms)
+✔ string opt-out recipient evidence retains the erased buyer's review request for retry (6.730465ms)
+✔ negative opt-out recipient evidence retains the erased buyer's review request for retry (7.333306ms)
+✔ null suppression recipient evidence retains the erased buyer's review request for retry (8.432294ms)
+✔ string suppression recipient evidence retains the erased buyer's review request for retry (4.203292ms)
+✔ object suppression recipient evidence retains the erased buyer's review request for retry (4.390665ms)
+✔ false suppression recipient evidence retains the erased buyer's review request for retry (3.860896ms)
+✔ invalid contact recipient evidence retains the erased buyer's review request for retry (5.312887ms)
+✔ object contact recipient evidence retains the erased buyer's review request for retry (5.479387ms)
+✔ primitive contact recipient evidence retains the erased buyer's review request for retry (7.557628ms)
+✔ array contact recipient evidence retains the erased buyer's review request for retry (6.287868ms)
+✔ wrong opt-out field recipient evidence retains the erased buyer's review request for retry (7.534578ms)
+✔ sparse recipient evidence retains the erased buyer's review request for retry (5.314159ms)
+✔ transport failure recipient evidence retains the erased buyer's review request for retry (4.463825ms)
+✔ complete evidence still sends a permitted buyer one review request (25.818087ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 189.676761
+Z_VOLUME {"runs":2011,"mocks":38,"over":false}
+
+Z_STATUS 0 null
+
+FILE review-stop-exact.test.ts
+✔ control: the stop page and the stop button with healthy replies (23.971525ms)
+✔ control: a healthy stop at the door says 'Unsubscribed.', and an unknown link 'Not found.' (9.451391ms)
+▶ R1: the stop page's readings of another shape are unknown, never 'no such link' or 'not stopped'
+  ✔ GET answered a number (0.615919ms)
+  ✔ GET answered a list (0.165339ms)
+  ✔ GET with no reply (0.279642ms)
+  ✔ GET with two replies (0.23847ms)
+  ✔ GET with no list (0.105449ms)
+  ✔ EXISTS answered nothing (0.331831ms)
+  ✔ EXISTS answered text (0.238109ms)
+  ✔ EXISTS answered 2 (0.330259ms)
+  ✔ EXISTS answered -1 (0.294294ms)
+  ✔ EXISTS with no reply (0.189476ms)
+  ✔ EXISTS with no list (0.128934ms)
+✔ R1: the stop page's readings of another shape are unknown, never 'no such link' or 'not stopped' (5.205145ms)
+▶ R2: pressing stop with a reply of another shape is unknown, never 'stopped' or 'no such link'
+  ✔ GET answered a number (0.181343ms)
+  ✔ GET with no reply (0.136827ms)
+  ✔ GET with no list (0.082474ms)
+  ✔ SET answered nothing (0.926077ms)
+  ✔ SET answered QUEUED (0.566825ms)
+  ✔ SET answered 1 (0.774829ms)
+  ✔ script answered nothing (0.716592ms)
+  ✔ script with no reply (1.092638ms)
+  ✔ script with no list (0.476559ms)
+  ✔ script with no reply for the SET (0.548177ms)
+✔ R2: pressing stop with a reply of another shape is unknown, never 'stopped' or 'no such link' (7.235327ms)
+▶ R3 at the door: an unknown stop write never says 'Unsubscribed.' nor 'Not found.', and the page offers the button again
+  ✔ SET answered nothing (3.209233ms)
+  ✔ script answered nothing (2.107249ms)
+✔ R3 at the door: an unknown stop write never says 'Unsubscribed.' nor 'Not found.', and the page offers the button again (5.75931ms)
+✔ the stop page says the last press was not saved when the route answered done=0, and offers the button again (7.62812ms)
+✔ control: no such sentence without done=0, nor once the stop is saved (3.057314ms)
+✔ the sentence exists in every buyer language and differs in each (0.123266ms)
+ℹ tests 31
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.66964
+Z_VOLUME {"runs":126,"mocks":0,"over":false}
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <Fragment>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <h1>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <button>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <Fragment>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <h1>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <button>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <Fragment>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <h1>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <button>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <Fragment>. See https://react.dev/link/warning-keys for more information.
+Each child in a list should have a unique "key" prop.
+
+Check the top-level render call using <h1>. See https://react.dev/link/warning-keys for more information.
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (76.971764ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (116.632781ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (34.368903ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.3261ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.14559ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.117477ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.482879ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (66.959483ms)
+✔ every store figure taken in the code is a kind a line prices (40.734279ms)
+✔ every email sent names a meter, and each file only the meters it may use (69.916767ms)
+✔ the units a figure is taken in cost at least what they stand for (8.452625ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.667016ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.171398ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.267434ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.107623ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.085158ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.281705ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.135284ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.716782ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.079791ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (1.853447ms)
+✔ Path push fits its reserved studio requests (0.077087ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.052269ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.085058ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.123377ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (28.71989ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 472.252754
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (122.386415ms)
+✔ each family is bounded one way at least, and what it says can be checked (45.883801ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (4.491197ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.089915ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.322116ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (6.239845ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.18539ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 187.240411
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3296atomic-eM6A2D

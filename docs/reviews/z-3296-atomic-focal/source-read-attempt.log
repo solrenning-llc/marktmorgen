@@ -1,0 +1,1 @@
+Initial snapshot collection: pre-PR44f4 lacks tests/r24-review-proof-exact.test.ts (git show exit128); this is absent test metadata, not a semantic run. Collector corrected to preserve explicit absence; no semantic tests repeated.

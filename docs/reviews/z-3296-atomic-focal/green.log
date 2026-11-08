@@ -1,0 +1,106 @@
+
+FILE z-3296-race-captured.proof.ts
+Z_INDEX_RACE {"erasedDuringMint":true,"errorName":"Error","returnedToken":false,"grantBytes":0,"notes":[],"ttl":-2,"retainedAfterSecondErasure":false,"productAndErasureCommands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","SMEMBERS","ZRANGEBYSCORE","DEL","EVAL"],"jsonPipelineBytes":1324}
+✔ MEDIUM: erasure after confirmed note must not be followed by an unindexed address grant (8.62891ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26.101166
+Z_VOLUME {"runs":15,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3296-command-aware.proof.ts
+Z_RECEIPT {"label":"hole","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"inherited OK","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"getter","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"frozen malformed","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"fractional note","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"unsafe note","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"extra","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"boxed OK","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"frozen healthy","returned":true,"errorName":null,"stored":true,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL"],"jsonPipelineBytes":894,"nestedRedis":6,"http":0}
+✔ real committed pipeline refuses hole and removes unsent grant (8.260625ms)
+✔ real committed pipeline refuses inherited OK and removes unsent grant (1.413563ms)
+✔ real committed pipeline refuses getter and removes unsent grant (0.833187ms)
+✔ real committed pipeline refuses frozen malformed and removes unsent grant (0.729541ms)
+✔ real committed pipeline refuses fractional note and removes unsent grant (0.792085ms)
+✔ real committed pipeline refuses unsafe note and removes unsent grant (0.716482ms)
+✔ real committed pipeline refuses extra and removes unsent grant (0.979017ms)
+✔ real committed pipeline refuses boxed OK and removes unsent grant (0.705885ms)
+✔ frozen healthy pipeline remains indexed and actual erasure deletes the grant (1.828219ms)
+✖ MEDIUM: partial pipeline exception must not leave a sixty-day unindexed grant (4.344326ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47.295968
+
+✖ failing tests:
+
+test at [stdin]:54666:27
+✖ MEDIUM: partial pipeline exception must not leave a sixty-day unindexed grant (4.344326ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /synthetic pipeline failure/. Input:
+
+  'AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n' +
+    '+ actual - expected\n' +
+    '\n' +
+    '  [\n' +
+    '+   1\n' +
+    "-   'OK'\n" +
+    '  ]\n'
+
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> ([stdin]:54683:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [AssertionError],
+    expected: /synthetic pipeline failure/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":82,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE r24-review-proof-exact.test.ts
+✔ mintReviewLink throws, and takes the link back, when the link's write answers nil (8.703484ms)
+✔ mintReviewLink throws, and takes the link back, when the link's write answers a number that is neither 1 nor 0 (0.867269ms)
+✔ mintReviewLink throws, and takes the link back, when the link's write answers text (0.500445ms)
+✔ mintReviewLink throws, and takes the link back, when the link's write answers an undefined slot (0.513475ms)
+✔ mintReviewLink throws, and takes the link back, when the index's ZADD answers text (0.482769ms)
+✔ mintReviewLink throws, and takes the link back, when the index's trim answers nil (0.395837ms)
+✔ mintReviewLink throws, and takes the link back, when the index's EXPIRE answers a negative number (0.280954ms)
+✔ mintReviewLink throws, and takes the link back, when a reply is missing from the link's write (0.668179ms)
+✔ mintReviewLink throws, and takes the link back, when a reply is missing from the erasure note (0.447004ms)
+✔ mintReviewLink throws, and takes the link back, when a reply too many on the link's write (0.68915ms)
+✔ mintReviewLink throws, and takes the link back, when a reply too many on the erasure note (0.371851ms)
+✔ mintReviewLink throws, and takes the link back, when the link's write answers something that is not a list (0.453244ms)
+✔ mintReviewLink throws, and takes the link back, when the erasure note answers something that is not a list (0.265431ms)
+✔ a pipeline that throws after the link's SET landed returns no token, and an erasure still finds no link (Codex Z) (0.871716ms)
+✔ when the take-back itself fails too, the link is still noted for erasure, and the log says what is left (0.915531ms)
+✔ an unknown write whose take-back fails is still erased with the address (0.948431ms)
+✔ an erasure that runs between the note and the link's write is never undone: no token, no grant (Codex Z) (0.707257ms)
+✔ a healthy link is written, noted for erasure, opened by its key and deleted with the address (control) (1.370548ms)
+✔ a store with no stats id writes the link alone and reads its one reply (control) (0.298921ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 38.342068
+Z_VOLUME {"runs":138,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3296atomic-31g2wa

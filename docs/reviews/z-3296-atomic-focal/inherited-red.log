@@ -1,0 +1,38 @@
+
+FILE z-3296-erasure-read-race.proof.ts
+Z_INHERITED_READ_RACE {"returnedToken":true,"grantBytes":111,"notes":[],"ttl":5184000,"retainedAfterSecondErasure":true,"commands":["SMEMBERS","ZRANGEBYSCORE","SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","DEL"],"jsonPipelineBytes":968}
+✖ inherited MEDIUM: an in-flight erasure must not delete the new index while leaving the new address grant (10.276903ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25.298461
+
+✖ failing tests:
+
+test at [stdin]:54572:27
+✖ inherited MEDIUM: an in-flight erasure must not delete the new index while leaving the new address grant (10.276903ms)
+  AssertionError [ERR_ASSERTION]: a completed erasure must not leave an unindexed grant retaining the erased address
+  + actual - expected
+
+  + '{"s":"22222222222222222222222222222222","r":"pi_synthetic_read3296","e":"synthetic-erasure-read@buyer.example"}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:54609:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"s":"22222222222222222222222222222222","r":"pi_synthetic_read3296","e":"synthetic-erasure-read@buyer.example"}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":14,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3296atomic-G4GHB1

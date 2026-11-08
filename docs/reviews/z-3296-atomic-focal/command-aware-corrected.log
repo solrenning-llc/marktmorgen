@@ -1,0 +1,34 @@
+
+FILE z-3296-command-aware.proof.ts
+Z_RECEIPT {"label":"hole","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"inherited OK","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"getter","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"frozen malformed","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"fractional note","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"unsafe note","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"extra","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"boxed OK","returned":false,"errorName":"UnknownReplyError","stored":false,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"jsonPipelineBytes":958,"nestedRedis":7,"http":0}
+Z_RECEIPT {"label":"frozen healthy","returned":true,"errorName":null,"stored":true,"commands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL"],"jsonPipelineBytes":894,"nestedRedis":6,"http":0}
+Z_MEDIUM {"grantCommitted":true,"grantBytes":0,"ttl":-2,"notedErased":1,"retainedAfterErasure":false,"attemptedPipelineCommands":["ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","DEL"],"actualSetBatchBytes":507}
+✔ real committed pipeline refuses hole and removes unsent grant (5.777729ms)
+✔ real committed pipeline refuses inherited OK and removes unsent grant (1.150276ms)
+✔ real committed pipeline refuses getter and removes unsent grant (0.606786ms)
+✔ real committed pipeline refuses frozen malformed and removes unsent grant (0.57609ms)
+✔ real committed pipeline refuses fractional note and removes unsent grant (0.586686ms)
+✔ real committed pipeline refuses unsafe note and removes unsent grant (0.498192ms)
+✔ real committed pipeline refuses extra and removes unsent grant (0.455568ms)
+✔ real committed pipeline refuses boxed OK and removes unsent grant (0.558874ms)
+✔ frozen healthy pipeline remains indexed and actual erasure deletes the grant (1.442447ms)
+✔ MEDIUM: partial pipeline exception must not leave a sixty-day unindexed grant (2.178317ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.048546
+Z_VOLUME {"runs":88,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3296atomic-TJVDW3

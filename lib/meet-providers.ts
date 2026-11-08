@@ -454,7 +454,15 @@ export async function refreshTokens(provider: MeetProvider, refresh: string): Pr
   return tokens;
 }
 
-/** Gives a token back, so the access ends on their side too. */
+/**
+ * Gives a token back, so the access ends on their side too. True only when
+ * the access is known to be over: the provider confirmed the revocation (200),
+ * or Google answered 400 invalid_token, its code for a token that is already
+ * invalid, expired or given back. Any other answer (another 400 code, a 400
+ * with no readable code, 5xx) is false: the grant may still be live, so a
+ * caller that forgets the token only on true keeps it for a retry (CX-123
+ * rule 24).
+ */
 export async function revoke(provider: MeetProvider, token: string): Promise<boolean> {
   if (!token) return false;
   const answer =
@@ -468,8 +476,11 @@ export async function revoke(provider: MeetProvider, token: string): Promise<boo
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: zoomBasic() },
         });
-  // Google answers 400 invalid_token for one already given back: done either way.
-  return answer.status === 200 || (answer.status === 400 && provider === "google");
+  if (answer.status === 200) return true;
+  // Google answers 400 invalid_token for one already given back: done either
+  // way. A 400 with any other code (invalid_request, ...) or none was refused
+  // before anything was revoked, so it is not done.
+  return provider === "google" && answer.status === 400 && answer.json.error === "invalid_token";
 }
 
 // ---- Meetings ----------------------------------------------------------------

@@ -269,8 +269,9 @@ export async function takeUpsell(input: {
   const created = typeof view.created === "number" ? view.created : 0;
   if (!offerOpen(created, secret, view.metadata?.upsell_key)) return { kind: "unavailable" };
   // Paid with something a one-click charge cannot reach again, or in another
-  // currency than the store's offers are priced in: there is no offer.
-  if (!reusableMethod(view) || (typeof view.currency === "string" ? view.currency : "usd") !== store.currency) {
+  // currency than the store's offers are priced in, or in one Stripe's answer
+  // does not name (never taken for dollars, rule 24): there is no offer.
+  if (!reusableMethod(view) || typeof view.currency !== "string" || view.currency !== store.currency) {
     return { kind: "unavailable" };
   }
 

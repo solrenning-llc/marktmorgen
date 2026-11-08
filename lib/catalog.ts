@@ -798,7 +798,11 @@ const LISTING_ANSWER_WORST_BYTES = 6 * MAX_PRODUCT_BYTES + 3;
 /** The most product records one MGET of listingsById names: as many as fit LISTING_MGET_ANSWER_BYTES at the worst. */
 export const LISTING_MGET_KEYS = Math.max(1, Math.floor(LISTING_MGET_ANSWER_BYTES / LISTING_ANSWER_WORST_BYTES));
 
-/** The most of those MGETs in flight at once, so what one sales file holds in answers stays bounded (about 31 MB). */
+/**
+ * The most of those MGETs in flight at once, so the answers being received at one time stay bounded (about 31 MB at
+ * the worst). This bounds the requests outstanding, not what one sales file keeps: every answer read is held until the
+ * last batch is in (Codex S on #3101), and that total is not bounded or measured here.
+ */
 export const LISTING_MGET_PARALLEL = 4;
 
 /**

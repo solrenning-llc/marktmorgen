@@ -10,9 +10,10 @@ import { UnknownReplyError } from "@/lib/redis-reply";
  * work on its pages: `{ action: "add", name, place, target }` makes one,
  * `{ action: "target", code, target }` changes where it goes, and
  * `{ action: "remove", code }` ends it. A target is `{ kind: "store" }` or
- * `{ kind: "product", id }`. Answers the list as it is after. A list that
- * cannot be read is never "no links": adding refuses ("unavailable", 503) and
- * a change already made answers "unread" (503), so the studio says to reload.
+ * `{ kind: "product", id }` or a ready cart, `{ kind: "cart", ids, code? }`
+ * (624 [SZ8](23)). Answers the list as it is after. A list that cannot be
+ * read is never "no links": adding refuses ("unavailable", 503) and a change
+ * already made answers "unread" (503), so the studio says to reload.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "page", 1_000);

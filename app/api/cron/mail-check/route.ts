@@ -5,6 +5,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Check, verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { timed, withCutoff } from "@/lib/fetch-timeout";
+import { STATUS_CHECKS, statusRunCommands, statusRunResult } from "@/lib/status-page";
 
 // The senders announce a bounce within seconds and a spam report within a
 // minute or so; the run waits up to a hundred seconds for both.
@@ -73,7 +74,8 @@ export async function GET(request: NextRequest) {
             (prior as { ok?: unknown }).ok === false;
         } catch { /* Malformed history is not proof of an earlier failure. */ }
       }
-      await redisPipeline([["SET", LAST, JSON.stringify({ at: Date.now(), ok, checks, usage }), "EX", 30 * 86_400]]);
+      const at = Date.now();
+      await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks, usage }), "EX", 30 * 86_400]]);
       if (!ok || failedBefore) {
         await sendEmail({ meter: { by: "company" },
           from: NIMBUS_FROM,
@@ -88,6 +90,9 @@ export async function GET(request: NextRequest) {
           ].join("\n"),
         }).catch((error) => console.error("sending the mail check result failed", error));
       }
+      // Kept for the public status page (lib/status-page.ts), after the save and the notice and apart from
+      // them, so its failure stops neither: its time and whether a delivery loop ran and passed, nothing else.
+      await redisPipeline(statusRunCommands(STATUS_CHECKS[0].key, at, statusRunResult(checks))).catch((error) => console.error("keeping the mail check's run for the status page failed", error));
       return Response.json({ ok, checks, usage }, { headers: { "Cache-Control": "no-store" } });
     } finally {
       await redisPipeline([["DEL", "nl:mail-check:lock"]]).catch(() => {});

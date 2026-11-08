@@ -44,6 +44,7 @@
  * counted for the creator's notices.
  */
 import { onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -90,7 +91,7 @@ type Cursor = { h: number; p: string };
  * #3098, same class). The rows themselves are checked by each caller.
  */
 const listOf = (reply: unknown): unknown[] => {
-  if (reply === null || typeof reply !== "object" || !Array.isArray((reply as { data?: unknown }).data)) throw new Error("Stripe answered with something that is not a list");
+  if (reply === null || typeof reply !== "object" || !Array.isArray((reply as { data?: unknown }).data)) throw new StripeListUnreadable("a list or search page with no data array");
   return (reply as { data: unknown[] }).data;
 };
 
@@ -148,7 +149,12 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
       console.error("plan-closing: Stripe's search did not say whether more subscriptions follow; tried again");
       return false;
     }
-    const rows = listed.filter((row): row is Row => Boolean(row) && typeof row === "object" && (row as Row).metadata?.store === handles[cursor.h]);
+    // A row that is not an object is not "another store's" (Claude 4 on #3108): the page is read again, never passed.
+    if (listed.some((row) => row === null || typeof row !== "object" || Array.isArray(row))) {
+      console.error("plan-closing: Stripe's search gave a subscription that could not be read; tried again");
+      return false;
+    }
+    const rows = listed.filter((row): row is Row => (row as Row).metadata?.store === handles[cursor.h]);
     if (rows.length < listed.length) console.error(`plan-closing: Stripe's search gave ${listed.length - rows.length} subscription(s) of another store; left alone`);
     if (!(await each(rows))) return false;
     cursor = found.has_more ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };

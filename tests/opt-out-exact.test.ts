@@ -84,18 +84,20 @@ async function payday(): Promise<void> {
   const month = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
   const claim = `nl:aff:payday:${statsId}:${month}`;
   const isClaim = (c: (string | number)[]) => c[0] === "SET" && c[1] === claim;
-  // What a run did for the store: the emails it counts as sent, and whether it went past the claim (the next
-  // step reads whether the creator pays from their PayPal by itself, then writes the email).
+  // What a run did for the store: the emails it counts as sent, and whether it went past the claim, that is took
+  // it (its SET NX answered "OK"). The PayPal link is read before the claim since Claude 5's MEDIUM on 91815567,
+  // so a read of it no longer tells.
   const run = async () => {
-    const seen: string[] = [];
+    let took = false;
     const watch = redis.pipeline;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      for (const c of commands) seen.push(`${c[0]} ${c[1]}`);
-      return watch(commands);
+      const replies = await watch(commands);
+      if (commands.length === 1 && isClaim(commands[0]) && Array.isArray(replies) && replies.length === 1 && replies[0] === "OK") took = true;
+      return replies;
     }) as typeof redis.pipeline;
     try {
       const counts = await sendPaydayEmails(Date.now() + 20_000);
-      return { sent: counts.sent, pastTheClaim: seen.includes(`GET nl:pp:${statsId}`) };
+      return { sent: counts.sent, pastTheClaim: took };
     } finally {
       redis.pipeline = watch;
     }

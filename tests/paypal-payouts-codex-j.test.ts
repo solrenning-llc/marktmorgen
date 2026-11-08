@@ -122,7 +122,9 @@ async function main(): Promise<void> {
   const store = shop();
   const payday = new Date(Date.UTC(2026, 10, 5, 9, 0, 0));
   const claimKey = `nl:aff:payday:${STATS}:2026-11`;
-  const claimed = async () => (await real([["GET", claimKey]]))[0];
+  // The month's claim holds a value only its run writes (lib/claim-mark.ts, claimMark, since main's exact payday claim):
+  // "taken" is any text there, not one fixed value.
+  const claimed = async () => typeof (await real([["GET", claimKey]]))[0] === "string";
 
   // ---- 1. Payday: a link read that fails never pays, and the month still gets its reminder ----
   // Since Claude 5's MEDIUM on 91815567 the month is claimed on that same run: the job runs
@@ -140,7 +142,7 @@ async function main(): Promise<void> {
     const first = await intercepted(linkRead, async () => [...reply], () => sendPaydayEmails(Date.now() + 60_000, payday));
     is("that store did not fail", [first.due, first.failed], [1, 0]);
     is("nothing was sent to PayPal", created.length, 0);
-    is("the month's claim is taken for the reminder", await claimed(), "1");
+    is("the month's claim is taken for the reminder", await claimed(), true);
     await sendPaydayEmails(Date.now() + 60_000, payday);
     is("a healthy run the same day pays nobody again", created.length, 0);
   }
@@ -150,12 +152,12 @@ async function main(): Promise<void> {
   await setAutoPay(store, true);
   await sendPaydayEmails(Date.now() + 60_000, payday);
   await sendPaydayEmails(Date.now() + 60_000, payday);
-  is("one batch over two runs", [created.length, await claimed()], [1, "1"]);
+  is("one batch over two runs", [created.length, await claimed()], [1, true]);
 
   part("Control: payday, auto-pay off: no batch, the month claimed for the reminder");
   await seed(store);
   await sendPaydayEmails(Date.now() + 60_000, payday);
-  is("no batch, claimed", [created.length, await claimed()], [0, "1"]);
+  is("no batch, claimed", [created.length, await claimed()], [0, true]);
 
   // ---- 2. The auto-pay switch is true or false, nothing else ----
   const badAuto: [string, unknown, boolean][] = [
@@ -176,7 +178,7 @@ async function main(): Promise<void> {
     is("the studio view rejects", await rejects(() => readPayPal(store)), true);
     const run = await sendPaydayEmails(Date.now() + 60_000, payday);
     is("payday sends no PayPal batch and does not fail", [created.length, run.failed], [0, 0]);
-    is("and claims the month for the manual reminder", await claimed(), "1");
+    is("and claims the month for the manual reminder", await claimed(), true);
   }
 
   part("Controls: the switch stored as true and as false");

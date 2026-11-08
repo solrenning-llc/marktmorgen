@@ -67,7 +67,9 @@ type Commands = (string | number)[][];
 const linkRead = (c: Commands) => c.length === 1 && c[0][0] === "GET" && c[0][1] === `nl:pp:${STATS}`;
 const at13 = (day: number) => new Date(Date.UTC(2026, 10, day, 13, 0, 0));
 const claimKey = `nl:aff:payday:${STATS}:2026-11`;
-const claimed = async () => (await real([["GET", claimKey]]))[0];
+// The month's claim holds a value only its run writes (lib/claim-mark.ts, claimMark, since main's exact payday claim):
+// "taken" is any text there, not one fixed value.
+const claimed = async () => typeof (await real([["GET", claimKey]]))[0] === "string";
 const UNREAD = "could not read your PayPal connection";
 
 /** Rewrites the stored link's auto-pay switch, the sealed Secret left as it is. */
@@ -90,7 +92,7 @@ async function month(broken: () => Promise<{ due: number; failed: number }>): Pr
   const first = await broken();
   is("payday: the store is due and does not fail", [first.due, first.failed], [1, 0]);
   is("payday: nothing is sent to PayPal", created.length, 0);
-  is("payday: the month is claimed on that very run", await claimed(), "1");
+  is("payday: the month is claimed on that very run", await claimed(), true);
   for (const day of [6, 7, 15, 30]) await sendPaydayEmails(Date.now() + 60_000, at13(day));
   const again = await sendPaydayEmails(Date.now() + 60_000, at13(5));
   is("the rest of the month and a second payday run: no batch, nothing failed", [created.length, again.failed], [0, 0]);
@@ -131,12 +133,12 @@ async function main(): Promise<void> {
   await seed(store, true);
   await sendPaydayEmails(Date.now() + 60_000, at13(5));
   for (const day of [6, 7, 15, 30]) await sendPaydayEmails(Date.now() + 60_000, at13(day));
-  is("one batch, the month claimed", [created.length, await claimed()], [1, "1"]);
+  is("one batch, the month claimed", [created.length, await claimed()], [1, true]);
 
   part("Control: auto-pay off: no batch, the month claimed for the reminder");
   await seed(store, false);
   const off = await sendPaydayEmails(Date.now() + 60_000, at13(5));
-  is("no batch, nothing failed, claimed", [created.length, off.failed, await claimed()], [0, 0, "1"]);
+  is("no batch, nothing failed, claimed", [created.length, off.failed, await claimed()], [0, 0, true]);
 
   part("The reminder says the connection could not be read, only when it could not");
   const base = { storeName: "Harbor Kitchen", payday: 5, people: 1, totalCents: 3000, currency: "usd", waitingCents: 0, hold: 0, refundsChecked: true };

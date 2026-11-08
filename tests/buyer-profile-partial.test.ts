@@ -307,6 +307,14 @@ async function main(): Promise<void> {
     true,
   );
   is("and purchasesUnread covers Stripe, the handed-over purchases and the PayPal amounts", /const purchasesUnread = profile\.stripeError \|\| profile\.unread\.includes\("imported"\) \|\| profile\.unread\.includes\("paypal"\);/.test(page), true);
+  // WCAG 1.3.3 (AX274): the orders box is read on its own (a screen reader can jump to its heading), so its words
+  // say what happened and what to do, never only "see the note above".
+  const ordersSection = page.slice(page.indexOf('aria-labelledby="orders-title"'), page.indexOf("</section>", page.indexOf('aria-labelledby="orders-title"')));
+  is(
+    "Stripe not read: the orders box says why and what to do in its own words, without pointing above",
+    [/\b(above|below)\b/i.test(ordersSection), ordersSection.includes('"Their purchases could not be loaded just now, because Stripe could not be read. Open this page again in a moment."')],
+    [false, true],
+  );
   const notesSection = page.slice(page.indexOf('aria-labelledby="notes-title"'), page.indexOf("</section>", page.indexOf('aria-labelledby="notes-title"')));
   is(
     "notes not read: the notes box (and its \"No notes yet.\") is not drawn; a status says they could not be loaded",

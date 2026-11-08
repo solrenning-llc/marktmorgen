@@ -1,9 +1,10 @@
 /**
  * A part of the person's data copy that cannot be read fails the copy (GDPR art. 15, CX-123 rule 24): the
- * contact record, the affiliate bond, the membership invitations and the store's call packages each refuse a reply
- * in an unknown shape, so the copy is retried rather than handed over with that part silently missing. Confirmed
- * absence (no record, an empty set) stays an empty part, and a record kept as written is copied. Synthetic data,
- * the in-memory Redis stub, no provider.
+ * contact record, the affiliate bond, the membership invitations and the store's call packages (the set and each
+ * listed package's record, with a member that is not a checkout id) each refuse a reply in an unknown shape, so
+ * the copy is retried rather than handed over with that part silently missing. Confirmed absence (no record, an
+ * empty set) stays an empty part, and a record kept as written is copied. Synthetic data, the in-memory Redis
+ * stub, no provider.
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
@@ -94,6 +95,48 @@ for (const [label, reply] of [
     });
   });
 }
+
+// A package listed for the store whose record cannot be read: the record is the only place that says whose it is,
+// so it is never taken as "not theirs" (lib/call-packages.ts, boughtForCopy).
+const listed = "cs_test_nogapspackage00";
+const packageRead = (c: unknown[]) => c[0] === "GET" && c[1] === `nl:pkg:${listed}`;
+const packageRecord = (e: string) => JSON.stringify({ s: "x", h: "nogapscopy", p: "synthetic_call", e, total: 3, at: 1_700_000_000, until: 0, token: "t", holds: [] });
+for (const [label, reply] of [
+  ["a missing reply", () => []],
+  ["a number for the record", () => [42]],
+  ["a record that is not JSON", () => ["{nope"]],
+  ["a record that is JSON but not an object", () => ['"7"']],
+  ["a record that is a list", () => ["[1,2]"]],
+  ["a record with no buyer", () => [JSON.stringify({ p: "synthetic_call", total: 3, at: 1, until: 0, holds: [] })]],
+  ["a record whose buyer is not text", () => [JSON.stringify({ p: "synthetic_call", e: 7, total: 3, at: 1, until: 0, holds: [] })]],
+] as [string, (real: unknown[]) => unknown[]][]) {
+  test(`call packages: ${label} for a listed package fails the copy, never an empty part`, async () => {
+    const scope = await fixture;
+    await redis.pipeline([["DEL", packagesKey(scope.statsId)], ["SADD", packagesKey(scope.statsId), listed]]);
+    await withReply(packageRead, reply, async () => {
+      await assert.rejects(() => COPIERS["lib/call-packages.ts"](scope), UnknownReplyError);
+    });
+  });
+}
+
+test("call packages: a listed member that is not a checkout id fails the copy, never skipped", async () => {
+  const scope = await fixture;
+  await withReply(parts(scope)[3].is, () => [["not-a-checkout"]], async () => {
+    await assert.rejects(() => COPIERS["lib/call-packages.ts"](scope), UnknownReplyError);
+  });
+});
+
+test("call packages: a listed package with no record (ran out) is confirmed none, and the person's own is copied", async () => {
+  const scope = await fixture;
+  await redis.pipeline([["DEL", packagesKey(scope.statsId), `nl:pkg:${listed}`], ["SADD", packagesKey(scope.statsId), listed]]);
+  assert.deepEqual(await withReply(packageRead, () => [null], () => COPIERS["lib/call-packages.ts"](scope)), []);
+  await redis.pipeline([["SET", `nl:pkg:${listed}`, packageRecord("someone-else@example.com")]]);
+  assert.deepEqual(await COPIERS["lib/call-packages.ts"](scope), []);
+  await redis.pipeline([["SET", `nl:pkg:${listed}`, packageRecord(email)]]);
+  const copied = (await COPIERS["lib/call-packages.ts"](scope)) as { product: string; sessions: number }[];
+  assert.deepEqual(copied.map((c) => [c.product, c.sessions]), [["synthetic_call", 3]]);
+  await redis.pipeline([["DEL", packagesKey(scope.statsId), `nl:pkg:${listed}`]]);
+});
 
 test("the whole copy fails, never handed over, when the contact record cannot be read", async () => {
   const scope = await fixture;

@@ -12,7 +12,11 @@ import { done, is, part } from "./check";
 
 part("Agreements: a heading, a sentence, and the jump to the form only for someone who may send");
 const agreements = readFileSync("components/agreements-studio.tsx", "utf8");
-is("drawn by the pattern under the list's h2", agreements.includes('<StudioEmptyState title="No agreements yet" body="An agreement you send shows here, with whether it was signed." action={canSend ? { href: "#ag-kind", label: "Write the first one" } : undefined} className="mt-3" />'), true);
+is("drawn by the pattern under the list's h2", agreements.includes('<StudioEmptyState title="No agreements yet" body="An agreement you send shows here, with whether it was signed." action={canSend && open ? { href: "#ag-kind", label: "Write your first agreement" } : undefined} className="mt-3" />'), true);
+// Claude 4 on #3165, the same two LOWs here: no jump while sending is closed (the form's buttons are disabled; VR
+// item 2), and a link text that names what it writes (WCAG 2.4.9, AAA).
+is("no jump while sending is closed", /action=\{canSend && open \? \{ href: "#ag-kind"/.test(agreements), true);
+is("the link names what it writes", agreements.includes('label: "Write your first agreement"') && !agreements.includes('label: "Write the first one"'), true);
 is("the jump goes to the form's first field, which exists", /<select id="ag-kind"/.test(agreements), true);
 is("no bare sentence left", agreements.includes('<p className="mt-3 text-ink-soft">No agreements yet.</p>'), false);
 

@@ -89,6 +89,34 @@ async function main(): Promise<void> {
     is("a retry after the signature leaves no version text", left(w.id), []);
     is("a retry answers what it deleted (0 only when the first pass already deleted it)", retry, finished ? 0 : 1);
   }
+  part("the signature's lock ran out while it waited; the erasure then ran (Codex M on #3151)");
+  {
+    const w = await world();
+    const scope = (await erasureScope(w.store, PERSON))!;
+    const eraser = ERASERS.find((e) => e.module === "lib/agreement-store.ts")!;
+    let armed = true;
+    let erased: unknown = "not run";
+    redis.pipeline = (async (commands: Parameters<typeof original>[0]) => {
+      const reply = await original(commands);
+      if (armed && commands.some((c) => c[0] === "GET" && c[1] === `nl:agree:v:${w.id}:1`)) {
+        armed = false;
+        redis.advance(11_000); // past the signature's ten-second lock: a request paused longer than its lock
+        erased = await eraser.run(scope, [], new Set()).then(
+          (n) => n,
+          (error: unknown) => `threw ${(error as Error)?.name}`,
+        );
+      }
+      return reply;
+    }) as typeof redis.pipeline;
+    const signed = await signAgreement(w.store, w.id, input(w.sha), "Synthetic Person");
+    redis.pipeline = original;
+    is("the real signing path reached its version read and ran the real eraser", armed, false);
+    is("the erasure took the free lock and deleted the agreement", erased, 1);
+    is("the stale signature, its lock gone, writes nothing and is not said as signed", signed.ok, false);
+    is("no record comes back (name, address, signature)", await readAgreement(w.id), null);
+    is("no record or version key comes back", left(w.id), []);
+    is("a retry finds nothing left, and nothing is stored", [await forgetAgreementsPerson(w.store.sid!, PERSON), left(w.id)], [0, []]);
+  }
   done();
 }
 main().catch((error) => {

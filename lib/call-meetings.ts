@@ -64,8 +64,10 @@ export async function syncMeetings(
   if (!isRedisConfigured()) return run;
   const stores = new Map<string, Store | null>();
   const paid = new Map<string, PaidCall[] | null>();
+  // Throws what the read throws: only a nil answer is "no store" (CX-123 rule 24), and only an answer is kept for the run,
+  // so one failed read never stands for the store's other records.
   const storeFor = async (handle: string) => {
-    if (!stores.has(handle)) stores.set(handle, await findStore(handle).catch(() => null));
+    if (!stores.has(handle)) stores.set(handle, await findStore(handle));
     return stores.get(handle) ?? null;
   };
   const paidFor = async (store: Store) => {
@@ -80,7 +82,14 @@ export async function syncMeetings(
       await dropScope(scope);
       continue;
     }
-    const store = await storeFor(record.handle);
+    // A store that could not be read is not gone: the record stays queued and a later run tries it, as a failed retry does.
+    let store: Store | null;
+    try {
+      store = await storeFor(record.handle);
+    } catch (error) {
+      console.error("reading a store for its meeting failed", error);
+      continue;
+    }
     if (!store || store.statsId !== record.statsId || (record.callsId && store.callsId !== record.callsId)) {
       // The store is gone or is somebody else's now: nothing we may do with it.
       await dropScope(scope);
@@ -153,7 +162,8 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
   for (const member of members) {
     if (Date.now() > deadline) break;
     const [callsId, handle] = member.split("|");
-    const store = callsId && handle ? await storeFor(handle) : null;
+    // A store that could not be read is skipped this run (nothing is written for it), and read again the next.
+    const store = callsId && handle ? await storeFor(handle).catch(() => null) : null;
     if (!store || store.callsId !== callsId || !store.stripeAccountId) continue;
     handled += await refundsOf(store, callsId, deadline).catch((error) => {
       console.error("reading a store's refunds for meetings failed", error);

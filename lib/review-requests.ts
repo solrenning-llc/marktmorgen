@@ -263,7 +263,22 @@ export async function sendReviewRequests(
       await drop(member);
       continue;
     }
-    if (!stores.has(entry.handle)) stores.set(entry.handle, await load(entry.handle).catch(() => null));
+    // Only a nil answer is "no store" (CX-123 rule 24). A read that threw is not known: the order waits, as it does when
+    // Stripe cannot be read, and the failure is not kept for the run, so the store's other orders are read again.
+    if (!stores.has(entry.handle)) {
+      const loaded = await load(entry.handle).then(
+        (found) => ({ found }),
+        (error: unknown) => {
+          console.error("reading a store for a review request failed", error);
+          return null;
+        },
+      );
+      if (!loaded) {
+        await later(member, nowSeconds + RETRY_SECONDS.stripe);
+        continue;
+      }
+      stores.set(entry.handle, loaded.found);
+    }
     const store = stores.get(entry.handle) ?? null;
     if (!store || store.statsId !== entry.statsId || !store.reviewAsk.days) {
       await drop(member);

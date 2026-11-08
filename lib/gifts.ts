@@ -338,20 +338,30 @@ export async function revokeRefundedGifts(
   // does. A read that fails or does not reach the end keeps the place, so it is read again next run.
   const lost = await lostDisputesOrRetry(store.stripeAccountId, since, deadline, lostCursorKey("gift", sid));
   let unsure = !lost.complete || !refundsKnown;
+  // The time of the oldest refund read that has not gone through yet (Infinity: none).
+  let waiting = Infinity;
   for (const refund of [...lost.rows, ...refunds]) {
     if (Date.now() >= deadline) return revoked;
     const id = typeof refund.id === "string" ? refund.id : "";
     const created = typeof refund.created === "number" ? refund.created : 0;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-    const charge = refund.charge as { refunded?: unknown } | null;
     const dispute = refund.object === "dispute";
+    // Disputes and refunds read by the one shared rule (lib/refunds.ts rowGivesBack), as the other jobs that take
+    // things back read them: a full refund going through (succeeded or pending), or a dispute lost; and, as before,
+    // a refund that succeeded on a charge marked refunded, whatever else that charge says.
+    const charge = refund.charge as { refunded?: unknown } | null;
+    const givesBack = rowGivesBack(refund) || (!dispute && refund.status === "succeeded" && charge?.refunded === true);
     newest = Math.max(newest, created);
+    // A refund Stripe has not finished (pending, or waiting on an action) whose charge is not refunded in full yet
+    // keeps the anchor at its time (review of #3188, Claude 3): a later refund never moves the read past it, so it is
+    // listed again and taken back once it goes through. One that already gives everything back is taken back now.
+    if (!dispute && (refund.status === "pending" || refund.status === "requires_action") && !givesBack) waiting = Math.min(waiting, created);
     if (dispute && id && !pi) {
       // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
       if (!(await markRead(sid, id))) unsure = true;
       continue;
     }
-    if (!id || !pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) continue;
+    if (!id || !pi || !givesBack) continue;
     // Read before anything is marked (Codex Z on #2724; CX-123 rule 24): whether this row was handled, the payment's
     // gift and the gift itself, each in its exact shape. Unknown leaves the row unread and the read unsure, and the
     // next run asks again; nothing is marked read until it was handled.
@@ -423,6 +433,7 @@ export async function revokeRefundedGifts(
   // anchor with it: the closing events are read from the anchor, so it waits while they are not all read.
   if (!(await confirmLostRead(lost, seenKey(sid)))) unsure = true;
   else if (lost.complete && lost.resumed) newest = Math.min(newest, Math.max(lost.newest, since));
+  newest = Math.min(newest, Math.max(waiting, since));
   if (!unsure) await redisPipeline([["SET", anchorKey(sid), String(newest)]]);
   return revoked;
 }

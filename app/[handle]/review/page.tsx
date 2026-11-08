@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { clientAddress } from "@/lib/request-guard";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
+import { StoreResting } from "@/components/store-resting";
 import { photoUrl } from "@/lib/photo-limits";
 import { imageUrl } from "@/lib/product-image";
 import { canRecover } from "@/lib/buyer-orders";
@@ -54,6 +55,8 @@ export default async function ReviewPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page.
+  if (store.suspended) return <StoreResting store={store} suspended />;
 
   const query = await searchParams;
   const get = (name: string) => (typeof query[name] === "string" ? (query[name] as string) : "");

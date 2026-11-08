@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
+import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
 import { WAIT_TOKEN, readWaitToken } from "@/lib/waitlist";
@@ -44,6 +45,9 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
   const leave = read("leave");
   const status = read("status");
   if (!token && !leave && !status) redirect(`/@${store.handle}`);
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page;
+  // the way to take an address off the list, and what it says after, stay open.
+  if (store.suspended && !leave && status !== "left") return <StoreResting store={store} suspended />;
 
   const grant = token && WAIT_TOKEN.test(token) ? await readWaitToken(token) : leave && WAIT_TOKEN.test(leave) ? await readWaitToken(leave) : null;
   const productId = grant?.p ?? read("product");

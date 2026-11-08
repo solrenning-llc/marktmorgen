@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
+import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { JOIN_TOKEN, readJoinToken } from "@/lib/store-join";
 import { speech } from "@/lib/buyer-words";
@@ -32,6 +33,8 @@ export default async function JoinPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page.
+  if (store.suspended) return <StoreResting store={store} suspended />;
 
   const query = await searchParams;
   const read = (name: string) => (typeof query[name] === "string" ? (query[name] as string) : "");

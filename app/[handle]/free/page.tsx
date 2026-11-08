@@ -10,6 +10,7 @@ import { welcomeFor } from "@/lib/welcome-offer-send";
 import { welcomeWords } from "@/lib/buyer-words/welcome";
 import { WelcomeCountdown } from "@/components/welcome-countdown";
 import { lookStyle } from "@/lib/store-look";
+import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
@@ -91,6 +92,8 @@ export default async function FreePage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page.
+  if (store.suspended) return <StoreResting store={store} suspended />;
 
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token : "";

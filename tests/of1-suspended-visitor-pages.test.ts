@@ -113,6 +113,7 @@ async function main(): Promise<void> {
   const waitlist = pages.find((p) => p.path === "/waitlist")!;
   is("the waitlist's page still offers to take an address off the list", suspendedPage(await open(waitlist, { leave: "x".repeat(24) })), false);
   is("and says it was taken off", suspendedPage(await open(waitlist, { status: "left", product: paid.product.id })), false);
+  is("the booking page still lets a paid booking be moved, the buyer's own", suspendedPage(await open(pages[0], { move: "cs_test_of1move000000" })), false);
 
   part("Switched back on, every page is as it was");
   await noteTakedown(owner, null, false);

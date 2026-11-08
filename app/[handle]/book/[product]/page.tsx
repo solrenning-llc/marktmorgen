@@ -12,6 +12,7 @@ import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { lookStyle } from "@/lib/store-look";
+import { StoreResting } from "@/components/store-resting";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { bookingLength, offeredLengths, ownLength } from "@/lib/call-lengths";
@@ -43,7 +44,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: productId } = await params;
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)).catch(() => null) : null;
-  const product = (store ? await readListing(store, productId) : null);
+  // Nothing of a store switched off after a report (lib/takedown.ts) is named in the tab.
+  const product = (store && !store.suspended ? await readListing(store, productId) : null);
   // A draft call's tab names nothing for whoever only knows its id (MM-SA-30): the same as an id that does not exist.
   if (!store || !product?.call || (product.hidden && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value)))) {
     return { title: "Book a call — Marktmorgen", robots: { index: false, follow: true } };
@@ -81,6 +83,9 @@ export default async function BookPage({ params, searchParams }: Params) {
   const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
   const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page; a booking
+  // already paid (moved above) and a package already bought are the buyer's, and keep their way in.
+  if (store.suspended && !pkg) return <StoreResting store={store} suspended />;
   // A draft call is left off the store (lib/catalog.ts): its title, price and
   // times are for the store's owner and team, signed in, and for a package
   // already bought for it (a booking already paid is moved above, read from

@@ -27,6 +27,7 @@ export const store = { handle: "synthetic", name: "Synthetic store", email: "own
 export const readConfig = async () => config;
 export const readConfigExact = readConfig;
 export const readMembers = async (_community: string, keys: string[]) => new Map(members.filter(m => keys.includes(m.k)).map(m => [m.k, m]));
+export const readMembersExact = readMembers;
 export const mailableMembers = async () => members;
 export const readMember = async () => null;
 export const setMail = async () => {};

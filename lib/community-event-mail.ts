@@ -55,13 +55,13 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
 import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
 import { SITE_URL } from "@/lib/site-url";
 import { type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
-import { type CommunityConfig, type Member, readConfigExact, readMembers } from "@/lib/community";
+import { type CommunityConfig, type Member, readConfigExact, readMembersExact } from "@/lib/community";
 import { holdsTicket } from "@/lib/community-access";
 import { tokenFor } from "@/lib/community-mail";
 import { alertCreator } from "@/lib/phone-alerts";
@@ -75,7 +75,6 @@ import {
   eventTimeIn,
   lengthIn,
   mayAttend,
-  readEvent,
   readEventExact,
   rsvpList,
   rsvpNumbers,
@@ -371,26 +370,43 @@ async function handleGone(handle: string): Promise<boolean> {
 type JobTarget = { store: Store; config: CommunityConfig; event: CommunityEvent } | "gone" | "unknown";
 
 /**
- * What a send is about, read again: its store, its community's setup and its event; "gone" only when one of them is
- * known to be gone (the store's address leads nowhere, or the store read whole has no such community, or the setup's
- * or the event's key answered exactly nil); "unknown" when any of them does not read (rules 24 and 30): a load that
- * throws, a store that answers nothing while its address still leads to one, a reply lost or in another shape.
+ * A store and one of its community's events, read exactly (rules 24 and 30): null only when one of them is known to be
+ * gone (the store's address leads nowhere, or the store read whole has no such community, or the event's key answered
+ * exactly nil). Throws when either does not read: a load that throws, a store that answers nothing while its address
+ * still leads to one, a reply lost or in another shape. A send's target (jobTarget) and a due reminder or phone
+ * notice (runEventQueue) are read the same way.
+ */
+async function storeAndEvent(
+  ref: { handle: string; community: string; event: string },
+  load: (handle: string) => Promise<Store | null>,
+): Promise<{ store: Store; event: CommunityEvent } | null> {
+  const store = await load(ref.handle);
+  if (!store) {
+    if (await handleGone(ref.handle)) return null;
+    throw new UnknownReplyError("a store that its address still leads to");
+  }
+  if (store.community?.id !== ref.community) return null;
+  const event = await readEventExact(ref.community, ref.event);
+  return event ? { store, event } : null;
+}
+
+/**
+ * What a send is about, read again: its store, its event and its community's setup; "gone" only when one of them is
+ * known to be gone (storeAndEvent, or the setup's key answered exactly nil); "unknown" when any of them does not read.
  */
 async function jobTarget(job: EventMailJob, load: (handle: string) => Promise<Store | null>): Promise<JobTarget> {
   try {
-    const store = await load(job.handle);
-    if (!store) return (await handleGone(job.handle)) ? "gone" : "unknown";
-    if (store.community?.id !== job.community) return "gone";
+    const found = await storeAndEvent(job, load);
+    if (!found) return "gone";
     const config = await readConfigExact(job.community);
-    if (!config) return "gone";
-    const event = await readEventExact(job.community, job.event);
-    return event ? { store, config, event } : "gone";
+    return config ? { ...found, config } : "gone";
   } catch (error) {
     console.error("an event send could not read its store or its event", error);
     return "unknown";
   }
 }
 
+const MEMBERS_NOTE = "We couldn't read who is in the next batch just now. The send is still pending.";
 const UNREAD_NOTE = "We couldn't read the store or the event just now. The send is still pending.";
 
 /**
@@ -471,7 +487,23 @@ export async function advanceEventJob(
         job = { ...job, note: "We couldn't read the remaining recipients. The send is still pending." };
         break;
       }
-      const [found, going]: [Map<string, Member>, Set<string>] = await Promise.all([readMembers(community, keys), stillGoing(community, event.id, keys)]);
+      // Who is in this batch, read exactly: a member is left out only when read as gone (nil), taken out, or no longer
+      // coming. A read that does not come back so (rules 24 and 30) leaves the batch not done and the cursor where it
+      // was, so the next run sends to them once, under the same batch key; while it is of use, as a send whose event
+      // does not read (a reminder by its own window, a notice until the event begins), never sent late.
+      const read = await Promise.all([readMembersExact(community, keys), stillGoing(community, event.id, keys)]).catch((error: unknown) => {
+        console.error("an event send could not read who is in a batch", error);
+        return null;
+      });
+      if (!read) {
+        if (!stillUseful(reminder ? job.kind : "1", event.start, Date.now())) {
+          if (reminder) return await finish("sent", "No longer due.");
+          return await finish("failed", "We couldn't read who was coming before the event's time. Nobody else was emailed.");
+        }
+        job = { ...job, note: MEMBERS_NOTE };
+        break;
+      }
+      const [found, going]: [Map<string, Member>, Set<string>] = read;
       let recipients: Member[] = keys
         .map((k) => found.get(k))
         .filter((m): m is Member => Boolean(m && !m.removed && (going.has(m.k) || kind === "cancelled")))
@@ -560,7 +592,12 @@ export async function runEventQueue(
   const now = Date.now();
   const [raw] = await redisPipeline([["ZRANGEBYSCORE", EVENT_QUEUE, 0, now, "LIMIT", 0, QUEUE_BATCH]]);
   const members = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-  const stores = new Map<string, Store | null>();
+  // One load per store in a run. A load that throws is not kept, so it is tried again for the next entry.
+  const loads = new Map<string, Store | null>();
+  const load = async (handle: string): Promise<Store | null> => {
+    if (!loads.has(handle)) loads.set(handle, await findStore(handle));
+    return loads.get(handle) ?? null;
+  };
   for (const member of members) {
     if (Date.now() > deadline) break;
     const due = parseDue(member);
@@ -571,10 +608,12 @@ export async function runEventQueue(
     }
     if (due.mark !== "p" && !options.mail) continue;
     try {
-      // A store that does not load is not a store that is gone: it throws, and the entry stays queued (below).
-      if (!stores.has(due.handle)) stores.set(due.handle, await findStore(due.handle));
-      const store = stores.get(due.handle) ?? null;
-      const event = store?.community?.id === due.community ? await readEvent(due.community, due.event) : null;
+      // Read exactly, as a send's target: only a store or an event known to be gone drops the entry. One that does not
+      // read (a load that throws or answers nothing while the address still leads to the store, an event's reply lost
+      // or in another shape) throws, and the entry stays queued while it is still due (below).
+      const found = await storeAndEvent(due, load);
+      const store = found?.store ?? null;
+      const event = found?.event ?? null;
       const current = event && !event.cancelled && event.start === due.start;
       if (!store || !event || !current) {
         counts.dropped += 1;

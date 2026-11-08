@@ -738,12 +738,17 @@ export async function rsvpList(id: string, eventId: string, limit = 100_000): Pr
     .sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
 }
 
-/** Which of these members are still coming, asked when an email to them goes out. */
+/**
+ * Which of these members are still coming, asked when an email to them goes out, read exactly (rules 24 and 30): one
+ * is not coming only when its field answered exactly nil. A reply lost, cut short or in another shape, or a field that
+ * is not a string, throws UnknownReplyError: a list that did not read is not a list of nobody coming.
+ */
 export async function stillGoing(id: string, eventId: string, members: string[]): Promise<Set<string>> {
   if (!members.length) return new Set();
-  const [raw] = await redisPipeline([["HMGET", rsvpKey(id, eventId), ...members]]);
-  const rows = Array.isArray(raw) ? raw : [];
-  return new Set(members.filter((_, i) => rows[i] !== null && rows[i] !== undefined));
+  const replies = repliesFor(await redisPipeline([["HMGET", rsvpKey(id, eventId), ...members]]), 1);
+  const rows = replies && repliesFor(replies[0], members.length);
+  if (!rows || rows.some((row) => row !== null && typeof row !== "string")) throw new UnknownReplyError("who is coming to an event");
+  return new Set(members.filter((_, i) => rows[i] !== null));
 }
 
 // ------------------------------------------------------------------ words and files

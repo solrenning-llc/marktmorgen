@@ -7,11 +7,12 @@
  *   - a refund of ours whose status is missing, null or one Stripe does not give was simply not counted, so the
  *     charge read "none" (the daily job then takes the stop back and tells the creator nothing was refunded);
  *   - a list with no `data`, `data` that is not a list, a row that is not an object, or a row of ours with no id
- *     read as a whole empty list ("none");
+ *     read as a whole empty list ("none"); so did a reply named another object (`"object": "invoice"`) or not
+ *     named at all, with an empty `data` (Codex G, 6726655568);
  *   - the reply for one charge listing another charge's refund of ours counted it for both, so US$69.00 given back
  *     on one of two charges read "found", settled, US$138.00.
  * Healthy controls: an exact refund is still found; each of two charges refunded is found for both; another store's
- * refund or a failed one of ours is not counted; no refund at all is still "none".
+ * refund or a failed one of ours is not counted; no refund at all, and an exact empty list, are still "none".
  * Nothing real is reached (tests/plan-refund-stripe-world.ts).
  */
 import { store as redis } from "./redis-stub";
@@ -98,6 +99,9 @@ async function main() {
     ["no data", () => ({ object: "list", has_more: false })],
     ["data that is not a list", () => ({ object: "list", data: {}, has_more: false })],
     ["a row that is not an object", () => ({ object: "list", data: [null], has_more: false })],
+    ["another object's name (Codex G, 6726655568)", () => ({ object: "invoice", data: [], has_more: false })],
+    ["no object name", () => ({ data: [], has_more: false })],
+    ["an object name that is not a word", () => ({ object: 1, data: [], has_more: false })],
   ];
   for (const [label, body] of shapes) {
     const s = await shop();
@@ -106,6 +110,11 @@ async function main() {
     is(`the platform's refunds with ${label}: unknown`, (await findPlanRefund(s.sid, NOW - 60, NOW + 60)).kind, "unknown");
     reshape = null;
   }
+  const emptyList = await shop();
+  reshape = () => ({ object: "list", data: [], has_more: false });
+  is("control: a charge's refunds an exact empty list: none", (await partsOutcome(emptyList.sid, one(emptyList.charge))).kind, "none");
+  is("control: the platform's refunds an exact empty list: none", (await findPlanRefund(emptyList.sid, NOW - 60, NOW + 60)).kind, "none");
+  reshape = null;
   const noId = await shop();
   refund(noId.charge, noId.sid, { id: undefined });
   is("a refund of ours with no id on the charge: unknown", (await partsOutcome(noId.sid, one(noId.charge))).kind, "unknown");

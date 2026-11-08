@@ -34,7 +34,7 @@ Cada lacuna abaixo é um fato do código de 1/11/2026, não uma recomendação j
 3. **Encerrar as sessões de todos.** Existe "sair de todos os aparelhos" para uma conta, mas não um comando que encerre de uma vez as sessões de todos os criadores. As sessões são números aleatórios guardados no Redis, sem assinatura por segredo: trocar um segredo não as encerra.
 4. **Parar todos os envios da plataforma.** Existe a pausa automática por loja, mas não um interruptor que pare de vez os e-mails de lista de todas as lojas. O mais próximo é `MARKETING_DAILY_CAP` (`lib/mail.ts`): com valor 1, a empresa inteira manda no máximo um e-mail de lista por dia, e os links de entrada e recibos continuam (0 quer dizer sem teto, não zero). Parar tudo de verdade exige tirar as credenciais de envio do ambiente, o que para também os links de entrada.
 5. **Retomar uma loja pausada antes do prazo.** A pausa automática termina sozinha em 7 dias; não há retomada manual.
-6. **Cópias de segurança.** A rotina diária existe, mas está desligada (`BACKUP_COST_REVIEW` é `null` em `lib/backup-run.ts`, sem agendamento). Num incidente que apague ou corrompa dados, hoje não há cópia para restaurar.
+6. **Cópias de segurança.** A rotina diária existe, mas está desligada (`BACKUP_COST_REVIEW` é `null` em `lib/backup-run.ts`, sem agendamento). Num incidente que apague ou corrompa dados, hoje não há cópia para restaurar. O roteiro de restauração, para quando ela estiver ligada, está na seção 8.
 7. **Registro de auditoria da plataforma.** Há o registro da equipe por loja, mas não um registro de todas as ações administrativas da plataforma.
 8. **PayPal e Discord.** Não recebem avisos assinados: o código não tem rota de avisos deles, só retornos de conexão; o retorno do PayPal é conferido perguntando ao próprio PayPal (`app/api/store/paypal/onboarded/route.ts`). Não é lacuna de assinatura; fica registrado para quem procurar.
 
@@ -122,3 +122,60 @@ Nenhum incidente registrado até 1/11/2026.
 | Data e hora (Fortaleza) | O que aconteceu | O que foi trocado ou parado | Quem foi avisado, e quando |
 | --- | --- | --- | --- |
 | — | — | — | — |
+
+## 8. Passo a passo: dados apagados ou corrompidos (restaurar uma cópia de segurança)
+
+Escrito pela Claude 4 em 8/11/2026 (273 [BK1], mensagens C1-20261108-1530-C4-34 a C1-20261108-2021-C4-37 da caixa). **Hoje a cópia de segurança está desligada** (lacuna 6): este roteiro vale para quando o dono aprovar o custo e ela for ligada. Várias peças citadas aqui ainda **não existem no main** e estão com o agente que escreve o código do backup: a rota agendada, o alarme externo, o identificador da chave nas cópias, o motivo `room_locked`, o registro de exclusões e a ferramenta de restauração independente. Antes de seguir um passo, confira no main se a peça já existe; o que não existe não pode ser usado. Este roteiro não diz onde ficam chaves, códigos ou cópias em papel.
+
+**Regras que valem em todos os passos:**
+
+- Nunca restaurar por cima do banco vivo. O próprio aviso oficial da Upstash diz: "All existing data in the target database will be deleted before the restore operation begins" (https://upstash.com/docs/redis/features/backup, lido em 8/11/2026). Portanto o botão "Restore" do console da Upstash nunca é usado apontando para o banco de produção.
+- Restaurar sempre num banco **novo** e só depois trocar as variáveis do site para ele.
+- O banco é compartilhado com o projeto hazelsong, segundo o próprio registro do dono (AGENTS.md, Hazelsong guardada, 24/10/2026; a Vercel mostra o banco ligado a dois projetos). A cópia do Marktmorgen leva só as chaves `nl:`. Uma restauração do banco inteiro pelo console voltaria os dois produtos ao mesmo momento; restaurar o Marktmorgen num banco novo e trocar só as variáveis do Marktmorgen deixa a Hazelsong como está. Nada da Hazelsong é apagado (HZ1).
+- Agentes não entram nas contas da Upstash, da Cloudflare, da Vercel nem do bunny, não leem nem imprimem segredos. Cada passo "na conta" é do dono.
+
+### 8.1 Primeira hora
+
+1. **Desligar o agendamento do backup.** É sempre o primeiro passo: uma execução durante o incidente pode copiar dados já corrompidos e, depois, apagar cópias antigas boas pela retenção. Como fazer depende de como a rota for construída (por exemplo, tirar a entrada do backup de `vercel.json` e publicar de novo); o passo exato entra aqui quando a rota existir no main. A trava do bucket (7 dias, C4-35 e C4-37) protege as cópias mais recentes mesmo assim.
+2. **Exportar o banco vivo antes de mexer em qualquer coisa**, como está, mesmo corrompido: é a prova do que aconteceu e o ponto de volta se a restauração der errado. O dono faz pelo console da Upstash (Backups, "Backup & Export"); o arquivo fica fora das contas da LLC.
+3. **Decidir de qual cópia restaurar**: a última boa antes do problema. O relatório do backup mostra a hora da última cópia verificada (`nl:backup:last-ok`). Cópias diárias do banco ficam 30 dias; as mensais, 3 (90 dias); a do próprio provedor, 1 ou 3 dias, se o dono tiver ligado (ver docs/backup-costs-2026-11-08.md, seção 4).
+
+### 8.2 Restaurar o banco (fora da produção, num banco novo)
+
+1. O dono cria um **banco novo e vazio** na Upstash, separado do vivo. A restauração recusa um destino que seja o banco vivo e só escreve num banco com `DBSIZE` 0 (`lib/backup-restore-target.ts`).
+2. Abrir a cópia escolhida com a chave das cópias. Se a cópia foi feita com a chave anterior (até 60 dias depois de uma troca, item 8.5), usar a anterior; conferir a impressão digital da chave (8 primeiros caracteres hexadecimais de HMAC-SHA256(chave, "mm-backup-kid"), mostrada no relatório) antes de usar. Sem o GitHub, usar a ferramenta de restauração independente guardada junto da exportação offline (C4-36, item 7), quando existir.
+3. Restaurar no banco novo e conferir o manifesto, as somas e as contagens antes de qualquer troca.
+4. **Reaplicar as exclusões de dados pessoais** feitas depois da data da cópia, a partir do registro de exclusões (guardado fora das chaves copiadas; só o identificador com hash e sal e a data, sem dado pessoal), **antes** de o site voltar a usar o banco.
+5. **Trocar as variáveis na Vercel** (projeto marktmorgen, ambiente Production): `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN` (ou `KV_REST_API_URL` e `KV_REST_API_TOKEN`, as que o projeto usar; `lib/redis.ts` lê primeiro as `UPSTASH_*`) passam a apontar para o banco novo; depois **publicar de novo**, porque a versão em produção só lê o valor novo numa nova publicação. Não mexer nas variáveis do projeto hazelsong.
+6. Conferir o site com uma loja de teste e registrar tudo na seção 7.
+7. Religar o agendamento do backup só depois de o site estar estável no banco novo e de as variáveis `BACKUP_*` estarem certas.
+
+### 8.3 Arquivos e vídeos
+
+A cópia de arquivos e vídeos (C4-37) é feita por um Worker na conta separada da Cloudflare, que só lê a origem. Restaurar um arquivo é copiá-lo do bucket de cópia de volta para a origem, pelo dono, com uma chave criada só para isso e revogada depois. Um arquivo apagado pelo criador ou por pedido de exclusão some da cópia em 30 dias; nunca restaurar um arquivo cuja exclusão foi pedida.
+
+### 8.4 Teste mensal de restauração
+
+- Roda **fora da produção**, com credenciais só do teste, revogadas depois. `BACKUP_RESTORE_*` nunca entra no ambiente Production.
+- **Com dados reais, só leitura**: ler o conjunto verificado, abrir e conferir manifesto, somas e contagens em memória, sem gravar em lugar nenhum (somente testes sintéticos com escrita, C4-35).
+- **Restauração com escrita, só com dados sintéticos**, num banco de teste que é esvaziado depois de cada teste.
+- Registrar a data e o resultado de cada teste na seção 7 (ou no registro que o código vier a ter).
+
+### 8.5 Troca da chave das cópias
+
+- Cada cópia leva no cabeçalho do arquivo `.mmbk` o identificador da chave que a selou (C4-36, item 3, a construir).
+- Depois de uma troca, a chave anterior continua aceita só para **ler** cópias antigas por **60 dias**; cópias novas usam só a nova. Passados os 60 dias, a anterior deixa de valer.
+- Uma cópia que não abre só por estar com a chave diferente **nunca** é apagada como perdida (`last_good_copy_lost`).
+- O dono confere a cópia da chave guardada em papel e a do gerenciador de senhas pela impressão digital, com o script local (C4-36, item 2), nunca imprimindo a chave.
+- Se a chave das cópias vazou: trocar como na seção 3, e tratar as cópias seladas com ela como expostas.
+
+### 8.6 Trava do bucket e resposta 409
+
+Com a trava ligada, apagar um objeto mais novo que ela é recusado pela Cloudflare com **409**. O código deve tratar esse 409 como "objeto travado", nunca como erro genérico: não insistir, não apagar outra coisa no lugar e, se não couber a cópia do dia sem apagar objeto travado, registrar o motivo `room_locked` no relatório e no alarme (C4-35 e C4-36, a construir). Ninguém desliga a trava para "abrir espaço" durante um incidente: ela existe para proteger as cópias justamente nessa hora. (O comportamento 409 está descrito pela caixa; a página oficial da Cloudflare sobre travas não pôde ser lida nesta sessão.)
+
+### 8.7 O alarme de silêncio (dead-man switch)
+
+- Depois de cada execução **bem-sucedida e verificada**, a rotina manda um sinal de vida a um monitor **fora da Vercel**. O alarme dispara pelo **silêncio**: aviso com 26 horas sem sinal e crítico com 48 horas (o mesmo prazo de `STALE_MS` em `lib/backup-run.ts`).
+- O sinal de vida só vai em sucesso; os motivos `prune_*`, `room_*` e `last_good_copy_lost` também disparam o alarme (C4-36, item 4).
+- Alarme de silêncio quer dizer: a cópia do dia **não** foi feita ou não foi verificada, por qualquer motivo, inclusive a Vercel fora do ar. Abrir o relatório do backup e o motivo da última falha (`nl:backup:last-fail`); se a Vercel estiver fora, esperar a volta e conferir que a próxima execução mandou o sinal.
+- O monitor externo é do dono e ainda não existe; até lá, não há alarme fora da Vercel.

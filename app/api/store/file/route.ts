@@ -17,6 +17,7 @@ import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
 import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
 import { maximumUploadBytes, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { rememberFolderOwner } from "@/lib/delivery";
+import { handedBack } from "@/lib/upload-hand-back";
 import { isVaultConfigured } from "@/lib/vault";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -52,6 +53,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // The browser asked this door already and read its answer (lib/upload-refusal.ts askDoor), so a refusal says why;
+    // the file store's library now asks for what was issued then, and is given it back unchanged: nothing is checked,
+    // counted or signed twice, and it grants nothing the browser does not already hold.
+    const issued = handedBack(body);
+    if (issued) return Response.json(issued);
     const answer = await handleUploadPresigned({
       body,
       request,

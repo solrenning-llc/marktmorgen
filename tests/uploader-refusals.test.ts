@@ -12,6 +12,8 @@
 import { readFileSync } from "node:fs";
 import * as soldFileUpload from "@/lib/sold-file-upload";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { handedBack } from "@/lib/upload-hand-back";
+import { askDoor } from "@/lib/upload-refusal";
 import { done, is, part } from "./check";
 
 const DID_NOT_FINISH = "The upload did not finish, and nothing was changed. Try again in a moment.";
@@ -153,6 +155,36 @@ async function main(): Promise<void> {
     const big = await vault({ status: 400, body: { ok: false, error: "too_big" } });
     is("control: too big keeps its reason", uploadReason(big), "too_big");
     is("control: and the form's own words", said(big, { too_big: "That file is too big." }), "That file is too big.");
+  }
+
+  part("a door that said yes hands its upload to the library once, and the door hands it back unchanged");
+  {
+    const issued = { delegationToken: "delegation.synthetic", signature: "sig-synthetic", params: { pathname: "stores/f/p/a.pdf", "valid-until": "1" } };
+    fileDoor = { "*": { status: 200, body: { type: "blob.generate-presigned-url", presignedUrlPayload: issued } } };
+    const before = seen.length;
+    is("askDoor returns what the door issued", await askDoor("/api/store/file", "stores/f/p/a.pdf", "{}"), issued);
+    is("askDoor asked the door once", seen.slice(before), ["/api/store/file"]);
+    fileDoor = { "*": { status: 200, body: { type: "blob.generate-presigned-url" } } };
+    const empty = await askDoor("/api/store/file", "stores/f/p/a.pdf", "{}").then(() => null, (thrown: unknown) => thrown);
+    is("a yes without an upload in it is no reason, and did not finish", [uploadReason(empty), said(empty)], ["server_error", DID_NOT_FINISH]);
+    const odd = await refusedWith({ status: 400, body: { ok: false, error: 7, message: { not: "text" } } });
+    is("a door's word that is not text is no word", [uploadReason(odd), said(odd)], ["server_error", DID_NOT_FINISH]);
+
+    const event = (clientPayload: unknown) => ({ type: "blob.generate-presigned-url", payload: { pathname: "stores/f/p/a.pdf", clientPayload, multipart: false } });
+    is("handed back: the issued upload, unchanged", handedBack(event(JSON.stringify({ handBack: issued }))), { type: "blob.generate-presigned-url", presignedUrlPayload: issued });
+    is("a first ask is not handed back (the door checks and signs it)", handedBack(event(JSON.stringify({ productId: "p1" }))), null);
+    is("a client payload that is not JSON is not handed back", handedBack(event("{not json")), null);
+    is("an empty signature is not handed back", handedBack(event(JSON.stringify({ handBack: { ...issued, signature: "" } }))), null);
+    is("params that are not text are not handed back", handedBack(event(JSON.stringify({ handBack: { ...issued, params: { a: 1 } } }))), null);
+    is("another event is not handed back", handedBack({ type: "blob.upload-completed", payload: { clientPayload: JSON.stringify({ handBack: issued }) } }), null);
+    is("no body is not handed back", [handedBack(null), handedBack("text")], [null, null]);
+    const route = (path: string) => readFileSync(path, "utf8");
+    for (const path of ["app/api/store/file/route.ts", "app/api/store/image/upload/route.ts"]) {
+      const source = route(path);
+      const back = source.indexOf("handedBack(body)");
+      is(`${path}: hands back before anything is checked, counted or signed`, back > 0 && back < source.indexOf("studioAccess(") && back < source.indexOf("handleUploadPresigned({"), true);
+      is(`${path}: only after another site is refused`, source.indexOf("fromAnotherSite(request)") < back, true);
+    }
   }
 
   part("every studio uploader goes through the door that says why, and shows the reason");

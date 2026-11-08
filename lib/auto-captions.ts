@@ -30,9 +30,14 @@
  * is asked for only when Stripe lists none still in flight and not enough
  * returned, under a key that follows what Stripe listed, so two looks at
  * once ask for the same one and money is never returned twice.
+ *
+ * What the service delivered is read only from its answer in its own shape
+ * (inventory of money calls, finding 9, rule 24): any other answer is unknown,
+ * never "nothing delivered", and nothing is refunded on it (deliveredIn,
+ * unknownLook).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { askStream, noteCaptionLanguages, streamCaptions, streamConfig, streamRecord } from "@/lib/stream";
 import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
@@ -61,6 +66,11 @@ const REFUND_KEEP_SECONDS = 400 * 86_400;
 export const ORDER_SETTLE_MS = 15 * 60_000;
 /** An order Stripe's invoices cannot settle is looked at, further apart each time, for this long; then kept for a person. */
 const ORDER_LOOKS_MS = 14 * 86_400_000;
+/**
+ * Past GIVE_UP_HOURS, a request whose answer from the service stays unknown is looked at, further apart each time,
+ * for this long; then kept for a person, never refunded on an unknown answer and never dropped.
+ */
+const DELIVERY_LOOKS_MS = 14 * 86_400_000;
 /** The API version chargeNow writes its invoices with (lib/billing.ts, CHARGE_VERSION), where an invoice names its payment. */
 const CHARGE_READ_VERSION = "2024-06-20";
 
@@ -373,20 +383,30 @@ async function settleOrder(id: string, raw: string, order: Order, now: number): 
   return "kept";
 }
 
-/** The languages the service lists captions in, from its answer about a video. */
-function deliveredIn(data: unknown): string[] {
-  const list = (data as { captions?: unknown } | null)?.captions;
-  if (!Array.isArray(list)) return [];
-  return list.flatMap((c) => {
-    const lang = (c as { srclang?: unknown } | null)?.srclang;
-    return typeof lang === "string" ? [lang.toLowerCase().slice(0, 2)] : [];
-  });
+/**
+ * The languages the service lists captions in, from its answer about a video: its `captions` list, every entry with
+ * its language. Null when the answer is in any other shape (no list, a list of another type, an entry without a
+ * language): what was delivered is then unknown, never "none", since captions it may have written must never be
+ * refunded. A list the service answers empty is none delivered.
+ */
+function deliveredIn(data: unknown): string[] | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const list = (data as { captions?: unknown }).captions;
+  if (!Array.isArray(list)) return null;
+  const langs: string[] = [];
+  for (const entry of list) {
+    const lang = entry && typeof entry === "object" ? (entry as { srclang?: unknown }).srclang : undefined;
+    if (typeof lang !== "string" || !lang) return null;
+    langs.push(lang.toLowerCase().slice(0, 2));
+  }
+  return langs;
 }
 
 /**
  * Asks the service what it has written for one video, lists each language as
  * it arrives, and settles the request once it is all there, or refunds what
- * is not after GIVE_UP_HOURS.
+ * is not after GIVE_UP_HOURS, only on an answer that says what was delivered
+ * (unknownLook has the rest).
  */
 export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"done" | "waiting" | "none"> {
   if (!STREAM_ID_PATTERN.test(id) || !isRedisConfigured()) return "none";
@@ -414,11 +434,8 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
     // The video is gone, deleted with its lesson: what was not written is given back.
     return (await settle(id, pending, pending.got, now)) ? "done" : "waiting";
   }
-  if (answer.status !== 200) {
-    await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
-    return "waiting";
-  }
-  const there = deliveredIn(answer.data);
+  const there = answer.status === 200 ? deliveredIn(answer.data) : null;
+  if (!there) return unknownLook(id, pending, answer.status, now);
   const got = pending.langs.filter((lang) => there.includes(lang));
   const fresh = got.filter((lang) => !pending.got.includes(lang));
   if (fresh.length) await noteCaptionLanguages(id, fresh);
@@ -428,6 +445,38 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
   await redisPipeline([
     ["SET", key, JSON.stringify({ ...pending, got }), "EX", KEEP_SECONDS],
     ["ZADD", QUEUE, now + LOOK_AGAIN_MS, id],
+  ]);
+  return "waiting";
+}
+
+/**
+ * The service's answer did not say what it delivered: not a 200, or a 200 in a
+ * shape that is not its own. Nothing is listed or refunded on it, and the
+ * languages already listed stay listed. Before GIVE_UP_HOURS the video is
+ * asked about again as usual. Past it, a refund may be owed and captions may
+ * have been delivered, so neither is decided: the record is kept as long as a
+ * refund owed is (it would otherwise run out with what is owed), looked at
+ * further apart, and settled by the first answer that says what was
+ * delivered. After DELIVERY_LOOKS_MS it is kept for a person, said so, and no
+ * longer queued; never refunded on an unknown answer, never dropped.
+ */
+async function unknownLook(id: string, pending: Pending, status: number, now: number): Promise<"waiting"> {
+  const past = now - pending.at - GIVE_UP_HOURS * 3_600_000;
+  if (status === 200) console.error("the video service answered about a video in a shape that does not say which captions it delivered; nothing is refunded on it", id);
+  if (past <= 0) {
+    await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
+    return "waiting";
+  }
+  const key = pendingKey(id);
+  if (past > DELIVERY_LOOKS_MS) {
+    console.error("which AI captions were delivered is still unknown after every automatic look; nothing refunded, the request kept for a person", id, status);
+    await redisPipeline([["SET", key, JSON.stringify(pending), "EX", REFUND_KEEP_SECONDS], ["ZREM", QUEUE, id]]);
+    return "waiting";
+  }
+  console.error("which AI captions were delivered is unknown past the give-up; nothing refunded, the request kept and looked at again", id, status);
+  await redisPipeline([
+    ["SET", key, JSON.stringify(pending), "EX", REFUND_KEEP_SECONDS],
+    ["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, Math.max(LOOK_AGAIN_MS, past / 4)), id],
   ]);
   return "waiting";
 }
@@ -596,15 +645,26 @@ async function cardRefundSettled(id: string, pending: Pending, owed: Owed): Prom
   return refundCharge(pending.pi, fresh ? owed.cents : left, fresh ? owed.key : `${owed.key}:${listed.failed}:${listed.returned}`);
 }
 
-/** The five-minute job's part: every video whose captions are due a look, until `deadline`. */
-export async function sweepAutoCaptions(deadline: number, now = Date.now()): Promise<{ looked: number; done: number }> {
-  const counts = { looked: 0, done: 0 };
+/**
+ * The five-minute job's part: every video whose captions are due a look, until `deadline`. Each look is on its own:
+ * one that fails is counted and said, keeps its place in the queue for the next run, and the rest are looked at. A
+ * list of due videos that does not read is unknown (UnknownReplyError), never an empty queue.
+ */
+export async function sweepAutoCaptions(deadline: number, now = Date.now()): Promise<{ looked: number; done: number; failed: number }> {
+  const counts = { looked: 0, done: 0, failed: 0 };
   if (!isRedisConfigured() || !streamConfig()) return counts;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 30]]);
-  for (const id of Array.isArray(due) ? due : []) {
-    if (Date.now() > deadline || typeof id !== "string") break;
+  const replies = repliesFor(await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 30]]), 1);
+  const due = replies ? stringList(replies[0]) : null;
+  if (!due) throw new UnknownReplyError("the AI captions due a look");
+  for (const id of due) {
+    if (Date.now() > deadline) break;
     counts.looked += 1;
-    if ((await syncAutoCaptions(id, now)) === "done") counts.done += 1;
+    try {
+      if ((await syncAutoCaptions(id, now)) === "done") counts.done += 1;
+    } catch (error) {
+      counts.failed += 1;
+      console.error("a look at a video's AI captions failed; it stays due for the next run", id, error);
+    }
   }
   return counts;
 }

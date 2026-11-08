@@ -223,7 +223,7 @@ async function main(): Promise<void> {
   part("A list of due videos in an unknown shape is unknown, never an empty queue");
   for (const [name, reply] of [["no reply", []], ["an object", [{}]], ["a member that is a number", [[VIDEO, 7]]], ["two replies", [[], []]]] as const) {
     reset();
-    replyFor = (commands) => (commands.length === 1 && commands[0][0] === "ZRANGEBYSCORE" && commands[0][1] === QUEUE ? (reply as unknown[]) : null);
+    replyFor = (commands) => (commands.length === 1 && commands[0][0] === "ZRANGEBYSCORE" && commands[0][1] === QUEUE ? (reply as unknown as unknown[]) : null);
     let threw = "";
     try {
       await sweepAutoCaptions(Date.now() + 8_000, T);
@@ -274,6 +274,11 @@ async function main(): Promise<void> {
       letGo: true,
     });
   }
+  reset();
+  seed();
+  redis.run(["ZADD", QUEUE, T - 2_000, VIDEO]);
+  throwsOn = (c) => c[0] === "GET" && c[1] === KEY;
+  is("one captions look failing: the job runs every part and does not say it all went well", await run(), { status: 500, ok: false, failed: ["captions"], videos: true, captions: true, watch: true, letGo: true });
 
   console.error = realError;
   done();

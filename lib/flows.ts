@@ -236,8 +236,9 @@ function parseFlows(raw: unknown): Flow[] {
 
 /**
  * The store's workflows for the sender (sendDueSteps): none only when Redis says exactly nil; a reply that is missing
- * or of another shape, or a string that is not a JSON list, throws, so the due batch goes back in the queue for a
- * later run instead of being dropped (CX-123 rule 24; a garbled '{' or '{}' is unknown, not "no workflows": #2861).
+ * or of another shape, a string that is not a JSON list, or a list with any element that is not a workflow, throws, so
+ * the due batch goes back in the queue for a later run instead of being dropped (CX-123 rule 24; a garbled '{', '{}'
+ * or '[1]' is unknown, not "no workflows" or "this workflow is gone": #2861).
  */
 async function readFlowsExact(listId: string): Promise<Flow[]> {
   const reply = repliesFor(await redisPipeline([["GET", flowsKey(listId)]]), 1);
@@ -249,9 +250,15 @@ async function readFlowsExact(listId: string): Promise<Flow[]> {
   } catch {
     throw new UnknownReplyError("the store's workflows");
   }
-  if (!Array.isArray(list)) throw new UnknownReplyError("the store's workflows");
+  if (!Array.isArray(list) || !list.every(isFlowShape)) throw new UnknownReplyError("the store's workflows");
   return list as Flow[];
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A workflow as writeFlows stores it: a string id, a boolean active and a list of steps that are each an object. */
+const isFlowShape = (value: unknown): boolean =>
+  isRecord(value) && typeof value.id === "string" && typeof value.active === "boolean" && Array.isArray(value.steps) && value.steps.every(isRecord);
 
 export class FlowWriteUnconfirmed extends Error {
   constructor() {

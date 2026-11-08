@@ -1099,35 +1099,49 @@ export class MemoryRedis {
           this.run(["SET", gone, "1", "EX", seconds]);
           return taken;
         }
-        // lib/erasure-index.ts FORGET_NOTED: an address's notes read and deleted, with the records they name, in one
-        // step. Read as Redis reads: a missing or empty container is not a key, and a note of another type is refused
-        // before anything is deleted (the plain SMEMBERS and ZRANGEBYSCORE here would make an empty one instead).
-        if (key.startsWith("-- marktmorgen:forget-noted:v1\n") && args[0] === "2" && args.length === 3) {
-          const [, index, notes] = args;
-          const held = (one: string) => {
+        // lib/erasure-index.ts FORGET_NOTED and FORGET_NOTED_PART, step for step, read as Redis reads: a missing or
+        // empty container is not a key, and a note of another type is refused before anything is deleted (the plain
+        // SMEMBERS and ZRANGEBYSCORE here would make an empty one instead).
+        if (key.startsWith("-- marktmorgen:forget-noted:v2\n") || key.startsWith("-- marktmorgen:forget-noted-part:v1\n")) {
+          const count = Number(args[0]);
+          const named = args.slice(1, count + 1);
+          const argv = args.slice(count + 1);
+          const [index, notes] = named;
+          const filled = (one: string) => {
             this.live(one);
             const value = this.data.get(one);
             return value instanceof Set || value instanceof Map ? value.size > 0 : Array.isArray(value) ? value.length > 0 : value !== undefined;
           };
           const members = (one: string, kind: "set" | "zset"): string[] => {
-            if (!held(one)) return [];
+            if (!filled(one)) return [];
             const value = this.data.get(one);
             if (kind === "set" && value instanceof Set) return [...value];
             if (kind === "zset" && Array.isArray(value) && typeof value[0] === "object") return this.run(["ZRANGEBYSCORE", one, "-inf", "+inf"]) as string[];
             throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
           };
+          const remove = (keys: string[]) => {
+            let gone = 0;
+            for (const one of new Set(keys)) {
+              if (filled(one)) gone += 1;
+              this.run(["DEL", one]);
+            }
+            return gone;
+          };
+          if (!Number.isSafeInteger(count) || count < 2 || named.length !== count) throw new Error("MemoryRedis: unsupported EVAL");
           const raw = members(index, "set");
           const scored = members(notes, "zset");
-          // The script keeps only the product's own keys: their prefix, read from the note's own name.
-          const ours = index.slice(0, index.indexOf(":") + 1);
-          const keys = [...new Set([index, notes, ...[...raw, ...scored].filter((one) => one.startsWith(ours))])];
-          let gone = 0;
-          for (const one of keys) {
-            const there = held(one);
-            this.run(["DEL", one]);
-            if (there) gone += 1;
+          if (key.startsWith("-- marktmorgen:forget-noted-part:v1\n")) {
+            if (count < 3 || argv.length) throw new Error("MemoryRedis: unsupported EVAL");
+            const records = named.slice(2);
+            const gone = remove(records);
+            if (raw.length) this.run(["SREM", index, ...records]);
+            if (scored.length) this.run(["ZREM", notes, ...records]);
+            return gone;
           }
-          return [gone, (raw.length ? 1 : 0) + (scored.length ? 1 : 0)];
+          const read = Number(argv[0]);
+          if (!Number.isSafeInteger(read) || raw.length !== read || scored.length !== argv.length - 1 - read) return "changed";
+          if (!argv.slice(1, read + 1).every((one) => raw.includes(one)) || !argv.slice(read + 1).every((one) => scored.includes(one))) return "changed";
+          return [remove(named), (read ? 1 : 0) + (argv.length - 1 - read ? 1 : 0)];
         }
         // lib/stock.ts STOCK_ADMIT and STOCK_BIND (513 [PF1], Codex G2's review of #1730, 5 November 2026), step for step.
         if (key.startsWith("-- marktmorgen:stock-admit:v1\n")) {

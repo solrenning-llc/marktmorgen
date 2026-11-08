@@ -769,6 +769,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },
+  "nl:stamp:drop@lib/pdf-stamp.ts": company("Folders of stamped copies to delete again", "One set, members gone when done."),
   "nl:phone:cfg:@lib/phone-alerts.ts": { what: "Phones that hear of sales", parts: [capped(MAX_DEVICES * 6 * 2 * KB, "MAX_STORE_DEVICES devices.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },
   "nl:phone:seen:@lib/phone-alerts.ts": { what: "An event already sent to phones", parts: [per("order", 40, MARK, "A sale."), per("buyer", 40, MARK, "A buyer's action.")] },
   "nl:phone:st:@lib/phone-alerts.ts": { what: "How the last send went, a device", parts: [capped(MAX_DEVICES * 6 * KB, "One a device.", src("lib/phone-alerts.ts", "MAX_DEVICES"))] },

@@ -280,6 +280,12 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   return { paid: found, ended, refunded };
 }
 
+/** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
+function wholeSeconds(value: unknown): number | null {
+  if (typeof value === "number") return countOf(value);
+  return typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : null;
+}
+
 /** The cached answer, in the shape written before ended memberships were kept too. */
 function parseLedger(cached: string): Ledger | null {
   try {
@@ -331,10 +337,19 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   }
   const fromStripe = asked.paid;
   const recorded = new Map<string, number>();
+  // Each course written down with when it began, in whole seconds (CX-123 rule 24): a value of another shape, or
+  // fields and values that do not pair up, is unknown, never 0 (1970, every drip module open) or "not written down".
+  const pairs: [unknown, unknown][] = [];
   if (Array.isArray(ledger)) {
-    for (let i = 0; i + 1 < ledger.length; i += 2) recorded.set(String(ledger[i]), Number(ledger[i + 1]));
+    if (ledger.length % 2 !== 0) throw new UnknownReplyError("the courses written down for an address");
+    for (let i = 0; i + 1 < ledger.length; i += 2) pairs.push([ledger[i], ledger[i + 1]]);
   } else if (ledger && typeof ledger === "object") {
-    for (const [k, v] of Object.entries(ledger as Record<string, string>)) recorded.set(k, Number(v));
+    pairs.push(...Object.entries(ledger as Record<string, unknown>));
+  }
+  for (const [field, value] of pairs) {
+    const began = wholeSeconds(value);
+    if (typeof field !== "string" || began === null) throw new UnknownReplyError("the courses written down for an address");
+    recorded.set(field, began);
   }
 
   // Brought over from another platform: the course itself, or a course in a
@@ -379,9 +394,13 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     .map((id) => courses.find((p) => p.id === id))
     .filter((p): p is Listing => Boolean(p?.course));
   if (withCourse.length) {
-    const flags = await redisPipeline(withCourse.map((p) => ["SISMEMBER", blockedKey(p.course!.id), emailKey(email)]));
+    const flags = repliesFor(await redisPipeline(withCourse.map((p) => ["SISMEMBER", blockedKey(p.course!.id), emailKey(email)])), withCourse.length);
+    // One 0 or 1 for each course asked (CX-123 rule 24): any other reply is unknown, never "not taken off", so a
+    // student the creator removed is never let back in on a reply that could not be read.
+    const taken = flags?.map(countOf);
+    if (!taken || taken.some((n) => n === null || n > 1)) throw new UnknownReplyError("whether a student was taken off a course");
     withCourse.forEach((p, i) => {
-      if (flags[i] === 1 || flags[i] === "1") result.delete(p.id);
+      if (taken[i] === 1) result.delete(p.id);
     });
   }
   return { paid: result, ended: asked.ended, refunded: asked.refunded };

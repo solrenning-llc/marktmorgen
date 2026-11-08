@@ -165,6 +165,12 @@ export function isUpcoming(event: CommunityEvent, now = Date.now()): boolean {
 
 // ------------------------------------------------------------------ records
 
+/** An event's product list as the code writes it (ids of 1 to 40 characters), or null for anything else. */
+function productList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.every((x) => typeof x === "string" && x.length >= 1 && x.length <= 40)) return null;
+  return [...new Set(value as string[])].slice(0, 200);
+}
+
 function parseEvent(raw: unknown): CommunityEvent | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -175,6 +181,11 @@ function parseEvent(raw: unknown): CommunityEvent | null {
     const link = typeof v.link === "string" ? cleanRoom(v.link) : null;
     const room = typeof v.room === "string" && isVideoRoom(v.room) ? v.room : "";
     const ownLink = typeof link === "string" ? link : "";
+    // Who may come, read exactly (CX-123 rule 24): no list is an event for every member, as the code writes one; a
+    // list in another shape, or holding an id this code never writes, is not "for everyone", so the record is not
+    // read at all and nobody is let in on it (mayAttend), rather than every member.
+    const only = v.only === undefined ? [] : productList(v.only);
+    if (only === null) return null;
     return {
       id: v.id,
       title: cleanLine(v.title, MAX_EVENT_TITLE) || "Live event",
@@ -189,7 +200,7 @@ function parseEvent(raw: unknown): CommunityEvent | null {
       meet: v.where === "meet" && isMeetProvider(v.meet) ? v.meet : null,
       room,
       link: ownLink,
-      only: Array.isArray(v.only) ? [...new Set(v.only.filter((x): x is string => typeof x === "string" && x.length <= 40))].slice(0, 200) : [],
+      only,
       replay: parseVideo(v.replay),
       cancelled: v.cancelled === true,
       post: typeof v.post === "string" && ITEM_ID.test(v.post) ? v.post : "",

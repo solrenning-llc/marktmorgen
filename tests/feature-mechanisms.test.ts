@@ -5,7 +5,7 @@ import { FEATURE_MECHANISMS } from "@/lib/feature-mechanisms";
 import { findPage } from "@/lib/site-pages";
 test("every feature and creator page has one factual mechanism, with no orphan or missing entry",()=>{
  const pages=[...FEATURE_PAGES,...CREATOR_PAGES];
- assert.equal(pages.length,42);
+ assert.equal(pages.length,44);
  assert.deepEqual(pages.map(page=>page.slug).sort(),Object.keys(FEATURE_MECHANISMS).sort());
  for(const page of pages){
   const blocks=page.blocks.filter(block=>block.kind==="how"&&block.title==="A practical way to use it");

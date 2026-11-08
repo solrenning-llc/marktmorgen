@@ -130,19 +130,22 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const used = pages?.post.used ?? [];
   // Read, not indexed, so there is nothing that can fall out of step: the room
   // as it is now, and this person's own recent conversations and no one else's.
+  // One that could not be read is unknown (null), never "no match" (CX-123
+  // rule 24): its tab carries no number, and opening it says it was not searched.
+  const unread = <T,>(read: Promise<T[]>) => read.catch((): null => null);
   const [roomHits, dmHits] = used.length
     ? await Promise.all([
-        config.chat.on ? searchRoom(id, used).catch(() => []) : Promise.resolve([]),
-        config.dm.on ? searchMessages(id, key, used).catch(() => []) : Promise.resolve([]),
+        config.chat.on ? unread(searchRoom(id, used)) : Promise.resolve([]),
+        config.dm.on ? unread(searchMessages(id, key, used)) : Promise.resolve([]),
       ])
     : [[], []];
-  const count = (t: Tab) =>
-    t === "room" ? roomHits.length : t === "dm" ? dmHits.length : (pages?.[t].total ?? 0);
+  const count = (t: Tab): number | null =>
+    t === "room" ? (roomHits?.length ?? null) : t === "dm" ? (dmHits?.length ?? null) : (pages?.[t].total ?? 0);
   // Nobody pressed a tab yet, so open the first one holding anything. Landing
   // on an empty Posts tab with four lessons sitting one press away reads as
   // "nothing found", and the member has to notice a small number to learn
   // otherwise. Posts when everything is empty, so the page is never tabless.
-  const tab: Tab = chosen ?? (pages ? (TABS.find((t) => count(t.kind) > 0)?.kind ?? "post") : "post");
+  const tab: Tab = chosen ?? (pages ? (TABS.find((t) => (count(t.kind) ?? 0) > 0)?.kind ?? "post") : "post");
   const empty = { posts: [], next: null, used: [], total: 0 };
   const first = indexed(tab) ? (pages?.[tab] ?? empty) : empty;
   const page = indexed(tab) && before !== null && pages ? await search(id, asked, before, tab) : first;
@@ -166,8 +169,10 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const events = tab === "event" ? await eventsFound(store, config, page.posts, gate) : [];
   const people = tab === "member" ? await membersFound(id, page.posts) : [];
 
-  const talk = tab === "room" ? roomHits.slice(0, SHOWN_TALK) : [];
-  const mine = tab === "dm" ? dmHits.slice(0, SHOWN_TALK) : [];
+  const talk = tab === "room" ? (roomHits ?? []).slice(0, SHOWN_TALK) : [];
+  const mine = tab === "dm" ? (dmHits ?? []).slice(0, SHOWN_TALK) : [];
+  // The tab being read could not be searched: said, never "No match".
+  const unsearched: "room" | "dm" | null = tab === "room" && roomHits === null ? "room" : tab === "dm" && dmHits === null ? "dm" : null;
   // Names for whoever wrote what is listed, never their addresses.
   const talkers = [...talk.map((m) => m.a), ...mine.map((h) => h.other)].filter((a) => a !== CREATOR);
   const [members, numbers, polls] = await Promise.all([
@@ -247,19 +252,23 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
                     aria-current={on ? "page" : undefined}
                   >
                     {t.label}
-                    <span className="cm-tab-n">{n}</span>
+                    {n === null ? null : <span className="cm-tab-n">{n}</span>}
                   </Link>
                 );
               })}
             </nav>
 
-            <p className="st-muted mt-3 text-sm">
-              {w.found(tab, shown, used.length === 1)}
-              {dropped && used.length ? ` ${w.searchedFor(used.join(", "))}` : ""}
-              {held > 0 ? ` ${w.heldMore(held)}` : ""}
-            </p>
+            {unsearched ? (
+              <p className="cm-flash cm-flash-warn mt-3" role="status">{w.searchUnread(unsearched)}</p>
+            ) : (
+              <p className="st-muted mt-3 text-sm">
+                {w.found(tab, shown, used.length === 1)}
+                {dropped && used.length ? ` ${w.searchedFor(used.join(", "))}` : ""}
+                {held > 0 ? ` ${w.heldMore(held)}` : ""}
+              </p>
+            )}
 
-            {shown === 0 ? (
+            {shown === 0 && !unsearched ? (
               <div className="st-note mt-5 text-center">
                 <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.noMatch}</p>
                 <p className="mt-1 text-sm">
@@ -383,12 +392,12 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
                 search that read the last 500 messages of the room, or 30
                 conversations, should not let somebody think it read everything
                 ever written. */}
-            {tab === "room" ? (
+            {tab === "room" && roomHits ? (
               <p className="st-muted mt-5 text-xs">
                 {`${w.roomSearched(500)}${roomHits.length > SHOWN_TALK ? ` ${w.newestShown(SHOWN_TALK)}` : ""}`}
               </p>
             ) : null}
-            {tab === "dm" ? (
+            {tab === "dm" && dmHits ? (
               <p className="st-muted mt-5 text-xs">
                 {`${w.dmSearched(SEARCH_CONVERSATIONS, SEARCH_MESSAGES)}${dmHits.length > SHOWN_TALK ? ` ${w.newestShown(SHOWN_TALK)}` : ""}`}
               </p>

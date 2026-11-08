@@ -92,7 +92,7 @@ is("the stores could not all be read: no card, since a failed read is not proof 
 is("no stores at all: no card", lastShown(kept, []), null);
 is("a handle that only starts the same is not the store", lastShown(kept, ["ada"]), null);
 is("nothing kept: nothing shown", lastShown(null, ["ada-studio"]), null);
-is("the library hands the card the handles it shows, or null when a store could not be read", [/<LibraryContinue person=\{continuePerson\} open=\{openHandles\} \/>/.test(library), /const openHandles = [^;]*unread[^;]*\? null : shelves\.map\(\(\{ store \}\) => store\.handle\)/.test(library), /storeForId\(sid\)\.catch\(\(\) => UNREAD_STORE\)/.test(library) && /unread = read\.some\(\(s\) => s === UNREAD_STORE\);/.test(library)], [true, true, true]);
+is("the library hands the card the handles it shows, or null when a store could not be read", [/<LibraryContinue person=\{continuePerson\} open=\{openHandles\} \/>/.test(library), /const openHandles = [^;]*unread[^;]*\? null : shelves\.map\(\(\{ store \}\) => store\.handle\)/.test(library), /store === "unknown" \? null/.test(library) && /\(\) => null,/.test(library) && /storesUnread = read\.filter\(\(r\) => r === null\)\.length;/.test(library) && /const unread = listUnread \|\| storesUnread > 0;/.test(library)], [true, true, true]);
 is("the card draws only what lastShown lets through, and never removes a record for it", [/const last = lastShown\(read, open\);/.test(card), /if \(!key \|\| raw === null \|\| read\) return;/.test(card)], [true, true]);
 
 part("Said in the privacy policy, and in the person-data registry");

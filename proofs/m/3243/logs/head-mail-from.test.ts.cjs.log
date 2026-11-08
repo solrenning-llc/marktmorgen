@@ -1,0 +1,20 @@
+✔ the domain of a From line is read whether or not a name is in front (1.270277ms)
+✔ with a domain set apart, each store writes from its own address on it (0.378442ms)
+✔ no setting, or one that is not a domain, changes nothing (0.189136ms)
+✔ the domain the site's own email comes from is never the creators' (0.115444ms)
+✔ an email Resend will not take from the creators' domain goes from the site's own address, under the same name (0.274715ms)
+✔ a handle that cannot be the first half of an address falls back (0.160452ms)
+✔ a creator's list email is from their own name at their own address (0.34464ms)
+✔ a list email Resend will not take from the creators' domain goes out from the site's own address (16.59123ms)
+✔ every email that asks for a sale or goes to a list is sent from the creator's address (0.983034ms)
+✔ Amazon is told about both domains, and may send from both (0.248084ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.85537
+M_ADMISSIONS {"nested":14,"pipeline":4,"mockHTTP":3,"worldCommands":0}
+Resend refused the creators' domain for a batch; sending it from the site's own address 403

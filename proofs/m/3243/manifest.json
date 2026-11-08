@@ -1,0 +1,110 @@
+[
+  {
+    "file": "before-winback-uncertain-send.test.ts.cjs.log",
+    "sha256": "ad19fb0e33bac24438e62aa1c06c5a3a82f9c8cf7016b85f56d403ae2944895b",
+    "result": [
+      "14 checks, 4 failing."
+    ],
+    "admissions": [
+      "{\"nested\":226,\"pipeline\":166,\"mockHTTP\":21,\"worldCommands\":0}"
+    ],
+    "ceiling": false
+  },
+  {
+    "file": "before-yearly-ask-uncertain-send.test.ts.cjs.log",
+    "sha256": "9e4d27748380fbb9833ea3a3e43b5bfe2b64756eb761f4831bf5a5a80e41bf6c",
+    "result": [
+      "12 checks, 4 failing."
+    ],
+    "admissions": [
+      "{\"nested\":0,\"pipeline\":0,\"mockHTTP\":0,\"worldCommands\":27}"
+    ],
+    "ceiling": false
+  },
+  {
+    "file": "head-l6-winback-exact.test.ts.cjs.log",
+    "sha256": "6871c593cd1cd9bc0fcd807698b74cf934d6a39d3a6c7ed93109bdeeebe6bfe0",
+    "result": [
+      "13 checks, 2 failing."
+    ],
+    "admissions": [
+      "{\"nested\":1588,\"pipeline\":1443,\"mockHTTP\":100,\"worldCommands\":0}"
+    ],
+    "ceiling": true
+  },
+  {
+    "file": "head-l6-winback-order.test.ts.cjs.log",
+    "sha256": "649150119078af49d8ff9a5e02116d32d29ac9fd5ee298a0f8f700aa54b23478",
+    "result": [
+      "3 checks, 2 failing."
+    ],
+    "admissions": [
+      "{\"nested\":2279,\"pipeline\":2083,\"mockHTTP\":100,\"worldCommands\":0}"
+    ],
+    "ceiling": true
+  },
+  {
+    "file": "head-mail-from.test.ts.cjs.log",
+    "sha256": "1b15edbe24ed6d809384b5d3e31ed40fb09f4d27ba2150650e83884f285bca02",
+    "result": [],
+    "admissions": [
+      "{\"nested\":14,\"pipeline\":4,\"mockHTTP\":3,\"worldCommands\":0}"
+    ],
+    "ceiling": false
+  },
+  {
+    "file": "head-trial-nudges.test.ts.cjs.log",
+    "sha256": "ab8f852434aa9ee1f5ff508e3c105b33124c1eb62c77d32e24945ece1656cac8",
+    "result": [
+      "18 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":158,\"pipeline\":118,\"mockHTTP\":9,\"worldCommands\":0}"
+    ],
+    "ceiling": false
+  },
+  {
+    "file": "head-winback-uncertain-send.test.ts.cjs.log",
+    "sha256": "1922f67cb6a62002acca675880591d99d50f801a476ad5b464f7472b8193ab74",
+    "result": [
+      "14 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":184,\"pipeline\":138,\"mockHTTP\":15,\"worldCommands\":0}"
+    ],
+    "ceiling": false
+  },
+  {
+    "file": "head-winback.test.ts.cjs.log",
+    "sha256": "e9a112f959882d417f843a9f8ffab7c965a0eea68869e74672cffeb4e486c4c6",
+    "result": [
+      "30 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":419,\"pipeline\":312,\"mockHTTP\":20,\"worldCommands\":0}"
+    ],
+    "ceiling": false
+  },
+  {
+    "file": "head-yearly-ask-read-evidence.test.ts.cjs.log",
+    "sha256": "49b445c9c76256c89a43dfab321964e19c4f07e8e8c04ccd08afb65bac003041",
+    "result": [
+      "41 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":0,\"pipeline\":0,\"mockHTTP\":0,\"worldCommands\":0}"
+    ],
+    "ceiling": false
+  },
+  {
+    "file": "head-yearly-ask-uncertain-send.test.ts.cjs.log",
+    "sha256": "f87506abd32348a8be44b6c4f2fe9de836ceb8f7f78b33dd1828a34ec4153d53",
+    "result": [
+      "12 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":0,\"pipeline\":0,\"mockHTTP\":0,\"worldCommands\":19}"
+    ],
+    "ceiling": false
+  }
+]

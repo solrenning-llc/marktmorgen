@@ -1,0 +1,25 @@
+
+Healthy control: sent once, its link works, and never again
+  ok    the first run sends Ann's offer
+  ok    Ann was written to once
+  ok    its link opens the offer
+  ok    the next run does not write to Ann again
+
+The sender answered a server error: not known whether it went
+  ok    the first run counts bob's offer as not sent
+  ok    bob's offer was handed to the sender once
+  ok    the email carried a link
+  ok    the next run does not write to bob a second time
+  ok    the link in the email that may have arrived still opens the offer
+
+The sender answered nothing (a dropped connection): not known whether it went
+  ok    the first run counts cat's offer as not sent
+  ok    cat's offer was handed to the sender once
+  ok    the email carried a link
+  ok    the next run does not write to cat a second time
+  ok    the link in the email that may have arrived still opens the offer
+
+14 checks, all passing.
+M_ADMISSIONS {"nested":184,"pipeline":138,"mockHTTP":15,"worldCommands":0}
+a come-back offer may not have gone; kept as sent wbunsure
+a come-back offer may not have gone; kept as sent wbunsure

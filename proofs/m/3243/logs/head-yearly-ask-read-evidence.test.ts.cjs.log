@@ -1,0 +1,50 @@
+
+Unknown EXISTS evidence cannot authorize contacts, a claim, a link or mail
+  ok    missing
+  ok    undefined
+  ok    extra
+  ok    text
+  ok    boolean
+  ok    null
+  ok    negative
+  ok    fraction
+  ok    extra field
+  ok    symbol
+  ok    inherited
+  ok    accessor
+  ok    proxy
+
+Only an exact SET NX acknowledgement authorizes the link and mail
+  ok    missing
+  ok    undefined
+  ok    extra
+  ok    text
+  ok    boolean
+  ok    null
+  ok    negative
+  ok    fraction
+  ok    extra field
+  ok    symbol
+  ok    inherited
+  ok    accessor
+  ok    proxy
+  ok    confirmed fresh member and claim preserve the successful offer
+  ok    confirmed earlier offer is skipped before contacts
+  ok    confirmed busy claim never mints or sends
+
+Unknown resume evidence never restarts the paid store scan
+  ok    missing
+  ok    extra
+  ok    number
+  ok    empty
+  ok    partial
+  ok    negative skip
+  ok    unsafe skip
+  ok    fraction skip
+  ok    extra field
+  ok    confirmed absent cursor starts the first scan
+  ok    confirmed cursor resumes its own batch
+  ok    no executable reply property was read
+
+41 checks, all passing.
+M_ADMISSIONS {"nested":0,"pipeline":0,"mockHTTP":0,"worldCommands":0}

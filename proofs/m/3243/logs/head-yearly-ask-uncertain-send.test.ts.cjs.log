@@ -1,0 +1,35 @@
+
+Healthy control: sent once, and never again
+  ok    the first run sends the offer
+  ok    the next run sends nothing
+
+sendEmail answered false (refused or not known): the mark stays, and the next run does not write again
+  ok    the first run hands the offer to the sender once and counts it as not sent
+  ok    the mark is kept
+  ok    the next run does not send the offer a second time
+
+sendEmail threw (not known whether it went): the mark stays, and the next run does not write again
+  ok    the offer was handed to the sender once
+  ok    the mark is kept
+  ok    the next run does not send the offer a second time
+
+Confirmed not sent (the run failed before the sender): the mark is let go, and the next run sends once
+  ok    nothing was handed to the sender
+  ok    the mark is let go
+  ok    the next run sends the offer once
+  ok    and never twice
+
+12 checks, all passing.
+M_ADMISSIONS {"nested":0,"pipeline":0,"mockHTTP":0,"worldCommands":19}
+the yearly offer may not have gone; kept as sent syntheticyearlyuncertain
+sending the yearly offer failed syntheticyearlyuncertain Error: synthetic: the connection dropped after the request went out
+    at world.mail (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:2736:37)
+    at sendEmail (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:108:16)
+    at askStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:2616:24)
+    at async run (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:2717:12)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:2737:3)
+sending the yearly offer failed syntheticyearlyuncertain Error: synthetic: the link could not be made
+    at mintYearlyLink (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:128:30)
+    at askStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:2602:27)
+    at async run (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:2717:12)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-yearly-ask-uncertain-send.test.ts.cjs:2745:3)

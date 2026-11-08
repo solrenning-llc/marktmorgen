@@ -1,0 +1,31 @@
+
+Healthy control: sent once, its link works, and never again
+  ok    the first run sends Ann's offer
+  ok    Ann was written to once
+  ok    its link opens the offer
+  ok    the next run does not write to Ann again
+
+The sender answered a server error: not known whether it went
+  ok    the first run counts bob's offer as not sent
+  ok    bob's offer was handed to the sender once
+  ok    the email carried a link
+  FAIL  the next run does not write to bob a second time
+        expected 1
+        got      2
+  FAIL  the link in the email that may have arrived still opens the offer
+        expected "bob@example.com"
+        got      undefined
+
+The sender answered nothing (a dropped connection): not known whether it went
+  ok    the first run counts cat's offer as not sent
+  ok    cat's offer was handed to the sender once
+  ok    the email carried a link
+  FAIL  the next run does not write to cat a second time
+        expected 1
+        got      2
+  FAIL  the link in the email that may have arrived still opens the offer
+        expected "cat@example.com"
+        got      undefined
+
+14 checks, 4 failing.
+M_ADMISSIONS {"nested":226,"pipeline":166,"mockHTTP":21,"worldCommands":0}

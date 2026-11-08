@@ -1,0 +1,10 @@
+{"mode":"head","file":"l6-winback-order.test.ts","checked":411,"status":1,"signal":null,"result":["3 checks, 2 failing."],"tail":"count (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)\n    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58442:26)\n    at sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:32)\n    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58693:3)\n"}
+file:///workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/run.mjs:18
+ const result=spawnSync(process.execPath,['--max-old-space-size=512',out],{cwd:root,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const log=(result.stdout||'')+(result.stderr||'');fs.writeFileSync(out+'.log',log);console.log(JSON.stringify({mode,file,checked,status:result.status,signal:result.signal,error:result.error?.message,result:log.match(/\d+ checks, (?:all passing|\d+ failing)\./g),tail:log.slice(-500)}));if(result.signal||result.error||/M_.*CEILING|M_EXTERNAL_NETWORK_DENIED/.test(log))throw Error('Incomplete child, not a product verdict');
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   ^
+
+Error: Incomplete child, not a product verdict
+    at file:///workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/run.mjs:18:564
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.22.1

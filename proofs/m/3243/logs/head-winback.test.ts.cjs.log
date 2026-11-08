@@ -1,0 +1,45 @@
+
+The setting
+  ok    off with no coupon
+  ok    off with no postal address to print
+  ok    a day not offered falls back to a week
+  ok    the words
+
+The email says what it is
+  ok    the subject names the product and the offer
+  ok    it says nothing is charged by opening it
+  ok    on, with its coupon and its address
+
+Who is written to
+  ok    exactly one email
+  ok    to the member who agreed and has not come back
+  ok    never to somebody already back, a plan, a set-length membership, another store, or somebody who never agreed
+  ok    a two-payment offer is not sent for a yearly membership
+  ok    a membership that ended three days ago waits for its seven
+  ok    it carries the one-click unsubscribe
+  ok    and the creator's postal address
+  ok    a second run sends nothing more
+
+The link
+  ok    it is for Dana, on this product
+  ok    with the offer as it was sent
+  ok    it opens nothing for another product
+  ok    without the box to start the membership before the 14 days end (lib/digital-consent.ts), no checkout opens
+  ok    the checkout opens
+  ok    with the coupon applied
+  ok    and no box for another code beside it
+  ok    for her address only
+  ok    with no second free trial
+  ok    marked, so the creator's Stripe shows where it came from
+
+Somebody who left the list
+  ok    the unsubscribe token is the list's own
+  ok    is not written to again
+  ok    while a one-payment offer now reaches the yearly member it could not before
+
+A price since removed, or kept with nothing to hand over (owner, C2-89)
+  ok    only the member whose price is still offered is written to
+  ok    the others leave no mark: no email spent, no later offer held back
+
+30 checks, all passing.
+M_ADMISSIONS {"nested":419,"pipeline":312,"mockHTTP":20,"worldCommands":0}

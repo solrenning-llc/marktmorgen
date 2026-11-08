@@ -1,0 +1,29 @@
+
+The step named
+  ok    with nothing to sell: put something up
+  ok    with no Stripe account: connect it
+  ok    then the coach's weightiest check
+  ok    with a link to the place it is fixed
+  ok    the first email says it is one of two
+  ok    the second says the days left
+
+Which day
+  ok    nothing on the first days
+  ok    the first on the fourth day
+  ok    the second on the tenth
+  ok    none once the trial is over
+  ok    none on a trial set to stop
+  ok    none on a plan already paying
+
+Sent once each, never to a store that sold
+  ok    the first, to the store that has not sold only
+  ok    not again the next day
+  ok    the second on the tenth day
+  ok    and no more
+
+A day the job missed
+  ok    first seen on the eleventh day: only the second is sent
+  ok    and the first is not sent after it
+
+18 checks, all passing.
+M_ADMISSIONS {"nested":158,"pipeline":118,"mockHTTP":9,"worldCommands":0}

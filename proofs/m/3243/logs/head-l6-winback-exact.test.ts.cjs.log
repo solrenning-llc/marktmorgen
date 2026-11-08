@@ -1,0 +1,750 @@
+
+Has the member come back? Only a whole list says no
+  ok    a list read in part, or no list, never counts as "has not come back": nobody is written to
+  ok    the claim taken on an unknown reading was let go: the next whole reading writes to Bob, once
+
+A partial membership row never proves that the member has not come back (Codex N on #2714)
+  ok    an active row with missing metadata is unknown, never 'has not come back'
+  ok    read whole the next time (live, but to another product): Fox is written to, once
+
+Is the mark ours? Only an exact OK says yes
+  ok    a claim answered in an unknown shape that did not land is not taken for ours: Cat is not written to
+  ok    the next run claims it whole and writes to Cat, once
+  ok    a claim answered oddly that did land with our own value is read back as ours: Fay is written to
+  ok    and never twice
+  ok    the once-a-while mark answered oddly but ours: Gus is written to, not held back for months
+
+Every ended membership of the window, past the first page
+  ok    Dan and Eve are both read, though the window's events come one a page
+  ok    and nobody is written to twice
+
+No more than a hundred offers looked at per store per run, however many ended (Claude 3 on #2714)
+  FAIL  150 ended: a hundred looked at this run
+        expected 100
+        got      11
+  FAIL  the other fifty on the next
+        expected 150
+        got      11
+
+13 checks, 2 failing.
+M_ADMISSIONS {"nested":1588,"pipeline":1443,"mockHTTP":100,"worldCommands":0}
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+sending a come-back offer failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58778:3)
+reading a store's ended memberships failed lsixback Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58442:26)
+    at sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58545:32)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-exact.test.ts.cjs:58780:3)

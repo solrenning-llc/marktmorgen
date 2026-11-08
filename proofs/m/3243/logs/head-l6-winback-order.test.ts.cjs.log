@@ -1,0 +1,565 @@
+
+Three daily runs over two days of ended memberships, listed newest first by Stripe
+  FAIL  all 100 of day 2 looked at
+        expected 100
+        got      0
+  FAIL  all 150 of day 1 looked at before they leave the window
+        expected 150
+        got      33
+  ok    no run looked at more than its 100, and nobody twice
+
+3 checks, 2 failing.
+M_ADMISSIONS {"nested":2279,"pipeline":2083,"mockHTTP":100,"worldCommands":0}
+a come-back offer may not have gone; kept as sent cfourwb
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+sending a come-back offer failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58470:27)
+    at async sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:26)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58691:3)
+reading a store's ended memberships failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58442:26)
+    at sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:32)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58692:3)
+reading a store's ended memberships failed cfourwb Error: M_HTTP_CEILING
+    at f (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:1:529)
+    at /workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5952:29
+    at timed (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:4177:19)
+    at onAccount (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:5951:43)
+    at sweepStore (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58442:26)
+    at sendWinBacks (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58545:32)
+    at async main (/workspace/scratch/d1ece80b1417/m-review-3243/proofs/m/3243/logs/head-l6-winback-order.test.ts.cjs:58693:3)

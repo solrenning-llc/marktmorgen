@@ -412,7 +412,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
       <strong>{w.testModeTitle}</strong> {w.testModeBody}
     </p>
   ) : selling || byPayPal ? (
-    <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+    <>
+      <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+      <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
+    </>
   ) : (
     <p className="st-note mt-6 text-sm">
       <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBodyOne(store.name)}
@@ -558,7 +561,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />
       {page.blocks.some((block) => block.kind === "pictures" && block.items.length > 0) ? <PictureViewer lang={store.language} /> : null}
-      <main id="content" className={`relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
+      <main id="content" className={`st-measure relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
         {children}
       </main>
       {sticky}

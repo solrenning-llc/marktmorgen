@@ -23,7 +23,7 @@ import { claimsKey, hostId } from "@/lib/host-claims";
 import { StoreBusyError, claimHandle, createStore, releaseHandle, renameHandle, setStripeAccount, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
-import { closeForErasure, closingStateKey, reactivate } from "./closed-for-erasure";
+import { closeForErasure, closingStateKey, reactivate, sentCommands } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
@@ -36,7 +36,7 @@ function after(word: string, key: (k: string) => boolean, then: () => Promise<vo
   let seen = 0;
   const inner = redis.pipeline;
   redis.pipeline = (async (commands: Command[]) => {
-    const hit = commands.some((c) => c[0] === word && key(String(c[1])));
+    const hit = sentCommands(commands).some((c) => c[0] === word && key(String(c[1])));
     const reply = await inner(commands);
     if (hit && ++seen === nth) await then();
     return reply;
@@ -48,7 +48,7 @@ function before(word: string, key: (k: string) => boolean, then: () => Promise<v
   let armed = true;
   const inner = redis.pipeline;
   redis.pipeline = (async (commands: Command[]) => {
-    if (armed && commands.some((c) => c[0] === word && key(String(c[1])))) {
+    if (armed && sentCommands(commands).some((c) => c[0] === word && key(String(c[1])))) {
       armed = false;
       await then();
     }
@@ -61,7 +61,7 @@ function dyingAt(word: string, key: (k: string) => boolean): void {
   let died = false;
   const inner = redis.pipeline;
   redis.pipeline = (async (commands: Command[]) => {
-    if (!died && commands.some((c) => c[0] === word && key(String(c[1])))) {
+    if (!died && sentCommands(commands).some((c) => c[0] === word && key(String(c[1])))) {
       died = true;
       throw new Error("synthetic: the pipeline did not reach the database");
     }

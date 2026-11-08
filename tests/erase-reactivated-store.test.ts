@@ -26,7 +26,7 @@ import { leadsKey } from "@/lib/contacts";
 import { claimHandle, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
-import { closeForErasure, closingStateKey, reactivate } from "./closed-for-erasure";
+import { closeForErasure, closingStateKey, reactivate, sentCommands } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
@@ -57,7 +57,7 @@ function dyingAt(word: string, key: (k: string) => boolean): void {
   let died = false;
   const inner = redis.pipeline;
   redis.pipeline = (async (commands: Command[]) => {
-    if (!died && commands.some((c) => c[0] === word && key(String(c[1])))) {
+    if (!died && sentCommands(commands).some((c) => c[0] === word && key(String(c[1])))) {
       died = true;
       throw new Error("synthetic: the pipeline did not reach the database");
     }

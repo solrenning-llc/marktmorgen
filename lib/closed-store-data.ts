@@ -58,13 +58,14 @@ import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held as LockHeld, LockBusyError, holdLock, releaseLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
-import { standingOf } from "@/lib/plan-standing";
+import { ENDED_INDEX, standingOf } from "@/lib/plan-standing";
+import { SHARING_INDEX } from "@/lib/platform-share";
 import { idsIn } from "@/lib/data-recount";
 import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, storeFolder, storeForEmailSeen, storeHandleKey, storeRef } from "@/lib/store";
+import { RELEASE_QUARANTINE_DAYS, STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, storeFolder, storeForEmailSeen, storeHandleKey, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -315,6 +316,122 @@ async function takeDue(ref: string, now: number): Promise<Taken> {
 }
 
 /**
+ * A closing store's deletes, made only while the walk still holds the store's lock, read in the same step (Codex M's
+ * focal M1 on #3156). KEYS: the lock, then the keys changed. ARGV: the walk's token, then each change as its word, the
+ * place of its key in KEYS and how many words of it follow: DEL (none), SREM, ZREM or HDEL (its members), SETEX (the
+ * value and its seconds). Every change is read before any is made. 1 done; 0 the lock is not the walk's any more,
+ * nothing done; -1 a change it does not make, nothing done.
+ */
+const CLOSING_FENCED = `-- marktmorgen:closing-fenced:v1
+local i, plan = 2, {}
+while i <= #ARGV do
+  local op, at, n = ARGV[i], tonumber(ARGV[i + 1]), tonumber(ARGV[i + 2])
+  if not at or not n or at < 2 or at > #KEYS or n < 0 or i + 2 + n > #ARGV then return -1 end
+  if op == "DEL" then
+    if n ~= 0 then return -1 end
+  elseif op == "SREM" or op == "ZREM" or op == "HDEL" then
+    if n < 1 then return -1 end
+  elseif op == "SETEX" then
+    if n ~= 2 or not tonumber(ARGV[i + 4]) then return -1 end
+  else
+    return -1
+  end
+  plan[#plan + 1] = {op, at, i + 3, n}
+  i = i + 3 + n
+end
+if #plan == 0 then return -1 end
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+for _, step in ipairs(plan) do
+  local op, key, from, n = step[1], KEYS[step[2]], step[3], step[4]
+  if op == "DEL" then
+    redis.call("DEL", key)
+  elseif op == "SETEX" then
+    redis.call("SET", key, ARGV[from], "EX", ARGV[from + 1])
+  else
+    for j = from, from + n - 1, 500 do
+      redis.call(op, key, unpack(ARGV, j, math.min(j + 499, from + n - 1)))
+    end
+  end
+end
+return 1`;
+
+/** The most keys, and the most words beside them, one CLOSING_FENCED step carries. */
+const FENCED_KEYS = 1000;
+const FENCED_WORDS = 4000;
+
+type Command = (string | number)[];
+/** Sends a closing store's changes: a pipeline, or the same changes made only while the walk holds the lock (fencedBy). */
+type Apply = (commands: Command[]) => Promise<unknown>;
+
+/**
+ * The way a step of the preparation sends its deletes: with `held`, only while the store's lock is still the walk's,
+ * read in the same step (CLOSING_FENCED), and a lock that is not the walk's any more stops the preparation with
+ * LockBusyError, nothing of that step changed. Until then a step renewed the lock (keep) and then deleted through a
+ * pipeline of its own, unchecked: a lock that ran out between the two (a paused function, a slow network) let the plan
+ * start again in that moment, and the delete still landed on the store that runs again (its team, its keys, its
+ * hooks, its record). Without `held` (a test's preparation of its own), the pipeline, as before.
+ *
+ * Only what a closing store's steps send is made: DEL of keys, SREM, ZREM and HDEL of members, SET with EX. Anything
+ * else is a mistake in this file and throws before anything is sent.
+ */
+export function fencedBy(held: LockHeld | undefined): Apply {
+  if (!held) return redisPipeline;
+  return async (commands) => {
+    type Change = { op: string; key: string; words: string[] };
+    const changes: Change[] = [];
+    for (const command of commands) {
+      const [word, ...rest] = command.map(String);
+      if (word === "DEL" && rest.length) for (const key of rest) changes.push({ op: "DEL", key, words: [] });
+      else if ((word === "SREM" || word === "ZREM" || word === "HDEL") && rest.length >= 2) {
+        for (let i = 1; i < rest.length; i += 500) changes.push({ op: word, key: rest[0], words: rest.slice(i, i + 500) });
+      } else if (word === "SET" && rest.length === 4 && rest[2].toUpperCase() === "EX") changes.push({ op: "SETEX", key: rest[0], words: [rest[1], rest[3]] });
+      else throw new Error(`not a closing store's change: ${word}`);
+    }
+    for (let at = 0; at < changes.length; ) {
+      const keys: string[] = [];
+      const place = new Map<string, number>();
+      const argv: string[] = [];
+      while (at < changes.length) {
+        const { op, key, words } = changes[at];
+        const fresh = !place.has(key);
+        if (argv.length && ((fresh && keys.length >= FENCED_KEYS) || argv.length + 3 + words.length > FENCED_WORDS)) break;
+        if (fresh) {
+          keys.push(key);
+          place.set(key, keys.length + 1);
+        }
+        argv.push(op, String(place.get(key)), String(words.length), ...words);
+        at += 1;
+      }
+      const replies = repliesFor(await redisPipeline([["EVAL", CLOSING_FENCED, 1 + keys.length, held.key, ...keys, held.token, ...argv]]), 1);
+      const answer = replies?.[0];
+      if (answer === 0) throw new LockBusyError("a closing store's lock ran out before its deletes");
+      if (answer !== 1) throw new UnknownReplyError("a closing store's deletes, made only while the walk holds its lock (EVAL)");
+    }
+    return [];
+  };
+}
+
+/**
+ * What closing a store's record changes (lib/store.ts, closeStoreRecord), spelled as lib/store.ts spells it, so the
+ * walk can make it only while it holds the store's lock (fencedBy): its addresses held back from anyone else for
+ * RELEASE_QUARANTINE_DAYS, its record and its copy from before a move, its id, its place among its account's stores,
+ * in the line of ended plans and among the stores that share. tests/erase-lock-fence.test.ts closes one store with
+ * the real closeStoreRecord and an identical one with these, and fails if what is left ever differs.
+ */
+export function closingRecordChanges(store: Store, now = Date.now()): Command[] {
+  const ref = storeRef(store);
+  const owner = ownerKeyOf(ref);
+  const released = `released:${new Date(now).toISOString()}`;
+  return [
+    ...[store.handle, ...store.previousHandles].map((handle) => ["SET", storeHandleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
+    ["DEL", owner, owner.replace("nl:store:owner:", "nl:store:before-catalog:")],
+    ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", `nl:store:id:${store.sid}`], ["SREM", accountStoresKey(store.email), store.sid]] : []),
+    ["ZREM", ENDED_INDEX, ref],
+    ["SREM", SHARING_INDEX, ref],
+  ];
+}
+
+/**
  * On a closing store's day, before its files go (lib/plan-closing.ts): what
  * its files left here under their own names, not the store's, which only its
  * products' files can find: its PDFs' previews and problem notes. A buyer's
@@ -332,8 +449,8 @@ export async function deleteSalesTraces(store: Store): Promise<number> {
   return keys.length;
 }
 
-async function del(keys: string[]): Promise<void> {
-  for (let i = 0; i < keys.length; i += DEL_BATCH) await redisPipeline([["DEL", ...keys.slice(i, i + DEL_BATCH)]]);
+async function del(keys: string[], apply: Apply = redisPipeline): Promise<void> {
+  for (let i = 0; i < keys.length; i += DEL_BATCH) await apply([["DEL", ...keys.slice(i, i + DEL_BATCH)]]);
 }
 
 /**
@@ -343,13 +460,18 @@ async function del(keys: string[]): Promise<void> {
  *
  * With `held`, the store's lock the walk took when it saw the store still due (takeDue): before each step that
  * deletes, it is made to last another CLOSING_LOCK_SECONDS, only while it is still the walk's (lib/redis-lock.ts,
- * holdLock), and a lock that ran out stops the preparation with LockBusyError before anything more is deleted, the
- * store's record still there and the store still in line.
+ * holdLock), and every delete of every step is made only while the lock is still the walk's, read in the same step
+ * (fencedBy, Codex M's focal M1 on #3156): a lock that ran out stops the preparation with LockBusyError before
+ * anything more is deleted, the store's record still there and the store still in line, though it ran out after the
+ * renewal. Not fenced: the outboxes of shipment and order-confirmation mail (lib/shipment-mail-outbox.ts,
+ * lib/order-confirmation-outbox.ts), each with fences of its own, which delete nothing while their mail is never
+ * activated (CURRENT_SHIPMENT_MAIL_LIFECYCLE).
  */
 export async function prepareStore(store: Store, now = Date.now(), held?: LockHeld): Promise<Batched> {
   const keep = async () => {
     if (held && !(await holdLock(held))) throw new LockBusyError("a closing store's lock ran out while it was prepared");
   };
+  const apply = fencedBy(held);
   const ref = storeRef(store);
   const { marks } = await marksOf(store);
   const extra: string[] = [];
@@ -368,7 +490,7 @@ export async function prepareStore(store: Store, now = Date.now(), held?: LockHe
         // Once for a host's claims, fifty pages at the most, before the first of them goes.
         if (!kept) await keep();
         kept = true;
-        await redisPipeline([["HDEL", claimsKey(host), ...mine]]);
+        await apply([["HDEL", claimsKey(host), ...mine]]);
       }
       cursor = next;
       if (cursor === "0") break;
@@ -381,24 +503,25 @@ export async function prepareStore(store: Store, now = Date.now(), held?: LockHe
     if (!elsewhere) extra.push(...hostCalendarKeys(hostId(email)));
   }
   await keep();
-  await dropTeam(store);
-  if (store.sid) await revokeAllKeys(store.sid);
-  await forgetStoreWebhooks(store.statsId);
-  await forgetStoreSync(store.statsId);
+  await dropTeam(store, apply);
+  if (store.sid) await revokeAllKeys(store.sid, apply);
+  await forgetStoreWebhooks(store.statsId, apply);
+  await forgetStoreSync(store.statsId, apply);
   await forgetShipmentMail(store.statsId);
   await forgetOrderConfirmationMail(store.statsId);
-  await forgetStorePhones(store.statsId);
+  await forgetStorePhones(store.statsId, apply);
   // The owner's path: their answers and the days they showed up (lib/path.ts).
-  await forgetPath(store);
+  await forgetPath(store, held);
   if (store.domain?.name) extra.push(domainKey(store.domain.name));
   await keep();
-  await del(extra);
+  await del(extra, apply);
   // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
   // still found by their mark (lib/closing-plan-guard.ts, markShut).
-  await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
+  await apply([["ZREM", FINAL_INDEX, ref]]);
   await keep();
-  await closeStoreRecord(store);
+  if (held) await apply(closingRecordChanges(store));
+  else await closeStoreRecord(store);
   return {
     ref,
     email: store.email,

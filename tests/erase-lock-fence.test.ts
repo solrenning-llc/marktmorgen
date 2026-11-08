@@ -15,9 +15,15 @@
  * setSubscription starts the plan again. What the database holds once the plan runs again must be exactly what it
  * holds after the walk: nothing of the store that runs again is deleted or changed, and the walk stops with
  * LockBusyError. No lock key is deleted by hand, no reply is forged.
+ *
+ * The record's last step is made by the walk from closingRecordChanges, lib/store.ts's closeStoreRecord spelled in
+ * lib/closed-store-data.ts so it can be fenced: the last part here closes one store both ways, from the same database,
+ * and fails if what is left ever differs.
  */
-import { eraseClosed, markDue, WALK_KEY } from "@/lib/closed-store-data";
-import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail, storeRef } from "@/lib/store";
+import { closingRecordChanges, eraseClosed, markDue, WALK_KEY } from "@/lib/closed-store-data";
+import { claimHandle, closeStoreRecord, ensureStatsId, ensureStoreId, renameHandle, storeForEmail, storeRef } from "@/lib/store";
+import { ENDED_INDEX } from "@/lib/plan-standing";
+import { SHARING_INDEX } from "@/lib/platform-share";
 import { putMember } from "@/lib/team";
 import { claimsKey, hostId } from "@/lib/host-claims";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -59,6 +65,46 @@ async function everything(): Promise<Map<string, string>> {
       : type === "zset" ? ["ZRANGEBYSCORE", key, "-inf", "+inf", "WITHSCORES"] : type === "list" ? ["LRANGE", key, 0, -1] : ["TYPE", key];
     const [value] = await original([read]);
     out.set(key, JSON.stringify(Array.isArray(value) && type === "set" ? [...value].map(String).sort() : value));
+  }
+  return out;
+}
+
+/** Every key with its type, to put the database back as it was. */
+async function dump(): Promise<[string, string, unknown][]> {
+  const out: [string, string, unknown][] = [];
+  const [[, keys]] = (await original([["SCAN", "0", "MATCH", "*", "COUNT", 1_000_000]])) as [string, string[]][];
+  for (const key of [...new Set(keys)].sort()) {
+    const [type] = (await original([["TYPE", key]])) as string[];
+    const read: Command = type === "string" ? ["GET", key] : type === "hash" ? ["HGETALL", key] : type === "set" ? ["SMEMBERS", key]
+      : type === "zset" ? ["ZRANGEBYSCORE", key, "-inf", "+inf", "WITHSCORES"] : ["LRANGE", key, 0, -1];
+    const [value] = await original([read]);
+    out.push([key, type, value]);
+  }
+  return out;
+}
+
+async function restore(rows: [string, string, unknown][]): Promise<void> {
+  redis.clear();
+  const flat = (value: unknown) => (Array.isArray(value) ? value.map(String) : Object.entries(value as Record<string, string>).flat());
+  for (const [key, type, value] of rows) {
+    if (type === "string") await original([["SET", key, String(value)]]);
+    else if (type === "hash") await original([["HSET", key, ...flat(value)]]);
+    else if (type === "set") await original([["SADD", key, ...flat(value)]]);
+    else if (type === "zset") {
+      const pairs = flat(value);
+      const scored: string[] = [];
+      for (let i = 0; i + 1 < pairs.length; i += 2) scored.push(pairs[i + 1], pairs[i]);
+      await original([["ZADD", key, ...scored]]);
+    } else await original([["RPUSH", key, ...flat(value)]]);
+  }
+}
+
+/** What is left, the moment an address was let go of written as the same word, and each key's expiry as whether it has one within the quarantine. */
+async function left(): Promise<Map<string, string>> {
+  const out = await everything();
+  for (const [key, value] of out) {
+    const [ttl] = (await original([["TTL", key]])) as number[];
+    out.set(key, `${value.replace(/released:[0-9TZ:.-]+/g, "released:*")} ttl:${ttl < 0 ? ttl : ttl > 29 * 86_400 && ttl <= 30 * 86_400 ? "quarantine" : "other"}`);
   }
   return out;
 }
@@ -177,6 +223,25 @@ async function main() {
     is("the store runs", Boolean(current?.subscriptionActive), true);
     is("nothing of the store that runs again is deleted or changed", [...running.keys()].filter((key) => now.get(key) !== running.get(key)), []);
   }
+  part("The record's last step: what the walk sends closes the record exactly as lib/store.ts's closeStoreRecord does");
+  redis.pipeline = original;
+  redis.clear();
+  await claimHandle(owner, "fenceshop", "Synthetic fence shop", "");
+  await ensureStoreId(owner);
+  await ensureStatsId(owner);
+  if (!(await renameHandle(owner, "fenceshop-two")).ok) throw new Error("Synthetic rename failed");
+  const closing = (await storeForEmail(owner))!;
+  await original([["ZADD", ENDED_INDEX, 1, storeRef(closing)], ["SADD", SHARING_INDEX, storeRef(closing)]]);
+  const base = await dump();
+  await closeStoreRecord(closing);
+  const byStore = await left();
+  await restore(base);
+  await original(closingRecordChanges(closing));
+  const byWalk = await left();
+  is("the store had two addresses, an id and a place in both lists", [closing.previousHandles.length, /^[0-9a-f]{32}$/.test(closing.sid)], [1, true]);
+  is("what is left is the same", [...new Set([...byStore.keys(), ...byWalk.keys()])].filter((key) => byStore.get(key) !== byWalk.get(key)), []);
+  is("and the record is gone", byWalk.has([...byStore.keys()].find((key) => key.startsWith("nl:store:owner:")) ?? "none"), false);
+  is("its addresses are held back for the quarantine", [...byWalk].filter(([key]) => key.startsWith("nl:store:handle:")).map(([, value]) => value.endsWith("ttl:quarantine")), [true, true]);
   done();
 }
 

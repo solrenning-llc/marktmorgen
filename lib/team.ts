@@ -619,11 +619,14 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   return { ok: true, store, member: joined.member };
 }
 
-/** Forgets a store's team, its invitations and its log, when the store itself goes. */
-export async function dropTeam(store: Store): Promise<void> {
+/**
+ * Forgets a store's team, its invitations and its log, when the store itself goes. `apply` sends the deletes: the
+ * closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
+ */
+export async function dropTeam(store: Store, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!store.sid) return;
   const team = await readTeam(store.sid);
-  await redisPipeline([
+  await apply([
     ...team.members.map((m) => ["SREM", indexKey(m.email), store.sid]),
     ["DEL", teamKey(store.sid)],
     ["DEL", logKey(store.sid)],

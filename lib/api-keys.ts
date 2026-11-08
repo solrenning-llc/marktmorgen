@@ -429,7 +429,7 @@ const flatOf = (raw: unknown): unknown[] =>
  * Takes every key of a store away, for a store that is deleted (added
  * 17 October 2026): the lookups first, so none opens anything, then the list.
  */
-export async function revokeAllKeys(sid: string): Promise<number> {
+export async function revokeAllKeys(sid: string, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<number> {
   if (!SID_PATTERN.test(sid) || !isRedisConfigured()) return 0;
   // The list is the only way to the lookups (audit SG2, rule 30): unread, nothing is deleted and this fails.
   const flat = await readList(sid);
@@ -438,8 +438,9 @@ export async function revokeAllKeys(sid: string): Promise<number> {
     const stored = parseStored(flat[i + 1]);
     if (stored) hashes.push(stored.hash);
   }
-  if (hashes.length) await redisPipeline(hashes.map((hash) => ["DEL", lookupKey(hash)]));
-  await redisPipeline([["DEL", listKey(sid)], ["DEL", holdKey(sid)], ["DEL", usedKey(sid)]]);
+  // `apply` sends the deletes: the closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
+  if (hashes.length) await apply(hashes.map((hash) => ["DEL", lookupKey(hash)]));
+  await apply([["DEL", listKey(sid)], ["DEL", holdKey(sid)], ["DEL", usedKey(sid)]]);
   return hashes.length;
 }
 

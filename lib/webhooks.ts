@@ -1992,7 +1992,7 @@ export async function watchStripe(deadline: number, now = Date.now()): Promise<{
  * of what was sent. Deliveries still waiting are dropped from the queue, so
  * nothing more is sent anywhere on its behalf. Safe to call twice.
  */
-export async function forgetStoreWebhooks(statsId: string | null): Promise<void> {
+export async function forgetStoreWebhooks(statsId: string | null, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   const today = Math.floor(Date.now() / 86_400_000);
   const replies = repliesFor(
@@ -2014,7 +2014,8 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
   const ids = log.filter((id) => DELIVERY_ID_PATTERN.test(id));
   // The endpoints told on those days, removed since or not.
   const told = new Set([...(parseConfig(rawConfig)?.endpoints ?? []).map((e) => e.id), ...rawTold.flatMap((members) => members ?? [])]);
-  await redisPipeline([
+  // `apply` sends the deletes: the closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
+  await apply([
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],

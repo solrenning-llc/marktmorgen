@@ -750,7 +750,7 @@ export async function testConnection(store: Store): Promise<{ ok: boolean; messa
  * the records of its jobs — which hold buyers' addresses — are deleted
  * rather than left to expire.
  */
-export async function forgetStoreSync(statsId: string | null): Promise<void> {
+export async function forgetStoreSync(statsId: string | null, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   const [logged] = await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]);
   const ids = new Set(Array.isArray(logged) ? (logged as unknown[]).map(String).filter((id) => JOB_ID.test(id)) : []);
@@ -769,7 +769,8 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
     }
     if (members.length < 500) break;
   }
-  await redisPipeline([
+  // `apply` sends the deletes: the closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
+  await apply([
     ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
     ...[...ids].map((id) => ["DEL", jobKey(id)]),
     ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), logKey(statsId)],

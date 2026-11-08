@@ -56,3 +56,27 @@ export async function reactivate(email: string): Promise<void> {
   const again = await setSubscription(email, { customerId: store.stripeCustomerId, subscriptionId: store.subscriptionId, active: true, tier: "creator", cycle: "month", trialEnds: 0 });
   if (!again?.subscriptionActive) throw new Error(`the plan of ${email} did not start again`);
 }
+
+type Command = (string | number)[];
+
+/**
+ * The commands a pipeline sends, with each of the closing walk's fenced steps (lib/closed-store-data.ts,
+ * CLOSING_FENCED) read as the changes it makes once it sees the lock still the walk's (SETEX as SET): a test that waits
+ * for the walk's delete of a key, or stops it, finds it whether the walk sends it bare or fenced.
+ */
+export function sentCommands(commands: Command[]): Command[] {
+  const out: Command[] = [];
+  for (const c of commands) {
+    out.push(c);
+    if (c[0] !== "EVAL" || !String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n")) continue;
+    const count = Number(c[2]);
+    const keys = c.slice(3, 3 + count).map(String);
+    const argv = c.slice(3 + count).map(String);
+    for (let i = 1; i + 2 < argv.length; ) {
+      const [op, at, n] = [argv[i], Number(argv[i + 1]), Number(argv[i + 2])];
+      out.push([op === "SETEX" ? "SET" : op, keys[at - 1], ...argv.slice(i + 3, i + 3 + n)]);
+      i += 3 + n;
+    }
+  }
+  return out;
+}

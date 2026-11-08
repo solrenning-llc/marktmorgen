@@ -654,9 +654,10 @@ export async function forgetPerson(store: Store, who: string): Promise<number> {
 }
 
 /** Forgets every device of a deleted store, whoever's they were. */
-export async function forgetStorePhones(statsId: string | null): Promise<void> {
+export async function forgetStorePhones(statsId: string | null, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", cfgKey(statsId), stateKey(statsId)]]);
+  // `apply` sends the deletes: the closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
+  await apply([["DEL", cfgKey(statsId), stateKey(statsId)]]);
 }
 
 /** Sends one test notification to one of this person's devices, now, and says how it went. */

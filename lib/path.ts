@@ -2,7 +2,8 @@ import { PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY } from "@/lib/path-board";
 import { readPathBoard, pathBoardScore, type PathBoardEntry } from "@/lib/path-board-rules";
 import { createHash, randomBytes } from "node:crypto";
 import {readReturnStep,pathReturnMission,type PathReturnStep} from "@/lib/path-return-rules";
-import { WRITE_PATH, FORGET_PATH } from "@/lib/path-atomic";
+import { WRITE_PATH, FORGET_PATH, FORGET_PATH_HELD } from "@/lib/path-atomic";
+import { LockBusyError } from "@/lib/redis-lock";
 /**
  * Where a store's Marktmorgen Path is kept (lib/path-rules.ts says what it
  * is): one small record, counted in the store's data room like everything
@@ -238,12 +239,19 @@ export async function visitPath(store: Store, record: PathRecord, now = Date.now
   return { record: next, facts: read };
 }
 
-/** Forgets the store's path: from its deletion and its closing. Safe to call twice. */
-export async function forgetPath(store: Store): Promise<void> {
+/**
+ * Forgets the store's path: from its deletion and its closing. Safe to call twice. With `held`, only while that lock
+ * is still its holder's, read in the same step (FORGET_PATH_HELD): the closing walk's, which forgets a closing store's
+ * Path only while it holds the store's lock, and stops with LockBusyError, nothing forgotten, once it does not.
+ */
+export async function forgetPath(store: Store, held?: { key: string; token: string }): Promise<void> {
   if (!SID.test(store.sid) || !isRedisConfigured()) return;
   const room = dataKey(store);
   if (!room) return;
-  const [reply] = await redisPipeline([["EVAL", FORGET_PATH, 4, room, key(store.sid), PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY, monthOf(Date.now()), store.sid]]);
+  const keys = [room, key(store.sid), PATH_BOARD_KEY, PATH_BOARD_OWNERS_KEY];
+  const args = [monthOf(Date.now()), store.sid];
+  const [reply] = await redisPipeline([held ? ["EVAL", FORGET_PATH_HELD, 5, ...keys, held.key, ...args, held.token] : ["EVAL", FORGET_PATH, 4, ...keys, ...args]]);
+  if (held && Array.isArray(reply) && Number(reply[0]) === -9) throw new LockBusyError("a closing store's lock ran out before its Path was forgotten");
   if (!Array.isArray(reply) || Number(reply[0]) !== 1) throw new Error("the Path could not be forgotten");
 }
 

@@ -1,0 +1,27 @@
+{
+  "subject": "af1218749c04e4d80890eb5d4ef96c2620e0f436",
+  "parents": [
+    "23b06ddfe100492c58ce48ab900689bf1a2d7b3d",
+    "09dd1ece44482e239e4d10bd690d9e46ab1e2fcc"
+  ],
+  "subjectTree": "556470f7f543b446bb829d075a865a23e998cb37",
+  "authorialPaths": {
+    "docs/tx4-canada-gst-hst-evidence.md": {
+      "gitBlob": "4c44cb1bf4a9c4afceadd6a7e5cc2e6e61021282",
+      "sha256": "9c15c67b3bb1e0211dfbc575f7053e239c3a12de6a72e95e97dfd9af8c2f1717"
+    },
+    "tests/tx4-canada-gst-hst-evidence.test.ts": {
+      "gitBlob": "44b49362858ec1f9d7386e180893e042565f0e09",
+      "sha256": "fa59a6f624178bb3277e4e95bc6635bab06e2215fcc44bc0d9f62e0edae0a3fd"
+    }
+  },
+  "logs": {
+    "types.log": "5ff09868862f370a21994d8b8f63ba753019d00d60438e9a2351cba2f7df1e2c",
+    "tests.log": "168cf06aba8061f135cb4e822296000f10c2651b3dde9329dc5824b3e899825e",
+    "subject-diff.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "merge-tree.log": "f17b5ac9747e77d8c92fd8b940a0209399649a465cc5e989d3f8034abc071aa4",
+    "lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "lint-setup-failure.log": "174d091473f08eb73a27e18b240ad1b620988c800192fa7c47969ee7e7656f92",
+    "types-setup-failure.log": "174d091473f08eb73a27e18b240ad1b620988c800192fa7c47969ee7e7656f92"
+  }
+}

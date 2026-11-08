@@ -1,0 +1,22 @@
+node:internal/modules/cjs/loader:1568
+  throw err;
+  ^
+
+Error: Cannot find module 'docs/reviews/z-2425-integration-focal/network-guard.cjs'
+Require stack:
+- internal/preload
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1564:15)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1118:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1142:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1169:12)
+    at Module._load (node:internal/modules/cjs/loader:1341:5)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+    at Module.require (node:internal/modules/cjs/loader:1674:12)
+    at node:internal/modules/cjs/loader:2221:12
+    at loadPreloadModules (node:internal/process/pre_execution:737:5)
+    at initializeModuleLoaders (node:internal/process/pre_execution:244:5) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [ 'internal/preload' ]
+}
+
+Node.js v24.22.1

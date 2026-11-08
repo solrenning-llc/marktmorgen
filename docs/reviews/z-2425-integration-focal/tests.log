@@ -1,0 +1,435 @@
+
+FILE tx4-canada-gst-hst-evidence.test.ts
+✔ TX4 dates primary Canadian sources without selecting a registration regime (0.956973ms)
+✔ TX4 separates quarterly filing, payment, retention and designated currency evidence (0.222605ms)
+✔ TX4 leaves complete local compliance costs unknown and unreserved (0.423749ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 7.43516
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE llc-fixed-costs.test.ts
+✔ every entire LLC cost is allocated to Marktmorgen with no Hazelsong subsidy (3.984468ms)
+✔ unknown costs, evidence, reserves or incomplete identities never become zero (6.544147ms)
+✔ source observations preserve full taxes, INSS and higher monthly mailbox rate (0.137176ms)
+✔ TX4 and SR obligations cannot disappear inside the old fixed-cost inventory (0.319972ms)
+✔ cost evidence accessors never execute or substitute a lower second value (0.342626ms)
+✔ inherited cost records, sparse arrays and accessor entries are not complete evidence (0.167963ms)
+✔ detached cost evidence retains valid totals and refuses unsafe aggregate amounts (0.993478ms)
+✔ SD1 initial LLC formation cannot disappear from the complete company cost review (0.314865ms)
+✔ deployment and function artifact retention is an explicit unknown whole-LLC cost (0.322276ms)
+✔ missing fixed-cost fields cannot inherit a zero ceiling or review evidence (0.458902ms)
+✔ missing fixed-cost fields never execute descriptor-map prototype getters (0.495867ms)
+✔ detaching own fixed costs never invokes inherited setters or replacement zero getters (0.967379ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.887302
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE tx4-us-filing-evidence.test.ts
+✔ TX4 records the conditional Form 5472 and pro forma Form 1120 filing rules from official sources (0.893257ms)
+✔ TX4 records the official due-date, extension and foreign-owned-DE delivery rules (0.154432ms)
+✔ TX4 keeps the penalty exposure and every unpriced compliance component explicit (0.344759ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6.435694
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE commercial-llc-costs.test.ts
+✔ actual commercial gate includes the complete full LLC inventory before exposure (85.830371ms)
+✔ unknown monthly/annual ceilings, reserves or evidence block even a generous aggregate (73.858886ms)
+✔ omitting the retention line cannot pass the actual commercial gate (34.973363ms)
+✔ exposure money cannot replace missing fixed overhead and old inventory snapshots fail (58.8934ms)
+✔ the full annual ceiling must fit too, including a single unpaid cent (147.670491ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 411.739123
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (77.824353ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (88.231984ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (32.655792ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.314912ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.147592ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.386744ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.453865ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (79.648816ms)
+✔ every store figure taken in the code is a kind a line prices (51.157289ms)
+✔ every email sent names a meter, and each file only the meters it may use (64.794145ms)
+✔ the units a figure is taken in cost at least what they stand for (7.146842ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.612253ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.160772ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.254514ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.109235ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.10647ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.288646ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.142545ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (2.193499ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.093631ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.005506ms)
+✔ Path push fits its reserved studio requests (0.110257ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.054182ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.084678ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.091498ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (29.709969ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 461.361278
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 121.5 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 288.3 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 704.9 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (64.505731ms)
+✔ each family is bounded one way at least, and what it says can be checked (46.135107ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (4.779431ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (0.869732ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.454706ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.171241ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.163176ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 127.532982
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE margin-alignment.test.ts
+✔ the dated report remains explicitly historical and matches its reproducible figures (82.839138ms)
+✔ the unchanged dearest receiving fee and every reserve use the whole amount charged (1.10729ms)
+✔ current TX cost budgets reserve the absolute evidence-bound tax and the final net cent (17.003962ms)
+✔ old tax math is available only in the explicitly archived model, never a live fallback (0.327054ms)
+✔ every full-use unit keeps its existing cost room under complete synthetic TX evidence (19.92707ms)
+✔ unknown real review cannot be replaced by a positive model or a zero tax allowance (0.366613ms)
+✔ archived thresholds preserve historical figures without proposing current prices or rights (31.779552ms)
+✔ the value presentation retains owner quotations and its dated tax-model rows (14.880278ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 174.899948
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE stripe-list-lot1.test.ts
+
+The reader: a page in its exact shape, each row by its own fields
+  ok    no data: not a page
+  ok    data not a list: not a page
+  ok    has_more missing: not a page
+  ok    has_more as text: not a page
+  ok    not an object: not a page
+  ok    readable rows kept, the others counted, never dropped silently
+  ok    an inherited id or a getter is not readable
+  ok    the next page starts only from a readable last row
+  ok    the lot pins the version STRIPE_VERSION names
+
+plan-disputes.ts: a page in another shape or a row not readable never completes the run
+  ok    disputes answered no data: not complete, a failure counted
+  ok    disputes answered data not a list: not complete, a failure counted
+  ok    disputes answered has_more missing: not complete, a failure counted
+  ok    disputes answered has_more as text: not complete, a failure counted
+  ok    disputes answered not an object: not complete, a failure counted
+  ok    a row not readable: counted as failed, not complete
+  ok    a whole, readable empty list completes
+
+plan-refund-write.ts: refunds read in another shape, or with a row not readable, make no refund
+  ok    refunds answered no data: nothing made
+  ok    refunds answered data not a list: nothing made
+  ok    refunds answered not an object: nothing made
+  ok    refunds answered a row not readable: nothing made
+  ok    a refund row with a subscription's id for id: not readable, nothing made
+  ok    a refund row with underscores only for id: not readable, nothing made
+  ok    refunds read whole and readable: the refund is made once
+
+assistant-billing.ts: a dispute not known from the page writes nothing this run; one on a readable row ends the add-on
+  ok    invoices answered no data: nothing written this run
+  ok    invoices answered data not a list: nothing written this run
+  ok    invoices answered has_more missing: nothing written this run
+  ok    invoices answered has_more as text: nothing written this run
+  ok    invoices answered not an object: nothing written this run
+  ok    invoices answered a row not readable beside a readable one: nothing written this run
+  ok    a dispute on a readable row ends the add-on at once, whatever the other rows
+
+upsell.ts: an offer's charge is 'not there' only from the customer's payments read whole
+  ok    payments answered no data: not known, never "not there"
+  ok    payments answered data not a list: not known, never "not there"
+  ok    payments answered has_more missing: not known, never "not there"
+  ok    payments answered has_more as text: not known, never "not there"
+  ok    payments answered not an object: not known, never "not there"
+  ok    a row not readable: not known
+  ok    its charge on a later page is found
+  ok    read whole and readable, not among them: not there
+  ok    each read pinned to the lot's version
+  ok    one page on the buyer's page, five in the job
+  ok    one page read and more to come: not known, never 'not there'
+  ok    the buyer's page reads one page for a waiting offer
+  ok    and the offer an hour old stays waiting, never closed as lost
+  ok    the five-minute job reads up to five pages for it
+  ok    and it still waits, the list not read to its end
+  ok    in the job's pages, its charge on page two is found
+
+payment-methods.ts: never 'none running' from a page in another shape or a row not readable
+  ok    subscriptions answered no data: not known
+  ok    subscriptions answered data not a list: not known
+  ok    subscriptions answered has_more missing: not known
+  ok    subscriptions answered has_more as text: not known
+  ok    subscriptions answered not an object: not known
+  ok    a row not readable and none of ours readable: not known
+  FAIL  one of ours readable beside a row not readable: at least that one (a yes stands)
+        expected true
+        got      false
+  ok    a row whose store is false: not known
+  ok    a row whose store is 7: not known
+  ok    a row whose store is an object: not known
+  FAIL  read whole and readable, none ours: none
+        expected 0
+        got      null
+  ok    each read pinned to the lot's version
+
+58 checks, 2 failing.
+Z_VOLUME {"runs":276,"mocks":105,"over":true}
+reading plan disputes failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:13784:77)
+    at syncPlanDisputes ([stdin]:61553:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async disputes ([stdin]:62518:21)
+    at async main ([stdin]:62698:3)
+plan disputes: more than one run's pages; the oldest wait for the next run
+reading plan disputes failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:13784:77)
+    at syncPlanDisputes ([stdin]:61553:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async disputes ([stdin]:62518:21)
+    at async main ([stdin]:62698:3)
+plan disputes: more than one run's pages; the oldest wait for the next run
+reading plan disputes failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:13785:43)
+    at syncPlanDisputes ([stdin]:61553:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async disputes ([stdin]:62518:21)
+    at async main ([stdin]:62698:3)
+plan disputes: more than one run's pages; the oldest wait for the next run
+reading plan disputes failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:13785:43)
+    at syncPlanDisputes ([stdin]:61553:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async disputes ([stdin]:62518:21)
+    at async main ([stdin]:62698:3)
+plan disputes: more than one run's pages; the oldest wait for the next run
+reading plan disputes failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage ([stdin]:13781:33)
+    at syncPlanDisputes ([stdin]:61553:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async disputes ([stdin]:62518:21)
+    at async main ([stdin]:62698:3)
+plan disputes: more than one run's pages; the oldest wait for the next run
+reading a plan payment's refunds failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:13784:77)
+    at wholeRefunds ([stdin]:61911:16)
+    at refundPlanPayment ([stdin]:61941:19)
+    at async planRefunds ([stdin]:62567:20)
+    at async main ([stdin]:62699:3)
+reading a plan payment's refunds failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:13784:77)
+    at wholeRefunds ([stdin]:61911:16)
+    at refundPlanPayment ([stdin]:61941:19)
+    at async planRefunds ([stdin]:62567:20)
+    at async main ([stdin]:62699:3)
+reading a plan payment's refunds failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage ([stdin]:13781:33)
+    at wholeRefunds ([stdin]:61911:16)
+    at refundPlanPayment ([stdin]:61941:19)
+    at async planRefunds ([stdin]:62567:20)
+    at async main ([stdin]:62699:3)
+reading a plan payment's refunds failed StripeListUnreadable: Stripe answered a list in another shape: a refund not readable
+    at wholeRefunds ([stdin]:61916:46)
+    at refundPlanPayment ([stdin]:61941:19)
+    at async planRefunds ([stdin]:62567:20)
+    at async main ([stdin]:62699:3)
+reading a plan payment's refunds failed StripeListUnreadable: Stripe answered a list in another shape: a refund not readable
+    at wholeRefunds ([stdin]:61916:46)
+    at refundPlanPayment ([stdin]:61941:19)
+    at async planRefunds ([stdin]:62573:20)
+    at async main ([stdin]:62699:3)
+reading a plan payment's refunds failed StripeListUnreadable: Stripe answered a list in another shape: a refund not readable
+    at wholeRefunds ([stdin]:61916:46)
+    at refundPlanPayment ([stdin]:61941:19)
+    at async planRefunds ([stdin]:62573:20)
+    at async main ([stdin]:62699:3)
+reading a store's add-on failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:13784:77)
+    at disputed ([stdin]:61998:16)
+    at async syncAssistant ([stdin]:62019:55)
+    at async assistant ([stdin]:62605:5)
+    at async main ([stdin]:62700:3)
+reading a store's add-on failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:13784:77)
+    at disputed ([stdin]:61998:16)
+    at async syncAssistant ([stdin]:62019:55)
+    at async assistant ([stdin]:62605:5)
+    at async main ([stdin]:62700:3)
+reading a store's add-on failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:13785:43)
+    at disputed ([stdin]:61998:16)
+    at async syncAssistant ([stdin]:62019:55)
+    at async assistant ([stdin]:62605:5)
+    at async main ([stdin]:62700:3)
+reading a store's add-on failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:13785:43)
+    at disputed ([stdin]:61998:16)
+    at async syncAssistant ([stdin]:62019:55)
+    at async assistant ([stdin]:62605:5)
+    at async main ([stdin]:62700:3)
+reading a store's add-on failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage ([stdin]:13781:33)
+    at disputed ([stdin]:61998:16)
+    at async syncAssistant ([stdin]:62019:55)
+    at async assistant ([stdin]:62605:5)
+    at async main ([stdin]:62700:3)
+reading a store's add-on failed StripeListUnreadable: Stripe answered a list in another shape: an add-on invoice not readable
+    at disputed ([stdin]:62010:30)
+    at async syncAssistant ([stdin]:62019:55)
+    at async assistant ([stdin]:62605:5)
+    at async main ([stdin]:62700:3)
+settling an upsell failed StripeListUnreadable: Stripe answered a list in another shape: more payments than are read
+    at findOfferCharge ([stdin]:62281:9)
+    at async settleOne ([stdin]:62290:12)
+    at async settleUpsells ([stdin]:62325:37)
+    at async offers2 ([stdin]:62664:3)
+    at async main ([stdin]:62701:3)
+settling an upsell failed StripeListUnreadable: Stripe answered a list in another shape: more payments than are read
+    at findOfferCharge ([stdin]:62281:9)
+    at async settleOne ([stdin]:62290:12)
+    at async settlePendingOffers ([stdin]:62353:7)
+    at async offers2 ([stdin]:62669:3)
+    at async main ([stdin]:62701:3)
+counting running memberships failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:13784:77)
+    at runningSubscriptions ([stdin]:62390:22)
+    at async memberships ([stdin]:62682:56)
+    at async main ([stdin]:62702:3)
+counting running memberships failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:13784:77)
+    at runningSubscriptions ([stdin]:62390:22)
+    at async memberships ([stdin]:62682:56)
+    at async main ([stdin]:62702:3)
+counting running memberships failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:13785:43)
+    at runningSubscriptions ([stdin]:62390:22)
+    at async memberships ([stdin]:62682:56)
+    at async main ([stdin]:62702:3)
+counting running memberships failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:13785:43)
+    at runningSubscriptions ([stdin]:62390:22)
+    at async memberships ([stdin]:62682:56)
+    at async main ([stdin]:62702:3)
+counting running memberships failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage ([stdin]:13781:33)
+    at runningSubscriptions ([stdin]:62390:22)
+    at async memberships ([stdin]:62682:56)
+    at async main ([stdin]:62702:3)
+counting running memberships failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:327)
+    at [stdin]:8072:29
+    at timed ([stdin]:7585:19)
+    at onAccount ([stdin]:8071:43)
+    at runningSubscriptions ([stdin]:62391:17)
+    at async memberships ([stdin]:62687:92)
+    at async main ([stdin]:62702:3)
+counting running memberships failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:327)
+    at [stdin]:8072:29
+    at timed ([stdin]:7585:19)
+    at onAccount ([stdin]:8071:43)
+    at runningSubscriptions ([stdin]:62391:17)
+    at memberships ([stdin]:62690:60)
+    at async main ([stdin]:62702:3)
+counting running memberships failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:327)
+    at [stdin]:8072:29
+    at timed ([stdin]:7585:19)
+    at onAccount ([stdin]:8071:43)
+    at runningSubscriptions ([stdin]:62391:17)
+    at memberships ([stdin]:62690:60)
+    at async main ([stdin]:62702:3)
+counting running memberships failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:327)
+    at [stdin]:8072:29
+    at timed ([stdin]:7585:19)
+    at onAccount ([stdin]:8071:43)
+    at runningSubscriptions ([stdin]:62391:17)
+    at memberships ([stdin]:62690:60)
+    at async main ([stdin]:62702:3)
+counting running memberships failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:327)
+    at [stdin]:8072:29
+    at timed ([stdin]:7585:19)
+    at onAccount ([stdin]:8071:43)
+    at runningSubscriptions ([stdin]:62391:17)
+    at memberships ([stdin]:62693:57)
+    at async main ([stdin]:62702:3)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z2425f-CzYsKE

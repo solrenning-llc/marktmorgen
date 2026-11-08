@@ -1,3 +1,31 @@
+# Codex Z — canonical continuation 2026-11-08 20:22 Fortaleza
+
+r17 ACTIVE / SERIALMediumZEROagents. COMPLETE prior690892-character CP8abda5f9bae29a7f0be859f69246f4565cf2a34d/blobf1ac0d4c7a480e4eff6ca7d64d3262f94b7c9344 retained BELOW verbatim. Five authorials/heads/REDs/WIPs/retries/caps stillheld. NoCIqueryretrycancel/fila/merge/productpush/mainintegration/automation byZ.
+
+## Newly completed #3308 FIRST PARTIAL, exact historical03c28
+
+Subject03c28f1f91a9cf9a852ebfc7d20722e5d3df0c76;formal5820151427BODY+commitEXACT. Claim6728457630/ROOT7500bf0b878bd33dd451d6dffad87bc4df90f937/blob867181a7ee86e832e249b56ebdd8fc24f5bdfaf0/FULL6837446 EXACTBEFOREproof. Inherited MEDIUM read→mint→DEL from3296 CLOSEDasreproduced: frozen ownoriginalSHA256eb19d195b86abc84ab2fd53848a9b3b2ac4cc25c1c223394838701c048a3aa6e BYTE-ID, SAMEtestOLD1FAIL111BTTL5184000/notes[]after2nderasure→HEAD1PASS0BTTL-2sameerasureincludesnewgrant;14→24nested0HTTP/968→2547JSONB. Tokenmayreturnbeforeerasurecompletes,notHTTPsuppressioncert.
+
+AuthororiginalRED37EXACT93a16 OLD8FAIL(2privacy+6modelcount/typeartifacts)→HEAD35PASS2MODEL-FIXTUREFAIL(not37green): plainstubSMEMBERScorrectswrongtypestringbeforeEVAL. Originalbytes/logretained,NOrerunadjusted37. Currentauthor55explicitwrongtypereadguard55PASS/12983nested. Newbatchcommittedreceiptcontrols4PASS/7066nested: actual1000deletedFIRST,onlyACKnested/oversize/throwchanged,remainingrecordstaysindexed/healthyretrydeletes. Initial3HARNESSFAILwronginsertion-ordersurvivor, source/logretained, observerONLYderiveactualEVALKEYS, ONLYchanged4rootrerun;author55/frozenracegreenNOTreplayed.
+
+LOW OPEN lib/erasure-index.ts106/113 batches<=100 dispatches101stbatch. ActualcallerprotocolprobeFAIL:101batches101reads303outercmd2768107requestJSONB/0MemoryRedis0HTTP. Responsesstandinexact/newnotesreplenished/expiredrecords; NOphysicalRedis/Luaexecution/101000uniquerecorddeletionclaim. Enforcebefore101dispatch,allowfinalcompareafter100.
+
+**NEW CONSUMED CAP sg2-unknown-replies.test.ts WHOLEroot ONCE:**100HTTPmocklimit,128attempts100dispatched28REFUSED_BEFOREmock,2207nestedRedis/overtrue/exit1. EntiregraphINCONCLUSIVE/not125PASS. NO rerun/extraction/partition/reset/raise/borrow. **C1NEW200HTTP budget requested for ONEwhole sg2 on exact FINALpostLOWfixhead;20kallnested120s512MiB256KiB unchanged. NOT granted.** Separatefrom3260/3283requests, allcapsretained; donotrepeatSG2becauseheadchanged.
+
+230qualifiedPASS+1LOWFAIL12roots overlap (55+1+4+linked32/1/21/35/19/29+registries26/7), plusSG2INCONCLUSIVE13th. Types6roots991sources0unfiltered/lint0/scanner4681-0/diff0. Max12983nested/70mockqualifiedroots. 454lockmatches/0requiredmissingBEFOREtestsNext16.4.5. RawALLlogsreversibleincloriginal37/harness/cap; no nativeRedis/redis-cli HERE(foundabsent; noinstall), fullsupplier/MR/bill/erasuree2e/browsercert.
+
+Evidenceowncodex/z-3308-first-review@f6f7b84d699f8077f3e21904a8278b18cde5e0b9/tree70b1bd48f85e55e8227e14455c76128997803d29 EXACTnatived35fc628f9185214a0c65ff135cd2cdcbe3d1bc4;29artifacts. Report3756d9c9f682e55abbbb7edc93f713f10b6a9c54/FULL8609exactreadbackBEFOREpartialverdict.
+
+C6changed3308WHILEreview: new6a9c6aa60d (exactFULLnotyetqueried), nativeRedis7.0.15DELE foundPARTmodelvsLuaorderdivergenceweSOURCEqualified; TYPEprechecknewPARTv2 returns-1beforedelete,REDfb1268209d2/57. RequestC66728548040. NOTZnativeproof/nobinaryassumptionacrossmachines. Our5820151427remainsanchoredOLD03c28/PARTIAL,NOapprovalof6a9inferred. LOW101C6notifiedonlyformalPRsofar; newHEADhasnotbeenreadbyZ/diff/testsnotstarted. Need nominalafterauthorfinalLOWfix/C1SG2grant, no3rdglobal. Shared erasurealreadyactiveC6/don'tabsorb.
+
+## #3305 nominal new request — CLAIM ONLY, source pendingROOT
+
+C6request6728563317 EXACTf8082ad3e3b63d052b5860ef0bca05ed3e0d8435(freshPRGETOPEN). FixM1doubt?path#nonce/nofiledelete; M2rejectunknownreadbeforequota. BodyFULLread; automaticbotnoissuesmessagesarenotZtechnicalfocal. Claim6728601966 BODYexact; noothernominalclaimROOT/timeline. **NOsource/diff/newworktree/proof/tests forf808 yet**. NeedROOTRES+exactreadbackbeforecode;onlynewdocs/reviews/z-3305-nominal-focal onownbranch. FreezeM1unchanged; M2newintentionalrefusalmustcaptureexceptions/updateOLDstateexistingexpectationhonestly, retainEXACTrecord/roominvariantbothOLDcc412/head. Author149newtests/linkedscoped+doubtordercontrolsiffeasible. Budgetsperchild20kALLnested100HTTP120s512MiB256KiB/types120s1024/DENYbeforegraph/SERIALMediumZEROagents;capINCONCLUSIVE/noraise/reset/partition/retry/borrow. NoSG2capreplay. Authorproduct/refRO/not6th/evidenceBEFOREopinion.
+
+CurrentnewcoordROOT60abad6106c1827c6129dca2f6b6111b4b37f05b/blobc65822fbd4e50ca1f25d3ad43a4c4a59eaf48ba0/FULL6858430 FULLdeltaALLread: C6round9chargedNow/auto-captionALTOonlyC1distribute;meet-providerfreebusy3310twofinancial; C23309FIRSTclean2LOW; C23300focalDONE/claimC2notduplicate; S2908+2861focalsDONE; V2633focalDONE/nolegalcert; T2916nominalRES; C6corephoto3310etcownnotZ. C1budgetgrantsstillNONE. PreviousZ3292/3296/3305findings/evidenceallretainedbelow. #2839condition2964lastOPEN/noC1compatibledisposition/5authorials+foreignrefbanremain. Main787cMVAGENTSnewhunkpreviouslyFULLread,othernormsBYTE-ID44f4;nofetchchase/noCIqueries.
+
+---
+
 # Codex Z — canonical continuation 08 November 2026, 20:09 Fortaleza
 
 r17 still ACTIVE, SERIAL Medium ZEROagents. COMPLETE prior686092-character checkpoint6fddd8e5619aa8b4d361471c6729a1434fbacd43/blob634a10b9463294f3c23cc7f236131b4831b3ebc6 is retained BELOW verbatim. Five authored units/heads/REDs/WIPs/holds/retries/caps unchanged. No CIquery/retry/cancel/fila/merge or productpush/mainintegration/automation by Z.

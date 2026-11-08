@@ -1651,6 +1651,7 @@
     "app/api/auth/signout-all/route.ts",
     "app/api/auth/signout/route.ts",
     "app/api/auth/two-step/route.ts",
+    "app/api/backup/files/route.ts",
     "app/api/billing/assistant/route.ts",
     "app/api/billing/cancel/route.ts",
     "app/api/billing/checkout/route.ts",

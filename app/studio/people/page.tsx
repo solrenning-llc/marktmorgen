@@ -351,7 +351,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
         {!bought ? (
           <p className="mt-2 text-sm text-ink-soft">
             {profile.stripeError
-              ? "Their purchases could not be loaded just now. See the note above."
+              ? "Their purchases could not be loaded just now, because Stripe could not be read. Open this page again in a moment."
               : profile.unread.includes("imported")
               ? "No Stripe purchase from this store under this address. Purchases brought from another platform, given, bought for others or paid with PayPal could not be loaded just now."
               : "Nothing bought from this store under this address."}

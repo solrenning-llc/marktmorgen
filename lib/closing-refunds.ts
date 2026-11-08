@@ -155,10 +155,10 @@ const idOf = (value: unknown): unknown => (value !== null && typeof value === "o
 
 /**
  * The invoice-payment statuses that prove a row was not paid: Stripe documents an invoice payment's status as one of
- * "open", "paid" or "canceled"; "failed" moves no money either, and the existing controls (#3097) already read it as not
- * paid. Anything else is unknown.
+ * "open", "paid" or "canceled" (https://docs.stripe.com/api/invoice-payment/object). Anything else is unknown, including
+ * "failed", which that list does not hold (Codex G's focal return on #3120, review 5816998291).
  */
-const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled", "failed"]);
+const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled"]);
 
 /**
  * The payment intent an invoice was paid by, whichever way this account's API version names it; "" only when this

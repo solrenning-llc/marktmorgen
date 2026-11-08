@@ -102,7 +102,8 @@ const pendingKey = (statsId: string) => `nl:ppsell:pending:${statsId}`;
 /** Issues PayPal answers a capture with when it takes nothing (Orders v2 errors). */
 const DECLINED = new Set(["INSTRUMENT_DECLINED", "PAYER_ACTION_REQUIRED", "ORDER_NOT_APPROVED", "PAYEE_ACCOUNT_RESTRICTED", "PAYER_ACCOUNT_RESTRICTED"]);
 /** Every PayPal order one address paid for one product, so a refund of one leaves the others standing. */
-const ownKey = (statsId: string, email: string, productId: string) => `nl:ppsell:own:${statsId}:${addressHash(email)}:${productId}`;
+/** The paid orders behind one address's product (also read by lib/paypal-handed.ts). */
+export const ownKey = (statsId: string, email: string, productId: string) => `nl:ppsell:own:${statsId}:${addressHash(email)}:${productId}`;
 /** Every paid order, scored by when it was paid, and those refunded in full: what the store's numbers read. */
 const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
 /** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */

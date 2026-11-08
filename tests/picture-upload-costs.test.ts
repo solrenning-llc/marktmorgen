@@ -52,5 +52,5 @@ for (const tier of ["creator", "pro", "scale"] as const) {
   const perRequest = put * BLOB_ADVANCED_OP + (3 * heads + 2) * BLOB_SIMPLE_OP + 2 * MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE;
   is(`${tier}: the studio figure, each request at its dearest`, Math.abs((line?.monthlyUsd(tier) ?? 0) - STORE_ALLOWANCES[tier].studio * perRequest) < 1e-9, true);
 }
-is("its source and date are said, and why the read is counted whole", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
+is("its source and date are said, and why the read is counted whole", (line?.basis ?? "").includes("Prices: vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026") && /6 November 2026/.test(line?.basis ?? "") && /206/.test(line?.basis ?? ""), true);
 done();

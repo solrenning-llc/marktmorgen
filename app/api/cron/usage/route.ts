@@ -265,22 +265,27 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const owners = await ownersOf(fresh.map((s) => s.folder));
+  // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". Then nobody is
+  // written to about the allowance, support is told nothing, the told list is left as it was, and the part is unknown.
+  let owners: (string | null)[];
+  try {
+    owners = await ownersOf(fresh.map((s) => s.folder));
+  } catch (error) {
+    console.error("usage-watch: who the stores over the delivery allowance belong to is unknown today; nobody was written to about it", error);
+    return Response.json(
+      { ok: false, unread: ["delivery"], video, visits, orders },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   let told = 0;
   const unknown: string[] = [];
   // Only a notice that went out is recorded as given: a refused send, a store left because no sender is configured,
   // or an ownerless store support could not be told about stays off the told list and is tried again next run.
   const given: string[] = [];
-  // An owner that could not be read is not "no owner": nobody is written to about it and it stays off the told list.
-  let unreadOwners = 0;
 
   for (let i = 0; i < fresh.length; i += 1) {
     const store = fresh[i];
     const email = owners[i];
-    if (email === undefined) {
-      unreadOwners += 1;
-      continue;
-    }
     if (!email) {
       unknown.push(store.folder);
       continue;
@@ -352,7 +357,6 @@ export async function GET(request: NextRequest) {
     if (supportTold === true) given.push(...unknown);
   }
 
-  if (unreadOwners > 0) console.error(`usage-watch: ${unreadOwners} store(s) over the allowance left for the next run, owner unread`);
 
   await redisPipeline([
     ["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],

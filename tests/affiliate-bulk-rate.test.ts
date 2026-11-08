@@ -49,7 +49,8 @@ async function main(): Promise<void> {
   part("The studio");
   const studio = readFileSync("components/affiliate-studio.tsx", "utf8");
   is("a labeled list and share, with the rule in words", studio.includes("Affiliates whose share changes") && studio.includes('htmlFor="share-many"') && studio.includes("It applies to sales from now on."), true);
-  is("an undo in a status note", studio.includes('"Shares put back as they were."') && studio.includes('role="status"'), true);
+  // Altered 2026-11-07 (rule 23): the undo says only what came back (lib/affiliate-bulk-words.ts undoWords).
+  is("an undo in a status note", studio.includes('undoWords(') && studio.includes('role="status"'), true);
   done();
 }
 

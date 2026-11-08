@@ -154,7 +154,9 @@ async function main(): Promise<void> {
     ownerRead = failure;
     const u1 = await run();
     ownerRead = "ok";
-    is("first run: nobody is written to (not the owner, not support)", [u1.status, u1.told, u1.emails], [200, 0, []]);
+    // The owners are read exactly (lib/delivery.ts ownersOf, from main): an unread owner answers the delivery part
+    // 503, unknown, so the cron is tried again; nobody is written to and nothing is recorded.
+    is("first run: nobody is written to (not the owner, not support)", [u1.status, u1.told, u1.emails], [503, undefined, []]);
     is("the store is not in the told list", (await toldList()).includes(folder("g")), false);
     const u2 = await run();
     is("next run, owner read back: the owner gets the notice", [u2.told, u2.emails], [1, ["owner@example.com"]]);

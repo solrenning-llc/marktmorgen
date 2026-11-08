@@ -744,7 +744,9 @@ function rfc3339(value: unknown): number | null {
   if (!m) return null;
   const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number);
   if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) return null;
-  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const last = new Date(0);
+  last.setUTCFullYear(year, month, 0);
+  const days = last.getUTCDate();
   if (day > days) return null;
   let offset = 0;
   if (m[8] !== "Z") {
@@ -754,7 +756,11 @@ function rfc3339(value: unknown): number | null {
     offset = (m[8][0] === "+" ? 1 : -1) * (oh * 60 + om) * 60_000;
   }
   const ms = m[7] ? Number(m[7].slice(0, 3).padEnd(3, "0")) : 0;
-  return Date.UTC(year, month - 1, day, hour, minute, second, ms) - offset;
+  // setUTCFullYear keeps a year below 100 as given (Date.UTC would move it into the 1900s).
+  const at = new Date(0);
+  at.setUTCFullYear(year, month - 1, day);
+  at.setUTCHours(hour, minute, second, ms);
+  return at.getTime() - offset;
 }
 
 export type GoogleCalendar = { id: string; name: string; primary: boolean; writable: boolean };

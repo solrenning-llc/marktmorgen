@@ -17,6 +17,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
@@ -223,30 +224,30 @@ async function save(b: Broadcast): Promise<void> {
   if (!Array.isArray(response) || response.length !== 1 || response[0] !== "OK") throw new Error("Campaign progress write could not be confirmed");
 }
 
+/** The ids LRANGE answered, when they are exactly a list of ids this code writes (rule 24, repliesFor/stringList); null otherwise. Pure. */
+function listedIds(response: unknown, limit: number): string[] | null {
+  const ids = stringList(repliesFor(response, 1)?.[0]);
+  if (!ids || ids.length > limit || !ids.every((id) => BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) return null;
+  return ids;
+}
+
 /**
  * How many of the newest `limit` broadcasts there are and how many bytes
  * their records hold, before they are read: for a reading that pays for its
  * size first (lib/mcp-tools.ts, emailsTool). Null when a size did not come back.
  */
-/** The ids LRANGE answered, when they are exactly a list of ids this code writes (rule 24); null otherwise. Pure. */
-function listedIds(response: unknown, limit: number): string[] | null {
-  const ids: unknown = Array.isArray(response) && response.length === 1 ? response[0] : null;
-  if (!Array.isArray(ids) || ids.length > limit || !ids.every((id) => typeof id === "string" && BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) return null;
-  return ids as string[];
-}
-
 export async function broadcastSizes(listId: string | null, limit = 30): Promise<{ count: number; bytes: number } | null> {
   if (!listId || !isRedisConfigured()) return { count: 0, bytes: 0 };
   // Only Redis's own list of ids: any other answer is unknown, never "no campaigns".
   const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
   if (!list) return null;
   if (!list.length) return { count: 0, bytes: 0 };
-  const replies = await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)]));
-  if (!Array.isArray(replies) || replies.length !== list.length) return null;
-  const lengths = replies.map((n) => (typeof n === "number" ? n : NaN));
-  if (lengths.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+  const replies = repliesFor(await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)])), list.length);
+  if (!replies) return null;
+  const lengths = replies.map(countOf);
+  if (lengths.some((n) => n === null)) return null;
   // A broadcast added between this and the reading is a few bytes more, bounded by how fast a store writes them.
-  return { count: list.length, bytes: lengths.reduce((a, b) => a + b, 0) };
+  return { count: list.length, bytes: (lengths as number[]).reduce((a, b) => a + b, 0) };
 }
 
 export class BroadcastsUnreadable extends Error {
@@ -267,8 +268,8 @@ export async function listBroadcasts(listId: string | null, limit = 30): Promise
   const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
   if (!list) throw new BroadcastsUnreadable("the list of campaigns");
   if (!list.length) return [];
-  const rows = await redisPipeline(list.map((id) => ["GET", bcKey(id)]));
-  if (!Array.isArray(rows) || rows.length !== list.length) throw new BroadcastsUnreadable("the campaigns' records");
+  const rows = repliesFor(await redisPipeline(list.map((id) => ["GET", bcKey(id)])), list.length);
+  if (!rows) throw new BroadcastsUnreadable("the campaigns' records");
   const out: Broadcast[] = [];
   for (let i = 0; i < list.length; i += 1) {
     if (rows[i] === null) continue;

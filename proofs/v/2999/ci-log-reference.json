@@ -1,0 +1,15 @@
+{
+  "commit": "161914831ae5e777d8791d168dda4a602fd297fa",
+  "path": "proofs/v/2999/ci-verify-128449404097.log",
+  "gitBlob": "67fb8a22bf553ceb537e25fb1d58fcdbf48c3469",
+  "sha256": "2d8bbcd4162eaf472b8e563721b54ac62b50773c399f63da7035403c98229d09",
+  "bytes": 6142347,
+  "lines": 76532,
+  "run": 42387307319,
+  "job": 128449404097,
+  "failedFiles": [
+    "closing-families.test.ts",
+    "data-recount.test.ts",
+    "limits-proposal.test.ts"
+  ]
+}

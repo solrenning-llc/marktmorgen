@@ -2927,8 +2927,20 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
-      // PayPal's refunds in full, named by the payment as the book names it.
-      for (const r of await readPayPalRefunds(store.statsId, since)) refunds.set(paypalPaymentId(r.capture), (refunds.get(paypalPaymentId(r.capture)) ?? 0) + r.cents);
+      // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
+      // sale, and one in another currency than its sale's means nothing in its cents: either leaves what is owed
+      // unknown (refundsChecked), never a refund of nothing, so no payout is made on it (rule 24, as #3189 for
+      // Stripe). A refund is in full, so the same payment listed twice counts once.
+      const paypalCurrency = new Map(everything.filter((r) => r.pi.startsWith("paypal:")).map((r) => [r.pi, r.currency.toLowerCase()] as const));
+      const paypalSeen = new Set<string>();
+      for (const r of await readPayPalRefunds(store.statsId, since)) {
+        const sale = typeof r.capture === "string" && r.capture ? paypalCurrency.get(paypalPaymentId(r.capture)) : null;
+        if (sale === null || typeof r.currency !== "string" || (sale !== undefined && sale !== r.currency.toLowerCase())) refundsChecked = false;
+        else if (!paypalSeen.has(r.capture)) {
+          paypalSeen.add(r.capture);
+          refunds.set(paypalPaymentId(r.capture), (refunds.get(paypalPaymentId(r.capture)) ?? 0) + r.cents);
+        }
+      }
     } catch (error) {
       console.error("reading refunds for the affiliate book failed", error);
       refundsChecked = false;

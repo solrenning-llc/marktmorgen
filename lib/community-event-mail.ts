@@ -232,13 +232,25 @@ function stillUseful(kind: EventMailKind, start: number, now: number): boolean {
   return true;
 }
 
-/** Writes a send's readers down, in order, and the send with them. */
-async function listReaders(job: EventMailJob, readers: string[]): Promise<void> {
+/**
+ * Writes a waiting notice's readers down, in order, then the send with them, every reply exact (Claude 2's focal on
+ * #3134), as startJob writes a send's. True only when the whole list was written and then the send; false when any
+ * reply is not known or the write failed, so the caller keeps the notice waiting and the next run reads and writes
+ * the list again (DEL first, so a list written in part is never sent from).
+ */
+async function listReaders(job: EventMailJob, readers: string[]): Promise<boolean> {
   const commands: (string | number)[][] = [["DEL", toKey(job.id)]];
   for (let i = 0; i < readers.length; i += 500) commands.push(["RPUSH", toKey(job.id), ...readers.slice(i, i + 500)]);
   commands.push(["EXPIRE", toKey(job.id), KEEP_SECONDS]);
-  await redisPipeline(commands);
-  await save(job);
+  try {
+    const listed = repliesFor(await redisPipeline(commands), commands.length);
+    if (!listed || !listed.every((reply) => countOf(reply) !== null)) return false;
+    const saved = repliesFor(await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", KEEP_SECONDS]]), 1)?.[0];
+    return saved === "OK";
+  } catch (error) {
+    console.error("writing down who a waiting event email goes to failed", error);
+    return false;
+  }
 }
 
 /**
@@ -502,8 +514,14 @@ export async function advanceEventJob(
         return job;
       }
       if (!readers.length) return await finish("sent", "");
-      job = { ...job, waiting: false, total: readers.length, note: "" };
-      await listReaders(job, readers);
+      const listed: EventMailJob = { ...job, waiting: false, total: readers.length, note: "" };
+      if (!(await listReaders(listed, readers))) {
+        // Not written down whole: it waits, and the next run writes the whole list again. Nothing was sent from it.
+        job = { ...job, note: WAITING_NOTE };
+        await save(job);
+        return job;
+      }
+      job = listed;
     }
     if (!isSenderConfigured()) return job;
     const words = eventMailWords(store, config, event, job);

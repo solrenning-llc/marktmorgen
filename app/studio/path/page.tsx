@@ -26,7 +26,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { pathPlanLine } from "@/lib/path-plan";
 import { largerPlanFor } from "@/lib/larger-plan";
@@ -60,7 +60,9 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
  const growthMissions=growth?pathGrowthMissions(growth.facts):[];
  const growthHref=(place:"products"|"email"|"people"|"reviews"|"numbers")=>place==="products"||place==="numbers"?studioPath(store)+"#"+place:studioPath(store,"",place);
  const larger=largerPlanFor(store,now/1000);
- const planLine=pathPlanLine(await allowanceUsed(store,"studio",now),allowanceFor(store,"studio",now/1000),larger);
+ // An unread count is said to be unknown on the line, and no plan is suggested from it (rule 24).
+ const studioUsed=await allowanceUsedExact(store,"studio",now);
+ const planLine=pathPlanLine(studioUsed,allowanceFor(store,"studio",now/1000),larger);
  const mission=returning?returnMission:progress?.today;
  const wording=record&&aiAvailableFor(store,now)?currentWordingSource(store,record,now):null;
  const campaign=returning?null:pathCampaign(progress?.today);
@@ -70,7 +72,7 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
   <StudioStorePin sid={store.sid}><main id="content" className="container-page break-words pb-20 pt-10">
    <p className="eyebrow">Marktmorgen Path</p><Link className="mt-3 inline-block underline" href="/platform/path">How Path works</Link><h1 className="t-h2 mt-3">{PATH_TITLE}</h1><p className="mt-3 text-ink-soft">{PATH_SLOGAN}</p>
    <PathCheckoutNotice notice={checkout} reviewHref={checkout.state==="preview"?"/mission":checkout.state==="live"?null:studioPath(store)+"#stripe"}/>
-   {planLine?<aside className="notice mt-6" aria-label="Your studio usage"><p>{planLine}</p>{larger?<Link className="mt-2 inline-block underline" href="/pricing">Review plans</Link>:null}</aside>:null}
+   {planLine?<aside className="notice mt-6" aria-label="Your studio usage"><p>{planLine}</p>{larger&&studioUsed!==null?<Link className="mt-2 inline-block underline" href="/pricing">Review plans</Link>:null}</aside>:null}
    {failed?<p role="alert" className="notice notice-error mt-6">Your Path could not be read just now. Please try again in a moment.</p>:null}
    {progress && record?<>
     <section className="mt-8 rounded-2xl border border-line bg-white p-6" aria-label="Your progress">

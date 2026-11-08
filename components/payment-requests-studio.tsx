@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { paymentRequestReply, type RequestAction } from "@/lib/payment-request-reply";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
+import { emailsUsedLine } from "@/lib/store-allowance-rules";
 import { type Currency, fieldPrefix, formatMoney, readMoney } from "@/lib/money";
 import {
   MAX_AUTO_REMINDERS,
@@ -76,7 +77,8 @@ export function PaymentRequestsStudio({
   closedWhy: string;
   limits: { open: number; kept: number };
   openNow: number;
-  emails: { used: number; limit: number };
+  /** The store's emails this month; `used` null when the count could not be read (said so, never "0 used"). */
+  emails: { used: number | null; limit: number };
   shareWords: string;
   taxOn: boolean;
   prefill: Prefill;
@@ -289,7 +291,7 @@ export function PaymentRequestsStudio({
             </label>
           </div>
           <p className="mt-5 text-sm text-ink-soft">
-            {`Each email, the request and each reminder, is one of your store's emails for this month: ${emails.used.toLocaleString("en-US")} of ${emails.limit.toLocaleString("en-US")} used. Open requests: ${openNow.toLocaleString("en-US")} of ${limits.open.toLocaleString("en-US")}.`}
+            {`Each email, the request and each reminder, is one of your store's emails for this month: ${emailsUsedLine(emails.used, emails.limit)} Open requests: ${openNow.toLocaleString("en-US")} of ${limits.open.toLocaleString("en-US")}.`}
           </p>
           <label className="mt-4 flex items-start gap-3">
             <input id="pr-consent" type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />

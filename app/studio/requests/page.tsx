@@ -9,7 +9,7 @@ import { PaymentRequestsStudio, type Prefill } from "@/components/payment-reques
 import { can } from "@/lib/team-roles";
 import { readMoney, moneyField } from "@/lib/money";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { shareOfSaleWords } from "@/lib/fee-words";
 import { MAX_LINE_TEXT, MAX_NAME, dueRange, requestLimitsFor } from "@/lib/payment-request-rules";
 import { listRequests, openCount } from "@/lib/payment-request-store";
@@ -40,7 +40,7 @@ export default async function StudioRequestsPage({ searchParams }: Params) {
   const { store } = view;
   const now = new Date().getTime();
   const listed = await listRequests(store, now);
-  const [requests, used, openNow] = await Promise.all([listed === null ? Promise.resolve([]) : refreshRefunds(store, listed, now), allowanceUsed(store, "email", now), openCount(store.sid, now).catch(() => null)]);
+  const [requests, used, openNow] = await Promise.all([listed === null ? Promise.resolve([]) : refreshRefunds(store, listed, now), allowanceUsedExact(store, "email", now), openCount(store.sid, now).catch(() => null)]);
   const open = requestsOpen(store);
   const read = (name: string, max: number) => (typeof query[name] === "string" ? (query[name] as string).slice(0, max) : "");
   const typed = read("amount", 20);

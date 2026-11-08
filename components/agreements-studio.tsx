@@ -7,6 +7,7 @@ import { agreementReply, type AgreementAction, type AgreementReply } from "@/lib
 import { agreementEditorVersion } from "@/lib/agreement-editor-version";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
+import { emailsUsedLine } from "@/lib/store-allowance-rules";
 import { type Currency, fieldPrefix, formatMoney, isCurrency, readMoney } from "@/lib/money";
 import {
   KEEP_DAYS,
@@ -68,7 +69,8 @@ export function AgreementsStudio({
   currency: Currency;
   canSend: boolean;
   open: boolean;
-  emails: { used: number; limit: number };
+  /** The store's emails this month; `used` null when the count could not be read (said so, never "0 used"). */
+  emails: { used: number | null; limit: number };
   payChoices: PayChoice[];
 }) {
   const router = useRouter();
@@ -305,7 +307,7 @@ export function AgreementsStudio({
             </label>
           ) : null}
           <p className="mt-5 text-sm text-ink-soft">
-            {`Each email, the link, a new version and each signed copy (one to them, one to you), is one of your store's emails for this month: ${emails.used.toLocaleString("en-US")} of ${emails.limit.toLocaleString("en-US")} used. The link takes a signature for ${SIGN_DAYS} days.`}
+            {`Each email, the link, a new version and each signed copy (one to them, one to you), is one of your store's emails for this month: ${emailsUsedLine(emails.used, emails.limit)} The link takes a signature for ${SIGN_DAYS} days.`}
           </p>
           {!editing ? (
             <label className="mt-4 flex items-start gap-3">

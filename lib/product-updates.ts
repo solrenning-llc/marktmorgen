@@ -37,7 +37,7 @@ import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
@@ -551,8 +551,10 @@ function checkedUpdateRecipients(emails: string[], checks: unknown, hasList: boo
 /** Moves every waiting update on. For the mail job. */
 export async function advanceUpdates(load: (handle: string) => Promise<Store | null>, deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["SMEMBERS", QUEUE]]);
-  const ids = Array.isArray(raw) ? (raw as string[]) : [];
+  // A queue that does not read in its exact shape is unknown (rule 24): it throws, so the mail job logs this step as
+  // failed instead of reporting no updates, and the next run reads it again.
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", QUEUE]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("the queue of product updates");
   let touched = 0;
   for (const id of ids) {
     if (Date.now() > deadline) break;

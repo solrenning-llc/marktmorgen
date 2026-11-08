@@ -12,8 +12,15 @@
  * by the last row's id, and a page with more but no id to walk on, a
  * repeated id or more pages than the bound is unknown too.
  *
- * Controls: an exactly empty list is "never" (noted today, one email), and
- * one earlier sale is "before" (its day noted, nothing sent).
+ * Which rows are sales is read exactly too: a row whose metadata is not an
+ * object (so whose it is cannot be read), or a row of this store whose
+ * payment status is not one Stripe documents or, when paid and not a tip,
+ * whose amount is not whole cents, is unknown, never "not a sale".
+ *
+ * Controls: an exactly empty list is "never" (noted today, one email), one
+ * earlier sale is "before" (its day noted, nothing sent), and rows that are
+ * exactly not a sale of this store (another store's, unpaid, free, of zero,
+ * a tip) are skipped.
  */
 import { claimHandle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { firstSaleAt, noteFirstSale } from "@/lib/yearly-offer";
@@ -125,6 +132,26 @@ async function main() {
           : json({ error: { message: "bad cursor" } }, 400),
     );
     is("a sale on the second page is before: walked on the last row's id, its day noted, nothing sent", [paged.noted, paged.day, paged.sent, paged.reads], [false, NOW - 40 * 86_400, 0, 2]);
+    const skipped = await pass((h) => () =>
+      json({
+        object: "list",
+        data: [
+          sale("another", NOW - 10 * 86_400, { id: "cs_other_store" }),
+          sale("another", NOW - 11 * 86_400, { id: "cs_other_odd", payment_status: "succeeded", amount_total: "1900" }),
+          sale(h, NOW - 12 * 86_400, { id: "cs_no_store", metadata: {} }),
+          sale(h, NOW - 13 * 86_400, { id: "cs_unpaid", payment_status: "unpaid", amount_total: null }),
+          sale(h, NOW - 14 * 86_400, { id: "cs_free", payment_status: "no_payment_required", amount_total: 0 }),
+          sale(h, NOW - 15 * 86_400, { id: "cs_zero", amount_total: 0 }),
+          tip(h, "cs_tip_only"),
+        ],
+        has_more: false,
+      }),
+    );
+    is(
+      "rows of another store, without a store, unpaid, free, of zero or a tip are exactly not a sale: never, today noted, one email",
+      [skipped.noted, skipped.day, skipped.sent],
+      [true, NOW - 60, 1],
+    );
   }
 
   part("Off-shape replies are unknown, never 'never sold'");
@@ -135,6 +162,19 @@ async function main() {
   await unknownCase("an empty list with has_more missing", () => () => json({ object: "list", data: [] }));
   await unknownCase("a row that is not a checkout", () => () => json({ object: "list", data: ["cs_1"], has_more: false }));
   await unknownCase("a sale without its date", (h) => () => json({ object: "list", data: [sale(h, NOW - 86_400, { created: "yesterday" })], has_more: false }));
+  // Which rows are sales is read exactly too (Claude 4 on #3281): a row of this store whose payment status or amount
+  // cannot be read, or a row whose metadata cannot say whose it is, may be the only earlier sale.
+  const only = (over: Record<string, unknown>) => (h: string) => () => json({ object: "list", data: [sale(h, NOW - 90 * 86_400, over)], has_more: false });
+  await unknownCase("the only earlier row with no payment status", only({ payment_status: undefined }));
+  await unknownCase("the only earlier row with a payment status Stripe does not document", only({ payment_status: "succeeded" }));
+  await unknownCase("the only earlier row with its amount as a string", only({ amount_total: "1900" }));
+  await unknownCase("the only earlier paid row with no amount", only({ amount_total: null }));
+  await unknownCase("the only earlier paid row with a fractional amount", only({ amount_total: 19.5 }));
+  await unknownCase("the only earlier row with null metadata", only({ metadata: null }));
+  await unknownCase("the only earlier row with no metadata", only({ metadata: undefined }));
+  await unknownCase("the only earlier row with metadata that is a list", only({ metadata: ["store"] }));
+  await unknownCase("the only earlier row with a store that is not a string", (h) => only({ metadata: { store: [h] } })(h));
+  await unknownCase("the only earlier row with a kind that is not a string", (h) => only({ metadata: { store: h, kind: 1 } })(h));
   await unknownCase("a page with more but rows without ids", (h) => (cursor) =>
     cursor === ""
       ? json({ object: "list", data: [{ ...tip(h, ""), id: undefined }], has_more: true })

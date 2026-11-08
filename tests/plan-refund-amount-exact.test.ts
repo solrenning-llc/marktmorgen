@@ -14,9 +14,9 @@
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { ENDING_KEY, SETTLE_SECONDS, findPlanRefund, finishPlanRefunds, partsOutcome } from "@/lib/plan-refund-flow";
+import { ENDING_KEY, GIVE_UP_DAYS, SETTLE_SECONDS, findPlanRefund, finishPlanRefunds, partsOutcome } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
-import { NOW, paidShop, world } from "./plan-refund-stripe-world";
+import { DAY, NOW, paidShop, world } from "./plan-refund-stripe-world";
 
 type Row = Record<string, unknown>;
 let k = 0;
@@ -98,6 +98,21 @@ async function main() {
   is("no letter says the refund was not made", world.emails.filter((e) => /We could not confirm the refund|was not made|Nothing was refunded/.test(e.text)).length, 0);
   is("found among the platform's refunds, amount unreadable: the plan not ended, the note and the stop kept", [listed.sub().status, listed.sub().cancel_at_period_end, (await listed.note()) !== null], ["active", true, true]);
   is("found on its charge, amount unreadable: the stop not taken back, the note kept", [charged.sub().status, charged.sub().cancel_at_period_end, (await charged.note()) !== null], ["active", true, true]);
+
+  part(`Still unknown after ${GIVE_UP_DAYS} days: kept and logged, never "Nothing was refunded" (rule 24, finding F1)`);
+  world.emails = [];
+  const logged: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 1);
+  } finally {
+    console.error = realError;
+  }
+  is("no letter at all: nothing unread is told as fact", world.emails.length, 0);
+  is("on the platform's list: the note and the stop kept, the plan untouched", [listed.sub().status, listed.sub().cancel_at_period_end, (await listed.note()) !== null], ["active", true, true]);
+  is("on its charge: the note and the stop kept, the plan untouched", [charged.sub().status, charged.sub().cancel_at_period_end, (await charged.note()) !== null], ["active", true, true]);
+  is("each still-held case is said in the log, by store", [listed.sid, charged.sid].map((sid) => logged.some((line) => line.includes(sid) && line.includes("still held"))), [true, true]);
   delete process.env.RESEND_API_KEY;
   done();
 }

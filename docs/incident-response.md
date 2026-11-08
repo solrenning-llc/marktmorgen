@@ -136,7 +136,7 @@ Escrito pela Claude 4 em 8/11/2026 (273 [BK1], mensagens C1-20261108-1530-C4-34 
 
 ### 8.1 Primeira hora
 
-1. **Desligar o agendamento do backup.** É sempre o primeiro passo: uma execução durante o incidente pode copiar dados já corrompidos e, depois, apagar cópias antigas boas pela retenção. Como fazer depende de como a rota for construída (por exemplo, tirar a entrada do backup de `vercel.json` e publicar de novo); o passo exato entra aqui quando a rota existir no main. A trava do bucket (7 dias, C4-35 e C4-37) protege as cópias mais recentes mesmo assim.
+1. **Desligar o agendamento do backup.** É sempre o primeiro passo: uma execução durante o incidente pode copiar dados já corrompidos e, depois, apagar cópias antigas boas pela retenção. Como fazer depende de como a rota for construída (por exemplo, tirar a entrada do backup de `vercel.json` e publicar de novo); o passo exato entra aqui quando a rota existir no main. A trava do bucket (7 dias, C4-35 e C4-37) protege as cópias mais recentes mesmo assim. O mesmo vale para o Worker de arquivos e vídeos: o dono pausa o agendamento dele na conta de backup da Cloudflare, para que nenhuma exclusão vencida seja aplicada durante o incidente.
 2. **Exportar o banco vivo antes de mexer em qualquer coisa**, como está, mesmo corrompido: é a prova do que aconteceu e o ponto de volta se a restauração der errado. O dono faz pelo console da Upstash (Backups, "Backup & Export"); o arquivo fica fora das contas da LLC.
 3. **Decidir de qual cópia restaurar**: a última boa antes do problema. O relatório do backup mostra a hora da última cópia verificada (`nl:backup:last-ok`). Cópias diárias do banco ficam 30 dias; as mensais, 3 (90 dias); a do próprio provedor, 1 ou 3 dias, se o dono tiver ligado (ver docs/backup-costs-2026-11-08.md, seção 4).
 
@@ -152,7 +152,22 @@ Escrito pela Claude 4 em 8/11/2026 (273 [BK1], mensagens C1-20261108-1530-C4-34 
 
 ### 8.3 Arquivos e vídeos
 
-A cópia de arquivos e vídeos (C4-37) é feita por um Worker na conta separada da Cloudflare, que só lê a origem. Restaurar um arquivo é copiá-lo do bucket de cópia de volta para a origem, pelo dono, com uma chave criada só para isso e revogada depois. Um arquivo apagado pelo criador ou por pedido de exclusão some da cópia em 30 dias; nunca restaurar um arquivo cuja exclusão foi pedida.
+A cópia de arquivos e vídeos é feita por um Worker na conta separada da Cloudflare, pelo desenho da mensagem C1-20261108-2031-C4-38 (docs/backup-costs-2026-11-08.md, seção 5.1). **Nenhuma credencial da produção fica na conta de backup**: o Worker só chama uma rota do site, protegida por um segredo próprio, que lista os objetos e devolve endereços de leitura de curta duração (R2 pré-assinado, endereço do bunny assinado com a chave de token da zona, Blob privado assinado só para leitura); o Worker baixa direto da origem, e os bytes não passam por função da Vercel. O texto anterior (C4-37), em que o Worker lia a origem com chaves da produção, foi substituído e não deve ser construído. A rota, o segredo e o Worker ainda **não existem no main**.
+
+**Restaurar um arquivo ou vídeo** (passo do dono; nada disso existe ainda):
+
+1. Antes de tudo, conferir no registro de exclusões se o arquivo foi apagado pelo criador ou por pedido de privacidade: **nunca restaurar um arquivo cuja exclusão foi pedida**.
+2. **Criar a permissão de gravação da origem só na hora**, para essa restauração, e nada além do necessário:
+   - R2 da produção: um token **Object Read & Write** limitado ao bucket de origem, com data de expiração no mesmo dia (a página de tokens do R2, lida em 8/11/2026, diz que um token vale até ser revogado ou até a expiração definida).
+   - Vercel Blob: endereços de gravação assinados (`issueSignedToken` com `operations: ['put']`, um caminho por vez, `validUntil` de no máximo 1 hora), emitidos por uma rota de restauração ligada só durante a restauração; nenhum `BLOB_READ_WRITE_TOKEN` sai da Vercel. A página de endereços assinados (lida em 8/11/2026) não diz se uma delegação pode ser revogada antes de `validUntil`, por isso a validade é curta.
+   - Bunny Stream: o vídeo volta pela porta de envio assinada que o próprio site já faz (`lib/stream.ts`, válida por pouco tempo); a chave da biblioteca não sai da Vercel.
+   - Para ler a cópia: um token **Object Read only** do bucket de cópia, criado na hora, na conta de backup.
+3. Copiar do bucket de cópia para a origem, com a versão escolhida (cada versão anterior de um arquivo alterado fica 30 dias na cópia).
+4. **Ao terminar, apagar o que foi criado no passo 2**: revogar os tokens do R2 (o de gravação da produção e o de leitura da cópia) e desligar a rota de restauração do Blob. Registrar na seção 7 o que foi criado e quando foi apagado.
+
+**Se o segredo da rota de listagem vazar:** quem o tiver consegue listar nomes e ler arquivos (incidente de confidencialidade), mas não grava nem apaga nada. Trocar o segredo na Vercel e no Worker ao mesmo tempo, como na seção 3, e conferir no relatório da rota quantas chamadas houve fora do horário do Worker.
+
+**Proteções que valem durante um incidente (a construir):** o Worker nunca deduz exclusão da ausência de um item na lista; se a lista vier vazia, falhar ou encolher mais de 20% em relação à anterior, não apaga nada e dispara o alarme; exclusões só a partir de registro explícito, aplicadas 30 dias depois. Um arquivo alterado vira objeto novo na cópia, e a versão anterior fica 30 dias, então uma origem sobrescrita com lixo não destrói a cópia boa nesse prazo. Ninguém desliga essas proteções para "acelerar" uma restauração.
 
 ### 8.4 Teste mensal de restauração
 
@@ -171,11 +186,11 @@ A cópia de arquivos e vídeos (C4-37) é feita por um Worker na conta separada 
 
 ### 8.6 Trava do bucket e resposta 409
 
-Com a trava ligada, apagar um objeto mais novo que ela é recusado pela Cloudflare com **409**. O código deve tratar esse 409 como "objeto travado", nunca como erro genérico: não insistir, não apagar outra coisa no lugar e, se não couber a cópia do dia sem apagar objeto travado, registrar o motivo `room_locked` no relatório e no alarme (C4-35 e C4-36, a construir). Ninguém desliga a trava para "abrir espaço" durante um incidente: ela existe para proteger as cópias justamente nessa hora. (O comportamento 409 está descrito pela caixa; a página oficial da Cloudflare sobre travas não pôde ser lida nesta sessão.)
+Com a trava ligada, apagar um objeto mais novo que ela é recusado pela Cloudflare com **409**. O código deve tratar esse 409 como "objeto travado", nunca como erro genérico: não insistir, não apagar outra coisa no lugar e, se não couber a cópia do dia sem apagar objeto travado, registrar o motivo `room_locked` no relatório e no alarme (C4-35 e C4-36, a construir). Ninguém desliga a trava para "abrir espaço" durante um incidente: ela existe para proteger as cópias justamente nessa hora. (O 409 de `DeleteObject` foi conferido nas páginas oficiais da Cloudflare em 8/11/2026: docs/backup-costs-2026-11-08.md, seção 4a. O que o Worker recebe pela ligação de Workers num objeto travado ainda não foi lido: tratar qualquer erro como não feito.)
 
 ### 8.7 O alarme de silêncio (dead-man switch)
 
-- Depois de cada execução **bem-sucedida e verificada**, a rotina manda um sinal de vida a um monitor **fora da Vercel**. O alarme dispara pelo **silêncio**: aviso com 26 horas sem sinal e crítico com 48 horas (o mesmo prazo de `STALE_MS` em `lib/backup-run.ts`).
-- O sinal de vida só vai em sucesso; os motivos `prune_*`, `room_*` e `last_good_copy_lost` também disparam o alarme (C4-36, item 4).
-- Alarme de silêncio quer dizer: a cópia do dia **não** foi feita ou não foi verificada, por qualquer motivo, inclusive a Vercel fora do ar. Abrir o relatório do backup e o motivo da última falha (`nl:backup:last-fail`); se a Vercel estiver fora, esperar a volta e conferir que a próxima execução mandou o sinal.
-- O monitor externo é do dono e ainda não existe; até lá, não há alarme fora da Vercel.
+- Há **dois sinais de vida**, os dois para o mesmo monitor **fora da Vercel e fora da conta de backup**: o da cópia do banco (rota da Vercel) e o do **Worker** de arquivos e vídeos (mensagem C4-38, item 5). Cada um só é mandado **em sucesso**: o do banco depois de cada execução bem-sucedida e verificada; o do Worker depois de um ciclo diário completo (listas lidas, cada cópia pendente verificada, exclusões vencidas aplicadas). O alarme dispara pelo **silêncio** de qualquer um deles: aviso com 26 horas sem sinal e crítico com 48 horas (o mesmo prazo de `STALE_MS` em `lib/backup-run.ts`).
+- Também disparam o alarme: os motivos `prune_*`, `room_*` e `last_good_copy_lost` da cópia do banco (C4-36, item 4); e, no Worker, lista vazia, falha ou encolhida mais de 20%, mais de 20% dos objetos de uma loja com etag novo num dia, arquivo recusado por tamanho, itens ausentes sem registro de exclusão, cópia atrasada em relação ao próprio teto e recusa da rota de listagem.
+- Alarme de silêncio quer dizer: a cópia do dia **não** foi feita ou não foi verificada, por qualquer motivo, inclusive a Vercel ou a Cloudflare fora do ar. Abrir o relatório do backup e o motivo da última falha (`nl:backup:last-fail`, para o banco; o registro do Worker, para arquivos e vídeos); se um provedor estiver fora, esperar a volta e conferir que a próxima execução mandou o sinal.
+- O monitor externo é do dono, ainda não foi escolhido e ainda não existe; o preço dele é desconhecido, não zero (docs/backup-costs-2026-11-08.md, seção 5c). Até lá, não há alarme fora da Vercel nem fora da Cloudflare.

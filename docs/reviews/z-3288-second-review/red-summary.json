@@ -1,0 +1,24 @@
+[
+  {
+    "file": "community-notice-size.test.ts",
+    "tests": 4,
+    "pass": 2,
+    "fail": 2,
+    "volume": {
+      "runs": 29,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "z-3288-notice-room.proof.ts",
+    "tests": 24,
+    "pass": 5,
+    "fail": 19,
+    "volume": {
+      "runs": 564,
+      "mocks": 0,
+      "over": false
+    }
+  }
+]

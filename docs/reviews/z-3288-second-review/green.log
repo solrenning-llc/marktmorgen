@@ -1,0 +1,565 @@
+
+FILE community-notice-size.test.ts
+✔ tell: a confirmed empty list takes the notice's room before filing it (7.823676ms)
+✔ tell: two healthy lists both grow, each with its room (9.679097ms)
+✔ tell: a list size in an unknown shape files nothing, so nothing is kept without its room (4.129873ms)
+✔ tell: one unknown size among two files nothing for either (0.540796ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.976404
+Z_VOLUME {"runs":33,"mocks":0,"over":false}
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9450:7
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9446:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9463:5
+    at async withPipeline ([stdin]:9408:5)
+    at async TestContext.<anonymous> ([stdin]:9459:3)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE z-3288-notice-room.proof.ts
+Z_CASE {"label":"empty","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"extra","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"nil slot","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"missing value","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"text count","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"OK slot","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"object slot","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"nested slot","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"negative","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"fraction","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"NaN","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"infinity","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"unsafe integer","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"hole","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"inherited","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"getter","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"frozen malformed","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"mixed missing","commands":["ZCARD","ZCARD"],"jsonPipelineBytes":111,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0,0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"mixed unknown","commands":["ZCARD","ZCARD"],"jsonPipelineBytes":111,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0,0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"mixed hole","commands":["ZCARD","ZCARD"],"jsonPipelineBytes":111,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0,0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"frozen zero","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3188,"nestedRedis":4,"mockHttp":0,"paid":720,"total":784,"sizes":[1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"dedup","commands":["ZCARD","ZCARD","TAKE","ZADD","ZREMRANGEBYRANK","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3502,"nestedRedis":8,"mockHttp":0,"paid":1440,"total":1504,"sizes":[1,1],"admittedAtWrite":[1440],"noticeBytes":720}
+Z_CASE {"label":"funded full ring","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":328,"nestedRedis":4,"mockHttp":0,"paid":72000,"total":72064,"sizes":[100],"admittedAtWrite":[72000],"noticeBytes":720}
+Z_CASE {"label":"filtered all","commands":[],"jsonPipelineBytes":0,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[],"admittedAtWrite":[],"noticeBytes":720}
+✔ independent unknown size: empty (7.156721ms)
+✔ independent unknown size: extra (0.660107ms)
+✔ independent unknown size: nil slot (1.280242ms)
+✔ independent unknown size: missing value (8.475441ms)
+✔ independent unknown size: text count (0.58314ms)
+✔ independent unknown size: OK slot (0.326653ms)
+✔ independent unknown size: object slot (0.53028ms)
+✔ independent unknown size: nested slot (0.313313ms)
+✔ independent unknown size: negative (0.82217ms)
+✔ independent unknown size: fraction (0.732496ms)
+✔ independent unknown size: NaN (0.661027ms)
+✔ independent unknown size: infinity (0.659535ms)
+✔ independent unknown size: unsafe integer (0.39099ms)
+✔ independent unknown size: hole (0.394285ms)
+✔ independent unknown size: inherited (0.598944ms)
+✔ independent unknown size: getter (0.482958ms)
+✔ independent unknown size: frozen malformed (0.362256ms)
+✔ independent unknown size: mixed missing (0.283038ms)
+✔ independent unknown size: mixed unknown (0.356748ms)
+✔ independent unknown size: mixed hole (0.263738ms)
+✔ confirmed empty frozen receipt reserves actual room before real ZADD (1.862732ms)
+✔ deduplication and actor filtering reserve only two actual rows (0.384741ms)
+✔ full funded ring reuses existing room and trims to the unchanged limit (21.588154ms)
+✔ only self and empty recipients spend no Redis commands (1.785975ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.434121
+Z_VOLUME {"runs":491,"mocks":0,"over":false}
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed UnknownReplyError: Redis answered a community notice list's size in an unknown shape
+    at tell ([stdin]:9368:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9453:5)
+    at async TestContext.<anonymous> ([stdin]:9479:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE community-notice-erasure-evidence.test.ts
+✔ community notice erasure requires one exact Redis deletion acknowledgement (5.52014ms)
+✔ community notice erasure accepts only possible two-key DEL counts (0.390028ms)
+✔ community notice erasure rejects an acknowledgement inherited from Object.prototype (0.378111ms)
+✔ an applied notice deletion with a lost acknowledgement stays unknown without replay (3.788727ms)
+✔ a member's notices for their data copy: healthy and empty read exactly as before (4.688415ms)
+✔ a member's notices answered in an unknown shape throw, and the copy is never handed over without them (9.31012ms)
+✔ a kept notice that does not read throws, never a shorter copy (3.145627ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 49.495275
+Z_VOLUME {"runs":303,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE community-reads-unknown.test.ts
+
+Room search: a lost or off-shape read is unknown, never no match
+  ok    a text pipeline throws
+  ok    a text pipeline was the reply read
+  ok    a short pipeline throws
+  ok    a short pipeline was the reply read
+  ok    an extra reply throws
+  ok    an extra reply was the reply read
+  ok    a null room throws
+  ok    a null room was the reply read
+  ok    a text room throws
+  ok    a text room was the reply read
+  ok    an object room throws
+  ok    an object room was the reply read
+  ok    a non-string entry throws
+  ok    a non-string entry was the reply read
+  ok    a hole in the room throws
+  ok    a hole in the room was the reply read
+
+Room search controls
+  ok    an exact empty room finds nothing
+  ok    a healthy room finds both lines, newest first
+  ok    no words searches nothing
+
+Message search: an off-shape list of conversations is unknown, never no match
+  ok    a text pipeline throws
+  ok    a text pipeline was the reply read
+  ok    a short pipeline throws
+  ok    a short pipeline was the reply read
+  ok    an extra reply throws
+  ok    an extra reply was the reply read
+  ok    a null inbox throws
+  ok    a null inbox was the reply read
+  ok    a text inbox throws
+  ok    a text inbox was the reply read
+  ok    a non-string entry throws
+  ok    a non-string entry was the reply read
+  ok    a hole in the inbox throws
+  ok    a hole in the inbox was the reply read
+
+Message search: an off-shape read of the conversations is unknown, never no match
+  ok    a null pipeline throws
+  ok    a null pipeline was the reply read
+  ok    a short pipeline throws
+  ok    a short pipeline was the reply read
+  ok    a null conversation throws
+  ok    a null conversation was the reply read
+  ok    a text conversation throws
+  ok    a text conversation was the reply read
+  ok    a non-string entry throws
+  ok    a non-string entry was the reply read
+  ok    a hole in the conversation throws
+  ok    a hole in the conversation was the reply read
+
+Message search controls
+  ok    an exact empty inbox finds nothing
+  ok    a healthy inbox finds both lines of their conversation, newest first
+  ok    a conversation with an exact empty list finds nothing
+
+Data copy: an off-shape read of their conversation lists is unknown, never fewer conversations
+  ok    a null pipeline throws
+  ok    a null pipeline was the reply read
+  ok    a text pipeline throws
+  ok    a text pipeline was the reply read
+  ok    a short pipeline throws
+  ok    a short pipeline was the reply read
+  ok    an empty pipeline throws
+  ok    an empty pipeline was the reply read
+  ok    an extra reply throws
+  ok    an extra reply was the reply read
+  ok    a null inbox throws
+  ok    a null inbox was the reply read
+  ok    a null requests list throws
+  ok    a null requests list was the reply read
+  ok    an object inbox throws
+  ok    an object inbox was the reply read
+  ok    a non-string entry throws
+  ok    a non-string entry was the reply read
+  ok    a hole in the requests throws
+  ok    a hole in the requests was the reply read
+
+Data copy: an off-shape read of a conversation is unknown, never fewer messages
+  ok    a null pipeline throws
+  ok    a null pipeline was the reply read
+  ok    a short pipeline throws
+  ok    a short pipeline was the reply read
+  ok    an extra reply throws
+  ok    an extra reply was the reply read
+  ok    a null conversation throws
+  ok    a null conversation was the reply read
+  ok    a text conversation throws
+  ok    a text conversation was the reply read
+  ok    a non-string entry throws
+  ok    a non-string entry was the reply read
+  ok    a hole in a conversation throws
+  ok    a hole in a conversation was the reply read
+  ok    a line that is not a message throws
+  ok    a line that is not a message was the reply read
+
+Data copy: the community part of a person's copy is never complete-looking on an unknown read
+  ok    an off-shape inbox: the copy's community part throws, so the whole copy fails
+  ok    an off-shape inbox was the reply read
+  ok    a lost list read: the copy's community part throws, so the whole copy fails
+  ok    a lost list read was the reply read
+  ok    an off-shape conversation: the copy's community part throws, so the whole copy fails
+  ok    an off-shape conversation was the reply read
+  ok    a lost conversation read: the copy's community part throws, so the whole copy fails
+  ok    a lost conversation read was the reply read
+
+Data copy controls
+  ok    exact empty lists: no conversations
+  ok    exact empty lists: no community part in the copy
+  ok    healthy lists: every conversation and request, whole
+  ok    healthy lists: the copy carries both conversations
+  ok    a request with an exact empty list is kept, with no messages
+
+The search page: a search that could not be read is said, never no match
+  ok    no failed room or message search is turned into an empty list
+  ok    a failed room or message search is kept as unknown
+  ok    an unknown tab carries no number
+  ok    an unknown tab says so in a live region
+  ok    an unknown tab never says No match
+  ok    an unknown tab never says what was searched
+  ok    the English words, plain
+  ok    es: its own words for both tabs, not the English
+  ok    fr: its own words for both tabs, not the English
+  ok    de: its own words for both tabs, not the English
+  ok    it: its own words for both tabs, not the English
+  ok    nl: its own words for both tabs, not the English
+  ok    pt: its own words for both tabs, not the English
+
+110 checks, all passing.
+Z_VOLUME {"runs":558,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (83.198124ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (172.294888ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (30.940675ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.988039ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.143296ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.156106ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.402637ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (68.87343ms)
+✔ every store figure taken in the code is a kind a line prices (46.249343ms)
+✔ every email sent names a meter, and each file only the meters it may use (71.179841ms)
+✔ the units a figure is taken in cost at least what they stand for (8.85448ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (3.45631ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.179961ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.279923ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.100752ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.183928ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.443549ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.144387ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.94805ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.219161ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.616518ms)
+✔ Path push fits its reserved studio requests (0.07991ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.055184ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.089835ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.122786ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (36.925681ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 555.7722
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (85.44276ms)
+✔ each family is bounded one way at least, and what it says can be checked (49.557685ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.876717ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (0.87451ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.393523ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.119956ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.183186ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 153.492063
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3288-QSKdKc

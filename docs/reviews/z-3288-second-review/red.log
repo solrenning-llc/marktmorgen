@@ -1,0 +1,630 @@
+
+FILE community-notice-size.test.ts
+✔ tell: a confirmed empty list takes the notice's room before filing it (5.768154ms)
+✔ tell: two healthy lists both grow, each with its room (8.798061ms)
+✖ tell: a list size in an unknown shape files nothing, so nothing is kept without its room (3.526853ms)
+✖ tell: one unknown size among two files nothing for either (0.793267ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 2
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24.543413
+
+✖ failing tests:
+
+test at [stdin]:9413:27
+✖ tell: a list size in an unknown shape files nothing, so nothing is kept without its room (3.526853ms)
+  AssertionError [ERR_ASSERTION]: ZCARD reply []
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9424:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9428:27
+✖ tell: one unknown size among two files nothing for either (0.793267ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+      'ZCARD',
+  +   'EVAL',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9437:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":29,"mocks":0,"over":false}
+filing a community notification failed TypeError: Cannot read properties of null (reading 'filter')
+    at tell ([stdin]:9341:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9422:7
+    at async withPipeline ([stdin]:9380:5)
+    at async TestContext.<anonymous> ([stdin]:9418:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed TypeError: Cannot read properties of undefined (reading 'filter')
+    at tell ([stdin]:9341:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9422:7
+    at async withPipeline ([stdin]:9380:5)
+    at async TestContext.<anonymous> ([stdin]:9418:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed TypeError: sizes.filter is not a function
+    at tell ([stdin]:9341:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9422:7
+    at async withPipeline ([stdin]:9380:5)
+    at async TestContext.<anonymous> ([stdin]:9418:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+filing a community notification failed TypeError: sizes.filter is not a function
+    at tell ([stdin]:9341:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async [stdin]:9422:7
+    at async withPipeline ([stdin]:9380:5)
+    at async TestContext.<anonymous> ([stdin]:9418:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 1 null
+
+FILE z-3288-notice-room.proof.ts
+Z_CASE {"label":"empty","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":321,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"extra","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3183,"nestedRedis":4,"mockHttp":0,"paid":1440,"total":1504,"sizes":[1],"admittedAtWrite":[1440],"noticeBytes":720}
+Z_CASE {"label":"nil slot","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3185,"nestedRedis":4,"mockHttp":0,"paid":720,"total":784,"sizes":[1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"missing value","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":329,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"text count","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3187,"nestedRedis":4,"mockHttp":0,"paid":720,"total":784,"sizes":[1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"OK slot","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":323,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"object slot","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":327,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"nested slot","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3188,"nestedRedis":4,"mockHttp":0,"paid":720,"total":784,"sizes":[1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"negative","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3185,"nestedRedis":4,"mockHttp":0,"paid":720,"total":784,"sizes":[1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"fraction","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3185,"nestedRedis":4,"mockHttp":0,"paid":720,"total":784,"sizes":[1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"NaN","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":319,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"infinity","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":324,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"unsafe integer","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":330,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"hole","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":320,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"inherited","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3186,"nestedRedis":4,"mockHttp":0,"paid":720,"total":784,"sizes":[1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"getter","commands":["ZCARD"],"jsonPipelineBytes":56,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[0],"admittedAtWrite":[],"noticeBytes":720}
+Z_CASE {"label":"frozen malformed","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":332,"nestedRedis":3,"mockHttp":0,"paid":0,"total":0,"sizes":[1],"admittedAtWrite":[0],"noticeBytes":720}
+Z_CASE {"label":"mixed missing","commands":["ZCARD","ZCARD","TAKE","ZADD","ZREMRANGEBYRANK","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3517,"nestedRedis":6,"mockHttp":0,"paid":720,"total":784,"sizes":[1,1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"mixed unknown","commands":["ZCARD","ZCARD","TAKE","ZADD","ZREMRANGEBYRANK","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3517,"nestedRedis":6,"mockHttp":0,"paid":720,"total":784,"sizes":[1,1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"mixed hole","commands":["ZCARD","ZCARD","TAKE","ZADD","ZREMRANGEBYRANK","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3511,"nestedRedis":6,"mockHttp":0,"paid":720,"total":784,"sizes":[1,1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"frozen zero","commands":["ZCARD","TAKE","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3188,"nestedRedis":4,"mockHttp":0,"paid":720,"total":784,"sizes":[1],"admittedAtWrite":[720],"noticeBytes":720}
+Z_CASE {"label":"dedup","commands":["ZCARD","ZCARD","TAKE","ZADD","ZREMRANGEBYRANK","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":3502,"nestedRedis":8,"mockHttp":0,"paid":1440,"total":1504,"sizes":[1,1],"admittedAtWrite":[1440],"noticeBytes":720}
+Z_CASE {"label":"funded full ring","commands":["ZCARD","ZADD","ZREMRANGEBYRANK"],"jsonPipelineBytes":328,"nestedRedis":4,"mockHttp":0,"paid":72000,"total":72064,"sizes":[100],"admittedAtWrite":[72000],"noticeBytes":720}
+Z_CASE {"label":"filtered all","commands":[],"jsonPipelineBytes":0,"nestedRedis":0,"mockHttp":0,"paid":0,"total":0,"sizes":[],"admittedAtWrite":[],"noticeBytes":720}
+✖ independent unknown size: empty (6.5467ms)
+✖ independent unknown size: extra (1.683771ms)
+✖ independent unknown size: nil slot (0.570942ms)
+✖ independent unknown size: missing value (0.416508ms)
+✖ independent unknown size: text count (0.548718ms)
+✖ independent unknown size: OK slot (0.442047ms)
+✖ independent unknown size: object slot (0.423279ms)
+✖ independent unknown size: nested slot (0.489999ms)
+✖ independent unknown size: negative (0.598172ms)
+✖ independent unknown size: fraction (0.811574ms)
+✖ independent unknown size: NaN (0.359052ms)
+✖ independent unknown size: infinity (0.365762ms)
+✖ independent unknown size: unsafe integer (0.35101ms)
+✖ independent unknown size: hole (0.286362ms)
+✖ independent unknown size: inherited (0.667788ms)
+✔ independent unknown size: getter (0.573195ms)
+✖ independent unknown size: frozen malformed (0.29137ms)
+✖ independent unknown size: mixed missing (0.435377ms)
+✖ independent unknown size: mixed unknown (0.409408ms)
+✖ independent unknown size: mixed hole (0.38424ms)
+✔ confirmed empty frozen receipt reserves actual room before real ZADD (0.515528ms)
+✔ deduplication and actor filtering reserve only two actual rows (0.386954ms)
+✔ full funded ring reuses existing room and trims to the unchanged limit (20.587908ms)
+✔ only self and empty recipients spend no Redis commands (0.245731ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 5
+ℹ fail 19
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 47.454542
+
+✖ failing tests:
+
+test at [stdin]:9448:75
+✖ independent unknown size: empty (6.5467ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: extra (1.683771ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: nil slot (0.570942ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: missing value (0.416508ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: text count (0.548718ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: OK slot (0.442047ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: object slot (0.423279ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: nested slot (0.489999ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: negative (0.598172ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: fraction (0.811574ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: NaN (0.359052ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: infinity (0.365762ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: unsafe integer (0.35101ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: hole (0.286362ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: inherited (0.667788ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: frozen malformed (0.29137ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: mixed missing (0.435377ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: mixed unknown (0.409408ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:9448:75
+✖ independent unknown size: mixed hole (0.38424ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      'ZCARD',
+      'ZCARD',
+  +   'TAKE',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK',
+  +   'ZADD',
+  +   'ZREMRANGEBYRANK'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:9452:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":564,"mocks":0,"over":false}
+filing a community notification failed Error: reply getter executed
+    at Array.get ([stdin]:9399:11)
+    at Array.filter (<anonymous>)
+    at tell ([stdin]:9341:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async observe ([stdin]:9425:5)
+    at async TestContext.<anonymous> ([stdin]:9451:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3288-ogY9Zf

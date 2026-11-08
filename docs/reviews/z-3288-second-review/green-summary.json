@@ -1,0 +1,69 @@
+[
+  {
+    "file": "community-notice-size.test.ts",
+    "tests": 4,
+    "pass": 4,
+    "fail": 0,
+    "volume": {
+      "runs": 33,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "z-3288-notice-room.proof.ts",
+    "tests": 24,
+    "pass": 24,
+    "fail": 0,
+    "volume": {
+      "runs": 491,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "community-notice-erasure-evidence.test.ts",
+    "tests": 7,
+    "pass": 7,
+    "fail": 0,
+    "volume": {
+      "runs": 303,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "community-reads-unknown.test.ts",
+    "tests": 110,
+    "pass": 110,
+    "fail": 0,
+    "volume": {
+      "runs": 558,
+      "mocks": 0,
+      "over": false
+    },
+    "framework": "custom assertion harness, not Node subtests"
+  },
+  {
+    "file": "plan-cost-registry.test.ts",
+    "tests": 26,
+    "pass": 26,
+    "fail": 0,
+    "volume": {
+      "runs": 0,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "store-data-registry.test.ts",
+    "tests": 7,
+    "pass": 7,
+    "fail": 0,
+    "volume": {
+      "runs": 0,
+      "mocks": 0,
+      "over": false
+    }
+  }
+]

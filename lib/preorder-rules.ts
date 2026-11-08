@@ -126,6 +126,12 @@ export type Preorder = {
   at: number;
   /** The payment, for a refund to find it. */
   pi: string;
+  /**
+   * Whether the creator ships it (the checkout's metadata ship=yes), kept so the buyer's list still says so once it is
+   * handed over (lib/buyer-orders.ts): its withdrawal period runs from a receipt not known here. Absent on an entry
+   * written before it was kept, which is read as not known.
+   */
+  ship?: boolean;
   /** Once handed over, in seconds. */
   given?: number;
   /** Once refunded before or after it was handed over, in seconds. */
@@ -141,6 +147,7 @@ export function parsePreorder(raw: unknown): Preorder | null {
       to: v.to,
       at: Number(v.at) || 0,
       pi: typeof v.pi === "string" ? v.pi : "",
+      ...(v.ship === true || v.ship === false ? { ship: v.ship } : {}),
       ...(Number(v.given) > 0 ? { given: Number(v.given) } : {}),
       ...(Number(v.revoked) > 0 ? { revoked: Number(v.revoked) } : {}),
     };
@@ -160,4 +167,21 @@ export function preorderCounts(entries: Preorder[]): { waiting: number; given: n
     else waiting += 1;
   }
   return { waiting, given, refunded };
+}
+
+/**
+ * The job a handed-over pre-order's grant is made with (lib/imported-purchases.ts, kept with no end, where its entry
+ * expires): "pre:<checkout>", and ":s" when it ships or ":d" when it does not, whenever its entry says so at the
+ * hand-over (Claude 1's H on #2827). An entry gone later never turns a known digital purchase into an unknown one,
+ * whose withdrawal would stay open with no end.
+ */
+export function preorderJob(checkout: string, ship: boolean | undefined): string {
+  return `pre:${checkout}${ship === true ? ":s" : ship === false ? ":d" : ""}`;
+}
+
+/** A pre-order grant's job read back: its checkout, and whether it ships (null when the job does not say: an older grant). */
+export function readPreorderJob(job: string): { checkout: string; ship: boolean | null } | null {
+  const m = /^pre:([^:]+)(?::([sd]))?$/.exec(job);
+  if (!m) return null;
+  return { checkout: m[1], ship: m[2] === "s" ? true : m[2] === "d" ? false : null };
 }

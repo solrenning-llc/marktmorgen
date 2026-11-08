@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { claimHandle, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { claimHandle, setStripeAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { FINAL_INDEX, inClosingDay } from "@/lib/closing-holds";
 import { prepareStore } from "@/lib/closed-store-data";
 import { UNDO_KEY, expirePlanCheckouts, markShut, planReturnedLetter, refusePlanIfClosing, refuseSession, retryPlanUndos } from "@/lib/closing-plan-guard";
@@ -414,6 +414,43 @@ async function main() {
     is("open plan checkouts that cannot be read hold the closing day, to be tried again", [unreadClose.state, world.expired.includes("cs_test_handoffcsopen1")], ["held", false]);
     await closeOne(storeRef(unreadStore), day + 120_000, noFiles, Number.POSITIVE_INFINITY);
     is("the next run reads them and expires the store's open plan checkout", world.expired.includes("cs_test_handoffcsopen1"), true);
+
+    // The platform's checkout list fails while the creator's own account answers: its members' renewals are still
+    // stopped on that run (a day's renewal is a charge whose fee never comes back), and the day is held for the checkouts.
+    const renew = await closingStore("handoffrn", day);
+    await setStripeAccount(renew.email, "acct_handoffrn1");
+    const renewStore = (await storeForEmail(renew.email))!;
+    world.sessions.push({ id: "cs_test_handoffrnopen1", status: "open", mode: "subscription", customer: renew.customer, metadata: { store: "handoffrn" } });
+    // Its members held and its buyers told already: its closing day is next, its renewals not stopped yet.
+    await redisPipeline([["SET", `nl:plan:closing:${createHash("sha256").update(storeRef(renewStore)).digest("hex").slice(0, 40)}`, JSON.stringify({ of: day - 30 * DAY, day, holdFrom: day - 30 * DAY, hold: day - 30 * DAY, buyersDone: day - 29 * DAY })]]);
+    const members = new Map([["sub_handoffrnmem1", "active"]]);
+    let memberStops = 0;
+    let checkoutsGarbled = true;
+    const beforeRenew = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      const method = init?.method ?? "GET";
+      if (new Headers(init?.headers).get("stripe-account") === "acct_handoffrn1") {
+        if (url.pathname === "/v1/subscriptions/search") return Response.json({ object: "search_result", data: [...members].map(([id, status]) => ({ id, status, metadata: { store: "handoffrn" } })), has_more: false, next_page: null });
+        const member = url.pathname.match(/^\/v1\/subscriptions\/(sub_\w+)$/);
+        if (member && method === "DELETE" && members.has(member[1])) {
+          memberStops += 1;
+          members.set(member[1], "canceled");
+          return Response.json({ id: member[1], status: "canceled" });
+        }
+      }
+      if (checkoutsGarbled && url.pathname === "/v1/checkout/sessions" && method === "GET") return Response.json({ object: "list", data: "garbled", has_more: false });
+      return beforeRenew(input, init);
+    };
+    const quietRenew = console.error;
+    console.error = () => {};
+    try {
+      const first = await closeOne(storeRef(renewStore), day + 60_000, noFiles, Number.POSITIVE_INFINITY);
+      is("unreadable open checkouts still let the members' renewals be stopped on that run, and hold the day for the checkouts", [first.state, first.note, memberStops, members.get("sub_handoffrnmem1"), world.expired.includes("cs_test_handoffrnopen1")], ["held", "its open plan checkouts could not all be read", 1, "canceled", false]);
+      checkoutsGarbled = false;
+      await closeOne(storeRef(renewStore), day + 120_000, noFiles, Number.POSITIVE_INFINITY);
+      is("the next run reads and expires the checkouts, and stops no renewal twice", [world.expired.includes("cs_test_handoffrnopen1"), memberStops], [true, 1]);
+    } finally { globalThis.fetch = beforeRenew; console.error = quietRenew; }
   } finally { globalThis.fetch = originalFetch; world.refundErrors = 0; }
 
   part("Each Stripe list is read in its exact shape: an answer in another shape is never taken as none");
@@ -453,6 +490,58 @@ async function main() {
       }
       await retryPlanUndos(Number.POSITIVE_INFINITY);
       is("once the invoices read in full, each payment is refunded once and each creator told once", await Promise.all(invoiceStores.map(async (one) => [refundsOf(one.pi).map((row) => row.amount), sent.filter((m) => m.to === one.email).length, Boolean((await undo(one.id))?.done)])), invoiceStores.map(() => [[6_900], 1, true]));
+
+      // Each field a paid invoice is read by (CX-123 rule 24): one that does not read is never taken as "no payment".
+      const invoiceFields: [string, (row: Record<string, unknown>) => void][] = [
+        ["amount_paid null", (row) => { row.amount_paid = null; }],
+        ["amount_paid below zero", (row) => { row.amount_paid = -6_900; }],
+        ["amount_paid as text", (row) => { row.amount_paid = "6900"; }],
+        ["created null", (row) => { row.created = null; }],
+        ["created null and status_transitions null", (row) => { row.created = null; row.status_transitions = null; }],
+        ["status_transitions null", (row) => { row.status_transitions = null; }],
+        ["paid_at as text", (row) => { row.status_transitions = { paid_at: "soon" }; }],
+        ["payment_intent a number", (row) => { row.payment_intent = 42; }],
+      ];
+      const fieldStores: Awaited<ReturnType<typeof closingStore>>[] = [];
+      for (const [index, [what, change]] of invoiceFields.entries()) {
+        const one = await closingStore(`invf${"abcdefgh"[index]}`, day);
+        fieldStores.push(one);
+        const before = refundPosts;
+        garble = (path, url, page) => {
+          if (path !== "/invoices" || url.searchParams.get("subscription") !== one.id) return undefined;
+          for (const row of page.data as Record<string, unknown>[]) if (row.status === "paid") change(row);
+          return page;
+        };
+        const outcome = await refusePlanIfClosing({ store: (await storeForEmail(one.email))!, handle: one.email.split("@")[0], subscriptionId: one.id, customerId: one.customer });
+        garble = null;
+        is(`a paid invoice with ${what}: kept in line, nothing settled, nobody told`, [outcome, refundPosts - before, Boolean((await undo(one.id))?.done), sent.filter((m) => m.to === one.email).length], ["returning", 0, false, 0]);
+      }
+
+      // Each field the paid charge is read by: one that does not read never settles it with no refund.
+      const chargeFields: [string, (charge: Record<string, unknown>) => void][] = [
+        ["amount null", (charge) => { charge.amount = null; }],
+        ["amount zero", (charge) => { charge.amount = 0; }],
+        ["amount_refunded null", (charge) => { charge.amount_refunded = null; }],
+        ["amount_refunded below zero", (charge) => { charge.amount_refunded = -1; }],
+        ["disputed as text", (charge) => { charge.disputed = "false"; }],
+        ["currency a number", (charge) => { charge.currency = 7; }],
+        ["currency not a code", (charge) => { charge.currency = "dollars"; }],
+      ];
+      for (const [index, [what, change]] of chargeFields.entries()) {
+        const one = await closingStore(`chgf${"abcdefg"[index]}`, day);
+        fieldStores.push(one);
+        const before = refundPosts;
+        garble = (path, _url, page) => {
+          if (path !== `/payment_intents/${one.pi}`) return undefined;
+          change(page.latest_charge as Record<string, unknown>);
+          return page;
+        };
+        const outcome = await refusePlanIfClosing({ store: (await storeForEmail(one.email))!, handle: one.email.split("@")[0], subscriptionId: one.id, customerId: one.customer });
+        garble = null;
+        is(`a paid charge with ${what}: no refund on it, kept in line, nobody told`, [outcome, refundPosts - before, Boolean((await undo(one.id))?.done), sent.filter((m) => m.to === one.email).length], ["returning", 0, false, 0]);
+      }
+      await retryPlanUndos(Number.POSITIVE_INFINITY);
+      is("once the invoices and charges read, each payment is refunded once and each creator told once", await Promise.all(fieldStores.map(async (one) => [refundsOf(one.pi).map((row) => row.amount), sent.filter((m) => m.to === one.email).length, Boolean((await undo(one.id))?.done)])), fieldStores.map(() => [[6_900], 1, true]));
 
       const paged = await closingStore("invpaged", day);
       garble = (path, url, page) => {
@@ -506,6 +595,21 @@ async function main() {
       const pagedExpired = await expirePlanCheckouts(shop, [rosa.customer]);
       garble = null;
       is("an open plan checkout on the second page is expired", [pagedExpired, world.expired.at(-1)], [1, "cs_test_rosapaged0001"]);
+
+      // Stripe failing to expire one (a server error, or no answer at all) is not taken as "it was not open": the step
+      // is refused and the next run expires it. Only Stripe's refusal of a session that is no longer open passes.
+      for (const [what, failure] of [["a server error", () => Response.json({ error: { type: "api_error", message: "a stand-in failure" } }, { status: 500 })], ["no answer", () => { throw new TypeError("fetch failed"); }]] as [string, () => Response][]) {
+        const id = `cs_test_rosaexpire${what === "no answer" ? "net" : "500"}1`;
+        world.sessions.push({ id, status: "open", mode: "subscription", customer: rosa.customer, metadata: { store: "rosa" } });
+        const plain = globalThis.fetch;
+        globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+          if (new URL(String(input instanceof Request ? input.url : input)).pathname === `/v1/checkout/sessions/${id}/expire`) return failure();
+          return plain(input, init);
+        }) as typeof fetch;
+        const failed = await expirePlanCheckouts(shop, [rosa.customer]).then(() => "finished", () => "refused").finally(() => { globalThis.fetch = plain; });
+        is(`expiring an open plan checkout answered with ${what}: the step is refused, to be tried again`, [failed, world.expired.includes(id)], ["refused", false]);
+        is(`(${what}) the next run expires it`, [await expirePlanCheckouts(shop, [rosa.customer]), world.expired.at(-1)], [1, id]);
+      }
     } finally {
       globalThis.fetch = listFetch;
       console.error = quietList;

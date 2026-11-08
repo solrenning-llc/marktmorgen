@@ -26,7 +26,7 @@
 import { createHash, createHmac } from "node:crypto";
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, releaseMark } from "@/lib/claim-mark";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
@@ -283,10 +283,27 @@ export async function versionExists(a: Pick<Agreement, "id" | "versions">, n: nu
 }
 
 export async function readVersion(a: Pick<Agreement, "id" | "versions">, n: number): Promise<AgreementVersion | null> {
+  // As before for the studio, the signing page and the emails: a reply of another shape is "can't be read right now".
+  return readVersionExact(a, n).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+}
+
+/**
+ * Version n's text, read exactly (CX-123 rules 24 and 30), for the person's
+ * data copy (lib/person-copy.ts): null when the version is not one the record
+ * lists, is confirmed absent (GET null) or does not read as its fingerprint
+ * says; a reply of any other shape throws UnknownReplyError, so a copy is
+ * never handed over with a version's text silently missing.
+ */
+export async function readVersionExact(a: Pick<Agreement, "id" | "versions">, n: number): Promise<AgreementVersion | null> {
   const mark = a.versions.find((m) => m.n === n);
   if (!mark || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", versionKey(a.id, n)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", versionKey(a.id, n)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("reading an agreement's version");
+  const raw = reply[0];
+  if (raw === null) return null;
   try {
     const v = parseVersion(JSON.parse(raw));
     return v && v.n === n && v.sha256 === mark.sha256 && fingerprint(v.text) === mark.sha256 ? v : null;
@@ -433,15 +450,15 @@ export async function signAgreement(store: Store, id: string, input: SignInput, 
 export async function listAgreements(store: Store): Promise<Agreement[] | null> {
   if (!isRedisConfigured() || !store.sid) return null;
   try {
-    const index = await redisPipeline([["ZREVRANGE", storeKey(store.sid), 0, MAX_KEPT_AGREEMENTS - 1]]);
-    if (!Array.isArray(index) || index.length !== 1 || !Array.isArray(index[0])) return null;
-    const list: unknown[] = index[0];
-    if (list.length > MAX_KEPT_AGREEMENTS || new Set(list).size !== list.length || !list.every((id) => typeof id === "string" && ID_PATTERN.test(id))) return null;
+    // Each reply read from its own slots (lib/redis-reply.ts, rule 30): the person's data copy reads through here.
+    const index = repliesFor(await redisPipeline([["ZREVRANGE", storeKey(store.sid), 0, MAX_KEPT_AGREEMENTS - 1]]), 1);
+    const list = index ? stringList(index[0]) : null;
+    if (!list || list.length > MAX_KEPT_AGREEMENTS || new Set(list).size !== list.length || !list.every((id) => ID_PATTERN.test(id))) return null;
     if (!list.length) return [];
-    const ids = list as string[];
-    const records = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
-    if (!Array.isArray(records) || records.length !== 1 || !Array.isArray(records[0]) || records[0].length !== ids.length) return null;
-    const values: unknown[] = records[0];
+    const ids = list;
+    const records = repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
+    const values = records ? repliesFor(records[0], ids.length) : null;
+    if (!values) return null;
     const out: Agreement[] = [];
     const gone: string[] = [];
     ids.forEach((id, i) => {
@@ -469,12 +486,15 @@ export async function listAgreements(store: Store): Promise<Agreement[] | null> 
 export async function agreementsOfPerson(store: Pick<Store, "sid">, email: string): Promise<Agreement[] | null> {
   if (!isRedisConfigured() || !store.sid) return null;
   try {
-    const [members] = await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]);
-    if (!Array.isArray(members)) return null;
-    const ids = members.map(String).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
+    // The person's set read exactly (rule 30, as forgetAgreementsPerson reads it): another shape is null, never "none".
+    const listed = repliesFor(await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]), 1);
+    const members = listed ? stringList(listed[0]) : null;
+    if (!members) return null;
+    const ids = members.filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
     if (!ids.length) return [];
-    const [values] = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
-    if (!Array.isArray(values) || values.length !== ids.length) return null;
+    const read = repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
+    const values = read ? repliesFor(read[0], ids.length) : null;
+    if (!values) return null;
     const out: Agreement[] = [];
     ids.forEach((id, i) => {
       const raw = values[i];
@@ -524,21 +544,42 @@ async function forget(a: Agreement): Promise<void> {
   ]);
 }
 
+/** How many agreements one pass of an erasure deletes: their DEL and ZREM go in one pipeline. */
+const FORGET_BATCH = MAX_PER_PERSON * 2;
+
 /**
  * Deletes every agreement a store keeps for one person (lib/person-erasure.ts),
  * signed or not, with every version's text: an open one stops taking a
  * signature. The copies already emailed stay with whoever received them.
  * Answers how many were deleted.
+ *
+ * Exact (CX-123 rules 24 and 30): the person's set is the only way to find
+ * their agreements, so it is read exactly and deleted last. A reply of another
+ * shape to the set, or to any delete, throws UnknownReplyError (the erasure is
+ * then not finished and can be pressed again); the set goes only once every
+ * agreement's delete has answered with a count, so a retry still finds every
+ * one. Only an exact empty set is "nothing to erase".
  */
 export async function forgetAgreementsPerson(sid: string, email: string): Promise<number> {
   if (!isRedisConfigured() || !sid) return 0;
   const person = personSet(sid, email);
-  const [members] = await redisPipeline([["SMEMBERS", person]]);
-  const ids = (Array.isArray(members) ? members.map(String) : []).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
-  if (!ids.length) {
-    await redisPipeline([["DEL", person]]);
-    return 0;
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
+  const members = listed ? stringList(listed[0]) : null;
+  if (!members) throw new UnknownReplyError("listing a person's agreements");
+  const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))];
+  for (let at = 0; at < ids.length; at += FORGET_BATCH) {
+    const batch = ids.slice(at, at + FORGET_BATCH);
+    const commands = batch.flatMap((id) => [["DEL", ...agreementKeys(id)], ["ZREM", storeKey(sid), id]]);
+    const replies = repliesFor(await redisPipeline(commands), commands.length);
+    // DEL answers how many of the agreement's keys went (its record and up to MAX_VERSIONS texts), ZREM 0 or 1.
+    const counted = replies?.every((reply, i) => {
+      const n = countOf(reply);
+      return n !== null && n <= (i % 2 === 0 ? 1 + MAX_VERSIONS : 1);
+    });
+    if (!counted) throw new UnknownReplyError("deleting a person's agreements");
   }
-  await redisPipeline([...ids.flatMap((id) => [["DEL", ...agreementKeys(id)], ["ZREM", storeKey(sid), id]]), ["DEL", person]]);
+  const dropped = repliesFor(await redisPipeline([["DEL", person]]), 1);
+  const gone = dropped ? countOf(dropped[0]) : null;
+  if (gone === null || gone > 1) throw new UnknownReplyError("deleting a person's agreement list");
   return ids.length;
 }

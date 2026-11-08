@@ -146,6 +146,9 @@ type Upload = {
   at: number;
 };
 
+/** The shape of a session id the provider hands back and openVaultUpload keeps. */
+const UPLOAD_ID = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
+
 const uploadKey = (pathname: string) => `nl:vault:up:${createHash("sha256").update(pathname).digest("hex").slice(0, 40)}`;
 
 /**
@@ -160,15 +163,29 @@ async function readUpload(pathname: string): Promise<Upload | null> {
   if (!replies) throw new UnknownReplyError("a vault upload record");
   const raw = replies[0];
   if (raw === null) return null;
-  let value: Partial<Upload>;
+  let value: { [K in keyof Upload]?: unknown } | null;
   try {
     if (typeof raw !== "string") throw new Error();
-    value = JSON.parse(raw) as Partial<Upload>;
+    value = JSON.parse(raw) as { [K in keyof Upload]?: unknown } | null;
   } catch {
     throw new UnknownReplyError("a vault upload record");
   }
-  if (!value || value.pathname !== pathname || typeof value.bytes !== "number" || !(value.bytes > 0)) throw new UnknownReplyError("a vault upload record");
-  return { reservation: typeof value.reservation === "string" ? value.reservation : undefined, pathname, uploadId: typeof value.uploadId === "string" ? value.uploadId : "", bytes: value.bytes, type: typeof value.type === "string" ? value.type : "", at: typeof value.at === "number" ? value.at : 0 };
+  // Every field in exactly the shape openVaultUpload writes it. A session id
+  // read as "" would be taken for a file sent whole (the object deleted in
+  // place of the session cancelled), and a reservation read as none would
+  // never be given back: anything else is an unknown record, not a guess.
+  if (
+    !value ||
+    typeof value !== "object" ||
+    value.pathname !== pathname ||
+    !(value.reservation === undefined || (typeof value.reservation === "string" && /^[0-9a-f]{32}$/.test(value.reservation))) ||
+    !(value.uploadId === "" || (typeof value.uploadId === "string" && UPLOAD_ID.test(value.uploadId))) ||
+    !(Number.isSafeInteger(value.bytes) && (value.bytes as number) > 0) ||
+    typeof value.type !== "string" ||
+    !(Number.isSafeInteger(value.at) && (value.at as number) >= 0)
+  )
+    throw new UnknownReplyError("a vault upload record");
+  return { reservation: value.reservation, pathname, uploadId: value.uploadId, bytes: value.bytes as number, type: value.type, at: value.at as number };
 }
 
 export type OpenedUpload = {
@@ -209,7 +226,7 @@ export async function openVaultUpload(input: {
   if (pieces > 1 || input.multipart) {
     const made = await ask(config, "POST", `${objectUrl(config, pathname)}?uploads=`, { headers: { "content-type": input.type } });
     uploadId = made.status === 200 ? (tag(made.text, "UploadId") ?? "") : "";
-    if (!uploadId || !/^[A-Za-z0-9._~+/=-]{1,1024}$/.test(uploadId)) return { ok: false, reason: "unavailable" };
+    if (!uploadId || !UPLOAD_ID.test(uploadId)) return { ok: false, reason: "unavailable" };
   }
   const record: Upload = { reservation: input.reservation, pathname, uploadId, bytes: input.bytes, type: input.type, at: Date.now() };
   const written = repliesFor(await redisPipeline([["SET", uploadKey(pathname), JSON.stringify(record), "EX", UPLOAD_SECONDS]]), 1);
@@ -507,7 +524,7 @@ export async function vaultReservationId(pathname: string): Promise<string | und
 /** Cancels a known multipart session even after the short-lived upload record expires. */
 export async function retireVaultSession(pathname: string, uploadId: string): Promise<boolean> {
   const config = vaultConfig();
-  if (!config || !readVaultPath(pathname) || !/^[A-Za-z0-9._~+\/=-]{1,1024}$/.test(uploadId)) return false;
+  if (!config || !readVaultPath(pathname) || !UPLOAD_ID.test(uploadId)) return false;
   const answer = await ask(config, "DELETE", objectUrl(config, pathname) + "?uploadId=" + encodeURIComponent(uploadId));
   if ([200, 204].includes(answer.status)) return true;
   if (answer.status !== 404) return false;

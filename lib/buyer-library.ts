@@ -41,7 +41,7 @@ import { storeForId } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -82,11 +82,19 @@ export async function storesKnownFor(email: string): Promise<string[]> {
   return [...new Set(ids(replies[0], "the stores that know an address"))].slice(0, MAX_LIBRARY_STORES);
 }
 
-/** Forgets that this address bought from or joined the store with this id (lib/person-erasure.ts): in every quarter it can be in. */
+/**
+ * Forgets that this address bought from or joined the store with this id (lib/person-erasure.ts): in every quarter it
+ * can be in. Each SREM reply is read in its exact shape (rule 24): 0 or 1, one per command. Anything else throws
+ * UnknownReplyError, so the erasure says this part could not finish and can be asked again, never "erased, 0 records"
+ * with the address still linked to the store.
+ */
 export async function forgetLibraryPerson(sid: string, email: string): Promise<number> {
   if (!STORE_ID.test(sid) || !isRedisConfigured()) return 0;
-  const replies = await redisPipeline([...libraryKeys(email), ...joinedKeys(email)].map((key) => ["SREM", key, sid]));
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const commands = [...libraryKeys(email), ...joinedKeys(email)].map((key) => ["SREM", key, sid]);
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const counts = replies?.map(countOf);
+  if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("forgetting a library's store");
+  return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }
 
 /**

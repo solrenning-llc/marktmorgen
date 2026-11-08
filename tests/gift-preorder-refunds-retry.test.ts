@@ -16,7 +16,9 @@
  *      payment, at most 100, kept as long as the records it could take back),
  *      the pass goes on, and the list is tried again first on every run; a row
  *      is let go only once handled. With the list full, or a write to it left
- *      unknown, the pass stays on its page: never dropped in silence.
+ *      unknown, the pass stays on its page: never dropped in silence. A
+ *      refund not final yet read on an earlier page still holds the anchor
+ *      when the pass ends (the pass kept on a failing page carries its time).
  *
  * Checked through the real gift and pre-order journeys against a stand-in for
  * the creator's Stripe account that pages as Stripe does.
@@ -217,6 +219,28 @@ async function stuck(job: Job, base: number): Promise<void> {
   is(`${job.name}: the refund behind is taken back`, await last.holds(), false);
   is(`${job.name}: handled at last`, await job.run(), 1);
   is(`${job.name}: and let go of the list`, await waiting(job.retry), {});
+
+  part(`${job.name}: a refund not final yet holds the anchor through a page tried again`);
+  const slow = await job.make(8);
+  const fourth = await job.make(9);
+  refunds = list(`${job.name}h`, 250, base + 2700, { 20: slow.pi, 120: fourth.pi });
+  // On the first page: pending, its charge not refunded in full yet (heldAt); on the second, a row never handled.
+  refunds[20] = { ...refunds[20], status: "pending", charge: { object: "charge", refunded: false } };
+  const refusingFourth = async (email: string) => {
+    if (email === fourth.email) throw new Error("the ledger never answers for this one");
+  };
+  is(`${job.name}: run 1, nothing taken back`, await job.run(refusingFourth), 0);
+  const kept = JSON.parse(String(await read(job.pass))) as { tries?: number; waiting?: number };
+  is(`${job.name}: the pass kept on the failing page carries the time of the refund not final yet`, [kept.tries, kept.waiting], [1, base + 2700 - 20]);
+  for (let run = 2; run <= TRIES; run += 1) await job.run(refusingFourth);
+  is(`${job.name}: the failing row moved to the list`, Object.keys(await waiting(job.retry)), [`re_${job.name}h${String(120).padStart(6, "0")}`]);
+  is(`${job.name}: the pass ended, the anchor waits at the refund not final yet`, await read(job.anchor), String(base + 2700 - 20));
+  is(`${job.name}: still held while it is pending`, await slow.holds(), true);
+  refunds[20] = { ...refunds[20], status: "succeeded", charge: { object: "charge", refunded: true } };
+  is(`${job.name}: once it goes through and the row can be handled, both are taken back`, await job.run(), 2);
+  is(`${job.name}: neither is held`, [await slow.holds(), await fourth.holds()], [false, false]);
+  is(`${job.name}: the list is empty again`, await waiting(job.retry), {});
+  is(`${job.name}: the anchor moves to the newest refund`, await read(job.anchor), String(base + 2700));
 }
 
 async function main(): Promise<void> {

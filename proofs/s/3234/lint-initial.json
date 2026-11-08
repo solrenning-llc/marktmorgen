@@ -1,0 +1,15 @@
+{
+  "command": [
+    "timeout",
+    "120s",
+    "node",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings",
+    "0",
+    "tests/s-3234-row-values.proof.ts",
+    "proofs/s/3234/run.mjs"
+  ],
+  "status": 1,
+  "stdout": "\n/workspace/scratch/s-3234-second-review/tests/s-3234-row-values.proof.ts\n  19:10   warning  'createHash' is defined but never used           @typescript-eslint/no-unused-vars\n  20:10   warning  'readFileSync' is defined but never used         @typescript-eslint/no-unused-vars\n  21:10   warning  'join' is defined but never used                 @typescript-eslint/no-unused-vars\n  23:20   warning  'part' is defined but never used                 @typescript-eslint/no-unused-vars\n  24:23   warning  'setStripeAccount' is defined but never used     @typescript-eslint/no-unused-vars\n  25:23   warning  'inClosingDay' is defined but never used         @typescript-eslint/no-unused-vars\n  26:10   warning  'prepareStore' is defined but never used         @typescript-eslint/no-unused-vars\n  27:31   warning  'expirePlanCheckouts' is defined but never used  @typescript-eslint/no-unused-vars\n  27:62   warning  'planReturnedLetter' is defined but never used   @typescript-eslint/no-unused-vars\n  27:103  warning  'refuseSession' is defined but never used        @typescript-eslint/no-unused-vars\n  27:118  warning  'retryPlanUndos' is defined but never used       @typescript-eslint/no-unused-vars\n  28:10   warning  'syncSubscriptions' is defined but never used    @typescript-eslint/no-unused-vars\n  29:10   warning  'closeOne' is defined but never used             @typescript-eslint/no-unused-vars\n  29:25   warning  'Hands' is defined but never used                @typescript-eslint/no-unused-vars\n\n\u2716 14 problems (0 errors, 14 warnings)\n\n",
+  "stderr": "ESLint found too many warnings (maximum: 0).\n"
+}

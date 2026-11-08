@@ -1,0 +1,15 @@
+{
+  "command": [
+    "timeout",
+    "120s",
+    "node",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings",
+    "0",
+    "tests/s-3234-row-values.proof.ts",
+    "proofs/s/3234/run.mjs"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

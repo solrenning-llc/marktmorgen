@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/closing-plan-guard.ts",
+    "../../../lib/plan-closing.ts",
+    "../../../tests/s-3234-row-values.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

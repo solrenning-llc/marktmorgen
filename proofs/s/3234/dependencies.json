@@ -1,0 +1,22 @@
+{
+  "esbuild": {
+    "lock": "0.28.2",
+    "installed": "0.28.2",
+    "same": true
+  },
+  "typescript": {
+    "lock": "5.9.3",
+    "installed": "5.9.3",
+    "same": true
+  },
+  "eslint": {
+    "lock": "9.39.5",
+    "installed": "9.39.5",
+    "same": true
+  },
+  "next": {
+    "lock": "16.4.5",
+    "installed": "16.4.5",
+    "same": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3234-row-values.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "9084ceafa1bd4bebd6fbd8cd6690fa49248929de",
+  "stdout": "  ok    healthy payment refunded once\n  FAIL  invoice-status: unknown row is retained, without refund POST or false settled letter\n        expected [\"returning\",[],false,0]\n        got      [\"returned\",[],true,1]\n  ok    invoice-status: interception reached healthy producer\n  FAIL  unknown invoice status must not claim No payment was taken\n        expected false\n        got      true\n  ok    healthy worker recheck refunds original payment once\n  FAIL  refund-negative: unknown row is retained, without refund POST or false settled letter\n        expected [\"returning\",[],false,0]\n        got      [\"returned\",[13800],true,1]\n  ok    refund-negative: interception reached healthy producer\n  FAIL  refund-status: unknown row is retained, without refund POST or false settled letter\n        expected [\"returning\",[],false,0]\n        got      [\"returned\",[6900],true,1]\n  ok    refund-status: interception reached healthy producer\n\n9 checks, 4 failing.\nS_VOLUME {\"runs\":189,\"attempts\":42,\"forwarded\":42}\n",
+  "stderr": "",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

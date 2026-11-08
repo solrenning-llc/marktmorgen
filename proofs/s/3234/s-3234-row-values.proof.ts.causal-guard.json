@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3234-row-values.proof.ts",
+  "oldSource": null,
+  "mode": "causal-guard-only",
+  "head": "9084ceafa1bd4bebd6fbd8cd6690fa49248929de",
+  "stdout": "  ok    healthy payment refunded once\n  ok    invoice-status: unknown row is retained, without refund POST or false settled letter\n  ok    invoice-status: interception reached healthy producer\n  ok    unknown invoice status must not claim No payment was taken\n  ok    healthy worker recheck refunds original payment once\n  ok    refund-negative: unknown row is retained, without refund POST or false settled letter\n  ok    refund-negative: interception reached healthy producer\n  ok    refund-status: unknown row is retained, without refund POST or false settled letter\n  ok    refund-status: interception reached healthy producer\n\n9 checks, all passing.\nS_VOLUME {\"runs\":175,\"attempts\":33,\"forwarded\":33}\n",
+  "stderr": "closing-plan-guard: sub_sstatuslate01 is not settled yet (Stripe did not answer); tried again on the next run StripeListUnreadable: Stripe answered a list in another shape: 1 rows of /invoices could not be read\n    at allRows ([stdin]:12018:36)\n    at async settleOne ([stdin]:12168:22)\n    at async refusePlanIfClosing ([stdin]:12076:8)\n    at async main ([stdin]:12403:16)\nclosing-plan-guard: sub_snegativelate01 is not settled yet (Stripe did not answer); tried again on the next run StripeListUnreadable: Stripe answered a list in another shape: 1 rows of /refunds could not be read\n    at allRows ([stdin]:12018:36)\n    at async giveBack ([stdin]:12129:19)\n    at async settleOne ([stdin]:12188:23)\n    at async refusePlanIfClosing ([stdin]:12076:8)\n    at async main ([stdin]:12403:16)\nclosing-plan-guard: sub_sunknownlate01 is not settled yet (Stripe did not answer); tried again on the next run StripeListUnreadable: Stripe answered a list in another shape: 1 rows of /refunds could not be read\n    at allRows ([stdin]:12018:36)\n    at async giveBack ([stdin]:12129:19)\n    at async settleOne ([stdin]:12188:23)\n    at async refusePlanIfClosing ([stdin]:12076:8)\n    at async main ([stdin]:12403:16)\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

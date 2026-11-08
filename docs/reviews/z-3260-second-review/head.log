@@ -1,0 +1,826 @@
+
+FILE letter-link-grant-set.test.ts
+
+control: an answered SET emails a link that opens, and takes one email from the allowance
+  ok    asked
+  ok    emailed with a token
+  ok    the token reads its grant
+  ok    one transactional email taken
+
+the grant's SET reply in any other shape: no email, no allowance taken, said in the log
+  ok    no reply: the form's answer is unchanged
+  ok    no reply: no email went out
+  ok    no reply: nothing taken from the store's transactional allowance
+  ok    no reply: the server's log says the link was not sent
+  ok    undefined: the form's answer is unchanged
+  ok    undefined: no email went out
+  ok    undefined: nothing taken from the store's transactional allowance
+  ok    undefined: the server's log says the link was not sent
+  ok    a hole: the form's answer is unchanged
+  ok    a hole: no email went out
+  ok    a hole: nothing taken from the store's transactional allowance
+  ok    a hole: the server's log says the link was not sent
+  ok    QUEUED: the form's answer is unchanged
+  ok    QUEUED: no email went out
+  ok    QUEUED: nothing taken from the store's transactional allowance
+  ok    QUEUED: the server's log says the link was not sent
+  ok    null: the form's answer is unchanged
+  ok    null: no email went out
+  ok    null: nothing taken from the store's transactional allowance
+  ok    null: the server's log says the link was not sent
+  ok    lower-case ok: the form's answer is unchanged
+  ok    lower-case ok: no email went out
+  ok    lower-case ok: nothing taken from the store's transactional allowance
+  ok    lower-case ok: the server's log says the link was not sent
+  ok    a number: the form's answer is unchanged
+  ok    a number: no email went out
+  ok    a number: nothing taken from the store's transactional allowance
+  ok    a number: the server's log says the link was not sent
+  ok    an error object: the form's answer is unchanged
+  ok    an error object: no email went out
+  ok    an error object: nothing taken from the store's transactional allowance
+  ok    an error object: the server's log says the link was not sent
+  ok    two replies: the form's answer is unchanged
+  ok    two replies: no email went out
+  ok    two replies: nothing taken from the store's transactional allowance
+  ok    two replies: the server's log says the link was not sent
+  ok    not a list: the form's answer is unchanged
+  ok    not a list: no email went out
+  ok    not a list: nothing taken from the store's transactional allowance
+  ok    not a list: the server's log says the link was not sent
+
+a pipeline that throws on the grant's SET: no email, no allowance taken
+  ok    thrown: the form's answer is unchanged
+  ok    thrown: no email went out
+  ok    thrown: nothing taken from the allowance
+
+asking again after a failed SET emails a link that opens
+  ok    asked again
+  ok    emailed once, with a token
+  ok    the new link opens
+  ok    one transactional email taken
+
+51 checks, all passing.
+Z_VOLUME {"runs":237,"mocks":15,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3260-committed-grant.proof.ts
+
+independent: the producer SET really lands before its receipt is lost or malformed
+  ok    committed then empty ACK: asynchronous form answer remains sent
+  ok    committed then empty ACK: actual producer kept exactly one grant
+  ok    committed then empty ACK: email dispatch follows confirmed receipt
+  ok    committed then empty ACK: transactional allowance follows confirmed receipt
+  ok    committed then empty ACK: exact grant-refusal diagnostic
+Z_CASE {"label":"committed then empty ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":868,"runs":13,"mocks":1,"emails":0,"allowance":0}
+  ok    committed then extra ACK: asynchronous form answer remains sent
+  ok    committed then extra ACK: actual producer kept exactly one grant
+  ok    committed then extra ACK: email dispatch follows confirmed receipt
+  ok    committed then extra ACK: transactional allowance follows confirmed receipt
+  ok    committed then extra ACK: exact grant-refusal diagnostic
+Z_CASE {"label":"committed then extra ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":868,"runs":12,"mocks":1,"emails":0,"allowance":0}
+  ok    committed then nil ACK: asynchronous form answer remains sent
+  ok    committed then nil ACK: actual producer kept exactly one grant
+  ok    committed then nil ACK: email dispatch follows confirmed receipt
+  ok    committed then nil ACK: transactional allowance follows confirmed receipt
+  ok    committed then nil ACK: exact grant-refusal diagnostic
+Z_CASE {"label":"committed then nil ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":868,"runs":12,"mocks":1,"emails":0,"allowance":0}
+  ok    committed then getter ACK: asynchronous form answer remains sent
+  ok    committed then getter ACK: actual producer kept exactly one grant
+  ok    committed then getter ACK: email dispatch follows confirmed receipt
+  ok    committed then getter ACK: transactional allowance follows confirmed receipt
+  ok    committed then getter ACK: exact grant-refusal diagnostic
+Z_CASE {"label":"committed then getter ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":868,"runs":12,"mocks":1,"emails":0,"allowance":0}
+  ok    committed then thrown ACK: asynchronous form answer remains sent
+  ok    committed then thrown ACK: actual producer kept exactly one grant
+  ok    committed then thrown ACK: email dispatch follows confirmed receipt
+  ok    committed then thrown ACK: transactional allowance follows confirmed receipt
+  ok    committed then thrown ACK: asynchronous failure is caught and logged
+Z_CASE {"label":"committed then thrown ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":868,"runs":12,"mocks":1,"emails":0,"allowance":0}
+  ok    committed frozen exact ACK: asynchronous form answer remains sent
+  ok    committed frozen exact ACK: actual producer kept exactly one grant
+  ok    committed frozen exact ACK: email dispatch follows confirmed receipt
+  ok    committed frozen exact ACK: transactional allowance follows confirmed receipt
+  ok    committed frozen exact ACK: actual emailed token reads the persisted grant
+  ok    committed frozen exact ACK: meter was already consumed at provider POST
+Z_CASE {"label":"committed frozen exact ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":1268,"runs":22,"mocks":2,"emails":1,"allowance":1}
+  ok    getter ACK is refused without executing its slot
+
+32 checks, all passing.
+Z_VOLUME {"runs":150,"mocks":7,"over":false}
+
+Z_STATUS 0 null
+
+FILE letter-members.test.ts
+
+The creator chooses the products when publishing
+  ok    a product this store does not have is refused
+  ok    21 distinct products of the store are refused
+  ok    20 are taken
+  ok    kept for the holders of the product checked
+  ok    read back the same
+  ok    a stored copy naming products none readable stays closed, never opened to all
+
+A wrong kind of choice never publishes for everyone
+  ok    a string is refused, and the email stays kept
+  ok    an object is refused, and the email stays kept
+  ok    a number is refused, and the email stays kept
+  ok    published again with no products said: still kept for members
+  ok    or with null
+  ok    an empty choice over an email kept for members is refused, and it stays kept
+  ok    only an empty choice said on purpose (open) opens it to everyone
+  ok    and checking the product again keeps it again
+
+Nothing chosen: everyone reads it, as before
+  ok    the same copy as before, with no products field
+  ok    everyone reads it
+  ok    its page shows its words, no form, no members label
+
+Kept for members: who sees the words
+  ok    a visitor nobody knows is asked to prove the address
+  ok    a pass for one course only is not proof enough
+  ok    a proved holder reads it
+  ok    a proved address refunded in full does not
+  ok    the creator always does
+  ok    without the product: subject, who it is for and the form, never the words
+  ok    the product is linked
+  ok    an address that holds nothing is told so, never shown the words
+  ok    a holder reads the words, and no form
+  ok    the creator reads them, told who else can
+
+The studio sees which are kept, and a failed read is not "not published"
+  ok    one read says it is published and kept for members
+  ok    and a public one is published for everyone
+  ok    a failed read is unknown, not an empty list
+  ok    the studio says "For members only" beside "Published on your store"
+  ok    and, when it could not read, says so and offers no Publish
+
+A refund in full closes it
+  ok    kept answer: still open for its few minutes
+  ok    asked again: closed
+  ok    and the page no longer shows the words
+
+A dispute lost, and a membership that stopped, close it too
+  ok    paid and undisputed: open
+  ok    the dispute lost: closed
+  ok    a membership running: open
+  ok    the membership stopped: closed
+
+Stripe that cannot be asked is unknown, never "none of these products"
+  ok    a holder whose answer ran out, with Stripe down: unknown
+  ok    the page says it could not check, offers to check again, never says none, never shows the form or the words
+  ok    nothing is kept from the failed ask
+  ok    Stripe back: the holder reads it again
+
+Codex G: HTTP 200 that is incomplete is unknown, not a closed door
+  ok    missing data: ownership unknown, not closed
+  ok    missing data: no negative cache invented
+  ok    missing data: real page says unknown and never shows body/false denial
+  ok    missing data: valid provider control reopens holder
+  ok    null data: ownership unknown, not closed
+  ok    null data: no negative cache invented
+  ok    null data: real page says unknown and never shows body/false denial
+  ok    null data: valid provider control reopens holder
+  ok    unscanned next page: ownership unknown, not closed
+  ok    unscanned next page: no negative cache invented
+  ok    unscanned next page: real page says unknown and never shows body/false denial
+  ok    unscanned next page: valid provider control reopens holder
+
+Codex G return: exact wire rows and bounded reads
+  ok    session id only: reader unknown
+  ok    session id only: negative cache absent
+  ok    session id only: no false denial or body
+  ok    session id only: nonstrict refuses
+  ok    session id only: nonstrict cache absent
+  ok    session id only: strict throws
+  ok    session missing status: reader unknown
+  ok    session missing status: negative cache absent
+  ok    session missing status: no false denial or body
+  ok    session missing status: nonstrict refuses
+  ok    session missing status: nonstrict cache absent
+  ok    session missing status: strict throws
+  ok    session missing payment: reader unknown
+  ok    session missing payment: negative cache absent
+  ok    session missing payment: no false denial or body
+  ok    session missing payment: nonstrict refuses
+  ok    session missing payment: nonstrict cache absent
+  ok    session missing payment: strict throws
+  ok    intent id only: reader unknown
+  ok    intent id only: negative cache absent
+  ok    intent id only: no false denial or body
+  ok    intent id only: nonstrict refuses
+  ok    intent id only: nonstrict cache absent
+  ok    intent id only: strict throws
+  ok    intent missing status: reader unknown
+  ok    intent missing status: negative cache absent
+  ok    intent missing status: no false denial or body
+  ok    intent missing status: nonstrict refuses
+  ok    intent missing status: nonstrict cache absent
+  ok    intent missing status: strict throws
+  ok    empty row: reader unknown
+  ok    empty row: negative cache absent
+  ok    empty row: no false denial or body
+  ok    empty row: nonstrict refuses
+  ok    empty row: nonstrict cache absent
+  ok    empty row: strict throws
+  ok    array row: reader unknown
+  ok    array row: negative cache absent
+  ok    array row: no false denial or body
+  ok    array row: nonstrict refuses
+  ok    array row: nonstrict cache absent
+  ok    array row: strict throws
+  ok    missing has_more: reader unknown
+  ok    missing has_more: negative cache absent
+  ok    missing has_more: no false denial or body
+  ok    missing has_more: nonstrict refuses
+  ok    missing has_more: nonstrict cache absent
+  ok    missing has_more: strict throws
+  ok    string has_more: reader unknown
+  ok    string has_more: negative cache absent
+  ok    string has_more: no false denial or body
+  ok    string has_more: nonstrict refuses
+  ok    string has_more: nonstrict cache absent
+  ok    string has_more: strict throws
+  ok    null entry: reader unknown
+  ok    null entry: negative cache absent
+  ok    null entry: no false denial or body
+  ok    null entry: nonstrict refuses
+  ok    null entry: nonstrict cache absent
+  ok    null entry: strict throws
+  ok    primitive entry: reader unknown
+  ok    primitive entry: negative cache absent
+  ok    primitive entry: no false denial or body
+  ok    primitive entry: nonstrict refuses
+  ok    primitive entry: nonstrict cache absent
+  ok    primitive entry: strict throws
+  ok    unknown session status: reader unknown
+  ok    unknown session status: negative cache absent
+  ok    unknown session status: no false denial or body
+  ok    unknown session status: nonstrict refuses
+  ok    unknown session status: nonstrict cache absent
+  ok    unknown session status: strict throws
+  ok    intent empty row: reader unknown
+  ok    intent empty row: negative cache absent
+  ok    intent empty row: no false denial or body
+  ok    intent empty row: nonstrict refuses
+  ok    intent empty row: nonstrict cache absent
+  ok    intent empty row: strict throws
+  ok    intent array row: reader unknown
+  ok    intent array row: negative cache absent
+  ok    intent array row: no false denial or body
+  ok    intent array row: nonstrict refuses
+  ok    intent array row: nonstrict cache absent
+  ok    intent array row: strict throws
+  ok    intent missing pagination: reader unknown
+  ok    intent missing pagination: negative cache absent
+  ok    intent missing pagination: no false denial or body
+  ok    intent missing pagination: nonstrict refuses
+  ok    intent missing pagination: nonstrict cache absent
+  ok    intent missing pagination: strict throws
+  ok    intent more pages: reader unknown
+  ok    intent more pages: negative cache absent
+  ok    intent more pages: no false denial or body
+  ok    intent more pages: nonstrict refuses
+  ok    intent more pages: nonstrict cache absent
+  ok    intent more pages: strict throws
+  FAIL  10 customers: result
+        expected false
+        got      "unknown"
+  FAIL  10 customers: at most ten payment queries
+        expected 10
+        got      0
+  ok    11 customers: result
+  FAIL  11 customers: at most ten payment queries
+        expected 10
+        got      0
+
+The link form: its field is named and described, and a notice after it is reached
+  ok    the field is labeled as an email address and described by the line that explains it
+  ok    the form is named by its question
+  ok    after the form (?link=email), the notice can take the focus the page gives it
+  ok    after the form (?link=limited), the notice can take the focus the page gives it
+  ok    after the form (?link=error), the notice can take the focus the page gives it
+  ok    after the form (?link=sent), the notice can take the focus the page gives it
+  ok    ?link=constructor draws no notice
+  ok    ?link=toString draws no notice
+  ok    ?link=__proto__ draws no notice
+  ok    ?link=hasOwnProperty draws no notice
+  ok    ?link=nope draws no notice
+  ok    the community's form, the same component: named, described, labeled in the store's language
+
+The emailed link: the same answer, at once, whoever asks
+  ok    an address that holds nothing: "sent" at once, nothing asked or sent before the answer
+  ok    and after it, no email
+  ok    a holder: the very same answer, the same nothing done before it
+  FAIL  and after it, one email to it
+        expected [1,"ana@example.com"]
+        got      [0,null]
+  FAIL  the email holds a link to open, never the words
+        expected [true,false]
+        got      [false,false]
+  ok    with the email service down, the holder's answer and a stranger's are the same
+  ok    a count of links asked always has an end
+  ok    one left with none, by a key that ran out between two commands, is given one
+  ok    and the count went on from it
+  ok    the window does not slide: ten minutes on, it ends when it would have
+Z_VOLUME {"runs":1204,"mocks":115,"over":true}
+reading which emails are published failed Error: the database is down
+    at store.pipeline ([stdin]:91309:11)
+    at redisPipeline ([stdin]:31998:41)
+    at publishedLetters ([stdin]:88451:26)
+    at main ([stdin]:91311:24)
+checking who may read an email kept for members failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:34363:11)
+    at async paidForAny ([stdin]:89133:27)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91346:68) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+checking who may read an email kept for members failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:34363:11)
+    at async paidForAny ([stdin]:89133:27)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91347:20) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91370:22)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91373:20)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91370:22)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91373:20)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91370:22)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91373:20)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89133:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed UnreadPurchasesError: the purchases could not be read in full: more than one page
+    at paidForAny ([stdin]:89166:24)
+    at async ticketFor ([stdin]:89206:120)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89155:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed UnreadPurchasesError: the purchases could not be read in full: a reply that is not a list
+    at listOf ([stdin]:89108:90)
+    at paidForAny ([stdin]:89155:20)
+    at async ticketFor ([stdin]:89206:120)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async main ([stdin]:91420:43)
+checking who may read an email kept for members failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async letterReader ([stdin]:89595:13)
+    at async main ([stdin]:91415:41)
+checking who may read an email kept for members failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async letterReader ([stdin]:89595:13)
+    at async LetterPage ([stdin]:90291:25)
+    at async render ([stdin]:91206:16)
+    at async main ([stdin]:91417:20)
+checking community access failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async main ([stdin]:91420:43)
+sending a link to read an email failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async sendLetterLink ([stdin]:89636:8)
+    at async runAfter ([stdin]:91488:46)
+    at async main ([stdin]:91499:3)
+sending a link to read an email failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async sendLetterLink ([stdin]:89636:8)
+    at async runAfter ([stdin]:91488:46)
+    at async main ([stdin]:91502:3)
+sending a link to read an email failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async sendLetterLink ([stdin]:89636:8)
+    at async runAfter ([stdin]:91488:46)
+    at async main ([stdin]:91507:3)
+sending a link to read an email failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async sendLetterLink ([stdin]:89636:8)
+    at async runAfter ([stdin]:91488:46)
+    at async main ([stdin]:91509:3)
+sending a link to read an email failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async sendLetterLink ([stdin]:89636:8)
+    at async runAfter ([stdin]:91488:46)
+    at async main ([stdin]:91516:3)
+sending a link to read an email failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async sendLetterLink ([stdin]:89636:8)
+    at async runAfter ([stdin]:91488:46)
+    at async main ([stdin]:91520:3)
+sending a link to read an email failed Error: mock HTTP ceiling before dispatch
+    at f ([stdin]:1:368)
+    at [stdin]:34345:29
+    at timed ([stdin]:32471:19)
+    at onAccount ([stdin]:34344:43)
+    at paidForAny ([stdin]:89133:33)
+    at ticketFor ([stdin]:89206:126)
+    at async sendLetterLink ([stdin]:89636:8)
+    at async runAfter ([stdin]:91488:46)
+    at async main ([stdin]:91524:3)
+TypeError: Cannot read properties of undefined (reading 'text')
+    at main ([stdin]:91527:57)
+
+Z_STATUS 1 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (74.730858ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (113.640484ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (43.637198ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.268453ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.217047ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.126351ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.408586ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (72.445801ms)
+✔ every store figure taken in the code is a kind a line prices (46.722791ms)
+✔ every email sent names a meter, and each file only the meters it may use (89.24005ms)
+✔ the units a figure is taken in cost at least what they stand for (7.108428ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.462797ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.162555ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.276136ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.098468ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.082485ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.30519ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.143707ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.719876ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.07967ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (1.850273ms)
+✔ Path push fits its reserved studio requests (0.078348ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.054953ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.114112ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.129064ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (28.362904ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 508.253553
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (123.317137ms)
+✔ each family is bounded one way at least, and what it says can be checked (48.061ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (4.753103ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.244739ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.501377ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.822166ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.167563ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 190.509979
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3260-KcRZkS

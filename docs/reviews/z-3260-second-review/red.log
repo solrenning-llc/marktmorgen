@@ -1,0 +1,198 @@
+
+FILE letter-link-grant-set.test.ts
+
+control: an answered SET emails a link that opens, and takes one email from the allowance
+  ok    asked
+  ok    emailed with a token
+  ok    the token reads its grant
+  ok    one transactional email taken
+
+the grant's SET reply in any other shape: no email, no allowance taken, said in the log
+  ok    no reply: the form's answer is unchanged
+  FAIL  no reply: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  no reply: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  no reply: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    undefined: the form's answer is unchanged
+  FAIL  undefined: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  undefined: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  undefined: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    a hole: the form's answer is unchanged
+  FAIL  a hole: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  a hole: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  a hole: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    QUEUED: the form's answer is unchanged
+  FAIL  QUEUED: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  QUEUED: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  QUEUED: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    null: the form's answer is unchanged
+  FAIL  null: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  null: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  null: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    lower-case ok: the form's answer is unchanged
+  FAIL  lower-case ok: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  lower-case ok: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  lower-case ok: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    a number: the form's answer is unchanged
+  FAIL  a number: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  a number: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  a number: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    an error object: the form's answer is unchanged
+  FAIL  an error object: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  an error object: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  an error object: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    two replies: the form's answer is unchanged
+  FAIL  two replies: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  two replies: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  two replies: the server's log says the link was not sent
+        expected true
+        got      false
+  ok    not a list: the form's answer is unchanged
+  FAIL  not a list: no email went out
+        expected [0,0]
+        got      [1,1]
+  FAIL  not a list: nothing taken from the store's transactional allowance
+        expected 0
+        got      1
+  FAIL  not a list: the server's log says the link was not sent
+        expected true
+        got      false
+
+a pipeline that throws on the grant's SET: no email, no allowance taken
+  ok    thrown: the form's answer is unchanged
+  ok    thrown: no email went out
+  ok    thrown: nothing taken from the allowance
+
+asking again after a failed SET emails a link that opens
+  ok    asked again
+  ok    emailed once, with a token
+  ok    the new link opens
+  ok    one transactional email taken
+
+51 checks, 30 failing.
+Z_VOLUME {"runs":314,"mocks":26,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3260-committed-grant.proof.ts
+
+independent: the producer SET really lands before its receipt is lost or malformed
+  ok    committed then empty ACK: asynchronous form answer remains sent
+  ok    committed then empty ACK: actual producer kept exactly one grant
+  FAIL  committed then empty ACK: email dispatch follows confirmed receipt
+        expected [0,0]
+        got      [1,1]
+  FAIL  committed then empty ACK: transactional allowance follows confirmed receipt
+        expected 0
+        got      1
+  FAIL  committed then empty ACK: exact grant-refusal diagnostic
+        expected true
+        got      false
+Z_CASE {"label":"committed then empty ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":1268,"runs":22,"mocks":2,"emails":1,"allowance":1}
+  ok    committed then extra ACK: asynchronous form answer remains sent
+  ok    committed then extra ACK: actual producer kept exactly one grant
+  FAIL  committed then extra ACK: email dispatch follows confirmed receipt
+        expected [0,0]
+        got      [1,1]
+  FAIL  committed then extra ACK: transactional allowance follows confirmed receipt
+        expected 0
+        got      1
+  FAIL  committed then extra ACK: exact grant-refusal diagnostic
+        expected true
+        got      false
+Z_CASE {"label":"committed then extra ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":1268,"runs":21,"mocks":2,"emails":1,"allowance":1}
+  ok    committed then nil ACK: asynchronous form answer remains sent
+  ok    committed then nil ACK: actual producer kept exactly one grant
+  FAIL  committed then nil ACK: email dispatch follows confirmed receipt
+        expected [0,0]
+        got      [1,1]
+  FAIL  committed then nil ACK: transactional allowance follows confirmed receipt
+        expected 0
+        got      1
+  FAIL  committed then nil ACK: exact grant-refusal diagnostic
+        expected true
+        got      false
+Z_CASE {"label":"committed then nil ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":1268,"runs":21,"mocks":2,"emails":1,"allowance":1}
+  ok    committed then getter ACK: asynchronous form answer remains sent
+  ok    committed then getter ACK: actual producer kept exactly one grant
+  FAIL  committed then getter ACK: email dispatch follows confirmed receipt
+        expected [0,0]
+        got      [1,1]
+  FAIL  committed then getter ACK: transactional allowance follows confirmed receipt
+        expected 0
+        got      1
+  FAIL  committed then getter ACK: exact grant-refusal diagnostic
+        expected true
+        got      false
+Z_CASE {"label":"committed then getter ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":1268,"runs":21,"mocks":2,"emails":1,"allowance":1}
+  ok    committed then thrown ACK: asynchronous form answer remains sent
+  ok    committed then thrown ACK: actual producer kept exactly one grant
+  ok    committed then thrown ACK: email dispatch follows confirmed receipt
+  ok    committed then thrown ACK: transactional allowance follows confirmed receipt
+  ok    committed then thrown ACK: asynchronous failure is caught and logged
+Z_CASE {"label":"committed then thrown ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":868,"runs":12,"mocks":1,"emails":0,"allowance":0}
+  ok    committed frozen exact ACK: asynchronous form answer remains sent
+  ok    committed frozen exact ACK: actual producer kept exactly one grant
+  ok    committed frozen exact ACK: email dispatch follows confirmed receipt
+  ok    committed frozen exact ACK: transactional allowance follows confirmed receipt
+  ok    committed frozen exact ACK: actual emailed token reads the persisted grant
+  ok    committed frozen exact ACK: meter was already consumed at provider POST
+Z_CASE {"label":"committed frozen exact ACK","grantSets":1,"storedBytes":110,"pipelineSerializedBytes":1268,"runs":22,"mocks":2,"emails":1,"allowance":1}
+  ok    getter ACK is refused without executing its slot
+
+32 checks, 12 failing.
+Z_VOLUME {"runs":186,"mocks":11,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3260-DhlnjB

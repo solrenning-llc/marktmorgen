@@ -1,0 +1,25 @@
+{
+  "subject": "0381dd241abf1842338e3c4a34bc5478434c9652",
+  "tree": "1f16274181473543968183fbc7366affdbd05bf0",
+  "oldSourceRef": "88dedad3b5c19202d595c6d049210859680ce4ef",
+  "oldSourceBlob": "5c860e677f2af44796ef171d0dca64914b64b322",
+  "files": {
+    "lib/letter-access.ts": {
+      "sha256": "0771a2ed4ebefe1980903ec89898ff637ff9eb028e7e38aaf0704c7e4fe59e3f",
+      "gitBlob": "9803ee90ab9bd3b5682c3b85c264ca8be54f80d5"
+    },
+    "tests/letter-link-grant-set.test.ts": {
+      "sha256": "a83af92431d659e9e540e593339d7c6f69a27120e6177376dcab1fe42f49d1ed",
+      "gitBlob": "b0cade523a25090c4996690dae369c9926e20988"
+    },
+    "docs/reviews/z-3260-second-review/z-3260-committed-grant.proof.ts": {
+      "sha256": "aafb8e19ab88b30a32f4714d470ad959460f68545ae4825be4746ba8ba1b2a7d",
+      "gitBlob": "e870097d0233754bb1d6165dc5e4d21798e7b535"
+    }
+  },
+  "rawLogSha256": {
+    "red.log": "04d269953e26ecca565cbca05c243f7c6340bfee74bc226b6ca009176a674a66",
+    "head.log": "07b1e98ef508c5c188a69902bf89db7d798dd791145ee3f9caa2c3d9b635cc3d"
+  },
+  "authorCopyByteIdentical": true
+}

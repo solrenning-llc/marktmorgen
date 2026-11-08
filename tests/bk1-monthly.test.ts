@@ -257,6 +257,27 @@ async function main(): Promise<void> {
     is("prune_unverified, no January mark, nothing deleted", [blind.ok && blind.prune, marked().map((m) => m.month), objects.has(stale)], ["prune_unverified", ["2026-12"], true]);
   }
 
+  part("The last good copy lost, a month's copy sealed under a key the run no longer holds: kept by name, never a stop");
+  {
+    // After a rotation past BACKUP_KEY_PREVIOUS_DAYS (60) a month's copy (up to 120 days) may be sealed under a key the
+    // run does not read with. It is kept by name, so the run need not open it, and it must not stop the run.
+    reset();
+    wipe();
+    seed(5);
+    const before = Buffer.alloc(32, 9);
+    at(Date.parse("2026-12-01T03:00:00Z"));
+    await runBackup({ now: clock, review, store, key: before });
+    const december = marked()[0]?.folder ?? "none";
+    // The mark then names a copy the bucket's rule took, and the bucket fills with leftovers past the lock.
+    redis.run(["SET", "nl:backup:last-ok", JSON.stringify({ at: clock, set: "dddddddd-dddd-4ddd-8ddd-000000000000", base: { keys: 0, bytes: 0 } })]);
+    for (let i = 0; i < 34; i += 1) filler(i, clock + 1_000 + i);
+    at(Date.parse("2026-12-20T03:00:00Z"));
+    lockMs = BACKUP_BUCKET_LOCK_DAYS * DAY;
+    const result = await runBackup({ now: clock, review, store, key, previousKeys: [] });
+    is("room made from the leftovers, the copy written, said as last good copy lost", [result.ok, result.ok && result.note], [true, "last_good_copy_lost"]);
+    is("December's copy, under the old key, whole", inFolder(december).length, 3);
+  }
+
   part("The R2 store: monthly names, and a create-only write on a locked name (409)");
   {
     const run = "dddddddd-dddd-4ddd-8ddd-000000000001";

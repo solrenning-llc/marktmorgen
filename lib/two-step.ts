@@ -451,6 +451,10 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   if (!email || !record) return null;
   const through = (to: "sign-in" | "recovery") =>
     held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
+  // Read before anything happens: this path assumes somebody else may hold the sign-in inbox (MM-SA-19), so the
+  // recovery address must hear of the days in which Cancel stops it. One that cannot be read (UnknownReplyError)
+  // stops here, the waiting login unspent and no day set, so the person can try again (Claude 6 on #3154).
+  const backupNow = await backupOf(email, record);
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (Number(removed) !== 1) return null;
@@ -472,15 +476,7 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
 If that was you, keep working: everything else is open.
 
 If it was not you, somebody can read your email: log in with your app's code or a passkey, or open your studio in a browser that is still logged in and press Cancel. That logs them out and keeps two-step login on. Then change your email password.`;
-  // Told to the recovery address too: this path assumes somebody else may hold the sign-in inbox (MM-SA-19). The
-  // session is open and the day set by now, so a recovery address that cannot be read (UnknownReplyError) never
-  // stops the sign-in inbox being told: it is told, and the address the record kept before, as before this read
-  // was exact (VR2 audit).
-  const backupNow = await backupOf(email, record).catch((error: unknown) => {
-    if (!(error instanceof UnknownReplyError)) throw error;
-    console.error("reading the recovery address to tell failed", error);
-    return record.backup;
-  });
+  // Told to the recovery address too (MM-SA-19), read above before the login was spent.
   await tell(
     email,
     first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",

@@ -93,7 +93,7 @@ export function SequenceImportBox({
         id={`${id}-file`}
         type="file"
         accept=".csv,text/csv"
-        className="mt-2 block text-sm"
+        className="mt-2 block min-h-11 w-full max-w-full text-sm"
         aria-describedby={`${id}-help`}
         onChange={(e) => {
           setFile(e.target.files?.[0] ?? null);

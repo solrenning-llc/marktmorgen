@@ -32,6 +32,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   calls.push(url.pathname);
   if (url.pathname === "/v1/subscriptions") {
     if (armed) failNextAfterList = true;
+    if (Array.isArray(list)) return Response.json(list[url.searchParams.get("starting_after") ? 1 : 0]);
     return Response.json(list);
   }
   if (url.pathname === `/v1/subscriptions/${id}`) return Response.json(detail);
@@ -112,6 +113,37 @@ async function main() {
     const after = (await storeForEmail(owner))!;
     is("counted as failed and incomplete, the store checked and not updated", typeof result === "string" ? result : [result.failed >= 1, result.complete, result.checked, result.updated], [true, false, 1, 0]);
     is("an unreadable row is neither paying nor not paying: the store is unchanged", after, before);
+  }
+  part("A subscription naming a handle its store no longer holds does not hide that store from step 2");
+  {
+    await setup();
+    list = { data: [{ ...row("canceled"), metadata: { store: "billing-seen-old-handle" } }], has_more: false }; detail = row("canceled");
+    const result = await syncSubscriptions(Date.now() + 10_000);
+    const after = (await storeForEmail(owner))!;
+    is("step 2 checked the store by its own subscription and applied the cancellation", [result.checked, result.updated, result.failed], [1, 1, 0]);
+    is("the store that stopped paying no longer counts as paid up", after.subscriptionActive, false);
+  }
+
+  part("A refusal on a later page keeps the place reached, so the pages already read are not read again");
+  {
+    await setup();
+    const first = "sub_SeenFirstPage01";
+    list = [{ data: [{ ...row("canceled", first), metadata: {} }], has_more: true }, { data: [row("future_unknown")], has_more: false }];
+    detail = row("active");
+    let result: Awaited<ReturnType<typeof syncSubscriptions>> | string;
+    try { result = await syncSubscriptions(Date.now() + 10_000); } catch (error) { result = `threw: ${(error as Error).message}`; }
+    is("counted as failed, incomplete", typeof result === "string" ? result : [result.failed >= 1, result.complete], [true, false]);
+    is("the saved place is the last subscription of the page read before the refused one", await redis.pipeline([["GET", listCursorKey]]), [first]);
+  }
+
+  part("Step 2: Stripe could not be asked about a paid-up store, so it is a failure, not a check passed");
+  {
+    const before = await setup();
+    list = { data: [], has_more: false }; detail = { error: "synthetic unreadable answer" };
+    const result = await syncSubscriptions(Date.now() + 10_000);
+    const after = (await storeForEmail(owner))!;
+    is("checked once, counted as failed, nothing updated", [result.checked, result.failed, result.updated], [1, 1, 0]);
+    is("an unreadable answer changes nothing about the store", after, before);
   }
   done();
 }

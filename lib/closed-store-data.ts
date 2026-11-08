@@ -63,7 +63,7 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, storeFolder, storeForEmail, storeForEmailSeen, storeHandleKey, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -333,25 +333,132 @@ function ownersOf(batch: Batched[]): Owners {
 
 const pieces = (text: string) => text.split(/[:|,]/);
 
-/** The closing store a key belongs to, if any: by an id in its name, or, for a family named by address, by an address. */
+/**
+ * The address a key of a family named by address is named by: what follows the family's name, whole. Until then any
+ * part of the key that was a closing store's address matched, so a store whose address is "weekly" took every store's
+ * nl:weekly:to: key with it.
+ */
+const addressOf = (key: string) => key.slice(closingFamilyOf(key).length);
+
+/** The closing store a key belongs to, if any: by an id in its name, or, for a family named by address, by its address. */
 export function ownerOfKey(key: string, rule: Closing, owners: Owners): string | null {
-  const parts = pieces(key);
-  if (rule.how === "erase" && rule.by === "handle") {
-    for (const part of parts) if (owners.byHandle.has(part)) return owners.byHandle.get(part)!;
-    return null;
-  }
-  for (const part of parts) {
+  if (rule.how === "erase" && rule.by === "handle") return owners.byHandle.get(addressOf(key)) ?? null;
+  for (const part of pieces(key)) {
     if (owners.byMark.has(part)) return owners.byMark.get(part)!;
     if (owners.byRef.has(part)) return owners.byRef.get(part)!;
   }
   return null;
 }
 
-/** Whether a member of a company list names a closing store. */
-function namesStore(member: string, owners: Owners): boolean {
-  if (owners.byRef.has(member)) return true;
-  return pieces(member).some((part) => owners.byMark.has(part) || owners.byRef.has(part));
+/**
+ * An id of a closing store that a live store may hold now (rule 30): its key, when it is its owner's address (an
+ * account's first store), and the folder derived from it (storeFolder), which a first store its owner opens again
+ * under the same address has too (lib/store.ts, claimHandle, once the closed store's record is gone); an address it
+ * let go of or held, which another store may claim once its month on the shelf is over; its Stripe account, which
+ * another store of its owner may sell through since it was prepared. A key or a list's member named only by such an
+ * id is not proven to be the closing store's: it goes only when no live store holds the id, read exactly at the page
+ * that would delete it. Until then the walk deleted them whoever held them: a first store opened again while its
+ * walk ran lost its pause, its place in the pauses' line and its folder's records, a store that claimed an address a
+ * closed store had let go of lost its weekly team, and a store that connected the closed one's account lost its
+ * account's records.
+ */
+type Held = { kind: "key" | "address" | "account"; id: string; email: string };
+
+/** The ids of the batch's stores a live store may hold, and whether one does. */
+type Reuse = { held: Map<string, Held>; live: (held: Held, page: Map<string, boolean>) => Promise<boolean> };
+
+/** A key of a family named by ids, or a member of a list, and what it is named by: an id proven the closing store's (no `held`), or one a live store may hold. */
+type Claim = { owner: string; held: Held | null };
+
+function claimOf(text: string, owners: Owners, reuse: Reuse, whole: boolean): Claim | null {
+  let first: Claim | null = null;
+  for (const part of whole ? [text, ...pieces(text)] : pieces(text)) {
+    const owner = owners.byMark.get(part) ?? owners.byRef.get(part);
+    if (!owner) continue;
+    const held = reuse.held.get(part) ?? null;
+    if (!held) return { owner, held: null };
+    first ??= { owner, held };
+  }
+  return first;
 }
+
+/** The store kept under a key, read exactly: a reply that does not read, or a record there that does not read as a store of this key, throws. */
+async function storeUnder(ref: string, what: string): Promise<Store | null> {
+  let reply: unknown;
+  const store = await storeForEmailSeen(ref, (_, answer) => void (reply = answer));
+  const read = repliesFor(reply, 1);
+  if (!read || (read[0] !== null && (typeof read[0] !== "string" || !store))) throw new UnknownReplyError(what);
+  return store;
+}
+
+/** Whether a store holds this address now, read exactly: nil or a released mark is nobody's (handleLeadsToStore); any other string is a store's; anything else throws. */
+async function addressHeld(handle: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["GET", storeHandleKey(handle)]]), 1);
+  const raw = replies?.[0];
+  if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("whether a live store holds a closing store's address (GET)");
+  return handleLeadsToStore(raw);
+}
+
+/**
+ * The set of an account's other stores (lib/store.ts, accountKey), spelled as it spells it: lib/store.ts does not
+ * export it, and its accountStores reads a reply that does not read as no store. tests/erase-cross-store.test.ts
+ * connects the account from an owner's other store made with the real createStore, and fails if the two ever differ.
+ */
+const accountStoresKey = (email: string) =>
+  `nl:account:stores:${createHash("sha256").update(`nimbus-account-stores:${email.toLowerCase()}`).digest("hex").slice(0, 40)}`;
+
+/** Whether a store of this owner sells through this Stripe account now, read exactly: its first store and every other store of its account. */
+async function accountHeld(email: string, account: string): Promise<boolean> {
+  const first = await storeUnder(email, "whether the owner's first store sells through a closing store's account (GET)");
+  if (first?.stripeAccountId === account) return true;
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", accountStoresKey(email)]]), 1);
+  const ids = replies?.[0];
+  if (!replies || !Array.isArray(ids) || ids.some((id) => typeof id !== "string")) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
+  for (const id of ids as string[]) {
+    if (!STORE_ID_PATTERN.test(id)) continue;
+    const other = await storeUnder(`#${id}`, "whether the owner's other store sells through a closing store's account (GET)");
+    if (other && other.email.toLowerCase() === email.toLowerCase() && other.stripeAccountId === account) return true;
+  }
+  return false;
+}
+
+/**
+ * What the batch's stores' ids a live store may hold are, for one run. A live store found holding one is kept for the
+ * rest of the run (keeping is never wrong); one found holding none is read again at the next page that needs it, so a
+ * store opened while the run goes on is seen. A page reads each id at most once, and only when it has a key or a member
+ * named by it alone: the reads are bounded by the keys the walk would delete for the store (tests/plan-cost-registry.ts,
+ * closure, deletes).
+ */
+async function reuseOf(batch: Map<string, Batched>): Promise<Reuse> {
+  const held = new Map<string, Held>();
+  for (const entry of batch.values()) {
+    if (entry.ref === entry.email) {
+      const key: Held = { kind: "key", id: entry.ref, email: entry.email };
+      held.set(entry.ref, key);
+      held.set(await storeFolder(entry.ref), key);
+    }
+    for (const handle of entry.handles) held.set(handle, { kind: "address", id: handle, email: entry.email });
+    for (const mark of entry.marks) if (STRIPE_ACCOUNT_PATTERN.test(mark)) held.set(mark, { kind: "account", id: mark, email: entry.email });
+  }
+  const liveForRun = new Set<string>();
+  return {
+    held,
+    live: async (one, page) => {
+      const tag = `${one.kind}|${one.id}|${one.email}`;
+      if (liveForRun.has(tag)) return true;
+      if (page.has(tag)) return page.get(tag)!;
+      const yes = one.kind === "key" ? (await storeUnder(one.id, "whether a live store holds a closing store's key (GET)")) !== null
+        : one.kind === "address" ? await addressHeld(one.id)
+        : await accountHeld(one.email, one.id);
+      page.set(tag, yes);
+      if (yes) liveForRun.add(tag);
+      return yes;
+    },
+  };
+}
+
+/** A reuse with no ids a live store may hold: every claim is proven, as the walk read them before. */
+const NO_REUSE: Reuse = { held: new Map(), live: async () => false };
 
 /**
  * What keys of the store lead to that are named by a token, not by the
@@ -565,14 +672,25 @@ export function followable(found: string, family: string): boolean {
   return Boolean(rule && rule.how === "token" && rule.via === family);
 }
 
-/** Takes a closing store's members out of one of the company's lists. */
-async function pruneIndex(key: string, owners: Owners): Promise<number> {
+/**
+ * Takes a closing store's members out of one of the company's lists: a member named by an id a live store may hold
+ * goes only when none holds it (claimOf, reuse), read before anything of the list is taken.
+ */
+async function pruneIndex(key: string, owners: Owners, reuse: Reuse, page: Map<string, boolean>): Promise<number> {
   const type = await typeOf(key);
-  const gone: string[] = [];
-  if (type === "set") await scanAll("SSCAN", key, (flat) => void gone.push(...flat.filter((m) => namesStore(m, owners))));
-  else if (type === "zset") await scanAll("ZSCAN", key, (flat) => void gone.push(...flat.filter((m, i) => i % 2 === 0 && namesStore(m, owners))));
-  else if (type === "hash") await scanAll("HSCAN", key, (flat) => void gone.push(...flat.filter((m, i) => i % 2 === 0 && namesStore(m, owners))));
+  const claimed: [string, Claim][] = [];
+  const take = (members: string[]) => {
+    for (const member of members) {
+      const claim = claimOf(member, owners, reuse, true);
+      if (claim) claimed.push([member, claim]);
+    }
+  };
+  if (type === "set") await scanAll("SSCAN", key, (flat) => take(flat));
+  else if (type === "zset") await scanAll("ZSCAN", key, (flat) => take(flat.filter((_, i) => i % 2 === 0)));
+  else if (type === "hash") await scanAll("HSCAN", key, (flat) => take(flat.filter((_, i) => i % 2 === 0)));
   else return 0;
+  const gone: string[] = [];
+  for (const [member, claim] of claimed) if (!claim.held || !(await reuse.live(claim.held, page))) gone.push(member);
   for (let i = 0; i < gone.length; i += 200) {
     const some = gone.slice(i, i + 200);
     await redisPipeline([[type === "set" ? "SREM" : type === "zset" ? "ZREM" : "HDEL", key, ...some]]);
@@ -587,22 +705,35 @@ export type WalkReport = { started: boolean; stores: number; pages: number; dele
  * takes them out of the company's lists. Answers how many keys it deleted
  * and took members from.
  */
-export async function walkPage(keys: string[], batch: Map<string, Batched>, owners: Owners): Promise<{ deleted: number; pruned: number }> {
+export async function walkPage(keys: string[], batch: Map<string, Batched>, owners: Owners, reuse: Reuse = NO_REUSE): Promise<{ deleted: number; pruned: number }> {
   const doomed = new Set<string>();
   // The keys each follower is handed, by store and family: read together, once the page is sorted.
   const followed = new Map<string, { family: string; owner: string; keys: string[] }>();
+  // Whether a live store holds an id, as this page read it: once a page at the most.
+  const page = new Map<string, boolean>();
   let pruned = 0;
+  // The page's keys of a closing store, sorted first: whether a live store holds an id one of them is named by alone
+  // is read before any of the page's keys is deleted, so a read that is unknown stops the run with them all kept.
+  const claimed: { key: string; family: string; claim: Claim }[] = [];
   for (const key of keys) {
     const family = closingFamilyOf(key);
     const rule = family ? CLOSING[family] : null;
     if (!rule) continue;
     if (rule.how === "index") {
-      pruned += await pruneIndex(key, owners);
+      pruned += await pruneIndex(key, owners, reuse, page);
       continue;
     }
     if (rule.how !== "erase") continue;
-    const owner = ownerOfKey(key, rule, owners);
-    if (!owner) continue;
+    let claim: Claim | null;
+    if (rule.by === "handle") {
+      const owner = ownerOfKey(key, rule, owners);
+      claim = owner ? { owner, held: reuse.held.get(addressOf(key)) ?? null } : null;
+    } else claim = claimOf(key, owners, reuse, false);
+    if (claim) claimed.push({ key, family, claim });
+  }
+  for (const { key, family, claim } of claimed) {
+    if (claim.held && (await reuse.live(claim.held, page))) continue;
+    const owner = claim.owner;
     if (FOLLOWERS[family]?.match(key)) {
       const group = followed.get(`${owner}|${family}`) ?? { family, owner, keys: [] };
       group.keys.push(key);
@@ -679,12 +810,13 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
 
   const batch = await readBatch();
   const owners = ownersOf([...batch.values()]);
+  const reuse = await reuseOf(batch);
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
     const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", "nl:*", "COUNT", WALK_COUNT]]);
     if (!Array.isArray(reply) || reply.length < 2) break;
     const next = String(reply[0]);
     const keys = Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
-    const done = await walkPage(keys, batch, owners);
+    const done = await walkPage(keys, batch, owners, reuse);
     report.deleted += done.deleted;
     report.pruned += done.pruned;
     report.pages += 1;

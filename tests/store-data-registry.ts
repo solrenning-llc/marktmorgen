@@ -395,6 +395,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:store:leads:@lib/closed-store-data.ts": follower("nl:store:leads:"),
   "nl:@lib/closed-store-data.ts": company("Not a key: the start of every key a follower may delete", "Read only, to check what is deleted."),
   "nl:plan:closing:@lib/closed-store-data.ts": { what: "The closing job's record of a store, read again before the walk prepares it", parts: [capped(0, "Read only: counted with lib/plan-closing.ts.")] },
+  "nl:account:stores:@lib/closed-store-data.ts": { what: "An account's other stores, read before the walk deletes what a closing store's Stripe account names", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:call:remindq@lib/call-records.ts": company("Call reminders due", "One sorted set for every store, members gone when sent: each a booked call's, an order's."),
   "nl:call:creator-reminded:@lib/call-reminders.ts": short("The creator reminded of a call", "call", 430, 2 * MARK),
   "nl:call:reminded:@lib/call-reminders.ts": short("A buyer reminded of a call", "call", 430, 2 * MARK),

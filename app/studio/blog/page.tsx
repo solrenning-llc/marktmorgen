@@ -11,6 +11,7 @@ import { aiAvailableFor, aiLeft } from "@/lib/ai";
 import { BlogEditor } from "@/components/blog-editor";
 import { allPosts, postSegment, readPost } from "@/lib/store-blog";
 import { NewTab } from "@/components/new-tab";
+import { StudioEmptyState } from "@/components/empty-state";
 
 export const metadata: Metadata = {
   title: "Blog — Marktmorgen",
@@ -70,7 +71,14 @@ export default async function StudioBlogPage({ searchParams }: Params) {
               {posts === null ? (
                 <p role="status" className="mt-3 text-sm text-ink-soft">Posts couldn&apos;t be loaded. Reload to try again.</p>
               ) : posts.length === 0 ? (
-                <p className="mt-3 text-sm text-ink-soft">No posts yet. Your store page links to the blog once one is published.</p>
+                <StudioEmptyState
+                  level={3}
+                  title="No posts yet"
+                  body="Your store page links to your blog once a post is published."
+                  action={writing ? undefined : { href: `${back}${back.includes("?") ? "&" : "?"}edit=new`, label: "Write your first post" }}
+                  compact
+                  className="mt-3"
+                />
               ) : (
                 <ul className="mt-3 divide-y divide-line">
                   {posts.map((post) => (

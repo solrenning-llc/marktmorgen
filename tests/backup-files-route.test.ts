@@ -256,6 +256,8 @@ async function main(): Promise<void> {
   reset();
   answer = await call("?page=deletions");
   is("deletion records: 503, never an empty, complete page", [answer.status, (answer.json as { error?: string }).error, answer.text.includes("records")], [503, "deletions_unavailable", false]);
+  answer = await call("?page=stores");
+  is("the stores page (each store with its plan's room) is not built: 503, never an empty, complete page", [answer.status, (answer.json as { error?: string }).error, answer.text.includes("stores\""), blobWorld.listCalls.length, commands.length], [503, "stores_unavailable", false, 0, 0]);
 
   part("a request it does not understand is refused before any work");
   reset();

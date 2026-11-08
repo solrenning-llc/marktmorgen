@@ -43,7 +43,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { DataRoomError, needData, takeData } from "@/lib/store-data";
+import { DataRoomError, giveData, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
 import { MAX_MAIL_BODY, MAX_SUBJECT, giveBackToMonth, monthlyAllowance, sendTo, takeFromMonth } from "@/lib/mail";
@@ -274,8 +274,11 @@ async function writeFlows(store: Store, listId: string, flows: Flow[], expected:
   // The room only grows before the write and only shrinks once the write is confirmed: a write refused or not known
   // never leaves it below what is kept (Claude 5 on #1927).
   const before = expected === null ? 0 : dataBytes([expected], 1 + keptFlowCount(expected));
-  // What it grows by is added to the room as it is now, never set: a room already counting a longer change stays so.
-  if (bytes > before) await needData(store, [{ slot: "wf:defs", bytes: bytes - before }]);
+  // The room is only ever moved by what this write changes, from the exact text it replaces (WRITE_FLOWS_IF checks
+  // it), never set: changes add up whatever order they land in, so a second save written and counted between this
+  // write and its room is never counted short (Claude 4 on #1927), and a save alone is counted once.
+  const grows = Math.max(0, bytes - before);
+  if (grows > 0) await needData(store, [{ slot: "wf:defs", bytes: grows }]);
   let replies: unknown;
   try {
     replies = await redisPipeline([["EVAL", WRITE_FLOWS_IF, 1, flowsKey(listId), expected === null ? "0" : "1", expected === null ? "" : createHash("sha1").update(expected, "utf8").digest("hex"), json]]);
@@ -284,14 +287,13 @@ async function writeFlows(store: Store, listId: string, flows: Flow[], expected:
   }
   if (!Array.isArray(replies) || replies.length !== 1) throw new FlowWriteUnconfirmed();
   if (replies[0] === 0) {
-    // What is kept is the other change's: its room is counted again from it, whatever this write set (best effort).
-    const now = await readFlowListRaw(listId).catch(() => null);
-    if (now?.raw) await needData(store, [{ slot: "wf:defs", bytes: dataBytes([now.raw], 1 + now.flows.length), set: true }]).catch(() => undefined);
+    // Nothing was written: only what this write took is given back; what the other change kept stays counted by it.
+    if (grows > 0) await giveData(store, [{ slot: "wf:defs", bytes: grows }]);
     throw new FlowsChanged();
   }
   if (replies[0] !== 1) throw new FlowWriteUnconfirmed();
-  // Confirmed: what is kept is this write, so the room is set to it exactly (shrinking too, now that it is known).
-  await needData(store, [{ slot: "wf:defs", bytes, set: true }]).catch(() => undefined);
+  // Confirmed: it replaced exactly what was read, so what it freed is given back (never throws; left counted if not).
+  if (before > bytes) await giveData(store, [{ slot: "wf:defs", bytes: before - bytes }]);
 }
 
 /** How many workflows a kept list holds, for its room; one that cannot be read counts none. */

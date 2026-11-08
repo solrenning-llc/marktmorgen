@@ -49,6 +49,7 @@ async function main(): Promise<void> {
   const pipe = redis.pipeline.bind(redis);
   let phase = 0;
   let failedReads = 0;
+  let refused = false;
   redis.pipeline = (async (cs: (string | number)[][]) => {
     // The shorter save reads the workflows; the longer one is then saved whole, before the shorter sets their room.
     if (phase === 0 && cs.some((c) => c[0] === "GET" && c[1] === `nl:mail:flows:${shop.listId}`)) {
@@ -59,11 +60,14 @@ async function main(): Promise<void> {
       redis.pipeline = spy;
       return read;
     }
-    if (phase === 1 && failedReads < 2 && cs.some((c) => c[0] === "GET" && c[1] === `nl:mail:flows:${shop.listId}`)) {
+    // Every read after it fails: neither a read after the refusal nor another try can count the room again.
+    if (phase === 1 && cs.some((c) => c[0] === "GET" && c[1] === `nl:mail:flows:${shop.listId}`)) {
       failedReads += 1;
       throw new Error("Redis request failed with status 503");
     }
-    return pipe(cs);
+    const replies = await pipe(cs);
+    if (phase === 1 && cs.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:flows-write-if")) && Array.isArray(replies) && replies[0] === 0) refused = true;
+    return replies;
   }) as typeof redis.pipeline;
   const spy = redis.pipeline;
   await saveFlow(shop, short).catch(() => null);
@@ -71,7 +75,9 @@ async function main(): Promise<void> {
   const shopCharged = Number(redis.run(["HGET", dataKey(shop)!, "wf:defs"]));
   const raw = redis.run(["GET", `nl:mail:flows:${shop.listId}`]) as string;
   const shopRequired = dataBytes([raw], 1 + (JSON.parse(raw) as unknown[]).length);
-  is("(the refusal was reached, and both reads after it failed)", [phase, failedReads], [1, 2]);
+  // Since Claude 4 on #1927 a refused write reads nothing again (it gives back only what it took), so the reads after
+  // it are the next try's: one or more, every one failing.
+  is("(the refusal was reached, and every read after it failed)", [phase, refused, failedReads >= 1], [1, true, true]);
   is("what the other change kept is still counted", shopCharged >= shopRequired, true);
   done();
 }

@@ -36,12 +36,17 @@ const BEN = "bbbbbbbbbbbb";
 const PROMO = "promo_1TestGiveCode0001";
 const FRESH = "promo_1TestGiveCode0002";
 
-/** Which command on the codes hash answers in an unknown shape, whether it ran first, and the reply. */
+/**
+ * Which command on the codes hash answers in an unknown shape, whether it ran first, and the reply. The HEXISTS and
+ * the HSET of a give are one script since Claude 2's MEDIUM on #3300 (GIVE_CODE, KEYS[2] the codes hash), so either
+ * breaks that script's reply.
+ */
 type Break = { command: "HSET" | "HEXISTS" | "HDEL"; ran: boolean; reply: () => unknown } | null;
 let breakWhat: Break = null;
 const real = redis.pipeline.bind(redis);
+const gives = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:affiliate-code-give:v1\n") && /^nl:aff:[^:]+:promo$/.test(String(c[4]));
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  const hit = breakWhat && commands.some((c) => c[0] === breakWhat!.command && /^nl:aff:[^:]+:promo$/.test(String(c[1])));
+  const hit = breakWhat && commands.some((c) => (breakWhat!.command !== "HDEL" && gives(c)) || (c[0] === breakWhat!.command && /^nl:aff:[^:]+:promo$/.test(String(c[1]))));
   if (hit && breakWhat) {
     if (breakWhat.ran) await real(commands);
     return breakWhat.reply();
@@ -105,6 +110,10 @@ async function main(): Promise<void> {
     ["two for one field", [2]],
     ["an object", [{}]],
     ["two replies for one command", [0, 0]],
+    ["a move receipt with a total", [[2, 240]]],
+    ["a room that could not be read", [[-1, 0]]],
+    ["a receipt with an extra item", [[1, 240, 0]]],
+    ["a receipt with a text total", [[1, "240"]]],
   ];
 
   part("Moving the code from Ana to Ben: an unknown HSET reply is never 'given'");

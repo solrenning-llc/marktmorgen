@@ -235,22 +235,73 @@ export async function send(
   // MAX_MESSAGES lets its oldest go, and that one's room comes back.
   const [length, oldest] = await redisPipeline([["LLEN", chatKey(id, pair)], ["LINDEX", chatKey(id, pair), 0]]);
   const dropped = Number(length) >= MAX_MESSAGES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
-  await needData(room, [{ slot: PAIR_SLOT(pair), bytes: dataBytes([JSON.stringify(message)], 1) + (already ? 0 : PAIR_BYTES) - dropped }]);
+  const taken = dataBytes([JSON.stringify(message)], 1) + (already ? 0 : PAIR_BYTES) - dropped;
+  await needData(room, [{ slot: PAIR_SLOT(pair), bytes: taken }]);
+
+  // A full request list makes room before the new request goes in, and the
+  // requests that leave it go whole (rule 30). Unknown: nothing new is written
+  // and the room just taken comes back.
+  if (asking) {
+    try {
+      await dropOldestRequests(id, to, room);
+    } catch (error) {
+      await giveData(room, [{ slot: PAIR_SLOT(pair), bytes: taken }]);
+      throw error;
+    }
+  }
 
   await redisPipeline([
     ["RPUSH", chatKey(id, pair), JSON.stringify(message)],
     ["LTRIM", chatKey(id, pair), -MAX_MESSAGES, -1],
     ["ZADD", inboxKey(id, from), message.at, pair],
-    ...(asking
-      ? [
-          ["ZADD", askedKey(id, to), message.at, pair],
-          ["ZREMRANGEBYRANK", askedKey(id, to), 0, -(MAX_REQUESTS + 1)],
-        ]
-      : [["ZADD", inboxKey(id, to), message.at, pair]]),
+    ...(asking ? [["ZADD", askedKey(id, to), message.at, pair]] : [["ZADD", inboxKey(id, to), message.at, pair]]),
     // The sender has read what they just wrote.
     ["HSET", readKey(id, pair), from, message.at],
   ]);
   return { ok: true, asked: asking };
+}
+
+/**
+ * Makes room in a member's request list for one more: every request past the
+ * newest MAX_REQUESTS - 1 goes, and goes whole. Its conversation, its read
+ * marks and its place in the sender's inbox are deleted, not just its line in
+ * the request list. A request trimmed off the list alone would leave a message
+ * addressed to this member that nothing of theirs points at, so their data copy
+ * would miss it and erasing them would leave it stored (rule 30).
+ *
+ * Everything past the cap is read, not just one, so a list a concurrent send
+ * pushed over the cap is brought back under it by the next request.
+ *
+ * Each reply in its exact shape (rule 24): a lost or off-shape reply throws
+ * UnknownReplyError and the send writes nothing new. The conversation is
+ * deleted first and the request list line last, so whatever is still stored
+ * stays in this member's request list for a retry, their copy and their
+ * erasure to find.
+ *
+ * Read, then deleted, in separate requests: a race is possible. If the
+ * recipient accepts one of these requests between the read and the deletion,
+ * the accepted conversation loses the messages it had, and their inbox keeps
+ * its name (still theirs to copy and erase). If the same sender writes again
+ * in that moment, that message goes with it.
+ */
+async function dropOldestRequests(id: string, to: string, room: DataStore): Promise<void> {
+  const what = "a member's oldest private-message requests removed";
+  const past = stringList(repliesFor(await redisPipeline([["ZREVRANGE", askedKey(id, to), MAX_REQUESTS - 1, -1]]), 1)?.[0]);
+  if (!past) throw new UnknownReplyError(what);
+  if (!past.length) return;
+  const pairs = past.filter((pair) => otherIn(pair, to) !== "");
+  const commands: (string | number)[][] = pairs.flatMap((pair) => [
+    ["DEL", chatKey(id, pair), readKey(id, pair)],
+    ["ZREM", inboxKey(id, otherIn(pair, to)), pair],
+  ]);
+  if (commands.length) {
+    const deleted = repliesFor(await redisPipeline(commands), commands.length);
+    if (!deleted || deleted.some((reply) => replyCount(reply) === null)) throw new UnknownReplyError(what);
+  }
+  const unlisted = repliesFor(await redisPipeline(past.map((pair) => ["ZREM", askedKey(id, to), pair])), past.length);
+  if (!unlisted || unlisted.some((reply) => (replyCount(reply) ?? 2) > 1)) throw new UnknownReplyError(what);
+  // Each conversation's room comes back, as when a request is declined.
+  if (pairs.length) await giveData(room, pairs.map((pair) => ({ slot: PAIR_SLOT(pair), bytes: 0, set: true })));
 }
 
 /** Accepts a request: it becomes an ordinary conversation. */

@@ -225,6 +225,12 @@ async function main(): Promise<void> {
       ["unlist", "cut short", []],
       ["unlist", "nothing", [null]],
     ] as ["delete" | "unlist", string, unknown][]) {
+      // A removal that went through before its reply was lost leaves room: the list is topped up to full again, so
+      // every case meets a full list.
+      for (let more = 0; (await requestCount(id, "gil")) < MAX_REQUESTS; more += 1) {
+        tick();
+        await send(id, setting, name(`k${on}${what.length}x`, more), "gil", "one more", ROOM);
+      }
       tick();
       const got = await sendOdd(on, reply, id, "hal", "gil", `hello (${on}, ${what})`);
       is(`${on} answered as ${what}: unknown, the new message not written`, [got, (await storedWith(id, "gil")).includes("gil.hal")], ["unknown", false]);

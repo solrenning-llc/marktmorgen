@@ -207,7 +207,9 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
       try {
         // Seen only once the store that wrote it down is in line with it: one
         // whose apply failed, or that named another store, is asked about
-        // again by step 2, in this same run, not a lap later.
+        // again by step 2 when step 2 reaches its store and that store still
+        // counts as paid up. A store that does not (a lapsed plan paid again)
+        // is not one step 2 reads: it waits for the next run's list.
         if ((await applyListed(subscription, counts)) && typeof subscription.id === "string") seen.add(subscription.id);
       } catch (error) {
         counts.failed += 1;
@@ -227,7 +229,11 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
 /** Step 2: stores still paid up whose subscription step 1 did not see. */
 async function syncStores(deadline: number, seen: Set<string>, counts: SyncCounts): Promise<boolean> {
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
-  let cursor = typeof saved === "string" && /^\d+$/.test(saved) ? saved : "0";
+  // `cursor|store`: the batch at `cursor` was cut short after that store (below). Only `cursor` (or an older value):
+  // the batch from its start. Anything else: from the top, as every run read before this cursor existed.
+  const place = typeof saved === "string" ? /^(\d+)(?:\|([\s\S]+))?$/.exec(saved) : null;
+  let cursor = place ? place[1] : "0";
+  let resume = place?.[2] ?? "";
   for (let step = 0; step < MAX_SCAN_STEPS; step += 1) {
     if (Date.now() > deadline) break;
     const { stores, next } = await storesAfter(cursor);
@@ -240,15 +246,26 @@ async function syncStores(deadline: number, seen: Set<string>, counts: SyncCount
         console.error("could not keep the line of ended plans", error),
       );
     }
-    // The deadline is checked before every store, not only between batches:
-    // a batch cut short is read again from its start by the next run.
+    // The deadline is checked before every store, not only between batches.
+    // A batch cut short keeps the place reached in it (the last store passed),
+    // and the next run starts after that store, so a batch holding more
+    // paid-up stores than one run reads is still read to its end, and a
+    // store further in it is reached (Claude 2 and Codex H2 on #3216). When
+    // that store is no longer in the batch, the batch is read from its start.
+    const at = resume ? stores.findIndex((store) => storeRef(store) === resume) : -1;
+    let passed = at >= 0 ? resume : "";
+    resume = "";
     let cutShort = false;
-    for (const store of stores) {
-      if (!store.subscriptionActive || !store.subscriptionId || seen.has(store.subscriptionId)) continue;
+    for (const store of stores.slice(at + 1)) {
+      if (!store.subscriptionActive || !store.subscriptionId || seen.has(store.subscriptionId)) {
+        passed = storeRef(store);
+        continue;
+      }
       if (Date.now() > deadline) {
         cutShort = true;
         break;
       }
+      passed = storeRef(store);
       counts.checked += 1;
       try {
         const state = await readSubscription(store.subscriptionId, store);
@@ -264,7 +281,10 @@ async function syncStores(deadline: number, seen: Set<string>, counts: SyncCount
         console.error("checking a store's subscription failed", error);
       }
     }
-    if (cutShort) break;
+    if (cutShort) {
+      if (passed) cursor = `${cursor}|${passed}`;
+      break;
+    }
     cursor = next;
     if (cursor === "0") {
       await redisPipeline([["DEL", CURSOR_KEY]]);

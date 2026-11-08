@@ -153,7 +153,7 @@ async function main() {
     is("checked once, counted as failed, nothing updated", [result.checked, result.failed, result.updated], [1, 1, 0]);
     is("an unreadable answer changes nothing about the store", after, before);
   }
-  part("Step 2 stops at the deadline between two stores, not only between batches, and reads the batch again next run");
+  part("Step 2 stops at the deadline between two stores, not only between batches, and goes on after the store it reached next run");
   {
     await setup();
     await claimHandle("billing-seen-two@example.com", "billing-seen-two", "Synthetic billing seen two", "");
@@ -165,7 +165,11 @@ async function main() {
     shift = 0; jumpOnRead = false;
     is("one store asked about, then the deadline stopped the walk", [result.checked, result.complete], [1, false]);
     is("only one individual read was sent", calls.filter((path) => path.startsWith("/v1/subscriptions/")).length, 1);
-    is("the walk is saved at the start of the batch it did not finish", await redis.pipeline([["GET", "nl:billing:sync:cursor"]]), ["0"]);
+    // The place reached inside the batch is kept with it, so the next run goes on after that store (Claude 2 and
+    // Codex H2 on #3216: saving only the start of the batch read the same stores again on every run).
+    const asked = calls.find((path) => path.startsWith("/v1/subscriptions/"))?.split("/").pop();
+    const askedOwner = asked === id ? owner : "billing-seen-two@example.com";
+    is("the walk is saved in the batch it did not finish, after the store it asked about", await redis.pipeline([["GET", "nl:billing:sync:cursor"]]), [`0|${askedOwner}`]);
   }
   done();
 }

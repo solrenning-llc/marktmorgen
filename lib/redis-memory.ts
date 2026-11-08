@@ -317,6 +317,19 @@ export class MemoryRedis {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
         }
+        // lib/calls.ts: a call lock's value swapped (take-over, renewal), and a hold written, only while the lock holds the value given.
+        if (key.startsWith("-- marktmorgen:call-lock-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, lock, from, to, seconds] = args;
+          if (this.run(["GET", lock]) !== from) return 0;
+          this.run(["SET", lock, to, "EX", seconds]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:call-hold-if-locked:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, lock, diary, token, field, value] = args;
+          if (this.run(["GET", lock]) !== token) return 0;
+          this.run(["HSET", diary, field, value]);
+          return 1;
+        }
         // The fenced writes of lib/redis-lock.ts that never fall back: modeled step for step.
         if (key.startsWith("-- marktmorgen:fenced-set:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, target, token, value] = args;

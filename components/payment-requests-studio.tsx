@@ -351,7 +351,7 @@ export function PaymentRequestsStudio({
 
       <section aria-labelledby="requests-heading">
         <h2 id="requests-heading" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Requests (${rows.length.toLocaleString("en-US")} of ${limits.kept.toLocaleString("en-US")} kept)`}</h2>
-        {rows.length === 0 ? <StudioEmptyState title="No payment requests yet" body="A request you send shows here, with whether it was paid." action={canSend ? { href: "#pr-email", label: "Write the first one" } : undefined} className="mt-3" /> : null}
+        {rows.length === 0 ? <StudioEmptyState title="No payment requests yet" body="A request you send shows here, with whether it was paid." action={canSend && open ? { href: "#pr-email", label: "Write your first payment request" } : undefined} className="mt-3" /> : null}
         <ul className="mt-4 space-y-3">
           {rows.map((r) => {
             const status = statusOf(r, now);

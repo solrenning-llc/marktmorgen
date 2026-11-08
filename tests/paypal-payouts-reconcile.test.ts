@@ -55,7 +55,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.stripe.com") {
     if (stripeState === "down") return json({ error: { message: "synthetic unavailable" } }, 500);
-    if (stripeState === "refunded" && url.pathname === "/v1/refunds") return json({ data: [{ id: "re_1", payment_intent: "pi_cs_1", amount: 10000, status: "succeeded" }, { id: "re_2", payment_intent: "pi_cs_2", amount: 5000, status: "succeeded" }], has_more: false });
+    if (stripeState === "refunded" && url.pathname === "/v1/refunds") return json({ data: [{ id: "re_1", payment_intent: "pi_cs_1", amount: 10000, currency: "usd", status: "succeeded" }, { id: "re_2", payment_intent: "pi_cs_2", amount: 5000, currency: "usd", status: "succeeded" }], has_more: false });
     return json({ data: [], has_more: false });
   }
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);

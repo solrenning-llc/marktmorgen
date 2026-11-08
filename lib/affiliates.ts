@@ -2672,12 +2672,47 @@ export type Book = {
 };
 
 /**
+ * Adds one refund or dispute Stripe listed to what was taken back from its
+ * payment, in that payment's cents. False when the row cannot be counted
+ * exactly — no id, an amount that is not a whole number of cents, no
+ * currency, or a currency other than the sale's (`currencyOf`, by payment;
+ * cents of another currency added to the sale's mean nothing) — and the
+ * reading is then not complete: a refund that cannot be counted is never
+ * counted as nothing, so no commission is paid on it (rule 24). The same id
+ * listed twice counts once.
+ */
+function takenBack(
+  byIntent: Map<string, number>,
+  seen: Set<string>,
+  row: Record<string, unknown>,
+  pi: string,
+  currencyOf: ReadonlyMap<string, string>,
+): boolean {
+  const { id, amount, currency } = row;
+  if (typeof id !== "string" || !id) return false;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) return false;
+  if (typeof currency !== "string" || !currency) return false;
+  const sale = currencyOf.get(pi);
+  if (sale !== undefined && sale.toLowerCase() !== currency.toLowerCase()) return false;
+  if (seen.has(id)) return true;
+  seen.add(id);
+  byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+  return true;
+}
+
+/**
  * What has been refunded, by payment, on the creator's account, from the
  * oldest sale on the book on. Pending refunds count: the creator already
  * gave the money back.
  */
-async function refundsSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+async function refundsSince(
+  store: Store,
+  since: number,
+  deadline: number | undefined,
+  currencyOf: ReadonlyMap<string, string>,
+): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
   const byIntent = new Map<string, number>();
+  const seen = new Set<string>();
   if (!store.stripeAccountId) return { byIntent, complete: false };
   let after = "";
   for (let page = 0; page < REFUND_PAGES; page += 1) {
@@ -2696,8 +2731,7 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
     for (const refund of rows) {
       if (refund.status !== "succeeded" && refund.status !== "pending") continue;
       const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      const amount = typeof refund.amount === "number" ? refund.amount : 0;
-      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+      if (pi && !takenBack(byIntent, seen, refund, pi, currencyOf)) return { byIntent, complete: false };
     }
     const last = rows[rows.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
@@ -2712,8 +2746,14 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
  * is holding or the buyer won (DISPUTE_TAKES). Read beside the refunds, so a
  * sale charged back earns its affiliate nothing, as a sale refunded does.
  */
-export async function disputesSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+export async function disputesSince(
+  store: Store,
+  since: number,
+  deadline: number | undefined,
+  currencyOf: ReadonlyMap<string, string>,
+): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
   const byIntent = new Map<string, number>();
+  const seen = new Set<string>();
   if (!store.stripeAccountId) return { byIntent, complete: false };
   let after = "";
   for (let page = 0; page < DISPUTE_PAGES; page += 1) {
@@ -2733,8 +2773,7 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
       if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
       const raw = dispute.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const amount = typeof dispute.amount === "number" && dispute.amount > 0 ? dispute.amount : 0;
-      if (pi && amount) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+      if (pi && !takenBack(byIntent, seen, dispute, pi, currencyOf)) return { byIntent, complete: false };
     }
     const last = rows[rows.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
@@ -2923,8 +2962,10 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   let refundsChecked = true;
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
+    // Each payment's currency, so a refund or dispute in another one is never added to its cents.
+    const currencyOf = new Map([...everything, ...bookings].filter((r) => r.pi).map((r) => [r.pi, r.currency] as const));
     try {
-      const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
+      const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline, currencyOf) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
       // PayPal's refunds in full, named by the payment as the book names it.
@@ -2938,7 +2979,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     // is owed is not known (refundsChecked), and no payout is made on it.
     if (store.stripeAccountId) {
       try {
-        const disputed = await disputesSince(store, since, limits.deadline);
+        const disputed = await disputesSince(store, since, limits.deadline, currencyOf);
         for (const [pi, cents] of disputed.byIntent) refunds.set(pi, (refunds.get(pi) ?? 0) + cents);
         refundsChecked = refundsChecked && disputed.complete;
       } catch (error) {

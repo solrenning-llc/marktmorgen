@@ -1,0 +1,15 @@
+{
+  "command": [
+    "node",
+    "--max-old-space-size=512",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings=0",
+    "lib/closing-refunds.ts",
+    "tests/closing-refunds-balance-exact.test.ts",
+    "tests/s-3242-recovery.proof.ts",
+    "proofs/s/3242/run.mjs"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

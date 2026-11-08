@@ -1,0 +1,11 @@
+{
+  "command": [
+    "git",
+    "diff",
+    "--cached",
+    "--check"
+  ],
+  "status": 2,
+  "stdout": "proofs/s/3242/product-diff.txt:8: trailing whitespace.\n+ \nproofs/s/3242/product-diff.txt:68: trailing whitespace.\n+ \n",
+  "stderr": ""
+}

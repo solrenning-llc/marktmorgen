@@ -1,0 +1,11 @@
+{
+  "file": "tests/closing-refunds-paid-intent-unknown.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "72ac71c2a7cc85cc7c9fa74db447e508892fe63a",
+  "stdout": "  ok    missing: unread paid row fails, never settles none\n  ok    missing: its durable row stays unsettled\n  ok    missing: healthy retry still reaches and refunds the member\n  ok    null: unread paid row fails, never settles none\n  ok    null: its durable row stays unsettled\n  ok    null: healthy retry still reaches and refunds the member\n  ok    invalid: unread paid row fails, never settles none\n  ok    invalid: its durable row stays unsettled\n  ok    invalid: healthy retry still reaches and refunds the member\n  ok    healthy control: known complete empty list may settle none\n  ok    healthy control: own paid row with readable intent refunds once\n\n11 checks, all passing.\nS_VOLUME {\"runs\":107,\"attempts\":36,\"forwarded\":36}\n",
+  "stderr": "giving a member's unused time back failed; tried again Error: an invoice's paid payment did not read as a payment intent\n    at intentOf ([stdin]:10729:21)\n    at async giveBackUnused ([stdin]:10837:39)\n    at async main ([stdin]:11007:19)\ngiving a member's unused time back failed; tried again Error: an invoice's paid payment did not read as a payment intent\n    at intentOf ([stdin]:10729:21)\n    at async giveBackUnused ([stdin]:10837:39)\n    at async main ([stdin]:11007:19)\ngiving a member's unused time back failed; tried again Error: an invoice's paid payment did not read as a payment intent\n    at intentOf ([stdin]:10729:21)\n    at async giveBackUnused ([stdin]:10837:39)\n    at async main ([stdin]:11007:19)\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

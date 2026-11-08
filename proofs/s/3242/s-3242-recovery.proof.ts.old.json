@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3242-recovery.proof.ts",
+  "oldSource": "0bd596d154f4638b04d1f4ddbeccae7727e522b4",
+  "mode": "old-module-overlay",
+  "head": "72ac71c2a7cc85cc7c9fa74db447e508892fe63a",
+  "stdout": "  FAIL  unknown balance does not settle or refund\n        expected [1,0,null,null,0]\n        got      [0,1,\"short\",1,0]\n  FAIL  unknown balance consumes none of reserved call budget\n        expected [[\"20\",\"10\"]]\n        got      [[\"20\",\"8\"]]\n  FAIL  same unsettled payment recovers once after healthy read\n        expected [1,0,1]\n        got      [0,0,0]\n  FAIL  healthy repeat does not ask for a second refund\n        expected [0,0,1]\n        got      [0,0,0]\n  ok    confirmed negative balance legitimately stays short\n  ok    confirmed absent currency follows existing null-transaction policy\n  ok    settlement rounds an actual fractional cent upward\n  FAIL  settlement cost fractional is unknown\n        expected true\n        got      false\n  FAIL  settlement cost unsafe is unknown\n        expected true\n        got      false\n  FAIL  settlement cost negative is unknown\n        expected true\n        got      false\n  FAIL  array transaction never permits final short or refund\n        expected [1,0,0,null]\n        got      [0,0,1,\"done\"]\n\n11 checks, 8 failing.\nS_VOLUME {\"runs\":79,\"attempts\":13,\"forwarded\":13}\n",
+  "stderr": "",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

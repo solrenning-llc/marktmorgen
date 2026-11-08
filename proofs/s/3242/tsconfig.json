@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/closing-refunds.ts",
+    "../../../tests/closing-refunds-balance-exact.test.ts",
+    "../../../tests/s-3242-recovery.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

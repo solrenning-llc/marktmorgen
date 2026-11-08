@@ -1,0 +1,11 @@
+{
+  "file": "tests/closing-refund-refused-final.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "72ac71c2a7cc85cc7c9fa74db447e508892fe63a",
+  "stdout": "\nRevisor 1 on #2699: a refund Stripe refuses on the closing day is told, never left held\n  ok    request is for the real fixture payment and exactly its unused 500 cents\n{\"label\":\"refusedfinal\",\"posts\":1,\"refunded\":0,\"out\":{\"done\":[],\"short\":[],\"unmade\":[{\"sub\":\"sub_g2699refund\",\"amount\":500,\"cur\":\"usd\",\"email\":\"member@example.com\"}],\"pending\":0,\"disputed\":0,\"none\":0,\"over\":0,\"failed\":0,\"left\":0},\"saved\":\"over\"}\n  ok    the member is settled as not made automatically\n  ok    and is told: one unmade row with what is left to give\n  ok    nothing counted as failed, so the closing can finish\n\n4 checks, all passing.\nS_VOLUME {\"runs\":16,\"attempts\":4,\"forwarded\":4}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

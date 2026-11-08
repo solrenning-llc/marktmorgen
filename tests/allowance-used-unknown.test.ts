@@ -46,6 +46,15 @@ const MALFORMED: [string, unknown[] | "lost"][] = [
   ["a fraction", ["1.5"]],
   ["an object", [{}]],
   ["a list", [["3"]]],
+  // Text INCRBY never writes (Codex Z on #3169): Number() reads each as a count, so each must be unknown here.
+  ["an empty string", [""]],
+  ["whitespace", [" "]],
+  ["hexadecimal zero", ["0x0"]],
+  ["a decimal zero", ["0.0"]],
+  ["an exponent", ["0e4"]],
+  ["a leading plus", ["+3"]],
+  ["a leading zero", ["03"]],
+  ["a fractional number", [2.5]],
 ];
 
 beforeEach(() => redis.clear());
@@ -66,6 +75,18 @@ for (const [label, reply] of MALFORMED) {
     }
   });
 }
+
+test("control: the text INCRBY writes, and a whole number, are read as the count", async () => {
+  assert.equal(typeof exact, "function", "allowanceUsedExact is exported by lib/store-allowance.ts");
+  for (const [reply, count] of [["0", 0], ["25", 25], [25, 25], [null, 0]] as const) {
+    const restore = unreadCounts("email", [reply]);
+    try {
+      assert.equal(await exact!(store, "email"), count, `${JSON.stringify(reply)} reads as ${count}`);
+    } finally {
+      restore();
+    }
+  }
+});
 
 test("a paying store whose billing month is not known has an unknown count, not 0 used", async () => {
   assert.equal(typeof exact, "function", "allowanceUsedExact is exported by lib/store-allowance.ts");

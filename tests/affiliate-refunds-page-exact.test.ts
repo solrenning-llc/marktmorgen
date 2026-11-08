@@ -18,7 +18,8 @@
  *   - every unreadable page shape, on both lists, leaves the book "not checked";
  *   - `requires_action` counts as refunded, like `pending`;
  *   - a refund or dispute status that does not read holds the book;
- *   - a payment that is neither text, an object with an id, nor null holds it;
+ *   - a payment that is neither text, an object with an id, nor null holds it,
+ *     and so does a counted row with no payment_intent field at all;
  *   - a refund on a payment whose records disagree on the currency holds it;
  *   - healthy controls: a complete page, a known non-counting state (failed,
  *     canceled, won), a refund with no payment, an expanded payment, and a
@@ -158,6 +159,32 @@ async function main(): Promise<void> {
     disputePage = list([dispute({ payment_intent: pi })]);
     is(`a lost dispute whose payment is ${what}: not checked`, (await state()).checked, false);
   }
+  disputePage = list();
+
+  // Codex G's second money review of #3189 (G97-LPI): a counted row with no payment_intent field at all is not one
+  // that says it names no payment (only an explicit null says that, the control above); it read as "nothing on the
+  // book", and the full commission was payable.
+  part("A counted refund or dispute with no payment_intent field");
+  const without = (row: Record<string, unknown>) => {
+    const { payment_intent: _, ...rest } = row;
+    void _;
+    return rest;
+  };
+  for (const status of ["succeeded", "pending", "requires_action"]) {
+    refundPage = list([without(refund({ status }))]);
+    is(`a ${status} refund with no payment_intent field: not checked`, (await state()).checked, false);
+  }
+  refundPage = list();
+  disputePage = list([without(dispute())]);
+  is("a lost dispute with no payment_intent field: not checked", (await state()).checked, false);
+  disputePage = list();
+  refundPage = list([without(refund({ status: "failed" }))]);
+  is("control: a failed refund with no payment_intent field gives nothing back: checked", await state(), { checked: true, one: ["earned", 3_000] });
+  refundPage = list();
+  disputePage = list([without(dispute({ status: "won" }))]);
+  is("control: a won dispute with no payment_intent field takes nothing: checked", await state(), { checked: true, one: ["earned", 3_000] });
+  disputePage = list([dispute({ payment_intent: null })]);
+  is("control: a lost dispute with no payment (null): cannot be on the book, checked", await state(), { checked: true, one: ["earned", 3_000] });
   disputePage = list();
 
   part("Two records of one payment disagree on its currency");

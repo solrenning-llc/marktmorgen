@@ -30,12 +30,15 @@ import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_usage_billing_close_exact_only";
 
-type Line = { id: string; cents: number; mark: string; created: number; key: string };
+type Line = { id: string; cents: number; mark: string; created: number; key: string; customer: string; subscription: string };
 const lines: Line[] = [];
 /** The stand-in's clock, in milliseconds: the time each case runs at. */
 let clock = Date.now();
 /** "lose": the line is made and its answer lost; "list": a lookup fails. */
 let stripeFault: "lose" | "list" | null = null;
+/** A 200 answer to a lookup in place of the real list: a body Stripe should never send (Claude 6 on #2944, ce838f4f). */
+let listBody: ((page: number) => unknown) | null = null;
+let listPage = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
@@ -47,14 +50,34 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const body = new URLSearchParams(String(init?.body ?? ""));
     const key = new Headers(init?.headers).get("Idempotency-Key") ?? "";
     const again = lines.find((l) => l.key === key && now - l.created < 86_400);
-    const line = again ?? { id: `ii_${lines.length + 1}`, cents: Number(body.get("amount")), mark: String(body.get("metadata[mark]")), created: now, key };
+    const line = again ?? {
+      id: `ii_${lines.length + 1}`,
+      cents: Number(body.get("amount")),
+      mark: String(body.get("metadata[mark]")),
+      created: now,
+      key,
+      customer: String(body.get("customer")),
+      subscription: String(body.get("subscription")),
+    };
     if (!again) lines.push(line);
     if (stripeFault === "lose") throw new TypeError("synthetic: the answer was lost on the way back");
     return new Response(JSON.stringify({ id: line.id, object: "invoiceitem" }), { status: 200 });
   }
   if (stripeFault === "list") return new Response(JSON.stringify({ error: { message: "synthetic: unavailable" } }), { status: 503 });
+  if (listBody) return new Response(JSON.stringify(listBody(listPage++)), { status: 200 });
   const since = Number(url.searchParams.get("created[gte]") ?? 0);
-  const data = lines.filter((l) => l.created >= since).map((l) => ({ id: l.id, object: "invoiceitem", metadata: { mark: l.mark } }));
+  // Each line in the shape Stripe lists it at the pinned version (lib/billing.ts findInvoiceLine, #3232).
+  const data = lines
+    .filter((l) => l.created >= since)
+    .map((l) => ({
+      id: l.id,
+      object: "invoiceitem",
+      customer: l.customer,
+      parent: { type: "subscription_details", subscription_details: { subscription: l.subscription } },
+      amount: l.cents,
+      currency: "usd",
+      metadata: { mark: l.mark },
+    }));
   return new Response(JSON.stringify({ object: "list", data, has_more: false }), { status: 200 });
 }) as typeof fetch;
 
@@ -183,6 +206,36 @@ async function main(): Promise<void> {
     is("the lookup fails: failed, nothing charged", [await run("2026-07", t0 + DAY), charged()], ["failed", 0]);
     stripeFault = null;
     is("the record is kept for the next run", (await pipeline([["GET", k.adding]]))[0], record);
+  }
+
+  part("A line written for more than is owed now, then a lookup Stripe answers off its shape or past the pages read: kept, never 800");
+  {
+    // Claude 6's MEDIUM on #2944 at ce838f4f: these read as "not there", the record was dropped and 0..300 charged again.
+    // Closed by #3232 (lib/billing.ts findInvoiceLine reads the list in its exact shape and throws on anything else).
+    const others = (page: number) =>
+      Array.from({ length: 100 }, (_, i) => ({ id: `ii_Other${page}x${i}`, object: "invoiceitem", metadata: { mark: "someone-else" } }));
+    const bodies: [string, (page: number) => unknown][] = [
+      ["a list with no data", () => ({ object: "list", has_more: false })],
+      ["data as an object", () => ({ object: "list", data: {}, has_more: false })],
+      ["an empty object", () => ({})],
+      ["three full pages of other lines, more still to come", (page) => ({ object: "list", data: others(page), has_more: true })],
+    ];
+    let month = 9;
+    for (const [what, body] of bodies) {
+      const m = `2026-${String(month++).padStart(2, "0")}`;
+      const k = fresh(m, 500);
+      stripeFault = "lose";
+      await run(m, t0);
+      stripeFault = null;
+      owed = 300;
+      const record = (await pipeline([["GET", k.adding]]))[0];
+      is(`${what}: run 1 charged 500 with its answer lost and kept the line's record`, [charged(), typeof record], [500, "string"]);
+      listBody = body;
+      listPage = 0;
+      is(`${what}: failed, the record kept, 500 in all`, [await run(m, t0 + DAY + 3_600_000), charged(), (await pipeline([["GET", k.adding]]))[0]], ["failed", 500, record]);
+      listBody = null;
+      is(`${what}, then a readable list: the line is found, 500 in all, never 800`, [await run(m, t0 + 2 * DAY), charged()], ["billed", 500]);
+    }
   }
 
   part("Control: healthy, billed once, then nothing more");

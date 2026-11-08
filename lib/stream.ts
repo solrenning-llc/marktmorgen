@@ -498,12 +498,16 @@ export async function openUpload(
 export async function lookAt(id: string, now = Date.now(), ms = STREAM_TIMEOUT_MS, claim = false): Promise<StreamRecord | null> {
   const config = streamConfig();
   if (!config || !isRedisConfigured() || !STREAM_ID_PATTERN.test(id)) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(id)]]);
-  const record = parseRecord(raw);
-  if (!record) {
+  // Only an exact nil is a video with no record, taken out of the due queue. Any other reply, or a record that does
+  // not read, is unknown: it throws and the id stays queued, so an abandoned upload is still deleted at the service
+  // once its record reads again, never left there and in the store's room (CX-123 rule 24).
+  const read = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+  if (read && read[0] === null) {
     await redisPipeline([["ZREM", DUE, id]]);
     return null;
   }
+  const record = read ? parseRecord(read[0]) : null;
+  if (!record) throw new UnknownReplyError("a video's record");
   if (record.state === "failed" || (record.state === "ready" && record.settled)) {
     await redisPipeline([["ZREM", DUE, id]]);
     return record;
@@ -511,6 +515,14 @@ export async function lookAt(id: string, now = Date.now(), ms = STREAM_TIMEOUT_M
   const played = record.state === "ready";
   const age = now - record.at;
   const unclaimed = record.state === "upload" && !claim;
+  // A lesson being told its video: the record written as no longer "upload" is read exactly (rule 30). Had it not
+  // landed, the lesson would keep a video this job deletes as abandoned two days later; so anything but "OK" throws
+  // and the lesson is not saved with it.
+  const claiming = claim && record.state === "upload";
+  const claimWritten = (replies: unknown, commands: number) => {
+    const written = repliesFor(replies, commands);
+    if (claiming && (!written || written[0] !== "OK")) throw new UnknownReplyError("a claimed video's record");
+  };
   if (unclaimed && age <= ABANDONED_AFTER_MS) {
     await redisPipeline([["ZADD", DUE, record.at + ABANDONED_AFTER_MS + 60_000, id]]);
     return record;
@@ -527,10 +539,8 @@ export async function lookAt(id: string, now = Date.now(), ms = STREAM_TIMEOUT_M
     // video still has it written down as its own, to be asked about later.
     const taken = claim && !played;
     const kept: StreamRecord = taken ? { ...record, state: "working" } : record;
-    await redisPipeline([
-      ...(taken ? [["SET", recordKey(id), JSON.stringify(kept)]] : []),
-      ["ZADD", DUE, now + nextLook(age), id],
-    ]);
+    const commands = [...(taken ? [["SET", recordKey(id), JSON.stringify(kept)]] : []), ["ZADD", DUE, now + nextLook(age), id]];
+    claimWritten(await redisPipeline(commands), commands.length);
     return kept;
   }
 
@@ -571,10 +581,13 @@ export async function lookAt(id: string, now = Date.now(), ms = STREAM_TIMEOUT_M
     // What could not be made into a video is not kept, or paid for.
     await removeProviderVideo(config, id, ms);
   }
-  await redisPipeline([
-    ["SET", recordKey(id), JSON.stringify(next)],
-    state === "failed" || settled ? ["ZREM", DUE, id] : ["ZADD", DUE, now + nextLook(age), id],
-  ]);
+  claimWritten(
+    await redisPipeline([
+      ["SET", recordKey(id), JSON.stringify(next)],
+      state === "failed" || settled ? ["ZREM", DUE, id] : ["ZADD", DUE, now + nextLook(age), id],
+    ]),
+    2,
+  );
   return next;
 }
 
@@ -652,7 +665,12 @@ export async function playerFor(pathname: string, now = Date.now()): Promise<Pla
     const receipt = await redisPipeline([["SET", peekKey(record.id), "1", "NX", "EX", 30]]);
     // Only a confirmed cooldown claim authorizes a provider request.
     if (Array.isArray(receipt) && receipt.length === 1 && receipt[0] === "OK") {
-      record = (await lookAt(record.id, now, STREAM_PEEK_TIMEOUT_MS)) ?? record;
+      // A record that does not read just now leaves the page on the one read above (rule 24: lookAt throws).
+      const looked = await lookAt(record.id, now, STREAM_PEEK_TIMEOUT_MS).catch((error: unknown) => {
+        if (error instanceof UnknownReplyError) return null;
+        throw error;
+      });
+      record = looked ?? record;
     }
   }
   const shape = shapeOf(record.width, record.height, null);
@@ -845,7 +863,16 @@ export async function sweep(deadline: number, now = Date.now()): Promise<{ looke
   for (const id of Array.isArray(due) ? due : []) {
     if (Date.now() > deadline) return counts;
     if (typeof id !== "string") continue;
-    const record = await lookAt(id, now);
+    let record: StreamRecord | null;
+    try {
+      record = await lookAt(id, now);
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      // Its record did not read: it stays queued, asked about again later, and the job goes on to the next video
+      // rather than stopping on it, or reading it first at every run.
+      await redisPipeline([["ZADD", DUE, now + nextLook(0), id]]);
+      continue;
+    }
     counts.looked += 1;
     if (record?.state === "ready") counts.ready += 1;
     if (record?.state === "failed") counts.failed += 1;

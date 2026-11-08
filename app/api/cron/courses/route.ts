@@ -3,13 +3,27 @@ import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured } from "@/lib/email";
-import { storeForHandle } from "@/lib/store";
-import { readCourse } from "@/lib/course";
+import { storeForHandleExactly } from "@/lib/store-exact";
+import { readCourseExact } from "@/lib/course";
 import { sendDripEmails } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { withCutoff } from "@/lib/fetch-timeout";
+
+export const maxDuration = 60;
+
+/**
+ * The store behind a drip course's address for sendDripEmails: null only when it is confirmed not there; a reply out of
+ * shape throws, so the course is kept and tried again the next run, never taken out as gone (CX-123 rule 24).
+ */
+async function dripStore(handle: string) {
+  const found = await storeForHandleExactly(handle);
+  if (found === "unknown") throw new UnknownReplyError("a drip course's store");
+  return found === "none" ? null : found;
+}
 
 /**
  * Run on a schedule by Vercel: tells each student when a module of their
@@ -17,8 +31,16 @@ import { sweepCommunityUploads } from "@/lib/community-files";
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
  * (lib/community-files.ts), a day on.
+ *
+ * Sixty seconds (maxDuration), every request given up by 57 s (withCutoff): the drip emails start nothing new after
+ * 40 s and the next run starts where they stopped (lib/learn.ts), so the two sweeps always have their turn.
  */
 export async function GET(request: NextRequest) {
+  const started = Date.now();
+  return withCutoff(started + 57_000, () => run(request, started));
+}
+
+async function run(request: NextRequest, started: number) {
   // Vercel sends the secret with every scheduled run, compared here in
   // constant time. Without one set, only a local development server runs the
   // job on request; in production that is a closed door, not an open one.
@@ -35,7 +57,11 @@ export async function GET(request: NextRequest) {
   if (got === "taken") return Response.json({ ok: true, busy: true });
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
-    const counts = await sendDripEmails(storeForHandle, readCourse, SITE_URL);
+    // Not walked (the drip set could not be read exactly): said in the log and the answer, never "0 sent"; the sweeps still run.
+    const counts = await sendDripEmails(dripStore, readCourseExact, SITE_URL, Math.floor(started / 1000), started + 40_000).catch((error: unknown) => {
+      console.error("could not send the drip emails", error);
+      return null;
+    });
     const stale = await sweepTaskUploads(deleteFile).catch((error: unknown) => {
       console.error("could not sweep unused assignment uploads", error);
       return [] as string[];
@@ -46,7 +72,7 @@ export async function GET(request: NextRequest) {
       return null;
     });
     return Response.json(
-      { ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures, ...(pictures === null ? { picturesFailed: true } : {}) },
+      { ok: true, ...(counts ?? { sent: null, dripsFailed: true }), unusedUploads: stale.length, unusedPictures: pictures, ...(pictures === null ? { picturesFailed: true } : {}) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

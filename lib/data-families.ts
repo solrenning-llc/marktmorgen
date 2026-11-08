@@ -51,7 +51,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
-  "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
+  "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:cursor", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
@@ -243,7 +243,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A store copy's progress, named by the receiving store (lib/store-copy.ts), seven days; its one-step lock, a minute.
   "nl:copy:": er(7), "nl:copy:lock:": X(1),
   "nl:cotrouble:": E, "nl:cotrouble:mail:": E,
-  "nl:course:": E, "nl:courses:drip": I, "nl:courses:lock": C,
+  "nl:course:": E, "nl:courses:cursor": C, "nl:courses:drip": I, "nl:courses:lock": C,
   "nl:creators:responses": C,
   "nl:crm:deals:": E, "nl:crm:fields:": E, "nl:crm:pacc:": E, "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:taskrecount:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
   // ---------------------------------------------------------------- d-f

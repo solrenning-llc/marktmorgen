@@ -153,6 +153,24 @@ async function main(): Promise<void> {
     is("the course after it is emailed", to(after), 1);
   }
 
+  part("(b) A page of students or a blocked list answered in another shape: that course is failed and kept, never 'nobody'");
+  for (const [label, pick] of [
+    ["a page of students", (c: Cmd) => c[0] === "HSCAN" && String(c[1]).startsWith(`nl:course:${A.id}:`)],
+    ["the blocked list", (c: Cmd) => c[0] === "SMEMBERS" && String(c[1]) === `nl:course:${A.id}:blocked`],
+  ] as [string, (c: Cmd) => boolean][]) {
+    const store = await setup();
+    await original([["SADD", DRIP, memberOf(store, A, PA)]]);
+    await original([["SADD", DRIP, memberOf(store, B, PB)]]);
+    const tag = label.replace(/\W+/g, "-");
+    const unread = await student(A, `unread-${tag}@example.com`);
+    const after = await student(B, `after-${tag}@example.com`);
+    inject = (commands) => (commands.some(pick) ? Promise.resolve(commands.map(() => "QUEUED")) : null);
+    const { value } = await quiet(() => sendDripEmails(async () => store, async (id) => (id === A.id ? A : id === B.id ? B : null), "https://marktmorgen.com", NOW));
+    inject = null;
+    is(`${label} unknown: failed and not counted walked, the other course walked`, value === "rejected" ? null : [(value as Counts).failed, (value as Counts).courses], [1, 1]);
+    is(`${label} unknown: nobody of that course emailed, the other course's student emailed, the course kept`, [to(unread), to(after), await inSet(memberOf(store, A, PA))], [0, 1, true]);
+  }
+
   part("(c) A course past 5,000 students: the least active student is emailed too, and an unreadable row is said");
   {
     const store = await setup();

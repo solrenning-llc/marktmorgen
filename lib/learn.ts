@@ -33,7 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -51,7 +51,7 @@ import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
-import { readKind, readListing } from "@/lib/catalog";
+import { readKind, readListing, readListingExactly } from "@/lib/catalog";
 import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -886,6 +886,18 @@ export async function openCourseLink(token: string): Promise<LinkGrant | null> {
 // ------------------------------------------------------------ drip emails
 
 const DRIP_SET = "nl:courses:drip";
+/**
+ * Where the next run starts when a run's deadline stopped it: the course it stopped at and the page of that course's
+ * students it was on (`{ m, h }`), so the courses after it are not always the ones left for later. Gone after a run
+ * that walked every course, and in thirty days by itself.
+ */
+const DRIP_CURSOR = "nl:courses:cursor";
+const DRIP_CURSOR_SECONDS = 30 * 86_400;
+/** Students read at a time (HSCAN COUNT, a hint): every one of them is read, page after page, never a first few thousand. */
+const DRIP_PAGE = 200;
+/** How long a run walks the courses when its caller gives no deadline; the route gives its own (app/api/cron/courses). */
+const DRIP_RUN_MS = 40_000;
+type Cmd = (string | number)[];
 const dripMailKey = (courseId: string, email: string, moduleId: string) =>
   `nl:course:${courseId}:dripmail:${emailKey(email)}:${moduleId}`;
 
@@ -897,48 +909,142 @@ export async function registerDrip(store: Store, product: Listing, course: Cours
 }
 
 /**
+ * What a run did: `sent` emails; `courses` walked to their last student; `failed` courses that could not be read or
+ * threw, logged and tried again the next run (never taken out); `pending` courses the deadline left for the next run,
+ * which starts with them; `unreadStudents` rows of a student that are not a student's record, logged, never read as
+ * "nobody to email".
+ */
+export type DripCounts = { sent: number; courses: number; failed: number; pending: number; unreadStudents: number };
+
+/** The cursor as kept: our own `{ m, h }`, null when there is none. A reply of another shape is unknown (rule 24). */
+function dripCursor(reply: unknown): { m: string; h: string } | null {
+  if (reply === null) return null;
+  if (typeof reply !== "string") throw new UnknownReplyError("where the drip emails' last run stopped");
+  try {
+    const kept = JSON.parse(reply) as { m?: unknown; h?: unknown };
+    if (typeof kept.m === "string" && typeof kept.h === "string" && /^[0-9]+$/.test(kept.h)) return { m: kept.m, h: kept.h };
+  } catch {}
+  // Our own text, not in our shape: only where to start is lost, never an email or a course; it starts at the head.
+  console.error("the drip emails' cursor is not one this job writes; this run starts at the first course");
+  return null;
+}
+
+/**
  * Tells each student when a module opens for them. Once per student and
  * unit, and only for modules that opened in the last three days, so a
  * course that gains a drip module does not email about months gone by.
+ *
+ * Bounded and fair: nothing new starts after `deadline`, and the next run starts at the course (and the page of its
+ * students) this one stopped at. One course that throws is counted and logged and the rest go on; it is tried again
+ * the next run. `load` and `loadCourse` answer null only for a store or a course confirmed absent, and throw when
+ * they cannot tell (the route passes the exact readers): only then, or when the product is confirmed gone or no
+ * longer holds this course, is the course taken out of the drip set.
  */
 export async function sendDripEmails(
   load: (handle: string) => Promise<Store | null>,
   loadCourse: (id: string) => Promise<Course | null>,
   origin: string,
   nowSeconds = Math.floor(Date.now() / 1000),
-): Promise<{ sent: number; courses: number }> {
-  const counts = { sent: 0, courses: 0 };
+  deadline = Date.now() + DRIP_RUN_MS,
+): Promise<DripCounts> {
+  const counts: DripCounts = { sent: 0, courses: 0, failed: 0, pending: 0, unreadStudents: 0 };
   if (!isRedisConfigured()) return counts;
-  const [raw] = await redisPipeline([["SMEMBERS", DRIP_SET]]);
-  const members = Array.isArray(raw) ? (raw as string[]) : [];
-  for (const member of members) {
-    const [courseId, handle, productId] = member.split("|");
-    const store = await load(handle);
-    const product = store ? await readListing(store, productId) : null;
-    const course = product?.course?.id === courseId ? await loadCourse(courseId) : null;
-    if (!store || !product || !course) {
-      await redisPipeline([["SREM", DRIP_SET, member]]);
-      continue;
+  // The set in its exact shape (CX-123 rule 24): a reply of another shape is unknown, never "no course".
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", DRIP_SET], ["GET", DRIP_CURSOR]]), 2);
+  const listed = stringList(replies?.[0]);
+  if (!replies || !listed) throw new UnknownReplyError("the courses with drip emails");
+  const cursor = dripCursor(replies[1]);
+  const members = [...new Set(listed)].sort();
+  const first = cursor ? Math.max(0, members.findIndex((member) => member >= cursor.m)) : 0;
+  let stopped: { m: string; h: string } | null = null;
+  for (let i = 0; i < members.length; i += 1) {
+    const member = members[(first + i) % members.length];
+    const from = cursor && member === cursor.m ? cursor.h : "0";
+    if (Date.now() >= deadline) {
+      stopped = { m: member, h: from };
+      counts.pending = members.length - i;
+      break;
     }
-    const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);
-    if (dripping.length === 0) continue;
-    const read = await studentsOf(course, 5000);
-    if (!read) {
-      // Unknown, not none: this course waits for the next run, which reads it again.
-      console.error("reading a course's students for its drip emails failed", course.id);
-      continue;
+    try {
+      const left = await dripCourse(member, from, { load, loadCourse, origin, nowSeconds, deadline, counts });
+      if (left !== null) {
+        stopped = { m: member, h: left };
+        counts.pending = members.length - i;
+        break;
+      }
+    } catch (error) {
+      // Not this course's turn to stop the others (rule 24: unknown is never "gone"): kept in the set, read again tomorrow.
+      counts.failed += 1;
+      console.error("a course's drip emails failed; it stays and is tried again the next run", member.split("|")[0], error);
     }
-    counts.courses += 1;
-    const { students } = read;
-    for (const student of students) {
-      if (student.blocked) continue;
+  }
+  // Only where to start next is written: a write that does not land starts the next run where this one started.
+  const write: Cmd | null = stopped ? ["SET", DRIP_CURSOR, JSON.stringify(stopped), "EX", DRIP_CURSOR_SECONDS] : cursor ? ["DEL", DRIP_CURSOR] : null;
+  if (write) {
+    const kept = await redisPipeline([write]).then((r) => repliesFor(r, 1), () => null);
+    if (!kept || (stopped ? kept[0] !== "OK" : countOf(kept[0]) === null)) console.error("where the drip emails' run stopped could not be confirmed kept");
+  }
+  return counts;
+}
+
+/**
+ * One course's drip emails from page `from` of its students: null when every student was read to the end (or the
+ * course has nothing that opens over time, or it is confirmed gone and taken out), else the page to start from next
+ * run, because the deadline came. Throws when anything it reads is unknown.
+ */
+async function dripCourse(
+  member: string,
+  from: string,
+  run: {
+    load: (handle: string) => Promise<Store | null>;
+    loadCourse: (id: string) => Promise<Course | null>;
+    origin: string;
+    nowSeconds: number;
+    deadline: number;
+    counts: DripCounts;
+  },
+): Promise<string | null> {
+  const { counts, deadline, nowSeconds } = run;
+  const [courseId, handle, productId] = member.split("|");
+  const store = courseId && handle && productId ? await run.load(handle) : null;
+  const product = store ? await readListingExactly(store, productId) : null;
+  if (product === "unknown") throw new UnknownReplyError("a drip course's product");
+  const course = product?.course?.id === courseId ? await run.loadCourse(courseId) : null;
+  if (!store || !product || !course) {
+    // Confirmed: the store, the product or the course is not there, or the product no longer holds this course.
+    await redisPipeline([["SREM", DRIP_SET, member]]);
+    return null;
+  }
+  const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);
+  if (dripping.length === 0) return null;
+  // Who is blocked, in its exact shape: an unknown list is never "nobody blocked".
+  const blockedList = stringList(repliesFor(await redisPipeline([["SMEMBERS", blockedKey(course.id)]]), 1)?.[0]);
+  if (!blockedList) throw new UnknownReplyError("a drip course's blocked students");
+  const blocked = new Set(blockedList);
+  let page = from;
+  do {
+    if (Date.now() >= deadline) return page;
+    // Every student, a page at a time (rule 24 and 30): a page that does not read is unknown, never the end.
+    const read = scanPage(await redisPipeline([["HSCAN", studentsKey(course.id), page, "COUNT", DRIP_PAGE]]));
+    if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("a page of a drip course's students");
+    for (let i = 0; i < read.items.length; i += 2) {
+      const row = studentTimes(read.items[i + 1]);
+      if (!row || typeof row.e !== "string" || !row.e) {
+        // Not a student's record: said and counted, never read as "nobody to email".
+        counts.unreadStudents += 1;
+        console.error("a student's record in a drip course could not be read; not emailed", course.id);
+        continue;
+      }
+      if (blocked.has(emailKey(row.e))) continue;
       for (const unit of dripping) {
-        const at = opensAt(course, unit, student.since);
+        const at = opensAt(course, unit, row.s);
         if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
+        // The rest of this page waits for the next run, which starts at this page: what is sent is not sent again.
+        if (Date.now() >= deadline) return page;
         // Sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an email already sent.
         // "unknown" sends nothing this pass and lets go of the mark if it holds our own value (it may have landed;
         // nothing was sent on it), so a later pass tries again (Claude 2 on #3276).
-        const mark = dripMailKey(course.id, student.email, unit.id);
+        const mark = dripMailKey(course.id, row.e, unit.id);
         const value = claimValue();
         const claimed = await claimMark(mark, 400 * 86_400, value);
         if (claimed === "unknown") {
@@ -946,7 +1052,7 @@ export async function sendDripEmails(
           await releaseMark(mark, value);
         }
         if (claimed !== "ours") continue;
-        const ok = await sendDripEmail(store, product, unit, student.email, origin);
+        const ok = await sendDripEmail(store, product, unit, row.e, run.origin);
         if (ok) counts.sent += 1;
         // Not sent: its own mark let go (compare-and-delete, never another's; never throws, so the pass goes on), and
         // a later pass sends it; a mark that cannot be let go stays. Not yet told apart (Claude 2 on #3276, finding
@@ -954,8 +1060,10 @@ export async function sendDripEmails(
         else await releaseMark(mark, value);
       }
     }
-  }
-  return counts;
+    page = read.next;
+  } while (page !== "0");
+  counts.courses += 1;
+  return null;
 }
 
 async function sendDripEmail(store: Store, product: Listing, unit: CourseModule, email: string, origin: string): Promise<boolean> {

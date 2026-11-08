@@ -637,6 +637,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:intro:c:@lib/intro-coupon.ts": { what: "An introductory price's coupon: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:course:@lib/learn.ts": { what: "A course's students, what they marked done, who is blocked, the drip emails sent", room: ["lib/learn.ts"], parts: [per("store", 400, MARK, "A drip email's mark.", MAIL("drip"))] },
   "nl:courses:drip@lib/learn.ts": company("Courses with drip emails", "One set for every store."),
+  "nl:courses:cursor@lib/learn.ts": company("Where the drip emails' last cut-short run stopped", "One key for every store, thirty days."),
   "nl:learn:enr:@lib/learn.ts": { what: "What a buyer is enrolled in", parts: [kept(KEY, "The record itself, one a buyer."), item(128, "Each product's place in it.")] },
   "nl:learn:link:@lib/learn.ts": short("A course link and its opens, an hour", "store", 1, LINK_BYTES, MAIL("course link")),
   "nl:learn:passes:@lib/learn.ts": { what: "The passes a buyer was given, so a deletion can find them", parts: [per("store", 90, MARK, "A pass's place, ninety days.", MAIL("course link"))] },

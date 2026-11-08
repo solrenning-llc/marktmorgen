@@ -91,6 +91,13 @@ export type PaymentRequest = {
   outside?: { method: OutsideMethod; note: string };
 };
 
+/**
+ * A request as the studio's list shows it: whether every refund Stripe holds
+ * for its payment was read (lib/payment-requests.ts, refreshRefunds). False
+ * means refunds are not known, never that there were none.
+ */
+export type CheckedRequest = PaymentRequest & { refundsChecked: boolean };
+
 /** How a request was paid outside Stripe. */
 export type OutsideMethod = "cash" | "transfer" | "other";
 export const OUTSIDE_METHODS: readonly OutsideMethod[] = ["cash", "transfer", "other"];

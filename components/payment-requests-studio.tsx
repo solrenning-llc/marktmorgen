@@ -21,7 +21,7 @@ import {
   MAX_OUTSIDE_NOTE,
   OUTSIDE_WORDS,
   type DraftProblem,
-  type PaymentRequest,
+  type CheckedRequest,
   type RequestDraft,
   type RequestStatus,
   canSendAgain,
@@ -32,7 +32,7 @@ import {
 } from "@/lib/payment-request-rules";
 
 type LineDraft = { text: string; quantity: string; amount: string };
-export type RequestRow = PaymentRequest & { link: string };
+export type RequestRow = CheckedRequest & { link: string };
 export type Prefill = { email: string; name: string; text: string; amount: string };
 
 const TONES: Record<RequestStatus, string> = {
@@ -351,9 +351,16 @@ export function PaymentRequestsStudio({
       <section aria-labelledby="requests-heading">
         <h2 id="requests-heading" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Requests (${rows.length.toLocaleString("en-US")} of ${limits.kept.toLocaleString("en-US")} kept)`}</h2>
         {rows.length === 0 ? <p className="mt-3 text-ink-soft">No requests yet.</p> : null}
+        {rows.some((r) => !r.refundsChecked) ? (
+          <p role="status" className="notice mt-3">
+            Refunds on Stripe could not all be checked just now, so a request marked &quot;Paid, refunds not checked&quot; may have been refunded, in part or in full. Reload this page to check again, or look the payment up in your Stripe dashboard.
+          </p>
+        ) : null}
         <ul className="mt-4 space-y-3">
           {rows.map((r) => {
             const status = statusOf(r, now);
+            // Paid on Stripe, but its refunds were not all read: never shown as surely not refunded.
+            const unchecked = status === "paid" && !r.refundsChecked;
             const next = nextReminderAt(r, now);
             const again = canSendAgain(r, now);
             // Each request in the currency it was made in: the store may have changed its own since (22 [E5], unit 2c).
@@ -364,7 +371,7 @@ export function PaymentRequestsStudio({
                   <p className="font-semibold text-ink [overflow-wrap:anywhere]">{r.name ? `${r.name} · ${r.email}` : r.email}</p>
                   <p className="flex items-center gap-2">
                     <span className="font-semibold tabular-nums text-ink">{its(r.total)}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${TONES[status]}`}>{STATUS_WORDS[status]}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${unchecked ? TONES.expired : TONES[status]}`}>{unchecked ? "Paid, refunds not checked" : STATUS_WORDS[status]}</span>
                   </p>
                 </div>
                 <p className="mt-1 text-sm text-ink-soft [overflow-wrap:anywhere]">{r.lines.map((l) => (l.quantity > 1 ? `${l.text} × ${l.quantity}` : l.text)).join(" · ")}</p>
@@ -376,7 +383,7 @@ export function PaymentRequestsStudio({
                     r.sent.length ? `emailed ${r.sent.length} of ${MAX_SENDS} times, last ${day(r.sent[r.sent.length - 1])}` : "not emailed yet",
                     next !== null ? `next reminder ${day(next)}` : "",
                     status === "paid" || status === "refunded" ? `paid ${its(r.amountPaid || r.total)} on ${day(r.paidAt)}${r.outside ? ` outside Stripe (${OUTSIDE_WORDS[r.outside.method]}${r.outside.note ? `: ${r.outside.note}` : ""})` : ""}` : "",
-                    r.refunded > 0 ? `${its(r.refunded)} refunded` : "",
+                    r.refunded > 0 ? (unchecked ? `at least ${its(r.refunded)} refunded` : `${its(r.refunded)} refunded`) : "",
                   ].filter(Boolean).join(" · ")}
                 </p>
                 {r.failed && status === "open" ? <p className="mt-1 text-xs font-semibold text-danger">{r.failed}</p> : null}

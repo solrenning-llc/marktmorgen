@@ -38,7 +38,7 @@ import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { type Store, saleHandles, storeForId } from "@/lib/store";
-import { type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
+import { type CheckedRequest, type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
 import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, requestOf } from "@/lib/payment-request-store";
 
 /** A reminder that could not go is tried again a day later, never sooner. */
@@ -300,37 +300,77 @@ export async function settleFromReturn(store: Store, request: PaymentRequest, se
   }
 }
 
+/** A payment on the creator's Stripe that its refunds can be looked up by. */
+const PAYMENT_INTENT = /^pi_[A-Za-z0-9]{8,255}$/;
+/** Pages of refunds (100 each) one studio reading asks Stripe for, at most. */
+const REFUND_PAGES = 3;
+
+/**
+ * The account's succeeded refunds since `since`, summed per payment, and
+ * whether every one was read (rule 24): a list still marked has_more after
+ * the last page read, a page or a row in another shape, or the same refund
+ * twice leaves `complete` false. What was read is still counted, once each:
+ * it is a floor of what was refunded, never the total. Throws when Stripe
+ * cannot be read.
+ */
+async function readRefunds(account: string, since: number): Promise<{ back: Map<string, number>; complete: boolean }> {
+  const back = new Map<string, number>();
+  const seen = new Set<string>();
+  let complete = true;
+  let after = "";
+  for (let page = 0; ; page += 1) {
+    if (page === REFUND_PAGES) return { back, complete: false };
+    const listed = await onAccount("GET", account, `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { back, complete: false };
+    for (const item of listed.data as unknown[]) {
+      const row = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+      const id = row && typeof row.id === "string" && row.id ? row.id : "";
+      const intent = row?.payment_intent;
+      if (!row || !id || seen.has(id) || (intent !== null && typeof intent !== "string") || typeof row.status !== "string" || !Number.isSafeInteger(row.amount) || (row.amount as number) < 0) {
+        complete = false;
+        continue;
+      }
+      seen.add(id);
+      if (typeof intent === "string" && intent && row.status === "succeeded") back.set(intent, (back.get(intent) ?? 0) + (row.amount as number));
+    }
+    if (!listed.has_more) return { back, complete };
+    const last = (listed.data as unknown[]).at(-1) as Record<string, unknown> | null | undefined;
+    if (!last || typeof last !== "object" || typeof last.id !== "string" || !last.id) return { back, complete: false };
+    after = last.id;
+  }
+}
+
 /**
  * Brings the studio's list up to date with refunds made on the creator's
  * Stripe (from its dashboard or anywhere else): one read of the account's
  * refunds since the oldest paid request shown, at most three pages. A
  * request refunded in full is "refunded"; in part, it says how much.
+ *
+ * Each request comes back with `refundsChecked`: false for one paid on
+ * Stripe whose refunds were not all read (more than the pages read, a reply
+ * in another shape, Stripe not answering, no Stripe account or no payment
+ * to look up), so the studio never shows it as surely not refunded. What
+ * was read is still written, only ever upward: a refund read is a refund.
  */
-export async function refreshRefunds(store: Store, requests: PaymentRequest[], now = Date.now()): Promise<PaymentRequest[]> {
-  const paid = requests.filter((r) => r.state === "paid" && /^pi_[A-Za-z0-9]{8,255}$/.test(r.payment));
-  if (!paid.length || !store.stripeAccountId) return requests;
+export async function refreshRefunds(store: Store, requests: PaymentRequest[], now = Date.now()): Promise<CheckedRequest[]> {
+  // Only a request paid through its checkout has refunds on Stripe; one refunded in full has nothing more to learn.
+  const onStripe = (r: PaymentRequest) => r.state === "paid" && !r.outside;
+  const shown = (r: PaymentRequest, read: boolean): CheckedRequest => ({ ...r, refundsChecked: !onStripe(r) || (read && PAYMENT_INTENT.test(r.payment)) });
+  const paid = requests.filter((r) => onStripe(r) && PAYMENT_INTENT.test(r.payment));
+  if (!paid.length || !store.stripeAccountId) return requests.map((r) => shown(r, false));
   const since = Math.floor(Math.min(...paid.map((r) => r.paidAt)) / 1000) - 60;
-  const back = new Map<string, number>();
+  let read: { back: Map<string, number>; complete: boolean };
   try {
-    let after = "";
-    for (let page = 0; page < 3; page += 1) {
-      const listed = await onAccount("GET", store.stripeAccountId, `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
-      const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-      for (const row of rows) {
-        const intent = typeof row.payment_intent === "string" ? row.payment_intent : "";
-        if (intent && row.status === "succeeded" && typeof row.amount === "number") back.set(intent, (back.get(intent) ?? 0) + row.amount);
-      }
-      const last = rows[rows.length - 1];
-      if (listed.has_more !== true || !last || typeof last.id !== "string") break;
-      after = last.id;
-    }
+    read = await readRefunds(store.stripeAccountId, since);
   } catch (error) {
     console.error("reading a store's refunds for payment requests failed", error);
-    return requests;
+    return requests.map((r) => shown(r, false));
   }
+  if (!read.complete) console.error("a store's refunds for payment requests were not all read; shown as not checked", { pages: REFUND_PAGES });
   const changed = new Map<string, PaymentRequest>();
+  const unsaved = new Set<string>();
   for (const r of paid) {
-    const refunded = back.get(r.payment) ?? 0;
+    const refunded = read.back.get(r.payment) ?? 0;
     if (refunded > r.refunded) {
       const done = await changeRequest(store, r.id, (current) =>
         current.payment === r.payment && refunded > current.refunded
@@ -338,9 +378,11 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
           : { next: null, answer: null },
       now).catch(() => null);
       if (done) changed.set(r.id, done.request);
+      // What was read could not be written: what is shown is older than Stripe, so not checked.
+      else unsaved.add(r.id);
     }
   }
-  return requests.map((r) => changed.get(r.id) ?? r);
+  return requests.map((r) => shown(changed.get(r.id) ?? r, read.complete && !unsaved.has(r.id)));
 }
 
 /** Why a request could not be marked as paid outside Stripe. */

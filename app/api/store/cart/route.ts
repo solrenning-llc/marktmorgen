@@ -7,6 +7,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
+import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { MAX_CART, cartable, dealOff, readCartIds } from "@/lib/cart-rules";
 import { bestBundleSwap } from "@/lib/cart-bundle";
 import { cartPicks } from "@/lib/store-collections";
@@ -290,7 +291,10 @@ export async function POST(request: NextRequest) {
   if (!canSell(store)) return away(`/@${store.handle}`);
 
   const products = (await Promise.all(ids.map((id) => readProduct(store, id).catch(() => null)))).filter((p) => p !== null);
-  const coming = await soonState(store).catch(() => ({ soon: new Set<string>() }));
+  // Which products are still coming soon: a reading that cannot be had is never "none" (review of #2846):
+  // back to the cart to try again, nothing charged.
+  const coming = await soonState(store).catch(() => null);
+  if (!coming) return away(`/@${store.handle}?cart=error#cart`);
   const fit = products.length === ids.length && products.every((p) => cartable(p) && p.fields.length === 0 && !coming.soon.has(p.id));
   if (!fit) return away(`/@${store.handle}?cart=changed#cart`);
   for (const product of products) {
@@ -318,6 +322,9 @@ export async function POST(request: NextRequest) {
     const holding = await withCartStockHolds(store, products, async (held) => createCartCheckout(store, products, linkOrigin(request, store), {
       held,
       remind: reminding,
+      // A code that came in a link to this store (lib/code-link.ts), applied
+      // by Stripe only if it is one of the creator's live codes.
+      code: readLinkCode(request.cookies.get(codeCookieName(store.handle))?.value) || undefined,
       country: readCountry(request.headers.get("x-vercel-ip-country")),
       cameFrom: cameFrom(request.headers.get("referer"), new URL(origin).hostname),
         // The channel this sale is credited to: the page's own tags, else the

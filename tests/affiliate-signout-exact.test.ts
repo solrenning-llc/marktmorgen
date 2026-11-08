@@ -8,12 +8,17 @@
  * As at the creator's sign-out (app/api/auth/signout; tests/auth-sessions-exact.test.ts): the cookie goes whatever
  * happens, and "signed out" is said only when ending the session did not fail; otherwise the page says the session
  * may still be open. The healthy path and a browser with no session answer as before.
+ *
+ * Claude 3's review of #3228: a delete answered in an unknown shape (`[null]`, `[undefined]`, `[{}]`, not a whole
+ * count, or a count that one key cannot give) is not "done" either, so it is said as may still be open; and the
+ * words never point to a remedy nobody can apply (VR item 2): they say only that the session closes by itself within
+ * its lifetime (AFFILIATE_SESSION_SECONDS).
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
-import { affiliateCookieName, affiliateForSession, joinAsBuyer } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, affiliateForSession, joinAsBuyer } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGE_CODES } from "@/lib/store-language";
@@ -89,6 +94,17 @@ async function deleteFailing<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Runs `work` with the session's delete answered by `reply` (the whole pipeline's answer) and nothing deleted. */
+async function deleteAnswering<T>(reply: unknown, work: () => Promise<T>): Promise<T> {
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: Command[]) => (commands.some(isSessionDelete) ? reply : original(commands))) as typeof redis.pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
 const cookieCleared = (response: Response) => response.headers.getSetCookie().some((c) => c.startsWith(`${COOKIE}=;`) && c.includes("Max-Age=0"));
 
 test("affiliate sign-out, its delete failing: this browser's cookie goes, but the page never says signed out", async () => {
@@ -96,7 +112,6 @@ test("affiliate sign-out, its delete failing: this browser's cookie goes, but th
   const response = await deleteFailing(() => signOut(post(session)));
   assert.equal(response.status, 303);
   assert.equal(response.headers.get("location"), `${SITE}/@${HANDLE}/affiliates?status=signedout-unknown`);
-  assert.notEqual(response.headers.get("location"), `${SITE}/@${HANDLE}/affiliates?status=signedout`);
   assert.equal(cookieCleared(response), true);
   // The session is still open at the server: exactly what the page must not deny.
   assert.ok(await affiliateForSession(store, session));
@@ -109,6 +124,61 @@ test("the page has words for a sign-out that may not have ended the session, in 
     assert.ok(notice.title && notice.body, `an empty notice in ${language}`);
     assert.notEqual(notice.title, affiliatesWords(language).notices.signedout.title, `said as signed out in ${language}`);
   }
+});
+
+// Nobody can end a left-over affiliate session by hand (no index from an affiliate to their sessions; removing the
+// affiliate does not end one), so the words say only what is true: it closes by itself within its lifetime.
+const SESSION_DAYS = AFFILIATE_SESSION_SECONDS / (24 * 60 * 60);
+const WRITE_TO_THE_STORE: Record<string, RegExp> = {
+  en: /write to the store/i,
+  es: /escribe a la tienda/i,
+  fr: /écrivez à la boutique/i,
+  de: /schreiben sie dem shop/i,
+  it: /scrivi al negozio/i,
+  nl: /schrijf de winkel/i,
+  pt: /escreva à loja/i,
+};
+
+test("the words after a sign-out that may not have ended the session promise no remedy, and say when it closes by itself", () => {
+  assert.equal(Number.isInteger(SESSION_DAYS), true);
+  assert.equal(
+    affiliatesWords("en").notices["signedout-unknown"].body,
+    `This browser is signed out, but we could not close your session on our side just now. It closes by itself within ${SESSION_DAYS} days.`,
+  );
+  for (const language of LANGUAGE_CODES) {
+    const { body } = affiliatesWords(language).notices["signedout-unknown"];
+    const writeToStore = WRITE_TO_THE_STORE[language];
+    assert.ok(writeToStore, `no check for ${language}`);
+    assert.doesNotMatch(body, writeToStore, `still sends the affiliate to the store in ${language}`);
+    assert.match(body, new RegExp(`\\b${SESSION_DAYS}\\b`), `no closing-by-itself period in ${language}`);
+  }
+});
+
+for (const [shape, reply] of [
+  ["[null]", [null]],
+  ["[undefined]", [undefined]],
+  ["[{}]", [{}]],
+  ["a count that is not whole", [1.5]],
+  ["a count one key cannot give (2)", [2]],
+  ["a negative count", [-1]],
+  ["a count as text", ["1"]],
+  ["no reply for the command", []],
+] as const) {
+  test(`affiliate sign-out, its delete answered in an unknown shape (${shape}): never said as signed out`, async () => {
+    const { store, session } = await signedIn();
+    const response = await deleteAnswering(reply, () => signOut(post(session)));
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), `${SITE}/@${HANDLE}/affiliates?status=signedout-unknown`);
+    assert.equal(cookieCleared(response), true);
+    assert.ok(await affiliateForSession(store, session));
+  });
+}
+
+test("affiliate sign-out, its delete answering 0 (already gone, as a second submit): said as signed out", async () => {
+  const { session } = await signedIn();
+  const response = await deleteAnswering([0], () => signOut(post(session)));
+  assert.equal(response.headers.get("location"), `${SITE}/@${HANDLE}/affiliates?status=signedout`);
+  assert.equal(cookieCleared(response), true);
 });
 
 test("affiliate sign-out, read in its shape: the session is gone and said so", async () => {

@@ -1701,3 +1701,30 @@ Current8children: SAMEP18PASS+author26+22+preorders32+email66+regression8+checko
 FreshGitheads at05h34: NEWmain **df4e813954a3f81e3760a25db9943233c209a693**, other10trackedPRheadsunchanged from04h31 list, only3077advanced82→54712. Candidate2514still8a offPR/e74official;3107f609/202096same. These areGitidentities NOTnewOPEN/MERGED/CIAPIstatesexceptdirected3077GET. Native mainnormativediff c5→df4: ONLYdocs/codex-queue.md3historicalHTdoccompletionbullets, FULLhunksread; AGENTS/CLAUDE/inbox/reservationsBYTE-ID, noPscope/foreignrelease. NativefetchmainobjectREADONLYnotproductintegration. #3077headreconfirmedGit54712BEFOREformal.
 
 3107P5816621599NOTCLEAN/SAMEinterval_count68edd/R2C1disposition and2020HOLD/30conflicts/ownership remain; no newexplicitdispositioninchannel. No extraPRtimelinesneededforthoseunchangedknownblocks. DoNOTrelabelcappedsuitesGREEN. Old4productMERGEDhistoryintact/norecreate.3034/35Jnominal/3135old3974notce7cert/2928legalboundariespreserved. TODOS29quotaUNKNOWN/Gitpreferred/noActionspoll/largelot/unsupportedrateprobe/credread; generalMVendedTODOS22/3139notclosedP. Only newreview/proof work, no product/authorrefpush/CIretrycancel/queue/merge/price/limit/flag/account/term/PII/provider. FinalPONTO plannedCXP-20261108-0541-C1-1 requiresfreshFULL/CAS/readback, notyetdelivered. Existingcontinuityunchanged/projectongoing/no backgroundwatch or newautomation.
+
+
+## Continuation — 08/11/2026 06h36 Fortaleza — NEW main-red3217 confirmed; no duplicate reviews
+
+FIRST recovered SAMEcanonical remote checkpoint3d9177e95849e3fbc0789a953902e3a1a6ae4483/blob84deca6f30ce513c23a9ead00f562b37d7d1572b/FULL354088. Prior PONTO0541 DELIVERED b866baf5d49344f5406fc201e05646061a30d318/blobedb771209a056789a45d95c4da8d8f9b6620af3b/FULL5618821, exactprefix/readback/IDonce confirmed afterone409+>120s; notpending asolderCP. Channel fileSHA→blob58ff2263d76b5b7125e7127ea7b322fa8b3d2876/FULL5717157 recovered complete. LastPONTO+newheaders/directedFULLV0630/N0631/G0630/T0613/U0628/M3156/CXC2 read; rawVtest sources remainV-owned, notPexecutions or taskgrant.
+
+**NEW MV3217 directly confirmed OPEN** at06h35, created08:51:20Z/updated09:30:53Z. This is AFTER TODOS22 historicalrelease, notold3139 reimposed. Issuebody: mainf5caa6ace6fdfe808a279d0507542b4497cc3323 AX2failure08:50:58Z/run42463762469. FULL3comments show CodeQLfailure08:58:49Z/c1d72a/run42465029587; AX2cancelled09:02:03Z/c1d72a/run42465029598; NEWAX2failure09:28:47Z/4db53ba365673f47437fff8976fe02c65ca369f3/run42466383323. No actualActionslog/CIquery or rootcause reproduction byP; notdeclaredflake. RuleMV: NO productPRpush or incorporation except actualmainrepair; localwork/requestedreviewscontinue. V's terminal-observation fixb739 isLOCAL/testinghelper, explicitly NOTAX2fix, no Ptakeover/thirdreview. Nreports3139closed07:54:23Z: Nreceipt, notPdirectoldissuequery; cannotclearNEW3217.
+
+Native small directed ls-remote completed: mainNEW **6b2d78796bc6950a321fd70e38faedd9dae5d3f6**. ALL ELEVEN tracked pull heads UNCHANGED:
+2020 96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff
+2514 e74d6cce39b3226090e1b206df505ebacb3080bc
+2928 7463a1b38d0cd6cc69f807e021921d4b0f05026a
+2954 2b172fe82fd8bf8d9585ad4fd335c030676fb61b
+3034 0cdb49725fbb78d341e648ae4758a5f0ab88f0f4
+3035 9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a
+3067 442a057113c87b8728e1a23711510fa852bd0e6d
+3077 54712ae1006a04e9a36a9ca4144ddc58ce53d809
+3087 8015b59367dc6ddf1057ac4b1b792b89eb0024a4
+3107 f609d7d79519104bdbbdf871d5a634b10064494d
+3135 ce7c310c9f347d74d039eb45b5371a27c9895a49
+CandidateT2514still8a0701f04afe42e5282ec69f0c2e7557c7955a1d/offPR. TheseareGitidentities NOTfreshOPEN/MERGED/CIstates. Old4productMERGEDhistorynotqueried/recreated. Ownlocalp3077-integration EXISTS thisrun exactHEAD54712; onlyownuntrackedartifacts/cache, productdiffnoedits. Prioroldcheckoutsnotclaimedrecovered. No original logs reconstituted as previous originals.
+
+NativeREADONLYfetchmain6b2 andnormativediffversusdf4: ONLY AGENTS adds14linesPV; FULLdelta read. PrioritizeoldestPRwithmoney/security/main-redexceptions; coordinatorowns5daywarnings/10dayclosureandwaitingexceptions, noPforeignref/PRclosuregrant. CLAUDE/inbox/queue/reservationsBYTE-ID, no universallease/ownershipchange. No mainmerge/productrefmove.
+
+Directed3107FULL4/2020FULL11 eachONCE; newcommentsafter07:32UTCALL[]. No nominalcorrective/dispositioninthatrecorte, NOTglobalqueueexhausted. 3107P5816621599secondalreadydeliveredNOTCLEAN/interval_countSAME68edd/R2C1pending; capped2suitesINCONCLUSIVE preserved/noreset. 2020P1CX13HOLD/30conflicts/foreignscopehand-offstillpending. 3077P5817228203integrationfocal/evidence6719373101completed;192+20historicalNOTreplayed, C6previousfilarequestNOTMERGEDproof. 3067/2954/3087focalsnotrepeated;2514candidateLOWclosedonly8a/CodeQL2HIGHHOLD/3135old3974notce7cert/3034-35Jnominal/2928legalboundariesintact.
+
+NewM3156residualexpiryproposedMED andC3localrepairawaitclassification, G1927/3189/3190dispositions, S3215partial/H23216/Z3204/J3195/Nrecovery/Vtiming/Uown/T/CXC2budgetsallpreserved; no new unclaimed Pnominal observed. No ownsourcefixstartedmerelyfromunknownqueue. TODOS29balanceUNKNOWN/smallpointreads/Gitpreferred/noAPIlarge-lot/Actionsloop/unsupportedrateprobe/credentials. SerialMedium0agents. ZEROnewproductcode/tests/RED/GREEN/reviews/CIretrycancel/pushPR/queue/merge/provider/price/limit/commission/flag/gate/account/term/PII/externalcontactmutation. ONLYcheckpoint/channelpublicationseparatefromproductPR, userauthorized. Projectongoing/localreviewsavailable; MVandcoordinationwaitaretransient, noautomationdisable/newautomation/backgroundwatch. FinalPONTOplannedCXP-20261108-0637-C1-1needsfreshFULL/CAS/readback,notyetdelivered.

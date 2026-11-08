@@ -191,6 +191,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/next-offer": row("offers", draft),
   "POST store/no-count": row("numbers", never(BROWSER)),
   "POST store/notes": row("numbers", draft),
+  "POST store/notify-prefs": row("settings", never("The owner's own alert emails, and starting again what the weekly email's stop link stopped: the owner's choice about the owner's inbox, made in the studio, never by an agent.")),
   "POST store/nudge": row("email", draft),
   "POST store/numbers-links": row("numbers", draft),
   "POST store/numbers/ask": row("numbers", read),

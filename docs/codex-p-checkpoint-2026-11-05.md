@@ -1767,3 +1767,336 @@ DirectGET3217STILLOPEN/updated10:14:50Z/closed_atnull. Mainadvance/2954mergeNOTM
 Directed3107FULL4/2020FULL11:newupdatedcreated>11:27UTCALL[]. P3107secondalreadydeliveredNOTCLEAN/interval_count68edd/R2C1disposition+2cappedINCONCLUSIVE;2020P1CX13HOLD/native30conflicts/ownershiphandoffpending. No test/reviewrepeat/capreset. 3077focal5817228203/INLINE6719373101and3067completedhistorical,2514LOWsó8acandidate/CodeQL2HIGHHOLD/3135old3974notce7cert/3034-35Jnominal/2928legalboundariesintact.
 
 Onlyreconciliation/documentation;ZEROnewsource/test/REDGREEN/review/claimRES/CIqueryretrycancel/foreignref/productpush/mainintegration/queue/merge/provider/price/limit/flag/account/term/PII/subagent. SerialMedium0agents/TODOS29quotaUNKNOWN/smallpointqueries/Gitpreferred/noActionsloop/largeAPIbatch/unsupportedprobe/credentialread. Ongoingproject/transientMV+coordinationwait/continuityunchanged/no newautomation/backgroundwatch. PONTOCXP-20261108-0929-C1-1plannedneedsfreshFULL/CAS/readback; notyetdelivered.
+
+
+## Continuation — 08/11/2026 10h40 Fortaleza — MV closed; independent V candidate evidence delivered
+
+FIRST SAMEcanonicalCP38da1c5b89f0368e8de97c85b59ddbebbd580abc/blob7212c3c9caee9668861d9b52a77bb30f4e47c84d/FULL366038 andchannel1300077f74697b11ab802e55e2b88e942be4d3eb/FULL5867924 recovered complete. PriorPONTO0929 DELIVERED68ae55ced76e61fa739c5a2a0269cdbefdde65e9/blobf62e9a13e10424b9e6c5e88fefc0ee57153f6739/FULL5830240/exactprefix+IDonce, notpending asoldCP.
+
+DirectGET3217 NOWCLOSED/completed/closed_at12:59:59Z=09h59min59Fortaleza. ORIGINALC4-3100FULLread fromchannel06Nov22h33 confirmsMAINVERDE/generalfreezeended/maincurrent+singleconsolidatedpush+9NEWchecks+review. SupersedesP0929OPEN; no artificialnewliteralannouncementgate. No Pproductpush/mainintegration/CI/queue/merge performed. ScopedHOLD3107/2020 remain. C3-1003 explicitly says3107ab06LOCAL/classificationpending, nofalsecleanapproval.
+
+NativeGitmain **00e05c1749345dfbccdcd50d4f8bf4e99a2b7fa2** NEW. TENtrackedpullrefheads UNCHANGED from0929tableexcluding2954alreadyMERGED (don'trequeryclosed2954). Tcandidate8a stilloffPR/e74. Nativepropernormativediffdd3→00eEMPTY/AGENTS/CLAUDE/inbox/queue/reservationsBYTE-ID. Directed3107FULL4/2020FULL11:newupdatedcreated>12:27UTCALL[]. No originalold4recreation. No capreset/inconclusiveGREENrewrite. VhelperLOCAL review is new causal work, no duplicateG1924/C23134/M3156/T3181/N3078/Uqueues.
+
+PRES V candidate announced466e613a6f5c0daaf79edc5c181eb81d2bb5eac4/blobc4b267954ec9e612ef2241456abfc59958478190 BEFOREsource/diff/tests/readbackEXACT. FirstCAS409NOWRITE at13:33:51Z; >120sbackoff/freshFULL5877964 preserving5870805prefix/dedup, G1924delivered/C23134/H2claimsread. Independentcopy p-v-terminal-review clonedSHAREDreadonlyobjects fromVlocaldirectory; newowncheckoutb739 withVsource/ref/indexintact. NotremoteVreffetchabilityclaim. SerialMediumZEROagents/quotaUNKNOWN/noActionsloop/APIlarge-lot/unsupportedrateprobe/credentials.
+
+Below is complete NEW independent P evidence BEFORE channel verdict. No finding in examinedone-filedelta; nonfinanciallocalcandidate review, notthirdglobal/CodeQLdownloads/AX2fix. InitialRED16/15PASS1FAIL→SAME16PASS; same8controlledold2FAIL→final8PASS; 14originalcallbacksbyte-ID/all16REDfinalcallbacksbyte-ID; types/lint/scanner/diff qualified in report. No source/oracle/deadline change. PriorVrealCIhistorynotPexecution. VpublicationcoordinateinterpretationnotPforeignpushgrant.
+
+### P evidence: proofs/p-v-terminal/observation.mjs
+```text
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {stripTypeScriptTypes} from 'node:module';
+import vm from 'node:vm';
+import {createHash} from 'node:crypto';
+
+// This is a NEW controlled observation proof, not a replay of the CI kernel schedule.
+const source = readFileSync('tests/test-runner.test.ts', 'utf8');
+const begin = source.indexOf('const running = (pid: number)');
+const end = source.indexOf("test('a timed-out file", begin);
+assert.ok(begin >= 0 && end > begin);
+const exact = source.slice(begin, end);
+const candidate = `async function gone(pid: number, ms = 3000): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (!running(pid)) return true;
+    await new Promise(done => setTimeout(done, 10));
+  }
+  return !running(pid);
+}`;
+const phase = process.argv[2];
+assert.ok(['original', 'candidate'].includes(phase));
+const input = phase === 'original' ? exact : exact.slice(0, exact.indexOf('async function gone')) + candidate;
+const code = stripTypeScriptTypes(input, {mode: 'strip'}) + '\nglobalThis.observeGone = gone;';
+const cases = [
+  {name: 'confirmed zombie then /proc disappears between signal0 and read', states: ['Z', 'ENOENT'], expected: true},
+  {name: 'confirmed absent PID then numeric PID reused by another process', states: ['ESRCH', 'S'], expected: true},
+  {name: 'zombie stays visible', states: ['Z'], expected: true},
+  {name: 'PID remains absent', states: ['ESRCH'], expected: true},
+  {name: 'live descendant later disappears', states: ['S', 'ESRCH'], expected: true},
+  {name: 'unknown process visibility never implies gone', states: ['EACCES'], expected: false},
+  {name: 'live descendant survives unchanged deadline', states: ['S'], expected: false},
+  {name: 'initial unreadable process later confirmed absent', states: ['ENOENT', 'ESRCH'], expected: true},
+];
+let failed = 0;
+for (const fixture of cases) {
+  let polls = 0, now = 0, current = '';
+  const context = vm.createContext({
+    process: {kill(pid, signal) {
+      assert.equal(pid, 123456); assert.equal(signal, 0);
+      assert.ok(++polls <= 10, 'bounded observation calls');
+      current = fixture.states[Math.min(polls - 1, fixture.states.length - 1)];
+      if (current === 'ESRCH') throw Object.assign(new Error('gone'), {code: 'ESRCH'});
+    }},
+    readFileSync(path, encoding) {
+      assert.equal(path, '/proc/123456/status'); assert.equal(encoding, 'utf8');
+      if (['ENOENT', 'EACCES'].includes(current)) throw Object.assign(new Error('visibility'), {code: current});
+      return `Name:\tfixture\nState:\t${current} (fixture)\n`;
+    },
+    Date: {now: () => now},
+    setTimeout(done, ms) {
+      assert.equal(ms, 10, 'original polling delay unchanged');
+      now += 250; // Controlled scheduler delay, not a measured wall clock.
+      queueMicrotask(done);
+    },
+  });
+  vm.runInContext(code, context, {timeout: 1000});
+  const result = await context.observeGone(123456, 500);
+  try {
+    assert.equal(result, fixture.expected, fixture.name);
+    console.log(JSON.stringify({name: fixture.name, pass: true, result, polls, syntheticElapsedMs: now}));
+  } catch (error) {
+    failed++;
+    console.log(JSON.stringify({name: fixture.name, pass: false, result, expected: fixture.expected, polls, syntheticElapsedMs: now, error: error.message}));
+  }
+}
+console.log(JSON.stringify({phase, checks: cases.length, failed, helperSha256: createHash('sha256').update(exact).digest('hex'), realProcessOrKernelSchedule: false}));
+process.exitCode = failed ? 1 : 0;
+
+```
+
+### P evidence: proofs/p-v-terminal/preload.mjs
+```text
+import net from 'node:net';
+import tls from 'node:tls';
+import http from 'node:http';
+import https from 'node:https';
+import {syncBuiltinESMExports} from 'node:module';
+const deny = () => { throw new Error('V runner proof: external network denied before imports'); };
+globalThis.fetch = deny;
+for (const api of [net, tls, http, https]) {
+  for (const key of ['connect', 'createConnection', 'request', 'get']) {
+    if (typeof api[key] === 'function') api[key] = deny;
+  }
+}
+syncBuiltinESMExports();
+
+```
+
+### P evidence: proofs/p-v-terminal/report.md
+```text
+# P independent review: V terminal-observation candidate
+
+Subject LOCAL b7397589a0d34957a5e213bfd122111740971e67/tree40b11b0dcd1f6b731a04a93a9d99f42bd3120c29; basef2451cd4ed01e9a94666863b07d834eebc912c41; RED70186b4a86f7ad9f0a6677d4da1028253a706384. Channel reservation466e613a6f5c0daaf79edc5c181eb81d2bb5eac4/blobc4b267954ec9e612ef2241456abfc59958478190 BEFORE source/diff/tests; firstCAS409 did not write, >120s then freshFULL+dedup/readbackEXACT. Shared object clone to own p-v-terminal-review; never changed V source/ref/index. Vsubject reconfirmedb739 after tests.
+
+No HIGH/MEDIUM/LOW found in the examined ONE-file candidate delta. Can enter after owner integration and exact final gates. gone now returns immediately on a confirmed terminal observation; an unresolved live/unreadable observation remains conservative at the unchanged deadline. Scope is internal test helper+two regression cases, NOT actual production runner behavior change. tests/test-runner.mjs byte-identical. Full 21addition/3deletion delta, full test file and actual runner source read. Windows/POSIX production process termination not globally certified. Reviewer does not merge/push/promote author's local candidate.
+
+Independently replayed exact RED test from git:16tests/15PASS/1FAIL ONLYnewterminalcase. Final SAME16callbacks16PASS. Actual subprocess timeout/descendant/output-release tests run locally. TypeScript AST audit verifies14originalcallbacksBYTE-IDbase→final, all16RED→finalcallbacksBYTE-ID; onlyhelper changes. Existing500ms/1200ms/600000ms limits preserved; no oracle/timing relaxation. Actual-node runs do not reproduce historical hosted CI's 1207ms schedule or identify its cause.
+
+V's SAME8 controlled observations copied BYTE-ID, extracting running/gone VERBATIM with stripTypeScriptTypes and VM: oldbase8/2FAIL+6controls -> exactfinal8PASS. Final helper SHA256000f8291d3d957bf4af9ac9bf38418ad8440d891d1cf1cf03bb807e6ed793c1d. These are MODELED process/proc/clock states, not kernel/process schedule replay. Persistent live/EACCES returnsfalse at same500syntheticms; zombie/absent terminal returns immediately; later disappearance remains true. No new defect claimed and no assertion changed.
+
+Bounds BEFORE graph perchild120s512MiB heap256KiBoutput, type120s1024MiB; copied Vpreload denies fetch/net/tls/http/https before imports and is inherited through NODE_OPTIONS by spawned testworkers. No Redis/HTTP/provider. Four test invocations:RED16/final16/controlled8final/controlled8base. No bounds reached/raised. Types REALstrictES2017ESNextBundlerallowJscheckJs2roots(test+runner)/allimports0diagnostics/exit0; lint candidatefileexit0 with React auto-detection WARNING because this owncheckout uses external existing dependency tree; noterror. Officialscanner4508tracked0, ownreport/sources/logs separately scanned0; productdiffcheck0/unstagedtrackedempty. No npm install this unit.
+
+Not CodeQL/Guidepup download fix, AX2 fix or hosted flake root-cause certification; no browser/AT/nativeRedis/fullbuild/fullCI/globalMR/ninechecks/queue/MERGED certificate. V's direct-user publication interpretation remains his/C4 coordination decision; P only reviewed local candidate. MV3217 directlyCLOSED12:59:59Z; originalC4-3100FULLread(no artificialgeneralfreeze), ownership/disposition/CI requirements preserved.
+
+All scripts and logs below are NEW P executions, not recovered old V logs. Source inputs are exact git objects; original candidate full source is durably inline in V0630@762f121b5cabf01f6831356a43fe14daf671aa73. Reconstruction: read candidate full source + red-reconstruction.patch there, or use V local git objects; do not pretend localb739ref is remote fetchable. P's only new artifacts are report/launchers/audit/copiedcontrol and outputs; nothing added to product.
+
+```
+
+### P evidence: proofs/p-v-terminal/run.mjs
+```text
+import {spawnSync} from 'node:child_process';
+import {resolve} from 'node:path';
+import {writeFileSync} from 'node:fs';
+const env={...process.env,NODE_OPTIONS:'--max-old-space-size=512 --import '+resolve('proofs/p-v-terminal/preload.mjs')};
+const cases=[['red',['--test','/tmp/p-v-terminal-red/test-runner.test.ts']],['final',['--test','tests/test-runner.test.ts']],['observation',['proofs/p-v-terminal/observation.mjs','original']]];
+for(const [label,args] of cases){
+ const r=spawnSync(process.execPath,args,{cwd:process.cwd(),env,encoding:'utf8',timeout:120000,maxBuffer:256*1024});
+ writeFileSync('/tmp/p-v-terminal-'+label+'.log',JSON.stringify({label,exit:r.status,signal:r.signal,error:r.error?.message})+'\n'+r.stdout+r.stderr);
+ console.log(JSON.stringify({label,exit:r.status,signal:r.signal,error:r.error?.message}));
+}
+
+```
+
+### P evidence: proofs/p-v-terminal/run-old-observation.mjs
+```text
+import {spawnSync} from 'node:child_process';
+import {resolve} from 'node:path';
+import {writeFileSync} from 'node:fs';
+const env={...process.env,NODE_OPTIONS:'--max-old-space-size=512 --import '+resolve('proofs/p-v-terminal/preload.mjs')};
+const r=spawnSync(process.execPath,[resolve('proofs/p-v-terminal/observation.mjs'),'original'],{cwd:'/tmp/p-v-base',env,encoding:'utf8',timeout:120000,maxBuffer:256*1024});
+writeFileSync('/tmp/p-v-terminal-old-observation.log',JSON.stringify({exit:r.status,signal:r.signal,error:r.error?.message})+'\n'+r.stdout+r.stderr);
+console.log(JSON.stringify({exit:r.status,signal:r.signal,error:r.error?.message}));
+
+```
+
+### P evidence: proofs/p-v-terminal/audit.mjs
+```text
+import {execFileSync} from 'node:child_process';
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
+import ts from '/workspace/scratch/452ffd7d3d6c/p3077-integration/node_modules/typescript/lib/typescript.js';
+const pins={base:'f2451cd4ed01e9a94666863b07d834eebc912c41',red:'70186b4a86f7ad9f0a6677d4da1028253a706384',final:'b7397589a0d34957a5e213bfd122111740971e67'};
+const source={};for(const [name,pin] of Object.entries(pins))source[name]=execFileSync('git',['show',pin+':tests/test-runner.test.ts'],{encoding:'utf8'});
+function callbacks(s){const ast=ts.createSourceFile('tests/test-runner.test.ts',s,ts.ScriptTarget.Latest,true);return ast.statements.filter(n=>ts.isExpressionStatement(n)&&ts.isCallExpression(n.expression)&&n.expression.expression.getText(ast)==='test').map(n=>{const a=n.expression.arguments;return {name:a[0].text,callback:s.slice(a[1].pos,a[1].end)};});}
+const old=callbacks(source.base),red=callbacks(source.red),fin=callbacks(source.final);
+assert.equal(old.length,14);assert.equal(red.length,16);assert.equal(fin.length,16);
+for(const x of old)assert.equal(fin.find(y=>y.name===x.name)?.callback,x.callback);
+assert.deepEqual(red,fin);
+assert.equal(readFileSync('tests/test-runner.test.ts','utf8'),source.final);
+const blobs={};for(const [name,pin]of Object.entries(pins))blobs[name]=execFileSync('git',['rev-parse',pin+':tests/test-runner.test.ts'],{encoding:'utf8'}).trim();
+console.log(JSON.stringify({pins,blobs,originalCallbacksByteIdentical:14,redFinalCallbacksByteIdentical:16,onlyProductDelta:execFileSync('git',['diff','--name-only',pins.base,pins.final],{encoding:'utf8'}).trim(),sourceHashes:Object.fromEntries(Object.entries(source).map(([k,s])=>[k,createHash('sha256').update(s).digest('hex')]))},null,2));
+
+```
+
+### P evidence: /tmp/p-v-terminal-red.log
+```text
+{"label":"red","exit":1,"signal":null}
+✔ one next bundle overlaps the running test; every process stays serial and every failure counts (7.507675ms)
+✔ a rejected next build is observed immediately but propagates only after the current process closes (3.423494ms)
+✔ a process launch failure drains its in-flight build before cleanup and preserves the original error (0.578202ms)
+✔ empty inventory does no work (0.217629ms)
+✔ real isolated child processes inherit the supplied environment, flush before advancing and keep nonzero exits (394.840299ms)
+✔ a test process that never ends is killed at its time limit and counted as a failure that names the file (505.538827ms)
+✔ a test process that ends in time is not touched by the limit (198.373113ms)
+✔ every file in tests/run.mjs runs under the limit, generous over the slowest file measured in CI and well under the job (0.604942ms)
+✔ a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread's wchan and the next compilation (505.708843ms)
+✔ a next compilation that never settles fails naming the file at the limit, and the runner does not hang on it (606.520522ms)
+✔ a run is told whether the next file's compilation has settled, and that there is none after the last (4.357904ms)
+✔ a timed-out file's descendants in its process group go with it, a throwing diagnose still counts the failure, and the next file runs (1298.278149ms)
+✖ a confirmed terminal observation is retained instead of probing the numeric PID again (2.818612ms)
+✔ an unconfirmed live or unreadable process is not reported gone at the deadline (0.111448ms)
+✔ once the runner has finished, nothing it started holds its output open (1286.967369ms)
+✔ a timeout says the file's process group was ended, and no test file starts a process outside its group (451.572354ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 15
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5469.866035
+
+✖ failing tests:
+
+test at ../../../../tmp/p-v-terminal-red/test-runner.test.ts:288:1
+✖ a confirmed terminal observation is retained instead of probing the numeric PID again (2.818612ms)
+  AssertionError [ERR_ASSERTION]: the original descendant was confirmed gone
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///tmp/p-v-terminal-red/test-runner.test.ts:290:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+```
+
+### P evidence: /tmp/p-v-terminal-final.log
+```text
+{"label":"final","exit":0,"signal":null}
+(node:155) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///workspace/scratch/452ffd7d3d6c/p-v-terminal-review/tests/test-runner.test.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /workspace/scratch/452ffd7d3d6c/p-v-terminal-review/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ one next bundle overlaps the running test; every process stays serial and every failure counts (7.305841ms)
+✔ a rejected next build is observed immediately but propagates only after the current process closes (1.341073ms)
+✔ a process launch failure drains its in-flight build before cleanup and preserves the original error (0.70227ms)
+✔ empty inventory does no work (0.220272ms)
+✔ real isolated child processes inherit the supplied environment, flush before advancing and keep nonzero exits (261.41965ms)
+✔ a test process that never ends is killed at its time limit and counted as a failure that names the file (512.798316ms)
+✔ a test process that ends in time is not touched by the limit (184.928923ms)
+✔ every file in tests/run.mjs runs under the limit, generous over the slowest file measured in CI and well under the job (0.554447ms)
+✔ a timeout first prints what /proc and the runner say: the file, whether exit came, the process state, each thread's wchan and the next compilation (506.494732ms)
+✔ a next compilation that never settles fails naming the file at the limit, and the runner does not hang on it (602.264944ms)
+✔ a run is told whether the next file's compilation has settled, and that there is none after the last (0.906618ms)
+✔ a timed-out file's descendants in its process group go with it, a throwing diagnose still counts the failure, and the next file runs (1317.707192ms)
+✔ a confirmed terminal observation is retained instead of probing the numeric PID again (0.464391ms)
+✔ an unconfirmed live or unreadable process is not reported gone at the deadline (0.158409ms)
+✔ once the runner has finished, nothing it started holds its output open (1289.4313ms)
+✔ a timeout says the file's process group was ended, and no test file starts a process outside its group (441.547227ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5273.85671
+
+```
+
+### P evidence: /tmp/p-v-terminal-observation.log
+```text
+{"label":"observation","exit":0,"signal":null}
+{"name":"confirmed zombie then /proc disappears between signal0 and read","pass":true,"result":true,"polls":1,"syntheticElapsedMs":0}
+{"name":"confirmed absent PID then numeric PID reused by another process","pass":true,"result":true,"polls":1,"syntheticElapsedMs":0}
+{"name":"zombie stays visible","pass":true,"result":true,"polls":1,"syntheticElapsedMs":0}
+{"name":"PID remains absent","pass":true,"result":true,"polls":1,"syntheticElapsedMs":0}
+{"name":"live descendant later disappears","pass":true,"result":true,"polls":2,"syntheticElapsedMs":250}
+{"name":"unknown process visibility never implies gone","pass":true,"result":false,"polls":3,"syntheticElapsedMs":500}
+{"name":"live descendant survives unchanged deadline","pass":true,"result":false,"polls":3,"syntheticElapsedMs":500}
+{"name":"initial unreadable process later confirmed absent","pass":true,"result":true,"polls":2,"syntheticElapsedMs":250}
+{"phase":"original","checks":8,"failed":0,"helperSha256":"000f8291d3d957bf4af9ac9bf38418ad8440d891d1cf1cf03bb807e6ed793c1d","realProcessOrKernelSchedule":false}
+(node:284) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+```
+
+### P evidence: /tmp/p-v-terminal-old-observation.log
+```text
+{"exit":1,"signal":null}
+{"name":"confirmed zombie then /proc disappears between signal0 and read","pass":false,"result":false,"expected":true,"polls":2,"syntheticElapsedMs":0,"error":"confirmed zombie then /proc disappears between signal0 and read\n\nfalse !== true\n"}
+{"name":"confirmed absent PID then numeric PID reused by another process","pass":false,"result":false,"expected":true,"polls":2,"syntheticElapsedMs":0,"error":"confirmed absent PID then numeric PID reused by another process\n\nfalse !== true\n"}
+{"name":"zombie stays visible","pass":true,"result":true,"polls":2,"syntheticElapsedMs":0}
+{"name":"PID remains absent","pass":true,"result":true,"polls":2,"syntheticElapsedMs":0}
+{"name":"live descendant later disappears","pass":true,"result":true,"polls":3,"syntheticElapsedMs":250}
+{"name":"unknown process visibility never implies gone","pass":true,"result":false,"polls":4,"syntheticElapsedMs":500}
+{"name":"live descendant survives unchanged deadline","pass":true,"result":false,"polls":4,"syntheticElapsedMs":500}
+{"name":"initial unreadable process later confirmed absent","pass":true,"result":true,"polls":3,"syntheticElapsedMs":250}
+{"phase":"original","checks":8,"failed":2,"helperSha256":"f3afced5f8835543831da90da6f116c0f570ff07e163f4c899ea37fc17c1266b","realProcessOrKernelSchedule":false}
+(node:13) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+```
+
+### P evidence: /tmp/p-v-terminal-audit.log
+```text
+{
+  "pins": {
+    "base": "f2451cd4ed01e9a94666863b07d834eebc912c41",
+    "red": "70186b4a86f7ad9f0a6677d4da1028253a706384",
+    "final": "b7397589a0d34957a5e213bfd122111740971e67"
+  },
+  "blobs": {
+    "base": "09890065166b2665513f04c9c12449fc6d3a421a",
+    "red": "1b2eaabbc4235cbf9781dcd81a67c1ba85763bd4",
+    "final": "244c56af07913534ee133d15307f1fac1a27bf82"
+  },
+  "originalCallbacksByteIdentical": 14,
+  "redFinalCallbacksByteIdentical": 16,
+  "onlyProductDelta": "tests/test-runner.test.ts",
+  "sourceHashes": {
+    "base": "41bd1cd20d55b972383cf304af29a1cc53cb183d39a4a9dc3dcad969ff678f71",
+    "red": "40c2b620645a4d6a98ab5bff5a5a904a01108734e9f6a48bd51b9bed5225c25a",
+    "final": "b0c4181cd014a4d56c692a485d254d987b135fa360fed616b1bcc90644b86b19"
+  }
+}
+
+```
+
+### P evidence: /tmp/p-v-terminal-types.log
+```text
+
+```
+
+### P evidence: /tmp/p-v-terminal-lint.log
+```text
+Warning: React version was set to "detect" in eslint-plugin-react settings, but the "react" package is not installed. Assuming latest React version for linting.
+
+```
+
+### P evidence: /tmp/p-v-terminal-scan.log
+```text
+Public data check: 4508 tracked files; 0 file(s) require correction.
+
+```
+
+Final PONTO/verdict CXP-20261108-1041-C1-1 planned; needsfreshFULL/CAS/readback. Projectongoing/continuityunchanged/no backgroundwatch/newautomation/disable. Own3077focal/2954MERGED/3107conditional/2020HOLD/2514candidate/3135compositionhistoryallpreserved.

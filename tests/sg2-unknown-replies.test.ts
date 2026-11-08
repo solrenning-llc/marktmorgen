@@ -389,9 +389,10 @@ async function main(): Promise<void> {
     is(`the list read as ${JSON.stringify(bad) ?? "nothing"}: unread, not empty`, answer, "UnknownReplyError");
   }
   malform(on("HGETALL", "nl:api:keys:"), { 0: "x" });
-  const strictRecords = [await rejects(() => keyRecords(SID, true)), (await keyRecords(SID).catch(() => null))?.length];
+  const strictRecords = [await rejects(() => keyRecords(SID, true)), await rejects(() => keyRecords(SID))];
   restore();
-  is("the studio's read of the keys (shownKeys, keyRecords strict) fails; the pause code's read is as before", strictRecords, ["UnknownReplyError", 0]);
+  // The pause code's read fails too (CX-123 rule 24, tests/r24-api-key-states.test.ts): read as no keys, a teammate leaving passed over their keys.
+  is("the studio's read of the keys (shownKeys) and the pause code's read both fail, never no keys", strictRecords, ["UnknownReplyError", "UnknownReplyError"]);
   malform(on("HGETALL", "nl:api:keys:"), null);
   const revoked = await rejects(() => revokeAllKeys(SID));
   restore();

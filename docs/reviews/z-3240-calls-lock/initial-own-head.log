@@ -1,0 +1,17 @@
+
+FILE z-3240-diary-domain.proof.ts
+
+A real producer's held entry with a semantically unreadable reply
+Z_VOLUME {"runs":55,"mocks":0,"over":false}
+[stdin]:53337
+  if (!held.ok) throw new Error(`no checkout: ${held.reason}`);
+                      ^
+
+Error: no checkout: unavailable
+    at sellSession ([stdin]:53337:23)
+    at async main ([stdin]:53359:21)
+
+Node.js v24.22.1
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3240-UENGEm

@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_busy_shape_only";
 
   part("A time paid at Stripe, while Stripe's list answers in another shape");
-  const ACCOUNT = "acct_1TestPaidShape01";
+  const ACCOUNT = "acct_1TestPaidShape";
   const paid = await callStore("paidshape@example.com", "paidshape", ACCOUNT);
   const T = weekdayAt(9, 600);
   const row = {
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
   is("once Stripe answers in its shape again, the paid time is still not offered", (await offered(paid.store, paid.call))?.includes(T), false);
 
   part("A time held in Redis, while its HGETALL answers in another shape");
-  const held = await callStore("heldshape@example.com", "heldshape", "acct_1TestHeldShape01");
+  const held = await callStore("heldshape@example.com", "heldshape", "acct_1TestHeldShape");
   const H = weekdayAt(10, 600);
   is("control: an empty diary offers the time", (await offered(held.store, held.call))?.includes(H), true);
   busyReply = { value: [] };

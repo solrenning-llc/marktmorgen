@@ -1,0 +1,11 @@
+{
+  "file": "proofs/s/3215-focal/capped-walk.proof.ts",
+  "mode": "old-modules-in-final-graph",
+  "parent": "d055c89729b8a9d6dda210e905ffc9342c0591d4",
+  "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+  "stdout": "  ok    refused first member did not send\n  ok    another due member receives one notice\n  FAIL  capped card walk advances beyond repeated start\n        expected \"sub_scapcardRun0004\"\n        got      null\n\n3 checks, 1 failing.\nS_VOLUME {\"runs\":106,\"attempts\":8,\"forwarded\":8}\n",
+  "stderr": "email rejected 422\n",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

@@ -1,0 +1,17 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/billing-reminders.ts",
+    "../../../lib/payment-recovery.ts",
+    "../../../tests/s-3215-recovered-billing.proof.ts",
+    "../../../tests/s-3215-recovered-card.proof.ts",
+    "./capped-walk.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

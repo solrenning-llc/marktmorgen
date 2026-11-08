@@ -1,0 +1,17 @@
+{
+  "command": [
+    "timeout",
+    "120s",
+    "node",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings",
+    "0",
+    "tests/s-3215-recovered-billing.proof.ts",
+    "tests/s-3215-recovered-card.proof.ts",
+    "proofs/s/3215-focal/capped-walk.proof.ts",
+    "proofs/s/3215-focal/run.mjs"
+  ],
+  "status": 1,
+  "stdout": "\n/workspace/scratch/s-3215-cursor-focal/proofs/s/3215-focal/capped-walk.proof.ts\n  19:10  warning  'sendFailedPlanNotices' is defined but never used  @typescript-eslint/no-unused-vars\n  74:10  warning  'failing' is defined but never used                @typescript-eslint/no-unused-vars\n\n\u2716 2 problems (0 errors, 2 warnings)\n\n",
+  "stderr": "ESLint found too many warnings (maximum: 0).\n"
+}

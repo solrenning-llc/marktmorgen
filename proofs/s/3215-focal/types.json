@@ -1,0 +1,14 @@
+{
+  "command": [
+    "timeout",
+    "120s",
+    "node",
+    "--max-old-space-size=1024",
+    "node_modules/typescript/bin/tsc",
+    "-p",
+    "proofs/s/3215-focal/tsconfig.json"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

@@ -1,0 +1,11 @@
+{
+  "file": "proofs/s/3215-focal/capped-walk.proof.ts",
+  "mode": "head",
+  "parent": "d055c89729b8a9d6dda210e905ffc9342c0591d4",
+  "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+  "stdout": "  ok    page cap is reached\n  ok    refused first subscription did not send\n  ok    capped walk advances beyond repeated start\n\n3 checks, all passing.\nS_VOLUME {\"runs\":11,\"attempts\":52,\"forwarded\":52}\n",
+  "stderr": "email rejected 422\nbilling reminders: more trialing subscriptions than one run reads; the next run goes on from where this one stopped\nbilling reminders: a trialing subscription at the start of this run was not handled again; the walk goes on and reads it when the list comes round\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

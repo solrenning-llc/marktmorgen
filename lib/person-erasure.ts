@@ -42,7 +42,7 @@
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, ensureListId, ensureStatsId, storeRef } from "@/lib/store";
-import { readKind } from "@/lib/catalog";
+import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
@@ -216,7 +216,7 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
   if (!current.statsId) current = await ensureStatsId(ref);
   if (current && !current.listId) current = await ensureListId(ref);
   if (!current?.statsId || !current.listId) return null;
-  const listings = await readKind(current, "course");
+  const listings = await readKindExact(current, "course");
   const courseOf = new Map(listings.flatMap((l) => (l.course?.id ? [[l.course.id, l.id] as const] : [])));
   // Read exactly (rule 24): an outline kept but unreadable throws, so the deletion answers "unavailable" and is
   // pressed again, never done with the person's records in that course still kept; only a confirmed absent one is left out.

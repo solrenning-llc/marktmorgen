@@ -22,7 +22,7 @@ const fixture = (async () => {
   await claimHandle(OWNER, "synthetic-flows-read", "Synthetic Flows Read", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestFlowsRead01", true);
+  await setStripeAccount(OWNER, "acct_TestFlowsRd1", true);
   await setSubscription(OWNER, { customerId: "cus_FlowsRead0001", subscriptionId: "sub_FlowsRead0001", active: true, tier: "pro", period: paidPeriod() });
   await setMailSettings(OWNER, { fromName: "Synthetic Flows Read", address: "1 Main St, Portland, OR 97201" });
   let store = (await storeForEmail(OWNER))!;

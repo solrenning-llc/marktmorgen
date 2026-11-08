@@ -350,6 +350,11 @@ async function stopLink(store: Store, email: string): Promise<string> {
   return token;
 }
 
+/** Gives back what reserve() took for a batch that did not go out; a give-back that is not confirmed is unknown and throws. */
+async function giveBack(store: Store, n: number): Promise<void> {
+  if (!(await release(store, n))) throw new UnknownReplyError("the give-back of an update's reserved emails");
+}
+
 /**
  * Moves one send on for as long as `deadline` allows. Safe to call from two
  * places at once: only one holds the send at a time.
@@ -430,9 +435,20 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           };
           break;
         }
+        let stops: string[];
+        try {
+          stops = [];
+          for (const email of recipients) stops.push(await stopLink(store, email));
+        } catch {
+          // A stop link that could not be written sends nothing (rule 24): what reserve() took from the store's month
+          // and the company's day is given back now, exactly, or the run fails, never taking it again on every run.
+          await giveBack(store, recipients.length);
+          job = { ...job, status: "waiting", note: "The stop links could not be saved just now. Nothing more was sent. We will try again." };
+          break;
+        }
         const messages: BatchMessage[] = [];
-        for (const email of recipients) {
-          const stop = await stopLink(store, email);
+        for (const [at, email] of recipients.entries()) {
+          const stop = stops[at];
           const page = `${SITE_URL}/unsubscribe?u=${stop}`;
           const r = render(store, text.subject, text.body, null, {
             page,
@@ -448,7 +464,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         }
         const outcome = await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
         if (outcome !== "sent") {
-          await release(store, recipients.length);
+          await giveBack(store, recipients.length);
           const failures = job.failures + 1;
           job =
             failures >= 5 || outcome === "refused"

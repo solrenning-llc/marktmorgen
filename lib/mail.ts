@@ -18,6 +18,7 @@ import { lookColours } from "@/lib/store-look";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
 import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
 import { tokensFor } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
@@ -361,15 +362,19 @@ export async function giveBackToMonth(store: Store, n: number): Promise<void> {
   if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["DECRBY", usedKey(store.listId, window), n]]);
 }
 
-/** Gives back what was taken for a batch that was not sent. */
-export async function release(store: Store, n: number): Promise<void> {
+/**
+ * Gives back what was taken for a batch that was not sent. True when there was nothing to give back or both counters
+ * answered a whole number (rule 24); false when the give-back could not be confirmed, so a caller that must know
+ * (lib/product-updates.ts) does not take it as done. Throws when the pipeline does.
+ */
+export async function release(store: Store, n: number): Promise<boolean> {
   const window = windowOf(store);
-  if (store.listId && window && n > 0) {
-    await redisPipeline([
-      ["DECRBY", usedKey(store.listId, window), n],
-      ["DECRBY", dayKey(), n],
-    ]);
-  }
+  if (!store.listId || !window || !(n > 0)) return true;
+  const replies = repliesFor(await redisPipeline([
+    ["DECRBY", usedKey(store.listId, window), n],
+    ["DECRBY", dayKey(), n],
+  ]), 2);
+  return !!replies && replies.every((r) => typeof r === "number" && Number.isSafeInteger(r));
 }
 
 function escape(text: string): string {

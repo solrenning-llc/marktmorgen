@@ -6,12 +6,17 @@
  * the invite. Each such store fails the run (retried the next day), earns nothing and is not marked. The healthy
  * single-page read and a confirmed empty list are unchanged; a second page is read to its end before anything is
  * decided.
+ *
+ * Claude 2's money review of #3221 (MEDIUM, the same reader): the fields of a paid invoice that set the money, the
+ * "paid before the invite" mark and the share's day and currency are read exactly too. An amount, a credit-note
+ * amount, a creation or payment time, a currency or a `parent` in an unknown shape is not 0, "usd" or "not a
+ * subscription": the store fails the run, nothing is written or marked, and nothing is posted to Stripe.
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { claimHandle, setSubscription } from "@/lib/store";
 import { settleInvites } from "@/lib/creator-invite-credit";
-import { ALL_KEY, byKey, creditKey } from "@/lib/creator-invites";
+import { ALL_KEY, OWED_KEY, byKey, creditKey } from "@/lib/creator-invites";
 import { INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
 
 const DAY = 86_400;
@@ -70,7 +75,7 @@ const RIPE = (id: string) => invoice(id, INVITE_HOLD_DAYS + 4);
 /** Paid long before the invite: the store was not brought to us. */
 const BEFORE = (id: string) => invoice(id, 400);
 
-type Outcome = { failed: number; complete: boolean; credit: unknown; back: boolean; posted: string[]; reads: string[] };
+type Outcome = { failed: number; complete: boolean; credit: unknown; back: boolean; posted: string[]; reads: string[]; credits: string[] };
 
 async function runCase(handle: string, reply: Reply, watch: string): Promise<Outcome> {
   redis.clear();
@@ -87,11 +92,23 @@ async function runCase(handle: string, reply: Reply, watch: string): Promise<Out
   redis.run(["ZADD", ALL_KEY, INVITED_AT, made.store.sid]);
   const run = await settleInvites(Date.now() + 60_000, NOW_MS);
   const by = JSON.parse(String(redis.run(["GET", byKey(made.store.sid)]))) as { back?: boolean };
-  return { failed: run.failed, complete: run.complete, credit: redis.run(["GET", creditKey(watch)]), back: by.back === true, posted, reads: invoiceReads };
+  const owed = redis.run(["SMEMBERS", OWED_KEY]);
+  const credits = [...redis.keys().filter((key) => key.startsWith(creditKey(""))), ...(Array.isArray(owed) ? owed.map((id) => `owed:${String(id)}`) : [`owed:${String(owed)}`])];
+  return { failed: run.failed, complete: run.complete, credit: redis.run(["GET", creditKey(watch)]), back: by.back === true, posted, reads: invoiceReads, credits };
 }
 
 const refused = (o: Outcome) => [o.failed >= 1, o.complete, o.credit, o.back, o.posted];
 const REFUSED = [true, false, null, false, []];
+/** Refused with nothing at all written: no share, no bonus, nothing owed. */
+const refusedWhole = (o: Outcome) => [o.failed >= 1, o.complete, o.credits, o.back, o.posted];
+const REFUSED_WHOLE = [true, false, [], false, []];
+
+/** The invoice without one of its fields. */
+function without(row: Record<string, unknown>, field: string): Record<string, unknown> {
+  const copy = { ...row };
+  delete copy[field];
+  return copy;
+}
 
 async function main() {
   process.env.STRIPE_SECRET_KEY = "sk_test_b1_invite_invoice_list_only";
@@ -143,6 +160,42 @@ async function main() {
     ? { object: "list", data: [RIPE("in_Broken002")], has_more: true }
     : { object: "list", has_more: false }), "in_Broken002");
   is("a second page in another shape is unknown", refused(brokenSecond), REFUSED);
+
+  part("The fields that set the money are read exactly (Claude 2's review of #3221)");
+  const ripe = RIPE("in_Field0001");
+  const at = ripe.created as number;
+  const fields: [string, Record<string, unknown>[]][] = [
+    ["notes-as-text", [{ ...ripe, post_payment_credit_notes_amount: "2900" }]],
+    ["notes-negative", [{ ...ripe, post_payment_credit_notes_amount: -1 }]],
+    ["notes-missing", [without(ripe, "post_payment_credit_notes_amount")]],
+    ["created-as-text-on-an-older-row", [ripe, { ...BEFORE("in_FieldOld01"), created: String(NOW - 400 * DAY) }]],
+    ["created-zero", [{ ...ripe, created: 0 }]],
+    ["created-missing", [without(ripe, "created")]],
+    ["amount-as-text", [{ ...ripe, amount_paid: "2900" }]],
+    ["amount-fraction", [{ ...ripe, amount_paid: 2_900.5 }]],
+    ["amount-negative", [{ ...ripe, amount_paid: -2_900 }]],
+    ["currency-number", [{ ...ripe, currency: 978 }]],
+    ["currency-uppercase", [{ ...ripe, currency: "USD" }]],
+    ["currency-odd-text", [{ ...ripe, currency: "us dollars" }]],
+    ["currency-missing", [without(ripe, "currency")]],
+    ["paid-at-missing", [{ ...ripe, status_transitions: {} }]],
+    ["paid-at-as-text", [{ ...ripe, status_transitions: { paid_at: String(at) } }]],
+    ["paid-at-zero", [{ ...ripe, status_transitions: { paid_at: 0 } }]],
+    ["status-transitions-null", [{ ...ripe, status_transitions: null }]],
+    ["parent-as-text", [{ ...ripe, parent: "subscription_details" }]],
+    ["parent-list", [{ ...ripe, parent: [] }]],
+    ["parent-missing", [without(ripe, "parent")]],
+  ];
+  for (const [n, [name, rows]] of fields.entries()) {
+    const o = await runCase(`field-${String(n).padStart(2, "0")}`, () => ({ object: "list", data: rows, has_more: false }), "in_Field0001");
+    is(`${name}: the store fails the run, nothing is written or marked, nothing is posted`, refusedWhole(o), REFUSED_WHOLE);
+  }
+  const parentNull = await runCase("parent-null", () => ({ object: "list", data: [RIPE("in_Field0002"), { ...RIPE("in_Field0003"), parent: null }], has_more: false }), "in_Field0002");
+  is("control: a paid invoice with no parent is known (not a plan's), earns nothing, the plan's invoice earns", [parentNull.failed, parentNull.complete, parentNull.back, parentNull.posted], [0, true, false, ["in_Field0002"]]);
+  const zeroPaid = await runCase("zero-paid", () => ({ object: "list", data: [RIPE("in_Field0004"), { ...BEFORE("in_FieldOld02"), amount_paid: 0 }], has_more: false }), "in_Field0004");
+  is("control: an older invoice that paid nothing does not mark the store; the ripe one earns", [zeroPaid.failed, zeroPaid.complete, zeroPaid.back, zeroPaid.posted], [0, true, false, ["in_Field0004"]]);
+  const healthyShare = JSON.parse(String(healthy.credit)) as { cents?: unknown; cur?: unknown; at?: unknown };
+  is("control: the healthy share keeps its amount, currency and day", [healthyShare.cents, healthyShare.cur, healthyShare.at], [1_450, "usd", NOW - (INVITE_HOLD_DAYS + 4) * DAY]);
   done();
 }
 

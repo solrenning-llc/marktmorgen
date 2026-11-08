@@ -19,14 +19,18 @@
  *   - R2 storage: one run at a time writes only when its whole set fits under
  *     the review's maxStoredBytes (lib/backup-run.ts, inbox C4-53), so the
  *     bucket never holds more; validReview asks it for retention + 2 sets at
- *     their stored bound (backupPeakSets); a GB-month is the average of the
+ *     their stored bound and the 3 months' copies (backupPeakSets, inbox
+ *     C1-20261108-2021-C4-37 item 4); a GB-month is the average of the
  *     daily peaks, so the ceiling bounds it; the account's usage is rounded up
  *     to the next unit, so one more GB-month is added;
- *   - R2 operations: each object (every part and the manifest) is one Class A
+ *   - R2 operations: each object (every part, the manifest and, for a month's
+ *     copy, its mark, an empty object; every run is taken as one that writes a
+ *     mark) is one Class A
  *     when written and one more when deleted (the run's DeleteObject is free,
  *     but the lifecycle rule, kept as a safety net, may come first, and whether
  *     its deletion is billed is not said: taken as billed, never zero), one
- *     Class B when read back; the objects alive when the month starts (at
+ *     Class B when read back (every part and the manifest; a mark is never
+ *     read); the objects alive when the month starts (at
  *     most backupKeptObjects) may be deleted in it too; each run lists twice
  *     (before it writes and after), backupListPages pages each, Class A, and
  *     may read the last verified manifest (or, when the bucket's rule took
@@ -118,7 +122,9 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
   if (!review || !Number.isSafeInteger(routeSeconds) || routeSeconds <= 0 || routeSeconds > 800) return null;
   const parts = review.maxParts ?? 1;
   const runBytes = review.maxRunBytes ?? Math.min(review.maxBytes, BACKUP_MAX_BYTES);
-  const objects = parts + 1;
+  // Written and deleted: the parts, the manifest and a month's mark. Read back: the parts and the manifest.
+  const objects = parts + 2;
+  const readBacks = parts + 1;
   const runs = BACKUP_RUNS_PER_MONTH;
   const days = BACKUP_DAYS_PER_MONTH;
   const up = (n: number) => Math.ceil(n);
@@ -134,7 +140,7 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
   const classA = up(((runs * (2 * objects + 2 * listPages) + kept) / 1_000_000 + 1) * R2_CLASS_A_MICRO_USD_PER_MILLION);
   // Each object read back, and, when room must be made, the last verified manifest, or every object the bucket can
   // hold when that copy is lost (lib/backup-run.ts, verifiedInBucket): at most `kept` reads a run.
-  const classB = up(((runs * (objects + kept)) / 1_000_000 + 1) * R2_CLASS_B_MICRO_USD_PER_MILLION);
+  const classB = up(((runs * (readBacks + kept)) / 1_000_000 + 1) * R2_CLASS_B_MICRO_USD_PER_MILLION);
   const commands = runs * review.maxCommands + days * BACKUP_REPORT_READS_PER_DAY;
   const upstashCommands = up((commands / 1_000_000) * UPSTASH_MICRO_USD_PER_MILLION_COMMANDS);
   const runTransfer =
@@ -148,9 +154,9 @@ export function backupWorstMonth(raw: BackupCostReview, routeSeconds: number): B
   const vercel = up(runs * (VERCEL_FUNCTION_GB * hours * VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR + hours * VERCEL_CPU_MICRO_USD_PER_HOUR + VERCEL_CALL_MICRO_USD_PER_MILLION / 1_000_000));
 
   const used: BackupCostLine[] = [
-    { id: "r2-storage", microUsd: storage, basis: `the review's ceiling of ${review.maxStoredBytes} bytes (at least ${sets} sets of ${setBytes}), never passed, plus one GB-month of rounding` },
-    { id: "r2-class-a", microUsd: classA, basis: `${runs} runs × (${objects} objects × 2 (written, then deleted) + 2 listings of ${listPages} page) + ${kept} objects alive at the month's start, deleted, plus one million of rounding` },
-    { id: "r2-class-b", microUsd: classB, basis: `${runs} runs × (${objects} read-backs + up to ${kept} reads to find the verified copies to keep), plus one million of rounding` },
+    { id: "r2-storage", microUsd: storage, basis: `the review's ceiling of ${review.maxStoredBytes} bytes (at least ${sets} sets of ${setBytes}: the retention, two more and the 3 months' copies), never passed, plus one GB-month of rounding` },
+    { id: "r2-class-a", microUsd: classA, basis: `${runs} runs × (${objects} objects (parts, manifest, a month's mark) × 2 (written, then deleted) + 2 listings of ${listPages} page) + ${kept} objects alive at the month's start, deleted, plus one million of rounding` },
+    { id: "r2-class-b", microUsd: classB, basis: `${runs} runs × (${readBacks} read-backs + up to ${kept} reads to find the verified copies to keep), plus one million of rounding` },
     { id: "upstash-commands", microUsd: upstashCommands, basis: `${runs} × ${review.maxCommands} commands + ${days} × ${BACKUP_REPORT_READS_PER_DAY} report reads` },
     { id: "upstash-transfer", microUsd: upstashTransfer, basis: `${runs} runs × ${runTransfer} bytes: ${scanPages} SCAN pages of ${BACKUP_SCAN_NAMES_PER_PAGE} names of ${BACKUP_SCAN_NAME_BYTES} bytes, ${runBytes} copied bytes, each key's name sent twice, the marks and the report's reads` },
     { id: "upstash-storage", microUsd: marks, basis: `${MARK_KEYS} marks of at most ${MARK_BYTES} bytes kept` },

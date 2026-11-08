@@ -281,7 +281,9 @@ export async function copyInParts(limits: PartsLimits, key: Uint8Array, store: B
  * before it is opened and handed to `onPart`, and let go before the next.
  * Throws on the first part missing or different, after the parts before it
  * were handed on: a restore that must write all or nothing reads the set
- * twice, first checking every key of every part, then writing.
+ * twice, first checking every key of every part, then writing. A manifest
+ * whose id has a folder (a month's copy, monthly/<YYYY-MM>/<run>/<uuid>,
+ * lib/backup-store.ts) names parts in that same folder.
  */
 export async function readBackupSet(
   manifestId: string,
@@ -293,8 +295,9 @@ export async function readBackupSet(
   const manifest = openManifest(await store.read(manifestId, manifestBound(MAX_PARTS)), key);
   const total = manifest.parts.reduce((n, part) => n + part.bytes, 0);
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || total > maxBytes) throw new Error("Backup set exceeds the bytes a restore may read");
+  const folder = manifestId.slice(0, manifestId.lastIndexOf("/") + 1);
   for (const [index, part] of manifest.parts.entries()) {
-    const read = await store.read(part.id, PART_MAX_BYTES + PART_SEAL_ROOM);
+    const read = await store.read(folder + part.id, PART_MAX_BYTES + PART_SEAL_ROOM);
     if (read.byteLength !== part.bytes || sha256(read) !== part.sha256) throw new Error("Backup part differs from its manifest");
     const snapshot = openBackup(read, key);
     if (snapshot.capturedAt !== manifest.capturedAt || snapshot.rows.length !== part.rows) throw new Error("Backup part does not match its manifest");

@@ -97,7 +97,7 @@ async function main(): Promise<void> {
   }
 
   part("The lost-copy path never deletes a manifest that only failed to open under another key (C4-36 item 3)");
-  const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 36_199_424, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
+  const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 39_593_120, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
   const objects = new Map<string, Uint8Array>();
   const writtenAt = new Map<string, number>();
   const deleted: string[] = [];
@@ -124,12 +124,16 @@ async function main(): Promise<void> {
     redis.now = () => clock;
     redis.run(["SET", "nl:store:one", "a shop"]);
     bucketClock = clock;
+    // The month's copy already marked (inbox C4-37 item 4), so the good set below is a daily copy, kept only as a
+    // verified set the keyring opens.
+    objects.set(`monthly/${new Date(clock).toISOString().slice(0, 7)}/99999999-9999-4999-8999-999999999999/verified`, new Uint8Array(0));
+    writtenAt.set(`monthly/${new Date(clock).toISOString().slice(0, 7)}/99999999-9999-4999-8999-999999999999/verified`, clock - 1_000);
     // A good set sealed under the old key, before the rotation.
     const good = await runBackup({ now: clock, review, store, key: oldKey });
     const goodIds = good.ok ? [good.id, ...openManifest(objects.get(good.id)!, oldKey).parts.map((p) => p.id)] : [];
     // The mark then names a manifest the bucket's rule took, and the bucket fills with old leftovers.
     redis.run(["SET", "nl:backup:last-ok", JSON.stringify({ at: clock, set: "dddddddd-dddd-4ddd-8ddd-000000000000", base: { keys: 0, bytes: 0 } })]);
-    for (let i = 0; i < 31; i += 1) {
+    for (let i = 0; i < 34; i += 1) {
       const id = `eeeeeeee-eeee-4eee-8eee-${String(i).padStart(12, "0")}`;
       objects.set(id, new Uint8Array(1_131_232));
       writtenAt.set(id, clock + 1_000 + i);

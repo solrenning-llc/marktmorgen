@@ -114,6 +114,19 @@ async function main(): Promise<void> {
   pages.set("/invoices", Array.from({ length: 10 }, (_, i) => ({ object: "list", data: [{ ...invoice(`in_RenewCap${i}`, "sub_None"), billing_reason: "manual" }], has_more: true })));
   is("more pages than the cap fails, never 'no renewals'", await outcome(() => sendRenewals(store, NOW)), "threw");
   is("nothing sent to the platforms for a page that was not read", sentTo.filter((id) => id.startsWith("in_RenewCap")), []);
+  // A day with more paid invoices than the cap still sends the renewals already read in their exact shape:
+  // each is a purchase of its own with its own mark, so sending it treats nothing unread as absent. The
+  // pass still fails for the unread rest (Claude 1, independent review on #3054 at 31b99d82).
+  pages.set("/invoices", [
+    { object: "list", data: [invoice("in_RenewBig01", "sub_Renew0001")], has_more: true },
+    ...Array.from({ length: 10 }, (_, i) => ({ object: "list", data: [{ ...invoice(`in_RenewBigX${i}`, "sub_None"), billing_reason: "manual" }], has_more: true })),
+  ]);
+  asked.length = 0;
+  sentTo.length = 0;
+  is("more pages than the cap still fails for the unread rest, never 'no renewals'", await outcome(() => sendRenewals(store, NOW)), "threw");
+  is("a renewal read on the first page is sent even when the day has more pages than the cap", sentTo.filter((id) => id.startsWith("in_RenewBig")), ["in_RenewBig01"]);
+  is("no page past the cap is asked", asked.filter((a) => a.startsWith("/invoices")).length, 10);
+  pages.delete("/invoices");
   // A pass whose deadline has gone asks no page after the first (Claude 2, review 6707563715 on #3054):
   // it fails as a page not read does, and the sweep tries again next pass.
   pages.set("/invoices", [

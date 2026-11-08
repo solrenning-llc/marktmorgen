@@ -1,0 +1,145 @@
+
+FILE r24-stream-due-exact.test.ts
+✔ lookAt keeps an abandoned upload queued when its record reads as no pipeline slot (9.466829ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as an extra pipeline slot (0.345773ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as a number (0.544443ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as a list (0.215616ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as an object (0.221535ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as an undefined slot (0.404511ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as text that is not JSON (0.425232ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as JSON that is not a record (0.215585ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as a pipeline that is not a list (1.038649ms)
+✔ sweep goes on past a record that does not read, keeps it queued for later and deletes the next abandoned upload (12.515104ms)
+✔ an exact nil still takes the id out of the due queue (control) (0.306603ms)
+✔ a readable abandoned upload is still deleted at the service and forgotten (control) (0.790534ms)
+✔ claimUpload refuses when the claimed record's write answers nil (1.010446ms)
+✔ claimUpload refuses when the claimed record's write answers a number (0.860259ms)
+✔ claimUpload refuses when the claimed record's write answers no slot (0.76774ms)
+✔ claimUpload refuses when the claimed record's write answers a pipeline that is not a list (0.693627ms)
+✔ claimUpload still writes a claimed video as working (control) (3.00554ms)
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer 0 (nothing moved) (3.638646ms)
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer nil (1.193954ms)
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer a string (1.142596ms)
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer no slot (2.786218ms)
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer a pipeline that is not a list (2.751235ms)
+✖ reading past unread records never looks at more than 40 records in a run (4.984028ms)
+✔ a confirmed move puts unread records five minutes later and the next run reaches the readable 41st (control) (6.783566ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 18
+ℹ fail 6
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65.141872
+
+✖ failing tests:
+
+test at [stdin]:5352:32
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer 0 (nothing moved) (3.638646ms)
+  AssertionError [ERR_ASSERTION]: a move not confirmed is said in the log
+      at [stdin]:5362:29
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async withUnread ([stdin]:5338:5)
+      at async TestContext.<anonymous> ([stdin]:5359:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:5352:32
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer nil (1.193954ms)
+  AssertionError [ERR_ASSERTION]: a move not confirmed is said in the log
+      at [stdin]:5362:29
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async withUnread ([stdin]:5338:5)
+      at async TestContext.<anonymous> ([stdin]:5359:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:5352:32
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer a string (1.142596ms)
+  AssertionError [ERR_ASSERTION]: a move not confirmed is said in the log
+      at [stdin]:5362:29
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async withUnread ([stdin]:5338:5)
+      at async TestContext.<anonymous> ([stdin]:5359:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:5352:32
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer no slot (2.786218ms)
+  AssertionError [ERR_ASSERTION]: a move not confirmed is said in the log
+      at [stdin]:5362:29
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async withUnread ([stdin]:5338:5)
+      at async TestContext.<anonymous> ([stdin]:5359:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:5352:32
+✖ sweep still deletes a readable abandoned 41st upload when 40 unread records' moves answer a pipeline that is not a list (2.751235ms)
+  AssertionError [ERR_ASSERTION]: a move not confirmed is said in the log
+      at [stdin]:5362:29
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async withUnread ([stdin]:5338:5)
+      at async TestContext.<anonymous> ([stdin]:5359:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at [stdin]:5376:30
+✖ reading past unread records never looks at more than 40 records in a run (4.984028ms)
+  AssertionError [ERR_ASSERTION]: 40 unread records read, then 40 more past them, never a third page
+
+  40 !== 80
+
+      at [stdin]:5385:27
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async withUnread ([stdin]:5338:5)
+      at async TestContext.<anonymous> ([stdin]:5383:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 40,
+    expected: 80,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":846,"mocks":8,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3294focal-Fwcp4j

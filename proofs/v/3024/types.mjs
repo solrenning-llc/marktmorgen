@@ -1,0 +1,12 @@
+import ts from 'typescript';
+import {readFileSync,existsSync} from 'node:fs';
+const config=ts.readConfigFile('tsconfig.json',ts.sys.readFile);
+if(config.error)throw Error(ts.flattenDiagnosticMessageText(config.error.messageText,'\n'));
+const parsed=ts.parseJsonConfigFileContent(config.config,ts.sys,process.cwd());
+const roots=JSON.parse(readFileSync('proofs/v/3024/types-roots.json','utf8'));
+if(existsSync('.next/types/routes.d.ts'))roots.push('.next/types/routes.d.ts');
+const options={...parsed.options,incremental:false,noEmit:true};
+const program=ts.createProgram(roots,options),diagnostics=ts.getPreEmitDiagnostics(program);
+console.log(JSON.stringify({roots,sources:program.getSourceFiles().length,diagnostics:diagnostics.length,target:ts.ScriptTarget[options.target],strict:options.strict,moduleResolution:ts.ModuleResolutionKind[options.moduleResolution]}));
+for(const d of diagnostics)console.log(ts.formatDiagnosticsWithColorAndContext([d],{getCanonicalFileName:x=>x,getCurrentDirectory:ts.sys.getCurrentDirectory,getNewLine:()=> '\n'}));
+process.exitCode=diagnostics.length?1:0;

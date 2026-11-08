@@ -138,9 +138,11 @@ is("a member taken out shows none", shownLinks({ ...base, removed: true }), []);
 async function main(): Promise<void> {
 part("The member record keeps them, cleaned, and stays inside its size");
 const cid = "cmlinks01";
+// Rule 23, main integration: exact member reads require explicit mute/removal booleans.
+// These healthy fixtures retain the same link assertions; unknown records remain refused.
 await redis.pipeline([
-  ["HSET", `nl:cm:${cid}:m`, "kold", JSON.stringify({ k: "kold", e: "old@example.com", n: "Old", dir: true })],
-  ["HSET", `nl:cm:${cid}:m`, "knew", JSON.stringify({ k: "knew", e: "new@example.com", n: "New", dir: true, s: [{ network: "github", url: new URL("/new", "https://github.com").href }, { network: "website", url: new URL("https://example.com").href }] })],
+  ["HSET", `nl:cm:${cid}:m`, "kold", JSON.stringify({ k: "kold", e: "old@example.com", n: "Old", dir: true, muted: false, removed: false })],
+  ["HSET", `nl:cm:${cid}:m`, "knew", JSON.stringify({ k: "knew", e: "new@example.com", n: "New", dir: true, muted: false, removed: false, s: [{ network: "github", url: new URL("/new", "https://github.com").href }, { network: "website", url: new URL("https://example.com").href }] })],
 ]);
 is("a record from before links has none", (await readMember(cid, "kold"))?.s, []);
 is("a record's links are read back cleaned", (await readMember(cid, "knew"))?.s, [{ network: "github", url: "https://github.com/new" }]);

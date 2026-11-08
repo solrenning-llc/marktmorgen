@@ -1,9 +1,10 @@
 # MV (AGENTS.md): opens the main-vermelho issue when main's own CI fails (on the current head, or on
 # an earlier head while the current one has no result) and closes it when all nine required
-# workflows passed on main's current head, or when that head's git tree is a merge-queue commit's
-# on which the nine required checks passed (checks: read reads those check runs). Not a required
-# check and not part of CI itself: it runs only after a required workflow completes on main, from
-# main's own copy of scripts/main_red_alarm.mjs (the decision; tests/main-red-alarm.test.ts).
+# workflows passed on main's current head, or when none of that head's runs failed (only canceled,
+# skipped, missing or not started) and its git tree is a merge-queue commit's on which the nine
+# required checks passed (checks: read reads those check runs). Not a required check and not part of
+# CI itself: it runs only after a required workflow completes on main, from main's own copy of
+# scripts/main_red_alarm.mjs (the decision; tests/main-red-alarm.test.ts).
 name: Main red alarm
 on:
   workflow_run:

@@ -20,14 +20,20 @@
  *   completes after main moved to B, or is canceled. The issue labeled main-vermelho is opened (or
  *   the open one gets a comment naming each red run not yet named in it).
  * - close: all nine have a completed success as their latest counted run on the current head; an
- *   earlier head never closes. Or (TODOS-19/21) the current head's git tree is the tree of a commit
- *   of main's merge queue (a merge_group run on gh-readonly-queue/main/…, created in the last
- *   MERGE_GROUP_HOURS) on which the nine required checks "All checks (…)" all passed: the same tree
- *   is the same code, already proven, so the cancels on main (cancel-in-progress stays) and a red on
- *   main's own runs of that tree do not keep it red. That proof is read only when the head is not
- *   already green, at most MERGE_GROUP_PAGES pages and MERGE_GROUP_CHECK_READS commits; any
- *   unreadable or failing reply in it is never green: it is logged and the decision stays as without
- *   it. Every open main-vermelho issue the alarm opened gets "MAIN VERDE"
+ *   earlier head never closes. Or (TODOS-19/21) every required workflow is either green on the
+ *   current head or has no result there (its run canceled with no failed job, skipped, missing, or
+ *   queued and not started), and the head's git tree is the tree of a commit of main's merge queue
+ *   (a merge_group run on gh-readonly-queue/main/…, created in the last MERGE_GROUP_HOURS) on which
+ *   the nine required checks "All checks (…)" all passed: the same tree is the same code, already
+ *   proven, so the cancels on main (cancel-in-progress stays) do not keep it red. A run on the head
+ *   that completed red (failure, timed_out, startup_failure, a canceled run with a failed job), with
+ *   an unexpected conclusion (action_required…) or still in progress is never hidden by the tree: the
+ *   decision is exactly as without it (TODOS-21: the #3139 red was real and appeared after its
+ *   merge-queue commit had passed). The proof is read only then, at most MERGE_GROUP_PAGES pages and
+ *   MERGE_GROUP_CHECK_READS commits; any unreadable or failing reply in it is never green: it is
+ *   logged and the decision stays as without it. Remaining limit: a failure that appears only after
+ *   the queue commit passed (time, date, outside service) and whose main run was canceled is not
+ *   seen on that head; the next head's own runs, or the daily schedule, still show it. Every open main-vermelho issue the alarm opened gets "MAIN VERDE"
  *   with the head and is closed; one opened by hand (a failure proven another way) is left to the
  *   PR that fixes it.
  * - none: anything else (a run still going with no red behind it, a workflow without a run, an
@@ -76,6 +82,8 @@ const AGGREGATOR = /^All checks \(/;
 /** Results that are evidence of nothing: they never open and never close. */
 const IGNORED = new Set(["cancelled", "skipped", "neutral", "stale"]);
 const SHA = /^[0-9a-f]{40}$/;
+/** Statuses of a run that has not started yet (queued behind a cancel), as opposed to in_progress. */
+const NOT_STARTED = new Set(["queued", "waiting", "pending", "requested"]);
 /** Pages of 100 runs read per listing before the script gives up and fails, visibly. */
 const MAX_PAGES = 10;
 /** Canceled runs on earlier main heads whose jobs are read, per workflow, per alarm run. */
@@ -96,6 +104,8 @@ const ACTIONS_APP = "github-actions";
  *   head_sha: string, status: string, conclusion: string | null, html_url: string,
  *   updated_at: string }} Run
  * @typedef {{ file: string, name: string, state: string, run: Run | null, earlier: Run | null }} State
+ *   state: green, red, running (in progress), queued (not started), missing (no evidence on the head:
+ *   no run, or canceled with no failed job, skipped, neutral, stale) or unknown (another conclusion)
  */
 
 /** @param {unknown} run @returns {Run} */
@@ -139,7 +149,7 @@ const newest = (runs) => runs.reduce((a, b) => (a && a.id > b.id ? a : b), /** @
  *   runs of the current head and, for the workflows earlierNeeded() names, of earlier main heads;
  *   redJobs: the canceled runs in which a job other than the aggregator ended in failure or
  *   timed_out; treeGreen: a merge-queue commit with the head's tree on which the nine required
- *   checks passed (queueProof), which makes the head green
+ *   checks passed (queueProof), which makes the head green only when treeEligible(states)
  * @returns {{ action: "open" | "close" | "none", red: Run[], states: State[], treeGreen: string | null }}
  */
 export function decide({ runs, trigger, head, redJobs = [], treeGreen = null }) {
@@ -162,7 +172,7 @@ export function decide({ runs, trigger, head, redJobs = [], treeGreen = null }) 
     const latest = newest(mine.filter((r) => r.head_sha === head));
     let state = "missing";
     if (latest) {
-      if (latest.status !== "completed") state = "running";
+      if (latest.status !== "completed") state = NOT_STARTED.has(latest.status) ? "queued" : "running";
       else if (latest.conclusion === "success") state = "green";
       else if (isRed(latest, failedInside)) state = "red";
       else state = "unknown";
@@ -173,11 +183,21 @@ export function decide({ runs, trigger, head, redJobs = [], treeGreen = null }) 
     const earlier = prior && isRed(prior, failedInside) ? prior : null;
     return { file, name, state, run: latest, earlier };
   });
-  // The head's tree already passed the nine in the merge queue: green, whatever its own runs say.
-  if (treeGreen) return { action: "close", red: [], states, treeGreen };
+  // The head's tree already passed the nine in the merge queue, and no run on the head says
+  // otherwise (each is green or has no result): green. A completed red on the head is never hidden.
+  if (treeGreen && treeEligible(states)) return { action: "close", red: [], states, treeGreen };
   const red = states.flatMap((s) => (s.state === "red" ? [/** @type {Run} */ (s.run)] : s.earlier ? [s.earlier] : []));
   const action = red.length ? "open" : states.every((s) => s.state === "green") ? "close" : "none";
   return { action, red, states, treeGreen: null };
+}
+
+/**
+ * Whether a merge-queue proof may make the head green: every required workflow is green on the head
+ * or has no result there (missing, or queued and not started). Never when one is red, unknown or
+ * still in progress on the head. @param {State[]} states
+ */
+export function treeEligible(states) {
+  return states.every((s) => s.state === "green" || s.state === "missing" || s.state === "queued");
 }
 
 /** The workflow files whose earlier main heads must be read: neither green nor red on the current head. @param {State[]} states */
@@ -204,7 +224,7 @@ export function openBody(red, head) {
     ...red.map(line),
     "",
     "Regra MV (AGENTS.md): enquanto esta issue estiver aberta, ninguém faz push em PR nenhum além do PR que conserta o main, e ninguém incorpora outra coisa. O trabalho local e as revisões continuam.",
-    "Esta issue fecha sozinha quando os 9 workflows obrigatórios passarem no head atual do main, ou quando a árvore do head atual for a de um commit da fila de merge em que os 9 checks obrigatórios passaram (scripts/main_red_alarm.mjs).",
+    "Esta issue fecha sozinha quando os 9 workflows obrigatórios passarem no head atual do main, ou quando nenhum run do head atual tiver falhado (só cancelados, pulados, ausentes ou não iniciados) e a árvore dele for a de um commit da fila de merge em que os 9 checks obrigatórios passaram (scripts/main_red_alarm.mjs).",
   ].join("\n");
 }
 
@@ -332,10 +352,12 @@ export async function alarm({ api, trigger, log = console.log, now = Date.now() 
   for (const r of onHead.values()) {
     if (r.head_sha === head && canceled(r) && REQUIRED.some((w) => counted(r, w.file)) && (await failedInside(api, r.id))) redJobs.push(r.id);
   }
-  // Not green on the head's own runs: its tree may already have passed the nine in the merge queue.
-  // Anything unreadable there is never green: the decision goes on as without it.
+  // Not green on the head's own runs, but none of them red, unknown or in progress either: its tree may
+  // already have passed the nine in the merge queue. Anything unreadable there is never green: the
+  // decision goes on as without it.
   let treeGreen = null;
-  if (decide({ runs, trigger, head, redJobs }).action !== "close") {
+  const onHeadOnly = decide({ runs, trigger, head, redJobs });
+  if (onHeadOnly.action !== "close" && treeEligible(onHeadOnly.states)) {
     try {
       treeGreen = await queueProof(api, head, now);
     } catch (error) {

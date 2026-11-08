@@ -57,7 +57,7 @@ import { recoveryOn } from "@/lib/recovery-setting";
 import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@/lib/store";
 import { listingsNamed, sellsThings } from "@/lib/catalog";
 import { affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
-import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
+import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
@@ -446,17 +446,37 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // A partner's standing share has to be written for every sale, not only
     // the ones somebody referred, so the store's partners are read once here
     // and a sale is passed on when a link, a code or a partner touches it.
-    if (affiliatesOn(store)) {
-      const [owners, partners] = paid.length
-        ? await Promise.all([codeOwners(store), listPartners(store)])
-        : [new Map<string, string>(), []];
-      for (const row of paid) {
-        // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
-        // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
-        if (row.metadata?.kind === "tip" || row.metadata?.kind === "request") continue;
-        const code = owners.size ? affiliateForCodes(row as { discounts?: unknown }, owners) : "";
+    // Nothing here ends the store's pass (Claude 2 on #3238): the codes are read only when an order on the page
+    // carries one, and a read that fails is null, never an empty map or list, so the orders that needed it are
+    // counted as failed and wait for the next pass (the writes are HSETNX, so a retry records a share once), while
+    // the confirmations, the library and the rest below go on.
+    if (affiliatesOn(store) && paid.length) {
+      // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
+      // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
+      const sold = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request");
+      const coded = sold.some((row) => promoCodesOn(row as { discounts?: unknown }).length > 0);
+      const unread = (what: string) => (error: unknown): null => {
+        console.error(`reading ${what} failed; the sales that need them wait for the next run`, store.handle, describe(error));
+        return null;
+      };
+      const [owners, partners] = await Promise.all([
+        coded ? codeOwners(store).catch(unread("the codes given to affiliates")) : new Map<string, string>(),
+        listPartners(store).catch(unread("the store's partners")),
+      ]);
+      for (const row of sold) {
+        const id = row.id as string;
+        if (partners === null || (owners === null && promoCodesOn(row as { discounts?: unknown }).length)) {
+          failOrder(id);
+          continue;
+        }
+        const code = owners?.size ? affiliateForCodes(row as { discounts?: unknown }, owners) : "";
         if (row.metadata?.via || code || partners.length) {
-          await noteSession(store, row as Parameters<typeof noteSession>[1], owners, partners);
+          try {
+            await noteSession(store, row as Parameters<typeof noteSession>[1], owners ?? undefined, partners);
+          } catch (error) {
+            failOrder(id);
+            console.error("an affiliate's sale was left for the next run", id, describe(error));
+          }
         }
       }
     }

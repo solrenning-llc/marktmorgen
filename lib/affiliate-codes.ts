@@ -37,7 +37,7 @@
  *   nl:aff:<id>:promo   hash  Stripe promotion code id -> affiliate id
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
@@ -47,13 +47,15 @@ export const PROMO_ID_PATTERN = /^promo_[A-Za-z0-9]{10,80}$/;
 
 const promoKey = (statsId: string) => `nl:aff:${statsId}:promo`;
 
-/** How many codes are given to affiliates, counted with one command before the page reads them (lib/affiliate-page-admission.ts). */
+/**
+ * How many codes are given to affiliates, counted with one command before the page reads them
+ * (lib/affiliate-page-admission.ts). Read exactly (CX-123 rule 24): one whole number from zero up for the one
+ * command, or null, which the page takes as refused; a null, "", false or "2" reply is never a count of 0.
+ */
 export async function codeOwnerCount(store: Store): Promise<number | null> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   try {
-    const [n] = await redisPipeline([["HLEN", promoKey(store.statsId)]]);
-    const count = Number(n);
-    return Number.isSafeInteger(count) && count >= 0 ? count : null;
+    return countOf(repliesFor(await redisPipeline([["HLEN", promoKey(store.statsId)]]), 1)?.[0]);
   } catch {
     return null;
   }

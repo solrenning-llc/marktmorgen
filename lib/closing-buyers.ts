@@ -125,6 +125,24 @@ export function buyerPagesCap(cap: number): number {
 const CURSOR = /^(start|\d{1,3}\|[!-~]{0,800})$/;
 
 /**
+ * One page of Stripe's payment search, only in its exact shape (rule 30, the
+ * same class as eachSold in lib/closing-holds.ts, Claude 6 on #3108): its
+ * rows, each an object, and the cursor to the next page, or "" on a page
+ * Stripe says is the last (has_more false). Null for anything else: has_more
+ * missing or not a boolean, has_more true with no cursor that is text, or
+ * data that is not a list. Such a page is never read as the last one, which
+ * would end the round with the rest of the handle's buyers never told.
+ */
+function searchPageOf(reply: unknown): { rows: Record<string, unknown>[]; next: string } | null {
+  if (!reply || typeof reply !== "object" || Array.isArray(reply)) return null;
+  const { data, has_more: more, next_page: next } = reply as { data?: unknown; has_more?: unknown; next_page?: unknown };
+  if (!Array.isArray(data) || !data.every((row) => row !== null && typeof row === "object" && !Array.isArray(row))) return null;
+  if (more === false) return { rows: data as Record<string, unknown>[], next: "" };
+  if (more === true && typeof next === "string" && next) return { rows: data as Record<string, unknown>[], next };
+  return null;
+}
+
+/**
  * Tells the next part of the store's buyers. `after` is where the last run
  * stopped ("" the first time: then the buyers kept here, the members held
  * and those brought over or paid with PayPal, are told first; each address
@@ -207,10 +225,15 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
     if (page) query.set("page", page);
     const list = await onAccount("GET", account, `/payment_intents/search?${query}`);
     out.pages += 1;
-    const rows = Array.isArray(list.data) ? (list.data as Record<string, unknown>[]) : [];
-    if (!(await tell(rows.map(payerOf)))) return out;
-    const next = typeof list.next_page === "string" ? list.next_page : "";
-    [h, page] = list.has_more === true && next ? [h, next] : [h + 1, ""];
+    // A page out of shape acts on none of its rows and the round is not done: the cursor stays where it was and the
+    // closing job asks for the same page again; only a page Stripe says is the last finishes the handle (rule 30).
+    const found = searchPageOf(list);
+    if (!found) {
+      console.error("closing-buyers: Stripe's payment search gave a page that does not say exactly whether more follow; tried again");
+      return out;
+    }
+    if (!(await tell(found.rows.map(payerOf)))) return out;
+    [h, page] = found.next ? [h, found.next] : [h + 1, ""];
     out.after = `${h}|${page}`;
   }
   return h >= handles.length ? { ...out, done: true } : out;

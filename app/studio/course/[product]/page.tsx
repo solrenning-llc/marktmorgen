@@ -30,7 +30,7 @@ import {
 import { readListing } from "@/lib/catalog";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
-import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
+import { autoCaptionStates, autoCaptionsMoney } from "@/lib/auto-captions";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
@@ -79,10 +79,14 @@ export default async function StudioCoursePage({
   // And the languages each one has captions in.
   const captions = await streamCaptions(videoPaths).catch(() => ({}));
   // And those being written by AI (lib/auto-captions.ts), which only somebody
-  // who may spend on the plan's card, on a store with a plan, may ask for.
-  const writing = await autoWriting(videoPaths).catch(() => ({}));
-  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
-  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
+  // who may spend on the plan's card, on a store with a plan, may ask for; and
+  // those whose captions could not be confirmed, kept for a person (`held`).
+  const { writing, held } = await autoCaptionStates(videoPaths).catch(() => ({ writing: {}, held: [] as string[] }));
+  // AI captions money not settled, shown to whoever may see the plan's card: refunds Stripe has not confirmed yet,
+  // and charges kept for a person, apart. Null when it could not be read: said, never shown as nothing owed.
+  const captionsMoney: Awaited<ReturnType<typeof autoCaptionsMoney>> | null = can(view.role, "billing") ? await autoCaptionsMoney(folder).catch(() => null) : { owed: [], unconfirmed: [] };
+  const owedRows = captionsMoney?.owed ?? [];
+  const unconfirmedRows = captionsMoney?.unconfirmed ?? [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
   // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
@@ -190,6 +194,25 @@ export default async function StudioCoursePage({
             </ul>
           </section>
         ) : null}
+        {unconfirmedRows.length ? (
+          <section aria-labelledby="captions-unconfirmed" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-unconfirmed>
+            <h2 id="captions-unconfirmed" className="text-base font-bold text-ink">
+              AI captions charges not confirmed yet
+            </h2>
+            <ul className="mt-2 max-w-[80ch] space-y-1 text-sm text-ink">
+              {unconfirmedRows.map((row) => (
+                <li key={row.id}>
+                  {`We could not confirm with our video provider which AI captions were written for a charge of $${(row.cents / 100).toFixed(2)}. That charge is not final, and any refund for it is not decided yet. We have stopped checking on our own. Write to ${SUPPORT_EMAIL} about it.`}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {captionsMoney === null ? (
+          <p className="mt-5 max-w-[80ch] text-sm text-ink" role="status" data-captions-money-unread>
+            We could not read your AI captions refunds and charges just now. Reload the page in a moment to see them.
+          </p>
+        ) : null}
         <CourseAccessCheck
           check={lessonCaptionCheck(course, streams, captions, writing)}
           productId={product.id}
@@ -206,6 +229,7 @@ export default async function StudioCoursePage({
           streams={streams}
           captions={captions}
           writing={writing}
+          held={held}
           auto={{ can: autoCan, spoken: parseLanguage(store.language) }}
           title={product.title}
           ai={aiState}

@@ -35,6 +35,12 @@
  * (inventory of money calls, finding 9, rule 24): any other answer is unknown,
  * never "nothing delivered", and nothing is refunded on it (deliveredIn,
  * unknownLook).
+ *
+ * A request kept for a person (what was delivered still unknown after every
+ * automatic look) is marked `kept`: never shown as being written, never a
+ * refund owed (none was decided), listed for its store apart with what was
+ * charged (autoCaptionsMoney), and counted once, with the other cases kept for
+ * a person, for the owner's monthly report (autoCaptionsKeptMonth).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
@@ -47,7 +53,7 @@ import type { Store } from "@/lib/store";
 import { GIVE_UP_HOURS, MAX_AUTO_MINUTES, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
 
 const pendingKey = (id: string) => `nl:stream:auto:${id}`;
-/** The videos of one store folder with a captions refund owed. */
+/** The videos of one store folder with captions money not settled: a refund owed, or a charge kept for a person. */
 const owedKey = (folder: string) => `nl:stream:autoowed:${folder}`;
 const QUEUE = "nl:stream:autoq";
 const KEEP_SECONDS = 7 * 86_400;
@@ -71,6 +77,15 @@ const ORDER_LOOKS_MS = 14 * 86_400_000;
  * for this long; then kept for a person, never refunded on an unknown answer and never dropped.
  */
 const DELIVERY_LOOKS_MS = 14 * 86_400_000;
+/** Each month's counts of what was kept for a person, for the owner's report: numbers only, no store, no person. */
+const keptMonthKey = (month: string) => `nl:stream:autokept:month:${month}`;
+const KEPT_KINDS = ["delivery", "order", "refund"] as const;
+type KeptKind = (typeof KEPT_KINDS)[number];
+/** Counts one case kept for a person in the month it was kept (lib/paypal-payouts.ts countUnknown keeps its counts the same way). */
+const countKept = (kind: KeptKind, now: number): (string | number)[][] => {
+  const key = keptMonthKey(new Date(now).toISOString().slice(0, 7));
+  return [["HINCRBY", key, kind, 1], ["EXPIRE", key, REFUND_KEEP_SECONDS]];
+};
 /** The API version chargeNow writes its invoices with (lib/billing.ts, CHARGE_VERSION), where an invoice names its payment. */
 const CHARGE_READ_VERSION = "2024-06-20";
 
@@ -133,6 +148,8 @@ type Pending = {
   credit?: Credit;
   /** A refund asked for and not yet confirmed by Stripe. */
   owed?: Owed;
+  /** When it was kept for a person: what the service delivered was still unknown after every automatic look (unknownLook). */
+  kept?: number;
 };
 
 function parseOwed(raw: unknown): Owed | undefined {
@@ -165,6 +182,7 @@ function parsePending(raw: unknown): Pending | null {
       path: value.path,
       // One that does not read is kept, never dropped: a refund to it is then not confirmed, so it is owed and shown.
       ...(value.credit !== undefined ? { credit: readCredit(value.credit) } : {}),
+      ...(typeof value.kept === "number" && Number.isSafeInteger(value.kept) ? { kept: value.kept } : {}),
       ...(value.owed !== undefined ? { owed: parseOwed(value.owed) ?? { cents: null, key: `nl-captions:unreadable:${value.at}:refund`, since: value.at, looks: REFUND_LOOKS_MAX, stuck: true as const } } : {}),
     };
   } catch {
@@ -174,7 +192,7 @@ function parsePending(raw: unknown): Pending | null {
 
 export type AutoAnswer =
   | { ok: true; writing: string[]; cents: number }
-  | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "checking" | "owed" | "refund_pending" | "refunded" | "credited" | "plan" | "card" | "declined" | "unavailable" };
+  | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "held" | "checking" | "owed" | "refund_pending" | "refunded" | "credited" | "plan" | "card" | "declined" | "unavailable" };
 
 /** What captions for this video cost, by how many languages: its length as charged. Null when it cannot have them yet. */
 export async function autoQuote(pathname: string): Promise<{ minutes: number; seconds: number } | null> {
@@ -295,7 +313,10 @@ async function heldBy(id: string, now: number): Promise<AutoAnswer> {
   const held = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
   if (!held) return { ok: false, reason: "unavailable" };
   const order = parseOrder(held[0]);
-  if (!order) return { ok: false, reason: parsePending(held[0])?.owed ? "owed" : "busy" };
+  if (!order) {
+    const pending = parsePending(held[0]);
+    return { ok: false, reason: pending?.owed ? "owed" : pending?.kept !== undefined ? "held" : "busy" };
+  }
   if (now - order.at < ORDER_SETTLE_MS) return { ok: false, reason: "checking" };
   const settled = await settleOrder(id, held[0] as string, order, now);
   return { ok: false, reason: settled === "refund" ? "owed" : settled === "gone" ? "unavailable" : "checking" };
@@ -376,7 +397,9 @@ async function settleOrder(id: string, raw: string, order: Order, now: number): 
   const age = now - order.at;
   if (age > ORDER_LOOKS_MS) {
     console.error("a captions charge could not be settled from Stripe after every automatic look; kept for a person", id);
-    await redisPipeline([["ZREM", QUEUE, id]]);
+    const left = repliesFor(await redisPipeline([["ZREM", QUEUE, id]]), 1);
+    // Counted the first time it leaves the queue; a reply that does not say it was not queued is counted too, so a charge kept for a person is never left out of the owner's report.
+    if (!left || left[0] !== 0) await redisPipeline(countKept("order", now));
     return "kept";
   }
   await redisPipeline([["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, Math.max(LOOK_AGAIN_MS, age / 4)), id]]);
@@ -470,7 +493,15 @@ async function unknownLook(id: string, pending: Pending, status: number, now: nu
   const key = pendingKey(id);
   if (past > DELIVERY_LOOKS_MS) {
     console.error("which AI captions were delivered is still unknown after every automatic look; nothing refunded, the request kept for a person", id, status);
-    await redisPipeline([["SET", key, JSON.stringify(pending), "EX", REFUND_KEEP_SECONDS], ["ZREM", QUEUE, id]]);
+    // Marked kept the first time, listed for its store and counted once for the owner's report; a later look (the
+    // service's announcement) keeps it as it is.
+    const first = pending.kept === undefined;
+    await redisPipeline([
+      ["SET", key, JSON.stringify(first ? { ...pending, kept: now } : pending), "EX", REFUND_KEEP_SECONDS],
+      ["ZREM", QUEUE, id],
+      ...keepListed(pending),
+      ...(first ? countKept("delivery", now) : []),
+    ]);
     return "waiting";
   }
   console.error("which AI captions were delivered is unknown past the give-up; nothing refunded, the request kept and looked at again", id, status);
@@ -498,7 +529,9 @@ async function settle(id: string, pending: Pending, got: string[], now: number):
       }
     }
   }
-  await redisPipeline([["DEL", pendingKey(id)], ["ZREM", QUEUE, id]]);
+  // Out of its store's listing too, where a request kept for a person was listed.
+  const folder = readStreamPath(pending.path)?.folder;
+  await redisPipeline([["DEL", pendingKey(id)], ["ZREM", QUEUE, id], ...(folder ? [["SREM", owedKey(folder), id]] : [])]);
   return true;
 }
 
@@ -618,6 +651,8 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
       ["SET", pendingKey(id), JSON.stringify({ ...pending, owed: { ...owed, looks, stuck: true } }), "EX", REFUND_KEEP_SECONDS],
       ["ZREM", QUEUE, id],
       ...keepListed(pending),
+      // Once: a stuck refund is never looked at again (above).
+      ...countKept("refund", now),
     ]);
     return "waiting";
   }
@@ -669,33 +704,85 @@ export async function sweepAutoCaptions(deadline: number, now = Date.now()): Pro
   return counts;
 }
 
-/** The languages still being written for each of these videos, by path. Videos with none are left out. */
-export async function autoWriting(pathnames: string[]): Promise<Record<string, string[]>> {
+/**
+ * Where AI captions stand for each of these videos, by path, in one read: the languages still being written
+ * (`writing`, videos with none left out) and the videos whose captions are kept for a person (`held`): never being
+ * written, and never offered again until a person settles them.
+ */
+export async function autoCaptionStates(pathnames: string[]): Promise<{ writing: Record<string, string[]>; held: string[] }> {
   const wanted = pathnames.flatMap((path) => {
     const parts = readStreamPath(path);
     return parts ? [{ path, id: parts.id }] : [];
   });
-  if (!wanted.length || !isRedisConfigured()) return {};
+  const writing: Record<string, string[]> = {};
+  const held: string[] = [];
+  if (!wanted.length || !isRedisConfigured()) return { writing, held };
   const rows = await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)]));
-  const out: Record<string, string[]> = {};
   wanted.forEach(({ path }, i) => {
     const pending = parsePending(rows[i]);
-    // A request whose refund is owed is no longer being written.
-    const left = pending && !pending.owed ? pending.langs.filter((lang) => !pending.got.includes(lang)) : [];
-    if (left.length) out[path] = left;
+    // A request whose refund is owed is no longer being written; one kept for a person is not either.
+    if (!pending || pending.owed) return;
+    if (pending.kept !== undefined) {
+      held.push(path);
+      return;
+    }
+    const left = pending.langs.filter((lang) => !pending.got.includes(lang));
+    if (left.length) writing[path] = left;
+  });
+  return { writing, held };
+}
+
+/** The languages still being written for each of these videos, by path. Videos with none are left out. */
+export async function autoWriting(pathnames: string[]): Promise<Record<string, string[]>> {
+  return (await autoCaptionStates(pathnames)).writing;
+}
+
+/**
+ * The AI captions money not settled in one store folder, deleted videos included, read exactly (rule 24): refunds
+ * Stripe has not confirmed (`owed`: cents owed and whether automatic looks have stopped), and charges kept for a
+ * person (`unconfirmed`: what was charged; no refund was decided, since what the service delivered is unknown, so it
+ * is never a refund owed, never refunded and never delivered). A list or a record in an unknown shape throws
+ * UnknownReplyError, never "nothing owed"; a listed record confirmed gone is not listed.
+ */
+export async function autoCaptionsMoney(folder: string): Promise<{ owed: { id: string; cents: number; stuck: boolean }[]; unconfirmed: { id: string; cents: number }[] }> {
+  const out: { owed: { id: string; cents: number; stuck: boolean }[]; unconfirmed: { id: string; cents: number }[] } = { owed: [], unconfirmed: [] };
+  if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return out;
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1);
+  const members = listed ? stringList(listed[0]) : null;
+  if (!members) throw new UnknownReplyError("the store's AI captions money not settled");
+  const ids = members.filter((m) => STREAM_ID_PATTERN.test(m)).sort().slice(0, 100);
+  if (!ids.length) return out;
+  const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
+  if (!rows) throw new UnknownReplyError("the store's AI captions money not settled");
+  ids.forEach((id, i) => {
+    const raw = rows[i];
+    if (raw === null) return;
+    if (typeof raw !== "string") throw new UnknownReplyError("an AI captions record");
+    const pending = parsePending(raw);
+    if (!pending || readStreamPath(pending.path)?.folder !== folder) return;
+    if (pending.owed) out.owed.push({ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true });
+    else if (pending.kept !== undefined) out.unconfirmed.push({ id, cents: pending.cents });
   });
   return out;
 }
 
 /** Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and whether automatic looks have stopped. */
 export async function autoRefundsOwed(folder: string): Promise<{ id: string; cents: number; stuck: boolean }[]> {
-  if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return [];
-  const [members] = await redisPipeline([["SMEMBERS", owedKey(folder)]]);
-  const ids = (Array.isArray(members) ? members : []).filter((m): m is string => typeof m === "string" && STREAM_ID_PATTERN.test(m)).sort().slice(0, 100);
-  if (!ids.length) return [];
-  const rows = await redisPipeline(ids.map((id) => ["GET", pendingKey(id)]));
-  return ids.flatMap((id, i) => {
-    const pending = parsePending(rows[i]);
-    return pending?.owed && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
-  });
+  return (await autoCaptionsMoney(folder)).owed;
+}
+
+/**
+ * The month's counts of AI captions kept for a person, for the owner's monthly report (lib/company-margin-report.ts,
+ * 465 [MR2], wired by its owner, as lib/paypal-payouts.ts payoutUnknownMonth): requests whose delivered captions
+ * stayed unknown (`delivery`), charges Stripe's invoices never settled (`order`) and refunds Stripe never confirmed
+ * (`refund`). Numbers only, no store, no person. Null when not read exactly: never zero.
+ */
+export async function autoCaptionsKeptMonth(month: string): Promise<Record<KeptKind, number> | null> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
+  const reply = repliesFor(await redisPipeline([["HMGET", keptMonthKey(month), ...KEPT_KINDS]]), 1);
+  const raw = reply ? repliesFor(reply[0], KEPT_KINDS.length) : null;
+  if (!raw) return null;
+  const counts = raw.map((v) => (v === null ? 0 : typeof v === "string" && /^(0|[1-9][0-9]{0,14})$/.test(v) ? Number(v) : NaN));
+  if (!counts.every(Number.isSafeInteger)) return null;
+  return { delivery: counts[0], order: counts[1], refund: counts[2] };
 }

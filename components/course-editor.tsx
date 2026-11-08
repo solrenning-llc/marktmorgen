@@ -42,6 +42,7 @@ import { CAPTION_LANGUAGES, type CaptionTrack, MAX_CAPTION_BYTES, MAX_CAPTION_TR
 import { captionsAnchor } from "@/lib/course-access-check";
 import { CENTS_PER_MINUTE, GIVE_UP_HOURS, MAX_AUTO_LANGUAGES, MAX_AUTO_MINUTES, MIN_CENTS, autoCaptionCents, dollars } from "@/lib/auto-captions-rules";
 import { TusError, tusUpload } from "@/lib/tus-upload";
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
 
 type Outline = { modules: { title: string; lessons: string[] }[] };
 
@@ -81,6 +82,7 @@ const MESSAGES: Record<string, string> = {
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
   auto_declined: "Your card was declined, so nothing was charged and nothing is being written.",
+  auto_held: "We could not confirm earlier AI captions for this video with our video provider, so new ones can't be bought for it yet. Write to " + SUPPORT_EMAIL + " about it.",
   auto_owed: "A refund for an earlier request for this video's captions is not confirmed by Stripe yet, so new AI captions can't be bought for it until it is. Its state is shown at the top of this page.",
   auto_refund_pending: "The video service would not write these captions. The charge is being refunded, but Stripe has not confirmed the refund yet; its state is shown at the top of this page.",
   auto_refunded: "The video service would not write these captions, so the charge was refunded to your card. Nothing is being written; try again in a moment.",
@@ -111,6 +113,8 @@ const Streams = createContext<{
   /** The languages captions are being written in by AI, by video (lib/auto-captions.ts). */
   writing: Record<string, string[]>;
   wrote: (path: string, langs: string[]) => void;
+  /** The videos whose AI captions could not be confirmed with the video service and are kept for a person. */
+  held: string[];
   /** Whether this person may have captions written by AI, charged to the plan's card; and the store's language. */
   auto: { can: boolean; spoken: string };
 }>({
@@ -119,6 +123,7 @@ const Streams = createContext<{
   captions: {},
   writing: {},
   wrote: () => {},
+  held: [],
   auto: { can: false, spoken: "en" },
   captioned: () => {},
 });
@@ -229,6 +234,7 @@ export function CourseEditor({
   streams = {},
   captions = {},
   writing = {},
+  held = [],
   auto = { can: false, spoken: "en" },
   initialTemplate = null,
   openFirst = null,
@@ -252,6 +258,8 @@ export function CourseEditor({
   captions?: Record<string, CaptionTrack[]>;
   /** The languages captions were being written in by AI, by video, when the page was drawn. */
   writing?: Record<string, string[]>;
+  /** The videos whose AI captions could not be confirmed with the video service, kept for a person (lib/auto-captions.ts). */
+  held?: string[];
   /** Whether this person may have captions written by AI, and the store's language to start from. */
   auto?: { can: boolean; spoken: string };
   /** The course's name, for the writing help. */
@@ -299,7 +307,7 @@ export function CourseEditor({
 
   return (
     <Look.Provider value={look ? { look, language } : null}>
-    <Streams.Provider value={{ states: streamStates, learned, captions: captionTracks, captioned, writing: writingNow, wrote, auto }}>
+    <Streams.Provider value={{ states: streamStates, learned, captions: captionTracks, captioned, writing: writingNow, wrote, held, auto }}>
     <div className="mt-8 space-y-6">
       {error ? (
         <p className="notice notice-error" role="alert">{error}</p>
@@ -1236,7 +1244,11 @@ function Captions({
           None yet. Have them written by AI below, or upload a .vtt or .srt file, and the player shows a captions button.
         </p>
       )}
-      {(streams.writing[pathname] ?? []).length ? (
+      {streams.held.includes(pathname) ? (
+        <p className="mt-2 max-w-[80ch] text-sm text-ink" role="status" data-captions-held>
+          {`We could not confirm these AI captions with our video provider, so the charge for them is not final. We have stopped checking on our own. Write to ${SUPPORT_EMAIL} about it.`}
+        </p>
+      ) : (streams.writing[pathname] ?? []).length ? (
         <p className="mt-2 text-sm text-ink" role="status" data-captions-writing>
           {`Being written by AI: ${(streams.writing[pathname] ?? []).map((code) => CAPTION_LANGUAGES.find((l) => l.code === code)?.label ?? code).join(", ")}. Most lessons take a few minutes; they appear here when they are done.`}
         </p>

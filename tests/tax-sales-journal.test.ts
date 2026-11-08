@@ -163,8 +163,9 @@ test("the sweep continues handing a paid purchase to its list when observation I
   }) as typeof fetch;
   try {
     const result = await sweepCheckouts(Date.now() + 20_000, p);
-    assert.equal(providerPages, 6);
-    assert.equal(attempts, 3); // One shared diagnostic pass budget, despite the repeated store.
+    // The repeated key is swept once a run (Codex T on #3064), so its three pages are read once, not twice.
+    assert.equal(providerPages, 3);
+    assert.equal(attempts, 3); // One shared diagnostic pass budget, despite the repeated key.
     assert.equal(result.listed, 1);
     assert.equal((await sweepCheckouts(Date.now() + 20_000)).listed, 0);
     assert.equal(attempts, 3); // No policy in the next real sweep: no extra journal IO.

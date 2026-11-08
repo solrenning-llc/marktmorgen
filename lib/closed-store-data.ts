@@ -245,8 +245,7 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
   // still found by their mark (lib/closing-plan-guard.ts, markShut).
   await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
-  await closeStoreRecord(store);
-  return {
+  const entry: Batched = {
     ref,
     email: store.email,
     sid: store.sid,
@@ -258,6 +257,11 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     endedAt: Date.parse(store.planEndedAt) || now,
     at: now,
   };
+  // The walk's entry is written before the record goes: once the record is gone, only this entry names the store's
+  // keys. A write that fails throws with the record still there, and the walk tries the store again later.
+  await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);
+  await closeStoreRecord(store);
+  return entry;
 }
 
 /** Who owns a key: the closing store one of whose ids names it. */
@@ -619,9 +623,8 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
         continue;
       }
       if (store) {
-        let entry: Batched;
         try {
-          entry = await prepareStore(store, now);
+          await prepareStore(store, now);
         } catch (error) {
           // Something it needs could not be read (rule 24), such as whether a host still serves another store:
           // never taken as "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat).
@@ -629,7 +632,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
           if (!(await moveBack(ref, now))) unsure = true;
           continue;
         }
-        await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);
+        // prepareStore wrote the walk's entry before it closed the record.
         report.stores += 1;
       }
       await redisPipeline([["ZREM", DUE_KEY, ref]]);

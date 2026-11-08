@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   {
     const w = await world();
     is("the erasure answers one agreement", await forgetAgreementsPerson(w.store.sid!, PERSON), 1);
-    is("signing afterwards is refused", (await signAgreement(w.store, w.id, input(w.sha), "Synthetic Person")).ok, false);
+    is("signing afterward is refused", (await signAgreement(w.store, w.id, input(w.sha), "Synthetic Person")).ok, false);
     is("no record or version remains", left(w.id), []);
   }
 

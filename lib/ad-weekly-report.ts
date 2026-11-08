@@ -86,9 +86,14 @@ function dateOf(day: string): string {
   return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === day ? DATES.format(at) : "an unknown day";
 }
 
-/** A tag as the numbers count it, up to the length the store keeps; anything else, or a long run of digits that could be a phone number, is not shown. */
+/** A tag as the numbers count it, up to the length the store keeps; anything else, or a number that could be a phone number, is not shown. */
 const SHOWN_TAG = new RegExp(`^[a-z0-9][a-z0-9._-]{0,${CAMPAIGN_TAG_MAX - 1}}$`);
-const shownTag = (tag: unknown): tag is string => typeof tag === "string" && SHOWN_TAG.test(tag) && !/\d{7,}/.test(tag);
+/** A real date written year, month, day (2026-11-27, 2026.11.27): four, two and two digits, never a phone number. */
+const DATE_IN_TAG = /(^|\D)(?:19|20)\d{2}[._-](?:0[1-9]|1[0-2])[._-](?:0[1-9]|[12]\d|3[01])(?!\d)/g;
+/** Seven digits or more, together or split by dots, dashes or underscores (555-201-4477, 1-202-555-0100, 202.555.0100). */
+const NUMBER_IN_TAG = /\d(?:[._-]?\d){6,}/;
+const phoneLike = (tag: string) => NUMBER_IN_TAG.test(tag.replace(DATE_IN_TAG, "$1x"));
+const shownTag = (tag: unknown): tag is string => typeof tag === "string" && SHOWN_TAG.test(tag) && !phoneLike(tag);
 
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
@@ -167,9 +172,10 @@ export function weeklyAdReport(input: WeeklyAdReportInput): WeeklyAdReport {
   const subject = `Your ads from ${from} to ${to}`;
 
   const spend = sum([...rows.map((r) => r.spend), unassignedAds]);
-  const sales = sum(rows.map((r) => r.sales));
-  const kept = sum(rows.map((r) => (r.sales === null || r.takenBack === null ? null : r.sales - r.takenBack.count)));
-  const afterTakenBack = sum(rows.map((r) => r.afterTakenBack));
+  // Unread sales are unknown in the totals too, even with no campaign row to carry the unknown.
+  const sales = salesKnown ? sum(rows.map((r) => r.sales)) : null;
+  const kept = salesKnown ? sum(rows.map((r) => (r.sales === null || r.takenBack === null ? null : r.sales - r.takenBack.count))) : null;
+  const afterTakenBack = salesKnown ? sum(rows.map((r) => r.afterTakenBack)) : null;
   const totalCost = spend === null || kept === null ? null : spend === 0 ? "no_spend" : kept > 0 ? Math.ceil(spend / kept) : "no_sales";
 
   const missing: string[] = [];
@@ -185,7 +191,12 @@ export function weeklyAdReport(input: WeeklyAdReportInput): WeeklyAdReport {
   if (!complete) before.push(`Partial: some figures for these days were not measured, so they show as unknown, not as zero. ${missing.join(" ")}`.trim());
   before.push(`Recorded ad spend in all: ${money(spend)}. Ads with no campaign tag: ${money(unassignedAds)}.`);
   before.push(`Left after refunds and disputes in all: ${money(afterTakenBack)}. Cost per sale kept, all ads: ${totalCost === null ? UNKNOWN : totalCost === "no_spend" ? "no ad spend recorded" : totalCost === "no_sales" ? "no sales kept" : formatMoney(totalCost, currency)}.`);
-  if (!rows.length) before.push("No campaign had recorded ad spend or tagged sales on these days.");
+  if (!rows.length) {
+    if (salesKnown && unassignedAds !== null) before.push("No campaign had recorded ad spend or tagged sales on these days.");
+    else if (unassignedAds !== null) before.push("No campaign had recorded ad spend on these days. Its tagged sales could not be read, so they are unknown.");
+    else if (salesKnown) before.push("No campaign had tagged sales on these days. Its ad spend could not be read, so it is unknown.");
+    else before.push("No campaign can be listed for these days, because neither ad spend nor sales could be read.");
+  }
 
   const listed = rows.slice(0, WEEKLY_AD_MAX_ROWS);
   const after: string[] = [];

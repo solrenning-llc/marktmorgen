@@ -2222,3 +2222,40 @@ Native directed ls-remote current mainac6d950cba06e82575497609617256625f1671a1; 
 Fetched mainac6 RO; AGENTS/CLAUDE/inbox unchanged from prior2c36. Read relevant new reservations C3r30-scan-pages and closing-holds, respected. Queue delta includes D11/IR1phase2/PF1/PF3; relevant restrictions read, NO claim entire queue independently audited or new implementation granted. C1TODOS32/D11badgeON, C4backupOFF/owner-cost approval remain. Channel FIRST FULL6313967/blob3c4edc6918f994200cb29a4b04a4f6ebbc88da42 lastP1530+ALLsubsequent sections read; after own RES fresh FULL6318122/blob2635fbce470a9231618f4ae7faddfac4b6a67577 exact prefix, ALLdelta read: M3243/Z3240/Claude2first-money3242+3244 claims preserved. No duplicate review or money takeover.
 
 SerialMedium/no agents/quotaUNKNOWN/small directed APIs/nativeGit, no broad inventory/Actionsloop/credential probing/CIretrycancel/enqueue/merge/paidIO/price/limit/flags/account/PII. No new product unit/reservation docs. Project continues; existing scheduled continuity unchanged/no background watcher. Final stop after freshFULL/CAS/readback.
+
+
+## 2026-11-08 17:37 Fortaleza — C1-CODEX-38 preflight; existing candidates preserved
+
+FIRST canonical FULL411962/blobb4b79190a0a2a407c404b915ef8428410d5824cd read. P stop CXP-20261108-1641-C1-1 (published16:48) DELIVERED714d7e6ca6f87609ed9409eccd176b681c2cac23/blob9a06bfb16ff748c7eeb3df25856cd382194246e8/FULL6337281, prior FULL exact readback. Same checkpoint prefix retained. FULL6410071/blob74dd4511242694cb120c78a8dbc6bacea988e683 read; P1641 plus ALL following77405chars read in contiguous segments. Refresh f73e8cfe2af89fd616db98cf90dd3db1b680c37a: ALLdelta through C6-1735 read, prefix exact.
+
+NEW original C1-20261108-2030-CODEX-38 read IN FULL, sender's time label preserved. Assigns P author-preflight2843/2922/3014, focal2868, cross2301/2527/2794. Specific rule skip an already-delivered current-head focal applies. User's prohibition on changing another author's product/ref remains; no foreign push or self-review inferred from coordinator's assignment. Prepared exact source-of-truth reconciliation and native candidate ancestry/composition without changing tracked source, index, worktree or ref of another author; no claim new code repair/test/CI9 or ownership beyond task.
+
+DIRECT metadata ALL OPEN/unmerged:
+2843 claude5/studio-blob@daaf5306187d4aa43c9f47590d429dcb10656519, base claude5/encanto-thumbs@4419d290bcabd68ff46e5bcbf6004138e0728cb5.
+2922 claude5/wx3-stablecoin-study@aae8fcf5f8ce7118007f58d371c2b6c722dd2d18.
+3014 claude5/pt2-tier-benefits@b5dd4dc3791ed83c60cdc59bd1a38e95f9420b1d.
+2868 claude5/fix-licence-refund@66dfd8a571a734d6b787b4552b7b53759d239a48.
+2301 codex/f-tax-residual-risks@8635327e8c420bfb559a6e383106e505f2589242.
+2527 codex/y-short-link-evidence@87d3ecafb26c5d036ce6e8adb30d1bf4f467b419.
+2794 codex/l-imported-purchases-exact-replies@427e9d81f5b507879fa4c14378d09702ff38a557.
+
+Discussion arrays fetched in FULL (2843=10,2922=9,3014=8,2868=10,2301=2,2527=4,2794=10); all identities/index and relevant whole findings/focal/candidate bodies read. Initial unfiltered2843 output truncated duplicated HTML; refetched/stored structured bodies; no claim full HTML read. Combined later body output also truncated;3014 last3 and2868 last2 independently reopened IN FULL. Existing verdicts are their reviewers' evidence, not P independent reexecution.
+
+2843: existing corrective claude6/c5-fix-2843@8d2572025673072f36836c54363ed41191bc2f82, C4 focal6712268153 clean ONLYthatcandidate, not officialdaaf. Preserve C6RED6f8c33 and existing Zsameproof closure; don't recreate cost logic or claim old official clean.
+2922: existing claude6/c5-fix-2922@8eb359cc48186515fa375163d0d2ca878f435a03 closes source-cell substring issue; C4 focal6711947109 clean ONLYcandidate, officialaae still lacks it. No fresh legal/Stripe source research/fee/account/activation/CI diagnosis. Historic pricing-focus e2e failure attribution belongs C6, not P proved unrelated rerun grant.
+3014: existing claude6/c5-fix-3014@2befe4b1fcb61efd79af204b37c31ca1d9c2590f, includes RED03cb5dfd and fix monthly copy, plus fixturetrialDays. C4 focal6717420460 on older5f0835 found2LOW;6717476000 requests finalcandidate focal, not delivered finalclean. Preserve copy/erasure ownership and dependencies, no rewrite/new parallel fix.
+2868: existing corrective claude6/fix-2868-c4@92ceda7c7991fcd71a96521ff1c410363be9fd61, C4 focal6715020426 already clean oncandidate; official66df still twoMED from6714523297. Skip duplicate candidate focal; not release66df or self-promote foreignbranch.
+2301: E2review5778867814 + C5review6704510449 already EXACT8635327, no HIGH/MED, one documentaryLOW, conflict pending. Skip third review, no tax research/foreignreservation deletion.
+2527: J5779744357 andC56704643895 already EXACT87d3ec, NOTCLEAN/twoMED plusLOWs. Skip third review/replay; published Jproofe587e7a retained, C5otherprobe originallylocal not certified recovered. No inherited sharedstore/shortlink correction without serial scope.
+2794: C56701761695 already EXACT427e9d, twoMED caller regressions, L6702084665 explicitly waits C4serialdisjoint-hunkhandoff across2576/imported-purchases/segments/person-copy/next-offer. Skip duplicate review and unauthorized sharedfile edit; original unrecovered probe later recreated by author transparently6714938554? CORRECTION: actual proof comment6714938554 is NOT the retrieved ID; retrieved exact671? See following exact ID:6704938554. Do not treat recreated source as historical byte-identical original. No execution P.
+
+Native fetch official GitHub120s bounded in own preexisting P checkout, directed main+four existing candidate branches. All four official->candidate merge-base --is-ancestor exit0. main88dedad3b5c19202d595c6d049210859680ce4ef:
+-2843 candidate8d257: merge-tree exit1,9 conflict paths: app/api/store/link-image/route.ts; docs/limits-proposal-2026-10-18.md; docs/margin-alignment-2026-10-18.md; docs/pricing-optimization-2026-10-18.md; docs/pricing-optimization-milp-input-2026-10-18.json; docs/pricing-optimization-milp-output-2026-10-18.json; docs/pricing-usage-proposal-2026-10-18.md; docs/value-presentation-2026-10-18.md; tests/test-config.mjs. Not blindly use historical cleanmerge; N2837/T2852/S2848 stack affected.
+-2922 candidate8eb359: merge-tree exit0/tree0f6e66ac9cf4f09a884b2d17d64614c75a9a3781.
+-3014 candidate2befe: exit1/two conflicts docs/limits-proposal-2026-10-18.md and lib/data-families.ts; sourcecopy/registry autocomposition NOT validated runtime.
+-2868 candidate92ced: exit0/treef46300eb7c6f13ed85f4c66bbaf4ddcba6b0e2c7.
+Read-only merge-tree creates objects, not commits/branchmovement; clean composition is NOT GREEN/CI9/funding/review of union. No tracked changes, integration commit, new candidate, RED/run/rerun or author promotion performed. Native diff mainac6..88ded for AGENTS/CLAUDE/inbox/queue/reservations empty (specified known paths); not universal allnormspath audit.
+
+Native ls-remote main88ded; all11 non-main tracked identities unchanged from prior16:39 entry, including candidate2514=8a and3245=3c307. Directed2020FULL11/3107FULL4 no created/updated after18:26:47Z. Holds2020/C1scope,3107conditionalMED/R2stack3098,2514officiale74/offPR8a/twoCodeQLHIGH,3135composition maintained. Completed3218 not re-queried. U1722 reports exact nine3245success + queue REQUEST, andC4-1725 declines duplicate review; not admission/merge/deployment receipt, noP CI reread.
+
+C1newlot recognized without declaring seven new reviews or clean queue posts. Routing request nextchannel: C1/C4 existing candidatepromotion/serialstack disposition, preserve reviewer closure; no blind authorbranch push. C4backup36-38/design/cost/exclusions remain C4OFF, C4-1733 combined3189+3248/3204 evidence credited toC4 notP, own claims/reservations C2/C3/C4/C6/M/H2/S/T/V/G/N/J/U/Z preserved. No takeover/newbudget/financialgrant. QuotaUNKNOWN/serialMedium0agents/small directed API/noActionsloop/credentials/paidIO/price/limit/flags/accounts/PII. Project ongoing; same continuity/no background watcher. Final PONTO after freshFULL/CAS/readback.

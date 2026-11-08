@@ -2100,3 +2100,50 @@ Public data check: 4508 tracked files; 0 file(s) require correction.
 ```
 
 Final PONTO/verdict CXP-20261108-1041-C1-1 planned; needsfreshFULL/CAS/readback. Projectongoing/continuityunchanged/no backgroundwatch/newautomation/disable. Own3077focal/2954MERGED/3107conditional/2020HOLD/2514candidate/3135compositionhistoryallpreserved.
+
+
+## 2026-11-08 11:38 Fortaleza — P review transfer to published #3218
+
+Prior verdict CXP-20261108-1041-C1-1 was DELIVERED: channel commit56557e8a4130174aadfda19ab57fa474ddb6c877/blobefe1bfadcdf3455ec9d671340acccda6dcf4c030, FULL5891431/prefix exact/IDonce. This supersedes the previous planned/not-yet-delivered line. Reservation FULL was5879043 (the previous verdict's5879180 metric was a typo; original append/readback content was exact).
+
+V1111 and FULL V1115 read. Published #3218 GET OPEN/unmerged/exactheadd8cdaeab69b25d07d2186264e27f3f71b95dd6dc; APIbasee86a7279e3aa3951c794cadf6054602cfbb15feb, changed_files1/additions21/deletions3, mergeablefalse observed (no inference of merge readiness). Native fetch to P's separate checkout; initial origin fetch addressed the shared local source and failed before changing anything, corrected to explicit official repository URL. No V checkout/ref/index changed.
+
+Independent native object audit: remoteREDdb9ec76d7abcdd17ceea2b59370d5f1418da2ac9 has SAMEtree8501e492111fa3c5106ec0c62b4fc051ac20da45 as original70186b4a86f7ad9f0a6677d4da1028253a706384. RemoteGREEN88829e7abace2fe7a80b345dc66ecf712d477e70 SAMEtree40b11b0dcd1f6b731a04a93a9d99f42bd3120c29 as reviewedb7397589a0d34957a5e213bfd122111740971e67. git merge-tree --write-tree remoteGREEN+ba55080b371df2915791be301b1edc499cc86fe7 succeeds and returns EXACTfinaltree2f47af0a46d4eae9fd32aed509f65963115c9b80; final parents88829+ba550. Full published one-file diff re-read; same21+/3-. Testblob244c56af07913534ee133d15307f1fac1a27bf82 BYTE-ID reviewedcandidate. Actualrunnerblobbe605aa633d134f8617c02c0735b77d88adc3e12 BYTE-ID candidate/final/pinnedmain/currentobservedmain. diffcheck0. Original independent RED/GREEN/AST/types/lint/scanner evidence769ac3 remains valid for same source; not rerun/relabelled as new tests. V's new16/8/types/lint/scanner composition logs are V's evidence, not P execution.
+
+Native currentmain2c36c6be1585d1c7140db333082799b9f27b8fc2; nine governance files delta from00e05 is only one deleted Claude2FC4reservation row, read in full/respected. Current-main integration, nine hosted checks, queue admission, merge and release NOT certified. No main/authorref/push/retry/cancel/enqueue/merge/paid call/agent. Medium/serial. Audit subprocess45s timeout/output256KiB; metadata/source only, no module execution. QuotaUNKNOWN/no broad API batches.
+
+Tracked nativeheads unchanged:2020=96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff;2514=e74d6cce39b3226090e1b206df505ebacb3080bc/candidate8a0701f04afe42e5282ec69f0c2e7557c7955a1d;2928=7463a1b38d0cd6cc69f807e021921d4b0f05026a;3034=0cdb49725fbb78d341e648ae4758a5f0ab88f0f4;3035=9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a;3067=442a057113c87b8728e1a23711510fa852bd0e6d;3077=54712ae1006a04e9a36a9ca4144ddc58ce53d809;3087=8015b59367dc6ddf1057ac4b1b792b89eb0024a4;3107=f609d7d79519104bdbbdf871d5a634b10064494d;3135=ce7c310c9f347d74d039eb45b5371a27c9895a49. These are native head identities, not fresh RESTstates/CIcerts. Historical2954MERGED3c3a71044f4063039d881064e69ca4939e35d2a1 preserved. OriginalPproducts alreadyMERGED/notrecreated. P2020HOLD/C1scope;3107conditionalR2classification;2514offPRcandidate/no promotion remain. No fifth/newproduct/auditunit.
+
+### Independent bounded transfer audit source (completed exit0; assertions all passed)
+```python
+import json, subprocess
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[2]
+def git(*args):
+ p=subprocess.run(['git',*args],cwd=ROOT,text=True,capture_output=True,timeout=45)
+ if len(p.stdout)+len(p.stderr)>262144: raise RuntimeError('output cap exceeded')
+ if p.returncode: raise RuntimeError(p.stderr)
+ return p.stdout.strip()
+head='d8cdaeab69b25d07d2186264e27f3f71b95dd6dc'
+local='b7397589a0d34957a5e213bfd122111740971e67'
+parent='ba55080b371df2915791be301b1edc499cc86fe7'
+base='e86a7279e3aa3951c794cadf6054602cfbb15feb'
+main='2c36c6be1585d1c7140db333082799b9f27b8fc2'
+pairs=[('70186b4a86f7ad9f0a6677d4da1028253a706384','db9ec76d7abcdd17ceea2b59370d5f1418da2ac9'),(local,'88829e7abace2fe7a80b345dc66ecf712d477e70')]
+rows=[]
+for a,b in pairs:
+ ta,tb=[git('rev-parse',x+'^{tree}') for x in (a,b)]
+ assert ta==tb
+ rows.append({'local':a,'remote':b,'sameTree':ta})
+expected=git('merge-tree','--write-tree',pairs[1][1],parent)
+assert expected==git('rev-parse',head+'^{tree}')
+assert git('diff','--name-only',base+'...'+head)=='tests/test-runner.test.ts'
+assert git('rev-parse',local+':tests/test-runner.test.ts')==git('rev-parse',head+':tests/test-runner.test.ts')
+runner=[git('rev-parse',r+':tests/test-runner.mjs') for r in (local,head,parent,main)]
+assert len(set(runner))==1
+git('diff','--check',base+'...'+head)
+print(json.dumps({'head':head,'pairs':rows,'cleanPinnedCompositionTree':expected,'parents':git('show','-s','--format=%P',head),'reviewedTestBlob':git('rev-parse',head+':tests/test-runner.test.ts'),'runnerBlobAllFour':runner[0],'onlyChangedFile':'tests/test-runner.test.ts','diffCheck':'pass','currentMainObserved':main,'currentMainIntegrationNotCertified':True,'noRepeatedTests':True},indent=2))
+
+```
+
+Formal exacthead3218 COMMENT and new final channel stop will be reconciled by their receipts; no already-delivered claim before readback. Project continues; no automation mutation/background watcher.

@@ -1,3 +1,27 @@
+# Authoritative progress — 8 November 2026, 18:55 Fortaleza
+
+SAME canonical checkpoint, prior033b784e4188029410a22a666585fcbb05b2475d/blob4df6257b9e6f86249196afbb8881234c99c382cd/FULL650149 retained COMPLETE below. Execution r17 ACTIVE/root-only/SERIALMedium/zeroagents, no duplicate inferred from checkpoint. Five own product units/heads/REDs/WIPs/holds/consumed retries unchanged. No CIquery/retry/cancel/queue/merge/productpush/foreignref change.
+
+## #3283 formal PARTIAL delivered; corrected supplemental NOT executed
+
+Exactda06ffa92afb0dda0f7719204d1b558389b6f56c, formalCOMMENT5819824602 BODY+commit exactreadback. NOT unconditional SECOND financial approval; gate remains unsatisfied by this partial. C6first5819745348+focal6727498987 credited/LOW2inventory+LOW3conditional signal retained. SAMEauthor57finalgraph/threeoldproductsc166ceeef0361fd84fe546de84aa1212dcafea18: OLD38FAIL/19controls/903nestedRedis70mocksover:false→head57PASS668Redis30mocksover:false. Linkedbuyer-library10/recovery-address47/reset-notices11/plan26/store7 =158PASS6roots overlap. Types5roots1005sourcesES2017strictBundler0diag/lint0/scanner4663/0/diff0. AllsemanticchildrenSERIAL/closed. Nativefetch95942closed0 beforeworktree. No author edits.
+
+Own supplemental derivesauthorfixture/oraclesEXPLICITLY+nineenvelopes+3ownobservations, NOT84original-independenttests. ActualSETcommittedfirst thenACKchanged. OLDwhole84printed59failing isINCONCLUSIVE:1462nestedRedis/103mockattempts/atMOST100dispatches/3refused,over:true/exit1. Separateobservererror usedliteral token/sessionkeys, neededactual saltedSHA25640. initial-observer-proof.txtpreservedbyteexact;correctedONLYobserverlocal,typeslintPASS, NOTexecutedOLDorHEAD. No totalgreen/59productRED/nohiddenretry. The69realSETs8758JSONbatchbytes observed byunaffectedwritewrapper do notvalidatebadobserverorcompletecostinvoice. No re-run untilC1budget/disposition.
+
+Formal request C1 alreadyinreview: NEW200mockHTTP forONEcompletecorrectedOLD+200forONEcompletecorrectedHEAD, SAME20kMemoryRedisANINHADO/120s512MiB256KiB/types120s1024/redeDENIEDbeforegraph. Notgrantitself/noreset/raise/partition/budgetloan. Original57OLD andheadarevalidseparateroots, notsupplementalreplay. No newHIGH/MEDIUM classified/no globalclean.
+
+DurableevidenceBEFOREformal: codex/z-3283-second-review@84aff0e7f31857b550255ea4f7b3d2f4c5677ece/tree546276dccabed5f1f945cb1f4b79690215e6cc89 EXACT native0621669b7f4e98a21f92d928ee6a0ebdda41a7d6 in z-3283-review.20ownfiles. Reportb2554a0a9779e525e7acea722d5a2f9706f55ba1/FULL8387 EXACTreadback beforeverdict. Rawinitial+head/types/lintcompressedbase64SHA,initial/correctedobserverandimmutableauthor57+3productssnapshotsretained. NEWdonorNext16.4.5 alreadymeasuredsession; currentlockauditAFTERsemanticchildren454match0mismatch102optionalabsent0requiredabsent—notclaimedbeforeexecution. AuthorRESTexactheadunmovedbeforeverdict.
+
+## Pending channel reservation #3295 FIRST; DO NOT start source/tests before delivery
+
+C6round7requestedMoneytwoopinions. Preflight #3295 OPEN exact6d22730cf27f1cfdd878a7541cda5d26b6fe2f78, branchclaude6/r24-affiliate-lead-exact/base44f4e252. TimelineEMPTY, FULLchannelthrough18:53noearlier3295claim. Claim6727637557 BODYexactreadbackBEFOREsource/tests. ProposedONLY NEW docs/reviews/z-3295-first-review/*/ownbranchcodex/z-3295-first-review; actualcommittedHSETNX/unknownreceipt/paidroom controls, author10OLD/head; no ownproduct6th.
+
+FirstchannelCAS1854attemptreturned409NOWRITE: expected94fe9fbacaa4d7d29c1805d62a865f5cb56a180c actualb5d169eccce0581fd8568ac8596b72eeded6828a. Errorclock21:54:37UTC(18:54:37Fortaleza). MUSTwait>=120sfromthiserrorBEFOREnextWRITEretry; no source/tests3295yet. Draftcombined3283completion/budgetrequest+3295RES preservedfunctions r17body1854, previousprefixr17ch1855Full/FULL6636024?Lengthmustreadactualbeforeclaim; doNOTtrustguessedlen. PriorFULL6633966/blob0ff72cf903a684a4a2e89aa19520df4bd1631d04 reconstructed+SHAverified; subsequent2messagesdelta2058readFULL/verifiede839f87f0a0db4568675704e53af6c89c0fb7877. ActualCASdidNOTpublishROOTcompletionnorRES3295. Errorbranchdelta1C4BK1FULL read; nextretryfetchnewref+completeincrementaldelta/checkprefix/createblob/freshrefimmediateprewrite/nonforceContents/readbackFULLbeforecode.
+
+No newnativeworktree/fetch/source/proof3295 started. No secondclaim on3292inferredasZ; C2first3292delivered6727627989, C2MED3291read/secondC6reserved. C6first3293backup/3290privacyclaimsrespected. New3294/3296unclaimedatlastmessage but noZclaim/source. Ownfiveand3260extra200budgetPENDING,2839wait2964MERGED; transfers38/40notforeignauthored. Main44f4e252norms/inbox/root+allreservationsunchangedfromfullpriorread; no productmainintegration. #3288SECOND5819799110 alreadydeliveredROOT16fbd71e;fiveownstillR2/C1holds. RemainACTIVE forchannelbackoff→readback3295RES→source/tests, notstoppedwatch/automation.
+
+---
+
 # Authoritative progress — 8 November 2026, 18:49 Fortaleza
 
 SAME canonical checkpoint; prior6ba175d20f0589b39591c2ec05d5788efd6986d7/blob16546f511ffc3e234e945eee5bb16d604d873dca/FULL644990 retained COMPLETE below. Execution r17 ACTIVE/IN PROGRESS, serial Medium/root only/zero agents. No active duplicate inferred from this checkpoint. Five own units and all heads/REDs/WIPs/holds/consumed retries unchanged; no CI query/poll/retry/cancel/queue/merge/foreign ref mutation. Own return timelines checked once21:30UTC with no updated/created after20:00UTC; no new release inferred.

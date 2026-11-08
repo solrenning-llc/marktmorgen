@@ -16,7 +16,7 @@ import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail 
 import { rememberBuyers, storesBoughtFrom, storesKnownFor } from "@/lib/buyer-library";
 import { askErasureLink } from "@/lib/erasure-request";
 import { COPIERS } from "@/lib/person-copy";
-import type { ErasureScope } from "@/lib/person-erasure";
+import type { ErasureScope } from "@/lib/erasure-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 
@@ -45,7 +45,7 @@ const fixture = (async () => {
 /** Every SUNION answers `reply`; every other command is the stub's. */
 async function withUnion<T>(reply: () => unknown, run: () => Promise<T>): Promise<T> {
   const original = redis.pipeline;
-  redis.pipeline = async (commands: unknown[][]) =>
+  redis.pipeline = async (commands: (string | number)[][]) =>
     (commands[0]?.[0] === "SUNION" ? reply() : original.call(redis, commands)) as Awaited<ReturnType<typeof original>>;
   try {
     return await run();

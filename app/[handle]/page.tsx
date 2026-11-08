@@ -249,7 +249,9 @@ export default async function StorePage({ params, searchParams }: Params) {
   // What is left of each limited product, counted from real checkouts. Asked
   // side by side, so a long store does not wait on its products one by one;
   // a product without a limit is answered without asking anything.
-  // A product handing out keys from a pool that is empty is sold out too.
+  // A product handing out keys from a pool that is empty is sold out too; one
+  // whose keys left could not be read is unknown, never "keys left" (CX-123
+  // rule 24): its card then draws no way to buy it and no count.
   // What each bundle on this page holds now: one read for the page, none for
   // a page without bundles (lib/bundles.ts).
   const inBundles = offeredItems(store, known).catch(() => new Map<string, Listing[]>());
@@ -257,9 +259,9 @@ export default async function StorePage({ params, searchParams }: Params) {
     listings.map(async (product) => {
       const [stock, out] = await Promise.all([
         stockLeft(store, product).catch(() => null),
-        outOfKeys(store, product).catch(() => false),
+        outOfKeys(store, product).catch(() => null),
       ]);
-      return out ? 0 : stock;
+      return out === null ? ("unread" as const) : out ? 0 : stock;
     }),
   );
   const rated = await ratings;
@@ -269,9 +271,11 @@ export default async function StorePage({ params, searchParams }: Params) {
   const coming = await soonState(store).catch(() => ({ soon: new Set<string>(), days: new Map<string, string>() }));
   const soon = coming.soon;
   const left = new Map<string, number>();
+  const unread = new Set<string>();
   listings.forEach((product, i) => {
     const count = counts[i];
-    if (count !== null) left.set(product.id, count);
+    if (count === "unread") unread.add(product.id);
+    else if (count !== null) left.set(product.id, count);
   });
 
   // Which parts of the page have something to show (lib/store-order.ts): only those are drawn.
@@ -460,6 +464,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                             cart={cartOn && !soon.has(product.id) && cartable(product) && left.get(product.id) !== 0}
                             sold={soldLine(soldCounts?.byProduct[product.id])}
                             grid
+                            unread={unread.has(product.id)}
                           />
                         ))}
                       </ul>

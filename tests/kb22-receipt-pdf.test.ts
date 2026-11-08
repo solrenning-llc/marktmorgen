@@ -206,7 +206,8 @@ async function main(): Promise<void> {
   is("a charge date one second past the last Date: unreadable", at(MAX_SECONDS + 1), { ok: false, why: "unreadable" });
   const last = at(MAX_SECONDS);
   let lastDrawable: unknown;
-  try { lastDrawable = last.ok && (await receiptDrawable(last.receipt)); } catch (error) { lastDrawable = `threw ${String(error)}`; }
+  // Drawn as every receipt is since U2: with the store's number (lib/receipt-number.ts).
+  try { lastDrawable = last.ok && (await receiptDrawable({ ...last.receipt, number: "R-000001" })); } catch (error) { lastDrawable = `threw ${String(error)}`; }
   is("control: the last date a Date can hold still reads and draws", [last.ok, lastDrawable], [true, true]);
 
   part("The file: tagged for a screen reader (PDF/UA)");

@@ -87,17 +87,25 @@ export function nextOfferShown(store: Store, now = Date.now()): boolean {
 }
 
 type Kept = { s: string; p: string; r: NextReason; w: string; x?: 1 };
+const KEPT_FIELDS = new Set(["s", "p", "r", "w", "x"]);
 
-/** A kept record as `keep` writes it, or null for any other string. */
+/**
+ * A kept record exactly as `keep` writes it, or null for any other string: its own s (this store's), p and w in
+ * text, r one of the reasons, x only as 1 when there, and no other key (Claude 2's review of #3265: a dismissal
+ * whose x is "1", true or 2 is not one `keep` wrote, and is never read as a live choice).
+ */
 function keptOf(raw: string, statsId: string | null): Kept | null {
-  let value: Kept;
+  let value: unknown;
   try {
-    value = JSON.parse(raw) as Kept;
+    value = JSON.parse(raw);
   } catch {
     return null;
   }
-  if (!value || typeof value !== "object" || Array.isArray(value) || !statsId || value.s !== statsId || typeof value.p !== "string" || !REASONS.includes(value.r)) return null;
-  return { s: value.s, p: value.p, r: value.r, w: typeof value.w === "string" ? readReason(value.w) : "", ...(value.x === 1 ? { x: 1 as const } : {}) };
+  if (!statsId || !plainObject(value) || Object.getOwnPropertyNames(value).some((name) => !KEPT_FIELDS.has(name))) return null;
+  const [s, p, r, w, x] = ["s", "p", "r", "w", "x"].map((name) => ownField(value, name));
+  if (s !== statsId || typeof p !== "string" || !REASONS.includes(r as NextReason) || typeof w !== "string") return null;
+  if (Object.hasOwn(value, "x") && x !== 1) return null;
+  return { s, p, r: r as NextReason, w: readReason(w), ...(x === 1 ? { x: 1 as const } : {}) };
 }
 
 /**
@@ -118,8 +126,10 @@ async function readKept(store: Store, session: string): Promise<Kept | null> {
   return kept;
 }
 
-async function keep(store: Store, session: string, kept: Kept): Promise<void> {
-  await redisPipeline([["SET", keptKey(session), JSON.stringify({ ...kept, s: store.statsId }), "EX", NEXT_OFFER_KEEP_SECONDS]]);
+/** Whether the choice was kept: only the SET's one reply "OK" says so (CX-123 rule 24); any other answer is not kept. */
+async function keep(store: Store, session: string, kept: Kept): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["SET", keptKey(session), JSON.stringify({ ...kept, s: store.statsId }), "EX", NEXT_OFFER_KEEP_SECONDS]]), 1);
+  return replies !== null && replies[0] === "OK";
 }
 
 /** A kept choice, as it is shown now: only while the product is still listed and on sale. */
@@ -130,11 +140,33 @@ async function shownOf(store: Store, kept: Kept): Promise<NextOffer | null> {
   return { product, ai: kept.r === "ai", why: kept.r === "ai" ? kept.w : "" };
 }
 
-/** A row whose metadata is an object (or null): one whose metadata says nothing cannot say what it handed over. */
-const metadataKnown = (row: Record<string, unknown>) => {
+/** Metadata as Stripe gives it: a plain object whose every own value is text. */
+const stringMap = (value: unknown) =>
+  plainObject(value) && Object.getOwnPropertyNames(value).every((name) => typeof ownField(value, name) === "string");
+const SESSION_STATUSES = new Set(["open", "complete", "expired"]);
+const SESSION_PAYMENT_STATUSES = new Set(["paid", "unpaid", "no_payment_required"]);
+const INTENT_STATUSES = new Set(["requires_payment_method", "requires_confirmation", "requires_action", "processing", "requires_capture", "canceled", "succeeded"]);
+const oneOf = (values: Set<string>, value: unknown) => typeof value === "string" && values.has(value);
+
+/**
+ * A checkout session in Stripe's shape at the pinned version (STRIPE_LIST_VERSION) on every field the decision
+ * reads (Claude 2's review of #3265): metadata null or text values only, status and payment_status Stripe's own
+ * values, customer null (a guest) or a customer id. Anything else would drop a purchase silently, so the row is
+ * unreadable and what the address owns is unknown.
+ */
+const sessionLegible = (row: Record<string, unknown>) => {
   const meta = ownField(row, "metadata");
-  return meta === null || plainObject(meta);
+  const customer = ownField(row, "customer");
+  return (
+    (meta === null || stringMap(meta)) &&
+    oneOf(SESSION_STATUSES, ownField(row, "status")) &&
+    oneOf(SESSION_PAYMENT_STATUSES, ownField(row, "payment_status")) &&
+    (customer === null || (typeof customer === "string" && CUSTOMER_PATTERN.test(customer)))
+  );
 };
+
+/** A payment intent in Stripe's shape on every field the decision reads: metadata of text values, status Stripe's own. */
+const intentLegible = (row: Record<string, unknown>) => stringMap(ownField(row, "metadata")) && oneOf(INTENT_STATUSES, ownField(row, "status"));
 
 /**
  * Every product this address has from this store, by id: what its completed
@@ -144,8 +176,9 @@ const metadataKnown = (row: Record<string, unknown>) => {
  * Null when that cannot be read in full: nothing is offered on a guess.
  * Each Stripe list is read in its exact shape (CX-123 rule 24,
  * lib/stripe-list.ts): a page that is not one throws, and a row without its
- * id or with metadata that is not an object, or more pages than are read,
- * leave what is owned unknown, never "nothing".
+ * id or with any field the decision reads out of Stripe's shape
+ * (`sessionLegible`, `intentLegible`), or more pages than are read, leave
+ * what is owned unknown, never "nothing".
  */
 export async function ownedHere(store: Store, email: string): Promise<Set<string> | null> {
   const account = store.stripeAccountId;
@@ -159,7 +192,7 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
   try {
     for (const variant of [...new Set([email.trim(), normaliseEmail(email)])]) {
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-      const listed = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`), metadataKnown);
+      const listed = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`), sessionLegible);
       if (listed.hasMore || listed.unreadable) return null;
       for (const session of listed.rows as Record<string, unknown>[]) {
         const meta = (session.metadata ?? {}) as Record<string, string>;
@@ -172,7 +205,7 @@ export async function ownedHere(store: Store, email: string): Promise<Set<string
     }
     if (customers.size > 3) return null;
     for (const customer of customers) {
-      const listed = readStripePage(await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`), metadataKnown);
+      const listed = readStripePage(await onAccount("GET", account, `/payment_intents?${new URLSearchParams({ customer, limit: "50" })}`), intentLegible);
       if (listed.hasMore || listed.unreadable) return null;
       for (const intent of listed.rows) {
         const meta = (intent.metadata ?? {}) as Record<string, string>;
@@ -355,7 +388,9 @@ export async function nextOfferFor(input: {
   let choice: NextChoice | null = picked?.choice ?? null;
   if (picked && modelAddsValue(picked.choice, picked.ranked)) choice = (await askForNext(store, bought, picked.ranked, now)) ?? picked.choice;
   const next: Kept = { s: store.statsId!, p: choice?.productId ?? "", r: choice?.reason ?? "order", w: choice?.why ?? "" };
-  await keep(store, session, next);
+  // Shown only once kept, so the page and the email say the same. A SET not answered "OK" shows nothing and leaves
+  // the lock for its minute: no other opening asks the model in it.
+  if (!(await keep(store, session, next))) return null;
   return shownOf(store, next);
 }
 
@@ -364,8 +399,7 @@ export async function dismissNextOffer(store: Store, session: unknown): Promise<
   if (typeof session !== "string" || !SESSION.test(session) || !store.statsId || !isRedisConfigured()) return false;
   const kept = await readKept(store, session);
   if (!kept) return false;
-  await keep(store, session, { ...kept, x: 1 });
-  return true;
+  return keep(store, session, { ...kept, x: 1 });
 }
 
 /**

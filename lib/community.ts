@@ -553,8 +553,13 @@ export async function setProfile(
   else if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
   // The handle is taken before the name is written, so a member is never left
   // named but unmentionable. Claiming gives back what they ended up with,
-  // which may carry a number when somebody already held the plain one.
+  // which may carry a number when somebody already held the plain one. It
+  // only reserves: the handle they had stays theirs until the record is known
+  // not to carry it any more (rule 30 on Codex G's review 5815632734 of #3123),
+  // so a change that did not go in never lets the name they are still shown
+  // under resolve to nobody, or to somebody else.
   const handle = await claimHandle(id, member.k, name, member.h);
+  const had = member.h && member.h !== handle ? member.h : "";
   let replaced = "";
   let saved: Member | null;
   try {
@@ -570,25 +575,41 @@ export async function setProfile(
     });
   } catch (error) {
     // The read or the write after the claim answered in no known shape, so
-    // whether the record took the handle is not known: a lost answer may hide
-    // a write that went in. It is given back only when the record, read in the
-    // same step, does not carry it (rule 30 on Codex G's review 5815559331 of
-    // #3123). When that answer is not known either, the original failure is
-    // what the caller sees.
-    if (handle) await giveBackHandle(id, handle, member.k).catch(() => 0);
+    // whether the record took the new handle is not known: a lost answer may
+    // hide a write that went in. Each of the two handles is given back only
+    // when the record, read in the same step, does not carry it (rule 30 on
+    // Codex G's reviews 5815559331 and 5815632734 of #3123): a record still
+    // on the old one keeps the old one and lets the new one go, a record on
+    // the new one keeps the new one and lets the old one go. When an answer
+    // is not known, nothing more is given back, so both stay reserved: a
+    // handle held too long is safe, one that stops resolving to the person
+    // still shown under it is not. Either way the original failure is what
+    // the caller sees.
+    await giveBackUnlessCarried(id, member.k, [handle, had]).catch(() => 0);
     throw error;
   }
   // The erasure deletes only the handle the record holds (lib/community-erasure.ts),
   // so a handle the record does not carry is given back here, never left tied to
   // the member: the one this change claimed when the record went in between (an
-  // erasure), and one a change made at the same time wrote and this one replaced
-  // (rule 30 on Codex G's review 5815472405 of #3123).
+  // erasure), the one the member had once the record no longer carries it, and
+  // one a change made at the same time wrote and this one replaced (rule 30 on
+  // Codex G's reviews 5815472405 and 5815632734 of #3123).
   if (!saved) {
-    if (handle) await giveBackHandle(id, handle, member.k);
+    await giveBackUnlessCarried(id, member.k, [handle, had]);
     return member;
   }
-  if (replaced && replaced !== handle && replaced !== member.h) await giveBackHandle(id, replaced, member.k);
+  await giveBackUnlessCarried(id, member.k, [had, replaced && replaced !== handle ? replaced : ""]);
   return saved;
+}
+
+/**
+ * Gives back each of these handles, one GIVE_BACK_HANDLE each, so each is let
+ * go only while it still points at this member and the record, read in the
+ * same step, does not carry it. Stops at the first answer that is not known,
+ * keeping every handle not yet given back.
+ */
+async function giveBackUnlessCarried(id: string, who: string, handles: string[]): Promise<void> {
+  for (const handle of [...new Set(handles)]) if (handle) await giveBackHandle(id, handle, who);
 }
 
 /**

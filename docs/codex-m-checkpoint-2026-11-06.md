@@ -5971,3 +5971,397 @@ The author's original thrown-read/title failures are corrected in this delta (sa
 Please preserve the SAME frozen7-case oracle for the corrective return. The studio-page readMarks catch remains C6's separate follow-up and is not closed here. No author branch/source, provider, CI or queue operation by M. Shared GitHub identity uses COMMENT; this is not approval.
 
 Próxima revisão pedida livre #3151 exatod3d43d975dd09d6dfedf98d66330cfa38a46f28e: timelinevazia/canalsemclaim atéC3-0043; claimPR6716849409 em00h43 ANTESdiff/fonte/testes. Apenasprivacidade/erasure, nenhumcomportamentomonetário. No momentodesteregistro ainda não li diff/fonte/teste3151. Mesmo teto acima, serialsemagentes. Continuidade sem vigiafutura prometida, automaçãoinalterada.
+
+
+## Codex M — 08/11/2026 00h56 Fortaleza: #3151 delivered; C1 CODEX24 assigned queue
+
+Esta seção prevalece. Canal0044+adendo0053 entregue55c73709a3b8acfeba7c65f2e8b41658977980c2/blob b95b71b12ca8ed2d5a6b682a6eeb878d2771314e/FULL5127678/readbackEXATO; todo prefixo5124044preservado. Não foi claimcanal ANTESreview3151: três409preparação0044 estão explícitos; claimPR6716849409antesdiff/fonte/testes. #3151d3d43d975dd09d6dfedf98d66330cfa38a46f28e evidência6716924438 FULL25050 antesCOMMENT5816497422, ambosFULL/readbackexato. MÉDIO herdado real proposed, NÃOlimpo,7checks3FAILantes/depois;588ordináriosPASS/types4/1047/0/lint0/scanner4025/0PARCIAL363. Completoabaixo. Nada de fonte/refautor/CI/fila operado.
+
+Codex M — independent evidence BEFORE the verdict for #3151, exact d3d43d975dd09d6dfedf98d66330cfa38a46f28e.
+
+Claim6716849409 preceded diff/source/test inspection. No other reviewer observed in the fresh timeline/channel preflight. Channel claim/status attempts0044 have CAS409 receipts and are NOT claimed delivered. Author branch/source/CI/queue untouched; serial, zero subagents.
+
+MEDIUM proposed, inherited current-path privacy residual (not an introduced regression): an already-running signAgreement can recreate an erased agreement AFTER the real ERASERS agreement step reports completion. signAgreement holds the agreement lock and has read the record/version; forgetAgreementsPerson does not coordinate with that lock and deletes the data and sole person's index. A pending saveAgreement then SETs its cached record, including synthetic person's name/email/signature, back into Redis. A retry returns0 because the person's set is gone, leaving the recreated record undiscoverable to erasure.
+
+The proof waits immediately after the REAL GET of the REAL version, calls the REAL ERASERS entry with a REAL erasureScope, then returns the previously-read reply to the REAL signer. No replacement business implementation. Control: erasure fully before a fresh signing request refuses signing and leaves no data. Actual caller is app/api/store/agreement-sign/route.ts:47; it calls signAgreement directly after ordinary request checks. This is a library/ERASERS-step interleaving proof, NOT an HTTP endpoint/full erasePerson/browser test. The new signature has not been independently classified as new post-erasure intent: the request was already running before erasure. C1/R2 decide the residual disposition; C6 owns changes.
+
+Frozen own test f8dc52dc596a77f601d7458e56db364a7ba5525f: SAME7checks/3FAIL before and after,4controlsPASS. Before = final graph with ONLY lib/agreement-store.ts1b49fb1ccce2020d2f50f076c1acd8ad19620aa0 and lib/person-copy.ts36fc97db9d18534b34b5094210477471c9ccc2c3 from RED2e0f4f38617c4d2be6503c52b26b76b36059f546. Not an old checkout graph. Final blobs280ec0bb1f68bf77a5579e6be7d0b14bc0f77726/565cb1110565ed2748a960793339311450e24462.
+
+Author test acb1118a0369dc4ca92281939ca85c1075a1bf57 is identical in RED and final:41checks21FAIL →41PASS, reproduced. It closes malformed fulfilled replies and delete acknowledgement/index ordering, but does not exercise a pending writer.
+
+Final ordinary selected tests: agreements-erase-unknown41, agreement-copy-words73, agreement-person-proof277, agreement-read-proof39, agreements59, person-erasure32, erasure-request-full21, person-copy20, person-copy-kept6, person-data-registry20 =588PASS. Own7/3FAIL separate; no assertion laundering.
+Types4roots/1047sources/0diagnostics; lint4files0errors0warnings. Scanner4025exact indexed files (4024head files + own proof),0findings; PARTIAL:361missing and2stale head files excluded. Not a full-tree certificate.
+Budget installed BEFORE test graph import:20,000 pipeline commands,20,000 nested MemoryRedis.run calls,100mockHTTP dispatches,120s,512MiB,256KiB child output. Initial fetch denied then test fixtures only; net.connect/createConnection,tls.connect,dgram.createSocket denied. Maximum completed3131pipeline/3332nested/9mockHTTP; no ceiling hit. No real Redis/provider/person/account/payment, no credentials, no native Lua, browser/axe/AT/build/full suite/global MR/nine CI/merge certification.
+Mechanical preparation hit shell argv-size rejection BEFORE child/source changes; retried chunked pin serialization. An attempted read of nonexistent app/api/agree/sign/route.ts failed; located actual caller above. These are harness/path preparation errors, not product REDs. No product/oracle altered for a green outcome.
+
+Reproduce: materialize exact final head and dependencies; generate head-pins.json from that Git tree, add the own proof hash above; materialize ONLY the two pinned RED source files in before/ and put their hashes in before-pins.json. Keep canonical tests/test-config.mjs/aliases from exact head. Place run.mjs at review root with view/ as exact final graph and execute node run.mjs before:agreements-erase-unknown.test.ts after:agreements-erase-unknown.test.ts before:m-3151-sign-erasure.proof.ts after:m-3151-sign-erasure.proof.ts. Runner verifies every bundle input's Git blob before executing. The attached runner dependency path is environment-specific and must point to the existing read-only dependency installation; no install is required or authorized. All emails/names/IDs in logs are synthetic examples.
+
+Full new proof/runner/selected essential logs follow. The permanent author's test and its graph are already versioned at the exact heads above.
+
+<details><summary>view/tests/m-3151-sign-erasure.proof.ts</summary>
+
+```ts
+/** Synthetic real-writer interleaving; no provider or real person. */
+import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { readDraft } from "@/lib/agreement-rules";
+import { agreementKeys, createAgreement, forgetAgreementsPerson, readAgreement, signAgreement } from "@/lib/agreement-store";
+import { ERASERS, erasureScope } from "@/lib/person-erasure";
+import { store as redis } from "./redis-stub";
+import { done, is } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+
+globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
+const original = redis.pipeline.bind(redis);
+const PERSON = "person@example.com";
+
+async function world(): Promise<{ store: Store; id: string; sha: string }> {
+  redis.clear();
+  const owner = "owner@example.com";
+  await claimHandle(owner, "agreerase", "Synthetic store", "");
+  await ensureStatsId(owner);
+  await ensureStoreId(owner);
+  await setStripeAccount(owner, "acct_1AgrErasexxxx", true);
+  await setSubscription(owner, { customerId: "cus_synthetic", subscriptionId: "sub_synthetic", active: true, tier: "creator", period: paidPeriod() });
+  const store = (await storeForEmail(owner))!;
+  const draft = readDraft({ kind: "agreement", email: PERSON, name: "Synthetic Person", title: "Synthetic agreement", body: "Synthetic text.", lines: [], consent: true }, "usd");
+  if (!("draft" in draft)) throw Error("invalid fixture draft");
+  const made = await createAgreement(store, draft.draft);
+  if (!made.ok) throw Error(made.message);
+  return { store, id: made.agreement.id, sha: made.version.sha256 };
+}
+
+async function main(): Promise<void> {
+  let w = await world();
+  const input = (sha: string) => ({ n: 1, sha256: sha, name: "Synthetic Person", email: PERSON, consent: true, ip: "unknown" });
+  await forgetAgreementsPerson(w.store.sid!, PERSON);
+  is("control: signing after a finished erasure is refused", (await signAgreement(w.store, w.id, input(w.sha), "Synthetic Person")).ok, false);
+  is("control: no record or version remains", agreementKeys(w.id).some(k => redis.keys().includes(k)), false);
+
+  w = await world();
+  const scope = (await erasureScope(w.store, PERSON))!;
+  const eraser = ERASERS.find(e => e.module === "lib/agreement-store.ts")!;
+  let armed = true;
+  let erased: unknown;
+  redis.pipeline = (async commands => {
+    const reply = await original(commands);
+    if (armed && commands.some(c => c[0] === "GET" && c[1] === `nl:agree:v:${w.id}:1`)) {
+      armed = false;
+      erased = await eraser.run(scope, [], new Set());
+    }
+    return reply;
+  }) as typeof redis.pipeline;
+  const signed = await signAgreement(w.store, w.id, input(w.sha), "Synthetic Person");
+  redis.pipeline = original;
+  is("the real signing path reached the version read and real eraser", armed, false);
+  is("the real agreement eraser reported one completed deletion", erased, 1);
+  is("signing cannot successfully recreate an agreement after erasure completed", signed.ok, false);
+  is("the erased record with name, email and signature stays absent", await readAgreement(w.id), null);
+  const retry = await forgetAgreementsPerson(w.store.sid!, PERSON);
+  is("a retry cannot leave personal data after saying nothing remains", [retry, await readAgreement(w.id) !== null], [0, false]);
+  done();
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });
+
+```
+</details>
+
+<details><summary>run.mjs</summary>
+
+```js
+import{readFileSync,writeFileSync,mkdirSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');mkdirSync('logs',{recursive:true});
+
+for(const job of process.argv.slice(2)){const[mode,test]=job.split(':'),view=join(root,'view');
+ const bootstrap=`import net from'node:net';import tls from'node:tls';import dgram from'node:dgram';const deny=()=>{throw Error('NO_EXTERNAL_NETWORK')};net.connect=net.createConnection=tls.connect=dgram.createSocket=deny;import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=deny;Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>100)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before'){for(const name of ['lib/agreement-store','lib/person-copy'])alias['@/'+name]=join(root,'before',name+'.ts');}if(test==='m-3141-library-render.proof.ts')alias['@/lib/buyer-library']=join(view,'tests/m-3141-library-world.ts');
+ let b;try{b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,jsx:'automatic',jsxImportSource:'@/lib/content-jsx',platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});}catch(e){console.log('BUILD_INCOMPLETE',job);continue}
+ const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const bytes=readFileSync(resolve(view,input)),hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(hash!==(input.startsWith('../before/')?JSON.parse(readFileSync('before-pins.json','utf8'))[input.slice(10)]:pin[input]))throw Error('Head pin mismatch '+input);checked++;}
+ const f=resolve('logs/'+mode+'-'+test+'.cjs');writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,checked,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1000)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+</details>
+
+<details><summary>verify.cjs</summary>
+
+```js
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/agreement-store.ts','lib/person-copy.ts','tests/agreements-erase-unknown.test.ts','tests/m-3151-sign-erasure.proof.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+</details>
+
+<details><summary>logs/before-agreements-erase-unknown.test.ts.cjs.log</summary>
+
+```text
+
+forgetAgreementsPerson: the person's set answers in another shape (undefined)
+  FAIL  an unknown reply is never 'no agreements': the erasure throws (not done)
+        expected "threw"
+        got      "answered 0"
+  FAIL  the person's set is kept, so a retry finds the agreement
+        expected 1
+        got      0
+  ok    nothing was deleted: the record and its version stay
+  FAIL  a retry with Redis answering normally erases the agreement, its version and the person's set
+        expected [1,true,0,0]
+        got      [0,false,2,0]
+
+forgetAgreementsPerson: the person's set answers in another shape (a string)
+  FAIL  an unknown reply is never 'no agreements': the erasure throws (not done)
+        expected "threw"
+        got      "answered 0"
+  FAIL  the person's set is kept, so a retry finds the agreement
+        expected 1
+        got      0
+  ok    nothing was deleted: the record and its version stay
+  FAIL  a retry with Redis answering normally erases the agreement, its version and the person's set
+        expected [1,true,0,0]
+        got      [0,false,2,0]
+
+forgetAgreementsPerson: the person's set answers in another shape (a list holding a number)
+  FAIL  an unknown reply is never 'no agreements': the erasure throws (not done)
+        expected "threw"
+        got      "answered 0"
+  FAIL  the person's set is kept, so a retry finds the agreement
+        expected 1
+        got      0
+  ok    nothing was deleted: the record and its version stay
+  FAIL  a retry with Redis answering normally erases the agreement, its version and the person's set
+        expected [1,true,0,0]
+        got      [0,false,2,0]
+
+forgetAgreementsPerson: the person's set answers in another shape (no reply at all)
+  FAIL  an unknown reply is never 'no agreements': the erasure throws (not done)
+        expected "threw"
+        got      "answered 0"
+  FAIL  the person's set is kept, so a retry finds the agreement
+        expected 1
+        got      0
+  ok    nothing was deleted: the record and its version stay
+  FAIL  a retry with Redis answering normally erases the agreement, its version and the person's set
+        expected [1,true,0,0]
+        got      [0,false,2,0]
+
+forgetAgreementsPerson: the deletes' replies are lost (nothing ran)
+  FAIL  deletes that may not have happened are never 'done': the erasure throws
+        expected "threw"
+        got      "answered 1"
+  ok    the person's set and the agreement are kept for the retry
+  ok    the retry erases everything
+
+forgetAgreementsPerson: the deletes ran but a reply came back in another shape
+  FAIL  a count that does not read is never 'done': the erasure throws
+        expected "threw"
+        got      "answered 1"
+  FAIL  the person's set is not deleted on an unconfirmed delete, so a retry still finds the id
+        expected 1
+        got      0
+  ok    the agreement itself is gone (the delete ran)
+  FAIL  the retry confirms the counts and deletes the person's set
+        expected [1,0]
+        got      [0,0]
+
+forgetAgreementsPerson: the person's set's own delete answers in another shape
+  FAIL  an unknown reply to the set's delete is never 'done': the erasure throws
+        expected "threw"
+        got      "answered 1"
+  FAIL  the retry still finds the id the set lists, and finishes
+        expected 1
+        got      0
+  ok    and nothing of the person is left
+
+Control: an exact empty set is the only 'nothing to erase'
+  ok    a person with no agreements: answered 0, no throw
+  ok    someone else's agreement is untouched
+
+Control: healthy agreements are fully erased, someone else's stay
+  ok    before: the first agreement has two versions
+  ok    the erasure answers both of the person's agreements
+  ok    their records and every version are gone
+  ok    the store's index keeps only the other person's
+  ok    the person's set is gone, the other person's stays
+  ok    the other person's agreement is untouched
+  ok    a second erasure finds nothing and answers 0
+
+lib/person-erasure.ts runs it, and a throw is not finished
+  ok    the erasure has an agreement step
+  FAIL  the step throws, which erasePerson records as failed (incomplete)
+        expected "threw"
+        got      "answered 0"
+  FAIL  and the retry erases
+        expected [1,true]
+        got      [0,false]
+
+Rule 30: the person's data copy reads each version's text exactly
+  ok    healthy: the copy holds the version's text
+  FAIL  a version's text that reads in another shape fails the copy, never drops the text
+        expected "threw"
+        got      "without text"
+  ok    the studio's list still reads
+
+41 checks, 21 failing.
+M_BUDGET {"pipelineCommands":414,"memoryRun":548,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>logs/after-agreements-erase-unknown.test.ts.cjs.log</summary>
+
+```text
+
+forgetAgreementsPerson: the person's set answers in another shape (undefined)
+  ok    an unknown reply is never 'no agreements': the erasure throws (not done)
+  ok    the person's set is kept, so a retry finds the agreement
+  ok    nothing was deleted: the record and its version stay
+  ok    a retry with Redis answering normally erases the agreement, its version and the person's set
+
+forgetAgreementsPerson: the person's set answers in another shape (a string)
+  ok    an unknown reply is never 'no agreements': the erasure throws (not done)
+  ok    the person's set is kept, so a retry finds the agreement
+  ok    nothing was deleted: the record and its version stay
+  ok    a retry with Redis answering normally erases the agreement, its version and the person's set
+
+forgetAgreementsPerson: the person's set answers in another shape (a list holding a number)
+  ok    an unknown reply is never 'no agreements': the erasure throws (not done)
+  ok    the person's set is kept, so a retry finds the agreement
+  ok    nothing was deleted: the record and its version stay
+  ok    a retry with Redis answering normally erases the agreement, its version and the person's set
+
+forgetAgreementsPerson: the person's set answers in another shape (no reply at all)
+  ok    an unknown reply is never 'no agreements': the erasure throws (not done)
+  ok    the person's set is kept, so a retry finds the agreement
+  ok    nothing was deleted: the record and its version stay
+  ok    a retry with Redis answering normally erases the agreement, its version and the person's set
+
+forgetAgreementsPerson: the deletes' replies are lost (nothing ran)
+  ok    deletes that may not have happened are never 'done': the erasure throws
+  ok    the person's set and the agreement are kept for the retry
+  ok    the retry erases everything
+
+forgetAgreementsPerson: the deletes ran but a reply came back in another shape
+  ok    a count that does not read is never 'done': the erasure throws
+  ok    the person's set is not deleted on an unconfirmed delete, so a retry still finds the id
+  ok    the agreement itself is gone (the delete ran)
+  ok    the retry confirms the counts and deletes the person's set
+
+forgetAgreementsPerson: the person's set's own delete answers in another shape
+  ok    an unknown reply to the set's delete is never 'done': the erasure throws
+  ok    the retry still finds the id the set lists, and finishes
+  ok    and nothing of the person is left
+
+Control: an exact empty set is the only 'nothing to erase'
+  ok    a person with no agreements: answered 0, no throw
+  ok    someone else's agreement is untouched
+
+Control: healthy agreements are fully erased, someone else's stay
+  ok    before: the first agreement has two versions
+  ok    the erasure answers both of the person's agreements
+  ok    their records and every version are gone
+  ok    the store's index keeps only the other person's
+  ok    the person's set is gone, the other person's stays
+  ok    the other person's agreement is untouched
+  ok    a second erasure finds nothing and answers 0
+
+lib/person-erasure.ts runs it, and a throw is not finished
+  ok    the erasure has an agreement step
+  ok    the step throws, which erasePerson records as failed (incomplete)
+  ok    and the retry erases
+
+Rule 30: the person's data copy reads each version's text exactly
+  ok    healthy: the copy holds the version's text
+  ok    a version's text that reads in another shape fails the copy, never drops the text
+  ok    the studio's list still reads
+
+41 checks, all passing.
+M_BUDGET {"pipelineCommands":421,"memoryRun":555,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>logs/before-m-3151-sign-erasure.proof.ts.cjs.log</summary>
+
+```text
+  ok    control: signing after a finished erasure is refused
+  ok    control: no record or version remains
+  ok    the real signing path reached the version read and real eraser
+  ok    the real agreement eraser reported one completed deletion
+  FAIL  signing cannot successfully recreate an agreement after erasure completed
+        expected false
+        got      true
+  FAIL  the erased record with name, email and signature stays absent
+        expected null
+        got      {"id":"2bf4232d535a4740968cd3f0779dff32","sid":"8f60c0d11b1d47d09dcab326bb97ffd6","kind":"agreement","email":"person@example.com","name":"Synthetic Person","createdAt":1794109797971,"expiresAt":1796701797971,"state":"open","versions":[{"n":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1","title":"Synthetic agreement","createdAt":1794109797971,"signature":{"name":"Synthetic Person","at":1794109797976,"ipHash":"","consent":"I agree to sign this electronically, and I am the person it was sent to.","consentVersion":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1"}}],"sent":[],"failed":"","payRequest":"","copies":0,"closedAt":1794109797976}
+  FAIL  a retry cannot leave personal data after saying nothing remains
+        expected [0,false]
+        got      [0,true]
+
+7 checks, 3 failing.
+M_BUDGET {"pipelineCommands":78,"memoryRun":106,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>logs/after-m-3151-sign-erasure.proof.ts.cjs.log</summary>
+
+```text
+  ok    control: signing after a finished erasure is refused
+  ok    control: no record or version remains
+  ok    the real signing path reached the version read and real eraser
+  ok    the real agreement eraser reported one completed deletion
+  FAIL  signing cannot successfully recreate an agreement after erasure completed
+        expected false
+        got      true
+  FAIL  the erased record with name, email and signature stays absent
+        expected null
+        got      {"id":"af827e36b6a970596aa1782be8f6b121","sid":"b0f53601493c4c88a95f18b79aafdc59","kind":"agreement","email":"person@example.com","name":"Synthetic Person","createdAt":1794109799243,"expiresAt":1796701799243,"state":"open","versions":[{"n":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1","title":"Synthetic agreement","createdAt":1794109799243,"signature":{"name":"Synthetic Person","at":1794109799244,"ipHash":"","consent":"I agree to sign this electronically, and I am the person it was sent to.","consentVersion":1,"sha256":"02ede513896fe75f09ef18f239649b40c6b15b35c29f521a2261b8836f6d42b1"}}],"sent":[],"failed":"","payRequest":"","copies":0,"closedAt":1794109799244}
+  FAIL  a retry cannot leave personal data after saying nothing remains
+        expected [0,false]
+        got      [0,true]
+
+7 checks, 3 failing.
+M_BUDGET {"pipelineCommands":78,"memoryRun":106,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>types.log</summary>
+
+```text
+{"roots":4,"sources":1047,"diagnostics":0}
+```
+</details>
+
+<details><summary>lint.log</summary>
+
+```text
+
+```
+</details>
+
+<details><summary>scanner.log</summary>
+
+```text
+Public data check: 4025 tracked files; 0 file(s) require correction.
+
+```
+</details>
+
+
+Codex M — independent privacy review of exact d3d43d975dd09d6dfedf98d66330cfa38a46f28e.
+
+**MEDIUM proposed inherited residual; NOT CLEAN.** lib/agreement-store.ts, forgetAgreementsPerson (person-index deletion after the record DEL) versus signAgreement/saveAgreement: a signing request already in progress can SET its cached agreement back AFTER the real ERASERS agreement step reported one completed erasure. The person's index has already gone; retry then answers0 and leaves the record containing name/email/signature. The eraser does not participate in the signer's agreement lock. The actual signing route calls this writer at app/api/store/agreement-sign/route.ts:47.
+
+Frozen testf8dc52dc596a77f601d7458e56db364a7ba5525f reaches the real version GET, runs the real ERASERS entry/erasureScope while that read waits, then resumes the real signer. SAME7checks3FAIL both before and after;4controlsPASS (including a fresh signature after completed erasure being refused). Thus this is a demonstrated current-path residual, not an introduced-regression claim or a hypothetical new caller. It is a library/eraser-step proof, not full HTTP/full erasePerson coverage. C1/R2 classify continuation; C6 owns a fix coordinating erasure with pending writers. A standalone reread leaves another write window.
+
+Evidence published BEFORE this verdict: issuecomment6716924438, FULL25050 and exact readback, with complete proof/runner and before/after logs. Author SAME41/21FAIL→41PASS closes the announced malformed-reply/index ordering cases. Selected ordinary588PASS; own7/3FAIL remains separate. Types4/1047/0;lint0;scanner4025/0 PARTIAL363headfiles excluded. Pre-dispatch20k/20k/100mock/120s512MiB256KiB; max3131pipeline3332nested9mock. No provider/nativeRedis/browser/build/globalMR/nineCI certificate. Author branch/source and CI/queue untouched.
+
+Please request a nominal focal return on the exact corrective head or provide C1/R2's explicit residual disposition; the ordinary passing tests alone do not close this proof. COMMENT is not approval.
+
+C1-20261108-0051-CODEX24 FULL lida: M recebe focal2840e336cf62; ASSUME2857 e3028vermelhos. Ordemrecebida, nãoauthorizationbypassreservas/HOLDs. #2840currente336cf626f178c81fb9160832d7966f7d1c06f03, branchclaude4/page-copy-unknown-2, baseec7f9d4fc97a556224cf9d9f192743fac165ed03. TimelineFULLread: Z5806683887limpo1fc, C1-6712259569MÉDIO616longdescriptionreadapóswrite, C4-6714365062RED2995/fixe336. ClaimPR6716937146 ANTESdiff/fonte/testes; deltacorretivo2pathslidodepoisclaim; testesAINDA NÃOexecutadosatéesteregistro. CanalRES0055CAS409 aindaNÃOentregue;retry>=120s/FULLfresh. Preparadoscache/pinsm-review-2840; sourceautorintocado.
+
+2857official85e32750eba464a392874a6d0234766ef1768fb5 OPEN/DRAFT/HOLD branchcodex/k-form-store-siblings-exact; metadata/timelineFULLread, SEMdiff/fonte/testeM. Identidade29/5 b0657bf..., parser41/4 52ef902...,KEEP79/7 3e53fa66... requeremexec/classificaçãoR2 histórica; G6699734439 SÓWIPG7a190e28e740fbed1fc6c31aeb732508bfc56f696 limpo. NãoaprovaroficialporWIP. NovaassunçãoC1 nãoapagaessesachados. 3028acfda4b06489d8572a3f6d4654745dc4d282d6bf OPEN/DRAFT branchcodex/k-form-historical-choice-feedback; C25808294084limpoexato. Holdsantigos2931/2894 precisamreconciliaçãoatual; nãoCIpolled/mergeado/pushnenhum. No momentoapenasmetadata/timelinestrêspedidos.
+
+Próximo focal2840exato: reproduzir3testespermanentes RED2995→e336 mantendooráculos, ligados6pagecopy+32storecopy; conferirstrictreaderdependênciassemnovoauditglobal. Depois2857/3028 emramoscodex/m-*preservados, verificarreserva/CIsatuaisantesúnicopush. C1coord, mediumserial0agentes; nenhumvivowatcherprometido/automaçãoinalterada.

@@ -34,7 +34,7 @@ import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { type LostRead, confirmLostRead, keptUnlessLost, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
@@ -207,11 +207,21 @@ const linkKey = (token: string) => `nl:rev:link:${sha(`nimbus-review-link:${toke
 
 type LinkGrant = { s: string; r: string; e: string };
 
-/** A link for the review request: one order, one address, 60 days. */
+/** A link for the review request: one order, one address, 60 days. Throws UnknownReplyError when its write or its erasure note does not read exactly; nothing may be sent then. */
 export async function mintReviewLink(store: Store, reference: string, email: string): Promise<string> {
   const token = randomBytes(24).toString("hex");
   const grant: LinkGrant = { s: store.statsId ?? "", r: reference, e: email };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS], ...noteForErasure(store.statsId, email, linkKey(token))]);
+  const notes = noteForErasure(store.statsId, email, linkKey(token));
+  // Read in their exact shape (CX-123 rule 24, as lib/checkout-recovery.ts reads a reminder's stop link): the link
+  // written ("OK") and each erasure note a count. Anything else is unknown, and no request is sent with a link that
+  // may lead nowhere or that an erasure could not find.
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", REVIEW_LINK_SECONDS], ...notes]), 1 + notes.length);
+  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) {
+    // The write may have landed: the link, with the address in it, is taken back at once (best effort, its reply not
+    // read as anything), so it is not kept 60 days unsent where an erasure may not find it.
+    await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
+    throw new UnknownReplyError("a review request's link");
+  }
   return token;
 }
 

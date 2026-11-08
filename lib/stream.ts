@@ -854,28 +854,53 @@ export async function dropCaption(pathname: string, lang: string): Promise<Capti
  * The five-minute job's work: asks about each video that is due, oldest
  * first, and tries again to delete the ones that could not be. Stops at
  * `deadline`; what is left is due still, and is first in line next time.
+ * A video whose record does not read is moved five minutes later; a move
+ * that is not confirmed leaves it among the earliest, so the job then reads
+ * as many due videos past it as it lost to such moves, once, and still
+ * looks at no more than 40 records a run (Codex Z on #3294).
  */
 export async function sweep(deadline: number, now = Date.now()): Promise<{ looked: number; ready: number; failed: number; deleted: number }> {
   const counts = { looked: 0, ready: 0, failed: 0, deleted: 0 };
   const config = streamConfig();
   if (!config || !isRedisConfigured()) return counts;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40]]);
-  for (const id of Array.isArray(due) ? due : []) {
-    if (Date.now() > deadline) return counts;
-    if (typeof id !== "string") continue;
+  const tried = new Set<string>();
+  let unmoved = 0;
+  const look = async (id: string): Promise<void> => {
+    tried.add(id);
     let record: StreamRecord | null;
     try {
       record = await lookAt(id, now);
     } catch (error) {
       if (!(error instanceof UnknownReplyError)) throw error;
       // Its record did not read: it stays queued, asked about again later, and the job goes on to the next video
-      // rather than stopping on it, or reading it first at every run.
-      await redisPipeline([["ZADD", DUE, now + nextLook(0), id]]);
-      continue;
+      // rather than stopping on it, or reading it first at every run. The move is read exactly (CH: 1, the one
+      // member moved); anything else, and it may still be among the earliest, so it is said and read past.
+      const moved = repliesFor(await redisPipeline([["ZADD", DUE, "CH", now + nextLook(0), id]]), 1);
+      if (!moved || moved[0] !== 1) {
+        unmoved += 1;
+        console.error("moving an unread video record to a later look could not be confirmed", id);
+      }
+      return;
     }
     counts.looked += 1;
     if (record?.state === "ready") counts.ready += 1;
     if (record?.state === "failed") counts.failed += 1;
+  };
+  const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40]]);
+  for (const id of Array.isArray(due) ? due : []) {
+    if (Date.now() > deadline) return counts;
+    if (typeof id !== "string") continue;
+    await look(id);
+  }
+  // As many due videos past the unmoved ones as were lost to them, once: never a third page, and never more than 40
+  // records looked at in a run, so a readable abandoned upload behind them is not left at the service run after run.
+  if (unmoved > 0) {
+    const lost = unmoved;
+    const [more] = await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40 + lost]]);
+    for (const id of (stringList(more) ?? []).filter((next) => !tried.has(next)).slice(0, lost)) {
+      if (Date.now() > deadline) return counts;
+      await look(id);
+    }
   }
   const [gone] = await redisPipeline([["SMEMBERS", GONE]]);
   for (const id of (Array.isArray(gone) ? gone : []).slice(0, 40)) {

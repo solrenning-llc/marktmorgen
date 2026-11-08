@@ -95,7 +95,8 @@ async function main() {
   await refused("btnocur", euros, { ...healthyCharge, balance_transaction: { amount: 900 } });
   await refused("btupper", euros, { ...healthyCharge, balance_transaction: { amount: 900, currency: "EUR" } });
   await refused("btid", euros, { ...healthyCharge, balance_transaction: "txn_r24balance" });
-  const { balance_transaction: _bt, ...noTransaction } = healthyCharge;
+  const noTransaction: Record<string, unknown> = { ...healthyCharge };
+  delete noTransaction.balance_transaction;
   await refused("btmissing", euros, noTransaction);
   await refused("chargecur", { object: "balance", available: [usd(100_000)], pending: [] }, { ...healthyCharge, currency: 840 });
 

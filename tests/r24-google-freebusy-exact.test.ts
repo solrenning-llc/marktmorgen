@@ -94,6 +94,7 @@ async function main() {
   part("Controls: valid RFC 3339 forms keep their exact instants");
   is("an explicit offset", await read({ primary: { busy: [{ start: "2026-11-09T11:00:00-03:00", end: "2026-11-09T12:00:00-03:00" }] } }), [[Date.parse(S), Date.parse(E)]]);
   is("fractional seconds", await read({ primary: { busy: [{ start: "2026-11-09T14:00:00.250Z", end: "2026-11-09T15:00:00.5Z" }] } }), [[Date.parse(S) + 250, Date.parse(E) + 500]]);
+  is("a year below 100 keeps its year (not moved into the 1900s)", await read({ primary: { busy: [{ start: "0099-11-09T14:00:00Z", end: "0099-11-09T15:00:00Z" }] } }), [[Date.parse("0099-11-09T14:00:00Z"), Date.parse("0099-11-09T15:00:00Z")]]);
   is("29 February in a leap year", await read({ primary: { busy: [{ start: "2028-02-29T14:00:00Z", end: "2028-02-29T15:00:00Z" }] } }), [[Date.parse("2028-02-29T14:00:00Z"), Date.parse("2028-02-29T15:00:00Z")]]);
 
   is("no request left the process", outbound, 0);

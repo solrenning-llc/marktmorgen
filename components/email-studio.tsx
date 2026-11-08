@@ -295,10 +295,6 @@ type Who = "all" | "buyers" | "leads";
 const TIME: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" };
 
 /**
- * A time in the reader's own time zone. The server does not know it, so the
- * first render says UTC and the browser swaps in local time straight after.
- */
-/**
  * The time the store's buyers behind a count were read, in this browser's own time (the one the composer's times are
  * in): "as of 3:42 PM". Their copy is kept an hour (lib/segments.ts, LEDGER_SECONDS; C3-80 (b)). Drawn only after a
  * count came back, in the browser, so it is never the server's.
@@ -314,6 +310,10 @@ function scrollToComposer(): void {
   document.getElementById("compose-title")?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
 }
 
+/**
+ * A time in the reader's own time zone. The server does not know it, so the
+ * first render says UTC and the browser swaps in local time straight after.
+ */
 function When({ seconds }: { seconds: number }) {
   const inBrowser = useSyncExternalStore(noSubscription, () => true, () => false);
   const date = new Date(seconds * 1000);

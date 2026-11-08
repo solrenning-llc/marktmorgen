@@ -130,7 +130,7 @@ export default async function StudioTeamPage({
               change to the team, newest first. The last 500 are kept.
             </p>
             {log === null ? (
-              <p role="status" className="notice mt-4">
+              <p role="status" className="notice notice-warn mt-4">
                 The activity could not be read just now. Reload this page in a moment; this does not mean nothing happened.
               </p>
             ) : log.length === 0 ? (
@@ -139,7 +139,7 @@ export default async function StudioTeamPage({
                 compact
                 className="mt-4"
                 title="No activity yet"
-                body="Each change a teammate makes from the studio, and each change to the team, is listed here, newest first."
+                body="Each change a teammate makes from the studio, each download of buyers' data, and each change to the team is listed here, newest first."
               />
             ) : (
               <>

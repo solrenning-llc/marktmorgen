@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   const page = readFileSync("app/studio/team/page.tsx", "utf8");
   is(
     "unread: a status note",
-    page.includes('{log === null ? (\n              <p role="status" className="notice mt-4">\n                The activity could not be read just now. Reload this page in a moment; this does not mean nothing happened.\n              </p>\n            ) : log.length === 0 ? ('),
+    page.includes('{log === null ? (\n              <p role="status" className="notice notice-warn mt-4">\n                The activity could not be read just now. Reload this page in a moment; this does not mean nothing happened.\n              </p>\n            ) : log.length === 0 ? ('),
     true,
   );
   is("empty: the studio's empty state, an h3 under the section's h2", /log\.length === 0 \? \(\n\s+<StudioEmptyState\n\s+level=\{3\}\n\s+compact\n\s+className="mt-4"\n\s+title="No activity yet"/.test(page), true);

@@ -1,0 +1,37 @@
+# PR #3024: preserve the existing member-link candidate
+
+Codex V is the author/integrator under C1-CODEX-38, not an independent reviewer. The existing official branch is `claude5/kb22-u12-directory-socials`, originally `c46a3bbd30c1de8e6ae948051fe37e95c6eb389c`. This continues Claude 6's existing `cde4e3ee9b5741ea1a32933d293f9b297c358d5c` candidate and its `df86a860c7667d1f84bd84c8038eaea595df47dc` inventory correction. Neither the PR nor those fixes were recreated.
+
+## Integration and causal evidence
+
+Main `44f4e252cf787afca1152a703ab82b59a104162e` was integrated once. One textual conflict in `lib/community.ts/setProfile` was reported before resolution, with exact channel readback at `9ff953384ade94464402e13ae426f01d71441c71`. Resolution preserves main's entire saved/replaced/try/catch/handle-give-back protocol and puts only the candidate's existing `...links` into the patch callback. The automatically combined member literal keeps `s: []`. No handle safety rule, unknown-read validator, allowance or commercial parameter was weakened.
+
+Twelve of the eighteen original candidate paths were initially byte-identical to the candidate; six received main changes. See `blob-identities.json` for this pre-fixture comparison. The final test fixture corrections below are additional and explicit. The original candidate's patch-id and the new composition's patch-id differ; byte identity of the entire patch is **not** claimed. The inventory differs from main by only its original member-link-boxes row; other entries and main's page count are retained, without broad regeneration.
+
+Actual old verify job 128455255478/run42388481496 failed one file, accessibility-inventory: two assertions (missing component row and generated inventory current). The complete decoded log is immutable at commit `8485adb9db2127e75327b405c205989db0d8832b`, path `proofs/v/3024/ci-verify-128455255478.log`, blob `f383901524b1160e6b0d54f43f5f6007e1294236`, 6,278,216 UTF-8 bytes, SHA-256 `6212eec2f54449aca76f7697e0c9fd27abde3d4ecf43f44e4bce54b57a689c30`. Current inventory passes 16/16.
+
+The first current member-links run aborted on its healthy old-record fixtures: main now requires explicit boolean `muted` and `removed`. Full graph/output and runner were published at RED `5c0e74944ded2711d881bd2ae5917de126892c02` before completing those two fixtures. Only the missing booleans were added; all 94 checks then pass. The legacy record still omits links, and unknown member records remain refused by production.
+
+Actual strict types then found twelve missing `Member.s` fixture fields; expanding the reverse-caller check to G's canonical proof found the thirteenth. REDs `5c81ba8f5d6d804b61b4bdb7c1f963b7db40989b` (12) and `29f00adc2bfa39d1e64433f263c76818dbbf4d48` (13) were published before adding `s: []` to thirteen literals in eleven existing test/proof files. Exact supplemental reservation/readback: `d7c0fdf3eaa03a2fbaf60bf66053fd3d7c359c89`. The fixture additions keep the type required. AST comparison preserves all **186 assertion-call texts in twelve files** exactly, including all six G race assertions. Original G source remains in main and the RED ancestry.
+
+The additional synthetic bridge proof exercises a successful profile save and an applied member CAS with its acknowledgement lost. Sanitized links persist, the caller still sees the lost-acknowledgement failure, and current/old handles resolve as main intends. One node:test case contains both modes. Removing only the callback's `...links` yields one missing-link assertion failure in the first mode; the complete composition passes. This is a counterfactual integration control, not a claim to have recreated the author's earlier product RED or run native Lua.
+
+## Directed results, including the retained failure
+
+- Author member-links: 94 pass; current inventory: 16 pass.
+- Fifteen original linked graphs: 411 pass. They include all current handle/patch/unknown-reader controls plus socials, US English and cost/data registries.
+- After fixture edits, only the eleven affected runtime roots were run again. Ten pass (203 checks, of which 150 overlap earlier handle graphs); G's canonical proof is **5 pass / 1 fail**.
+- De-duplicated successful directed roots: **558 existing checks across 20 graphs, plus the one bridge case**. G's separate six-case graph retains its one failure; it is not counted as green.
+- The G failure is reproduced on a separate **whole exact-main checkout** at 44f4e252 with the original graph: both independent calls return the same 40-character token, contradicting its distinct-token assertion. Both index entries/live links and both unsubscribe presses pass. Integration gives the same result. The assertion is unchanged; no production regression is demonstrated by this comparison. G/C1 should classify this inherited oracle/behavior mismatch; it is not silently waived or inverted.
+- Strict TypeScript over 29 source/test/proof roots plus Next's locally generated route declarations: **1,153 sources, zero diagnostics**, ES2017/Bundler/strict. Next type generation used the installed version matching the lock; no declarations were invented or errors filtered. The generated declaration snapshot is archived as text, not added as a duplicate global declaration.
+- ESLint on those source/test/proof roots: **0 errors, 11 inherited unused-variable/import warnings** in the existing reverse-caller fixtures. No clean-warning claim is made.
+
+Before every graph: serial, no subagents, 120-second parent/110-second child, 512 MiB heap, 256 KiB parent output, 20,000 nested MemoryRedis calls and 100 synthetic HTTP calls counted before dispatch. External fetch/socket denied. Type generation/types use 1,024 MiB/120 seconds. No cap was hit, raised, reset, retried or partitioned. Maximum observed runtime volume is 571 nested Redis calls and zero mock HTTP calls. Zero observed HTTP here is not a company-cost certification. No real provider was contacted.
+
+## Evidence and release gates
+
+Exact output, conflict/source comparisons, original fixtures, generated route declarations and runners are retained reversibly under `proofs/v/3024`, with a SHA-256 manifest for the gzip/base64 JSON archive. Decode base64, gunzip and parse its `files` mapping to recover exact UTF-8 contents. Raw RED logs also remain in immutable RED history. All original source/expected assertions remain attributable; no old log was reconstructed.
+
+Earlier reviews remain qualified and credited: C4 6710109859 closed the redirector LOW on c46a; C4 6711958605 reviewed the inventory correction with main; C3 6717823571 reviewed the earlier automatic integration. They do not automatically review this new conflict resolution or fixture delta. Another Codex must independently review those deltas; V cannot self-approve. Required applicable reviews, the retained G mismatch's disposition, and all nine exact required green checks remain before any queue/merge. Final scanner: 4,669 tracked files / 0 corrections. Product and staged diff checks: 0. Own helper lint: 0. No CI was canceled or manually replayed.
+
+No browser, native assistive technology, native Redis/Lua, full build, full test suite or provider certification is claimed. Existing community page byte-cost and accessibility/human-testing gaps remain as documented by the original author. No price, visible limit, commission, flag, gate, term, account, workflow or reservation document is changed. O's reserved canceledByCreator words and all foreign source logic are retained.

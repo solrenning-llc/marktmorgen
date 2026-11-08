@@ -1,5 +1,0 @@
-Generating route types...
-✓ Types generated successfully
-V3024_VOLUME {"redis":0,"http":0}
-
-V3024_VALIDATOR {"label":"typegen","status":0,"signal":null,"error":null}

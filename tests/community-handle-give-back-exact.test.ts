@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /**
  * Controls beside Codex G's proof (tests/community-handle-reserve-unknown.test.ts,
  * review 5815559331 of #3123): when setProfile's member update after the handle
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
     n += 1;
     const email = `member${n}@handlegiveback.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     await pipeline([["HSET", members, key, JSON.stringify(record)]]);
     return { key, email };
   }

@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /**
  * Rule 30 on Codex G's residual MEDIUM on #3123 (review 5815472405): the
  * same class in lib/community.ts setProfile. A member's @handle is claimed in
@@ -69,7 +70,7 @@ async function main(): Promise<void> {
     n += 1;
     const email = `member${n}@handleorphan.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     await pipeline([["HSET", members, key, JSON.stringify(record)]]);
     return { key, email };
   }

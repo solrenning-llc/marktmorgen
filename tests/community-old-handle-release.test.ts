@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /**
  * Beside Codex G's proof (tests/community-old-handle-after-failure.test.ts,
  * review 5815632734 of #3123): claimHandle only reserves the new handle, and
@@ -74,7 +75,7 @@ async function main(): Promise<void> {
     n += 1;
     const email = `member${n}@oldhandle.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: `Old ${n}`, h: old, dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: `Old ${n}`, h: old, dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     await pipeline([["HSET", members, key, JSON.stringify(record)], ["HSET", handles, old, key]]);
     return { key, snapshot: (await readMember(cid, key))! };
   }
@@ -82,7 +83,7 @@ async function main(): Promise<void> {
     n += 1;
     const email = `member${n}@oldhandle.example`;
     const key = memberKey(email);
-    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: "", h: "", dir: false, mail: false, at: 1, seen: 1, muted: false, removed: false, t: "", q: [], qa: 0, qq: [], s: [] };
     await pipeline([["HSET", members, key, JSON.stringify(record)]]);
     return key;
   }

@@ -278,6 +278,8 @@ async function main() {
     is("the editor says plainly that only the newest are shown", editor.includes("Only your ${MAX_CODES} newest codes are shown here"), true);
     is("the editor shows scheduled codes Stripe's page left out", editor.includes("unlisted"), true);
     is("the editor's card has the address the email links to", editor.includes('id="discount-codes"'), true);
+    const cancels = editor.split("\n").filter((line) => line.includes('action: "unschedule"'));
+    is("every Cancel, the unlisted ones too, says what the cancel did (never \"It stays off\" of a code that may have started; #3006)", cancels.length >= 2 && cancels.every((line) => line.includes("canceledMessage(") && !line.includes("It stays off")), true);
     const cron = readFileSync("app/api/cron/imports/route.ts", "utf8");
     is("the five-minute job's comment names the notice", /tells the creator/.test(cron), true);
   } finally {

@@ -180,8 +180,9 @@ export async function listLetters(store: Pick<Store, "sid">): Promise<Letter[] |
   if (!isRedisConfigured() || !store.sid) return [];
   try {
     const range = repliesFor(await redisPipeline([["ZREVRANGE", listKey(store.sid), 0, MAX_PUBLISHED_LETTERS - 1]]), 1)?.[0];
-    if (!Array.isArray(range) || !range.every((id) => typeof id === "string")) return null;
-    const list = (range as string[]).filter((id) => LETTER_ID.test(id));
+    // Every id is one this code wrote; any other is an unknown answer, never "none".
+    if (!Array.isArray(range) || !range.every((id) => typeof id === "string" && LETTER_ID.test(id))) return null;
+    const list = range as string[];
     if (!list.length) return [];
     const raws = repliesFor(await redisPipeline([["MGET", ...list.map(recordKey)]]), 1)?.[0];
     if (!Array.isArray(raws) || raws.length !== list.length) return null;

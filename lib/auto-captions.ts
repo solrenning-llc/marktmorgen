@@ -12,6 +12,15 @@
  *   nl:stream:auto:<video>   what is being written, and the charge for it
  *   nl:stream:autoq          which videos to ask about, and when
  *
+ * A charge is made once (inventory of money calls, 8 November 2026): an order
+ * is written before it, holding the video, and the charge's idempotency key
+ * comes from that order, never from the clock of an attempt. An answer from
+ * Stripe that never came back is not taken for "nothing was charged": the
+ * order is kept and queued, a retry charges nothing more, and Stripe's own
+ * invoice decides (paid: used or refunded; void or never made: the order
+ * goes). A charge that succeeded is recorded with its payment before anything
+ * else, so a process that dies after it leaves a record the sweep refunds.
+ *
  * A refund Stripe has not confirmed as succeeded is never taken as done: the
  * record is kept with what is owed (`owed`), the video is asked about again,
  * and each look first reads the payment's refunds from Stripe. A new refund
@@ -20,10 +29,12 @@
  * once ask for the same one and money is never returned twice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { askStream, noteCaptionLanguages, streamCaptions, streamConfig, streamRecord } from "@/lib/stream";
 import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
 import { captionLabel } from "@/lib/captions";
-import { chargeNow, isBillingConfigured, refundCharge, refundsOnIntent } from "@/lib/billing";
+import { chargeNow, isBillingConfigured, onPlatformAt, refundCharge, refundsOnIntent } from "@/lib/billing";
 import type { Store } from "@/lib/store";
 import { GIVE_UP_HOURS, MAX_AUTO_MINUTES, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
 
@@ -39,6 +50,46 @@ export const REFUND_LOOKS_MAX = 40;
 const REFUND_LOOK_MAX_MS = 6 * 3_600_000;
 /** A refund owed is kept long after the last look, so it is never lost while somebody may still ask about it. */
 const REFUND_KEEP_SECONDS = 400 * 86_400;
+/**
+ * An order is settled from Stripe's invoice only this long after it was written: by then the request that wrote it
+ * has ended (each Stripe call gives up after 20 seconds, and a request lasts minutes at most), so an invoice not
+ * listed was never made and one listed open will never be paid by it.
+ */
+export const ORDER_SETTLE_MS = 15 * 60_000;
+/** An order Stripe's invoices cannot settle is looked at, further apart each time, for this long; then kept for a person. */
+const ORDER_LOOKS_MS = 14 * 86_400_000;
+/** The API version chargeNow writes its invoices with (lib/billing.ts, CHARGE_VERSION), where an invoice names its payment. */
+const CHARGE_READ_VERSION = "2024-06-20";
+
+/**
+ * What a charge is for, written before it is made and holding the video
+ * (SET NX, lib/claim-mark.ts). `order` is new each time and makes the charge's
+ * idempotency key; the rest is what a refund needs if the charge is found
+ * paid and nothing was asked of the service.
+ */
+type Order = {
+  order: string;
+  at: number;
+  cents: number;
+  langs: string[];
+  path: string;
+  customer: string;
+};
+
+function parseOrder(raw: unknown): Order | null {
+  if (typeof raw !== "string" || !raw.startsWith("{")) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<Order>;
+    if (typeof value.order !== "string" || !value.order || typeof value.at !== "number" || !Number.isSafeInteger(value.cents) || (value.cents as number) <= 0) return null;
+    if (!Array.isArray(value.langs) || !value.langs.every((l) => typeof l === "string") || typeof value.path !== "string" || typeof value.customer !== "string") return null;
+    return { order: value.order, at: value.at, cents: value.cents as number, langs: value.langs, path: value.path, customer: value.customer };
+  } catch {
+    return null;
+  }
+}
+
+/** The mark on the order's invoice; `nl-` before it is the charge's idempotency key. */
+const orderSign = (id: string, order: Order) => `captions:${id}:${order.order}`;
 
 type Owed = {
   /** Cents to return, or null for the whole payment. */
@@ -95,7 +146,7 @@ function parsePending(raw: unknown): Pending | null {
 
 export type AutoAnswer =
   | { ok: true; writing: string[]; cents: number }
-  | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "owed" | "refund_pending" | "refunded" | "plan" | "card" | "declined" | "unavailable" };
+  | { ok: false; reason: "off" | "unknown" | "not_ready" | "language" | "long" | "busy" | "checking" | "owed" | "refund_pending" | "refunded" | "plan" | "card" | "declined" | "unavailable" };
 
 /** What captions for this video cost, by how many languages: its length as charged. Null when it cannot have them yet. */
 export async function autoQuote(pathname: string): Promise<{ minutes: number; seconds: number } | null> {
@@ -123,19 +174,23 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
   if (!store.subscriptionActive || !store.subscriptionId || !store.stripeCustomerId) return { ok: false, reason: "plan" };
 
   const key = pendingKey(record.id);
-  const receipt = await redisPipeline([["SET", key, "charging", "NX", "EX", 300]]);
-  // An uncertain claim must not authorize a charge or remove another request.
-  if (!Array.isArray(receipt) || receipt.length !== 1) return { ok: false, reason: "unavailable" };
-  if (receipt[0] === null) {
-    // A refund still owed for this video holds it: say so, not that captions are being written.
-    const [held] = await redisPipeline([["GET", key]]);
-    return { ok: false, reason: parsePending(held)?.owed ? "owed" : "busy" };
-  }
-  if (receipt[0] !== "OK") return { ok: false, reason: "unavailable" };
-
   const cents = autoCaptionCents(record.seconds, asked.languages.length);
+  const order: Order = { order: claimValue(now), at: now, cents, langs: asked.languages, path: pathname, customer: store.stripeCustomerId };
+  const value = JSON.stringify(order);
+  // The order is written before the charge and kept as long as a refund may be owed: it is the only trace of a charge whose answer was lost.
+  const claim = await claimMark(key, REFUND_KEEP_SECONDS, value);
+  // An uncertain claim must not authorize a charge or remove another request.
+  if (claim === "unknown") return { ok: false, reason: "unavailable" };
+  if (claim === "taken") return heldBy(record.id, now);
+  // Queued before the charge, so the sweep finds this order if nothing after the charge runs.
+  const queued = repliesFor(await redisPipeline([["ZADD", QUEUE, now + ORDER_SETTLE_MS, record.id]]), 1);
+  if (!queued || (queued[0] !== 0 && queued[0] !== 1)) {
+    await releaseMark(key, value);
+    return { ok: false, reason: "unavailable" };
+  }
+
   const names = asked.languages.map((lang) => captionLabel(lang) ?? lang).join(", ");
-  const sign = `captions:${record.id}:${now}`;
+  const sign = orderSign(record.id, order);
   const charged = await chargeNow({
     customerId: store.stripeCustomerId,
     subscriptionId: store.subscriptionId,
@@ -144,10 +199,28 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     mark: sign,
     idempotencyKey: `nl-${sign}`,
   });
-  if (!charged.ok) {
-    await redisPipeline([["DEL", key]]);
-    return { ok: false, reason: charged.reason === "error" ? "unavailable" : charged.reason };
+  let pi: string;
+  if (charged.ok) {
+    pi = charged.paymentIntent;
+  } else {
+    // No card: no invoice was made. Otherwise Stripe's invoice says what happened, never the error alone.
+    const found = charged.reason === "card" ? "none" : await orderCharge(record.id, order, false);
+    if (found === "none") {
+      await releaseMark(key, value);
+      return { ok: false, reason: charged.reason === "error" ? "unavailable" : charged.reason };
+    }
+    if (found === "unknown") return { ok: false, reason: "checking" };
+    pi = found.pi;
   }
+
+  // Charged: recorded with its payment before anything else, and queued, so a refund is never lost.
+  const pending: Pending = { langs: asked.languages, got: [], at: now, cents, pi, path: pathname };
+  const wrote = repliesFor(await redisPipeline([
+    ["SET", key, JSON.stringify(pending), "EX", KEEP_SECONDS],
+    ["ZADD", QUEUE, now + LOOK_FIRST_MS, record.id],
+  ]), 2);
+  // Not written for sure: the service is not asked. The order or the record stays queued, and either refunds it.
+  if (!wrote || wrote[0] !== "OK" || (wrote[1] !== 0 && wrote[1] !== 1)) return { ok: false, reason: "checking" };
 
   const answer = await askStream("POST", `/videos/${record.id}/transcribe?force=true`, {
     sourceLanguage: asked.spoken,
@@ -161,21 +234,106 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
   if (answer.status !== 200 || success === false) {
     console.error("the video service would not write captions", answer.status, answer.data);
     const refundKey = `nl-${sign}:refund`;
-    if (await refundCharge(charged.paymentIntent, null, refundKey)) {
+    if (await refundCharge(pi, null, refundKey)) {
       await redisPipeline([["DEL", key]]);
       return { ok: false, reason: "refunded" };
-    } else {
-      await owe(record.id, { langs: asked.languages, got: [], at: now, cents, pi: charged.paymentIntent, path: pathname }, null, refundKey, now);
-      return { ok: false, reason: "refund_pending" };
     }
-    return { ok: false, reason: "unavailable" };
+    await owe(record.id, pending, null, refundKey, now);
+    return { ok: false, reason: "refund_pending" };
   }
-  const pending: Pending = { langs: asked.languages, got: [], at: now, cents, pi: charged.paymentIntent, path: pathname };
-  await redisPipeline([
-    ["SET", key, JSON.stringify(pending), "EX", KEEP_SECONDS],
-    ["ZADD", QUEUE, now + LOOK_FIRST_MS, record.id],
-  ]);
   return { ok: true, writing: asked.languages, cents };
+}
+
+/**
+ * Why a video is held by another request: a refund owed, captions being
+ * written, or an order whose charge is not settled yet. An order old enough
+ * is settled here from Stripe's invoice, never charged again: paid, it is
+ * refunded (nothing was asked of the service for it); never made or void, it
+ * goes, and the next request is a new order.
+ */
+async function heldBy(id: string, now: number): Promise<AutoAnswer> {
+  const held = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
+  if (!held) return { ok: false, reason: "unavailable" };
+  const order = parseOrder(held[0]);
+  if (!order) return { ok: false, reason: parsePending(held[0])?.owed ? "owed" : "busy" };
+  if (now - order.at < ORDER_SETTLE_MS) return { ok: false, reason: "checking" };
+  const settled = await settleOrder(id, held[0] as string, order, now);
+  return { ok: false, reason: settled === "refund" ? "owed" : settled === "gone" ? "unavailable" : "checking" };
+}
+
+/**
+ * What Stripe's invoices say became of an order's charge: its payment when the
+ * invoice is paid, "none" when no charge was made or can be (never made, or
+ * void), "unknown" otherwise. Only `final` (the order is ORDER_SETTLE_MS old)
+ * takes an invoice not listed, or a draft, for none, and voids one left open.
+ */
+async function orderCharge(id: string, order: Order, final: boolean): Promise<{ pi: string } | "none" | "unknown"> {
+  const sign = orderSign(id, order);
+  try {
+    const query = new URLSearchParams({
+      customer: order.customer,
+      "created[gte]": String(Math.floor(order.at / 1000) - 120),
+      "created[lte]": String(Math.floor((order.at + ORDER_SETTLE_MS) / 1000) + 120),
+      limit: "100",
+    });
+    const listed = await onPlatformAt(CHARGE_READ_VERSION, "GET", `/invoices?${query}`);
+    if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.has_more !== false) return "unknown";
+    const rows = listed.data as unknown[];
+    // A row that cannot be read may be this order's invoice.
+    if (!rows.every((row) => row && typeof row === "object" && (row as { object?: unknown }).object === "invoice" && typeof (row as { id?: unknown }).id === "string")) return "unknown";
+    const mine = (rows as Record<string, unknown>[]).filter((row) => (row.metadata as { mark?: unknown } | null | undefined)?.mark === sign);
+    if (mine.length > 1) {
+      console.error("more than one invoice carries a captions order's mark", id);
+      return "unknown";
+    }
+    if (!mine.length) return final ? "none" : "unknown";
+    const invoice = mine[0];
+    if (invoice.customer !== order.customer || invoice.currency !== "usd") return "unknown";
+    if (invoice.status === "paid") {
+      const pi = invoice.payment_intent;
+      return typeof pi === "string" && /^pi_[A-Za-z0-9]{8,64}$/.test(pi) ? { pi } : "unknown";
+    }
+    if (invoice.status === "void") return "none";
+    if (!final) return "unknown";
+    if (invoice.status === "draft") return "none";
+    if (invoice.status === "open" || invoice.status === "uncollectible") {
+      const voided = await onPlatformAt(CHARGE_READ_VERSION, "POST", `/invoices/${encodeURIComponent(String(invoice.id))}/void`, new URLSearchParams(), `nl-${sign}:void`);
+      return voided?.id === invoice.id && voided.status === "void" ? "none" : "unknown";
+    }
+    return "unknown";
+  } catch (error) {
+    console.error("a captions order's invoice could not be read", id, error);
+    return "unknown";
+  }
+}
+
+/**
+ * Settles an order ORDER_SETTLE_MS old from Stripe's invoice: paid, it is kept
+ * as a refund owed in full and refunded by the sweep (collectRefund); none,
+ * the order goes; unknown, it stays, looked at again further apart, and after
+ * ORDER_LOOKS_MS it is kept for a person and no longer queued.
+ */
+async function settleOrder(id: string, raw: string, order: Order, now: number): Promise<"refund" | "gone" | "kept"> {
+  const found = await orderCharge(id, order, true);
+  if (found === "none") {
+    // Out of the queue first: a new order written once this one goes queues itself again.
+    await redisPipeline([["ZREM", QUEUE, id]]);
+    await releaseMark(pendingKey(id), raw);
+    return "gone";
+  }
+  if (found !== "unknown") {
+    const pending: Pending = { langs: order.langs, got: [], at: order.at, cents: order.cents, pi: found.pi, path: order.path };
+    await owe(id, pending, null, `nl-${orderSign(id, order)}:refund`, now);
+    return "refund";
+  }
+  const age = now - order.at;
+  if (age > ORDER_LOOKS_MS) {
+    console.error("a captions charge could not be settled from Stripe after every automatic look; kept for a person", id);
+    await redisPipeline([["ZREM", QUEUE, id]]);
+    return "kept";
+  }
+  await redisPipeline([["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, Math.max(LOOK_AGAIN_MS, age / 4)), id]]);
+  return "kept";
 }
 
 /** The languages the service lists captions in, from its answer about a video. */
@@ -196,7 +354,18 @@ function deliveredIn(data: unknown): string[] {
 export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"done" | "waiting" | "none"> {
   if (!STREAM_ID_PATTERN.test(id) || !isRedisConfigured()) return "none";
   const key = pendingKey(id);
-  const [raw] = await redisPipeline([["GET", key]]);
+  const read = repliesFor(await redisPipeline([["GET", key]]), 1);
+  // Unread is not absent: the video stays queued (an order taken out of the queue would be found only by a retry).
+  if (!read) return "waiting";
+  const raw = read[0];
+  const order = parseOrder(raw);
+  if (order) {
+    if (now - order.at < ORDER_SETTLE_MS) {
+      await redisPipeline([["ZADD", QUEUE, order.at + ORDER_SETTLE_MS, id]]);
+      return "waiting";
+    }
+    return (await settleOrder(id, raw as string, order, now)) === "gone" ? "done" : "waiting";
+  }
   const pending = parsePending(raw);
   if (!pending) {
     if (raw !== "charging") await redisPipeline([["ZREM", QUEUE, id]]);

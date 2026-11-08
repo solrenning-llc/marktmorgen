@@ -77,6 +77,7 @@ const MESSAGES: Record<string, string> = {
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
   auto_long: `Captions are written for videos of up to ${MAX_AUTO_MINUTES / 60} hours.`,
   auto_busy: "Captions for this video are already being written. They appear here when they are done.",
+  auto_checking: "Stripe has not confirmed yet whether this charge went through. Nothing more is charged for this video until it does, in about 15 minutes. If your card was charged and no captions are written, the charge is refunded on its own.",
   auto_plan: "Captions written by AI are charged to the card your plan is paid with, so they need a plan first.",
   auto_card: "There is no card on your plan to charge. Add one under Plan and billing, then try again.",
   auto_declined: "Your card was declined, so nothing was charged and nothing is being written.",

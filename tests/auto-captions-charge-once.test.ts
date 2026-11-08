@@ -19,6 +19,7 @@
 import { requestAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
 import { streamPath } from "@/lib/stream-rules";
 import type { Store } from "@/lib/store";
+import { readFileSync } from "node:fs";
 import { store as redis, advance } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -42,6 +43,8 @@ let payAnswerLost = false;
 let listDown = false;
 /** The process dies the moment /pay answers: nothing after it runs. */
 let dieAfterPay = false;
+/** The process dies when this Stripe call is reached, before Stripe does it. */
+let dieAt = "";
 let dead = false;
 const transcribes: unknown[] = [];
 
@@ -60,6 +63,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ guid: VIDEO, status: 4, captions: [] });
   }
   const path = url.pathname.replace(/^\/v1/, "");
+  if (dieAt && `${method} ${path}`.endsWith(dieAt)) {
+    dead = true;
+    throw new Died("the process is gone");
+  }
   const body = new URLSearchParams(String(init?.body ?? ""));
   const key = new Headers(init?.headers).get("Idempotency-Key");
   if (method === "POST" && key && replays.has(key)) {
@@ -157,6 +164,7 @@ function reset(): void {
   payAnswerLost = false;
   listDown = false;
   dieAfterPay = false;
+  dieAt = "";
   dead = false;
   redis.run(["SET", `nl:stream:v:${VIDEO}`, JSON.stringify({ id: VIDEO, path: PATH, name: "Knife skills.mp4", type: "video/mp4", bytes: 1, state: "ready", at: Date.now(), seconds: 600, width: 1920, height: 1080, settled: true })]);
 }
@@ -200,6 +208,8 @@ async function main(): Promise<void> {
   payAnswerLost = false;
   is("not said to be uncharged, nothing asked of the service", [unknown, transcribes.length, paidCount()], ["checking", 0, 1]);
   is("the request is kept and looked at again", [redis.run(["GET", KEY]) !== null, redis.run(["ZSCORE", "nl:stream:autoq", VIDEO]) !== null], [true, true]);
+  const order = (JSON.parse(String(redis.run(["GET", KEY]))) as { order: string }).order;
+  is("the charge's key comes from the order written before it", [...replays.keys()].filter((k) => k.endsWith(":invoice")), [`nl-captions:${VIDEO}:${order}:invoice`]);
   is("a retry at once charges nothing more", [await ask(T + 1_000), paidCount(), invoices.length], ["checking", 1, 1]);
   advance(10 * 60_000);
   is("ten minutes on, still nothing more", [await ask(T + 10 * 60_000), paidCount(), invoices.length], ["checking", 1, 1]);
@@ -220,11 +230,38 @@ async function main(): Promise<void> {
   is("charged, and nothing after it ran", [died, paidCount(), transcribes.length], ["died", 1, 0]);
   advance(6 * 60_000);
   is("six minutes on, a retry charges nothing more", [await ask(T + 6 * 60_000), paidCount(), invoices.length], ["checking", 1, 1]);
+  const sweepPipeline = redis.pipeline;
+  redis.pipeline = async (commands) => (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === KEY ? ([] as unknown[]) : sweepPipeline(commands));
+  is("a look whose read of the record comes back in an unknown shape keeps the video queued", [await syncAutoCaptions(VIDEO, T + 7 * 60_000), redis.run(["ZSCORE", "nl:stream:autoq", VIDEO]) !== null, redis.run(["GET", KEY]) !== null], ["waiting", true, true]);
+  redis.pipeline = sweepPipeline;
   advance(10 * 60_000);
   await syncAutoCaptions(VIDEO, T + 16 * 60_000);
   await syncAutoCaptions(VIDEO, T + 30 * 60_000);
   is("the sweep finds the charge and refunds it in full, once", [paidCount(), refunds.length, kept()], [1, 1, 0]);
   is("a retry after it: one new charge, used", [await ask(T + 31 * 60_000), paidCount(), kept(), transcribes.length], ["asked", 2, PRICE, 1]);
+
+  part("The process dies before Stripe made anything, or before it paid");
+  reset();
+  dieAt = "GET /subscriptions/sub_Store000003";
+  // Nothing after the cut answers, so the order is kept as not known.
+  is("cut off before any invoice: kept, nothing charged", [await ask(T), invoices.length, redis.run(["GET", KEY]) !== null], ["checking", 0, true]);
+  dieAt = "";
+  dead = false;
+  advance(5 * 60_000);
+  is("five minutes on: held, nothing charged", [await ask(T + 5 * 60_000), invoices.length], ["checking", 0]);
+  advance(11 * 60_000);
+  is("once it is old enough: no invoice was made, so the order goes, and nothing is charged by it", [await ask(T + 16 * 60_000), invoices.length, redis.run(["GET", KEY])], ["unavailable", 0, null]);
+  is("asked again: charged once, used", [await ask(T + 17 * 60_000), paidCount(), transcribes.length], ["asked", 1, 1]);
+  reset();
+  dieAt = "/pay";
+  is("cut off with the invoice open, before it was paid: kept", [await ask(T), invoices.map((i) => i.status), redis.run(["GET", KEY]) !== null], ["checking", ["open"], true]);
+  dieAt = "";
+  dead = false;
+  advance(16 * 60_000);
+  is("the sweep voids the open invoice and lets the video go; nothing charged", [await syncAutoCaptions(VIDEO, T + 16 * 60_000), invoices.map((i) => i.status), paidCount(), redis.run(["GET", KEY])], ["done", ["void"], 0, null]);
+
+  part("The invoices are read at the version chargeNow writes them with");
+  is("the same API version as lib/billing.ts charges with", [readFileSync("lib/billing.ts", "utf8").includes('const CHARGE_VERSION = "2024-06-20";'), readFileSync("lib/auto-captions.ts", "utf8").includes('const CHARGE_READ_VERSION = "2024-06-20";')], [true, true]);
 
   part("A declined card is still said to be declined, and frees the video");
   reset();

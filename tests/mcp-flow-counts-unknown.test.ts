@@ -3,20 +3,22 @@
  * 24: unknown is never zero). What is checked, with real sequences saved by
  * saveFlow and the real emailsTool:
  *
- *   - flowStats reads each sequence's tallies only in their exact shape: an
- *     even list of field names and whole numbers from zero up; a reading that
- *     throws, a reply of another shape (a number, a string, an odd list, a
- *     value that is not a number, negative or a fraction) or a pipeline that
- *     answers fewer replies throws UnknownReplyError (or the error itself),
- *     never a zero;
+ *   - get_emails reads the tallies with the studio's own strict reader
+ *     (readFlowStatsStrict, lib/flow-stats.ts), so one rule says what a tally
+ *     reply may be (Claude 4 on #3176): an even list, each field once, whole
+ *     numbers from zero up; a reading that throws, a reply of another shape (a
+ *     number, a string, an odd list, a value that is not a whole number) or a
+ *     pipeline that answers fewer replies throws, never a zero. A whole number
+ *     given as a number and a field it does not count are read as that rule
+ *     reads them;
  *   - get_emails then says each sequence's started, emails_sent and
  *     reached_the_end as null with counts_unavailable true, never 0;
  *   - a sequence nobody has started yet (no hash: an empty list) is a real 0,
  *     and real tallies come out as they are, with counts_unavailable false.
  */
 import { emailsTool } from "@/lib/mcp-tools";
-import { enroll, flowStats, readFlows, saveFlow } from "@/lib/flows";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { enroll, readFlows, saveFlow } from "@/lib/flows";
+import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { upsertContact } from "@/lib/contacts";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
@@ -66,16 +68,16 @@ async function main(): Promise<void> {
   };
   const throws = async () => {
     try {
-      await flowStats(flows);
+      await readFlowStatsStrict(flows);
       return "read";
     } catch (error) {
-      return error instanceof UnknownReplyError ? "unknown" : error instanceof Error ? error.message : "thrown";
+      return error instanceof Error && error.message === "connection reset" ? error.message : "unknown";
     }
   };
 
   part("Control: real tallies, and a sequence nobody started yet");
   twist = null;
-  const read = await flowStats(flows);
+  const read = await readFlowStatsStrict(flows);
   is("real tallies as they are", [read.get(welcomeId)?.started, read.get(welcomeId)?.sent, read.get(welcomeId)?.reached], [1, 4, 2]);
   is("no hash at all (an empty list) is a real zero", [read.get(quietId)?.started, read.get(quietId)?.sent, read.get(quietId)?.reached], [0, 0, 0]);
   is("get_emails shows them, counts_unavailable false", await sequences(), [["Welcome", 1, 4, 2, false], ["Quiet", 0, 0, 0, false]]);
@@ -84,7 +86,7 @@ async function main(): Promise<void> {
   twist = () => {
     throw new Error("connection reset");
   };
-  is("flowStats does not answer zeros", await throws(), "connection reset");
+  is("the reader does not answer zeros", await throws(), "connection reset");
   const unknown = [["Welcome", null, null, null, true], ["Quiet", null, null, null, true]];
   is("get_emails says null and counts_unavailable, never 0", await sequences(), unknown);
 
@@ -99,22 +101,27 @@ async function main(): Promise<void> {
     ["a negative value", ["started", "-1"]],
     ["a fraction", ["started", "1.5"]],
     ["a number past the safe range", ["started", "9007199254740993"]],
-    ["a value that is not a string", ["started", 3]],
     ["a field that is not a string", [7, "1"]],
     ["a field twice", ["started", "1", "started", "2"]],
   ];
   for (const [what, reply] of shapes) {
     twist = (replies) => [reply, ...replies.slice(1)];
-    is(`${what}: flowStats throws UnknownReplyError`, await throws(), "unknown");
+    is(`${what}: the reader throws`, await throws(), "unknown");
     is(`${what}: get_emails says null`, await sequences(), unknown);
   }
 
   part("The pipeline answered fewer replies");
   twist = (replies) => replies.slice(0, 1);
-  is("flowStats throws UnknownReplyError", await throws(), "unknown");
+  is("the reader throws", await throws(), "unknown");
   is("get_emails says null", await sequences(), unknown);
   twist = () => ({ 0: [], 1: [] });
   is("a reply list that is not a list is unknown", await throws(), "unknown");
+
+  part("One rule with the studio's Email page (Claude 4 on #3176)");
+  twist = (replies) => [["started", 3], ...replies.slice(1)];
+  is("a whole number given as a number is read as it is", await sequences(), [["Welcome", 3, 0, 0, false], ["Quiet", 0, 0, 0, false]]);
+  twist = (replies) => [["started", "1", "extra", "x"], ...replies.slice(1)];
+  is("a field the tallies do not count is left out, as the studio reads it", await sequences(), [["Welcome", 1, 0, 0, false], ["Quiet", 0, 0, 0, false]]);
 
   part("Back to normal");
   twist = null;

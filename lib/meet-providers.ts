@@ -722,14 +722,39 @@ export async function googleFreeBusy(token: string, calendars: string[], from: n
       for (const b of entry.busy as unknown[]) {
         if (!b || typeof b !== "object" || Array.isArray(b)) throw unreadable();
         const { start, end } = b as { start?: unknown; end?: unknown };
-        const s = typeof start === "string" ? Date.parse(start) : Number.NaN;
-        const e = typeof end === "string" ? Date.parse(end) : Number.NaN;
-        if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) throw unreadable();
+        const s = rfc3339(start);
+        const e = rfc3339(end);
+        if (s === null || e === null || e <= s) throw unreadable();
         busy.push([s, e]);
       }
     }
   }
   return busy;
+}
+
+/**
+ * Google's TimePeriod start/end are RFC 3339 date-times (`date-time` in the API discovery document): a full date, a
+ * time and an explicit zone, `Z` or `±hh:mm`. Anything else is not read (CX-123 rule 24): Date.parse would take "1"
+ * for 2001, a date alone, locale text, a time without a zone in the server's own zone, and 30 February as 2 March.
+ * The calendar fields are checked before conversion, so no time is moved. Returns the instant in ms, or null.
+ */
+function rfc3339(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!m) return null;
+  const [year, month, day, hour, minute, second] = m.slice(1, 7).map(Number);
+  if (month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59) return null;
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day > days) return null;
+  let offset = 0;
+  if (m[8] !== "Z") {
+    const oh = Number(m[8].slice(1, 3));
+    const om = Number(m[8].slice(4, 6));
+    if (oh > 23 || om > 59) return null;
+    offset = (m[8][0] === "+" ? 1 : -1) * (oh * 60 + om) * 60_000;
+  }
+  const ms = m[7] ? Number(m[7].slice(0, 3).padEnd(3, "0")) : 0;
+  return Date.UTC(year, month - 1, day, hour, minute, second, ms) - offset;
 }
 
 export type GoogleCalendar = { id: string; name: string; primary: boolean; writable: boolean };

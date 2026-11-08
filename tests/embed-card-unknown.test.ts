@@ -5,9 +5,10 @@
  * coming soon (soonOne → not soon), stock (stockLeft → no limit) and licence
  * keys (outOfKeys → keys left). Then it could draw a buy button, or the
  * embedded calendar with its times, for a product that may not be launched or
- * may be sold out. Now any of the three unknown makes the card a plain link to
- * the product's own page, which decides on its own reading: no checkout, and
- * no calendar in the frame (it opens only on a link to the booking page).
+ * may be sold out. Now any of the three unknown makes the card say buying is
+ * not available just now (cardBuyUnread, as main already did for coming soon
+ * and keys): no checkout and no calendar in the frame, and its title still
+ * leads to the product's own page.
  */
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
@@ -20,9 +21,10 @@ is("stock: a failed read is its own mark, never \"no limit\" (null)", card.inclu
 is("keys: a failed read is unknown (null), not \"keys left\"", card.includes("outOfKeys(store, product).catch(() => null)"), true);
 is("none of the old fallbacks is left", [/soonOne\([^)]*\)\.catch\(\(\) => \(\{ soon: false/, /stockLeft\([^)]*\)\.catch\(\(\) => null\)/, /outOfKeys\([^)]*\)\.catch\(\(\) => false\)/].some((old) => old.test(card)), false);
 
-part("Unknown makes the card a link to the product's own page");
-is("any of the three unknown is `unread`", /const unread = coming === null \|\| stock === UNREAD \|\| noKeys === null;/.test(card), true);
-is("its action is the product's page, whatever pageAction said: no checkout", card.includes("unread ? { action: { kind: \"link\" as const, href: productPath(store, product) }, label: computed.label }"), true);
-is("so no calendar either: the calendar opens only on a link to the booking page", /action\.kind === "link" && action\.href === `\/@\$\{store\.handle\}\/book\/\$\{product\.id\}`/.test(card), true);
+part("Unknown stock draws no buy button");
+is("a failed stock read is `stockUnread`", card.includes("const stockUnread = stock === UNREAD;"), true);
+is("how many are left is not said then", card.includes("const count = noKeys === null || stockUnread ? null : noKeys ? 0 : stock;"), true);
+is("pageAction runs only when all three were read", card.includes("const computed = coming && noKeys !== null && !stockUnread\n    ? pageAction("), true);
+is("otherwise the card says buying is not available just now: no checkout, no calendar", card.includes(': { action: { kind: "none" as const, text: speech(store).w.cardBuyUnread }, label: "" };'), true);
 
 done();

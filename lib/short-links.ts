@@ -68,13 +68,18 @@ export async function countLinks(statsId: string | null): Promise<number> {
  * are none, never another shape: a reply missing, of another shape or with a
  * member that is not a string is unknown and throws UnknownReplyError
  * (CX-123 rule 24), so neither the cap nor "one link to a name" is decided on
- * it (addLink), and the studio shows its own words instead of "no links".
+ * it (addLink). Initial studio rendering is a separate, deferred caller concern.
  */
 export async function readLinks(statsId: string | null): Promise<ShortLink[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const raw = stringList(repliesFor(await redisPipeline([["HVALS", storeKey(statsId)]]), 1)?.[0]);
   if (!raw) throw new UnknownReplyError("a store's short links");
-  const list = raw.map(parse).filter((l): l is Kept => Boolean(l && l.statsId === statsId));
+  const list = raw.map((value) => {
+    const link = parse(value);
+    // A kept member that cannot be read or attributed here cannot be excluded from the cap or name check.
+    if (!link || link.statsId !== statsId) throw new UnknownReplyError("a store's short link");
+    return link;
+  });
   return list.sort((a, b) => b.made - a.made || a.code.localeCompare(b.code)).map(shown);
 }
 

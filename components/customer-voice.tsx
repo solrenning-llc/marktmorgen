@@ -6,7 +6,7 @@ import type { VoiceSource, VoiceSummary } from "@/lib/customer-voice";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
-  unread: "Some of what customers said could not be read just now, so there may be more than this. No AI job was used. Try again in a moment.",
+  unread: "Some of what customers said could not be read just now, so no summary was made: it would leave them out for the whole month. No AI job was used. Try again in a moment.",
   few: "Not enough yet: fewer than 8 things customers wrote or searched for in the last 90 days. It is worth reading once there are more.",
   used: "This month's AI jobs are used up. They come back with your next billing month.",
   off: "This summary is not available right now.",
@@ -31,8 +31,8 @@ const said = (counts: Partial<Record<VoiceSource, number>>) =>
     .map((s) => `${counts[s]} ${SOURCE_WORDS[s][counts[s] === 1 ? 0 : 1]}`)
     .join(" · ");
 
-/** The lists named in plain words, the first capitalized: "Reviews and searches with no result". */
-function unreadWords(unread: VoiceSource[]): string {
+/** The lists named in plain words, the first capitalized: "Reviews and searches with no result". Pure. */
+export function unreadWords(unread: VoiceSource[]): string {
   const names = SOURCES.filter((s) => unread.includes(s)).map((s) => SOURCE_WORDS[s][1]);
   const list = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
   return list ? `${list[0].toUpperCase()}${list.slice(1)}` : "";
@@ -87,11 +87,6 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
       {summary ? (
         <div className="mt-3">
           <p className="text-xs text-ink-soft">{`${monthName(summary.month)}: read ${said(summary.read) || "nothing"}.`}</p>
-          {summary.unread?.length ? (
-            <p className="notice notice-warn mt-2 text-sm" role="status">
-              {`${unreadWords(summary.unread)} could not be read when this summary was made, so they are not in it.`}
-            </p>
-          ) : null}
           {summary.themes.length ? (
             <ol className="mt-2 space-y-3">
               {summary.themes.map((theme) => (

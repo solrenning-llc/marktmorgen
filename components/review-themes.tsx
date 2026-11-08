@@ -24,10 +24,6 @@ export function ReviewThemes({ voice, studioHome }: { voice: VoiceSummary | null
           Made once a month with your customer voice, from reviews and the other things customers write.{" "}
           <Link href={studioHome} className="underline underline-offset-4">Make it on your studio&apos;s home page</Link>.
         </p>
-      ) : themes.length === 0 && voice.unread?.includes("review") ? (
-        <p className="mt-2 text-sm text-ink-soft" role="status">
-          Reviews could not be read when this summary was made, so it has no themes from them. The next summary reads them again.
-        </p>
       ) : themes.length === 0 ? (
         <p className="mt-2 text-sm text-ink-soft">None of this month&apos;s themes includes a review.</p>
       ) : (

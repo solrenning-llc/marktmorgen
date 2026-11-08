@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     is(`${name}: nothing reached Stripe`, paidTo("cus_Ana0001"), []);
   }
 
-  part("Read healthily afterwards, the same credit is paid, once");
+  part("Read healthily afterward, the same credit is paid, once");
   const healed = await runWith(null);
   is("added once, complete", [healed.added, healed.failed, healed.complete], [1, 0, true]);
   is("done and off the owed list", [recordOf("bonus_unknownstore")?.state, owed("bonus_unknownstore")], ["done", 0]);

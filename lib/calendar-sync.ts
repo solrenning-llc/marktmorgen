@@ -42,6 +42,7 @@ import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
@@ -280,8 +281,9 @@ export async function calendarBusy(
       if (fresh) return fresh.busy;
       const good = cached ? parseReading(cached[i * 2 + 1]) : null;
       // Somebody else is reading it right now: the last good reading will do.
-      const [mine] = await redisPipeline([["SET", lockKey(feed.id), "1", "NX", "EX", 20]]).catch(() => [null]);
-      if (mine === null) return good?.busy ?? [];
+      // Read exactly (lib/claim-mark.ts, CX-123 rule 24): only a lock known to be this read's own reads the calendar.
+      const lock = claimValue();
+      if ((await claimMark(lockKey(feed.id), 20, lock)) !== "ours") return good?.busy ?? [];
       try {
         const reading = await readFeed(feed.url, fallbackTz, now, hooks);
         const text = JSON.stringify(reading);
@@ -302,7 +304,7 @@ export async function calendarBusy(
         ]).catch(() => {});
         return good?.busy ?? [];
       } finally {
-        await redisPipeline([["DEL", lockKey(feed.id)]]).catch(() => {});
+        await releaseMark(lockKey(feed.id), lock);
       }
     }),
   );

@@ -31,8 +31,11 @@ const unreadable = new Set<string>();
 // The same for the list of stores an address serves on a team (lib/team.ts memberStores reads it first).
 const unreadableSets = new Set<string>();
 const teamIndexKey = (email: string) => "nl:team:of:" + createHash("sha256").update("nimbus-team-of:" + email).digest("hex").slice(0, 40);
+// The move back a walk (ZADD XX) answered with nothing Redis would say: not known to have moved.
+let unconfirmedMoves = false;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
+  if (unconfirmedMoves && commands.length === 1 && commands[0][0] === "ZADD" && commands[0][2] === "XX") return [null];
   if (commands.some((c) => c[0] === "GET" && unreadable.has(String(c[1])))) throw new Error("Redis request timed out (test)");
   if (commands.some((c) => c[0] === "SMEMBERS" && unreadableSets.has(String(c[1])))) throw new Error("Redis request timed out (test)");
   return realPipeline(commands);
@@ -108,6 +111,28 @@ async function main(): Promise<void> {
   const last = await eraseClosed(Date.now() + 30_000, async () => {}, T4);
   is("the closing store is prepared", last.stores, 1);
   is("the host's calendar is gone", kept(X), [0, 0, 0, 0]);
+
+  part("A move back a walk that Redis does not confirm is unknown, never a run that is done");
+  redis.clear();
+  await makeStore(A, "unknowna");
+  const TU = Date.now();
+  await markDue(A, TU - 1000);
+  unreadable.add(ownerKey(A));
+  unconfirmedMoves = true;
+  const unsure = await eraseClosed(Date.now() + 30_000, async () => {}, TU);
+  unconfirmedMoves = false;
+  unreadable.delete(ownerKey(A));
+  is("the store is still in line (nothing taken out)", redis.run(["ZSCORE", DUE_KEY, A]) !== null, true);
+  is("the run does not say it is done", unsure.done, false);
+  const confirmed = await (async () => {
+    unreadable.add(ownerKey(A));
+    try {
+      return await eraseClosed(Date.now() + 30_000, async () => {}, TU);
+    } finally {
+      unreadable.delete(ownerKey(A));
+    }
+  })();
+  is("control: the same run with the move confirmed is done", confirmed.done, true);
 
   done();
 }

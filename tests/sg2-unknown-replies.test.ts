@@ -3,8 +3,8 @@
  * and 30): a reply from Redis that is missing, cut short or of another shape
  * is never read as none, zero or done.
  *
- *   4  lib/erasure-index.ts forgetNoted: the note of an address's records is
- *      kept, nothing is deleted, and the erasure step fails.
+ *   4  lib/erasure-index.ts forgetNoted: a note Redis cannot read deletes
+ *      nothing and keeps the note; a reply in another shape fails the step.
  *   5  lib/two-step.ts endLocked: the locked sessions' set is kept, and the
  *      email says they could not be logged out, never that they were.
  *   6  lib/auth.ts dropSecondStep (and endAllSessions, rule 30): the sessions
@@ -121,35 +121,34 @@ async function main(): Promise<void> {
   const note = async () => {
     await real([["SET", record, "{}"], ...noteForErasure(STATS, PERSON, record)]);
   };
-  const notesKey = `nl:erase:ix:${STATS}:${sha(`nimbus-erase-ix:${STATS}:${PERSON}`).slice(0, 32)}:z`;
+  const indexKey = `nl:erase:ix:${STATS}:${sha(`nimbus-erase-ix:${STATS}:${PERSON}`).slice(0, 32)}`;
+  const notesKey = `${indexKey}:z`;
+  // One step reads the notes and deletes them with the records (lib/erasure-index.ts FORGET_NOTED): a note Redis
+  // cannot read refuses the whole step before anything is deleted; a reply in another shape fails the step.
+  const isForget = (command: Command) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:forget-noted:v1\n");
   await note();
-  for (const bad of BAD_LISTS) {
-    malform(on("ZRANGEBYSCORE", "nl:erase:ix:"), bad);
-    const answer = await rejects(() => forgetNoted(STATS, PERSON));
-    restore();
-    is(`a note read as ${JSON.stringify(bad) ?? "nothing"}: fails, the note and its record kept`, [answer, await exists(notesKey), await exists(record)], ["UnknownReplyError", true, true]);
-  }
-  malform(on("SMEMBERS", "nl:erase:ix:"), { 0: "nl:x" });
-  is("an old-kind note read in another shape: the same", [await rejects(() => forgetNoted(STATS, PERSON)), await exists(notesKey), await exists(record)], ["UnknownReplyError", true, true]);
-  restore();
-  malformAll(() => true, [[]]);
-  is("a pipeline answering one reply for two commands: the same", [await rejects(() => forgetNoted(STATS, PERSON)), await exists(notesKey), await exists(record)], ["UnknownReplyError", true, true]);
-  restore();
-  for (const bad of BAD_COUNTS) {
-    await note();
-    malform((command) => command[0] === "DEL" && String(command[1]).startsWith("nl:erase:ix:"), bad);
-    const answer = await rejects(() => forgetNoted(STATS, PERSON));
-    restore();
-    is(`a deletion answered ${JSON.stringify(bad) ?? "nothing"}: not a receipt of none, the step fails`, answer, "UnknownReplyError");
-  }
-  await note();
-  malform(on("ZRANGEBYSCORE", "nl:erase:ix:"), null);
+  await real([["SET", indexKey, "not a set"]]);
+  is("an old-kind note of another type: Redis refuses, the note and its record kept", [await rejects(() => forgetNoted(STATS, PERSON)), await exists(notesKey), await exists(record)], ["Error", true, true]);
   const eraser = ERASERS.find((e) => e.module === "lib/erasure-index.ts");
   const stepAnswer = await rejects(() => eraser!.run({ statsId: STATS, email: PERSON } as never, [], new Set()));
+  is("through the erasure's own step: it fails (said as an unfinished step), the note kept", [stepAnswer, await exists(notesKey)], ["Error", true]);
+  await real([["DEL", indexKey]]);
+  for (const bad of [...BAD_LISTS, ...BAD_COUNTS.map((count) => [count, 1])]) {
+    await note();
+    malform(isForget, bad);
+    const answer = await rejects(() => forgetNoted(STATS, PERSON));
+    restore();
+    is(`the step answered ${JSON.stringify(bad) ?? "nothing"}: not a receipt of none, the step fails`, answer, "UnknownReplyError");
+  }
+  await note();
+  malformAll(isForget, []);
+  is("a pipeline answering no reply for the step: it fails", await rejects(() => forgetNoted(STATS, PERSON)), "UnknownReplyError");
+  await note();
+  malformAll(isForget, [[1, 1], [1, 1]]);
+  is("a pipeline answering two replies for the step: it fails", await rejects(() => forgetNoted(STATS, PERSON)), "UnknownReplyError");
   restore();
-  is("through the erasure's own step: it fails (said as an unfinished step), the note kept", [stepAnswer, await exists(notesKey)], ["UnknownReplyError", true]);
-  // (The stand-in counts every key named to DEL, there or not; only that a count comes back is held here.)
-  is("read in its shape: the record and the note go, with a count", [typeof (await forgetNoted(STATS, PERSON)), await exists(record), await exists(notesKey)], ["number", false, false]);
+  await note();
+  is("read in its shape: the record and the note go, with their count", [await forgetNoted(STATS, PERSON), await exists(record), await exists(notesKey)], [1, false, false]);
 
   part("5: endLocked keeps the locked sessions it could not read, and says so");
   const LOST = "lost@example.com";

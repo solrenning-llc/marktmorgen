@@ -1,6 +1,6 @@
 /**
- * 656 [WG16], unit 6: the course's own page in the studio and the studio's
- * Discord page use the one studio empty state (components/empty-state.tsx,
+ * 656 [WG16], unit 6: the course's own page in the studio uses the one
+ * studio empty state (components/empty-state.tsx,
  * StudioEmptyState) where a list is empty, instead of a bare sentence in a
  * sand box:
  *
@@ -12,12 +12,13 @@
  *     way, since a free course is never "sold" and still has students;
  *   - "Completions": no certificate issued. Its two true sentences are kept
  *     (certificates on: nobody finished yet; off: switch them on above), with
- *     no action, since the switch sits just above in the same section;
- *   - "Who joined" on the Discord page: nobody joined yet; its sentence is
- *     kept, with no action, since buyers join after paying.
+ *     no action, since the switch sits just above in the same section.
+ *
+ * The Discord page's "Who joined" waits for #2932 and #3017 (Claude 5), which
+ * hold lib/discord-store.ts and the Discord page; it is not changed here.
  *
  * Read from the source, as unit 2's test reads the blog and reviews pages:
- * these pages need a signed-in owner and a Stripe account to render.
+ * this page needs a signed-in owner and a Stripe account to render.
  */
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
@@ -26,7 +27,6 @@ import { StudioEmptyState } from "@/components/empty-state";
 import { done, is, part } from "./check";
 
 const course = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
-const discord = readFileSync("components/discord-studio.tsx", "utf8");
 
 part("The course's students: an empty list");
 is("the page imports the studio empty state", /import \{[^}]*\bStudioEmptyState\b[^}]*\} from "@\/components\/empty-state";/.test(course), true);
@@ -62,16 +62,6 @@ is(
 );
 is("no action: the switch is just above, in the same section", /title=\{course\.certificate \? "No certificates yet"[\s\S]{0,400}?action=/.test(course.slice(course.indexOf('"Certificates are off"') - 200, course.indexOf('"Certificates are off"') + 400)), false);
 is("no bare sentence left where nobody finished", course.includes('<p className="mt-3 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">'), false);
-
-part("The Discord page: nobody joined yet");
-is("the component imports the studio empty state", /import \{[^}]*\bStudioEmptyState\b[^}]*\} from "@\/components\/empty-state";/.test(discord), true);
-is(
-  "nobody joined: the studio empty state, an h3 under the section's h2, its sentence kept, no action",
-  discord.includes(' members.length === 0 ? (\n          <StudioEmptyState\n            level={3}\n            compact\n            className="mt-5"\n            title="Nobody has joined yet"\n            body="Buyers see “Join the Discord” after paying, and on their orders."\n          />'),
-  true,
-);
-is("the section's heading it sits under is an h2", discord.includes('<h2 id="discord-people"'), true);
-is("no bare sentence left", discord.includes(">Nobody has joined yet. Buyers see"), false);
 
 part("What the creator sees, drawn by the real component");
 const students = renderToStaticMarkup(

@@ -16,7 +16,6 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { emailKey, storeKey } from "@/lib/learn";
 import { normaliseEmail } from "@/lib/auth";
@@ -124,23 +123,15 @@ export async function readMember(room: string, userId: string): Promise<Member |
   return parse<Member>(raw);
 }
 
-/**
- * Everyone given roles in this store's server, newest first, at most `limit`;
- * null when Redis answered in a shape that cannot be read (rule 24), so the
- * studio never says "Nobody has joined yet" while someone has. Only Redis's
- * own empty answer is none; a member whose record is itself not readable is
- * skipped, as before.
- */
-export async function membersOf(room: string, limit = 500): Promise<{ id: string; member: Member }[] | null> {
+/** Everyone given roles in this store's server, newest first, at most `limit`. */
+export async function membersOf(room: string, limit = 500): Promise<{ id: string; member: Member }[]> {
   if (!isRedisConfigured()) return [];
-  const replies = repliesFor(await redisPipeline([["HGETALL", membersKey(room)]]), 1);
-  if (!replies) return null;
-  const pairs = stringList(replies[0]);
-  if (!pairs || pairs.length % 2 !== 0) return null;
+  const [flat] = await redisPipeline([["HGETALL", membersKey(room)]]);
+  const pairs = Array.isArray(flat) ? flat : [];
   const out: { id: string; member: Member }[] = [];
   for (let i = 0; i + 1 < pairs.length; i += 2) {
     const member = parse<Member>(pairs[i + 1]);
-    if (member) out.push({ id: pairs[i], member });
+    if (member) out.push({ id: String(pairs[i]), member });
   }
   return out.sort((a, b) => b.member.at - a.member.at).slice(0, limit);
 }

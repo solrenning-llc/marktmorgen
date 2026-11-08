@@ -1,16 +1,15 @@
 /**
- * 656 [WG16] unit 6, rule 23 / rule 24 (CX-123): the three lists this unit
- * gives an empty state (a course's students, its certificates, the store's
- * Discord members) are read by studentsOf (lib/learn.ts), certificatesFor
- * (lib/certificate.ts) and membersOf (lib/discord-store.ts). Each read a reply
- * in an unknown shape as "none", so the studio would say "No students yet",
- * "No certificates yet" or "Nobody has joined yet" while there were some.
+ * 656 [WG16] unit 6, rule 23 / rule 24 (CX-123): the two lists this unit
+ * gives an empty state (a course's students and its certificates) are read by
+ * studentsOf (lib/learn.ts) and certificatesFor (lib/certificate.ts). Each
+ * read a reply in an unknown shape as "none", so the studio would say "No
+ * students yet" or "No certificates yet" while there were some.
  *
  * Now a reply of another shape, a cut envelope or a count of replies that
  * does not match what was sent is unknown (null), never an empty list; only
  * Redis's own empty answer is "none". A record that is itself malformed is
  * still skipped, as before: one broken certificate must not hide the rest.
- * The pages say the list could not be read instead of the empty state, and
+ * The course page says the list could not be read instead of the empty state, and
  * the course's drip schedule skips a course whose students it could not read
  * this round instead of acting on an unknown list of blocked students.
  *
@@ -20,7 +19,6 @@ import { readFileSync } from "node:fs";
 import type { Course } from "@/lib/course";
 import { emailKey, studentsOf } from "@/lib/learn";
 import { certificatesFor } from "@/lib/certificate";
-import { membersOf } from "@/lib/discord-store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -52,16 +50,12 @@ async function main(): Promise<void> {
   const certId = "abcdefgh12345678";
   redis.run(["SET", `nl:cert:${certId}`, JSON.stringify({ id: certId, name: "Ana", title: "Start", store: "harbor", productId: "p1", courseId: course.id, issuedAt: 1_760_000_600, withdrawnAt: 0 })]);
   redis.run(["SADD", `nl:course:${course.id}:certs:all`, certId]);
-  const room = "room0001";
-  redis.run(["HSET", `nl:dc:mem:${room}`, "123456789012345678", JSON.stringify({ e: student, n: "ana", p: ["p1"], r: ["r1"], at: 1_760_000_700, checked: 1_760_000_700 })]);
 
   part("Read whole: the lists as kept, and Redis's own empty answer is none");
   is("the student is listed, with one lesson done", (await studentsOf(course))?.students.map((s) => [s.email, s.done]), [[student, 1]]);
   is("a course nobody opened: an empty list", await studentsOf(emptyCourse), { total: 0, students: [] });
   is("the certificate is listed", (await certificatesFor(course.id))?.list.map((c) => c.id), [certId]);
   is("a course with no certificate: an empty list", await certificatesFor(emptyCourse.id), { list: [], total: 0 });
-  is("the member is listed", (await membersOf(room))?.map((m) => m.id), ["123456789012345678"]);
-  is("a server nobody joined: an empty list", await membersOf("room0002"), []);
 
   part("Students: an unknown reply is unknown (null), never none");
   for (const [name, answer] of [
@@ -96,17 +90,6 @@ async function main(): Promise<void> {
   redis.run(["SADD", `nl:course:${course.id}:certs:all`, "0000000000000000"]);
   is("a certificate that is gone (nil) is skipped", (await certificatesFor(course.id))?.list.map((c) => c.id), [certId]);
 
-  part("Discord members: an unknown reply is unknown (null), never none");
-  for (const [name, answer] of [
-    ["the members answered as a number", replace("HGETALL", 9)],
-    ["the members cut short (an odd number of fields)", replace("HGETALL", ["123456789012345678"])],
-    ["no reply at all", (() => []) as Answer],
-  ] as [string, Answer][]) {
-    shape = answer;
-    is(`${name}: null`, await safely(() => membersOf(room)), null);
-    shape = null;
-  }
-
   part("The pages say the list could not be read, instead of the empty state");
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
   is("the course page keeps an unknown read of the students apart", page.includes("const studentsRead = await studentsOf(course, 500).catch(() => null);"), true);
@@ -119,15 +102,6 @@ async function main(): Promise<void> {
   is(
     "certificates unread: a status note, not the empty state",
     page.includes('{certificates === null ? (\n            <p role="status" className="notice mt-3">\n              The certificates could not be read just now. Reload this page in a moment; this does not mean none were issued.\n            </p>\n          ) : certificates.list.length === 0 ? ('),
-    true,
-  );
-  const discordPage = readFileSync("app/studio/discord/page.tsx", "utf8");
-  is("the Discord page keeps an unknown read of the members apart", discordPage.includes("server ? membersOf(room, 200).catch(() => null) : Promise.resolve([])"), true);
-  const discord = readFileSync("components/discord-studio.tsx", "utf8");
-  is("the members are null when unread", discord.includes("members: Person[] | null;"), true);
-  is(
-    "members unread: a status note, not the empty state",
-    discord.includes('{members === null ? (\n          <p role="status" className="notice mt-5">\n            Who joined could not be read just now. Reload this page in a moment; this does not mean nobody has joined.\n          </p>\n        ) : members.length === 0 ? ('),
     true,
   );
   const learn = readFileSync("lib/learn.ts", "utf8");

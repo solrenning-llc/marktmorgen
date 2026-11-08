@@ -43,6 +43,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Listing, type Store, appendSitePages, ensureStatsId, setProductExtras, setProductFunnel, storeForId, storeRef } from "@/lib/store";
 import { idsOfKind, readListings, readProduct } from "@/lib/catalog";
 import { offerableAfterPaying } from "@/lib/bundles";
@@ -164,31 +165,50 @@ function runKey(name: string, pages: Checked[]): string {
   return digest(["run", name, pages.map((c) => [c.page.role, c.page.product, c.page.bumps, pageKeyOf(c.page), c.page.draft.offer])]);
 }
 
+/**
+ * The ledger's fields, read only in their exact shape (lib/redis-reply.ts, CX-123 rule 24): one reply for the one
+ * command, a list of exactly one slot per field, each a string or nil. Anything else is unknown, never "never made"
+ * (which would make an import already saved a second time): it throws UnknownReplyError, so the plan and the save
+ * stop before anything is made (sweep APP2 finding 5).
+ */
 async function readLedger(sid: string, fields: string[]): Promise<(string | null)[]> {
   if (!fields.length || !isRedisConfigured()) return fields.map(() => null);
-  const [found] = await redisPipeline([["HMGET", ledgerKey(sid), ...fields]]);
-  return fields.map((_, i) => (Array.isArray(found) && typeof found[i] === "string" ? (found[i] as string) : null));
+  const replies = repliesFor(await redisPipeline([["HMGET", ledgerKey(sid), ...fields]]), 1);
+  const slots = replies ? repliesFor(replies[0], fields.length) : null;
+  if (!slots || slots.some((slot) => slot !== null && typeof slot !== "string")) throw new UnknownReplyError("the ClickFunnels import ledger");
+  return slots as (string | null)[];
 }
 
-/** A run that stopped after making its funnel of pages: that funnel's id, to use again rather than make a second. */
-function parsePartial(raw: string | null): string {
-  if (!raw) return "";
-  try {
-    const value = JSON.parse(raw) as { state?: string; funnel?: string };
-    return value && value.state === "funnel" && typeof value.funnel === "string" ? value.funnel : "";
-  } catch {
-    return "";
-  }
-}
+/** A page entry is only the id saveFunnelImport gives the page it made (randomBytes(5), hex). */
+const PAGE_ID = /^[0-9a-f]{10}$/;
 
-function parseSaved(raw: string | null): SavedImport | null {
-  if (!raw) return null;
+const isSaved = (v: Record<string, unknown>): boolean => {
+  const funnel = v.funnel && typeof v.funnel === "object" ? (v.funnel as Record<string, unknown>) : null;
+  const count = (n: unknown) => typeof n === "number" && Number.isFinite(n);
+  return Boolean(funnel && typeof funnel.id === "string" && funnel.id && typeof funnel.name === "string" && typeof funnel.slug === "string")
+    && Array.isArray(v.pages) && v.pages.every((id) => typeof id === "string") && count(v.bumps) && count(v.offers) && count(v.at);
+};
+
+/**
+ * A run entry, read only as one of the three shapes saveFunnelImport writes: "started" (nothing kept), "funnel" with
+ * its funnel's id (a run that stopped after making its funnel of pages: that funnel is used again rather than a second
+ * made), or "done" with what was made. A missing entry (nil) is a run never made. Anything else (not JSON, an unknown
+ * state, "funnel" or "done" without the funnel's id) is unknown, never "never made", which would make the import again
+ * (CX-123 rule 24, review of #2974): it throws UnknownReplyError, so the plan and the save stop before anything is made.
+ */
+function readRun(raw: string | null): { done: SavedImport | null; partial: string } {
+  if (raw === null) return { done: null, partial: "" };
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as SavedImport & { state?: string };
-    return value && value.state === "done" && value.funnel && typeof value.funnel.id === "string" ? value : null;
+    value = JSON.parse(raw);
   } catch {
-    return null;
+    throw new UnknownReplyError("a ClickFunnels import run entry");
   }
+  const v = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  if (v?.state === "started") return { done: null, partial: "" };
+  if (v?.state === "funnel" && typeof v.funnel === "string" && v.funnel) return { done: null, partial: v.funnel };
+  if (v?.state === "done" && isSaved(v)) return { done: v as unknown as SavedImport, partial: "" };
+  throw new UnknownReplyError("a ClickFunnels import run entry");
 }
 
 const money = (cents: number, store: Store) => formatMoney(cents, store.currency);
@@ -230,8 +250,9 @@ async function build(store: Store, raw: unknown): Promise<Built> {
   const sid = store.sid ?? "";
   const pageKeys = input.pages.map((c) => `page:${pageKeyOf(c.page)}`);
   const [runRaw, ...madeIds] = await readLedger(sid, [`run:${key}`, ...pageKeys]);
-  const done = parseSaved(runRaw);
-  const partial = parsePartial(runRaw);
+  const { done, partial } = readRun(runRaw);
+  // A page entry the same way (rule 30): only the id of the page made, or nil; anything else would make that page twice.
+  if (madeIds.some((id) => id !== null && !PAGE_ID.test(id))) throw new UnknownReplyError("a ClickFunnels import page entry");
 
   // Only the products the pages name are read, not the whole catalog.
   const named = new Set(input.pages.flatMap((c) => [c.page.product, ...c.page.bumps]).filter(Boolean));

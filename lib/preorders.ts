@@ -66,6 +66,15 @@ const INTENT_ID = /^pi_[A-Za-z0-9]{8,255}$/;
  */
 export type SoonState = { soon: Set<string>; days: Map<string, string>; partial?: true };
 
+/**
+ * True only when the product is known not to be coming soon: not in the read set, and the set read whole. While the
+ * read is `partial`, a product outside the read set is unknown (CX-123 rule 24), so it is never "not coming soon": a
+ * caller that sells, lists or sends it to Stripe leaves it out.
+ */
+export function knownNotSoon(state: SoonState, productId: string): boolean {
+  return !state.partial && !state.soon.has(productId);
+}
+
 function knownSoonMember(raw: unknown): boolean {
   if (raw === 1 || raw === "1") return true;
   if (raw === 0 || raw === "0") return false;

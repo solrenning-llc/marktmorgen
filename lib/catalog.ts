@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -728,6 +729,27 @@ export async function listingSizes(store: Store, ids: string[]): Promise<number[
 export async function readListing(store: Store, id: string | null | undefined): Promise<Listing | null> {
   if (typeof id !== "string" || !id) return null;
   return (await readListings(store, [id]))[0] ?? null;
+}
+
+/**
+ * One listing read exactly (CX-123 rule 24; Claude 3 on #2910): null only when the store has no such product or its
+ * own record is confirmed absent (an exact null), "unknown" when that record answered anything but one record of this
+ * very product (no reply, a number, a list, text that is not a listing, another product's). A request that fails
+ * throws, as readListing does. What the store record holds whole (inline, or in the head) is not read again.
+ */
+export async function readListingExactly(store: Store, id: string | null | undefined): Promise<Listing | null | "unknown"> {
+  if (typeof id !== "string" || !id) return null;
+  const catalog = store.catalog;
+  if (catalog.inline || !productIds(store).includes(id)) return readListing(store, id);
+  const inHead = catalog.head.find((listing) => listing.id === id);
+  if (inHead) return inHead;
+  // A store record that names a product held elsewhere, but no place to read it from, cannot say it is gone.
+  if (!catalog.id || !isRedisConfigured()) return "unknown";
+  const replies = repliesFor(await redisPipeline([["GET", listingKey(catalog.id, id)]]), 1);
+  if (!replies) return "unknown";
+  if (replies[0] === null) return null;
+  const listing = typeof replies[0] === "string" && replies[0] ? parseListing(parseJson(replies[0])) : null;
+  return listing && listing.id === id ? listing : "unknown";
 }
 
 /** One listing when it is a course, or null; a store of null answers null. */

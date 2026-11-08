@@ -9,12 +9,15 @@
  *     cannot be a store's at all;
  *   - "unknown" when the reply is anything else, or when the key leads to a store whose record the reader in
  *     lib/store.ts could not give back;
- *   - the store otherwise, read by that same reader, so what it checks (the owner key, the id the record carries) is
- *     still checked.
+ *   - the store otherwise, read from the record that key leads to with storeForEmail, which checks the record belongs
+ *     to that very owner key; by id, the record must also carry that id, as storeForId checks.
+ *
+ * The key is read once: the record is read from the reference the exact read gave, never by asking the tolerant
+ * reader again, which would repeat the same GET (Claude 3 on #2910: one command more per pasted card view).
  *
  * A request that fails throws, as before; its caller says the page could not be read just now.
  */
-import { type Store, STORE_ID_PATTERN, handleLeadsToStore, handleProblem, storeForId, storeForPage, storeHandleKey } from "@/lib/store";
+import { type Store, STORE_ID_PATTERN, handleLeadsToStore, handleProblem, storeForEmail, storeHandleKey } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 
@@ -37,7 +40,7 @@ export async function storeForHandleExactly(handle: string): Promise<ExactStore>
   if (ref === undefined) return "unknown";
   // A name that was let go is held, not owned: it leads nowhere on purpose.
   if (ref === null || !handleLeadsToStore(ref)) return "none";
-  return (await storeForPage(handle)) ?? "unknown";
+  return (await storeForEmail(ref)) ?? "unknown";
 }
 
 /** The store with this id, read exactly. */
@@ -46,5 +49,6 @@ export async function storeForIdExactly(sid: string): Promise<ExactStore> {
   const ref = await getExactly(`nl:store:id:${sid}`);
   if (ref === undefined) return "unknown";
   if (ref === null) return "none";
-  return (await storeForId(sid)) ?? "unknown";
+  const store = await storeForEmail(ref);
+  return store && store.sid === sid ? store : "unknown";
 }

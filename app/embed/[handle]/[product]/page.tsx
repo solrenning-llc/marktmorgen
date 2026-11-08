@@ -7,7 +7,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { cache } from "react";
 import { type Listing, type Store, normaliseHandle } from "@/lib/store";
 import { storeForHandleExactly } from "@/lib/store-exact";
-import { readListing, readListings } from "@/lib/catalog";
+import { readListingExactly, readListings } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { lookStyle } from "@/lib/store-look";
 import { imageUrl } from "@/lib/product-image";
@@ -67,7 +67,8 @@ type Params = {
  * The store and the product, or null for one that is not there. A read that
  * failed is `unread`, never "not there" (CX-123 rule 24): the card then says
  * it could not be loaded just now, never that the product is no longer on sale. The store is read exactly
- * (lib/store-exact.ts), so an address that answered out of shape is unread too (Codex J on #2910).
+ * (lib/store-exact.ts), so an address that answered out of shape is unread too (Codex J on #2910), and so is the
+ * product's own record (readListingExactly; Claude 3 on #2910).
  */
 const load = cache(async (raw: string, id: string): Promise<{ store: Store | null; product: Listing | null; unread: boolean }> => {
   let decoded = "";
@@ -89,7 +90,9 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store | nul
   // A draft is not on sale, and its card says so as its page would.
   let product: Listing | null;
   try {
-    product = await readListing(store, id);
+    const read = await readListingExactly(store, id);
+    if (read === "unknown") return { store, product: null, unread: true };
+    product = read;
   } catch {
     return { store, product: null, unread: true };
   }
@@ -160,7 +163,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     return (
       <div className="flex h-screen items-center justify-center p-4" style={{ background: "transparent" }}>
         <style>{SEE_THROUGH}</style>
-        <p className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
+        {/* With a store, the sentence is in its language and says so (3.1.2); without one, it is English, as the page. */}
+        <p lang={store ? speech(store).lang.locale : undefined} className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
           {store ? (
             <>
               {`${loaded.unread ? speech(store).w.cardUnread : speech(store).w.noLongerOnSale} `}
@@ -184,16 +188,19 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     // Unknown is null, never "not coming soon" (CX-123 rule 24): the card then draws no buy button.
     soonOne(store, product.id).catch(() => null),
     stockLeft(store, product).catch(() => null),
-    outOfKeys(store, product).catch(() => false),
+    // Unknown is null, never "keys left" (CX-123 rule 24; Claude 4 on #2910): the card then draws no buy button.
+    outOfKeys(store, product).catch(() => null),
     product.bumps.length ? readListings(store, bumpTargets(product)).catch(() => []) : Promise.resolve([]),
     summaryOf(store.statsId, product.id).catch(() => null),
   ]);
   const soon = coming?.soon ?? false;
-  const count = noKeys ? 0 : stock;
+  // With the key count unknown, how many are left is not said either.
+  const count = noKeys === null ? null : noKeys ? 0 : stock;
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
-  // Whether it is coming soon could not be read: buying, the waitlist or the pre-order cannot be told apart, so the card
-  // says buying is not available just now, and its title still leads to the product's page.
-  const computed = coming
+  // Whether it is coming soon, or whether a key is left, could not be read: buying, the waitlist or the pre-order cannot
+  // be told apart, or the product may be sold out, so the card says buying is not available just now, and its title
+  // still leads to the product's page.
+  const computed = coming && noKeys !== null
     ? pageAction(store, product, remaining, selling, related, soon, preorderDay(store, product, coming.soon, coming.day))
     : { action: { kind: "none" as const, text: speech(store).w.cardBuyUnread }, label: "" };
   const page = tag(productPath(store, product));

@@ -548,15 +548,22 @@ export async function courseProgress(store: Store, productId: string, emails: st
   const course = listing?.course ? await readCourse(listing.course.id) : null;
   if (!course) return out;
   const lessons = lessonsInOrder(course).map(({ lesson }) => lesson.id);
-  const rows = await redisPipeline([
-    ["HMGET", studentsKey(course.id), ...emails.map(emailKey)],
-    ...emails.map((email) => ["SMEMBERS", doneKey(course.id, email)]),
-  ]);
-  const seen = Array.isArray(rows[0]) ? (rows[0] as unknown[]) : [];
+  const rows = repliesFor(
+    await redisPipeline([["HMGET", studentsKey(course.id), ...emails.map(emailKey)], ...emails.map((email) => ["SMEMBERS", doneKey(course.id, email)])]),
+    emails.length + 1,
+  );
+  // One row for each address (null for one who never opened the course) and one list of lessons done for each; any
+  // other answer is unknown, never "not started" or "not finished": a workflow would send a student who finished the
+  // "hasn't finished" email on a guess (CX-123 rule 24). Thrown, the workflow step is put back for a later run.
+  const seen = rows ? repliesFor(rows[0], emails.length) : null;
+  if (!rows || !seen) throw new UnknownReplyError("where students are in a course");
   emails.forEach((email, i) => {
-    const done = new Set(Array.isArray(rows[i + 1]) ? (rows[i + 1] as string[]) : []);
+    const row = seen[i];
+    const names = stringList(rows[i + 1]);
+    if ((row !== null && (typeof row !== "string" || !row)) || !names) throw new UnknownReplyError("where students are in a course");
+    const done = new Set(names);
     out.set(email, {
-      started: typeof seen[i] === "string" && Boolean(seen[i]),
+      started: row !== null,
       finished: lessons.length > 0 && lessons.every((id) => done.has(id)),
     });
   });

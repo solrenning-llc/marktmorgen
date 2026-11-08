@@ -1,0 +1,120 @@
+
+FILE affiliate-paypal-refunds-exact.test.ts
+
+Control: a sale not refunded is payable
+  ok    checked
+  ok    its commission offered
+
+Control: a refund in full, read whole, takes the commission back
+  ok    checked
+  ok    no commission
+  ok    nothing offered
+  ok    the line says refunded
+
+Control: the currency in capitals is the sale's
+  ok    checked
+  ok    no commission
+
+No capture
+  FAIL  the book is not checked
+        expected false
+        got      true
+  FAIL  nothing passes the refund guard
+        expected 0
+        got      1000
+
+A capture that is empty
+  FAIL  the book is not checked
+        expected false
+        got      true
+  FAIL  nothing passes the refund guard
+        expected 0
+        got      1000
+
+A capture that is not text
+  FAIL  the book is not checked
+        expected false
+        got      true
+  FAIL  nothing passes the refund guard
+        expected 0
+        got      1000
+
+A refund in another currency than the sale's
+  FAIL  the book is not checked
+        expected false
+        got      true
+  ok    nothing passes the refund guard
+
+The same refund listed twice counts once, and the book stays checked
+  ok    checked
+  ok    refunded once, the sale's cents
+  ok    no commission
+
+Control: another sale's refund leaves this one payable
+  ok    checked
+  ok    its commission offered
+  ok    no provider was asked
+
+22 checks, 7 failing.
+Z_VOLUME {"runs":161,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3204-paypal-coverage.proof.ts
+
+Healthy controls
+  ok    unrefunded sale stays payable
+  ok    whole healthy refund removes its commission
+
+C2 HIGH: a 501st current refund cannot leave the book checked
+Z_REFUND_CASE {"label":"target is 501st","partial":true,"rows":500,"checked":true,"through":1000,"commission":1000}
+  ok    fault reaches the actual coverage reader
+  FAIL  cut-short read prevents eligibility
+        expected [false,0]
+        got      [true,1000]
+
+Boundary control: the target in a complete 500-row read is refunded
+Z_REFUND_CASE {"label":"target is 500th","partial":false,"rows":500,"checked":true,"through":0,"commission":0}
+  ok    complete boundary is confirmed whole
+  ok    complete boundary remains healthy
+
+C2 HIGH: a missing listed refund is unknown
+Z_REFUND_CASE {"label":"listed refund missing","partial":true,"rows":0,"checked":true,"through":1000,"commission":1000}
+  ok    missing record is flagged by the actual coverage reader
+  FAIL  missing refund prevents eligibility
+        expected [false,0]
+        got      [true,1000]
+
+C2 MEDIUM: unreadable or inconsistent full-refund amounts
+Z_REFUND_CASE {"label":"stored cents 0","partial":false,"rows":1,"checked":true,"through":1000,"commission":1000}
+  ok    amount 0 has a present indexed record
+  FAIL  amount 0 never passes the refund guard
+        expected [false,0]
+        got      [true,1000]
+Z_REFUND_CASE {"label":"stored cents -5000","partial":false,"rows":1,"checked":true,"through":1000,"commission":1000}
+  ok    amount -5000 has a present indexed record
+  FAIL  amount -5000 never passes the refund guard
+        expected [false,0]
+        got      [true,1000]
+Z_REFUND_CASE {"label":"stored cents 100","partial":false,"rows":1,"checked":true,"through":980,"commission":980}
+  ok    amount 100 has a present indexed record
+  FAIL  amount 100 never passes the refund guard
+        expected [false,0]
+        got      [true,980]
+Z_REFUND_CASE {"label":"stored cents abc","partial":false,"rows":1,"checked":true,"through":0,"commission":"NaN"}
+  ok    amount abc has a present indexed record
+  FAIL  amount abc never passes the refund guard
+        expected [false,0]
+        got      [true,0]
+Z_REFUND_CASE {"label":"stored cents undefined","partial":false,"rows":1,"checked":true,"through":0,"commission":"NaN"}
+  ok    amount undefined has a present indexed record
+  FAIL  amount undefined never passes the refund guard
+        expected [false,0]
+        got      [true,0]
+  ok    no provider request
+
+19 checks, 7 failing.
+Z_VOLUME {"runs":2181,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3204-ZHN3HF

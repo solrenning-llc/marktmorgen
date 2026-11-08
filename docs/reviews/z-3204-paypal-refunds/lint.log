@@ -1,0 +1,2 @@
+
+Z_CHECK {"name": "lint", "exit": 0, "seconds": 4.212, "maxHeapMiB": 1024, "timeoutSeconds": 120}

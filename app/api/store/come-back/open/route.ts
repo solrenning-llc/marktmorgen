@@ -1,10 +1,10 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
+import { membershipWords } from "@/lib/buyer-words/membership";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { openWinBack } from "@/lib/winback-send";
-import { membershipWords } from "@/lib/buyer-words/membership";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;

@@ -439,6 +439,7 @@ async function main(): Promise<void> {
     "creator-card": ["act:page:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
     "discord": ["need:settings"],
+    "discount": ["need:settings"],
     "file/attach": ["act:products:detach", "lockedFor"],
     "forms": ["act:page:remove"],
     "free/download": ["not:a buyer asking for a free product, put on the list by their own request"],
@@ -563,6 +564,7 @@ async function main(): Promise<void> {
       unpipeline: "act:orders",
     },
     "discord": "need:settings",
+    "discount": "need:settings",
     "free/download": "not:a buyer asking for a free product, put on the list by their own request",
     "forms": { remove: "act:page" },
     "funnel-share": {

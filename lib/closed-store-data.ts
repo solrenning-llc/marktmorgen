@@ -219,10 +219,11 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
       if (cursor === "0") break;
     }
   }
-  // A host's own calendar is the host's, across the stores they serve: it goes with the last of them.
+  // A host's own calendar is the host's, across the stores they serve: it goes with the last of them. A read
+  // that fails is never "no other store" (rule 24): it throws, and the walk tries this store again later.
   for (const email of [store.email, ...team.members.map((m) => m.email)]) {
-    const elsewhere = (await memberStores(email).catch(() => [{ store }])).some((m) => m.store.sid !== store.sid)
-      || (await accountStores(email).catch(() => [store])).some((other) => other.sid !== store.sid);
+    const elsewhere = (await memberStores(email)).some((m) => m.store.sid !== store.sid)
+      || (await accountStores(email)).some((other) => other.sid !== store.sid);
     if (!elsewhere) extra.push(...hostCalendarKeys(hostId(email)));
   }
   await dropTeam(store);
@@ -589,9 +590,27 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     if (!refs.length) return { ...report, done: true };
     for (const ref of refs) {
       if (Date.now() > deadline) break;
-      const store = await storeForEmail(ref).catch(() => null);
+      let store: Store | null;
+      try {
+        store = await storeForEmail(ref);
+      } catch (error) {
+        // Not read (rule 24): never "no store". It stays in line, moved back a walk so it does not hold the head of
+        // the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves the line.
+        console.error("a closed store's record could not be read; it waits for the next walk", error);
+        await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]);
+        continue;
+      }
       if (store) {
-        const entry = await prepareStore(store, now);
+        let entry: Batched;
+        try {
+          entry = await prepareStore(store, now);
+        } catch (error) {
+          // Something it needs could not be read (rule 24), such as whether a host still serves another store:
+          // never taken as "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat).
+          console.error("a closed store could not be prepared; it waits for the next walk", error);
+          await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]);
+          continue;
+        }
         await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);
         report.stores += 1;
       }

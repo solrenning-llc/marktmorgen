@@ -13,7 +13,7 @@
  * Whether a moved member already kept a membership (lib/move-members.ts,
  * keptAlready) is read in its exact shape by #2685, not here.
  */
-import { adsCheckout, customerType, sendRenewals, setServerToken } from "@/lib/ad-events";
+import { adEventId, adsCheckout, customerType, sendRenewals, setServerToken } from "@/lib/ad-events";
 import { nextAdsCookie, adsCookieName } from "@/lib/ad-consent";
 import { NO_PIXELS } from "@/lib/pixels";
 import { claimHandle, ensureStatsId, setAdsServer, setPixels, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -32,6 +32,9 @@ const SEC = Math.floor(NOW / 1000);
 const pages = new Map<string, unknown[]>();
 const asked: string[] = [];
 const sentTo: string[] = [];
+// The platforms get an id made from the invoice's (lib/ad-events.ts adEventId), never the invoice's own.
+const capIds = new Set(Array.from({ length: 10 }, (_, i) => adEventId(`in_RenewCap${i}`)));
+const bigIds = new Set(["in_RenewBig01", ...Array.from({ length: 10 }, (_, i) => `in_RenewBigX${i}`)].map((id) => adEventId(id)));
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -113,7 +116,7 @@ async function main(): Promise<void> {
   is("a page that says more with no last one fails", await outcome(() => sendRenewals(store, NOW)), "threw");
   pages.set("/invoices", Array.from({ length: 10 }, (_, i) => ({ object: "list", data: [{ ...invoice(`in_RenewCap${i}`, "sub_None"), billing_reason: "manual" }], has_more: true })));
   is("more pages than the cap fails, never 'no renewals'", await outcome(() => sendRenewals(store, NOW)), "threw");
-  is("nothing sent to the platforms for a page that was not read", sentTo.filter((id) => id.startsWith("in_RenewCap")), []);
+  is("nothing sent to the platforms for a page that was not read", sentTo.filter((id) => capIds.has(id)), []);
   // A day with more paid invoices than the cap still sends the renewals already read in their exact shape:
   // each is a purchase of its own with its own mark, so sending it treats nothing unread as absent. The
   // pass still fails for the unread rest (Claude 1, independent review on #3054 at 31b99d82).
@@ -124,7 +127,7 @@ async function main(): Promise<void> {
   asked.length = 0;
   sentTo.length = 0;
   is("more pages than the cap still fails for the unread rest, never 'no renewals'", await outcome(() => sendRenewals(store, NOW)), "threw");
-  is("a renewal read on the first page is sent even when the day has more pages than the cap", sentTo.filter((id) => id.startsWith("in_RenewBig")), ["in_RenewBig01"]);
+  is("a renewal read on the first page is sent even when the day has more pages than the cap", sentTo.filter((id) => bigIds.has(id)), [adEventId("in_RenewBig01")]);
   is("no page past the cap is asked", asked.filter((a) => a.startsWith("/invoices")).length, 10);
   pages.delete("/invoices");
   // A pass whose deadline has gone asks no page after the first (Claude 2, review 6707563715 on #3054):

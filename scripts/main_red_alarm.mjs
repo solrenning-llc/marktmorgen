@@ -169,7 +169,15 @@ export function decide({ runs, trigger, head, redJobs = [], treeGreen = null }) 
   const all = /** @type {Run[]} */ ([...byId.values()]);
   const states = REQUIRED.map(({ file, name }) => {
     const mine = all.filter((r) => evidenceFor(r, file, failedInside));
-    const latest = newest(mine.filter((r) => r.head_sha === head));
+    const onHead = mine.filter((r) => r.head_sha === head);
+    let latest = newest(onHead);
+    // A completed red on the head is never hidden by a later run of the same workflow on the same head
+    // that has not finished (a schedule queued after a failed push, Codex H2 on #3144): it stays red
+    // until a later run completes.
+    if (latest && latest.status !== "completed") {
+      const done = newest(onHead.filter((r) => r.status === "completed"));
+      if (done && isRed(done, failedInside)) latest = done;
+    }
     let state = "missing";
     if (latest) {
       if (latest.status !== "completed") state = NOT_STARTED.has(latest.status) ? "queued" : "running";

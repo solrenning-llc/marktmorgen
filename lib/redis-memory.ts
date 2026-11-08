@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 /**
  * A Redis that lives in memory, for testing the parts of this codebase whose
@@ -125,12 +126,48 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
+        if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, hold, token] = args;
+          return this.run(["GET", hold]) === token ? this.run(["DEL", hold]) : 0;
+        }
+        // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
+        if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, members, field, json] = args;
+          const now = this.run(["HGET", members, field]);
+          if (now === null || now === undefined) {
+            this.run(["HSET", members, field, json]);
+            return 2;
+          }
+          let mark: unknown;
+          try {
+            mark = JSON.parse(String(now));
+          } catch {
+            return -1;
+          }
+          if (!mark || typeof mark !== "object") return -1;
+          if ((mark as { d?: unknown }).d === 1) return 0;
+          this.run(["HSET", members, field, json]);
+          return 1;
+        }
         // lib/agent-book.ts AGENT_BOOK_WRITE: the agent book written only while the writer still holds the store's lock.
         if (key.startsWith("-- marktmorgen:agent-book-write:v1\n") && args[0] === "2" && args.length === 5) {
           const [, lock, book, token, json] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", book, json]);
           return 1;
+        }
+        // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
+        if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
+          const target = args[1];
+          const out: number[] = [];
+          for (let i = 2; i < args.length; i += 3) {
+            const current = this.run(["HGET", target, args[i]]);
+            const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+            if (seen === args[i + 1]) this.run(["HSET", target, args[i], args[i + 2]]);
+            out.push(seen === args[i + 1] ? 1 : 0);
+          }
+          return out;
         }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
@@ -1396,16 +1433,17 @@ export class MemoryRedis {
 
       case "ZADD": {
         const z = this.zset(key);
-        // "NX": a member already there keeps the score it has.
+        // "NX": a member already there keeps the score it has. "XX": only a member already there is moved.
         const onlyNew = args[0] === "NX";
-        const pairs = onlyNew ? args.slice(1) : args;
+        const onlyOld = args[0] === "XX";
+        const pairs = onlyNew || onlyOld ? args.slice(1) : args;
         for (let i = 0; i + 1 < pairs.length; i += 2) {
           const score = Number(pairs[i]);
           const member = pairs[i + 1];
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) {
             if (!onlyNew) z[at].score = score;
-          } else z.push({ score, member });
+          } else if (!onlyOld) z.push({ score, member });
         }
         z.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
         return 1;

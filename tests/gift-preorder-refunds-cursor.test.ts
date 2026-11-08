@@ -21,6 +21,10 @@
  *     again next run, never passed over;
  *   - a kept pass in an unknown shape (not text, not the pass's JSON, another
  *     anchor's window) starts the pass over from the anchor, never skips;
+ *   - a refund not final yet (pending, its charge not refunded in full) read
+ *     on an early page of a pass holds the anchor at its time when the pass
+ *     ends in a later run, so the next pass reads it again and takes it back
+ *     once it goes through;
  *   - the first reads in another shape do nothing and ask nothing of Stripe.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
@@ -162,6 +166,23 @@ async function check(job: Job, base: number): Promise<void> {
   is(`${job.name}: a pass read as a number starts over from the newest page`, afters(), [null, id("e", 99), id("e", 199)]);
   is(`${job.name}: then the pass goes on`, await job.run(), 1);
   is(`${job.name}: taken back`, await odd.holds(), false);
+
+  part(`${job.name}: a refund not final yet, read early in a pass, holds the anchor when the pass ends`);
+  const slow = await job.make(40);
+  refunds = list(`${job.name}f`, 450, base + 4000, -1, "pi_unused");
+  // On the second page: pending, its charge not refunded in full yet (lib/gifts.ts, lib/preorders.ts heldAt).
+  refunds[150] = { ...refunds[150], status: "pending", payment_intent: slow.pi, charge: { object: "charge", refunded: false } };
+  is(`${job.name}: run 1 takes nothing back from a refund not final yet`, await job.run(), 0);
+  is(`${job.name}: the kept pass carries the time of that refund`, JSON.parse(String(await read(job.pass))).waiting, base + 4000 - 150);
+  is(`${job.name}: run 2 ends the pass, still nothing taken back`, await job.run(), 0);
+  is(`${job.name}: still held while it is pending`, await slow.holds(), true);
+  is(`${job.name}: the anchor waits at that refund, not at the newest one the pass read`, await read(job.anchor), String(base + 4000 - 150));
+  is(`${job.name}: and the pass is let go`, await read(job.pass), null);
+  refunds[150] = { ...refunds[150], status: "succeeded", charge: { object: "charge", refunded: true } };
+  is(`${job.name}: once it goes through, the next pass takes it back`, await job.run(), 1);
+  is(`${job.name}: no longer held once refunded in full`, await slow.holds(), false);
+  await job.run();
+  is(`${job.name}: then the anchor moves to the newest refund`, await read(job.anchor), String(base + 4000));
 
   part(`${job.name}: the first reads in another shape do nothing`);
   redis.pipeline = async (commands) => (commands.length === 3 && commands[2][1] === job.pass ? [1, null] : original.call(redis, commands));

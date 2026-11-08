@@ -560,6 +560,7 @@ export function BuyBox({
   selling,
   related,
   ready = true,
+  unread = false,
   soon = false,
   preorder = null,
   bundleItems = null,
@@ -581,6 +582,12 @@ export function BuyBox({
   selling: boolean;
   /** For a bundle: whether it holds enough to hand over right now. */
   ready?: boolean;
+  /**
+   * Whether it can be bought could not be read just now: its license keys left (lib/licence-keys.ts outOfKeys). Unknown
+   * is never "keys left" (CX-123 rule 24): no way to buy is drawn, and the box says buying is not available just now,
+   * as the card on the creator's own site does.
+   */
+  unread?: boolean;
   /** Coming soon: a waitlist instead of a way to pay (lib/waitlist.ts). */
   soon?: boolean;
   /** Coming soon and taking pre-orders: the day it is expected (lib/preorders.ts, preorderDay). */
@@ -615,6 +622,7 @@ export function BuyBox({
       <span className="sr-only">{`: ${product.title}`}</span>
     </Link>
   );
+  if (unread) return <p className="st-muted mt-4 text-sm">{speech(store).w.cardBuyUnread}</p>;
   if (soon && !isFree(product) && preorder && stepped) return toStep("#preorder");
   if (soon && !isFree(product)) return preorder ? <PreorderForm store={store} product={product} day={preorder} writes={writes} consentAgain={consentAgain} /> : <WaitlistForm store={store} product={product} writes={writes} />;
   const { w, money } = speech(store);
@@ -1139,6 +1147,7 @@ export function ProductCard({
   cart = false,
   sold = null,
   grid = false,
+  unread = false,
 }: {
   store: Store;
   product: Listing;
@@ -1170,6 +1179,8 @@ export function ProductCard({
   sold?: string | null;
   /** It stands in the store page's grid, two to a row on a computer (Encanto 3): its cover is described at that width. */
   grid?: boolean;
+  /** Its license keys left could not be read just now (CX-123 rule 24): no way to buy it, and no count, is drawn. */
+  unread?: boolean;
 }) {
   const href = productPath(store, product);
   const { w, num } = speech(store);
@@ -1234,10 +1245,10 @@ export function ProductCard({
 
   const rest = (
     <>
-      {plan && canSellProduct(store, product) && !soon ? (
+      {plan && canSellProduct(store, product) && !soon && !unread ? (
         <p className="st-muted mt-1 text-sm font-semibold">{w.orPlan(planLine(store, plan))}</p>
       ) : null}
-      {remaining !== null && !soon ? (
+      {remaining !== null && !soon && !unread ? (
         <p className="mt-2 text-sm font-bold" style={{ color: "var(--st-accent-text)" }}>
           {soldOut ? w.soldOut : w.left(remaining, num(remaining))}
         </p>
@@ -1253,8 +1264,9 @@ export function ProductCard({
         soon={soon}
         preorder={preorder}
         stepped
+        unread={unread}
       />
-      {cart ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {cart && !unread ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {product.recurring && manageable ? (
         <p className="mt-3 text-center text-sm">
           <Link href={`/@${store.handle}/manage`} className="st-footer-link font-semibold">

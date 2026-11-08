@@ -125,6 +125,57 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/closed-store-data.ts CLOSING_TAKE: a closing store's lock taken for the walk only while its record, the
+        // closing job's record and its closing day are what the walk's check read.
+        if (key.startsWith("-- marktmorgen:closing-take:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, owner, lock, closing, finals, raw, hasClosing, closingRaw, hasScore, scoreRaw, ref, token, seconds] = args;
+          if (this.run(["GET", owner]) !== raw) return 0;
+          const now = this.run(["GET", closing]);
+          if (hasClosing === "1" ? now !== closingRaw : now !== null && now !== undefined) return 0;
+          const score = this.run(["ZSCORE", finals, ref]);
+          if (hasScore === "1" ? score === null || score === undefined || Number(score) !== Number(scoreRaw) : score !== null && score !== undefined) return 0;
+          return this.run(["SET", lock, token, "NX", "EX", seconds]) === "OK" ? 1 : -1;
+        }
+        // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
+        // only while no live store holds it, read in the same step.
+        if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const [kind, rawChecks, account, rawKnown] = argv;
+          const checks = Number(rawChecks), known = Number(rawKnown);
+          const members = argv.slice(4, 4 + known);
+          const op = argv[4 + known];
+          const changed = argv.slice(5 + known);
+          const shape = (op === "DEL" && keys.length > checks) || (["SREM", "ZREM", "HDEL"].includes(op) && keys.length === checks + 1 && changed.length > 0);
+          if (!shape) return -1;
+          if (kind === "key") {
+            if (this.run(["EXISTS", keys[0]]) === 1) return 0;
+          } else if (kind === "address") {
+            const holder = this.run(["GET", keys[0]]);
+            if (typeof holder === "string" && holder !== "" && !holder.startsWith("released:")) return 0;
+          } else if (kind === "account") {
+            if (Number(this.run(["SCARD", keys[1]])) !== known) return -2;
+            if (members.some((member) => Number(this.run(["SISMEMBER", keys[1], member])) !== 1)) return -2;
+            let held = false;
+            for (let i = 0; i < checks; i += 1) {
+              if (i === 1) continue;
+              const raw = this.run(["GET", keys[i]]);
+              if (raw === null || raw === undefined) continue;
+              let record: unknown;
+              try {
+                record = JSON.parse(String(raw));
+              } catch {
+                return -1;
+              }
+              if (!record || typeof record !== "object") return -1;
+              if ((record as { stripeAccountId?: unknown }).stripeAccountId === account) held = true;
+            }
+            if (held) return 0;
+          } else return -1;
+          this.run(op === "DEL" ? ["DEL", ...keys.slice(checks)] : [op, keys[checks], ...changed]);
+          return 1;
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

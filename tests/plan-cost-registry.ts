@@ -1414,7 +1414,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     feature: "Closing the store (18 October 2026): its records deleted, its followers read, its whole exports after its plan ended, its last steps",
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
-      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
+      { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE", "takeDue", "TAKE_ATTEMPTS", "CLOSING_TAKE", "CLOSING_UNHELD"] },
       { file: "lib/plan-closing-rules.ts", names: ["ENDED_STORE_EXPORTS"] },
       { file: "app/api/store/export/route.ts", names: ["ENDED_STORE_EXPORTS", "storeExport(store)"] },
       { file: "lib/store-export.ts", names: ["EXPORT_STRIPE_PAGES", "EXPORT_PAGE_SECONDS", "EXPORT_COMMANDS"] },
@@ -1437,9 +1437,18 @@ export const KEY_NAME_BYTES = 128;
  * stores they serve; and a hundred for its ids, team, keys for the API,
  * webhooks, email platform, phones, address, record and line in the walk,
  * with the one read of whether it is still due (eraseClosed, dueForErasure:
- * its closing day and the closing job's record, two commands).
+ * its closing day and the closing job's record, two commands). And the
+ * store's lock (takeDue, Codex M on #3156): each of its TAKE_ATTEMPTS (3)
+ * reads of its record and of whether it is due (three commands) and the
+ * step that takes the lock (CLOSING_TAKE: the EVAL and its four commands),
+ * the lock made to last again before each host's claims (the EVAL and its two
+ * commands) and before the three other steps that delete, and let go of
+ * (the same). What the walk deletes by an id a live store may hold, in the
+ * same step as it reads that none does (CLOSING_UNHELD), is one step beside
+ * each read the walk already makes of that id, bounded as those reads are,
+ * by the keys it deletes for the store (closure, deletes).
  */
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100;
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5 + 3) + 100 + 3 * (3 + 5) + 4 * 3;
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command (lib/store-export.ts). */
 export function exportCommands(bytes: number): number {

@@ -51,10 +51,11 @@
  * payments (tests/plan-cost-registry.ts, closure), and the renewals it stops
  * with the orders that sold them (ORDER_COST).
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { type Held as LockHeld, LockBusyError, holdLock, releaseLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
 import { standingOf } from "@/lib/plan-standing";
@@ -63,7 +64,7 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, storeFolder, storeForEmail, storeForEmailSeen, storeHandleKey, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, storeFolder, storeForEmailSeen, storeHandleKey, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -210,7 +211,7 @@ const closingStateKey = (ref: string) => `nl:plan:closing:${createHash("sha256")
  * the store stays in line and nothing of it is touched. Until then the walk asked nothing: a store that re-subscribed
  * and stayed in line (unmarkDue failed, or was never called) was prepared, closed and erased though its plan ran.
  */
-async function dueForErasure(store: Store, now: number): Promise<"due" | "live" | "hold"> {
+async function dueForErasure(store: Store, now: number): Promise<{ due: "due" | "live" | "hold"; score: string | null; closing: string | null }> {
   const ref = storeRef(store);
   const replies = repliesFor(await redisPipeline([["ZSCORE", FINAL_INDEX, ref], ["GET", closingStateKey(ref)]]), 2);
   if (!replies) throw new UnknownReplyError("a closing store's closing day and record (ZSCORE, GET)");
@@ -227,13 +228,90 @@ async function dueForErasure(store: Store, now: number): Promise<"due" | "live" 
   }
   const removedFor = (endedAt: number) => record.of === endedAt && typeof record.removed === "number" && Number.isFinite(record.removed);
   const standing = standingOf(store, now / 1000);
+  const seen = (due: "due" | "live" | "hold") => ({ due, score: score === null ? null : String(score), closing: raw as string | null });
   if (score !== null) {
-    if (standing === "paid" || standing === "trial") return "hold";
-    return removedFor(Number(score)) ? "due" : "hold";
+    if (standing === "paid" || standing === "trial") return seen("hold");
+    return seen(removedFor(Number(score)) ? "due" : "hold");
   }
   const endedAt = Date.parse(store.planEndedAt);
-  if (standing !== "ended" || !Number.isFinite(endedAt)) return "live";
-  return closesStore(endedAt) && removedFor(endedAt) ? "due" : "live";
+  if (standing !== "ended" || !Number.isFinite(endedAt)) return seen("live");
+  return seen(closesStore(endedAt) && removedFor(endedAt) ? "due" : "live");
+}
+
+/**
+ * A store's record and its lock (lib/store.ts, ownerKey and lockKeyOf), spelled as lib/store.ts spells them: it does
+ * not export them. tests/m-reactivation-during-check.proof.ts and tests/erase-race-final-check.test.ts change a store
+ * with the real setSubscription and claimHandle around the walk, and fail if the spellings ever differ.
+ */
+const ownerKeyOf = (ref: string) => `nl:store:owner:${createHash("sha256").update(`nimbus-store:${ref.toLowerCase()}`).digest("hex").slice(0, 40)}`;
+const lockKeyOf = (owner: string) => owner.replace("nl:store:owner:", "nl:store:lock:");
+
+/** How long the walk holds a closing store's lock at a time; made to last as long again before each step that deletes. */
+export const CLOSING_LOCK_SECONDS = 120;
+/** How many times the walk reads a store in line again when its record or its closing changed after its check. */
+export const TAKE_ATTEMPTS = 3;
+
+/**
+ * The store's lock taken for the walk only while its record, the closing job's record and its closing day are exactly
+ * what the walk's check read (KEYS: record, lock, closing record, FINAL_INDEX; ARGV: the record read, whether the
+ * closing record was there and what it was, whether the closing day was there and what it was, the store's key, the
+ * walk's token, the lock's seconds). 1 taken; 0 something changed, nothing taken; -1 another write holds the lock.
+ */
+const CLOSING_TAKE = `-- marktmorgen:closing-take:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+local closing = redis.call("GET", KEYS[3])
+if ARGV[2] == "1" then
+  if closing ~= ARGV[3] then return 0 end
+elseif closing then
+  return 0
+end
+local score = redis.call("ZSCORE", KEYS[4], ARGV[6])
+if ARGV[4] == "1" then
+  if not score or tonumber(score) ~= tonumber(ARGV[5]) then return 0 end
+elseif score then
+  return 0
+end
+if not redis.call("SET", KEYS[2], ARGV[7], "NX", "EX", ARGV[8]) then return -1 end
+return 1`;
+
+type Taken = { due: "gone" | "live" | "hold" } | { due: "due"; store: Store; held: LockHeld };
+
+/**
+ * Whether a store in line is due now (dueForErasure), and when it is, the store's own lock (lib/store.ts) taken for
+ * the walk in the same step as the walk sees that nothing its check read has changed (CLOSING_TAKE, rule 30, Codex M
+ * on #3156): every write to a store's record is made under that lock and only while it holds it (lib/store.ts,
+ * withStore, setIfHeld), so from then on no plan can start the store again while the walk prepares it, and once
+ * prepared its record is closed and no plan can reach it (lib/closing-plan-guard.ts). A record or a closing that
+ * changed after the check (a plan started again while the check waited on its reads) is read and checked again, at
+ * most TAKE_ATTEMPTS times; a lock another write holds keeps the store in line for the next run, untouched. Until
+ * then the check and the first delete were separate steps: a store whose plan ran again while the check waited was
+ * prepared from what was read before, closed and erased with its contacts.
+ *
+ * "gone" when no store is kept under the key, as before. A read that does not answer throws UnknownReplyError: the
+ * run stops and the store stays in line untouched.
+ */
+async function takeDue(ref: string, now: number): Promise<Taken> {
+  for (let attempt = 0; attempt < TAKE_ATTEMPTS; attempt += 1) {
+    let reply: unknown;
+    const store = await storeForEmailSeen(ref, (_, answer) => void (reply = answer));
+    const read = repliesFor(reply, 1);
+    if (!read) throw new UnknownReplyError("a closing store's record (GET)");
+    if (!store || typeof read[0] !== "string") return { due: "gone" };
+    const seen = await dueForErasure(store, now);
+    if (seen.due !== "due") return { due: seen.due };
+    const owner = ownerKeyOf(ref);
+    const id = storeRef(store);
+    const held: LockHeld = { key: lockKeyOf(owner), token: randomUUID(), ttlSeconds: CLOSING_LOCK_SECONDS };
+    const replies = repliesFor(await redisPipeline([[
+      "EVAL", CLOSING_TAKE, 4, owner, held.key, closingStateKey(id), FINAL_INDEX,
+      read[0], seen.closing === null ? "0" : "1", seen.closing ?? "", seen.score === null ? "0" : "1", seen.score ?? "", id, held.token, CLOSING_LOCK_SECONDS,
+    ]]), 1);
+    const answer = replies?.[0];
+    if (answer === 1) return { due: "due", store, held };
+    if (answer === -1) return { due: "hold" };
+    if (answer !== 0) throw new UnknownReplyError("whether a closing store is as its check read it (EVAL)");
+  }
+  return { due: "hold" };
 }
 
 /**
@@ -262,8 +340,16 @@ async function del(keys: string[]): Promise<void> {
  * The first step for one store, while its record can still be read: what
  * is found only through it, and then the record. Answers what the walk
  * needs of it. Safe to run again.
+ *
+ * With `held`, the store's lock the walk took when it saw the store still due (takeDue): before each step that
+ * deletes, it is made to last another CLOSING_LOCK_SECONDS, only while it is still the walk's (lib/redis-lock.ts,
+ * holdLock), and a lock that ran out stops the preparation with LockBusyError before anything more is deleted, the
+ * store's record still there and the store still in line.
  */
-export async function prepareStore(store: Store, now = Date.now()): Promise<Batched> {
+export async function prepareStore(store: Store, now = Date.now(), held?: LockHeld): Promise<Batched> {
+  const keep = async () => {
+    if (held && !(await holdLock(held))) throw new LockBusyError("a closing store's lock ran out while it was prepared");
+  };
   const ref = storeRef(store);
   const { marks } = await marksOf(store);
   const extra: string[] = [];
@@ -272,12 +358,18 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   const own = new Set(marks);
   for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
     let cursor = "0";
+    let kept = false;
     for (let round = 0; round < 50; round += 1) {
       const [reply] = await redisPipeline([["HSCAN", claimsKey(host), cursor, "COUNT", 500]]);
       const [next, flat] = Array.isArray(reply) ? [String(reply[0]), (reply[1] as unknown[]).map(String)] : ["0", []];
       const mine: string[] = [];
       for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
-      if (mine.length) await redisPipeline([["HDEL", claimsKey(host), ...mine]]);
+      if (mine.length) {
+        // Once for a host's claims, fifty pages at the most, before the first of them goes.
+        if (!kept) await keep();
+        kept = true;
+        await redisPipeline([["HDEL", claimsKey(host), ...mine]]);
+      }
       cursor = next;
       if (cursor === "0") break;
     }
@@ -288,6 +380,7 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
       || (await accountStores(email).catch(() => [store])).some((other) => other.sid !== store.sid);
     if (!elsewhere) extra.push(...hostCalendarKeys(hostId(email)));
   }
+  await keep();
   await dropTeam(store);
   if (store.sid) await revokeAllKeys(store.sid);
   await forgetStoreWebhooks(store.statsId);
@@ -298,11 +391,13 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // The owner's path: their answers and the days they showed up (lib/path.ts).
   await forgetPath(store);
   if (store.domain?.name) extra.push(domainKey(store.domain.name));
+  await keep();
   await del(extra);
   // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
   // still found by their mark (lib/closing-plan-guard.ts, markShut).
   await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
+  await keep();
   await closeStoreRecord(store);
   return {
     ref,
@@ -456,6 +551,104 @@ async function reuseOf(batch: Map<string, Batched>): Promise<Reuse> {
     },
   };
 }
+
+/**
+ * What the walk deletes of what an id a live store may hold names, done only while no live store holds it, read in
+ * the same step (rule 30, Codex M on #3156). KEYS: what says who holds the id (`checks` of them), then what changes.
+ * ARGV: the id's kind, `checks`, the Stripe account (its kind "account"), the account's other stores as the walk read
+ * them (`known` of them), then the change: DEL, which deletes every key after the checks in one command, or SREM, ZREM
+ * or HDEL, which take the members that follow out of the one key after the checks in one command.
+ *
+ *   - "key", a store's key (an account's first store): held while a record is kept under it (KEYS[1]), whatever it holds.
+ *   - "address": held while its key (KEYS[1]) leads to a store, as handleLeadsToStore (lib/store.ts) reads it.
+ *   - "account": held while the owner's first store (KEYS[1]) or one of their other stores (KEYS[3...]) sells through
+ *     it; the set of their other stores (KEYS[2]) must be exactly the one read, or -2 and nothing is done.
+ *
+ * 1 done; 0 held, nothing done; -1 a change it does not make or a record that does not read; -2 the owner's stores
+ * changed since they were read. A key of another type than its check reads makes the script fail, and nothing is done.
+ */
+const CLOSING_UNHELD = `-- marktmorgen:closing-unheld:v1
+local kind, checks, known = ARGV[1], tonumber(ARGV[2]), tonumber(ARGV[4])
+local op = ARGV[5 + known]
+if not ((op == "DEL" and #KEYS > checks) or ((op == "SREM" or op == "ZREM" or op == "HDEL") and #KEYS == checks + 1 and #ARGV > 5 + known)) then return -1 end
+if kind == "key" then
+  if redis.call("EXISTS", KEYS[1]) == 1 then return 0 end
+elseif kind == "address" then
+  local holder = redis.call("GET", KEYS[1])
+  if holder and holder ~= "" and string.sub(holder, 1, 9) ~= "released:" then return 0 end
+elseif kind == "account" then
+  if redis.call("SCARD", KEYS[2]) ~= known then return -2 end
+  for i = 1, known do
+    if redis.call("SISMEMBER", KEYS[2], ARGV[4 + i]) ~= 1 then return -2 end
+  end
+  local held = false
+  for i = 1, checks do
+    if i ~= 2 then
+      local raw = redis.call("GET", KEYS[i])
+      if raw then
+        local ok, record = pcall(cjson.decode, raw)
+        if not ok or type(record) ~= "table" then return -1 end
+        if record.stripeAccountId == ARGV[3] then held = true end
+      end
+    end
+  end
+  if held then return 0 end
+else
+  return -1
+end
+if op == "DEL" then
+  redis.call("DEL", unpack(KEYS, checks + 1))
+else
+  redis.call(op, KEYS[checks + 1], unpack(ARGV, 6 + known))
+end
+return 1`;
+
+/** What CLOSING_UNHELD changes: keys deleted, or members taken out of one list. */
+type Unheld = { op: "DEL"; keys: string[] } | { op: "SREM" | "ZREM" | "HDEL"; key: string; members: string[] };
+
+/**
+ * Makes `change` only while no live store holds `one`, read in the same step (CLOSING_UNHELD): answers whether it
+ * was made. Until then a key or a member named by such an id went once a read had found nobody holding it, a step
+ * before: a first store its owner opened in between lost its pause, its last pause and its folder's owner. The
+ * owner's other stores are read first for an account, and a set that changed since stops the run with nothing done,
+ * as a record that does not read does: the page is read again at the next run.
+ */
+async function unlessHeld(one: Held, change: Unheld): Promise<boolean> {
+  if (change.op === "DEL" ? !change.keys.length : !change.members.length) return true;
+  let checks: string[];
+  let known: string[] = [];
+  if (one.kind === "key") checks = [ownerKeyOf(one.id)];
+  else if (one.kind === "address") checks = [storeHandleKey(one.id)];
+  else {
+    const replies = repliesFor(await redisPipeline([["SMEMBERS", accountStoresKey(one.email)]]), 1);
+    const ids = replies?.[0];
+    if (!replies || !Array.isArray(ids) || ids.some((id) => typeof id !== "string")) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
+    known = ids as string[];
+    checks = [ownerKeyOf(one.email), accountStoresKey(one.email), ...known.filter((id) => STORE_ID_PATTERN.test(id)).map((id) => ownerKeyOf(`#${id}`))];
+  }
+  const targets = change.op === "DEL" ? change.keys : [change.key];
+  const replies = repliesFor(await redisPipeline([[
+    "EVAL", CLOSING_UNHELD, checks.length + targets.length, ...checks, ...targets,
+    one.kind, checks.length, one.kind === "account" ? one.id : "", known.length, ...known, change.op, ...(change.op === "DEL" ? [] : change.members),
+  ]]), 1);
+  const answer = replies?.[0];
+  if (answer === 1) return true;
+  if (answer === 0) return false;
+  throw new UnknownReplyError("whether a live store holds a closing store's id, with what it names (EVAL)");
+}
+
+/** Keys named by `one` deleted DEL_BATCH at a step, each step only while no live store holds it: answers how many went. */
+async function deleteUnheld(one: Held, keys: string[]): Promise<number> {
+  let gone = 0;
+  for (let i = 0; i < keys.length; i += DEL_BATCH) {
+    const some = keys.slice(i, i + DEL_BATCH);
+    if (!(await unlessHeld(one, { op: "DEL", keys: some }))) break;
+    gone += some.length;
+  }
+  return gone;
+}
+
+const heldTag = (one: Held) => `${one.kind}|${one.id}|${one.email}`;
 
 /** A reuse with no ids a live store may hold: every claim is proven, as the walk read them before. */
 const NO_REUSE: Reuse = { held: new Map(), live: async () => false };
@@ -689,13 +882,31 @@ async function pruneIndex(key: string, owners: Owners, reuse: Reuse, page: Map<s
   else if (type === "zset") await scanAll("ZSCAN", key, (flat) => take(flat.filter((_, i) => i % 2 === 0)));
   else if (type === "hash") await scanAll("HSCAN", key, (flat) => take(flat.filter((_, i) => i % 2 === 0)));
   else return 0;
+  const op = type === "set" ? "SREM" : type === "zset" ? "ZREM" : "HDEL";
   const gone: string[] = [];
-  for (const [member, claim] of claimed) if (!claim.held || !(await reuse.live(claim.held, page))) gone.push(member);
+  // A member named by an id a live store may hold is taken out only in the same step as no store is seen holding it (unlessHeld).
+  const guarded = new Map<string, { held: Held; members: string[] }>();
+  for (const [member, claim] of claimed) {
+    if (!claim.held) gone.push(member);
+    else if (!(await reuse.live(claim.held, page))) {
+      const group = guarded.get(heldTag(claim.held)) ?? { held: claim.held, members: [] };
+      group.members.push(member);
+      guarded.set(heldTag(claim.held), group);
+    }
+  }
   for (let i = 0; i < gone.length; i += 200) {
     const some = gone.slice(i, i + 200);
-    await redisPipeline([[type === "set" ? "SREM" : type === "zset" ? "ZREM" : "HDEL", key, ...some]]);
+    await redisPipeline([[op, key, ...some]]);
   }
-  return gone.length;
+  let taken = gone.length;
+  for (const { held, members } of guarded.values()) {
+    for (let i = 0; i < members.length; i += 200) {
+      const some = members.slice(i, i + 200);
+      if (!(await unlessHeld(held, { op, key, members: some }))) break;
+      taken += some.length;
+    }
+  }
+  return taken;
 }
 
 export type WalkReport = { started: boolean; stores: number; pages: number; deleted: number; pruned: number; finished: number; done: boolean };
@@ -708,7 +919,7 @@ export type WalkReport = { started: boolean; stores: number; pages: number; dele
 export async function walkPage(keys: string[], batch: Map<string, Batched>, owners: Owners, reuse: Reuse = NO_REUSE): Promise<{ deleted: number; pruned: number }> {
   const doomed = new Set<string>();
   // The keys each follower is handed, by store and family: read together, once the page is sorted.
-  const followed = new Map<string, { family: string; owner: string; keys: string[] }>();
+  const followed = new Map<string, { family: string; owner: string; held: Held | null; keys: string[] }>();
   // Whether a live store holds an id, as this page read it: once a page at the most.
   const page = new Map<string, boolean>();
   let pruned = 0;
@@ -731,21 +942,35 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
     } else claim = claimOf(key, owners, reuse, false);
     if (claim) claimed.push({ key, family, claim });
   }
+  // Keys named only by an id a live store may hold, and what their followers find through them, by that id: deleted
+  // only in the same step as no store is seen holding it (unlessHeld).
+  const guarded = new Map<string, { held: Held; keys: Set<string> }>();
+  const doom = (key: string, held: Held | null) => {
+    if (!held) return void doomed.add(key);
+    const group = guarded.get(heldTag(held)) ?? { held, keys: new Set<string>() };
+    group.keys.add(key);
+    guarded.set(heldTag(held), group);
+  };
   for (const { key, family, claim } of claimed) {
     if (claim.held && (await reuse.live(claim.held, page))) continue;
     const owner = claim.owner;
     if (FOLLOWERS[family]?.match(key)) {
-      const group = followed.get(`${owner}|${family}`) ?? { family, owner, keys: [] };
+      const at = `${owner}|${family}|${claim.held ? heldTag(claim.held) : ""}`;
+      const group = followed.get(at) ?? { family, owner, held: claim.held, keys: [] };
       group.keys.push(key);
-      followed.set(`${owner}|${family}`, group);
+      followed.set(at, group);
     }
-    doomed.add(key);
+    doom(key, claim.held);
   }
-  for (const { family, owner, keys: found } of followed.values()) {
-    for (const key of await FOLLOWERS[family].find(found, batch.get(owner)!)) if (followable(key, family)) doomed.add(key);
+  for (const { family, owner, held, keys: found } of followed.values()) {
+    for (const key of await FOLLOWERS[family].find(found, batch.get(owner)!)) if (followable(key, family)) doom(key, held);
   }
   await del([...doomed]);
-  return { deleted: doomed.size, pruned };
+  let deleted = doomed.size;
+  for (const { held, keys: named } of guarded.values()) {
+    deleted += await deleteUnheld(held, [...named].filter((key) => !doomed.has(key)));
+  }
+  return { deleted, pruned };
 }
 
 async function readBatch(): Promise<Map<string, Batched>> {
@@ -783,18 +1008,19 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     if (!refs.length) return { ...report, done: true };
     for (const ref of refs) {
       if (Date.now() > deadline) break;
-      const store = await storeForEmail(ref).catch(() => null);
-      if (store) {
-        // Still due, read again just before the first destructive step (dueForErasure): a store whose plan runs again
-        // leaves the line untouched, one that cannot be said stays in it untouched. Once prepared, its record is
-        // closed and no plan can reach it any more (lib/closing-plan-guard.ts).
-        const due = await dueForErasure(store, now);
-        if (due === "hold") continue;
-        if (due === "live") {
-          await redisPipeline([["ZREM", DUE_KEY, ref]]);
-          continue;
+      // Still due, read again just before the first destructive step, and the store's lock taken in the same step as
+      // the walk sees nothing it read changed (takeDue): a store whose plan runs again leaves the line untouched, one
+      // that cannot be said stays in it untouched. While the walk holds the lock no plan can start the store again;
+      // once prepared, its record is closed and no plan can reach it any more (lib/closing-plan-guard.ts).
+      const taken = await takeDue(ref, now);
+      if (taken.due === "hold") continue;
+      if (taken.due === "due") {
+        let entry: Batched;
+        try {
+          entry = await prepareStore(taken.store, now, taken.held);
+        } finally {
+          await releaseLock(taken.held);
         }
-        const entry = await prepareStore(store, now);
         await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);
         report.stores += 1;
       }

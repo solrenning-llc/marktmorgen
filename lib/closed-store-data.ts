@@ -53,6 +53,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, scanPage } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -142,10 +143,12 @@ function filesIn(value: unknown, out: { pathname: string; addedAt: string }[] = 
  * Stripe account, which name the company's records about its plan.
  */
 export async function marksOf(store: Store): Promise<{ marks: string[]; files: { pathname: string; addedAt: string }[] }> {
-  const listings = await readAllListings(store).catch(() => []);
-  const flows = store.listId ? await readFlows(store.listId).catch(() => []) : [];
+  // A read that fails is never "nothing" (rule 24): its ids would be missed and their keys never erased. It throws,
+  // and the walk tries the store again later (eraseClosed), or the closing day holds (lib/plan-closing.ts).
+  const listings = await readAllListings(store);
+  const flows = store.listId ? await readFlows(store.listId) : [];
   const courseIds = listings.flatMap((l) => (l.course ? [l.course.id] : []));
-  const courses = courseIds.length ? [...(await readCourses(courseIds).catch(() => new Map())).values()] : [];
+  const courses = courseIds.length ? [...(await readCourses(courseIds)).values()] : [];
   const own = [store.sid, store.statsId, store.listId, store.callsId, store.catalog?.id, store.community?.id, await storeFolder(storeRef(store)), store.photoId];
   const found = new Set<string>([...own.filter((id): id is string => typeof id === "string" && id.length >= 6), ...idsIn(JSON.stringify(store), JSON.stringify(listings), JSON.stringify(flows), JSON.stringify(courses))]);
   for (const id of [...courseIds, ...listings.flatMap((l) => (l.podcast ? [l.podcast.id] : [])), ...flows.map((f) => f.id)]) if (id) found.add(id);
@@ -205,7 +208,8 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   const { marks } = await marksOf(store);
   const extra: string[] = [];
   // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
-  const team = store.sid ? await readTeam(store.sid).catch(() => ({ members: [], invites: [] })) : { members: [], invites: [] };
+  // Read whole or not at all: a team not read is never "no teammates" (rule 24); it throws, and the walk waits.
+  const team = store.sid ? await readTeam(store.sid) : { members: [], invites: [] };
   const own = new Set(marks);
   for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
     let cursor = "0";
@@ -219,10 +223,11 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
       if (cursor === "0") break;
     }
   }
-  // A host's own calendar is the host's, across the stores they serve: it goes with the last of them.
+  // A host's own calendar is the host's, across the stores they serve: it goes with the last of them. A read
+  // that fails is never "no other store" (rule 24): it throws, and the walk tries this store again later.
   for (const email of [store.email, ...team.members.map((m) => m.email)]) {
-    const elsewhere = (await memberStores(email).catch(() => [{ store }])).some((m) => m.store.sid !== store.sid)
-      || (await accountStores(email).catch(() => [store])).some((other) => other.sid !== store.sid);
+    const elsewhere = (await memberStores(email)).some((m) => m.store.sid !== store.sid)
+      || (await accountStores(email)).some((other) => other.sid !== store.sid);
     if (!elsewhere) extra.push(...hostCalendarKeys(hostId(email)));
   }
   await dropTeam(store);
@@ -240,8 +245,7 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
   // still found by their mark (lib/closing-plan-guard.ts, markShut).
   await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
-  await closeStoreRecord(store);
-  return {
+  const entry: Batched = {
     ref,
     email: store.email,
     sid: store.sid,
@@ -253,6 +257,14 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
     endedAt: Date.parse(store.planEndedAt) || now,
     at: now,
   };
+  // The walk's entry is written before the record goes: once the record is gone, only this entry names the store's
+  // keys. A write that fails throws with the record still there, and the walk tries the store again later.
+  // Only HSET's own count (0 for an entry rewritten, 1 for a new one) is a write; any other answer is not known to
+  // have landed and throws before the record goes (Codex T on #3181).
+  const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1)?.[0];
+  if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
+  await closeStoreRecord(store);
+  return entry;
 }
 
 /** Who owns a key: the closing store one of whose ids names it. */
@@ -304,15 +316,27 @@ type Follower = { match: (key: string) => boolean; find: (keys: string[], entry:
 
 const READ_BATCH = FOLLOW_BATCH;
 
+/** The most pages one walk of a key's members reads (a thousand asked for a page); a walk not at its end by then is unknown. */
+const MEMBER_PAGES = 10_000;
+
+/**
+ * Every member of one key, a page at a time. A page that does not read, or a walk not at its end after
+ * MEMBER_PAGES, throws UnknownReplyError (rules 24 and 30, review of #2921): never "no more members", so the walk's
+ * page is not deleted, its cursor is not moved on, its stores are not finished, and the next run reads it again.
+ * Until then a short walk here left a closing store's members and followed keys behind while the store was
+ * reported erased.
+ */
 async function scanAll(command: "HSCAN" | "SSCAN" | "ZSCAN", key: string, each: (flat: string[]) => Promise<void> | void): Promise<void> {
   let cursor = "0";
-  for (let round = 0; round < 10_000; round += 1) {
-    const [reply] = await redisPipeline([[command, key, cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) return;
-    cursor = String(reply[0]);
-    await each(Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : []);
+  for (let round = 0; round < MEMBER_PAGES; round += 1) {
+    const page = scanPage(await redisPipeline([[command, key, cursor, "COUNT", 1000]]));
+    // A hash or a sorted set answers pairs (field and value, member and score): an odd page is not one.
+    if (!page || (command !== "SSCAN" && page.items.length % 2 !== 0)) throw new UnknownReplyError(`the closing walk's ${command} of a key`);
+    cursor = page.next;
+    await each(page.items);
     if (cursor === "0") return;
   }
+  throw new UnknownReplyError(`the closing walk's ${command} of a key, not at its end after ${MEMBER_PAGES} pages,`);
 }
 
 const json = (raw: string): Record<string, unknown> | null => {
@@ -565,6 +589,18 @@ async function readBatch(): Promise<Map<string, Batched>> {
   return out;
 }
 
+/**
+ * Moves a closing store that could not be read or prepared back a walk (ZADD XX: never puts back one that left the
+ * line meanwhile). True only on Redis's own answer, 0 or 1; anything else is not known to have moved (rule 24), so the
+ * old due time may still stand and the run must not say it is done.
+ */
+async function moveBack(ref: string, now: number): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]), 1)?.[0];
+  if (reply === 0 || reply === 1) return true;
+  console.error("moving a closed store back a walk was not confirmed; it may come up again before then", reply);
+  return false;
+}
+
 /** What the closing job does when a store's records are gone: told by the caller (lib/plan-closing.ts), which writes it down and emails the owner. */
 export type Finisher = (entry: Batched, now: number) => Promise<void>;
 
@@ -576,6 +612,8 @@ export type Finisher = (entry: Batched, now: number) => Promise<void>;
 export async function eraseClosed(deadline: number, finish: Finisher, now = Date.now()): Promise<WalkReport> {
   const report: WalkReport = { started: false, stores: 0, pages: 0, deleted: 0, pruned: 0, finished: 0, done: false };
   if (!isRedisConfigured()) return report;
+  // A move back a walk that Redis did not confirm (moveBack): this run is never said to be done.
+  let unsure = false;
   const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase"]]);
   const [cursorRaw, startedRaw, phaseRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", ""];
   let phase = phaseRaw || "idle";
@@ -589,16 +627,33 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     if (!refs.length) return { ...report, done: true };
     for (const ref of refs) {
       if (Date.now() > deadline) break;
-      const store = await storeForEmail(ref).catch(() => null);
+      let store: Store | null;
+      try {
+        store = await storeForEmail(ref);
+      } catch (error) {
+        // Not read (rule 24): never "no store". It stays in line, moved back a walk so it does not hold the head of
+        // the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves the line.
+        console.error("a closed store's record could not be read; it waits for the next walk", error);
+        if (!(await moveBack(ref, now))) unsure = true;
+        continue;
+      }
       if (store) {
-        const entry = await prepareStore(store, now);
-        await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);
+        try {
+          await prepareStore(store, now);
+        } catch (error) {
+          // Something it needs could not be read (rule 24), such as whether a host still serves another store:
+          // never taken as "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat).
+          console.error("a closed store could not be prepared; it waits for the next walk", error);
+          if (!(await moveBack(ref, now))) unsure = true;
+          continue;
+        }
+        // prepareStore wrote the walk's entry before it closed the record.
         report.stores += 1;
       }
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
     const [count] = await redisPipeline([["HLEN", BATCH_KEY]]);
-    if (!Number(count)) return { ...report, done: true };
+    if (!Number(count)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";
@@ -608,10 +663,11 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   const batch = await readBatch();
   const owners = ownersOf([...batch.values()]);
   while (phase === "walk" && Date.now() < deadline && report.pages < WALK_PAGES_PER_RUN) {
-    const [reply] = await redisPipeline([["SCAN", cursor, "MATCH", "nl:*", "COUNT", WALK_COUNT]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    const next = String(reply[0]);
-    const keys = Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
+    // A page that does not read is unknown, not a page with no keys nor the end of the database (rule 30): the run
+    // stops with the cursor where it was, so the page is read again and no store is finished past it.
+    const page = scanPage(await redisPipeline([["SCAN", cursor, "MATCH", "nl:*", "COUNT", WALK_COUNT]]));
+    if (!page) throw new UnknownReplyError("the closing walk's SCAN");
+    const { next, items: keys } = page;
     const done = await walkPage(keys, batch, owners);
     report.deleted += done.deleted;
     report.pruned += done.pruned;
@@ -629,7 +685,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       report.finished += 1;
     }
     await redisPipeline([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "finished", now]]);
-    report.done = true;
+    report.done = !unsure;
   }
   return report;
 }

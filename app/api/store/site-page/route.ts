@@ -2,8 +2,10 @@ import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { StoreFullError, imageFolder, setSitePages } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
-import { claimPictures, dropPage, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
@@ -87,7 +89,7 @@ export async function POST(request: NextRequest) {
       if (!found) return refuse("unknown", 404);
       const saved = await setSitePages(ref, pages.filter((page) => page.id !== found.id));
       if (!saved.ok) return refuse(saved.reason);
-      const gone = await dropPage(saved.store.statsId, siteKey(found.id), saved.store).catch(() => [] as string[]);
+      const gone = await dropPage(saved.store.statsId, siteKey(found.id), saved.store).catch(picturesOfFailedDrop);
       if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
       return Response.json({ ok: true, pages: saved.store.sitePages });
     }
@@ -116,19 +118,27 @@ export async function POST(request: NextRequest) {
       const statsId = store.statsId;
       const key = siteKey(found.id);
       // Pictures: each new one a picture in this store's own folder, shown on no other page.
-      const before = picturePaths(await readPage(statsId, key));
+      // A page whose read is not known is never taken for an empty one: nothing is claimed, released or written from it.
+      let held;
+      try {
+        held = await readPage(statsId, key);
+      } catch (error) {
+        console.error("reading a store page before saving it failed", error);
+        return refuse("page_unread", 503);
+      }
+      const before = picturePaths(held);
       const shown = picturePaths(page);
+      // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
+      if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "page", "replace"))) return refusedJson("locked");
       const fresh = shown.filter((path) => !before.includes(path));
       if (fresh.length) {
         const folder = await imageFolder(ref);
         for (const path of fresh) {
           if (!ownsImagePath(path, folder) || !(await isStoredPicture(path))) return refuse("pictures");
         }
-        const taken = await claimPictures(statsId, key, fresh);
-        if (taken.length) {
-          await releasePictures(statsId, key, fresh);
-          return refuse("pictures");
-        }
+        // Fresh from the picture door or already this page's, never a product's, a link's or another page's picture
+        // from the shared folder (lib/sales-page-store.ts, claimNewPictures).
+        if (!(await claimNewPictures(statsId, key, fresh))) return refuse("pictures");
       }
       await writePage(statsId, key, page, store);
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).

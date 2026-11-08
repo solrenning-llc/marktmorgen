@@ -57,6 +57,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -164,6 +165,12 @@ export function isUpcoming(event: CommunityEvent, now = Date.now()): boolean {
 
 // ------------------------------------------------------------------ records
 
+/** An event's product list as the code writes it (ids of 1 to 40 characters), or null for anything else. */
+function productList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.every((x) => typeof x === "string" && x.length >= 1 && x.length <= 40)) return null;
+  return [...new Set(value as string[])].slice(0, 200);
+}
+
 function parseEvent(raw: unknown): CommunityEvent | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -174,6 +181,11 @@ function parseEvent(raw: unknown): CommunityEvent | null {
     const link = typeof v.link === "string" ? cleanRoom(v.link) : null;
     const room = typeof v.room === "string" && isVideoRoom(v.room) ? v.room : "";
     const ownLink = typeof link === "string" ? link : "";
+    // Who may come, read exactly (CX-123 rule 24): no list is an event for every member, as the code writes one; a
+    // list in another shape, or holding an id this code never writes, is not "for everyone", so the record is not
+    // read at all and nobody is let in on it (mayAttend), rather than every member.
+    const only = v.only === undefined ? [] : productList(v.only);
+    if (only === null) return null;
     return {
       id: v.id,
       title: cleanLine(v.title, MAX_EVENT_TITLE) || "Live event",
@@ -188,7 +200,7 @@ function parseEvent(raw: unknown): CommunityEvent | null {
       meet: v.where === "meet" && isMeetProvider(v.meet) ? v.meet : null,
       room,
       link: ownLink,
-      only: Array.isArray(v.only) ? [...new Set(v.only.filter((x): x is string => typeof x === "string" && x.length <= 40))].slice(0, 200) : [],
+      only,
       replay: parseVideo(v.replay),
       cancelled: v.cancelled === true,
       post: typeof v.post === "string" && ITEM_ID.test(v.post) ? v.post : "",
@@ -360,13 +372,21 @@ export function readEventInput(
   return { title, about, start, minutes, tz, cap, where, link, meet, only };
 }
 
-/** Counts one more change by the creator, and says whether it is allowed. */
+/**
+ * Counts one more change by the creator, and says whether it is allowed.
+ * The count is read only in its exact shape (CX-123 rule 24): a reply that
+ * is missing, cut short or of another shape throws UnknownReplyError, so
+ * nothing is changed and the studio says something went wrong (the route's
+ * "server_error"), never that there were too many changes.
+ */
 export async function withinEventWrites(id: string): Promise<boolean> {
-  const [, count] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["SET", writesKey(id), "0", "EX", 3_600, "NX"],
     ["INCR", writesKey(id)],
-  ]);
-  return Number(count) <= EVENT_WRITES_PER_HOUR;
+  ]), 2);
+  const count = replies && (replies[0] === "OK" || replies[0] === null) ? countOf(replies[1]) : null;
+  if (count === null || count < 1) throw new UnknownReplyError("a count of changes to live events");
+  return count <= EVENT_WRITES_PER_HOUR;
 }
 
 /** Where the reminders for an event stand in the queue: one entry per moment, for this start. */
@@ -687,11 +707,15 @@ export async function rsvpList(id: string, eventId: string, limit = 100_000): Pr
   const out: { key: string; at: number }[] = [];
   let cursor = "0";
   for (let page = 0; page < 200; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
-    for (let i = 0; i + 1 < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
-    cursor = String(reply[0]);
+    // Each page in its exact shape (CX-123 rule 24; Claude 5 on #2954): a page in another shape is not the end of the
+    // list, so it throws, and nothing is written down for only part of the people coming.
+    const page = repliesFor(repliesFor(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]), 1)?.[0], 2);
+    const next = page?.[0];
+    const flat = page ? stringList(page[1]) : null;
+    const cursorText = typeof next === "string" && /^\d+$/.test(next) ? next : typeof next === "number" && Number.isSafeInteger(next) && next >= 0 ? String(next) : null;
+    if (cursorText === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("who is coming to an event");
+    for (let i = 0; i < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
+    cursor = cursorText;
     if (cursor === "0" || out.length >= limit) break;
   }
   return out.slice(0, limit).sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
@@ -840,7 +864,7 @@ export async function rsvpsOf(id: string, who: string): Promise<{ event: string;
   return events.flatMap((event, i) => (replies[i] === null || replies[i] === undefined ? [] : [{ event, at: Number(replies[i]) || 0 }]));
 }
 
-/** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts). */
+/** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts), and what the walk of its archive reads (lib/community-walk.ts). */
 export async function eventCount(id: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const [n] = await redisPipeline([["ZCARD", indexKey(id)]]);

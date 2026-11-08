@@ -86,6 +86,8 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
 
   const asked = await requestErasureLink({ email: tess, ip: "203.0.113.7", origin: "https://marktmorgen.com", handle: store.handle });
   is("asking sends a link", asked, "sent");
+  // The link goes after the answer (lib/erasure-request.ts, afterAnswer): wait for it before reading what was sent.
+  for (let i = 0; i < 200 && !sent.some((m) => m.to === tess && m.text.includes("/privacy/delete?token=")); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
   const mail = sent.find((m) => m.to === tess && m.text.includes("/privacy/delete?token="));
   const token = mail?.text.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
   is("the email carries a link that works", token.length, 64);

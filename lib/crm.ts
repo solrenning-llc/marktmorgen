@@ -11,8 +11,10 @@
  *   nl:crm:deals:<statsId>           hash  deal id -> deal (JSON)
  *   nl:crm:lock:<statsId>            one deals import (lib/hubspot-import.ts) or change of pipelines
  *                                    at a time, a minute at most
- *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person
+ *   nl:crm:tasks:<statsId>           hash  person -> their tasks (JSON, lib/person-tasks.ts), gone with the person;
+ *                                    and TASK_COUNT_FIELD -> how many tasks the store keeps in all
  *   nl:crm:tasklock:<statsId>        one change of the store's tasks at a time (lib/redis-lock.ts), ten seconds at the most
+ *   nl:crm:taskrecount:<statsId>     one paid recount of the store's tasks at a time (lib/redis-lock.ts), thirty seconds at the most
  *
  * A value is kept under the person's key, never the address (as a note
  * about them is), one hash a field, so the list's file reads each field once
@@ -22,9 +24,9 @@ import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, holdLock, takeLock, withLock } from "@/lib/redis-lock";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
-import { type DataChange, type DataStore, giveData, needData } from "@/lib/store-data";
+import { type DataChange, type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
-import { type DueTask, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
+import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
   CRM_ID,
@@ -84,6 +86,10 @@ async function stillHeld(held: Held): Promise<boolean> {
 export class CrmDealConflict extends Error {
   constructor() { super("CRM deal changed meanwhile"); this.name = "CrmDealConflict"; }
 }
+/** A field would be taken away, with its answers, by a write that may not take any. */
+export class CrmFieldsKept extends Error {
+  constructor() { super("CRM fields may not be taken away here"); this.name = "CrmFieldsKept"; }
+}
 /** Somebody else changed the pipelines between this change's read and its write: nothing was written. */
 export class CrmSchemaConflict extends Error {
   constructor() { super("CRM configuration changed meanwhile"); this.name = "CrmSchemaConflict"; }
@@ -109,6 +115,56 @@ const TASKS_LOCK_SECONDS = 10;
 export const TASKS_LOCK_WAIT_MS = 2_000;
 /** How long deleting a person waits for a change of their tasks, before it reports failure. */
 const TASKS_FORGET_WAIT_MS = 5_000;
+/**
+ * The field of the store's tasks hash that keeps how many tasks the store
+ * has in all, so an add checks MAX_STORE_TASKS by reading one number instead
+ * of every task (the review of #1959: 980 tasks were 356,672 bytes read for
+ * one add). Never a person's key (those are 32 hex characters), so nothing
+ * that reads people takes it for one. Changed only under the tasks' lock, in
+ * the same script as the write it counts; made again from every task, once,
+ * paid for first (TASKS_RECOUNT_UNITS), when a store kept tasks before it.
+ */
+export const TASK_COUNT_FIELD = "count";
+/**
+ * One paid recount of a store's tasks at a time: a second change that needs
+ * one waits for the first, then finds the count made and pays nothing. Held
+ * while the studio is asked to pay (which may read Stripe), so longer than
+ * the tasks' lock, which is never held while paying.
+ */
+const recountLockKey = (statsId: string) => `nl:crm:taskrecount:${statsId}`;
+const RECOUNT_LOCK_SECONDS = 30;
+const RECOUNT_WAIT_MS = 5_000;
+/** Passes of a change that needs a recount, under the recount's lock: one to look, one after paying, one more when people were added meanwhile. */
+const RECOUNT_PASSES = 3;
+/** What the count takes in the store's data room: its field at the largest it can be. */
+export const TASK_COUNT_WEIGHT = dataBytes([TASK_COUNT_FIELD, String(MAX_STORE_TASKS)], 1);
+/**
+ * The most one task weighs as kept (JSON): its words at three bytes a
+ * character at the most (MAX_TASK_TEXT; control characters are taken out, so
+ * none is written as an escape, and a pair of characters is four bytes), the
+ * teammate's address, which came in a request of at most 2,000 bytes
+ * (app/api/store/person-tasks/route.ts), and its id, date, two times and
+ * names; tests/person-tasks.test.ts holds the worst one under it.
+ */
+export const TASK_KEPT_BYTES = 2_800;
+/** What a person's record adds besides their tasks, counted once a task (each person has one at least): their key, the list's marks and the reply's framing. */
+const TASK_PERSON_BYTES = 64;
+/** What one studio request pays to read from the database (tests/plan-cost-registry.ts, UNIT_COST.studio). */
+const STUDIO_REQUEST_BYTES = 50_000;
+/**
+ * Studio requests taken before every task of a store is read to make its
+ * count again: what `people` people can keep, at most MAX_STORE_TASKS tasks
+ * at their heaviest, at STUDIO_REQUEST_BYTES a request
+ * (tests/plan-cost-registry.test.ts holds it above what the read costs).
+ */
+export function tasksRecountUnits(people: number): number {
+  const tasks = Math.min(Math.max(0, Math.floor(people)) * MAX_PERSON_TASKS, MAX_STORE_TASKS);
+  return Math.max(1, Math.ceil((tasks * (TASK_KEPT_BYTES + TASK_PERSON_BYTES)) / STUDIO_REQUEST_BYTES));
+}
+/** At the most: a store with as many tasks as it may keep. */
+export const TASKS_RECOUNT_UNITS = tasksRecountUnits(MAX_STORE_TASKS);
+/** The most bytes a recount reads. */
+export const TASKS_RECOUNT_BYTES = MAX_STORE_TASKS * (TASK_KEPT_BYTES + TASK_PERSON_BYTES);
 const PERSON = /^[0-9a-f]{32}$/;
 /** Where people's field values are counted in the store's data room (lib/store-data.ts). */
 const VALUES_SLOT = "crm:v";
@@ -130,22 +186,40 @@ export async function readFields(statsId: string | null): Promise<CrmField[]> {
   return parseFields(json(raw));
 }
 
-/** Saves the fields; the answers kept for a field that is gone go with it. */
-export async function writeFields(statsId: string, fields: CrmField[]): Promise<CrmField[]> {
-  let before: CrmField[];
+/**
+ * The store's fields exactly as saved, for a decision that writes: none only
+ * when none were ever saved. A reply in an unknown shape, or a saved list
+ * with an entry that does not read, throws CrmSchemaReadUnavailable, never
+ * "no fields" (CX-123 rules 24 and 30): a sequence's field step is never
+ * turned away, saved or ended as "removed" against fields that are not the
+ * store's.
+ */
+export async function readFieldsWhole(statsId: string | null): Promise<CrmField[]> {
+  if (!statsId || !isRedisConfigured()) return [];
   try {
     const response = await redisPipeline([["GET", fieldsKey(statsId)]]);
     if (!Array.isArray(response) || response.length !== 1) throw new CrmSchemaReadUnavailable();
-    if (response[0] === null) before = [];
-    else {
-      if (typeof response[0] !== "string") throw new CrmSchemaReadUnavailable();
-      const raw: unknown = JSON.parse(response[0]);
-      if (!Array.isArray(raw)) throw new CrmSchemaReadUnavailable();
-      before = parseFields(raw);
-      if (before.length !== raw.length) throw new CrmSchemaReadUnavailable();
-    }
+    if (response[0] === null) return [];
+    if (typeof response[0] !== "string") throw new CrmSchemaReadUnavailable();
+    const raw: unknown = JSON.parse(response[0]);
+    if (!Array.isArray(raw)) throw new CrmSchemaReadUnavailable();
+    const fields = parseFields(raw);
+    if (fields.length !== raw.length) throw new CrmSchemaReadUnavailable();
+    return fields;
   } catch { throw new CrmSchemaReadUnavailable(); }
+}
+
+/**
+ * Saves the fields; the answers kept for a field that is gone go with it.
+ * With `keepAll`, nothing is written when a field kept now would be gone
+ * (CrmFieldsKept). The fields are read just before the write, not in the
+ * same step: a field another session adds in between is left off the list
+ * but its answers are never deleted, since only fields read as gone are.
+ */
+export async function writeFields(statsId: string, fields: CrmField[], keepAll = false): Promise<CrmField[]> {
+  const before = await readFieldsWhole(statsId);
   const gone = before.filter(f => !fields.some(n => n.id === f.id));
+  if (keepAll && gone.length) throw new CrmFieldsKept();
   try {
     const response = await redisPipeline([["SET", fieldsKey(statsId), JSON.stringify(fields)], ...gone.map(f => ["DEL", valuesKey(statsId, f.id)])]);
     if (!Array.isArray(response) || response.length !== 1 + gone.length || response[0] !== "OK" || Array.from(response).slice(1).some(value => value !== 0 && value !== 1)) throw new CrmSchemaWriteUnconfirmed();
@@ -195,12 +269,15 @@ export async function allValues(statsId: string | null, fields: CrmField[]): Pro
 
 /**
  * The store's pipelines: the saved ones once the creator has changed one,
- * and until then the board it always had, as the first pipeline.
+ * and until then the board it always had, as the first pipeline. A reply in
+ * an unknown shape, or a saved record that does not read, throws
+ * CrmSchemaReadUnavailable, never the default pipeline in its place (CX-123
+ * rules 24 and 30): a teammate's access, a deal's stage or a workflow step
+ * is never decided against pipelines that are not the store's.
  */
 export async function readPipelines(statsId: string | null): Promise<Pipeline[]> {
   if (!statsId || !isRedisConfigured()) return [firstPipeline(DEFAULT_STAGES)];
-  const [pipes, legacy] = await redisPipeline([["GET", pipesKey(statsId)], ["GET", stagesKey(statsId)]]);
-  return parsePipelines(json(pipes), true) ?? [firstPipeline(parseStages(json(legacy)) ?? DEFAULT_STAGES)];
+  return (await pipelineSnapshot(statsId)).pipelines;
 }
 
 /** Every stage of every pipeline, in order: what a deal's stage is read against. */
@@ -226,9 +303,14 @@ async function pipelineSnapshot(statsId: string): Promise<{ raw: string; pipelin
       if (!pipelines) throw new CrmSchemaReadUnavailable();
       return { raw: pipes, pipelines };
     }
-    // Before any pipeline was saved, the board's own stages, as the board has always read them.
-    if (legacy !== null && typeof legacy !== "string") throw new CrmSchemaReadUnavailable();
-    return { raw: "", pipelines: [firstPipeline(parseStages(json(legacy)) ?? DEFAULT_STAGES)] };
+    // Before any pipeline was saved, the board's own stages, as the board has always read them; the defaults only
+    // when that record was never saved either. A board record that does not read whole is unknown (rule 30).
+    if (legacy === null) return { raw: "", pipelines: [firstPipeline(DEFAULT_STAGES)] };
+    if (typeof legacy !== "string") throw new CrmSchemaReadUnavailable();
+    const board = json(legacy);
+    const stages = parseStages(board);
+    if (!Array.isArray(board) || !stages || stages.length !== board.length) throw new CrmSchemaReadUnavailable();
+    return { raw: "", pipelines: [firstPipeline(stages)] };
   } catch { throw new CrmSchemaReadUnavailable(); }
 }
 
@@ -817,13 +899,99 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   // wait throws (LockBusyError): the deletion fails and says so, never skips
   // them.
   records += await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, async () => {
-    // One pipeline: what is given back is what the deletion removed.
-    const [before, gone] = await redisPipeline([["HGET", tasksKey(statsId), person], ["HDEL", tasksKey(statsId), person]]);
-    const freed = taskWeight(person, before);
-    if (gone === 1 && freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
-    return gone === 1 ? 1 : 0;
+    // Read first, for how many tasks the store's count loses; then one
+    // script deletes them and answers what it deleted, so what is given back
+    // is what the deletion removed. Should their tasks have changed between
+    // the two (a lock that ran out), the count is dropped, to be made again.
+    const [read] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
+    const reply = await redisPipeline([["EVAL", FORGET_PERSON_TASKS, 1, tasksKey(statsId), person, typeof read === "string" ? read : "", tasksOf(read).length, TASK_COUNT_FIELD]]);
+    const [taken] = reply;
+    if (!Array.isArray(taken) || taken.length !== 2 || typeof taken[0] !== "string" || (taken[1] !== 0 && taken[1] !== 1)) throw new CrmValueWriteUnconfirmed();
+    const freed = taskWeight(person, taken[0]) + (taken[1] === 1 ? TASK_COUNT_WEIGHT : 0);
+    if (freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
+    return taken[0] ? 1 : 0;
   });
   return records;
+}
+
+/**
+ * A person's tasks deleted, answered as { what was deleted ("" for none),
+ * 1 when the count was dropped }. ARGV: the person, their tasks as read
+ * before, how many those were, the count's field. The count loses that many
+ * when what is deleted is what was read (and it is a whole number);
+ * otherwise it is dropped, and made again from every task by the next add
+ * that needs it.
+ */
+export const FORGET_PERSON_TASKS = `-- marktmorgen:crm-tasks-forget:v1
+local value = redis.call("HGET", KEYS[1], ARGV[1])
+if not value then return {"", 0} end
+redis.call("HDEL", KEYS[1], ARGV[1])
+local kept = redis.call("HGET", KEYS[1], ARGV[4])
+local n = kept and string.match(kept, "^%d+$") and tonumber(kept)
+if n and value == ARGV[2] then
+  redis.call("HSET", KEYS[1], ARGV[4], tostring(math.max(0, n - tonumber(ARGV[3]))))
+  return {value, 0}
+end
+return {value, redis.call("HDEL", KEYS[1], ARGV[4])}`;
+
+/**
+ * One person's tasks written, and the store's count with them, in one step.
+ * ARGV: the person; their tasks as read under the lock ("" for none); the new
+ * tasks ("" deletes the record); how many tasks that adds (negative when it
+ * takes some away); the count to start from when there is none yet ("" to
+ * leave it absent); the count's field. Answers -1, with nothing written, when
+ * the person's tasks are no longer what was read (a lock that ran out let
+ * another change in); 1 once written; 2 once written when a count that was
+ * not a whole number was dropped or replaced, whose room goes back. A count
+ * that is there is moved by the change.
+ */
+export const WRITE_PERSON_TASKS = `-- marktmorgen:crm-tasks-write:v1
+local before = redis.call("HGET", KEYS[1], ARGV[1]) or ""
+if before ~= ARGV[2] then return -1 end
+if ARGV[3] == "" then redis.call("HDEL", KEYS[1], ARGV[1]) else redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) end
+local kept = redis.call("HGET", KEYS[1], ARGV[6])
+local n = kept and string.match(kept, "^%d+$") and tonumber(kept)
+if n then
+  redis.call("HSET", KEYS[1], ARGV[6], tostring(math.max(0, n + tonumber(ARGV[4]))))
+elseif ARGV[5] ~= "" then
+  redis.call("HSET", KEYS[1], ARGV[6], ARGV[5])
+  if kept then return 2 end
+elseif kept then
+  redis.call("HDEL", KEYS[1], ARGV[6])
+  return 2
+end
+return 1`;
+
+/**
+ * The store's count saved on its own, once every task was read to make it:
+ * 0 when a whole number is there already (nothing written), 1 when written
+ * where there was none, 2 when written over one that was not a whole number.
+ */
+export const SAVE_TASK_COUNT = `-- marktmorgen:crm-tasks-count-save:v1
+local kept = redis.call("HGET", KEYS[1], ARGV[1])
+if kept and string.match(kept, "^%d+$") then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+if kept then return 2 end
+return 1`;
+
+/** The count as kept: a whole number, or null when there is none (or it is not one). */
+function countOf(raw: unknown): number | null {
+  if (typeof raw !== "string" || !/^\d+$/.test(raw)) return null;
+  return Number(raw);
+}
+
+/** A change that needs every task of the store read to make its count again, and the studio would not pay for it. */
+export class TasksRecountRefused extends Error {
+  /** What the studio said when it refused, for the person who asked. */
+  readonly words: string;
+  /** Why: "unknown" when it could not be counted just now (try again), else the figure or its pool used. */
+  readonly reason: string;
+  constructor(words: string, reason = "used") {
+    super("The store's tasks were not counted: the studio requests for it were refused");
+    this.name = "TasksRecountRefused";
+    this.words = words;
+    this.reason = reason;
+  }
 }
 
 /** What one person's tasks take in the store's data room, as kept. */
@@ -839,6 +1007,17 @@ export async function readPersonTasks(statsId: string | null, person: string): P
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return [];
   const [raw] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
   return tasksOf(raw);
+}
+
+/**
+ * How many people have tasks in the store: one HLEN and one HEXISTS, never
+ * the tasks themselves. What reading every task is paid for by
+ * (tasksRecountUnits), before it is read: the agenda and the recount.
+ */
+export async function taskPeople(statsId: string | null): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [fields, counted] = await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]);
+  return Math.max(0, (Number(fields) || 0) - (counted === 1 ? 1 : 0));
 }
 
 /** Everyone's tasks, by person: what the agenda groups (lib/person-tasks.ts, tasksDue). At most MAX_STORE_TASKS. */
@@ -859,43 +1038,125 @@ export async function readAllTasks(statsId: string | null): Promise<DueTask[]> {
 /**
  * Changes one person's tasks: `change` gets their tasks and answers the new
  * list or a refusal. A list that grows past MAX_STORE_TASKS across the store
- * is refused ("store_full"). Room in the store's data room is taken before
- * writing (DataRoomError when it does not fit); a shorter list gives it back.
- * The read, the change, the room and the write happen under the store's
- * tasks lock, so each real change is kept and counted exactly once; a change
- * that cannot take it within TASKS_LOCK_WAIT_MS throws LockBusyError, with
- * nothing written or counted.
+ * is refused ("store_full"), checked against the store's count of its tasks
+ * (TASK_COUNT_FIELD), one number, never every task. A store whose count is
+ * not there yet while it keeps tasks (it kept them before the count) has it
+ * made once from every task, when a change first grows its tasks: `pay` is
+ * asked for tasksRecountUnits(people) studio requests first, outside the
+ * tasks' lock and one recount at a time (a second change waits, then finds
+ * the count made), and a refusal throws TasksRecountRefused with nothing
+ * written. The count is saved as soon as it is made, before the change is
+ * checked against the cap and the room, so a change refused after it never
+ * loses what was paid for. Room
+ * in the store's data room is taken before writing (DataRoomError when it
+ * does not fit); a shorter list gives it back. The read, the change, the
+ * room and the write happen under the store's tasks lock, the write and the
+ * count in one script, so each real change is kept and counted exactly once;
+ * a change that cannot take it within TASKS_LOCK_WAIT_MS throws
+ * LockBusyError, with nothing written or counted.
  */
-export async function changePersonTasks(statsId: string, person: string, room: DataStore, change: (tasks: PersonTask[]) => TaskResult): Promise<TaskResult> {
+export async function changePersonTasks(
+  statsId: string,
+  person: string,
+  room: DataStore,
+  change: (tasks: PersonTask[]) => TaskResult,
+  pay: (units: number) => Promise<{ ok: true } | { ok: false; reason: string; message: string }> = async () => ({ ok: false, reason: "used", message: "" }),
+): Promise<TaskResult> {
   if (!PERSON.test(person)) return { ok: false, error: "unknown" };
-  return withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, async (held) => {
-    // A change that waited while the store was deleted writes nothing back:
-    // its tasks are gone with it (forgetCrm). One EXISTS of the store's id
-    // key; a store whose id is not of today's form (none is made any more)
-    // relies on forgetCrm's second deletion under this lock instead.
-    if (room.sid && STORE_ID_PATTERN.test(room.sid) && !(await storeIdExists(room.sid))) return { ok: false, error: "unknown" };
-    const [before] = await redisPipeline([["HGET", tasksKey(statsId), person]]);
-    const tasks = tasksOf(before);
-    const result = change(tasks);
-    if (!result.ok) return result;
-    if (result.tasks.length > tasks.length && (await readAllTasks(statsId)).length + result.tasks.length - tasks.length > MAX_STORE_TASKS) return { ok: false, error: "store_full" };
-    const value = result.tasks.length ? JSON.stringify(result.tasks) : "";
-    const grown = taskWeight(person, value) - taskWeight(person, before);
-    // A lock that ran out meanwhile (a stalled request) may have let another
-    // change in: what was read may be stale, so nothing is counted or written.
-    if (!(await holdLock(held))) throw new LockBusyError();
-    // Room is taken before a write that grows, and given back only after a
-    // write that shrinks is confirmed: one that may not have landed keeps it.
-    if (grown > 0) await needData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
-    try {
-      const response = await redisPipeline([value ? ["HSET", tasksKey(statsId), person, value] : ["HDEL", tasksKey(statsId), person]]);
-      if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 0 && response[0] !== 1)) throw new CrmValueWriteUnconfirmed();
-    } catch {
-      throw new CrmValueWriteUnconfirmed();
+  const first = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, 0, held));
+  if ("result" in first) return first.result;
+  // A recount: one at a time for the store, so two changes never both pay.
+  // Its first pass looks again, and pays nothing when the one before made it.
+  return withLock(recountLockKey(statsId), RECOUNT_LOCK_SECONDS, RECOUNT_WAIT_MS, async (recount) => {
+    let paid = 0;
+    // At most three passes: the second after paying, the third only when
+    // more people were added meanwhile than were paid for. The last one
+    // never pays: nothing would read after it.
+    for (let pass = 0; pass < RECOUNT_PASSES; pass += 1) {
+      const outcome = await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_LOCK_WAIT_MS, (held) => changeOnce(statsId, person, room, change, paid, held));
+      if ("result" in outcome) return outcome.result;
+      if (pass === RECOUNT_PASSES - 1) break;
+      const answer = await pay(outcome.units - paid);
+      if (!answer.ok) throw new TasksRecountRefused(answer.message, answer.reason);
+      paid = outcome.units;
+      // Paying may have taken longer than the recount's lock (a Stripe
+      // read): lost, another change may be recounting too, so nothing is read.
+      if (!(await holdLock(recount))) throw new LockBusyError();
     }
-    if (grown < 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: -grown }]);
-    return result;
+    throw new LockBusyError();
   });
+}
+
+/** One pass of changePersonTasks, under the lock: its answer, or the studio requests a recount needs before it can be made. */
+async function changeOnce(statsId: string, person: string, room: DataStore, change: (tasks: PersonTask[]) => TaskResult, paid: number, held: Held): Promise<{ result: TaskResult } | { units: number }> {
+  // A change that waited while the store was deleted writes nothing back:
+  // its tasks are gone with it (forgetCrm). One EXISTS of the store's id
+  // key; a store whose id is not of today's form (none is made any more)
+  // relies on forgetCrm's second deletion under this lock instead.
+  if (room.sid && STORE_ID_PATTERN.test(room.sid) && !(await storeIdExists(room.sid))) return { result: { ok: false, error: "unknown" } };
+  const [before, kept, fields] = await redisPipeline([["HGET", tasksKey(statsId), person], ["HGET", tasksKey(statsId), TASK_COUNT_FIELD], ["HLEN", tasksKey(statsId)]]);
+  const tasks = tasksOf(before);
+  const result = change(tasks);
+  if (!result.ok) return { result };
+  const added = result.tasks.length - tasks.length;
+  let count = countOf(kept);
+  let start = "";
+  if (added > 0 && count === null) {
+    // No count yet: none is needed for a store with no tasks; one that has
+    // some has every task read, once, paid for first.
+    const people = Math.max(0, (Number(fields) || 0) - (kept === null || kept === undefined ? 0 : 1));
+    if (people > 0) {
+      const units = tasksRecountUnits(people);
+      if (units > paid) return { units };
+      count = (await readAllTasks(statsId)).length;
+      // Saved at once, before the cap and the room are checked, so what was
+      // paid for is kept whatever this change comes to. Its field is counted
+      // as written (noteData, never refused): the count stands for tasks
+      // already kept, and a full room must not throw the recount away.
+      if (!(await holdLock(held))) throw new LockBusyError();
+      let saved: unknown;
+      try {
+        [saved] = await redisPipeline([["EVAL", SAVE_TASK_COUNT, 1, tasksKey(statsId), TASK_COUNT_FIELD, String(count)]]);
+      } catch {
+        throw new CrmValueWriteUnconfirmed();
+      }
+      if (saved !== 0 && saved !== 1 && saved !== 2) throw new CrmValueWriteUnconfirmed();
+      // 0: a whole number was there after all, which only a change let in by a
+      // lost lock could have saved: nothing is written and the change is
+      // refused as busy; trying again reads that count, and pays nothing.
+      if (saved === 0) throw new LockBusyError();
+      if (saved === 1) await noteData(room, [{ slot: TASKS_SLOT, bytes: TASK_COUNT_WEIGHT }]);
+    } else {
+      count = 0;
+      start = String(added);
+    }
+  }
+  if (added > 0 && (count ?? 0) + added > MAX_STORE_TASKS) return { result: { ok: false, error: "store_full" } };
+  const value = result.tasks.length ? JSON.stringify(result.tasks) : "";
+  const grown = taskWeight(person, value) - taskWeight(person, before) + (start ? TASK_COUNT_WEIGHT : 0);
+  // A lock that ran out meanwhile (a stalled request) may have let another
+  // change in: what was read may be stale, so nothing is counted or written.
+  if (!(await holdLock(held))) throw new LockBusyError();
+  // Room is taken before a write that grows, and given back only after a
+  // write that shrinks is confirmed: one that may not have landed keeps it.
+  if (grown > 0) await needData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
+  let written: unknown;
+  try {
+    const response = await redisPipeline([["EVAL", WRITE_PERSON_TASKS, 1, tasksKey(statsId), person, typeof before === "string" ? before : "", value, added, start, TASK_COUNT_FIELD]]);
+    if (!Array.isArray(response) || response.length !== 1 || (response[0] !== 1 && response[0] !== 2 && response[0] !== -1)) throw new CrmValueWriteUnconfirmed();
+    written = response[0];
+  } catch {
+    throw new CrmValueWriteUnconfirmed();
+  }
+  if (written === -1) {
+    // Nothing was written: the room taken for it goes back, and the change is refused as busy.
+    if (grown > 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: grown }]);
+    throw new LockBusyError();
+  }
+  // A count that was not a whole number, dropped or replaced: the room it took goes back.
+  const freed = (grown < 0 ? -grown : 0) + (written === 2 ? TASK_COUNT_WEIGHT : 0);
+  if (freed > 0) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
+  return { result };
 }
 
 /** How many deals the store keeps: what deleting a person reads (lib/person-erasure.ts). */

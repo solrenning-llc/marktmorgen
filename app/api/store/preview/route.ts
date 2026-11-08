@@ -5,7 +5,7 @@ import { normaliseHandle, setProductPreview, storeForHandle } from "@/lib/store"
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { plain, serveFile } from "@/lib/serve-file";
 import { MAX_PREVIEW_PAGES, previewCopy } from "@/lib/pdf-preview";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, withinEssentialLimit } from "@/lib/request-guard";
 
 /** Making a preview the first time reads the whole PDF: give it the time a big one needs. */
 export const maxDuration = 60;
@@ -19,7 +19,7 @@ export const maxDuration = 60;
  * downloads rather than running up a bill (lib/serve-file.ts).
  */
 export async function GET(request: NextRequest) {
-  if (!(await withinLimit("preview", clientAddress(request), 30, 60))) return plain(429, "Too many at once. Try again in a minute.");
+  if (!(await withinEssentialLimit("preview", clientAddress(request), 30, 60))) return plain(429, "Too many at once. Try again in a minute.");
   const params = request.nextUrl.searchParams;
   const store = await storeForHandle(normaliseHandle(params.get("handle") ?? ""));
   if (!store) return plain(404, "There is no such store.");

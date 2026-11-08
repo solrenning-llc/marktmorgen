@@ -14,7 +14,9 @@ export async function POST(request: NextRequest) {
 
   try {
     const state = await readAccount(store.stripeAccountId);
-    await setStripeAccount(ref, store.stripeAccountId, state.chargesEnabled);
+    // Said only once the record took it (CX-123 rule 24): that record opens the store's checkout.
+    const saved = await setStripeAccount(ref, store.stripeAccountId, state.chargesEnabled);
+    if (!saved.ok) return away(origin, studio("stripe=error"));
     return away(origin, studio(`stripe=${state.chargesEnabled ? "ready" : "pending"}`));
   } catch (error) {
     console.error("stripe check failed", error);

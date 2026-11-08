@@ -62,10 +62,19 @@ export async function readMoves(sessions: string[]): Promise<Map<string, Move>> 
   const found = new Map<string, Move>();
   const list = sessions.filter(Boolean);
   if (!list.length || !isRedisConfigured()) return found;
-  const replies = await redisPipeline(list.map((session) => ["GET", movedKey(session)]));
-  list.forEach((session, i) => {
-    const move = parseMove(replies[i]);
-    if (move) found.set(session, move);
+  // A hundred keys at one MGET, every MGET in one trip: a command for each hundred bookings, not one a booking
+  // (lib/call-moves-read.ts, MOVES_PER_MGET, prices it; tests/plan-cost-registry.test.ts holds the two equal).
+  // A key that is gone, or holds no string, is answered null and read as never moved, as an unreadable move is.
+  const perRead = 100;
+  const lots: string[][] = [];
+  for (let i = 0; i < list.length; i += perRead) lots.push(list.slice(i, i + perRead));
+  const replies = await redisPipeline(lots.map((lot) => ["MGET", ...lot.map(movedKey)]));
+  lots.forEach((lot, l) => {
+    const values = Array.isArray(replies[l]) ? (replies[l] as unknown[]) : [];
+    lot.forEach((session, i) => {
+      const move = parseMove(values[i]);
+      if (move) found.set(session, move);
+    });
   });
   return found;
 }
@@ -102,7 +111,37 @@ export async function planReminders(callsId: string, handle: string, session: st
     if (at - now < REMINDER_MIN_LEAD_MS) continue;
     commands.push(["ZADD", REMINDER_QUEUE, at, reminderMember(callsId, handle, session, mark, start)]);
   }
-  if (commands.length) await redisPipeline(commands);
+  // A booking made or moved: the store's calendar feed makes its file again (lib/calendar-sync.ts, bookedCalendarFeed).
+  commands.push(...changedCommands(callsId, now));
+  await redisPipeline(commands);
+}
+
+/**
+ * When a store's bookings last changed (made, moved, or a time let go), in
+ * milliseconds, by the store's calls id, which a rename does not change: the
+ * private calendar feed makes its file again only after it
+ * (lib/calendar-sync.ts, bookedCalendarFeed). Kept as long as the feed's
+ * copy, CALENDAR_COPY_SECONDS. And each change gives the feed one more making
+ * that UTC day (its credits, at most CALENDAR_CREDITS_PER_DAY used a day),
+ * so a day's bookings show at the app's next check. Its cost is the feed's
+ * own line (tests/plan-cost-registry.ts, calendar-feed).
+ */
+export const bookingsChangedKey = (callsId: string) => `nl:cal:chg:${callsId}`;
+export const bookingCreditsKey = (callsId: string, day: string) => `nl:cal:chg:${callsId}:${day}`;
+const CHANGED_SECONDS = 40 * 86_400;
+const changedCommands = (callsId: string, now = Date.now()): (string | number)[][] => {
+  const credits = bookingCreditsKey(callsId, new Date(now).toISOString().slice(0, 10));
+  return [["SET", bookingsChangedKey(callsId), String(now), "EX", CHANGED_SECONDS], ["INCRBY", credits, 1], ["EXPIRE", credits, 2 * 86_400]];
+};
+
+/**
+ * A call refunded in full (lib/call-meetings.ts, the refund job): the feed's
+ * file is made again at the app's next check, with one more making that UTC
+ * day, as for a booking made or moved.
+ */
+export async function markBookingsChanged(callsId: string, now = Date.now()): Promise<void> {
+  if (!isRedisConfigured()) return;
+  await redisPipeline(changedCommands(callsId, now));
 }
 
 /**
@@ -124,5 +163,6 @@ export async function unplanReminders(callsId: string, handle: string, session: 
       reminderMember(callsId, handle, session, "24", start),
       reminderMember(callsId, handle, session, "1", start),
     ],
+    ...changedCommands(callsId),
   ]);
 }

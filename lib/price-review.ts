@@ -119,6 +119,18 @@ export function storePriceWords(taxOnTop: boolean): string {
 }
 
 /**
+ * The same, for one of several price options, by what the checkout can take
+ * off it (lib/store-checkout.ts, createCheckout): a store sale and a fair
+ * price for the buyer's country are only for a product at one price
+ * (lib/store-sale.ts, saleable), and a welcome offer opens no option; a
+ * discount code can, and on a membership so can a come-back offer
+ * (lib/winback-send.ts), which keeps the option the member had.
+ */
+export function optionStorePriceWords(taxOnTop: boolean, membership: boolean): string {
+  return `Your store's price is this, before any discount code${membership ? " or come-back offer" : ""}${taxOnTop ? ", plus sales tax or VAT where it applies" : ""}.`;
+}
+
+/**
  * The review for a save, or null when it changes nothing buyers pay, when
  * the product is not on the store, or when the save would be refused: a
  * price typed that cannot be read or is out of range, a membership or a
@@ -206,7 +218,8 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
  * `label` is the name as typed: none, or one the route refuses, is not
  * reviewed. On a membership, members who joined at that
  * price keep it, as for the product's own price. The price is the store's,
- * before a sale, an offer or a code, with tax on top where the store adds it.
+ * before a discount code (and, on a membership, a come-back offer), with tax
+ * on top where the store adds it (optionStorePriceWords).
  *
  * With a payment plan set on the product, what the new price does to it is
  * said, from whether buyers are offered it now (`planBefore`) and with the
@@ -215,8 +228,8 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
  * (uncoveredOption), a lower one can bring a paused plan back, and below
  * what they add up to, buyers who pay in parts still pay that.
  *
- * Not reviewed yet: adding or removing an option, and changing which is
- * recommended.
+ * Removing an option is said in its own confirmation (optionRemovalWords).
+ * Not reviewed yet: adding an option, and changing which is recommended.
  */
 export function optionPriceReview(
   /** The name and lines as typed, and the SKU sent (undefined unless the product is shipped). */
@@ -245,12 +258,114 @@ export function optionPriceReview(
   if (price === null || price === option.priceCents) return null;
   const notes = [
     product.interval
-      ? `New members who pick it join at this once you save. ${storePriceWords(product.taxOnTop)} A checkout already open keeps what it opened with. Members who already joined keep the price they joined at.`
-      : `Your store shows this as soon as you save. ${storePriceWords(product.taxOnTop)}`,
+      ? `New members who pick it join at this once you save. ${optionStorePriceWords(product.taxOnTop, true)} A checkout already open keeps what it opened with. Members who already joined keep the price they joined at.`
+      : `Your store shows this as soon as you save. ${optionStorePriceWords(product.taxOnTop, false)}`,
   ];
   notes.push(...planWords(product.plan, product.planBefore, product.planAfter(price), price, money));
   return {
     rows: [{ key: "option", label: `“${label}”`, now: money(option.priceCents), then: money(price), field: "price" }],
     note: notes.join(" "),
   };
+}
+
+/**
+ * What removing one price option really changes, said after "Remove “…”."
+ * in its confirmation (VR: nothing said may be untrue):
+ *
+ *   - the file on it goes with it (app/api/store/option/route.ts);
+ *   - anyone who bought at it, when it handed over its own file or link,
+ *     can no longer get that from their order (lib/buyer-orders.ts,
+ *     deliveryOf: a removed option leaves the order's delivery empty), unless
+ *     it was the last and the product has its own file or link, which they
+ *     then get instead. A course or podcast is opened by the product, not the
+ *     option, so its buyers keep it, but lose the option's extra file or link;
+ *   - the last one: buyers then pay the product's own price, per period on
+ *     a membership, with the introductory and yearly prices the checkout
+ *     would then offer (lib/intro-price.ts activeIntro, lib/yearly-price.ts
+ *     activeYearly, read for the product without it), or, when the product
+ *     hands nothing over on its own, it cannot be bought until it does, said
+ *     by what it lacks (lib/store-checkout.ts, canSellProduct);
+ *   - one of several that is the only one handing anything over: the product
+ *     cannot be bought until another has a file or link (handsOver,
+ *     lib/product-option.ts, the rule canSellProduct follows, read for the
+ *     product with and without it);
+ *   - on a membership, members who joined at it keep being charged, until
+ *     they or you cancel, or after the last payment when it ends after some;
+ *   - on a membership, an open invitation for it to a member moving here from
+ *     another platform (lib/move-members.ts, openMove) or a come-back offer
+ *     for it (lib/winback-send.ts) no longer opens a checkout, even when it
+ *     was the last (lib/product-option.ts, namedPriceGone): its page says the
+ *     price is no longer offered, with a link to the product's page;
+ *   - a payment plan that starts or stops being offered without it
+ *     (lib/product-extras.ts, activePlan).
+ *
+ * "Nothing else on the product changes" only when none of that is so.
+ */
+export function optionRemovalWords(
+  /** `delivers`: it has its own file or link; `extra`: on a course or podcast, where that is something extra. */
+  option: { hasFile: boolean; delivers: boolean; extra: boolean },
+  product: {
+    options: number;
+    interval: Interval | null;
+    hidden: boolean;
+    ownPriceCents: number;
+    /** What the product lacks to be sold on its own, or null when it hands something over by itself. */
+    missing: "lesson" | "episode" | "delivery" | null;
+    /** Whether it has a file or link of its own, which buyers of a removed last option then get. */
+    ownDelivery: boolean;
+    /** Whether it hands something over now, and would without this option (lib/product-option.ts, handsOver). */
+    sellsBefore: boolean;
+    sellsAfter: boolean;
+    /** On a membership, how many payments it ends after (0: runs until canceled). */
+    payments: number;
+    /** Whether the checkout would offer its introductory and its yearly price once this option is gone. */
+    introKept: boolean;
+    yearlyKept: boolean;
+    planBefore: boolean;
+    planAfter: boolean;
+  },
+  money: (cents: number) => string,
+): string {
+  const said: string[] = [];
+  const last = product.options === 1;
+  if (option.hasFile) said.push("The file on it is deleted with it.");
+  if (option.delivers) {
+    said.push(
+      last && product.ownDelivery
+        ? "Anyone who bought at it gets the product's own file or link from their order instead."
+        : option.extra
+          ? "Anyone who bought at it keeps access, but can no longer get its extra file or link from their order."
+          : "Anyone who bought at it can no longer get its file or link from their order.",
+    );
+  }
+  if (last) {
+    if (product.missing) {
+      const lacks = product.missing === "lesson" ? "a lesson" : product.missing === "episode" ? "an episode" : "its own file or link";
+      said.push(`It is the last price, so this cannot be bought until it has ${lacks}.`);
+    } else {
+      // The checkout offers one of the two at most (lib/intro-price.ts, lib/yearly-price.ts).
+      const kept = product.introKept ? ", with its introductory price" : product.yearlyKept ? ", with its yearly price" : "";
+      // A membership's price is said with its period, as buyers see it: "$20 a month".
+      const own = `${money(product.ownPriceCents)}${product.interval ? ` a ${product.interval}` : ""}`;
+      said.push(`It is the last price, so ${product.hidden ? "once published, buyers pay" : "buyers then pay"} its own price, ${own}${kept}.`);
+    }
+  } else if (product.sellsBefore && !product.sellsAfter) {
+    said.push("No other price hands anything over, so this cannot be bought until one has a file or link.");
+  }
+  if (product.interval) {
+    said.push(
+      product.payments
+        ? "Members who joined at it keep being charged what they joined at. Each membership ends when they or you cancel it, or after its last payment."
+        : "Members who joined at it keep being charged what they joined at until they or you cancel.",
+    );
+    // lib/move-members.ts openMove and lib/winback-send.ts: an invitation or offer names its option, and one gone,
+    // even the last, is never swapped for another price (owner, C2-89): its page says so, with a link to the product's page.
+    // A draft has no page buyers can open, so no link is promised for it.
+    said.push(
+      `Anyone with an unused invitation for it (sent to members moving here from another platform) or an unused come-back offer for it is told this price is no longer offered${product.hidden ? "" : ", with a link to the product's page"}.`,
+    );
+  }
+  if (product.planBefore && !product.planAfter) said.push("Your payment plan stops being offered.");
+  if (!product.planBefore && product.planAfter) said.push("Your payment plan is offered again.");
+  return said.length ? said.join(" ") : "Nothing else on the product changes.";
 }

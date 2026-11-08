@@ -4,9 +4,10 @@ import type { NextRequest } from "next/server";
 import { StoreFullError, imageFolder, isFree, setProductPage } from "@/lib/store";
 import { productIdFor, readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { EMPTY_PAGE, MAX_BLOCKS, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
-import { jsonAccess } from "@/lib/studio-route";
-import { claimPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { EMPTY_PAGE, MAX_BLOCKS, type SalesPage, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
+import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
+import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
@@ -16,6 +17,9 @@ import { isStoredPicture } from "@/lib/picture-check";
  * against it — with room to spare; each is held to MAX_PAGE_BYTES.
  */
 const MAX_BODY_BYTES = 420_000;
+
+/** A page read whose answer is not known: refused before anything is written (lib/studio-messages.ts page_unread). */
+const unread = () => Response.json({ ok: false, error: "page_unread" }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
 
 /**
  * Saves a product's page of blocks (lib/sales-page.ts), or clears it.
@@ -46,6 +50,11 @@ export async function POST(request: NextRequest) {
     if (problem) return Response.json({ ok: false, error: problem }, { status: 400 });
     // A form is asked on the store's own pages, where it can lead a funnel on; a product's page has its own checkout.
     if (page.blocks.some((block) => block.kind === "form")) return Response.json({ ok: false, error: "kind" }, { status: 400 });
+    // A booking block is kept and drawn but not offered yet (552 [BB1] unit 1): nothing saves one, in either version,
+    // until its picker and its call chooser exist, so a hand-made request cannot put any id on a page.
+    if ([...page.blocks, ...(page.variant?.blocks ?? [])].some((block) => block.kind === "booking")) {
+      return Response.json({ ok: false, error: "kind" }, { status: 400 });
+    }
     if (oversized(page)) return Response.json({ ok: false, error: "too_big" }, { status: 400 });
     // What is shown after a free sign-up is another product of this store,
     // one that costs money; a paid product's page shows nothing after.
@@ -73,9 +82,20 @@ export async function POST(request: NextRequest) {
     // has to be a file in this store's own picture folder that really is a
     // picture, not the product's own picture under another name, and not
     // one another product's page is already showing.
-    const stored = store.statsId && product.page ? await readPage(store.statsId, id) : null;
+    // A page whose read is not known is never taken for an empty one: nothing is claimed, released or written from it.
+    let stored: SalesPage | null = null;
+    if (store.statsId && product.page) {
+      try {
+        stored = await readPage(store.statsId, id);
+      } catch (error) {
+        console.error("reading a product page before saving it failed", error);
+        return unread();
+      }
+    }
     const before = stored ? picturePaths(stored) : [];
     const shown = picturePaths(page);
+    // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
+    if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
     const fresh = shown.filter((path) => !before.includes(path));
     if (fresh.length > 0) {
       if (!store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
@@ -86,9 +106,9 @@ export async function POST(request: NextRequest) {
           return Response.json({ ok: false, error: "pictures" }, { status: 400 });
         }
       }
-      const taken = await claimPictures(store.statsId, id, fresh);
-      if (taken.length > 0) {
-        await releasePictures(store.statsId, id, fresh);
+      // Each new one fresh from the picture door or already this page's, never another record's picture from the
+      // shared folder, so taking it off later deletes only this page's own (lib/sales-page-store.ts, claimNewPictures).
+      if (!(await claimNewPictures(store.statsId, id, fresh))) {
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
     }
@@ -129,7 +149,8 @@ export async function GET(request: NextRequest) {
     const copy = copyOfPage(await readPage(store.statsId, id));
     return Response.json({ ok: true, ...copy }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
+    // Never a copy started from an empty page that was not.
     console.error("reading a page to copy failed", error);
-    return Response.json({ ok: false, error: "server_error" }, { status: 500 });
+    return unread();
   }
 }

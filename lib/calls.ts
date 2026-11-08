@@ -59,7 +59,7 @@ import { HOLD_SECONDS, checkoutClosesAt, onAccount } from "@/lib/stripe-account"
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { askForCallReminder, recoveryOn, refusedRecovery, withoutCallReminder } from "@/lib/recovery-setting";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
-import { refundedInFull } from "@/lib/refunds";
+import { keptUnlessLost, refundedInFull } from "@/lib/refunds";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import type { Listing, Product, Store } from "@/lib/store";
 import { idsOfKind, listingFinder, readListing, readListings, sellsAny } from "@/lib/catalog";
@@ -273,8 +273,41 @@ export async function paidCallsRead(store: Store): Promise<{ paid: Awaited<Retur
 type CallRow = Awaited<ReturnType<typeof paidCalls>>[number];
 
 /**
+ * The most charges one reading of a store's bookings asks Stripe about a
+ * dispute (queue 388 [TB14]): only a charge Stripe marks as disputed is
+ * asked (GET /disputes?charge=, lib/refunds.ts, keptUnlessLost), which is
+ * rare, and none else. Past it, or when Stripe cannot be asked, the booking
+ * keeps its time: in the doubt the buyer keeps what they paid for, and a
+ * later reading frees it (Claude 4, C4-20261105-2100-C6-4).
+ */
+export const DISPUTE_READS_PER_READING = 5;
+
+/** Whether Stripe marks this booking's charge as disputed (the payment read with its latest charge expanded). */
+function disputedCharge(row: SessionRow): boolean {
+  const payment = row.payment_intent as { latest_charge?: { disputed?: unknown } | null } | null | undefined;
+  return !!payment && typeof payment === "object" && !!payment.latest_charge && typeof payment.latest_charge === "object" && payment.latest_charge.disputed === true;
+}
+
+/**
+ * callFromRow, with a disputed charge asked about while `reads.left` lasts: a
+ * dispute lost frees the booking as a full refund does (lib/refunds.ts, the
+ * owner's rule of 4 November 2026: whatever its amount).
+ */
+async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, reads: { left: number }): Promise<CallRow | "refunded" | null> {
+  const call = callFromRow(row, handles);
+  if (!call || call === "refunded" || !disputedCharge(row) || !store.stripeAccountId) return call;
+  if (reads.left <= 0) {
+    console.warn("a disputed booking keeps its time: this reading asked Stripe about as many disputes as it may", store.handle, call.session);
+    return call;
+  }
+  reads.left -= 1;
+  return (await keptUnlessLost(store.stripeAccountId, row.payment_intent)) ? "refunded" : call;
+}
+
+/**
  * A paid booking of this store from one checkout session, or null. A booking
  * refunded in full is `refunded`: it no longer holds its time or gets reminders.
+ * A dispute lost is read by callOrLost, which asks Stripe.
  */
 function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded" | null {
   const meta = row.metadata ?? {};
@@ -332,6 +365,7 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
   const handles = saleHandles(store);
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 86400;
   const found: CallRow[] = [];
+  const reads = { left: DISPUTE_READS_PER_READING };
   let after = "";
   // Whether the last page read still said there were more: older bookings were then left out.
   let partial = false;
@@ -343,7 +377,7 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
     )) as { data?: unknown; has_more?: unknown };
     const rows = Array.isArray(list.data) ? (list.data as SessionRow[]) : [];
     for (const row of rows) {
-      const call = callFromRow(row, handles);
+      const call = await callOrLost(store, row, handles, reads);
       if (call === "refunded") {
         if (typeof row.id === "string") refunded.add(row.id);
       } else if (call) found.push(call);
@@ -369,7 +403,7 @@ export async function paidCall(store: Store, session: string): Promise<CallRow |
     store.stripeAccountId,
     `/checkout/sessions/${encodeURIComponent(session)}?expand[]=payment_intent.latest_charge`,
   )) as SessionRow;
-  const call = callFromRow(row, saleHandles(store));
+  const call = await callOrLost(store, row, saleHandles(store), { left: 1 });
   if (!call || call === "refunded") return null;
   return (await withMoves([call]))[0] ?? null;
 }
@@ -820,6 +854,25 @@ export function callCheckoutBody(input: {
   return body;
 }
 
+/**
+ * The listed site an embedded calendar booked from, kept on the sale: written
+ * after everything else (the platform's share included, lib/platform-share.ts),
+ * and only while Stripe's fifty metadata fields have room, as
+ * lib/store-checkout.ts writes it, so it is never what stops a booking.
+ */
+export function keepEmbedSite(body: URLSearchParams, site: string | null | undefined, fromPackage: boolean): void {
+  if (!site || !/^https:\/\//.test(site) || fromPackage) return;
+  // Back from Stripe's page, the listed site stays with the booking page, so a second try is still the site's (3.3.7).
+  const cancel = body.get("cancel_url");
+  if (cancel) {
+    const url = new URL(cancel);
+    url.searchParams.set("site", site.slice(0, 700));
+    body.set("cancel_url", url.toString());
+  }
+  if ([...body.keys()].filter((key) => key.startsWith("metadata[")).length >= 50) return;
+  body.set("metadata[embed_site]", site.slice(0, 300));
+}
+
 /** The API version a checkout with nothing to pay is made at (lib/call-packages.ts). */
 export const NO_COST_VERSION = "2026-08-26.dahlia";
 
@@ -851,6 +904,8 @@ export async function holdAndCheckout(input: {
   channel?: Record<string, string>;
   /** The length the buyer chose, in minutes, on a call with several (lib/call-lengths.ts); none is the setup's own. */
   minutes?: unknown;
+  /** The listed site the calendar embedded there booked from, already checked against the creator's list (app/api/store/book). */
+  embedSite?: string | null;
 }): Promise<HoldResult> {
   const { store, product, start, origin } = input;
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
@@ -922,6 +977,8 @@ export async function holdAndCheckout(input: {
       const mayComeOff = store.hasDiscounts && shareBps(store) > 0 && !input.code ? await codesMayTakeOff(store.stripeAccountId, store.currency) : [];
       applyShare(body, store, { recurring: false, least: leastPaid(linesTotal(body).cents, mayComeOff) });
     }
+    // Kept on the sale last, after the share (keepEmbedSite).
+    keepEmbedSite(body, input.embedSite, Boolean(pkg));
 
     // A session from a package is a checkout with nothing to pay, which Stripe
     // takes only at API version 2023-08-16 or later
@@ -1128,8 +1185,15 @@ export async function moveBooking(input: {
   if (length === null) return { ok: false, reason: "taken" };
   let end = start + length;
   const callsId = store.callsId;
-  // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now.
-  const team = await teamForMove(store, product).catch(() => null);
+  // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now. A team that cannot be read
+  // is not known, never "no team" (rule 24): moved by the store's own hours, its hosts' claim would be let go below.
+  let team: Awaited<ReturnType<typeof teamForMove>>;
+  try {
+    team = await teamForMove(store, product);
+  } catch (error) {
+    console.error("reading a moved booking's team failed", error);
+    return { ok: false, reason: "error" };
+  }
 
   if (!(await takeLock(callsId))) return { ok: false, reason: "taken" };
   let from: { start: number; end: number; moves: number };
@@ -1488,6 +1552,17 @@ export async function confirmBooking(input: {
   }
   due = due ?? null;
   cancel = cancel ?? null;
+  // A team booking's hosts are read before the once-only mark too, the same way: a failed read is not known, never "no
+  // team" (rule 24), which would confirm the booking without them and let their claim run out with the hold. It is
+  // left for the next confirmation, and thrown rather than returned (Codex G on #3080): the mail job counts a
+  // confirmation that returned and takes it off its queue, so only a throw keeps it there for the next run; the
+  // thanks page and catchUpBookings catch it and try again later.
+  let team: Awaited<ReturnType<typeof bookingTeam>>;
+  try {
+    team = await bookingTeam(store, product, session);
+  } catch (error) {
+    throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
+  }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
   // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
@@ -1498,11 +1573,7 @@ export async function confirmBooking(input: {
     await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: input.amountCents ?? 0, title: product.title });
   }
 
-  // A team booking keeps its hosts and the claim on their time, now for good.
-  const team = await bookingTeam(store, product, session).catch((error) => {
-    console.error("reading a team booking's hosts failed", error);
-    return null;
-  });
+  // A team booking keeps its hosts and the claim on their time, now for good (read above).
   const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(team ? { h: team.hosts, c: team.claim } : {}) };
   // Kept for good now that it is paid: written anew, so the store's room is
   // charged the whole entry (lib/order-data.ts), not only what it grew by

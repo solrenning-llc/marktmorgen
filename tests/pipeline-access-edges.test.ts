@@ -406,6 +406,9 @@ async function main(): Promise<void> {
   };
   const keptDeal = (await crm(owner, { action: "deal", deal: { title: "Kept", email: "", cents: 1, stage: checked.stages[0].id, note: "" } })).body.deal!.id;
   const keptPipes = String((await redisPipeline([["GET", pipesKey]]))[0]);
+  // A field kept by the full session, so that saving none in the locked one would take it away with its answers
+  // (main's rule since the merge: a locked session may save fields, never remove one; lib/two-step.ts "fields-remove").
+  is("(a field saved by the full session)", (await crm(owner, { action: "fields", fields: [{ id: "fielda", name: "Company", type: "text", options: [] }] })).status, 200);
   const keptFields = (await redisPipeline([["GET", `nl:crm:fields:${statsId}`]]))[0];
   const tried = [await asLocked({ action: "fields", fields: [] }), await asLocked({ action: "unpipeline", id: other.id, moveTo: checked.stages[0].id }), await asLocked({ action: "undeal", id: keptDeal })];
   is("saving the fields, removing a pipeline and removing a deal are refused as locked", tried.map((t) => [t.status, t.body.error]), [[403, "locked"], [403, "locked"], [403, "locked"]]);

@@ -1,0 +1,130 @@
+import { del, head } from "@/lib/blob";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+
+/**
+ * Pictures let in through the picture door (app/api/store/image/upload) and
+ * not put on anything yet.
+ *
+ * A picture's name is chosen by the browser and the routes that put one on a
+ * product, a link or a page only check that it sits in the store's own picture
+ * folder. That folder is shared by every picture of the store, so a name the
+ * browser sends may be the picture of another product, link or page. When
+ * putting one on fails, the file may be deleted only when this very request
+ * took it from this list and the file was stored after the door wrote it down
+ * (dropTakenPictures): the door notes each name it signs for, only while no
+ * file has that name, and the first route that tries to put it on anything
+ * takes it off, whether that succeeds or not. A picture already on something
+ * was taken then (or signed before this list existed, and never written
+ * down), so a failed request naming it deletes nothing. Unknown is kept: a
+ * file left behind costs storage, a picture deleted from under a product
+ * costs the creator's page.
+ *
+ * The same note is what lets a new name onto a record at all (4 November
+ * 2026, after a review proved that a picture put on a second record was
+ * deleted with it): a product's or a link's picture, and a page's new one,
+ * must be taken from this list by the request that puts it on, or be that
+ * record's own already. A name another record shows, a buyer's review photo
+ * or an email's picture was never noted (or was taken when it was put on),
+ * so it is refused there, and taking it off the second record later can
+ * never delete it. A picture put on before this rule stays where it is shown
+ * and can still be kept or replaced there.
+ *
+ * One list per store's picture folder, so one store's doors never push out
+ * another's. Notes older than PICTURE_DOOR_SECONDS, and past the newest
+ * PICTURE_DOOR_MAX of the store, are dropped as new ones come in, and the list
+ * itself expires a window after its last note; a dropped or stale note is
+ * never taken, so its file is never deleted by a failure (it costs storage, at
+ * most MAX_IMAGE_BYTES in lib/product-image.ts), never deleted wrongly.
+ */
+export const PICTURE_DOOR_SECONDS = 24 * 60 * 60;
+/** The most notes a store keeps, newest first: past it the oldest go, and their files are kept, not deleted. */
+export const PICTURE_DOOR_MAX = 1_000;
+
+/** A picture's path is images/<folder>/<file>; its store's list is named by the folder. */
+function doorsKey(path: string): string | null {
+  const parts = path.split("/");
+  return parts.length === 3 && parts[0] === "images" && /^[0-9a-f]{24}$/.test(parts[1]) ? `nl:pictures:doors:${parts[1]}` : null;
+}
+
+/**
+ * Writes down a picture the door just signed for, in milliseconds; old notes are dropped with it. False when it
+ * could not be written: such an upload could never be put on anything, so the door is not opened for it.
+ */
+export async function notePictureDoor(path: string, now = Date.now()): Promise<boolean> {
+  const key = doorsKey(path);
+  if (!key || !isRedisConfigured()) return false;
+  const replies = repliesFor(await redisPipeline([
+    ["ZREMRANGEBYSCORE", key, 0, now - PICTURE_DOOR_SECONDS * 1000],
+    ["ZADD", key, now, path],
+    ["ZREMRANGEBYRANK", key, 0, -(PICTURE_DOOR_MAX + 1)],
+    ["EXPIRE", key, PICTURE_DOOR_SECONDS],
+  ]), 4);
+  // Noted only on its whole acknowledgement (Codex P on #2156): a count for each trim, 0 or 1 for the add, and 1
+  // for the expiry the add made possible. Anything else is not a note, and the upload is not opened.
+  if (!replies) return false;
+  const [trimmed, added, kept, expires] = replies.map(countOf);
+  return trimmed !== null && (added === 0 || added === 1) && kept !== null && expires === 1;
+}
+
+/**
+ * Takes each of these pictures off its store's list, and returns those this
+ * call took, with when the door signed for each (ms): the ones let in through
+ * the door within PICTURE_DOOR_SECONDS that nothing had tried to put on yet.
+ * A stale note is taken off but not returned.
+ *
+ * When the take cannot be confirmed (the read or the removal failed, or its
+ * answer was lost), this throws, and every caller refuses with server_error
+ * before it writes or deletes anything (4 November 2026, after a review
+ * proved that a swallowed failure here let a picture go on a product with
+ * its note still on the list, so a later refused request naming it took the
+ * note and deleted the product's picture). Nothing is written, so a note
+ * still there is on a picture nothing shows, and the creator's retry finds
+ * it; a removal that ran with its answer lost leaves a file nothing shows,
+ * kept (storage, never a picture deleted from under a record).
+ */
+export async function takePictureDoor(paths: string[], now = Date.now()): Promise<Map<string, number>> {
+  const unique = [...new Set(paths.filter((path) => typeof path === "string" && doorsKey(path) !== null))];
+  const taken = new Map<string, number>();
+  if (unique.length === 0 || !isRedisConfigured()) return taken;
+  const answers = await redisPipeline(unique.flatMap((path) => {
+    const key = doorsKey(path) as string;
+    return [["ZSCORE", key, path], ["ZREM", key, path]];
+  }));
+  if (!Array.isArray(answers) || answers.length !== 2 * unique.length) throw new Error("could not confirm the pictures taken from the door");
+  // Each reply only in its exact shape (CX-123, rule 24): ZREM the whole number 0 or 1, ZSCORE null or a score (a
+  // number, or the numeric string the REST API sends). Anything else is unknown and throws, never "taken".
+  unique.forEach((path, i) => {
+    // Read exactly (Codex P on #2156): the score is absent (null) or a number Redis wrote, the removal an exact 0 or
+    // 1; anything else is not a confirmed take, and throws as an unconfirmed take does.
+    const score = answers[2 * i];
+    const removed = countOf(answers[2 * i + 1]);
+    if (removed !== 0 && removed !== 1) throw new UnknownReplyError("taking a picture from the door: ZREM");
+    if (score !== null && !(typeof score === "number" || (typeof score === "string" && /^\d{1,16}(\.\d+)?$/.test(score)))) {
+      throw new UnknownReplyError("taking a picture from the door: ZSCORE");
+    }
+    const at = score === null ? NaN : Number(score);
+    const fresh = Number.isFinite(at) && at > 0 && at >= now - PICTURE_DOOR_SECONDS * 1000;
+    if (removed === 1 && fresh) taken.set(path, at);
+  });
+  return taken;
+}
+
+/**
+ * Deletes those of these pictures that this request took from the door and
+ * that were stored strictly after the door noted them. The door notes a name
+ * only while no file has it, and an upload can never write over a file; the
+ * time read here is a second check that a file stored before its note (a door
+ * asked again for somebody's picture) is kept. Anything that cannot be read is
+ * kept. Best effort: nothing here throws.
+ */
+export async function dropTakenPictures(taken: Map<string, number>, paths: string[]): Promise<void> {
+  const ours: string[] = [];
+  for (const path of new Set(paths)) {
+    const noted = taken.get(path);
+    if (noted === undefined) continue;
+    const stored = await head(path).then((found) => new Date(found.uploadedAt).getTime(), () => NaN);
+    if (Number.isFinite(stored) && stored > noted) ours.push(path);
+  }
+  if (ours.length) await del(ours).catch(() => {});
+}

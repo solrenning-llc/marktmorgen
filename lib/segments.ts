@@ -22,14 +22,16 @@
  * A group is a name over the choices the composer already has: who, one
  * product, one left out, and the three above. Choosing it fills them in.
  */
-import { importedBuyers } from "@/lib/imported-purchases";
+import { importedBuyers, importedWhoKey } from "@/lib/imported-purchases";
 import { IMPORTED_CHANNEL } from "@/lib/channel-names";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
-import { paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
+import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
 import { rfmGroup } from "@/lib/rfm-rules";
+import { IncludedBytes } from "@/lib/sent-bytes";
 import { ALL_TIME_PAGES, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -68,10 +70,100 @@ const RENEWALS_SECONDS = 25;
  * currencies do not add up, so "spent with you" counts the store's currency
  * only (22 [E5], unit 2c).
  */
-export async function buyerLedger(store: Store): Promise<Ledger> {
-  if (!readsSales(store) && !store.pastBuyers) return { buyers: new Map(), partial: false };
+/** Thrown by buyerLedger when what reading Stripe again costs could not be counted first: nothing was read. */
+export class LedgerNotCounted extends Error {
+  constructor() {
+    super("the reading of the store's buyers could not be counted");
+    this.name = "LedgerNotCounted";
+  }
+}
+
+/**
+ * Studio requests one reading of the buyers from Stripe costs at the most,
+ * when its ten-minute copy ran out (tests/plan-cost-registry.ts,
+ * BUYER_LEDGER), besides what it reads and writes by size (below): for a
+ * caller that counts them (`count`, below).
+ */
+export const BUYER_LEDGER_UNITS = 8;
+/** Bytes of the ledger's copy, or of the imported buyers, that one studio request covers when read (tests/plan-cost-registry.ts, LEDGER_MB). */
+export const LEDGER_BYTES_PER_UNIT = 1_000_000;
+/** The most one imported buyer weighs: its address and when it came, read, then written in the copy as a row. */
+export const IMPORTED_BUYER_BYTES = 2 * (254 + 64);
+
+
+/**
+ * Studio requests reading (or writing) `bytes` of the buyers costs, by size:
+ * none within what is left of the request's included bytes (`included`, one
+ * for the whole request, lib/sent-bytes.ts IncludedBytes; C3-112 (2)), then
+ * one a megabyte. A fresh one when the reading is the request's only part.
+ */
+export const ledgerUnits = (bytes: number, included: IncludedBytes = new IncludedBytes()) => included.take(bytes, LEDGER_BYTES_PER_UNIT).units;
+
+/**
+ * What a reading of the buyers moves besides Stripe's pages, from what is
+ * kept, measured before it is read: the imported buyers, and the PayPal sales
+ * (at most ALL_TIME_PAGES pages of a hundred) and refunds
+ * (PAYPAL_REFUNDS_READ), each at the most its record can weigh.
+ */
+export function ledgerReadBytes(kept: { imported: number; paypalSales: number; paypalRefunds: number }): number {
+  return kept.imported * IMPORTED_BUYER_BYTES + Math.min(kept.paypalSales, ALL_TIME_PAGES * 100) * MAX_PAID_BYTES + Math.min(kept.paypalRefunds, PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
+}
+
+/** Whether reading the store's buyers reads anything: its sales (Stripe or PayPal) or buyers it brought over. */
+export const readsBuyers = (store: Store): boolean => readsSales(store) || Boolean(store.pastBuyers);
+
+/**
+ * The studio requests one reading of the buyers (buyerLedger, below) costs at
+ * the most, as what is kept is measured now: its ten-minute copy by size, and,
+ * should that copy be gone or unusable, the reading from Stripe with the
+ * imported buyers and the PayPal sales and refunds by how many are kept, each
+ * counted exactly as buyerLedger counts it. What a narrowed email the
+ * scheduled job starts holds when it is written down (lib/broadcasts.ts,
+ * createBroadcast; C3-80 (d)). Throws LedgerNotCounted when what is kept
+ * cannot be measured: unknown is never none.
+ */
+export async function ledgerReadingUnits(store: Store): Promise<number> {
+  if (!readsBuyers(store)) return 0;
+  let copy = 0;
+  let imported = 0;
+  // The copy and the rest share one reading's included bytes, as buyerLedger counts them (C3-112 (2)).
+  const included = new IncludedBytes();
   if (store.statsId && isRedisConfigured()) {
-    const [cached] = await redisPipeline([["GET", ledgerKey(store.statsId)]]);
+    const replies = repliesFor(await redisPipeline([["STRLEN", ledgerKey(store.statsId)], ["HLEN", importedWhoKey(store.statsId)]]).catch(() => null), 2);
+    // STRLEN and HLEN answer 0 for a key that is not there, never null: any other shape is unknown (CX-123 rule 24).
+    const size = countOf(replies?.[0]);
+    const who = countOf(replies?.[1]);
+    if (size === null || who === null) throw new LedgerNotCounted();
+    copy = size > 0 ? ledgerUnits(size, included) : 0;
+    imported = who;
+  }
+  const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)).catch(() => null) : { sales: 0, refunds: 0 };
+  if (!paypal) throw new LedgerNotCounted();
+  return copy + (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds }), included);
+}
+
+/**
+ * `count`, when given, is asked before anything big is read, with the studio
+ * requests it costs, and answers whether they were counted; when they were
+ * not, nothing more is read and LedgerNotCounted is thrown. The ten-minute
+ * copy is counted by its size (measured first, STRLEN, then read no further
+ * than counted, GETRANGE), and a reading from Stripe as BUYER_LEDGER_UNITS,
+ * with the imported buyers and the PayPal sales and refunds by how many are
+ * kept (ledgerReadBytes), before any is read.
+ */
+export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>, included: IncludedBytes = new IncludedBytes()): Promise<Ledger> {
+  if (!readsBuyers(store)) return { buyers: new Map(), partial: false };
+  const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
+  if (store.statsId && isRedisConfigured()) {
+    // STRLEN answers 0 for a copy that is not there, never null: a size in any other shape is unknown (CX-123
+    // rule 24; Codex J on #2270), so it is neither read as no copy nor counted as 0 units, and nothing more is read.
+    const bytes = countOf(repliesFor(await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]), 1)?.[0]);
+    if (bytes === null) throw new LedgerNotCounted();
+    // The copy is taken from the request's included bytes (`included`, shared with the page's other parts), or counted.
+    const taken = bytes > 0 ? included.take(bytes, LEDGER_BYTES_PER_UNIT) : { units: 0, covers: 0 };
+    if (bytes > 0 && !(await counted(taken.units))) throw new LedgerNotCounted();
+    // Never more than was counted: a copy grown since is read cut, cannot be parsed, and is read again below, counted.
+    const [cached] = bytes > 0 ? await redisPipeline([["GETRANGE", ledgerKey(store.statsId), 0, taken.covers - 1]]) : [null];
     if (typeof cached === "string" && cached) {
       try {
         const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; v?: number };
@@ -83,6 +175,17 @@ export async function buyerLedger(store: Store): Promise<Ledger> {
       }
     }
   }
+  // Stripe's pages (when there is a Stripe account), and the imported buyers and the PayPal sales and refunds by
+  // how many are kept, at the most each weighs: counted before any is read.
+  // HLEN answers 0 when nobody was imported, never null: a count in any other shape is unknown (CX-123 rule 24).
+  const imported = store.statsId && isRedisConfigured() ? countOf(repliesFor(await redisPipeline([["HLEN", importedWhoKey(store.statsId)]]), 1)?.[0]) : 0;
+  if (imported === null) throw new LedgerNotCounted();
+  // The PayPal sales kept are read with the store's sales whatever is connected now (a creator who sold with
+  // PayPal and disconnected it keeps them, lib/stats.ts readPaidSales); the refunds only while PayPal is (round 6, H1).
+  // A store that reads no sales (no Stripe, no PayPal: imported buyers only) reads none of them (round 7, M1).
+  const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };
+  const moved = ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds });
+  if (!(await counted((store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(moved, included)))) throw new LedgerNotCounted();
   // Checkouts and offers after paying; and, on a Stripe account, the renewals
   // of memberships and payment plans, and what refunds and disputes took back
   // (270 [GR1], unit 2): a member who pays every month is not quiet since they
@@ -191,10 +294,13 @@ export function ledgerChannels(ledger: Ledger): string[] {
   return [...by].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([channel]) => channel);
 }
 
-/** The narrowing for an audience: null when there is none, so nothing is read from Stripe. */
-export async function keepFor(store: Store, narrow: Narrow | null | undefined): Promise<((email: string) => boolean) | undefined> {
+/**
+ * The narrowing for an audience: null when there is none, so nothing is read
+ * from Stripe. `count`, when given, counts that reading first (buyerLedger).
+ */
+export async function keepFor(store: Store, narrow: Narrow | null | undefined, count?: (units: number) => Promise<boolean>): Promise<((email: string) => boolean) | undefined> {
   if (!isNarrowed(narrow)) return undefined;
-  return keeps(narrow, await buyerLedger(store));
+  return keeps(narrow, await buyerLedger(store, count));
 }
 
 // ------------------------------------------------------------ saved groups
@@ -261,6 +367,8 @@ export async function removeSegment(store: Store, id: unknown): Promise<Segment[
  */
 export async function forgetLedgerCopy(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", ledgerKey(statsId)]]);
-  return Number(gone) || 0;
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ledgerKey(statsId)]]), 1)?.[0]);
+  // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
+  if (gone === null) throw new UnknownReplyError("the deletion of the buyers' ten-minute copy");
+  return gone;
 }

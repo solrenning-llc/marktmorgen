@@ -18,6 +18,7 @@ import { POST as amazonPosts } from "@/app/api/mail/ses/route";
 import { TRUSTED_TOKEN } from "@/lib/ses";
 import { stringToSign, type SnsMessage } from "@/lib/sns";
 import { verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
+import { statusRunResult } from "@/lib/status-page";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { withCutoff } from "@/lib/fetch-timeout";
@@ -134,9 +135,19 @@ async function main(): Promise<void> {
   const none = await verifyMailLoop(Date.now() + 1_000);
   is("neither sender is checked, and neither is failed for it", none.map((c) => [c.check, c.ok]), [["Resend's loop", true], ["Amazon SES's loop", true]]);
   is("Amazon's account is not asked about either", await verifyAmazonAccount(), []);
+  is("no loop ran, so the status page keeps a run that tested nothing, never a pass", [none.some((c) => c.loop), statusRunResult(none)], [false, null]);
 
   part("Resend, with every link holding");
   process.env.RESEND_WEBHOOK_SECRET = `whsec_${SECRET_BYTES.toString("base64")}`;
+  process.env.RESEND_API_KEY = "re_unreviewed_synthetic_only";
+  const withoutProof = await verifyMailLoop(Date.now() + 100);
+  is("missing fallback proof is a recorded gap, never a failed delivery loop", withoutProof.find((c) => c.check === "Resend's loop"), {
+    check: "Resend's loop", ok: true, detail: "not checked: reviewed Resend fallback proof is missing",
+  });
+  is("the unproved sender creates no delivery probes", resendTook.length, 0);
+  is("a synthetic Resend key and secret with Amazon unset: no loop ran, tested nothing (review GRAVE)", [withoutProof.some((c) => c.loop), statusRunResult(withoutProof)], [false, null]);
+  is("the skipped sender creates no temporary list", leftBehind(), []);
+  process.env.RESEND_API_KEY = "re_test_check_only_a_stand_in";
   const good = await verifyMailLoop(Date.now() + 20_000);
   is("the bounce and the spam report both come back", good.slice(0, 2).map((c) => [c.check, c.ok]), [
     ["Resend: a list email's bounce comes back with its tags and takes the address off", true],
@@ -145,6 +156,7 @@ async function main(): Promise<void> {
   is("to the addresses Resend keeps for it, each with this run's label", resendTook.map((m) => m.to.replace(/\+[0-9a-f]{8}@/, "+label@")), ["bounced+label@resend.dev", "complained+label@resend.dev"]);
   is("tagged as a list email is: a store and a list, both made up", resendTook[0].tags?.map((t) => [t.name, /^[0-9a-f]{32}$/.test(t.value)]), [["nl_store", true], ["nl_list", true]]);
   is("and nothing of the made-up list is left behind", leftBehind(), []);
+  is("the loop's own checks say they ran; the skipped Amazon loop does not; the run passed", [good.slice(0, 2).map((c) => c.loop), good.find((c) => c.check === "Amazon SES's loop")?.loop, statusRunResult(good)], [[true, true], undefined, true]);
 
   part("Resend, with one link broken");
   resend = "drops-tags";
@@ -156,6 +168,7 @@ async function main(): Promise<void> {
   resend = "refuses";
   const refused = await verifyMailLoop(Date.now() + 4_000);
   is("not taking the email fails at once", refused.slice(0, 1).map((c) => [c.check, c.ok, c.detail]), [["Resend takes a list email", false, 'it answered "refused"']]);
+  is("a loop that ran and failed is a failed run", [refused[0].loop, statusRunResult(refused), statusRunResult(dropped)], [true, false, false]);
   is("and each time the made-up list is taken away again", leftBehind(), []);
   resend = "faithful";
 

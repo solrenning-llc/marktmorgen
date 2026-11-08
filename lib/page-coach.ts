@@ -20,7 +20,7 @@ import { PAGE_TEST_PAID_WORDS, PAGE_TEST_RUNNING_WORDS } from "@/lib/headline-te
  *
  * Pure, so the studio's editor and the server ask the same function.
  */
-import { type BlockKind, type PageBlock, type SalesPage, picturesOf } from "@/lib/sales-page";
+import { type BlockKind, type FactKey, type PageBlock, type RowElement, type SalesPage, picturesOf } from "@/lib/sales-page";
 import type { PageFacts } from "@/lib/page-facts";
 import { vagueLinkTitle } from "@/lib/link-purpose";
 
@@ -47,6 +47,8 @@ export type CoachInput = {
   pictureAlt: string;
   /** The numbers the store has counted for it (lib/page-facts.ts). */
   facts: PageFacts;
+  /** The numbers whose read did not come back (lib/page-facts-read.ts): not known to be there, nor to be missing. */
+  factsUnread?: readonly FactKey[];
 };
 
 const filled = (block: PageBlock): boolean => {
@@ -82,6 +84,14 @@ const filled = (block: PageBlock): boolean => {
       return Boolean(block.product);
     case "form":
       return Boolean(block.form);
+    case "booking":
+      // Not offered and not drawn yet (552 [BB1] unit 1): a block nobody sees counts for nothing.
+      return false;
+    case "divider":
+    case "space":
+      // Only arrangement (375 [TB1]): left out of the blocks read, so a line or some room never moves a button
+      // away from the top or the end of the page, nor counts as anything the page says.
+      return false;
     case "quotes":
       return block.items.length > 0;
     case "row":
@@ -92,6 +102,24 @@ const filled = (block: PageBlock): boolean => {
   }
 };
 
+/** A row's parts (375 [TB1]); none for any other block. */
+const partsOf = (block: PageBlock): RowElement[] => (block.kind === "row" ? block.columns.flat() : []);
+
+/**
+ * The words of each button a block draws: a button block's, and each of a
+ * row's buttons, the page's own, those leading elsewhere and those that open
+ * a video in a window alike.
+ */
+const buttonWords = (block: PageBlock): string[] =>
+  block.kind === "cta" ? [block.label] : partsOf(block).flatMap((part) => (part.kind === "button" || part.kind === "video-window" ? [part.label] : []));
+
+/** Whether a block draws the page's own button (to buy or sign up): a button block, or a row's button with no address. */
+const ownButton = (block: PageBlock): boolean => block.kind === "cta" || partsOf(block).some((part) => part.kind === "button" && !part.url);
+
+/** Whether a row shows the inside: a picture it describes (a decorative one shows nothing), a video, or a video in a window. */
+const rowShows = (block: PageBlock): boolean =>
+  partsOf(block).some((part) => part.kind === "video" || part.kind === "video-window" || (part.kind === "image" && !part.decorative));
+
 /** Every check, in the order the coach lists them. */
 export function coachChecks(input: CoachInput): CoachCheck[] {
   const blocks = input.page.blocks.filter(filled);
@@ -99,7 +127,8 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
   const count = (kind: "benefits" | "inside" | "steps" | "faq") =>
     blocks.reduce((n, b) => (b.kind === kind ? n + b.items.length : n), 0);
   const hero = blocks[0]?.kind === "hero" ? blocks[0] : null;
-  const ctas = blocks.map((b, i) => (b.kind === "cta" ? i : -1)).filter((i) => i >= 0);
+  // The page's own buttons, a row's among them (375 [TB1]); a row's button leading elsewhere is not one.
+  const ctas = blocks.map((b, i) => (ownButton(b) ? i : -1)).filter((i) => i >= 0);
   const free = input.free;
   const checks: CoachCheck[] = [
     {
@@ -188,7 +217,7 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
         id: "show",
         label: "A look inside",
         why: "Pages of the book, a screen of the course, a lesson to watch: showing the inside beats describing it.",
-        done: has("pictures") || has("video") || blocks.some((b) => b.kind === "feature" && b.picture),
+        done: has("pictures") || has("video") || blocks.some((b) => (b.kind === "feature" && b.picture) || rowShows(b)),
         weight: 2,
         add: "pictures",
       },
@@ -215,9 +244,10 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
     });
   }
   // A button's own words say what it does (274 [AX1] Part A item 6; WCAG 2.4.4, 2.4.9): a screen reader may list
-  // the buttons by their words alone. An empty label keeps the page's own words, which do.
-  const vagueButtons = [...blocks, ...(input.page.variant?.blocks ?? [])].filter((b) => b.kind === "cta" && b.label.trim() && vagueLinkTitle(b.label)).length;
-  if (blocks.some((b) => b.kind === "cta")) {
+  // the buttons by their words alone. An empty label keeps the page's own words, which do. A row's buttons are
+  // buttons too (375 [TB1]), those leading elsewhere included: their words must say where.
+  const vagueButtons = [...blocks, ...(input.page.variant?.blocks ?? [])].flatMap(buttonWords).filter((label) => label.trim() && vagueLinkTitle(label)).length;
+  if (blocks.some((b) => buttonWords(b).length > 0)) {
     checks.push({
       id: "button_words",
       label: vagueButtons ? `Every button says what it does (${vagueButtons === 1 ? "1 does not" : `${vagueButtons} do not`})` : "Every button says what it does",
@@ -234,13 +264,17 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
     weight: 1,
     add: "bio",
   });
-  // Only asked for when the store has a number to show: never a reason to type one.
-  if (Object.keys(input.facts).length > 0) {
+  // Only asked for when the store has a number to show, or one that could not be read just now: never a reason to type one.
+  const unread = input.factsUnread ?? [];
+  if (Object.keys(input.facts).length > 0 || unread.length > 0) {
     checks.push({
       id: "facts",
       label: "Your numbers, shown",
-      why: "Your store has counted numbers for this product. Shown big, they say in a second what a paragraph says in a minute.",
-      done: blocks.some((b) => b.kind === "facts" && b.show.some((key) => input.facts[key])),
+      why: unread.length
+        ? "Some of your store's numbers for this product could not be read just now, so this check may be off. Reload the page to read them again."
+        : "Your store has counted numbers for this product. Shown big, they say in a second what a paragraph says in a minute.",
+      // Only a counted number shown is done: an unread one keeps the check open, so its "may be off" reason is seen (Claude 5 on #3025).
+      done: blocks.some((b) => b.kind === "facts" && b.show.some((key) => Boolean(input.facts[key]))),
       weight: 1,
       add: "facts",
     });

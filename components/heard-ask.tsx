@@ -47,7 +47,7 @@ export function HeardAsk({ handle, session, storeName, lang }: { handle: string;
               <button
                 key={a}
                 type="button"
-                className="btn st-btn-ghost btn-sm"
+                className="btn st-btn-ghost btn-sm min-w-11"
                 aria-pressed={chosen === a}
                 disabled={state === "sending"}
                 onClick={() => void answer(a)}

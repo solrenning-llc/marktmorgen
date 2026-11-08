@@ -1,0 +1,213 @@
+s3101-batch-bytes.proof.ts
+S_BATCH_BYTES {"products":500,"sessionsPerProduct":50,"roomCharacters":500,"serializedListingBytes":29449,"largestResponseBytes":151294,"syntheticLimitBytes":10485760,"productReads":100,"rows":500,"failure":""}
+4 checks, all passing.
+COUNTED_MEMORY_COMMANDS 1635
+COUNTED_MOCK_HTTP 6
+sales-file-batch-bytes.test.ts
+
+The bound holds at the worst, by construction
+  ok    an answer budget is named, under the provider's 10 MB
+  ok    an MGET's worst answer (every record at its bound, every byte escaped) fits that budget
+  ok    and what is in flight at once stays under 64 MB
+
+500 records of about 29 KB each: the file is made, every answer under the provider's ceiling
+  ok    the file is made
+  ok    with every sale a row and each product's own title
+  ok    no answer passed the provider's ceiling
+  ok    no more MGETs in flight at once than the bound
+
+7 checks, all passing.
+COUNTED_MEMORY_COMMANDS 635
+COUNTED_MOCK_HTTP 6
+sales-file-cheaper.test.ts
+
+An ordinary file is byte for byte what it was
+  ok    the same bytes as before
+  ok    every sale a row, none partial
+  ok    a product confirmed gone keeps the title its sale carried
+
+Products are read in batches, not one after another
+  ok    at most ceil(N/LISTING_MGET_KEYS) + 2 = 243 trips for 1203 products
+  ok    and a command for each batch, never one for each product
+  ok    every sale is still a row
+  ok    each product's own title, and its extras' titles
+  ok    byte for byte what it was
+
+Each cell is bounded in the file, a cut marked, no row left out
+  ok    every sale is still a row, every column still there
+  ok    no row is more than 2,435 bytes
+  ok    a long buyer name is cut at 600 bytes, with a visible mark
+  ok    so are an email and an id no real one could be
+  ok    a buyer name of 400 characters in another alphabet is cut too, with the mark
+  ok    a catalog title and option label are never cut
+
+A product record that does not read is said, never a missing product (rule 24)
+  ok    no reply for the read: the file is not made
+  ok    a reply of another type: the file is not made
+  ok    a list cut short: the file is not made
+  ok    a record that is not a listing: the file is not made
+  ok    a healthy read still writes the product's title
+
+19 checks, all passing.
+COUNTED_MEMORY_COMMANDS 2728
+COUNTED_MOCK_HTTP 26
+catalog-read-count.test.ts
+
+A store with a head
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store without a head
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store inline
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+
+A store with no catalog to read from
+  ok    every product: counted as read
+  ok    some, in another order: counted as read
+  ok    ids the store does not have: counted as read
+  ok    ids asked twice: counted as read
+  ok    nothing: counted as read
+  ok    the head is not read again
+  ok    an inline store reads none
+
+22 checks, all passing.
+COUNTED_MEMORY_COMMANDS 23
+COUNTED_MOCK_HTTP 0
+stats-report.test.ts
+
+What a browser and the host say
+  ok    devices
+  ok    countries
+
+Counted, and read back
+  ok    countries
+  ok    devices
+  ok    checkouts by channel, untagged as direct
+  ok    free addresses by channel
+  ok    the all-time record keeps no countries
+
+A channel from visit to sale
+  ok    one row a channel, money first
+
+The API's summary
+  ok    visits are there, money is null without Stripe
+  ok    its channels
+  ok    its countries and devices
+
+The weekly email
+  ok    it says the week
+  ok    with where it came from and how to stop it
+  ok    a week with nobody is not written about
+  ok    a week starts on its Monday
+  ok    claimed once a week
+  ok    the stop link is the store's own
+  ok    stopped, and started again
+
+18 checks, all passing.
+COUNTED_MEMORY_COMMANDS 319
+COUNTED_MOCK_HTTP 0
+store-export-unknown-size.test.ts
+✔ an unreadable data-room size refuses the export shape before any later read (4.157004ms)
+✔ an unknown data-room reply (boolean counts) refuses the export shape before later reads (0.799348ms)
+✔ an unknown data-room reply (blank counts) refuses the export shape before later reads (1.044305ms)
+✔ an unknown data-room reply (negative bytes) refuses the export shape before later reads (0.331879ms)
+✔ an unknown data-room reply (fractional bytes) refuses the export shape before later reads (0.449715ms)
+✔ an unknown data-room reply (an extra HMGET field) refuses the export shape before later reads (0.349845ms)
+✔ an unknown data-room reply (an extra pipeline result) refuses the export shape before later reads (0.327514ms)
+✔ a confirmed empty data room remains an exact zero-sized shape (13.676278ms)
+✔ the route answers unavailable before allowance or export work when the shape cannot be measured (1.261356ms)
+COUNTED_MEMORY_COMMANDS 3
+COUNTED_MOCK_HTTP 0
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 43.435605
+plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (89.372169ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (440.457338ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (69.113828ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.967419ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.222116ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.176137ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.46749ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (93.970238ms)
+✔ every store figure taken in the code is a kind a line prices (158.042544ms)
+✔ every email sent names a meter, and each file only the meters it may use (123.88771ms)
+✔ the units a figure is taken in cost at least what they stand for (10.503845ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (3.168031ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.365644ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.778863ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.1443ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.109698ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.380803ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.796252ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.348314ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (9.28773ms)
+✔ Path push fits its reserved studio requests (0.156862ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.106994ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.301695ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.237939ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (218.38089ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1264.641675
+store-data-registry.test.ts
+creator: room 18 MB; outside it 121.5 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 288.3 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 704.9 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (182.584598ms)
+✔ each family is bounded one way at least, and what it says can be checked (88.503537ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (59.276605ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (11.973754ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (2.241727ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (13.026788ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.423067ms)
+COUNTED_MEMORY_COMMANDS 0
+COUNTED_MOCK_HTTP 0
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 405.965083

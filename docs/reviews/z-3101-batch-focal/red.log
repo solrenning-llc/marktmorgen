@@ -1,0 +1,48 @@
+s3101-batch-bytes.proof.ts
+S_BATCH_BYTES {"products":500,"sessionsPerProduct":50,"roomCharacters":500,"serializedListingBytes":29449,"largestResponseBytes":15127904,"syntheticLimitBytes":10485760,"productReads":1,"failure":"Error: synthetic transport: 15127904 response bytes exceed 10485760"}
+COUNTED_MEMORY_COMMANDS 1536
+COUNTED_MOCK_HTTP 6
+AssertionError [ERR_ASSERTION]: a catalog accepted by productWrites must still export
++ actual - expected
+
++ 'Error: synthetic transport: 15127904 response bytes exceed 10485760'
+- ''
+
+    at main (/tmp/z-points-9jZwFu/s3101-batch-bytes.proof.ts.cjs:12296:25) {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 'Error: synthetic transport: 15127904 response bytes exceed 10485760',
+  expected: '',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+sales-file-batch-bytes.test.ts
+
+The bound holds at the worst, by construction
+  FAIL  an answer budget is named, under the provider's 10 MB
+        expected true
+        got      false
+  FAIL  an MGET's worst answer (every record at its bound, every byte escaped) fits that budget
+        expected true
+        got      false
+  FAIL  and what is in flight at once stays under 64 MB
+        expected true
+        got      false
+
+500 records of about 29 KB each: the file is made, every answer under the provider's ceiling
+  FAIL  the file is made
+        expected "made"
+        got      "failed"
+  FAIL  with every sale a row and each product's own title
+        expected [500,true,false]
+        got      null
+  FAIL  no answer passed the provider's ceiling
+        expected "under"
+        got      "14784393 bytes"
+  FAIL  no more MGETs in flight at once than the bound
+        expected "within"
+        got      "1 at once"
+
+7 checks, 7 failing.
+COUNTED_MEMORY_COMMANDS 536
+COUNTED_MOCK_HTTP 6

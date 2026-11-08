@@ -33,6 +33,7 @@ import { DraftRemovalConflict, DraftRemovalUnconfirmed, DraftReadUnavailable, Dr
 import { copyOf, keepSending } from "@/lib/mail-reuse";
 import { setUpStarters } from "@/lib/mail-starters";
 import { readListings } from "@/lib/catalog";
+import { CrmSchemaReadUnavailable } from "@/lib/crm";
 import type { Permission } from "@/lib/team-roles";
 
 export const maxDuration = 60;
@@ -417,6 +418,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof FlowWriteUnconfirmed) return fail("flow_write_unconfirmed", 502);
     if (error instanceof FlowRunUnavailable) return fail("flow_runs_unavailable", 503);
     if (error instanceof FlowVersionsUnavailable) return fail("flow_versions_unavailable", 503);
+    // A sequence's stages and fields are checked against the store's own; unknown ones save nothing (lib/crm.ts).
+    if (error instanceof CrmSchemaReadUnavailable) return fail("crm_schema_read_unavailable", 503);
     if (error instanceof DraftWriteUnconfirmed) return fail("draft_write_unconfirmed", 502);
     if (error instanceof DraftReadUnavailable) return fail("draft_read_unavailable", 503);
     if (error instanceof DraftRemovalConflict) return fail("draft_remove_conflict", 409);

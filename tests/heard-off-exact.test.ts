@@ -11,7 +11,10 @@ import { strict as assert } from "node:assert";
 import net from "node:net";
 import tls from "node:tls";
 import { after, test } from "node:test";
+import { NextRequest } from "next/server";
 import { heardOff, recordHeard, setHeardOff } from "@/lib/heard";
+import { claimHandle, ensureStatsId, setStripeAccount } from "@/lib/store";
+import { POST as heardRoute } from "@/app/api/store/heard/route";
 import { store as redis } from "./redis-stub";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_heard_off_exact_only";
@@ -66,11 +69,39 @@ for (const [label, reply] of MALFORMED) {
   });
 }
 
-test("recordHeard counts nothing on an unknown reply", async () => {
-  const store = { handle: "harbor", stripeAccountId: "acct_1TestHeardOff01", statsId: "synthetic-stats", currency: "usd" } as unknown as Parameters<typeof recordHeard>[0];
-  const { value } = await logged(() => withReply(["QUEUED"], () => recordHeard(store, "cs_test_heardoff00001", "friend")));
+// Not read is not "off" (Claude 6 on #3115): the answer is not counted now and the reply says so honestly.
+for (const [label, reply] of MALFORMED) {
+  test(`recordHeard: ${label} counts nothing and is unavailable, not off`, async () => {
+    const store = { handle: "harbor", stripeAccountId: "acct_1TestHeardOff01", statsId: "synthetic-stats", currency: "usd" } as unknown as Parameters<typeof recordHeard>[0];
+    const { value } = await logged(() => withReply(reply, () => recordHeard(store, "cs_test_heardoff00001", "friend")));
+    assert.deepEqual(outbound, [], "Stripe is never asked when the mark cannot be read");
+    assert.equal(value, "unavailable");
+  });
+}
+
+const OWNER = "heard-off-exact@example.com";
+async function postAnswer(reply: unknown[]): Promise<{ status: number; body: unknown }> {
+  redis.clear();
+  await claimHandle(OWNER, "harborx", "Harbor Shop", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestHeardOff02", true);
+  const request = new NextRequest("https://marktmorgen.com/api/store/heard", {
+    method: "POST",
+    headers: { "content-type": "application/json", host: "marktmorgen.com", origin: "https://marktmorgen.com" },
+    body: JSON.stringify({ h: "harborx", s: "cs_test_heardoff00002", a: "friend" }),
+  });
+  const response = await logged(() => withReply(reply, () => heardRoute(request)));
+  return { status: response.value.status, body: await response.value.json() };
+}
+
+test("the route answers an unknown reply with 503 unavailable, never 200 off", async () => {
+  assert.deepEqual(await postAnswer(["QUEUED"]), { status: 503, body: { ok: false } });
   assert.deepEqual(outbound, [], "Stripe is never asked when the mark cannot be read");
-  assert.equal(value, "off");
+});
+
+test("the route control: a store confirmed off still answers 200 without counting", async () => {
+  assert.deepEqual(await postAnswer([1]), { status: 200, body: { ok: false } });
+  assert.deepEqual(outbound, []);
 });
 
 test("healthy controls: on by default, off once switched off, on again, and nothing is logged", async () => {

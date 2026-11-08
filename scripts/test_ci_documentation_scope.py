@@ -5,6 +5,13 @@ from ci_documentation_scope import documentation_diff, documentation_path, requi
 
 A = "a" * 40
 B = "b" * 40
+# The one workflow that is not CI: the MV alarm (AGENTS.md) runs only after the nine below
+# complete on main and has no documentation scope (tests/main-red-alarm.test.ts).
+NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
+
+def ci_workflows():
+    paths = list(Path(".github/workflows").glob("*.yml"))
+    return [p for p in paths if p.name not in NOT_CI]
 
 def change(path, before="100644", after="100644", status="M"):
     return (f":{before} {after} {A} {B} {status}\0{path}\0").encode()
@@ -60,7 +67,7 @@ class DocumentationScopeTests(unittest.TestCase):
 
     def test_workflow_conditions_stay_inside_jobs_and_are_unique(self):
         names = set()
-        workflows = list(Path(".github/workflows").glob("*.yml"))
+        workflows = ci_workflows()
         self.assertEqual(len(workflows), 9)
         for path in workflows:
             text = path.read_text(encoding="utf-8")
@@ -89,7 +96,7 @@ class DocumentationScopeTests(unittest.TestCase):
                 self.assertNotIn("always()", conditions[0], str(path))
 
     def test_daily_and_manual_events_are_explicit_and_isolated(self):
-        for path in Path(".github/workflows").glob("*.yml"):
+        for path in ci_workflows():
             text = path.read_text(encoding="utf-8")
             prefix = text.split("jobs:\n", 1)[0]
             self.assertIn("  schedule:\n    - cron: '37 5 * * *'\n  workflow_dispatch:\n", prefix, str(path))

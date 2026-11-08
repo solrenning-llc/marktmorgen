@@ -10,6 +10,7 @@
  *   nl:transparency:since           ISO day counting began
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { REPORT_KINDS, type ReportKind } from "@/lib/takedown-rules";
 
 export type NoticeKind = ReportKind;
@@ -61,23 +62,58 @@ export type YearCounts = {
   steps: Record<StepType, number>;
 };
 
-/** The day counting began (null before the first count), and each year since, newest first. */
+/** No count was written before this day, so an earlier start day is not one we wrote. */
+const FIRST_DAY = "2026-01-01";
+/** Every field a year's hash can hold; any other is not one we wrote. */
+const FIELDS: ReadonlySet<string> = new Set([
+  ...NOTICE_KINDS.flatMap((kind) => [`notice:${kind}`, `acted:${kind}`]),
+  ...STEP_TYPES.map((type) => `step:${type}`),
+]);
+
+/** A real calendar day, written as we write it (YYYY-MM-DD). */
+function isDay(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * The years whose counts are certainly still kept on the day `now`: a year's
+ * hash lives KEEP_SECONDS after its last count, so at least KEEP_SECONDS after
+ * the year began. An older year's hash may be gone, and gone is not zero.
+ */
+const keptOn = (year: number, now: number) => Date.UTC(year, 0, 1) + KEEP_SECONDS * 1000 > now;
+
+/**
+ * The day counting began (null before the first count), and each year since
+ * whose counts are still kept, newest first.
+ */
 export async function transparencyCounts(now = Date.now()): Promise<{ since: string | null; years: YearCounts[] }> {
   if (!isRedisConfigured()) return { since: null, years: [] };
-  const [since] = await redisPipeline([["GET", SINCE]]);
-  if (typeof since !== "string") return { since: null, years: [] };
+  // Only a start day that is not there is "nothing counted yet"; any other reply is unknown and throws (rule 24).
+  const [since] = repliesFor(await redisPipeline([["GET", SINCE]]), 1) ?? unknown("the day counting began");
+  if (since === null) return { since: null, years: [] };
+  // A start day we could have written: a real day, not before counting could begin, not after today.
+  const today = new Date(now).toISOString().slice(0, 10);
+  if (typeof since !== "string" || !isDay(since) || since < FIRST_DAY || since > today) unknown("the day counting began");
   const first = Number(since.slice(0, 4));
   const last = Number(yearOf(now));
-  const years = Array.from({ length: Math.max(0, last - first + 1) }, (_, i) => String(last - i));
-  const raws = await redisPipeline(years.map((y) => ["HGETALL", yearKey(y)]));
+  const years = Array.from({ length: last - first + 1 }, (_, i) => last - i).filter((year) => keptOn(year, now)).map(String);
+  const raws = repliesFor(await redisPipeline(years.map((y) => ["HGETALL", yearKey(y)])), years.length) ?? unknown("a year's counts");
   return {
     since,
     years: years.map((year, i) => {
-      const flat = Array.isArray(raws[i]) ? (raws[i] as unknown[]).map(String) : [];
-      const get = (field: string) => {
-        const at = flat.findIndex((v, k) => k % 2 === 0 && v === field);
-        return at >= 0 ? Number(flat[at + 1]) || 0 : 0;
-      };
+      // An empty list is a year with nothing counted yet; anything but pairs of text, each a field we write once
+      // with a whole number, is unknown.
+      const flat = stringList(raws[i]);
+      if (!flat || flat.length % 2 !== 0) unknown("a year's counts");
+      const counts = new Map<string, number>();
+      for (let k = 0; k < flat.length; k += 2) {
+        const value = /^\d{1,15}$/.test(flat[k + 1]) ? Number(flat[k + 1]) : null;
+        if (value === null || !FIELDS.has(flat[k]) || counts.has(flat[k])) unknown("a year's counts");
+        counts.set(flat[k], value);
+      }
+      const get = (field: string) => counts.get(field) ?? 0;
       return {
         year,
         notices: { copyright: get("notice:copyright"), other: get("notice:other") },
@@ -86,4 +122,8 @@ export async function transparencyCounts(now = Date.now()): Promise<{ since: str
       };
     }),
   };
+}
+
+function unknown(what: string): never {
+  throw new UnknownReplyError(what);
 }

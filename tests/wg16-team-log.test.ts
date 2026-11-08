@@ -116,6 +116,25 @@ async function main(): Promise<void> {
   shape = null;
   is("a teammate on the team, log unread: taken off as ever", [mate.status, mate.body.ok, (await readTeam(store.sid!)).members.some((m) => m.email === MATE)], [200, true, false]);
 
+  // Claude 4 on #3164 (LEVE): a line of the log that does not read is skipped, so "never taken off" cannot be read
+  // from what is left: it may be the very "Took x off the team" line a failed key sweep wrote (KeysNotSwept), whose
+  // second press must sweep that person's API keys again. Unsure, then, with nothing swept, written or emailed.
+  part("Removing someone while a line of the log does not read");
+  const took = JSON.stringify({ at: "2026-11-08T00:00:00.000Z", who: OWNER, role: "owner", what: "Took gone-mate@example.com off the team" });
+  shape = lrange(["{not json", took]);
+  written.length = 0;
+  const mailBefore = sent.length;
+  const half = await remove("someone-else@example.com");
+  is("an address not on the team, a line unread: unsure (503), not 'not on the team'", [half.status, half.body.error], [503, "unsure"]);
+  is("and nothing is written or emailed for it", [written.filter((w) => !w.includes(" nl:allow:")), sent.length - mailBefore], [[], 0]);
+  const again = await remove("gone-mate@example.com");
+  shape = null;
+  is("the person the readable lines show taken off: still a repeat, answered as already off", [again.status, again.body.ok], [200, true]);
+  shape = lrange([JSON.stringify({ at: "2026-11-08T00:00:00.000Z", who: OWNER, role: "owner", what: "Changed the store's name" })]);
+  const whole = await remove("never-here-2@example.com");
+  shape = null;
+  is("a log read whole that never shows the address: not on the team, as before", [whole.status, whole.body.error], [404, "not_found"]);
+
   part("The Team page says the activity could not be read, instead of 'Nothing yet.'");
   const page = readFileSync("app/studio/team/page.tsx", "utf8");
   is(

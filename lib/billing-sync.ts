@@ -240,8 +240,15 @@ async function syncStores(deadline: number, seen: Set<string>, counts: SyncCount
         console.error("could not keep the line of ended plans", error),
       );
     }
+    // The deadline is checked before every store, not only between batches:
+    // a batch cut short is read again from its start by the next run.
+    let cutShort = false;
     for (const store of stores) {
       if (!store.subscriptionActive || !store.subscriptionId || seen.has(store.subscriptionId)) continue;
+      if (Date.now() > deadline) {
+        cutShort = true;
+        break;
+      }
       counts.checked += 1;
       try {
         const state = await readSubscription(store.subscriptionId, store);
@@ -257,6 +264,7 @@ async function syncStores(deadline: number, seen: Set<string>, counts: SyncCount
         console.error("checking a store's subscription failed", error);
       }
     }
+    if (cutShort) break;
     cursor = next;
     if (cursor === "0") {
       await redisPipeline([["DEL", CURSOR_KEY]]);

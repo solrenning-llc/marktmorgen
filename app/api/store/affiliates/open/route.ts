@@ -2,7 +2,8 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, type Charge, affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
+import { forcePublicRequests, givePublicRequests, holdPublicRequests } from "@/lib/traffic";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
@@ -40,12 +41,29 @@ export async function POST(request: NextRequest) {
   if (!(await withinStore("aff-open", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) {
     return new Response(null, { status: 303, headers: { Location: `${page}?status=limited`, "Cache-Control": "no-store" } });
   }
-  const result = await openAffiliateLink(store, token).catch((error) => {
+  // Accepting an invitation that carries a share reads the program's people for the 90% cap: paid from the store's
+  // public requests first, at the read's worst, as its other public links are, and given back down to what was read
+  // (lib/affiliates.ts paidPeople). Not taken: the page says so ("resting"), nothing read or written, the link kept.
+  const charge: Charge = async (units) => {
+    const now = Date.now();
+    // Refused, the hold is not left counted (`hold`); given back only up to what was taken; a read that moved more is
+    // counted at what it read, past the window if it must (forcePublicRequests).
+    if (!(await holdPublicRequests(store, units, now))) return null;
+    return {
+      give: async (n) => {
+        if (Number.isSafeInteger(n) && n > 0 && n <= units) await givePublicRequests(store, n, now);
+      },
+      force: (n) => forcePublicRequests(store, n, now),
+    };
+  };
+  const result = await openAffiliateLink(store, token, charge).catch((error) => {
     console.error("opening an affiliate link failed", error);
     return { ok: false as const, reason: "error" as const };
   });
   if (!result.ok) {
-    return new Response(null, { status: 303, headers: { Location: `${page}?status=${result.reason}`, "Cache-Control": "no-store" } });
+    // An invitation whose share no longer fits the cap (lib/affiliates.ts): the page's "not taking affiliates right now".
+    const status = result.reason === "committed" || result.reason === "crowded" ? "unavailable" : result.reason;
+    return new Response(null, { status: 303, headers: { Location: `${page}?status=${status}`, "Cache-Control": "no-store" } });
   }
   const secure = origin.startsWith("https://") ? "; Secure" : "";
   return new Response(null, {

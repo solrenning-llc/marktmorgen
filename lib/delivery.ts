@@ -319,17 +319,21 @@ export async function storeKeysOf(folders: string[]): Promise<(string | null)[]>
  * The creators behind a set of folders, for the notice that goes to them:
  * the address, or null for a folder nobody uploaded to or whose key is an
  * account's other store ("#" and its id, lib/store.ts storeRef), which holds
- * no address. Read exactly, as storeKeysOf: an unknown answer throws, and is
- * never "no address on file". So does kept text that is neither, such as
- * whitespace or "not-an-owner" (Codex Z on #3072): it is not evidence that the
- * store has no owner, so support is not told so and the store is not recorded.
+ * no address. Read exactly: a read unknown as a whole (no reply, one of
+ * another length, a database that does not answer) throws, and is never "no
+ * address on file". One folder's answer that is neither (not text, "",
+ * whitespace, "not-an-owner": Codex Z on #3072) is undefined, that folder's
+ * owner unknown: not evidence that the store has no owner, so support is not
+ * told so and it is not recorded, and it costs no other folder its notice
+ * (Claude 1's decision on #3072, 1975a5cd).
  */
-export async function ownersOf(folders: string[]): Promise<(string | null)[]> {
+export async function ownersOf(folders: string[]): Promise<(string | null | undefined)[]> {
   if (!isRedisConfigured() || folders.length === 0) return folders.map(() => null);
-  return (await keptOwners(folders, "who a folder belongs to")).map((v) => {
-    if (v === null || OTHER_STORE_KEY.test(v)) return null;
-    if (v.includes("@")) return v;
-    throw new UnknownReplyError("who a folder belongs to");
+  const replies = repliesFor(await redisPipeline(folders.map((f) => ["GET", ownerKey(f)])), folders.length);
+  if (!replies) throw new UnknownReplyError("who a folder belongs to");
+  return replies.map((v) => {
+    if (v === null || (typeof v === "string" && OTHER_STORE_KEY.test(v))) return null;
+    return typeof v === "string" && v.includes("@") ? v : undefined;
   });
 }
 

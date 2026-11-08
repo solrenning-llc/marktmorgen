@@ -65,15 +65,16 @@ const UTM = ["utm_source", "utm_medium", "utm_campaign"] as const;
 /** Whether an address is one of this store's own pages. */
 export function isOwnLink(url: URL, store: Pick<Store, "handle" | "domain">): boolean {
   if (url.protocol !== "https:") return false;
-  const host = url.hostname.toLowerCase();
-  if (store.domain?.name && host === store.domain.name.toLowerCase()) return true;
+  // A pending domain is not yet the store, and another HTTPS port is another
+  // origin. Neither receives the email's tags or the reader's sequence key.
+  if (store.domain?.liveAt && url.origin === `https://${store.domain.name.toLowerCase()}`) return true;
   let site: string;
   try {
-    site = new URL(SITE_URL).hostname.toLowerCase();
+    site = new URL(SITE_URL).origin;
   } catch {
     return false;
   }
-  if (host !== site) return false;
+  if (url.origin !== site) return false;
   const home = `/@${store.handle.toLowerCase()}`;
   const path = url.pathname.toLowerCase();
   return path === home || path.startsWith(`${home}/`);

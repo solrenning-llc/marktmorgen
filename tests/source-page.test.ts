@@ -127,6 +127,20 @@ async function main(): Promise<void> {
   pageType = "text/html; charset=windows-1252";
   is("a page in another charset is read in it", (await readSourcePage("https://ana.example.com/", hooks)).ok, true);
   pageType = "text/html";
+  part("Unexpected transport failures never put creator input in logs");
+  const input = "https://ana.example.com/?access_token=synthetic-test-only\r\nFORGED_LOG_LINE";
+  class FailingAgent extends https.Agent {
+    createConnection(): net.Socket { throw new Error(`Transport failed for ${input}`); }
+  }
+  const captured: unknown[][] = [], realError = console.error;
+  let unexpected;
+  console.error = (...args: unknown[]) => { captured.push(args); };
+  try { unexpected = await readSourcePage(input, { ...hooks, agent: new FailingAgent() as never }); }
+  finally { console.error = realError; }
+  is("an unexpected transport exception still gives the same unreadable result", unexpected, { ok: false, reason: "unreadable" });
+  is("the diagnostic is only its fixed failure code, without an exception object", captured, [["SOURCE_PAGE_READ_FAILED"]]);
+  const logText = captured.flat().map(value => value instanceof Error ? value.message : String(value)).join(" ");
+  is("URL, query token, forged line and CRLF never reach the log", /ana\.example|access_token|synthetic-test-only|FORGED_LOG_LINE|[\r\n]/.test(logText), false);
   const unreadable = await writeStoreSetup((await storeForEmail(owner))!, { about: "", selling: "", link: "https://10.0.0.5/" }, Date.now(), hooks);
   is("an unreadable link and no words: no draft (the started job counts, as every started attempt does)", unreadable.ok, false);
   const withWords = await writeStoreSetup((await storeForEmail(owner))!, { about: "I plan dinners for busy parents.", selling: "", link: "https://10.0.0.5/" }, Date.now(), hooks);

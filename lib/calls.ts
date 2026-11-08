@@ -59,7 +59,7 @@ import { HOLD_SECONDS, checkoutClosesAt, onAccount } from "@/lib/stripe-account"
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { askForCallReminder, recoveryOn, refusedRecovery, withoutCallReminder } from "@/lib/recovery-setting";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
-import { refundedInFull } from "@/lib/refunds";
+import { keptUnlessLost, refundedInFull } from "@/lib/refunds";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import type { Listing, Product, Store } from "@/lib/store";
 import { idsOfKind, listingFinder, readListing, readListings, sellsAny } from "@/lib/catalog";
@@ -70,9 +70,11 @@ import { formatMoney } from "@/lib/money";
 import {
   type Busy,
   type CallSetup,
+  type CancelPromise,
   KEEP_PAST_SESSION_DAYS,
   MAX_MOVES,
   isBookable,
+  readCancelPromise,
   isTimeZone,
   lengthAt,
   movableUntil,
@@ -82,6 +84,7 @@ import {
   seatsTaken,
   zoneName,
 } from "@/lib/call-setup";
+import { bookingLength, ownLength } from "@/lib/call-lengths";
 import { planCheck, planReminders, readMoves, unplanReminders, writeMove } from "@/lib/call-records";
 import { calendarBusy } from "@/lib/calendar-sync";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
@@ -249,6 +252,8 @@ export async function paidCalls(store: Store): Promise<
     pi: string;
     /** What is left to pay in person, and a code taken off the whole price, as the sale keeps them (lib/call-deposit.ts). */
     due: DueInPerson | null;
+    /** The cancellation deadline the buyer was promised when paying (lib/call-setup.ts, readCancelPromise). */
+    cancel: CancelPromise | null;
   }[]
 > {
   return (await readCallSessions(store)).paid;
@@ -268,8 +273,41 @@ export async function paidCallsRead(store: Store): Promise<{ paid: Awaited<Retur
 type CallRow = Awaited<ReturnType<typeof paidCalls>>[number];
 
 /**
+ * The most charges one reading of a store's bookings asks Stripe about a
+ * dispute (queue 388 [TB14]): only a charge Stripe marks as disputed is
+ * asked (GET /disputes?charge=, lib/refunds.ts, keptUnlessLost), which is
+ * rare, and none else. Past it, or when Stripe cannot be asked, the booking
+ * keeps its time: in the doubt the buyer keeps what they paid for, and a
+ * later reading frees it (Claude 4, C4-20261105-2100-C6-4).
+ */
+export const DISPUTE_READS_PER_READING = 5;
+
+/** Whether Stripe marks this booking's charge as disputed (the payment read with its latest charge expanded). */
+function disputedCharge(row: SessionRow): boolean {
+  const payment = row.payment_intent as { latest_charge?: { disputed?: unknown } | null } | null | undefined;
+  return !!payment && typeof payment === "object" && !!payment.latest_charge && typeof payment.latest_charge === "object" && payment.latest_charge.disputed === true;
+}
+
+/**
+ * callFromRow, with a disputed charge asked about while `reads.left` lasts: a
+ * dispute lost frees the booking as a full refund does (lib/refunds.ts, the
+ * owner's rule of 4 November 2026: whatever its amount).
+ */
+async function callOrLost(store: Store, row: SessionRow, handles: Set<string>, reads: { left: number }): Promise<CallRow | "refunded" | null> {
+  const call = callFromRow(row, handles);
+  if (!call || call === "refunded" || !disputedCharge(row) || !store.stripeAccountId) return call;
+  if (reads.left <= 0) {
+    console.warn("a disputed booking keeps its time: this reading asked Stripe about as many disputes as it may", store.handle, call.session);
+    return call;
+  }
+  reads.left -= 1;
+  return (await keptUnlessLost(store.stripeAccountId, row.payment_intent)) ? "refunded" : call;
+}
+
+/**
  * A paid booking of this store from one checkout session, or null. A booking
  * refunded in full is `refunded`: it no longer holds its time or gets reminders.
+ * A dispute lost is read by callOrLost, which asks Stripe.
  */
 function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded" | null {
   const meta = row.metadata ?? {};
@@ -298,6 +336,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),
     due: readDue(meta),
+    cancel: readCancelPromise(meta),
   };
 }
 
@@ -326,6 +365,7 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
   const handles = saleHandles(store);
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_DAYS * 86400;
   const found: CallRow[] = [];
+  const reads = { left: DISPUTE_READS_PER_READING };
   let after = "";
   // Whether the last page read still said there were more: older bookings were then left out.
   let partial = false;
@@ -337,7 +377,7 @@ async function readCallSessions(store: Store): Promise<{ paid: CallRow[]; refund
     )) as { data?: unknown; has_more?: unknown };
     const rows = Array.isArray(list.data) ? (list.data as SessionRow[]) : [];
     for (const row of rows) {
-      const call = callFromRow(row, handles);
+      const call = await callOrLost(store, row, handles, reads);
       if (call === "refunded") {
         if (typeof row.id === "string") refunded.add(row.id);
       } else if (call) found.push(call);
@@ -363,7 +403,7 @@ export async function paidCall(store: Store, session: string): Promise<CallRow |
     store.stripeAccountId,
     `/checkout/sessions/${encodeURIComponent(session)}?expand[]=payment_intent.latest_charge`,
   )) as SessionRow;
-  const call = callFromRow(row, saleHandles(store));
+  const call = await callOrLost(store, row, saleHandles(store), { left: 1 });
   if (!call || call === "refunded") return null;
   return (await withMoves([call]))[0] ?? null;
 }
@@ -529,6 +569,7 @@ export async function catchUpBookings(store: Store, paid: PaidCall[], origin: st
       lead: call.lead,
       pi: call.pi,
       due: call.due,
+      cancel: call.cancel,
       origin,
     }).catch((error) => console.error("catching up a booking failed", error));
   }
@@ -686,9 +727,17 @@ export function callCheckoutBody(input: {
    * than the discounted price, and the rest is what is left of it.
    */
   code?: { id: string; code: string; figures: DepositFigures } | null;
+  /**
+   * The length the buyer chose, on a call with several (lib/call-lengths.ts,
+   * bookingLength): its price is what is charged, and the length is said on
+   * the line and kept on the sale. None: the product's own price.
+   */
+  length?: { minutes: number; cents: number } | null;
 }): URLSearchParams {
   const { store, product, start, end, buyerTz, origin } = input;
   const pkg = input.fromPackage;
+  const length = product.call?.lengths?.length ? input.length ?? null : null;
+  const priceCents = length ? length.cents : product.priceCents;
   // Said in the buyer's own time zone: they are the one reading Stripe's page,
   // in the store's language (lib/store-language.ts). The same title is kept
   // on the sale, as what the buyer saw.
@@ -697,11 +746,12 @@ export function callCheckoutBody(input: {
   // Never from a package: the package was the payment.
   const code = pkg ? null : input.code ?? null;
   const due = pkg
-    ? { cents: product.priceCents, rest: 0 }
+    ? { cents: priceCents, rest: 0 }
     : code
       ? { cents: code.figures.charged, rest: code.figures.rest }
-      : chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
-  const name = `${product.title} \u2014 ${when}`;
+      : chargeNow({ priceCents, currency: store.currency, deposit: product.call?.deposit ?? null, inPerson: Boolean(product.call?.place) });
+  // A call with several lengths says the one chosen, in the store's language, on Stripe's page and on the sale.
+  const name = `${product.title}${length ? bookingWords(store.language).chosenLength(length.minutes) : ""} \u2014 ${when}`;
   const body = new URLSearchParams({
     mode: "payment",
     locale: lang.stripe,
@@ -724,16 +774,25 @@ export function callCheckoutBody(input: {
     "payment_intent_data[metadata][kind]": "call",
     "payment_intent_data[metadata][start]": String(start),
     success_url: `${origin}/@${store.handle}/thanks?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin}/@${store.handle}/book/${product.id}`,
+    // Back from Stripe's page, the length chosen is still chosen (3.3.7).
+    cancel_url: `${origin}/@${store.handle}/book/${product.id}${length && length.minutes !== product.call?.minutes ? `?length=${length.minutes}` : ""}`,
   });
   if (product.summary) body.set("line_items[0][price_data][product_data][description]", product.summary);
-  if (due.rest > 0 || code) {
+  // The creator's cancellation deadline (lib/call-setup.ts, cancelHours): said before paying; never for a session from a package, which pays nothing here.
+  // A time already inside it when booked is told so, never promised a refund nobody owes.
+  const cancelHours = pkg ? 0 : product.call?.cancelHours ?? 0;
+  const cancelLate = cancelHours > 0 && start - Date.now() < cancelHours * 3_600_000;
+  if (due.rest > 0 || code || cancelHours) {
     // Said on Stripe's own page, before paying, and kept on the sale for the creator.
     const said = formatMoney(due.rest, store.currency, lang.locale);
     const bw = bookingWords(store.language);
     // The creator's own summary first, then the sentence, kept whole within Stripe's 500 characters.
     // With a code, what it took off the whole price is said too (the owner's decision of 2 November 2026).
-    const sentence = [code ? bw.codeOffPrice(code.code, formatMoney(code.figures.off, store.currency, lang.locale)) : "", due.rest > 0 ? bw.depositRest(said, store.name) : ""].filter(Boolean).join(" ");
+    const sentence = [
+      code ? bw.codeOffPrice(code.code, formatMoney(code.figures.off, store.currency, lang.locale)) : "",
+      due.rest > 0 ? bw.depositRest(said, store.name) : "",
+      cancelHours ? (cancelLate ? bw.cancelTooLate(cancelHours, store.name) : bw.cancelPolicy(cancelHours, store.name)) : "",
+    ].filter(Boolean).join(" ");
     const summary = product.summary ? product.summary.slice(0, Math.max(0, 500 - sentence.length - 3)) : "";
     body.set("line_items[0][price_data][product_data][description]", summary ? `${summary} \u2014 ${sentence}` : sentence.slice(0, 500));
     if (due.rest > 0) {
@@ -741,14 +800,20 @@ export function callCheckoutBody(input: {
       body.set("metadata[rest]", String(due.rest));
       body.set("payment_intent_data[metadata][rest]", String(due.rest));
     }
+    if (cancelHours) {
+      // The promise as made, kept on the sale: the confirmation and any refund read it from there (lib/call-setup.ts, readCancelPromise).
+      body.set("metadata[cancel_hours]", String(cancelHours));
+      if (cancelLate) body.set("metadata[cancel_late]", "1");
+    }
     if (code) {
       // The whole price, the code and what it took off, on the sale for the creator's orders.
-      body.set("metadata[price]", String(product.priceCents));
+      body.set("metadata[price]", String(priceCents));
       body.set("metadata[code]", code.code);
       body.set("metadata[code_off]", String(code.figures.off));
       body.set("payment_intent_data[metadata][code]", code.code);
     }
   }
+  if (length) body.set("metadata[minutes]", String(length.minutes));
   if (input.team) {
     body.set("metadata[hosts]", input.team.hosts.join(","));
     body.set("metadata[claim]", input.team.claim);
@@ -789,6 +854,25 @@ export function callCheckoutBody(input: {
   return body;
 }
 
+/**
+ * The listed site an embedded calendar booked from, kept on the sale: written
+ * after everything else (the platform's share included, lib/platform-share.ts),
+ * and only while Stripe's fifty metadata fields have room, as
+ * lib/store-checkout.ts writes it, so it is never what stops a booking.
+ */
+export function keepEmbedSite(body: URLSearchParams, site: string | null | undefined, fromPackage: boolean): void {
+  if (!site || !/^https:\/\//.test(site) || fromPackage) return;
+  // Back from Stripe's page, the listed site stays with the booking page, so a second try is still the site's (3.3.7).
+  const cancel = body.get("cancel_url");
+  if (cancel) {
+    const url = new URL(cancel);
+    url.searchParams.set("site", site.slice(0, 700));
+    body.set("cancel_url", url.toString());
+  }
+  if ([...body.keys()].filter((key) => key.startsWith("metadata[")).length >= 50) return;
+  body.set("metadata[embed_site]", site.slice(0, 300));
+}
+
 /** The API version a checkout with nothing to pay is made at (lib/call-packages.ts). */
 export const NO_COST_VERSION = "2026-08-26.dahlia";
 
@@ -818,10 +902,21 @@ export async function holdAndCheckout(input: {
   fromPackage?: { id: string; coupon: string; email: string; back: string } | null;
   /** The channel this sale is credited to, as Stripe metadata (lib/visit-channel.ts channelOfRequest). */
   channel?: Record<string, string>;
+  /** The length the buyer chose, in minutes, on a call with several (lib/call-lengths.ts); none is the setup's own. */
+  minutes?: unknown;
+  /** The listed site the calendar embedded there booked from, already checked against the creator's list (app/api/store/book). */
+  embedSite?: string | null;
 }): Promise<HoldResult> {
   const { store, product, start, origin } = input;
-  const setup = product.call;
   if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  // Weekly hours: the length chosen, at its own price, or the booking is refused, never charged at another length's price.
+  const booked = product.call.kind === "weekly" ? bookingLength(product.call, product.priceCents, input.minutes) : null;
+  if (product.call.kind === "weekly" && !booked) return { ok: false, reason: "invalid" };
+  // Another length than the setup's own is never had from a package, with a deposit or with a code, whose figures are the product's own price.
+  const other = booked !== null && booked.minutes !== product.call.minutes;
+  if (other && (input.fromPackage || product.call.deposit || input.code)) return { ok: false, reason: "invalid" };
+  // Every check below, and the hold, are at the chosen length.
+  const setup: CallSetup = booked ? { ...product.call, minutes: booked.minutes } : product.call;
   const length = lengthAt(setup, start);
   // A dated session the creator has since taken off.
   if (length === null) return { ok: false, reason: "taken" };
@@ -834,6 +929,8 @@ export async function holdAndCheckout(input: {
   const chosen = whole && input.host?.key ? chosenTeam(whole, input.host.key, input.host.label) : null;
   if (chosen === "changed") return { ok: false, reason: "host-changed" };
   const team = chosen ?? whole;
+  // A team's hosts' times are read at the setup's own length (lib/call-lengths.ts).
+  if (team && other) return { ok: false, reason: "invalid" };
 
   // Counted as orders, admitted before anything is held or opened: nobody is stopped while paying.
   const admitted = await admitOrders(store, CALL_ORDER_UNITS);
@@ -872,7 +969,7 @@ export async function holdAndCheckout(input: {
     }
 
     const pkg = input.fromPackage ?? null;
-    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, lead: input.lead ?? null, code: input.code ?? null });
+    const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, length: booked, lead: input.lead ?? null, code: input.code ?? null });
     // The share of the sale, when the store's plan has one (lib/platform-share.ts).
     // A session from a package pays nothing here: its share was taken on the package.
     if (!pkg) {
@@ -880,6 +977,8 @@ export async function holdAndCheckout(input: {
       const mayComeOff = store.hasDiscounts && shareBps(store) > 0 && !input.code ? await codesMayTakeOff(store.stripeAccountId, store.currency) : [];
       applyShare(body, store, { recurring: false, least: leastPaid(linesTotal(body).cents, mayComeOff) });
     }
+    // Kept on the sale last, after the share (keepEmbedSite).
+    keepEmbedSite(body, input.embedSite, Boolean(pkg));
 
     // A session from a package is a checkout with nothing to pay, which Stripe
     // takes only at API version 2023-08-16 or later
@@ -955,13 +1054,17 @@ function offerFrom(product: CallListing, now: number, seats: TeamBusy[], session
  * Every open time or session for a call product, or null when it cannot be
  * read, and the paid calls read on the way, for catchUpBookings.
  */
-export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null) {
+export async function slotsForProduct(store: Store, product: CallListing, pick?: { key: string } | null, minutes?: number | null) {
+  // One of a call's lengths (lib/call-lengths.ts): its times, at that length. Never on a team, whose hosts' times are read
+  // at the setup's own length: there the length asked is not read, and `team` says so, so the page offers no lengths.
+  const atLength = Boolean(minutes && product.call.kind === "weekly" && minutes !== product.call.minutes && product.call.lengths?.some((l) => l.minutes === minutes));
   try {
     const now = Date.now();
     const { busy, paid, blocked, sessions } = await readBusy(store, now);
     const whole = await activeTeam(store, product);
     // A team event type the plan or the team no longer allows: nothing on offer.
-    if (whole === "closed") return { days: [], left: {}, sessions: [], paid };
+    if (whole === "closed") return { days: [], left: {}, sessions: [], paid, team: true };
+    if (atLength && !whole) product = { ...product, call: { ...product.call, minutes: minutes as number } };
     if (whole) {
       // A team that lets buyers choose: who they may pick, and only the chosen host's times once they have.
       const hosts = hostChoices(whole);
@@ -970,9 +1073,9 @@ export async function slotsForProduct(store: Store, product: CallListing, pick?:
       const team = narrowed && narrowed !== "changed" ? narrowed : whole;
       // The page is where each host's calendar is read again, when its last reading is old.
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true });
-      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked };
+      return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked, team: true };
     }
-    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid };
+    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid, team: false };
   } catch {
     return null;
   }
@@ -988,14 +1091,23 @@ export async function slotsForMove(
   product: CallListing,
   session: string,
   current: number,
+  /** How long the booking is, in milliseconds: times are offered at the booking's own length (lib/call-lengths.ts, ownLength). */
+  bookedMs: number,
 ): Promise<Offer | null> {
+  const kept = ownLength(product.call, bookedMs);
+  if (kept === "unknown") return null;
+  // The team is read as it is kept, at the call's own length, as moveBooking reads it; only its hosts' times are read at the
+  // length paid for. Read at the paid length, a host stretch shorter than it would drop the whole team, and the page would
+  // fall back to the store's hours, which the move then refuses.
+  const listed = product;
+  if (kept !== null) product = { ...product, call: { ...product.call, minutes: kept } };
   try {
     const now = Date.now();
     const { busy, blocked, sessions } = await readBusy(store, now);
     // A team booking moves with the host it has: only their free times are offered. The
     // team as it was saved is used, so a plan that now allows fewer never takes a buyer's move away.
     const own = busy.find((b) => b.session === session && b.hosts && b.claim);
-    const team = own ? await teamForMove(store, product) : null;
+    const team = own ? await teamForMove(store, listed) : null;
     if (team && own && own.hosts && own.claim) {
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true, except: { session, claim: own.claim } });
       return { days: teamMoveDays(product.call, ctx, own.hosts, current, now), left: {}, sessions: [] };
@@ -1071,10 +1183,17 @@ export async function moveBooking(input: {
   if (!store.callsId || !isRedisConfigured()) return { ok: false, reason: "unavailable" };
   const length = lengthAt(setup, start);
   if (length === null) return { ok: false, reason: "taken" };
-  const end = start + length;
+  let end = start + length;
   const callsId = store.callsId;
-  // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now.
-  const team = await teamForMove(store, product).catch(() => null);
+  // Moves keep their hosts, so the team as it was saved is used whatever the plan allows now. A team that cannot be read
+  // is not known, never "no team" (rule 24): moved by the store's own hours, its hosts' claim would be let go below.
+  let team: Awaited<ReturnType<typeof teamForMove>>;
+  try {
+    team = await teamForMove(store, product);
+  } catch (error) {
+    console.error("reading a moved booking's team failed", error);
+    return { ok: false, reason: "error" };
+  }
 
   if (!(await takeLock(callsId))) return { ok: false, reason: "taken" };
   let from: { start: number; end: number; moves: number };
@@ -1088,6 +1207,11 @@ export async function moveBooking(input: {
       ? { start: recorded.s, end: recorded.e, moves: recorded.n }
       : { start: input.booked.start, end: input.booked.end, moves: 0 };
     if (from.moves >= MAX_MOVES) return { ok: false, reason: "limit" };
+    // Weekly hours move at the length paid for, whatever the setup says now (lib/call-lengths.ts, ownLength).
+    const kept = ownLength(setup, from.end - from.start);
+    if (kept === "unknown") return { ok: false, reason: "error" };
+    if (kept !== null) end = start + kept * 60_000;
+    const at: CallSetup = kept !== null ? { ...setup, minutes: kept } : setup;
     if (now > movableUntil(setup, from.start)) return { ok: false, reason: "late" };
     if (start === from.start) return { ok: false, reason: "same" };
 
@@ -1105,14 +1229,17 @@ export async function moveBooking(input: {
       // The booking keeps its hosts, and their claim moves to the new time in one step.
       teamOwn = { hosts: own.hosts, claim: own.claim };
       try {
-        const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: false, except: { session, claim: own.claim } });
-        if (!(await moveTeamClaim({ store, product, ctx, hosts: own.hosts, claim: own.claim, start, end, now }))) return { ok: false, reason: "taken" };
+        // The hosts are checked at the length paid for (`at`), the length the booking is written at, never the call's
+        // length now: a paid hour never runs past a host's working hours or into their next event.
+        const paid: CallListing = { ...product, call: at };
+        const ctx = await teamContext(store, paid, team, [...busy, ...sessions, ...blocked], now, { refresh: false, except: { session, claim: own.claim } });
+        if (!(await moveTeamClaim({ store, product: paid, ctx, hosts: own.hosts, claim: own.claim, start, end, now }))) return { ok: false, reason: "taken" };
       } catch {
         return { ok: false, reason: "error" };
       }
     } else {
       const others = against(product, busy.filter((b) => b.session !== session), sessions, blocked, ownerOf(store));
-      if (!isBookable(setup, now, others, start, product.id)) return { ok: false, reason: "taken" };
+      if (!isBookable(at, now, others, start, product.id)) return { ok: false, reason: "taken" };
     }
 
     await writeMove(session, { s: start, e: end, n: from.moves + 1 });
@@ -1329,6 +1456,19 @@ export function buyerNote(words: BookingWords, store: Store, room: string | null
   return room ? `${words.icsJoin(room)}${isVideoRoom(room) ? `\n\n${words.videoRoomNote}` : ""}` : words.icsWillSend(store.name);
 }
 
+/**
+ * What the creator is told about the cancellation deadline the buyer was
+ * promised, in English as every creator email is. The refund is made on the
+ * store's Stripe account: by them, or by the store's owner when the email
+ * goes to a host on the team.
+ */
+export function creatorCancelLine(cancel: CancelPromise, owner: boolean): string {
+  const who = owner ? "You make a refund in your Stripe dashboard." : "A refund is made by the store's owner, in their Stripe dashboard.";
+  return cancel.late
+    ? `They were told this time starts within the ${cancel.hours}-hour cancellation deadline, so what they paid online does not have to be refunded if they cancel or miss it; if the store cancels, they get it all back. ${who}`
+    : `They were told: cancel at least ${cancel.hours} hours before, by replying, and what they paid online is refunded; if they cancel later or miss it, it does not have to be; if the store cancels, they get it all back. ${who}`;
+}
+
 /** Where a calendar file for a booking can be fetched again, from an email. */
 export function icsLink(origin: string, store: Store, session: string): string {
   return `${origin}/api/store/ics?handle=${encodeURIComponent(store.handle)}&session_id=${encodeURIComponent(session)}`;
@@ -1385,6 +1525,8 @@ export async function confirmBooking(input: {
    * read, and then read from the sale here for an in-person booking.
    */
   due?: DueInPerson | null;
+  /** The cancellation deadline promised when paying, read from the sale like `due`; left out when not read. */
+  cancel?: CancelPromise | null;
   origin: string;
 }): Promise<void> {
   const { store, product, session, start, end, buyerEmail, origin } = input;
@@ -1392,17 +1534,34 @@ export async function confirmBooking(input: {
   // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
   // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
   // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.
+  // The deadline promised when paying is read the same way whenever it was not handed, whatever the product says now:
+  // a deadline the creator turned off after the sale is still the promise the buyer paid under (lib/call-setup.ts, readCancelPromise).
   let due = input.due;
-  if (due === undefined) {
-    if (whereOf(product.call).kind !== "place") due = null;
-    else {
-      try {
-        due = (await paidCall(store, session))?.due ?? null;
-      } catch (error) {
-        console.error("reading what is left to pay in person failed; confirmed later", error);
-        return;
-      }
+  let cancel = input.cancel;
+  const needDue = due === undefined && whereOf(product.call).kind === "place";
+  const needCancel = cancel === undefined;
+  if (needDue || needCancel) {
+    try {
+      const sale = await paidCall(store, session);
+      if (due === undefined) due = sale?.due ?? null;
+      if (cancel === undefined) cancel = sale?.cancel ?? null;
+    } catch (error) {
+      console.error("reading the sale's note failed; confirmed later", error);
+      return;
     }
+  }
+  due = due ?? null;
+  cancel = cancel ?? null;
+  // A team booking's hosts are read before the once-only mark too, the same way: a failed read is not known, never "no
+  // team" (rule 24), which would confirm the booking without them and let their claim run out with the hold. It is
+  // left for the next confirmation, and thrown rather than returned (Codex G on #3080): the mail job counts a
+  // confirmation that returned and takes it off its queue, so only a throw keeps it there for the next run; the
+  // thanks page and catchUpBookings catch it and try again later.
+  let team: Awaited<ReturnType<typeof bookingTeam>>;
+  try {
+    team = await bookingTeam(store, product, session);
+  } catch (error) {
+    throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
   }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
@@ -1414,11 +1573,7 @@ export async function confirmBooking(input: {
     await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: input.amountCents ?? 0, title: product.title });
   }
 
-  // A team booking keeps its hosts and the claim on their time, now for good.
-  const team = await bookingTeam(store, product, session).catch((error) => {
-    console.error("reading a team booking's hosts failed", error);
-    return null;
-  });
+  // A team booking keeps its hosts and the claim on their time, now for good (read above).
   const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(team ? { h: team.hosts, c: team.claim } : {}) };
   // Kept for good now that it is paid: written anew, so the store's room is
   // charged the whole entry (lib/order-data.ts), not only what it grew by
@@ -1510,6 +1665,8 @@ export async function confirmBooking(input: {
         }`,
         ...(canMove(setup, start, input.moves ?? 0) ? [b.moveYourself(hours, moveLink(origin, store, product.id, session))] : []),
         b.toCancel(store.name),
+        // The creator's deadline, as Stripe's page said it; a session from a package paid nothing here.
+        ...(cancel ? [cancel.late ? b.cancelTooLate(cancel.hours, store.name) : b.cancelPolicy(cancel.hours, store.name)] : []),
         "",
         `${store.name}${b.colon}${origin}/@${store.handle}`,
       ].join("\n"),
@@ -1545,6 +1702,8 @@ export async function confirmBooking(input: {
       ...(meeting && !meeting.made && video ? [VIDEO_ROOM_NOTE] : []),
       // What is left to collect in person, whatever the booking is now, so the creator never misses it.
       ...(due ? [creatorDueLine(due, { paidCents: input.amountCents, currency: paidIn })] : []),
+      // What the buyer was told about cancelling: the refund it promises is the creator's to make.
+      ...(cancel ? [creatorCancelLine(cancel, creatorSide.trim().toLowerCase() === store.email.trim().toLowerCase())] : []),
       "",
       `${
         theirs

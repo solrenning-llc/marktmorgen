@@ -5,12 +5,17 @@ import { boughtByToken, packageState } from "@/lib/call-packages";
 import { isSoon } from "@/lib/waitlist";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
+import { bookingLength, offeredLengths, ownLength } from "@/lib/call-lengths";
+import { slotWords } from "@/lib/slot-words";
 import { type CallListing, canMove, catchUpBookings, icsLink, isCallProduct, slotsForMove, slotsForProduct, whyNotMove } from "@/lib/calls";
 import { chargeNow } from "@/lib/call-deposit";
 import { type CallSetup, MAX_MOVES, MEET_NAMES, movableUntil, readableTime, zoneName } from "@/lib/call-setup";
@@ -18,13 +23,15 @@ import { isVideoRoom, roomLabel, roomOf } from "@/lib/call-rooms";
 import { readOrder } from "@/lib/store-checkout";
 import { SITE_URL } from "@/lib/site-url";
 import { imageUrl } from "@/lib/product-image";
-import { SlotPicker, type SlotWords } from "@/components/slot-picker";
+import { SlotPicker } from "@/components/slot-picker";
 import { type SessionChoice, SessionPicker, type SessionWords } from "@/components/session-picker";
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
-import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
+import { type BookingWords, bookingNotice, bookingWords } from "@/lib/buyer-words/booking";
 import { NewTab } from "@/components/new-tab";
+import { listedReturn, listedSite } from "@/lib/embed-sites";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -37,7 +44,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)).catch(() => null) : null;
   const product = (store ? await readListing(store, productId) : null);
-  if (!store || !product?.call) return { title: "Book a call — Marktmorgen", robots: { index: false, follow: true } };
+  // A draft call's tab names nothing for whoever only knows its id (MM-SA-30): the same as an id that does not exist.
+  if (!store || !product?.call || (product.hidden && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value)))) {
+    return { title: "Book a call — Marktmorgen", robots: { index: false, follow: true } };
+  }
   const { w } = speech(store);
   const pick = product.call.kind === "live" ? w.pickSession : w.pickTime;
   return { title: `${pick}${bookingWords(store.language).colon}${product.title} — ${store.name}`, robots: { index: false, follow: true } };
@@ -58,19 +68,57 @@ export default async function BookPage({ params, searchParams }: Params) {
   const moving = typeof query.move === "string" ? query.move : "";
   if (moving) return <MovePage store={store} product={product} session={moving} status={status} />;
 
+  // Sent here from the calendar on one of the creator's listed sites (app/embed), after a refusal or back from Stripe:
+  // the site and the way back stay with the booking, read against the creator's list again, so a second try is still the
+  // site's (3.3.7). Anything not on the list is dropped; the booking route checks both once more.
+  const embedSite = listedSite(store.embedSites, typeof query.site === "string" ? query.site : null);
+  const embedBack = listedReturn(store.embedSites, typeof query.return === "string" ? query.return : typeof query.site === "string" && query.site !== embedSite ? query.site : null);
+  const embed = embedSite && !pkgOf(query) ? { site: embedSite, back: embedBack } : null;
+
   const { w, money, lang } = speech(store);
   const b = bookingWords(store.language);
-  const notice = b.notices[status] ?? null;
   // Booking from a package (lib/call-packages.ts): how many are left, said up top.
   const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
   const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
+  // A draft call is left off the store (lib/catalog.ts): its title, price and
+  // times are for the store's owner and team, signed in, and for a package
+  // already bought for it (a booking already paid is moved above, read from
+  // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
+  if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const pkgState = pkg ? await packageState(pkg.bought) : null;
-  const open = canSellProduct(store, product) && !(await isSoon(store, product.id).catch(() => false));
+  // Coming soon or not (lib/waitlist.ts): a state that could not be read is unknown, never "launched" (rule 24), so the
+  // calendar books and sells nothing then and says the times could not be read, as when the times themselves cannot be.
+  const soon = await isSoon(store, product.id).catch(() => null);
+  const sellable = canSellProduct(store, product);
+  const open = sellable && soon === false;
+  const unread = sellable && soon === null;
   // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".
   const withKey = typeof query.with === "string" && /^[0-5]$/.test(query.with) ? query.with : "";
-  const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null) : null;
+  // One of a call's lengths, each with its price (lib/call-lengths.ts): asked for by its link; the times are read at it,
+  // except on a team, which reads its hosts' times at the call's own length and says so (read.team).
+  const asked = typeof query.length === "string" ? query.length : undefined;
+  // The times are read at the length asked for only where lengths are offered at all (offeredLengths): with a deposit,
+  // for one, the page books the call's own length, so it shows that length's times.
+  const offerable = !pkgToken && product.call.kind === "weekly" && offeredLengths(product.call, product.priceCents, { pkg: false, team: false }).length > 0;
+  const askedLength = offerable ? bookingLength(product.call, product.priceCents, asked) : null;
+  const read = open ? await slotsForProduct(store, product, withKey ? { key: withKey } : null, askedLength?.minutes ?? null) : null;
   const hostChoices = (read && "hosts" in read ? read.hosts : null) ?? [];
+  // Offered only where each can be booked and charged (holdAndCheckout): never from a package, with a deposit or on a team.
+  const choices = read ? offeredLengths(product.call, product.priceCents, { pkg: Boolean(pkgToken), team: read.team }) : [];
+  // Each length's link keeps the rest of the address (a campaign's tags, a chosen host) and goes straight to the times.
+  const lengthHref = (minutes: number) => {
+    const next = new URLSearchParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (key === "length" || key === "status" || typeof value !== "string") continue;
+      next.set(key, value);
+    }
+    next.set("length", String(minutes));
+    return `?${next.toString()}#times`;
+  };
+  const chosen = choices.length ? askedLength ?? choices[0] : null;
+  // A length taken off meanwhile asks for a length again only while the page still offers several (bookingNotice).
+  const notice = bookingNotice(b, status, choices, product.call.minutes);
   const pickedHost = (read && "picked" in read ? read.picked : null) ?? null;
   const days = read ? read.days : null;
   const starts = days ? days.flatMap((day) => day.starts) : [];
@@ -79,7 +127,7 @@ export default async function BookPage({ params, searchParams }: Params) {
   if (read && read.paid.length) after(() => catchUpBookings(store, read.paid, SITE_URL));
   const setup = product.call;
   const live = setup.kind === "live";
-  const price = money(product.priceCents);
+  const price = money(chosen ? chosen.cents : product.priceCents);
   const fromPackage = Boolean(pkg && pkgState && pkgState.left > 0);
   // A booking with a deposit: a discount code is typed here and taken off the whole price (lib/deposit-code.ts),
   // shown only when the checkout would charge a deposit, as app/api/store/book reads it.
@@ -116,8 +164,10 @@ export default async function BookPage({ params, searchParams }: Params) {
               </h1>
               <p className="st-price text-base">{price}</p>
             </div>
-            <p className="st-muted mt-2 text-sm font-semibold">{callLine(setup, b)}</p>
+            <p className="st-muted mt-2 text-sm font-semibold">{callLine(chosen ? { ...setup, minutes: chosen.minutes } : setup, b)}</p>
             {deposit ? <p className="mt-2 text-sm" data-call-due="">{b.depositRest(money(deposit.rest), store.name)}</p> : null}
+            {/* The creator's cancellation deadline (lib/call-setup.ts), before paying; a session from a package pays nothing here. */}
+            {setup.cancelHours && !fromPackage ? <p className="mt-2 text-sm" data-call-cancel="">{b.cancelPolicy(setup.cancelHours, store.name)}</p> : null}
             {product.summary ? <p className="st-muted mt-3 leading-relaxed">{product.summary}</p> : null}
 
             {pkgState ? (
@@ -142,7 +192,7 @@ export default async function BookPage({ params, searchParams }: Params) {
               </div>
             ) : null}
 
-            {!open ? (
+            {!open && !unread ? (
               <div className="st-note mt-6">
                 <p className="font-bold" style={{ color: "var(--st-text)" }}>{b.notices.unavailable.title}</p>
                 <p className="mt-1 text-sm">{b.closedBody(store.name)}</p>
@@ -162,6 +212,27 @@ export default async function BookPage({ params, searchParams }: Params) {
               />
             ) : (
               <>
+                {chosen ? (
+                  // Each length is a link to its own times, followed only when the buyer asks (3.2.5): what is marked is
+                  // always what the times below and the button book and charge, never a choice the page has not drawn.
+                  <div className="mt-6" role="group" aria-labelledby={`length-${product.id}`} data-length-pick="">
+                    <p id={`length-${product.id}`} className="font-bold" style={{ color: "var(--st-text)" }}>{b.lengthPick}</p>
+                    <ul className="mt-2 grid gap-2">
+                      {choices.map((l) => (
+                        <li key={l.minutes}>
+                          <a
+                            href={lengthHref(l.minutes)}
+                            aria-current={l.minutes === chosen.minutes ? "true" : undefined}
+                            className={`btn ${l.minutes === chosen.minutes ? "st-btn" : "st-btn-ghost"} w-full justify-start`}
+                          >
+                            {b.lengthOption(l.minutes, money(l.cents))}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-sm">{b.lengthChosen(b.lengthOption(chosen.minutes, money(chosen.cents)))}</p>
+                  </div>
+                ) : null}
                 {hostChoices.length ? (
                   // A plain form: the times are drawn again for the person chosen, only when the buyer asks (3.2.2).
                   <form method="get" className="mt-6" data-host-pick="">
@@ -174,11 +245,13 @@ export default async function BookPage({ params, searchParams }: Params) {
                           <option key={h.key} value={h.key}>{h.label}</option>
                         ))}
                       </select>
-                      <button type="submit" className="btn btn-secondary">{b.hostShow}</button>
+                      <button type="submit" className="btn st-btn-ghost">{b.hostShow}</button>
                     </div>
                     {pickedHost ? <p className="mt-2 text-sm" role="status">{b.withHost(pickedHost.label)}</p> : null}
                   </form>
                 ) : null}
+                {/* Where a length's link lands, so the page scrolls and focus starts at the times it changed (2.4.3). */}
+                <span id="times" />
                 <SlotPicker
                   starts={starts}
                   creatorTz={setup.tz}
@@ -187,7 +260,10 @@ export default async function BookPage({ params, searchParams }: Params) {
                   seatsLeft={setup.seats > 1 ? seatLabels(read.left, b) : undefined}
                   pkg={fromPackage ? pkgToken : undefined}
                   host={pickedHost}
-                  words={{ ...slotWords(store, b, setup.minutes, payNow, false, fromPackage), code }}
+                  minutes={chosen ? chosen.minutes : undefined}
+                  shownCents={chosen ? chosen.cents : undefined}
+                  embed={embed}
+                  words={{ ...slotWords(store, b, chosen ? chosen.minutes : setup.minutes, payNow, false, fromPackage), code }}
                 />
               </>
             )}
@@ -195,25 +271,21 @@ export default async function BookPage({ params, searchParams }: Params) {
         </div>
 
         <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(true, false), store.name)}</p>
+        {/* Only while the calendar is open: a closed one sells nothing here (WhoAnswers also leaves out test mode and the demo store). */}
+        {open ? <WhoAnswers store={store} /> : null}
     </Shell>
   );
 }
 
-/** What the time picker says, for this page, in the store's language. */
-function slotWords(store: Store, b: BookingWords, minutes: number, price: string, move: boolean, fromPackage: boolean): SlotWords {
-  const { w, lang } = speech(store);
-  return {
-    locale: lang.locale,
-    pickDay: b.pickDay,
-    pickTime: w.pickTime,
-    noneTitle: move ? b.noOtherTimes : b.noTimes,
-    noneBody: move ? b.noOtherTimesBody : b.noTimesBody,
-    yours: b.timesInYours("{zone}"),
-    creators: b.timesInCreators("{zone}"),
-    chosen: b.chosenLength(minutes),
-    submit: move ? b.moveToTime : fromPackage ? b.bookFromPackage : b.continueToPay(price),
-    note: move ? b.moveNoCharge : fromPackage ? b.packageNoCharge : b.timeKept,
-  };
+/** The length a booking moves at, as moveBooking keeps it (lib/call-lengths.ts, ownLength). */
+/** A package's token in the address, when there is one: a session from a package is never the listed site's sale. */
+function pkgOf(query: { [key: string]: string | string[] | undefined }): boolean {
+  return typeof query.pkg === "string" && query.pkg.length > 0;
+}
+
+function movesAt(setup: CallListing["call"], booking: { start: number; end: number }): number {
+  const kept = ownLength(setup, booking.end - booking.start);
+  return typeof kept === "number" ? kept : setup.minutes;
 }
 
 /** What the session picker says, for this page, in the store's language. */
@@ -246,7 +318,7 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <main id="content" className="relative mx-auto max-w-xl px-4 py-12 sm:py-16">
+      <main id="content" className="st-measure relative mx-auto max-w-xl px-4 py-12 sm:py-16">
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -260,7 +332,7 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
         </div>
         {children}
         <div className="mt-6 text-center">
-          <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+          <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {w.backTo(store.name)}
           </Link>
           <StoreTracking store={store} presence />
@@ -337,8 +409,11 @@ async function MovePage({
   const moved = status === "moved";
   const notice = moved ? null : b.moveNotices[status] ?? null;
   const blocked = whyNotMove(setup, booking.start, booking.moves);
-  const movable = blocked === null;
-  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start) : null;
+  // A paid booking of a length no call may have is never moved at a guess (moveBooking refuses it): said as such,
+  // never as times that could not be read, which a refresh would not change.
+  const lengthStuck = ownLength(setup, booking.end - booking.start) === "unknown";
+  const movable = blocked === null && !lengthStuck;
+  const offer = movable && !moved ? await slotsForMove(store, product, session, booking.start, booking.end - booking.start) : null;
   const leftMoves = MAX_MOVES - booking.moves;
   const until = movableUntil(setup, booking.start);
   const price = money(product.priceCents);
@@ -386,7 +461,9 @@ async function MovePage({
                 ? b.moveNotices.limit.title
                 : blocked === "late"
                   ? b.moveNotices.late.title
-                  : b.noOtherSession}
+                  : lengthStuck
+                    ? b.lengthNotMovable
+                    : b.noOtherSession}
             </p>
             <p className="mt-1 text-sm">{isHouseStore(store) ? DEMO_STAYS_NOTE : b.staysAsIs(store.name)}</p>
           </div>
@@ -423,7 +500,7 @@ async function MovePage({
                 productId={product.id}
                 seatsLeft={setup.seats > 1 ? seatLabels(offer.left, b) : undefined}
                 move={session}
-                words={slotWords(store, b, setup.minutes, price, true, false)}
+                words={slotWords(store, b, movesAt(setup, booking), price, true, false)}
               />
             )}
           </>

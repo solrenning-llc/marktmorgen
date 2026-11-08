@@ -2,10 +2,19 @@ import type { NextRequest } from "next/server";
 import { setTax, storeForEmail } from "@/lib/store";
 import { taxStatus } from "@/lib/tax";
 import { guardStoreWrite } from "@/lib/store-request";
+import { runningSeries, seriesUnknownResponse } from "@/lib/call-series-open";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * Switches Stripe Tax on or off for the store's checkouts. On only once
- * Stripe says the creator's tax setup is complete.
+ * Stripe says the creator's tax setup is complete, and never while a series
+ * of calls is running ("series", with how many; C2-94): its later sessions
+ * are charged without a checkout, so Stripe Tax would not add the tax to
+ * them while the rest of the store charges it on top
+ * (lib/call-series-billing.ts, seriesBillingProblem). A count Redis
+ * answered in an unknown shape is not "none": switching on is refused
+ * ("unavailable", 503) with nothing saved. Switching it off, or the tax
+ * number box and invoices, stays free.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings");
@@ -22,6 +31,14 @@ export async function POST(request: NextRequest) {
     if (enabled) {
       const store = await storeForEmail(guarded.ref);
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
+      if (!store.tax.enabled) {
+        const running = await runningSeries(store).catch((error: unknown) => {
+          if (error instanceof UnknownReplyError) return null;
+          throw error;
+        });
+        if (running === null) return seriesUnknownResponse();
+        if (running > 0) return Response.json({ ok: false, error: "series", running }, { status: 409 });
+      }
       if (!store.stripeAccountId) return Response.json({ ok: false, error: "stripe" }, { status: 400 });
       const status = await taxStatus(store);
       if (status.state !== "active") {

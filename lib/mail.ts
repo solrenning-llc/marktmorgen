@@ -15,8 +15,8 @@
  */
 import { bodyHtml, bodyText } from "@/lib/mail-body";
 import { lookColours } from "@/lib/store-look";
-import { NIMBUS_FROM, type BatchMessage, hasResend, sendBatch, sendEmail, sentThisMonth } from "@/lib/email";
-import { SES_BULK_SHARE, isSesConfigured, sesBulkRoom, sesReady, sesSentLast24h } from "@/lib/ses";
+import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
+import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
 import { tokensFor } from "@/lib/contacts";
@@ -171,7 +171,11 @@ export function listCeiling(): number {
  * hours that email sent many at a time may take (lib/ses.ts). Amazon's own
  * number is read from Amazon, and grows as the account proves itself.
  */
-export async function senderRoom(): Promise<number> {
+export async function senderRoom(listOnly = false): Promise<number> {
+  if (listOnly) {
+    const state = isSesConfigured() ? await sesReady() : null;
+    return state ? (await sesBulkRoom(state)) ?? 0 : 0;
+  }
   const resendUsed = hasResend() ? await sentThisMonth() : 0;
   // Zero admission when usage is unknown, not a claim of zero usage.
   if (resendUsed === null) return 0;
@@ -192,50 +196,39 @@ const toldKey = (now = new Date()) => `nl:sender:${now.toISOString().slice(0, 7)
  */
 async function tellSenderIsFull(): Promise<void> {
   try {
-    const claim: unknown = await redisPipeline([["SET", toldKey(), "1", "NX", "EX", 40 * 86_400]]);
-    if (!Array.isArray(claim)) return;
-    const length = Object.getOwnPropertyDescriptor(claim, "length");
+    const key = toldKey();
+    const read: unknown = await redisPipeline([["GET", key]]);
+    if (!Array.isArray(read)) return;
+    const length = Object.getOwnPropertyDescriptor(read, "length");
     if (!length || !("value" in length) || length.value !== 1) return;
-    const first = Object.getOwnPropertyDescriptor(claim, "0");
-    // The existing claim may have applied before losing its acknowledgement.
-    // Only a confirmed fresh claim authorizes this bounded owner email.
-    if (!first || !("value" in first) || first.value !== "OK") return;
-    const quota = senderQuota();
-    const resendSent = await sentThisMonth();
-    const amazon = isSesConfigured() ? await sesReady() : null;
-    const amazonSent = amazon ? await sesSentLast24h() : null;
-    const amazonQuota = amazon?.max24 === -1
-      ? `Amazon SES reports no daily quota ceiling for this account. Its sending rate is ${amazon.rate.toLocaleString("en-US")} emails per second. Each store's existing email allowance and delivery controls still apply.`
-      : amazon ? `This account allows ${amazon.max24.toLocaleString("en-US")} in any 24 hours; creators' list email uses up to ${Math.floor(amazon.max24 * SES_BULK_SHARE).toLocaleString("en-US")} of them. Amazon raises that number by itself as the account proves itself, and a higher one can be asked for in the Amazon SES console, under Account dashboard.` : "";
-    await sendEmail({ meter: { by: "company" },
+    const previous = Object.getOwnPropertyDescriptor(read, "0");
+    if (!previous || !("value" in previous) || previous.value !== null) return;
+    // One canonical payload for the period, including retries through a
+    // different admission route. Changing usage must not change its receipt.
+    const accepted = await sendEmail({ idempotencyKey: key, meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
-      subject: resendSent === null ? "List email is waiting: sender usage cannot be confirmed" : "List email is waiting: the sender's monthly volume is nearly used",
+      subject: "List email is waiting for Amazon SES",
       text: [
-        ...(amazon
-          ? [
-              `${amazonSent === null ? "Amazon SES usage in the last 24 hours cannot currently be confirmed." : `In the last 24 hours ${amazonSent.toLocaleString("en-US")} emails went out through Amazon SES.`} ${amazonQuota}`,
-              "",
-              "List admission also depends on Resend's confirmed monthly room:",
-              "",
-            ]
-          : []),
-        resendSent === null ? "Resend usage this month cannot currently be confirmed. List email waits until its available room can be confirmed." : `This month ${resendSent.toLocaleString("en-US")} emails have gone out through Resend, of every kind.`,
-        `Resend's configured quota is ${quota.toLocaleString("en-US")} a month and its whole-account ceiling is ${(quota * SENDER_PAUSES_AT).toLocaleString("en-US")}; creators' list email is held at ${listCeiling().toLocaleString("en-US")}.`,
-        "",
+        "Creator list email sends only through Amazon SES.",
+        "Sending waits until availability can be confirmed.",
+        "Resend is not used for this list batch. This notice does not confirm delivery.",
+        "Account settings, sending capacity or usage may need attention. This notice does not identify the current cause or confirm delivery.",
+        "Service email can use Resend only while the account review, credential binding and paid fallback quota are confirmed. Missing proof blocks that route.",
         "Sign-in links, receipts and deliveries keep their existing sending route.",
-        "",
-        resendSent === null ? "Usage is checked again automatically. Waiting email resumes when room can be confirmed." : "To let list email continue before the month turns: move the sender to a larger plan, then set SENDER_MONTHLY_QUOTA on the host to that plan's number of emails. Waiting emails go out by themselves after that.",
+        "Availability is checked again automatically. Check account status and sending usage in the providers' consoles before considering a plan change.",
       ].join("\n"),
     });
+    // One additional command after acceptance; no mark for false/unknown.
+    if (accepted === true) await redisPipeline([["SET", key, "1", "NX", "EX", 40 * 86_400]]);
   } catch (error) {
     console.error("telling the inbox the sender is nearly full failed", error);
   }
 }
 
 /** Whether `n` more list emails fit under the sender's ceiling; says so once when they do not. */
-async function senderTakes(n: number): Promise<boolean> {
-  if ((await senderRoom()) >= n) return true;
+async function senderTakes(n: number, listOnly = false): Promise<boolean> {
+  if ((await senderRoom(listOnly)) >= n) return true;
   await tellSenderIsFull();
   return false;
 }
@@ -280,7 +273,7 @@ export async function releaseDay(n: number): Promise<void> {
 }
 
 /** Takes `n` from the month (and the company's day), or nothing when that would pass either. */
-export async function reserve(store: Store, n: number): Promise<Reserved> {
+export async function reserve(store: Store, n: number, listOnly = false): Promise<Reserved> {
   if (!Number.isSafeInteger(n) || n<0) return "month";
   if(n===0)return "ok";
   if(!store.listId)return "month";
@@ -293,8 +286,25 @@ export async function reserve(store: Store, n: number): Promise<Reserved> {
   if(!Number.isSafeInteger(allowance) || allowance<0 || n>allowance)return "month";
   if(store.period?.funded===true && !(await reservePaidResourceWindow(store)))return "unavailable";
   try {
-    if(!(await senderTakes(n)))return "sender";
     const key=usedKey(store.listId,window),cap=dailyCap(),day=dayKey();
+    if(!listOnly) {
+      if(!(await senderTakes(n)))return "sender";
+      const results=await redisPipeline([["INCRBY",key,n],["EXPIRE",key,70*86400],["INCRBY",day,n],["EXPIRE",day,3*86400]]);
+      if(results.length!==4 || results[1]!==1 || results[3]!==1)return "unavailable";
+      const total=confirmedCount(results[0],n),today=confirmedCount(results[2],n);
+      if(total===null || today===null)return "unavailable";
+      const overMonth=total>allowance,overDay=cap>0 && today>cap;
+      if(!overMonth && !overDay)return "ok";
+      await redisPipeline([["DECRBY",key,n],["DECRBY",day,n]]);
+      return overMonth?"month":"day";
+    }
+    // No SES setup is a known sender wait and needs no temporary ledger work.
+    if(!isSesConfigured()) {
+      await senderTakes(n, true);
+      return "sender";
+    }
+    // For list delivery, reserve the local limits before reading provider
+    // capacity. A known month/day wait needs no SES 24-hour usage read.
     const results=await redisPipeline([["INCRBY",key,n],["EXPIRE",key,70*86400],["INCRBY",day,n],["EXPIRE",day,3*86400]]);
     // A missing acknowledgement may still have consumed capacity. Never
     // refund it or dispatch a provider call on an ambiguous response.
@@ -302,9 +312,16 @@ export async function reserve(store: Store, n: number): Promise<Reserved> {
     const total=confirmedCount(results[0],n),today=confirmedCount(results[2],n);
     if(total===null || today===null)return "unavailable";
     const overMonth=total>allowance,overDay=cap>0 && today>cap;
-    if(!overMonth && !overDay)return "ok";
-    await redisPipeline([["DECRBY",key,n],["DECRBY",day,n]]);
-    return overMonth?"month":"day";
+    if(overMonth || overDay) {
+      await redisPipeline([["DECRBY",key,n],["DECRBY",day,n]]);
+      return overMonth?"month":"day";
+    }
+    if(!(await senderTakes(n, true))) {
+      // No provider was attempted, so the confirmed reservation returns.
+      await redisPipeline([["DECRBY",key,n],["DECRBY",day,n]]);
+      return "sender";
+    }
+    return "ok";
   } catch { return "unavailable"; }
 }
 
@@ -409,7 +426,8 @@ export function render(
   // Said only in a sequence's email to somebody who allowed it, with the way to stop it.
   const counting = Boolean(readerKey && token && !door && tag?.medium === "sequence");
   const stopCounting = counting ? `${SITE_URL}/unsubscribe?l=${token}` : "";
-  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><body style="margin:0;padding:0;background:#f7f5f0">
+  // The subject as the document's title and the character set said, for an app or browser that opens the HTML on its own.
+  const html = `<!doctype html><html lang="${escape(door?.lang ?? LANGUAGES[parseLanguage(store.language)].locale)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject.slice(0, MAX_SUBJECT))}</title></head><body style="margin:0;padding:0;background:#f7f5f0">
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
 <div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body, tag ? (href) => taggedLink(href, store, tag, counting ? readerKey : undefined) : undefined, store.look ? lookColours(store.look).accent : undefined)}</div>
 <div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">
@@ -505,7 +523,7 @@ export async function sendTo(
   // A missing checkpoint is not evidence that this list is safe to send.
   if (pause === undefined) return { done, rest: emails, stopped: "retry" };
   if (pause) return { done, rest: emails, stopped: "paused", pause };
-  const tags = healthTags(store, true);
+  const tags = healthTags(store, true, tag?.campaign);
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
     if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };
@@ -514,14 +532,24 @@ export async function sendTo(
     const portion = await rampRoom(watched, Math.min(BATCH_SIZE, room, emails.length - i));
     if (portion <= 0) return { done, rest: emails.slice(i), stopped: "portion" };
     const chunk = emails.slice(i, i + portion);
-    const reserved = await reserve(store, chunk.length);
+    const reserved = await reserve(store, chunk.length, true);
     if (reserved !== "ok") {
       await rampBack(watched, chunk.length);
       return { done, rest: emails.slice(i), stopped: reserved === "month" ? "allowance" : reserved === "unavailable" ? "retry" : reserved };
     }
     // In a sequence, those who allowed their link use to be seen get links that say so (lib/mail-clicks.ts).
     const counting = tag?.medium === "sequence" ? new Set<string>() : undefined;
-    const tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    // Who may still be written to, and their links, read in their exact shape (lib/contacts.ts tokensFor): an
+    // unknown answer is not "they all left", so nobody in this batch is counted as gone. Nothing went to the
+    // provider, so what was taken for it is given back and the batch is tried again later.
+    let tokens: Map<string, string>;
+    try {
+      tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
+    } catch {
+      await release(store, chunk.length);
+      await rampBack(watched, chunk.length);
+      return { done, rest: emails.slice(i), stopped: "retry" };
+    }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
       .filter((email) => tokens.has(email))
@@ -531,7 +559,14 @@ export async function sendTo(
         return { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags };
       });
     if (messages.length) await paced();
-    const outcome = await sendBatch(messages, `${keyBase}:${i}:${chunk.length}`, { by: "monthly" });
+    const outcome = await sendListBatch(messages, `${keyBase}:${i}:${chunk.length}`, { by: "monthly" });
+    if (outcome === "waiting") {
+      // This invocation made no provider send. Existing allowance/portion
+      // reservations may be returned; unknown acceptance never uses this path.
+      await release(store, chunk.length);
+      await rampBack(watched, chunk.length);
+      return { done, rest: emails.slice(i), stopped: "sender" };
+    }
     if (outcome !== "sent") {
       // Dispatch may have succeeded before its acknowledgement was lost.
       // Keep attempted capacity reserved; retries consume new capacity.

@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioEmptyState } from "@/components/empty-state";
 import { FORM_STARTERS } from "@/lib/form-starters";
 import { FormAnswers } from "@/components/form-answers";
 import { FormResponseDeal } from "@/components/form-response-deal";
@@ -42,7 +43,7 @@ import {
 } from "@/lib/forms";
 
 /** One saved form, with how many answers it has kept and the newest of them. */
-export type SavedForm = { form: FormDef; total: number; latest: (FormResponse & { opportunityRef?: string })[] };
+export type SavedForm = { form: FormDef; total: number | null; latest: (FormResponse & { opportunityRef?: string })[] };
 
 const MESSAGES: Record<string, string> = {
   name: "Give the form a name. Only you see it.",
@@ -152,6 +153,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
         // Back to results by pointing answers: the points, categories and ranges are let go.
         return {
           id: d.id, name: d.name, button: d.button, doneHeading: d.doneHeading, doneBody: d.doneBody, offerList: d.offerList, updatedAt: d.updatedAt,
+          ...(d.opensAt ? { opensAt: d.opensAt } : {}), ...(d.closesAt ? { closesAt: d.closesAt } : {}),
           outcomes: d.outcomes.map((o) => ({ id: o.id, title: o.title, body: o.body, product: o.product })),
           fields: d.fields.map((f) => ({ ...f, options: f.options.map((o) => ({ id: o.id, label: o.label, outcome: o.outcome, ...(o.next ? { next: o.next } : {}) })) })),
         };
@@ -201,7 +203,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
 
       {saved.length === 0 && draft === null ? (
         <div className="mt-6 rounded-2xl bg-paper p-4 text-sm text-ink-soft ring-1 ring-line" data-form-starters="">
-          <p>No forms yet. Make one, then add a Form block to one of your pages under Pages and choose it there.</p>
+          <StudioEmptyState compact title="No forms yet" body="Make one, then add a Form block to one of your pages under Pages and choose it there." />
           {/* A ready example (487 [IT4], item 5): it opens in the editor below, unsaved, for you to change and save. */}
           <h3 id="form-starters-title" className="mt-3 font-semibold text-ink">Or start from an example</h3>
           <ul className="mt-2 space-y-2" aria-labelledby="form-starters-title">
@@ -236,15 +238,15 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
                   {form.name}
                   {isScored(form) ? <span className="tag">Scored quiz</span> : form.outcomes.length ? <span className="tag">Quiz</span> : null}
                 </p>
-                <p className="mt-1 text-sm text-ink-soft">{`${form.fields.length} ${form.fields.length === 1 ? "question" : "questions"} · ${total.toLocaleString("en-US")} ${total === 1 ? "answer" : "answers"} kept`}</p>
+                {total === null ? <p className="notice notice-warn mt-2" role="status">Answers could not be read right now. Reload this page to try again. You can still edit this form.</p> : <p className="mt-1 text-sm text-ink-soft">{`${form.fields.length} ${form.fields.length === 1 ? "question" : "questions"} · ${total.toLocaleString("en-US")} ${total === 1 ? "answer" : "answers"} kept`}</p>}
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {total > 0 ? (
+                {total !== null && total > 0 ? (
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpen(open === form.id ? null : form.id)}>
                     {open === form.id ? "Hide answers" : "See answers"}
                   </button>
                 ) : null}
-                {total > 0 ? (
+                {total !== null && total > 0 ? (
                   <a className="btn btn-secondary btn-sm" href={`${exportBase}${form.id}`}>
                     <Icon name="download" size={16} />
                     Download all answers
@@ -269,8 +271,8 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
                 )}
               </div>
             </div>
-            {open === form.id ? (
-              <FormAnswers form={form} latest={latest} total={total} canReview={dealStages.some(stage => stage.kind === "open")} blocked={draft !== null || dealDraft !== null} existingDeals={knownDeals} existingDealsAvailable={existingDealsAvailable} onReview={response => response.opportunityRef && setDealDraft({ form, response, responseRef: response.opportunityRef })} />
+            {open === form.id && total !== null ? (
+              <FormAnswers pdfBase={exportBase.replace("/forms/export?", "/forms/response-pdf?")} form={form} latest={latest} total={total} canReview={dealStages.some(stage => stage.kind === "open")} blocked={draft !== null || dealDraft !== null} existingDeals={knownDeals} existingDealsAvailable={existingDealsAvailable} onReview={response => response.opportunityRef && setDealDraft({ form, response, responseRef: response.opportunityRef })} />
             ) : null}
           </li>
         ))}
@@ -532,6 +534,8 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
           ) : null}
           {scoredDraft ? <QuizScoringCheck form={draft} onSpread={spread} /> : null}
 
+          <FormSchedule opensAt={draft.opensAt} closesAt={draft.closesAt} onChange={(next) => setDraft((d) => (d ? { ...withoutSchedule(d), ...next } : d))} />
+
           <p className="field-label mt-8">After sending</p>
           <div className="mt-2 grid gap-3 sm:grid-cols-2">
             <label className="block">
@@ -578,5 +582,58 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** A draft without its schedule, so a cleared time is left out rather than kept. */
+function withoutSchedule(d: FormDef): FormDef {
+  const rest = { ...d };
+  delete rest.opensAt;
+  delete rest.closesAt;
+  return rest;
+}
+
+/** Seconds as a datetime-local value in the creator's own time zone, and back. */
+const toLocal = (seconds: number | undefined): string => {
+  if (!seconds) return "";
+  const d = new Date(seconds * 1000);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`;
+};
+const fromLocal = (value: string): number | undefined => {
+  if (!value) return undefined;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : undefined;
+};
+
+/**
+ * When the form takes answers (639 [GL7](26)): an optional time it opens and
+ * one it closes, in the creator's own time zone. Before and after, the page
+ * says so instead of asking, and nothing is taken.
+ */
+function FormSchedule({ opensAt, closesAt, onChange }: { opensAt?: number; closesAt?: number; onChange: (next: { opensAt?: number; closesAt?: number }) => void }) {
+  const backwards = Boolean(opensAt && closesAt && closesAt <= opensAt);
+  return (
+    <fieldset className="mt-8 min-w-0">
+      <legend className="field-label">When it takes answers (optional)</legend>
+      <p id="form-schedule-help" className="mt-1 text-sm text-ink-soft">
+        In your own time zone. Leave both empty to take answers at any time. Before it opens and after it closes, the page says so instead of asking.
+      </p>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="field-label">Opens</span>
+          <input type="datetime-local" className="field mt-2" aria-describedby="form-schedule-help" value={toLocal(opensAt)} onChange={(e) => onChange({ ...(fromLocal(e.target.value) ? { opensAt: fromLocal(e.target.value) } : {}), ...(closesAt ? { closesAt } : {}) })} />
+        </label>
+        <label className="block">
+          <span className="field-label">Closes</span>
+          <input type="datetime-local" className="field mt-2" aria-describedby={`form-schedule-help${backwards ? " form-schedule-order" : ""}`} aria-invalid={backwards || undefined} value={toLocal(closesAt)} onChange={(e) => onChange({ ...(opensAt ? { opensAt } : {}), ...(fromLocal(e.target.value) ? { closesAt: fromLocal(e.target.value) } : {}) })} />
+        </label>
+      </div>
+      {backwards ? (
+        <p id="form-schedule-order" role="alert" className="notice notice-warn mt-2">
+          It closes before it opens, so the closing time will not be kept. Choose a closing time after the opening.
+        </p>
+      ) : null}
+    </fieldset>
   );
 }

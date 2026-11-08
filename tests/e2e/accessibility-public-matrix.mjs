@@ -1,10 +1,14 @@
+import {checkContentFocusTarget,checkCompiledContentTargets} from "./skip-content-focus.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {readFileSync} from "node:fs";
 import {resolve,join} from "node:path";
+import {checkHelpSearchAvailability} from "./help-search-availability.mjs";
 const root=resolve(".");
 const require=createRequire(join(root,"package.json"));
 const engine=process.env.E2E_BROWSER??"chromium";
+// WCAG 1.4.12 text spacing, applied the same way to the keyboard document and to the audit document.
+const TEXT_SPACING="*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}p{margin-bottom:2em!important}";
 if(!["chromium","firefox","webkit"].includes(engine))throw Error("Unsupported engine "+engine);
 const driver=require("playwright-core")[engine];
 const axe=readFileSync(require.resolve("axe-core/axe.min.js"),"utf8");
@@ -15,6 +19,10 @@ let browser,failed=0,cases=0;const gaps=[];
 try{
  let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error(output);try{up=(await fetch(origin)).ok;}catch{}if(up)break;await new Promise(resolve=>setTimeout(resolve,500));}if(!up)throw Error("Local app unavailable "+output);
  browser=await driver.launch();console.log("PUBLIC_MATRIX_ENGINE:"+JSON.stringify({requested:engine,actual:driver.name(),version:browser.version()}));
+ if(process.env.AX2_PUBLIC_STANDARD==="true"){
+  await checkCompiledContentTargets({browser,root});
+  await checkHelpSearchAvailability({browser,origin});
+ }
  for(const path of ["/","/pricing","/signin"])for(const width of [320,390,768,1280,1920])for(const mode of ["baseline","text-spacing","reduced-motion","forced-colors","reflow-320",...(process.env.AX2_PUBLIC_STANDARD==="true"?["dark"]:[])]){
   const viewportWidth=mode==="reflow-320"?320:width;
   const context=await browser.newContext({...(mode==="dark"?{colorScheme:"dark"}:{}),viewport:{width:viewportWidth,height:900},serviceWorkers:"block",reducedMotion:mode==="reduced-motion"?"reduce":"no-preference",forcedColors:mode==="forced-colors"?"active":"none"});
@@ -35,7 +43,7 @@ try{
    page.on("pageerror",error=>errors.push(String(error)));
    await context.route("**/*",route=>{const r=route.request(),url=new URL(r.url());if(!["GET","HEAD"].includes(r.method())){writes++;return route.abort();}if(url.origin!==origin){foreign++;return route.abort();}return route.continue();});
    const response=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});await restoreDarkAfterNavigation();if(response.status()!==200)throw Error("HTTP "+response.status());
-   if(mode==="text-spacing")await page.addStyleTag({content:"*{line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}p{margin-bottom:2em!important}"});
+   if(mode==="text-spacing")await page.addStyleTag({content:TEXT_SPACING});
    if(mode==="forced-colors"){
     const active=await page.evaluate(()=>matchMedia("(forced-colors: active)").matches);
     if(!active)gaps.push({path,width,mode,reason:"Engine did not activate forced-colors media after emulation request; real OS/device validation remains open."});
@@ -74,30 +82,18 @@ try{
     }
     if(!focused)throw Error("No keyboard target reached");
    }
-   // Keyboard proof above retains its real scrolled positions. Whole-document
-   // target geometry is evaluated at a stable origin, like the Studio/action matrices.
-   // Native focus may still be animating a smooth scroll in Chromium.
-   // Wait for the real keyboard scroll to finish before requesting audit origin.
-   await page.evaluate(()=>{document.activeElement?.blur?.();});
-   try{await page.waitForFunction(()=>{
-    const key=scrollX+","+scrollY,previous=window.__publicKeyboardScroll;
-    if(!previous||previous.key!==key){window.__publicKeyboardScroll={key,since:performance.now()};return false;}
-    return performance.now()-previous.since>=200;
-   },undefined,{timeout:10000});}catch(error){console.error("PUBLIC_SCROLL_DIAGNOSTIC:"+JSON.stringify({engine,path,width,stage:"keyboard-settlement",...await page.evaluate(()=>({x:scrollX,y:scrollY,state:window.__publicKeyboardScroll,active:document.activeElement?.tagName}))}));throw error;}
-   await page.evaluate(()=>{
-    delete window.__publicKeyboardScroll;
-    const root=document.documentElement;
-    window.__publicScrollStyle={value:root.style.getPropertyValue("scroll-behavior"),priority:root.style.getPropertyPriority("scroll-behavior")};
-    // Firefox may retain CSS smooth scrolling despite an "instant" request.
-    // Keyboard proof is already complete; only normalize whole-document audit geometry.
-    root.style.setProperty("scroll-behavior","auto","important");
-    window.scrollTo({top:0,left:0,behavior:"auto"});
-   });
-   try{await page.waitForFunction(()=>{
-    if(scrollX!==0||scrollY!==0){delete window.__publicOriginSince;return false;}
-    window.__publicOriginSince??=performance.now();return performance.now()-window.__publicOriginSince>=200;
-   },undefined,{timeout:10000});}catch(error){console.error("PUBLIC_SCROLL_DIAGNOSTIC:"+JSON.stringify({engine,path,width,stage:"audit-origin",...await page.evaluate(()=>({x:scrollX,y:scrollY,originSince:window.__publicOriginSince,active:document.activeElement?.tagName,scrollBehavior:getComputedStyle(document.documentElement).scrollBehavior}))}));throw error;}
-   await page.evaluate(()=>{delete window.__publicOriginSince;});
+   // The axe audit measures whole-document target geometry from the origin. In Firefox a
+   // page can go back to where the keyboard's smooth scroll left it after any scroll request:
+   // on #2818, scrollTo(0,0), behavior "instant" and documentElement.scrollTop=0 were each
+   // undone about 16 ms later, even 10 s after the Tab, with no focus change and no site
+   // code scrolling (C4-20261106-2310-C6-135). So, always, for every engine and case, the
+   // audit opens the same URL again in the same context and mode and measures that new
+   // document, which starts at (0,0). The keyboard proof above is unchanged.
+   await page.goto("about:blank");
+   const fresh=await page.goto(origin+path,{waitUntil:"networkidle",timeout:60000});await restoreDarkAfterNavigation();if(fresh.status()!==200)throw Error("HTTP "+fresh.status());
+   if(mode==="text-spacing")await page.addStyleTag({content:TEXT_SPACING});
+   const start=await page.evaluate(()=>({x:scrollX,y:scrollY}));
+   if(start.x!==0||start.y!==0)throw Error("Audit document did not start at the origin "+JSON.stringify(start));
    if(mode==="dark"&&!await page.evaluate(()=>matchMedia("(prefers-color-scheme: dark)").matches))throw Error("Dark color-scheme request not honored");
    await page.addScriptTag({content:axe});
    const report=await page.evaluate(async()=>{
@@ -116,6 +112,7 @@ try{
    if(report.incomplete.length)gaps.push({path,width,mode,manualReview:report.incomplete});
    console.log("PUBLIC_MATRIX_CASE:"+JSON.stringify({engine,path,width,mode,viewportWidth,writes,foreign,...report,errors}));
    if(report.violations.length||errors.length||writes)failed++;
+   if(mode==="baseline"&&width===390)await checkContentFocusTarget({context,origin,path});
    // After preserving the baseline audit, exercise a real mobile-to-desktop
    // change. A CSS-hidden drawer must not retain its scroll lock or focus.
    if(path==="/pricing"&&width===390&&mode==="baseline"){ // VS1: the shared drawer is on every page but the home page and /pricing, which share the home page's short menu; it is exercised on a feature page, after the /pricing audit above.
@@ -164,12 +161,55 @@ try{
     await posted;
     if(recoveryPosts!==1)throw Error("Corrected recovery input did not submit exactly once");
     console.log("PENDING_SUBMIT_VALIDATION_REGRESSION:"+JSON.stringify({engine,emptyRetry:true,malformedRetry:true,validKeyboardPost:1,intercepted:true}));
+
+    // The actual help page and its hydrated search: no account, API or test-only UI.
+    // Preserve the entry-page audit above; these are bounded navigation regressions.
+    await page.waitForURL(origin+"/api/auth/lost",{waitUntil:"load"});
+    for(const helpWidth of [390,1280]){
+     await page.setViewportSize({width:helpWidth,height:900});
+     await page.goto(origin+"/help#%",{waitUntil:"networkidle"});
+     const search=page.getByRole("searchbox",{name:"Search the help center",exact:true});
+     const sectionLink=page.getByRole("navigation",{name:"Help sections",exact:true}).locator("a").first();
+     const sectionId=(await sectionLink.getAttribute("href")).slice(1);
+     const answerId=await page.locator("details[data-help-item]").last().getAttribute("id");
+     if(!sectionId||!answerId)throw Error("Help navigation fixture is incomplete");
+     await search.fill("zzzz-no-answer-fixture");
+     await page.waitForFunction(()=>document.querySelectorAll("details[data-help-item]:not([hidden])").length===0);
+     await sectionLink.focus();await page.keyboard.press("Enter");
+     await page.waitForFunction(id=>{
+      const field=document.querySelector("#help-search"),section=document.getElementById(id);
+      return field?.value===""&&section&&!section.hidden&&section.getBoundingClientRect().height>0;
+     },sectionId);
+     // The current fragment has not changed: following it again emits no hashchange.
+     await search.fill("zzzz-no-answer-fixture");
+     await page.waitForFunction(()=>document.querySelectorAll("details[data-help-item]:not([hidden])").length===0);
+     await sectionLink.focus();await page.keyboard.press("Enter");
+     await page.waitForFunction(id=>document.querySelector("#help-search")?.value===""&&!document.getElementById(id)?.hidden,sectionId);
+     await search.fill("zzzz-no-answer-fixture");
+     await page.waitForFunction(()=>document.querySelectorAll("details[data-help-item]:not([hidden])").length===0);
+     await page.goto(origin+"/help#"+encodeURIComponent(answerId));
+     await page.waitForFunction(id=>{
+      const answer=document.getElementById(id),section=answer?.closest("section[data-help-section]");
+      return document.querySelector("#help-search")?.value===""&&answer?.open&&!answer.hidden&&section&&!section.hidden;
+     },answerId);
+     if(!await page.locator("details[data-help-item]").last().isVisible())throw Error("Help answer is still hidden after its link");
+     await search.fill("Stripe");
+     await page.waitForFunction(()=>document.querySelector("#help-search")?.value==="Stripe"&&document.querySelector("#help-search")?.getAttribute("aria-describedby")&&document.querySelectorAll("details[data-help-item][hidden]").length>0);
+     for(const fragment of ["missing-help-answer-fixture","%E0%A4%A"]){
+      await page.goto(origin+"/help#"+fragment);
+      // Let the real hashchange handler run before checking that it kept the search.
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      if(await search.inputValue()!=="Stripe")throw Error("Unrelated or malformed help fragment cleared the search");
+     }
+     if(errors.length||writes)throw Error("Help navigation raised an error or attempted a write: "+errors.join("; "));
+     console.log("HELP_FRAGMENT_NAVIGATION_REGRESSION:"+JSON.stringify({engine,width:helpWidth,malformedEntry:true,keyboardSection:true,repeatedSection:true,hiddenAnswer:true,queryPreserved:true,writes,foreign}));
+    }
    }
 
   }catch(error){failed++;console.error("PUBLIC_MATRIX_FAILURE:"+JSON.stringify({engine,path,width,mode,error:String(error)}));}
   finally{cases++;await context.close();}
  }
  console.log("PUBLIC_MATRIX_OPEN_GAPS:"+JSON.stringify(gaps));
- console.log("PUBLIC_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,failed,gaps:gaps.length,scope:"Three public entry journeys only. Synthetic emulation; reflow320 is not real browser400% zoom. No real-device, assistive-user or whole-product AAA certification."}));
+ console.log("PUBLIC_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,failed,gaps:gaps.length,scope:"Three public entry journeys and help fragment navigation regressions. Synthetic emulation; reflow320 is not real browser400% zoom. No real-device, assistive-user or whole-product AAA certification."}));
 }finally{if(browser)await browser.close();app.kill("SIGTERM");}
 process.exitCode=failed?1:0;

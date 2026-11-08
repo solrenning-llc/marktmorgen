@@ -44,7 +44,10 @@
  * counted for the creator's notices.
  */
 import { onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { signedOf } from "@/lib/redis-count";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
@@ -72,7 +75,25 @@ const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
 
 type Row = HeldSub & Record<string, unknown>;
+/**
+ * Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing.
+ * A reply that is not an object (a JSON null, a string, a number) is not its own either, never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 type Cursor = { h: number; p: string };
+
+/**
+ * The rows of a list or search Stripe gave (rule 30). A reply that is not one
+ * (a JSON null, a string, a number, an object with no data array) is not an
+ * empty list, which would read as nothing to hold and the last page: it
+ * throws, so the member is tried again and the pages read again (Claude 6 on
+ * #3098, same class). The rows themselves are checked by each caller.
+ */
+const listOf = (reply: unknown): unknown[] => {
+  if (reply === null || typeof reply !== "object" || !Array.isArray((reply as { data?: unknown }).data)) throw new StripeListUnreadable("a list or search page with no data array");
+  return (reply as { data: unknown[] }).data;
+};
 
 const parseCursor = (raw: unknown): Cursor => {
   try {
@@ -118,9 +139,25 @@ async function eachSold(store: Store, folder: string, field: string, until: numb
     query.append("expand[]", "data.customer");
     if (cursor.p) query.set("page", cursor.p);
     const found = await onAccount("GET", account, `/subscriptions/search?${query}`);
-    if (!(await each(Array.isArray(found.data) ? (found.data as Row[]) : []))) return false;
+    // Only the store's own sales of the handle searched (rule 30): a row the search gave that names another handle,
+    // or none, is not this store's member, and is never held, let go or written down.
+    const listed = listOf(found);
+    // Whether there is more is said exactly, or the page is not known to be the last (Claude 6 on #3108, rule 24):
+    // done on a page that does not say would leave the next pages' members never held, or held for good.
     const next = typeof found.next_page === "string" ? found.next_page : "";
-    cursor = found.has_more === true && next ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };
+    if (typeof found.has_more !== "boolean" || (found.has_more && !next)) {
+      console.error("plan-closing: Stripe's search did not say whether more subscriptions follow; tried again");
+      return false;
+    }
+    // A row that is not an object is not "another store's" (Claude 4 on #3108): the page is read again, never passed.
+    if (listed.some((row) => row === null || typeof row !== "object" || Array.isArray(row))) {
+      console.error("plan-closing: Stripe's search gave a subscription that could not be read; tried again");
+      return false;
+    }
+    const rows = listed.filter((row): row is Row => (row as Row).metadata?.store === handles[cursor.h]);
+    if (rows.length < listed.length) console.error(`plan-closing: Stripe's search gave ${listed.length - rows.length} subscription(s) of another store; left alone`);
+    if (!(await each(rows))) return false;
+    cursor = found.has_more ? { h: cursor.h, p: next } : { h: cursor.h + 1, p: "" };
     await redisPipeline([["HSET", workKey(folder), field, JSON.stringify(cursor)]]);
   }
   if (cursor.h >= handles.length) {
@@ -139,11 +176,17 @@ export async function startCallBudget(folder: string, calls: number): Promise<vo
  * Takes `n` calls, all or none: from the budget ("calls"), or from the calls
  * set aside for refunds ("rcalls", REFUND_CALLS_PER_MEMBER for each member
  * held with a payment to give back), which nothing else may use.
+ * Throws UnknownReplyError when HINCRBY's total is not a whole number
+ * (CX-123 rule 24): no call is made on it, and nothing is given back, since
+ * it is not known whether the take ran; the callers count the member as not
+ * reached (holdRows marks it to try again, giveBackUnused stops).
  */
 export async function takeCalls(folder: string, n: number, from: "calls" | "rcalls" = "calls"): Promise<boolean> {
   if (n <= 0) return true;
-  const [left] = await redisPipeline([["HINCRBY", workKey(folder), from, -n]]);
-  if (Number(left) >= 0) return true;
+  const replies = repliesFor(await redisPipeline([["HINCRBY", workKey(folder), from, -n]]), 1);
+  const left = replies ? signedOf(replies[0]) : null;
+  if (left === null) throw new UnknownReplyError("a closing's budget of Stripe calls");
+  if (left >= 0) return true;
   await redisPipeline([["HINCRBY", workKey(folder), from, n]]);
   return false;
 }
@@ -167,7 +210,36 @@ export function paidPeriodOf(invoice: Record<string, unknown>, email: string, in
   return { inv: invoice.id, ...(pi ? { pi } : {}), amt: line.amt, tot, cur, ps: line.ps, pe: line.pe, e: email };
 }
 
-const listOf = (reply: Record<string, unknown>) => (Array.isArray(reply.data) ? (reply.data as Record<string, unknown>[]) : []);
+/** An id as Stripe gives it: a string, or an expanded object's own id; "" when it is neither. */
+const idOf = (value: unknown): string =>
+  typeof value === "string" ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : "";
+
+/**
+ * Whether an invoice Stripe listed for a member is the member's own (rule 30):
+ * a readable id, its subscription the one asked for wherever the API version
+ * names it (on the invoice, or under its parent in newer versions) and none
+ * naming another, and its customer the member's.
+ */
+function isOwnInvoice(invoice: Record<string, unknown>, sub: string, customer: string): boolean {
+  if (typeof invoice.id !== "string" || !INVOICE_ID.test(invoice.id)) return false;
+  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } | null } | null | undefined;
+  const named = [idOf(invoice.subscription), idOf(parent?.subscription_details?.subscription)].filter(Boolean);
+  return named.length > 0 && named.every((one) => one === sub) && customer !== "" && idOf(invoice.customer) === customer;
+}
+
+/**
+ * The rows of a list Stripe gave for one member's invoices, every one checked
+ * to be the member's own. One that is not (another subscription's or
+ * customer's, or one naming none) is never acted on, and throws before any
+ * write: the list cannot be trusted to be the member's whole, so the member is
+ * tried again the next day (f:), never counted as held with its hold part done.
+ * A reply that is not a list throws the same way (listOf).
+ */
+function ownInvoices(reply: unknown, sub: string, customer: string, what: string): Record<string, unknown>[] {
+  const rows = listOf(reply);
+  if (rows.some((row) => !row || typeof row !== "object" || !isOwnInvoice(row as Record<string, unknown>, sub, customer))) throw new Error(`Stripe listed ${what} that is not the member's own`);
+  return rows as Record<string, unknown>[];
+}
 
 /**
  * Holds one member for an ending: its open invoices voided and its drafts
@@ -176,19 +248,29 @@ const listOf = (reply: Record<string, unknown>) => (Array.isArray(reply.data) ? 
  * membership written down (up to ten looked back, in one call); then its
  * collection paused. Every call is taken from the budget first, and its
  * refund's calls are set aside once it is held. Throws when Stripe could not
- * be asked; answers "over" when the budget did not cover it.
+ * be asked, or listed an invoice that is not the member's own (before any
+ * write, so the member is tried again whole); answers "over" when the budget
+ * did not cover it.
  */
 async function holdOne(account: string, folder: string, sub: Row, endedAt: number): Promise<"held" | "over"> {
   const id = sub.id as string;
   // Its open and draft invoices listed, its paid ones read, its hold and its release; and its refund's, set aside.
   const plan = isPaymentPlan(sub);
   if (!(await takeCalls(folder, 5 + (plan ? 0 : REFUND_CALLS_PER_MEMBER)))) return "over";
-  const open = listOf(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "open", limit: "10" })}`));
-  const drafts = listOf(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "draft", limit: "10" })}`)).filter((d) => typeof d.id === "string" && INVOICE_ID.test(d.id) && d.auto_advance !== false);
+  // Every list read and checked row by row before any write (ownInvoices): a row that is not the member's own decides nothing.
+  const customer = idOf(sub.customer);
+  const open = ownInvoices(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "open", limit: "10" })}`), id, customer, "an open invoice");
+  const drafts = ownInvoices(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "draft", limit: "10" })}`), id, customer, "a draft").filter((d) => d.auto_advance !== false);
+  let paid: Record<string, unknown>[] = [];
+  if (!plan) {
+    const query = new URLSearchParams({ subscription: id, status: "paid", limit: "10" });
+    query.append("expand[]", "data.payments");
+    paid = ownInvoices(await onAccount("GET", account, `/invoices?${query}`), id, customer, "a paid invoice");
+  }
   // A void each; a draft kept now and let go again on a release.
   if (!(await takeCalls(folder, open.length + 2 * drafts.length))) return "over";
   for (const invoice of open) {
-    if (typeof invoice.id === "string" && INVOICE_ID.test(invoice.id)) await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id)}/void`, undefined, undefined, `closing-void:${invoice.id}`);
+    await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id as string)}/void`, undefined, undefined, `closing-void:${invoice.id}`);
   }
   for (const invoice of drafts) {
     await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id as string)}`, new URLSearchParams({ auto_advance: "false", "metadata[closing_draft]": String(endedAt) }), undefined, `closing-draft:${invoice.id}:${endedAt}`);
@@ -196,9 +278,6 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
   if (drafts.length) await redisPipeline([["HSET", workKey(folder), `d:${id}`, drafts.map((d) => d.id).join(",")]]);
   const email = memberEmail(sub);
   if (!plan) {
-    const query = new URLSearchParams({ subscription: id, status: "paid", limit: "10" });
-    query.append("expand[]", "data.payments");
-    const paid = listOf(await onAccount("GET", account, `/invoices?${query}`));
     const period = paid.map((invoice) => paidPeriodOf(invoice, email)).find((p): p is PaidPeriod => p !== null) ?? null;
     // The first reading is the one before any hold (HSETNX).
     if (period) await redisPipeline([["HSETNX", paidKey(folder), id, JSON.stringify(period)]]);
@@ -315,6 +394,9 @@ export async function retryHolds(store: Store, endedAt: number, until: number): 
         return;
       }
       const sub = (await onAccount("GET", account, `/subscriptions/${encodeURIComponent(id)}?expand[]=customer`)) as Row;
+      // Another subscription's reply, or one with no id: nothing is known of this member. It stays to be tried again
+      // tomorrow (its call spent, as for any failed read), never dropped and never another subscription held in its place.
+      if (!isOwnReply(sub, id)) throw new Error("Stripe answered for another subscription");
       if (!chargeable(sub) || (sub.metadata?.store_hold === String(endedAt) && sub.pause_collection)) {
         await redisPipeline([["HDEL", workKey(folder), `f:${id}`]]);
         return;

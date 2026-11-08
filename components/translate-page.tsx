@@ -1,8 +1,8 @@
 "use client";
 
-import { useContext, useState } from "react";
+import { useContext, useId, useState } from "react";
 import { Icon } from "@/components/icons";
-import { AiOn } from "@/components/ai-assist";
+import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import type { SalesPage } from "@/lib/sales-page";
 import { MAX_TRANSLATE_PARTS, pageWords, translateParts } from "@/lib/page-translate";
 import { LANGUAGES, LANGUAGE_CODES, type LanguageCode } from "@/lib/store-language";
@@ -46,11 +46,14 @@ export function TranslatePage({
    */
   onResult: (page: SalesPage, sent: SalesPage) => boolean;
 }) {
-  const { on, left: startLeft } = useContext(AiOn);
+  const ai = useContext(AiOn);
+  const { on } = ai;
+  const startLeft = allowanceOf(ai);
   const [to, setTo] = useState<LanguageCode>(storeLanguage);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ error: boolean; text: string } | null>(null);
   const [left, setLeft] = useState(startLeft);
+  const allowanceId = useId();
   if (!on) return null;
   const parts = translateParts(pageWords(page())).length;
 
@@ -64,13 +67,18 @@ export function TranslatePage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "translate", product: productId, language: to, page: sent }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: SalesPage; left?: number; error?: string };
-      if (data.ok && data.value) {
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: { page?: SalesPage; untranslated?: number }; left?: number; error?: string };
+      if (data.ok && data.value?.page) {
         if (typeof data.left === "number") setLeft(data.left);
-        const applied = onResult(data.value, sent);
+        const applied = onResult(data.value.page, sent);
+        // A block whose translated words would not fit came back as it was (lib/page-translate.ts, keepEveryBlock): said, never hidden.
+        const kept = typeof data.value.untranslated === "number" && data.value.untranslated > 0 ? data.value.untranslated : 0;
+        const keptWords = kept
+          ? ` ${kept === 1 ? "One block was" : `${kept} blocks were`} left in the old language, because the translated words were too long for it: change ${kept === 1 ? "it" : "them"} by hand.`
+          : "";
         setNote(
           applied
-            ? { error: false, text: `Translated into ${LANGUAGES[to].english}. Read it through, then press Save. Undo puts the words back as they were.` }
+            ? { error: false, text: `Translated into ${LANGUAGES[to].english}.${keptWords} Read it through, then press Save. Undo puts the words back as they were.` }
             : { error: true, text: "The page changed while it was being translated, so nothing was replaced. Translate it again." },
         );
         return;
@@ -105,16 +113,18 @@ export function TranslatePage({
               ))}
             </select>
           </label>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void run()} disabled={busy || parts === 0 || tooLong || left < parts} aria-busy={busy}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void run()} disabled={busy || parts === 0 || tooLong || left === null || left < parts} aria-busy={busy} aria-describedby={allowanceId}>
             {busy ? "Translating…" : "Translate"}
           </button>
         </div>
-        <p className="text-xs text-ink-soft">
+        <p id={allowanceId} className="text-xs text-ink-soft">
           {parts === 0
             ? "Add a few blocks first."
             : tooLong
               ? MESSAGES.long
-              : `This page takes ${parts} of your writing ${parts === 1 ? "job" : "jobs"} · ${left} left this month`}
+              : left === null
+                ? `${AI_ALLOWANCE_UNKNOWN} This page takes ${parts} of your writing ${parts === 1 ? "job" : "jobs"}.`
+                : `This page takes ${parts} of your writing ${parts === 1 ? "job" : "jobs"} · ${left} left this month`}
         </p>
         {note ? (
           <p className={note.error ? "notice notice-error text-sm" : "text-sm font-semibold text-ink"} role={note.error ? "alert" : "status"}>

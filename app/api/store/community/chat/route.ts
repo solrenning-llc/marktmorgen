@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { fromAnotherSite } from "@/lib/studio-route";
+import { fromAnotherSite, refusedJson } from "@/lib/studio-route";
+import { lockedFor } from "@/lib/two-step";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { CREATOR, readMembers, within } from "@/lib/community";
@@ -8,6 +9,9 @@ import { MAX_CHAT_TEXT, clearRoom, lastSaid, room, say, unsay } from "@/lib/comm
 import { grantRoom } from "@/lib/chat-grant";
 import { isTalking } from "@/lib/chat-pace";
 import { takeBuyerAction } from "@/lib/buyer-actions";
+
+/** What the page shows for a reason it does not know, or "unknown": the room's honest "could not confirm" sentence. */
+const unconfirmed = () => Response.json({ ok: false, error: "unknown" }, { status: 503, headers: { "Cache-Control": "no-store" } });
 
 /**
  * The room: reading what is new, and saying something.
@@ -62,6 +66,19 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  try {
+    return await act(request);
+  } catch (error) {
+    // Redis did not answer, or answered a count in a shape nobody knows
+    // (CX-123 rule 24): whether the message went in is not known, so the
+    // page says it could not be confirmed, in the store's language, and asks
+    // to check the room before sending again (refusals.unknown).
+    console.error("a community room action failed", error);
+    return unconfirmed();
+  }
+}
+
+async function act(request: NextRequest): Promise<Response> {
   if (fromAnotherSite(request)) return new Response("forbidden", { status: 403 });
   // Read only as far as 8_000 bytes, whether or not a length was declared (docs/security-audit-2026-10-18.md, MM-SA-10).
   const body = (await limited(request, 8_000).then((r) => r.json()).catch(() => null)) as Record<string, unknown> | null;
@@ -99,13 +116,15 @@ export async function POST(request: NextRequest) {
     const name = owner ? store.name : viewer.member?.n || "A member";
     const said = await say(id, config.chat, key, owner, text(body.text, MAX_CHAT_TEXT), name);
     if (!said.ok) {
-      return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : 400 });
+      return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : said.reason === "unknown" ? 503 : 400 });
     }
     return Response.json({ ok: true, message: said.message, name });
   }
 
   // Taking something out, and emptying the room: the creator's alone.
   if (!owner) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
+  // Neither comes back: a session let in without its second step waits (lib/two-step.ts).
+  if (await lockedFor(request, "community", action)) return refusedJson("locked");
   if (action === "unsay") {
     const number = Number(body.number);
     if (!Number.isInteger(number) || number <= 0) return Response.json({ ok: false, error: "bad" }, { status: 400 });

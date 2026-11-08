@@ -25,6 +25,8 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -82,9 +84,11 @@ async function save(job: AnnouncementJob): Promise<void> {
   await redisPipeline([["SET", jobKey(job.id), JSON.stringify(job), "EX", 60 * 86_400]]);
 }
 
+/** An announcement's send: null when it is not there; a reply in another shape throws UnknownReplyError (CX-123 rule 24). */
 export async function readJob(id: string): Promise<AnnouncementJob | null> {
   if (!JOB_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", jobKey(id)]]);
+  const raw = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1)?.[0];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("an announcement's send");
   return parse(raw);
 }
 
@@ -144,12 +148,44 @@ export async function queueAnnouncement(store: Store, config: CommunityConfig, p
  * (lib/community-event-mail.ts): both are the community's emails they asked for.
  */
 export async function tokenFor(store: Store, communityId: string, member: Member): Promise<string> {
-  if (member.t) return member.t;
-  const token = randomBytes(20).toString("hex");
-  // Kept for good, once a member: counted in the store's room (lib/order-data.ts).
-  await orderWrite(store, [["SET", unsubKey(token), `${communityId}|${member.k}|${store.handle}`]]);
-  await setMemberToken(communityId, member, token);
-  return token;
+  // The token is made canonical on the member's record first: ours, or one
+  // another send kept first, which is the link already in an email and is
+  // never replaced (Codex G on #3123). Only that token ever gets a link
+  // record, so no record is written for a token that is not the member's, and
+  // the member's erasure, which deletes the record of member.t, finds every
+  // one (Codex G, review 5815472405).
+  const kept = member.t || (await setMemberToken(communityId, member, randomBytes(20).toString("hex")));
+  if (!kept) throw new Error("a community member with no record has no stop link");
+  await keepStopLink(store, communityId, member.k, kept);
+  return kept;
+}
+
+/**
+ * Makes sure the member's canonical token has its link record, and only
+ * while the member still holds it. A record already there is read, not
+ * written again; a missing one (a send that stopped between keeping the
+ * token and writing its record) is written once, with SET NX. Then the
+ * member is read again: an erasure that ran in between (and so may have
+ * deleted the record before it was written) leaves no member holding the
+ * token, and the record just written is deleted with its reply confirmed,
+ * before anything is returned. Every reply is read in its exact shape
+ * (CX-123 rule 24): one not known throws, so the send stays pending and no
+ * email carries the link.
+ */
+async function keepStopLink(store: Store, communityId: string, key: string, token: string): Promise<void> {
+  const value = `${communityId}|${key}|${store.handle}`;
+  const read = repliesFor(await redisPipeline([["GET", unsubKey(token)]]), 1);
+  if (!read || (read[0] !== null && read[0] !== value)) throw new UnknownReplyError("a community stop link");
+  if (read[0] === value) return;
+  // Kept for good, once a member: counted in the store's room at what it adds (lib/order-data.ts).
+  const [set] = await orderWrite(store, [["SET", unsubKey(token), value, "NX"]]);
+  if (set !== "OK" && set !== null) throw new UnknownReplyError("a community stop link");
+  if ((await readMember(communityId, key))?.t === token) return;
+  // The member is gone (or holds another token): this token is no one's link,
+  // and its record goes before the call refuses.
+  const gone = repliesFor(await redisPipeline([["DEL", unsubKey(token)]]), 1)?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("a community stop link of a member who is gone");
+  throw new Error("a community member with no record has no stop link");
 }
 
 /** Runs `each` over `items`, a few at a time. */
@@ -168,6 +204,24 @@ async function inTurns<T, R>(items: T[], width: number, each: (item: T) => Promi
   return out;
 }
 
+/** Only a complete positional recipient batch can advance this send. */
+async function recipientBatch(id: string, start: number, count: number): Promise<string[] | null> {
+  try {
+    const reply: unknown = await redisPipeline([["LRANGE", toKey(id), start, start + count - 1]]);
+    if (!Array.isArray(reply) || Object.getPrototypeOf(reply) !== Array.prototype || reply.length !== 1 || Reflect.ownKeys(reply).length !== 2) return null;
+    const outer = Object.getOwnPropertyDescriptor(reply, "0");
+    const rows: unknown = outer && Object.hasOwn(outer, "value") ? outer.value : null;
+    if (!Array.isArray(rows) || Object.getPrototypeOf(rows) !== Array.prototype || rows.length !== count || Reflect.ownKeys(rows).length !== count + 1) return null;
+    const keys: string[] = [];
+    for (let index = 0; index < count; index++) {
+      const slot = Object.getOwnPropertyDescriptor(rows, String(index));
+      if (!slot || !Object.hasOwn(slot, "value") || typeof slot.value !== "string" || !/^[0-9a-f]{32}$/.test(slot.value)) return null;
+      keys.push(slot.value);
+    }
+    return new Set(keys).size === count ? keys : null;
+  } catch { return null; }
+}
+
 /**
  * Moves one send on for as long as `deadline` allows. Safe to call from two
  * places at once: only one holds the send at a time.
@@ -177,10 +231,19 @@ export async function advanceAnnouncement(
   load: (handle: string) => Promise<Store | null>,
   deadline: number,
 ): Promise<AnnouncementJob | null> {
-  const [got] = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]);
-  if (got === null) return null;
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run, or not known to
+  // be ours, nothing is sent this time, and the lock is let go only while it still holds this run's own value.
+  const lock = claimValue();
+  if ((await claimMark(lockKey(id), 90, lock)) !== "ours") return null;
   try {
-    let job = await readJob(id);
+    // Its record not read (Claude 5 on #2954): nothing is done this time and it stays in line, never taken out of it.
+    let job: AnnouncementJob | null;
+    try {
+      job = await readJob(id);
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    }
     if (!job || job.status === "sent" || job.status === "failed") {
       await redisPipeline([["SREM", QUEUE, id]]);
       return job;
@@ -202,10 +265,9 @@ export async function advanceAnnouncement(
 
     while (job.done < job.total && Date.now() < deadline) {
       // Checked batches (lib/mail.ts): each member is asked of Stripe before sending.
-      const [chunk] = await redisPipeline([["LRANGE", toKey(id), job.done, job.done + CHECKED_BATCH_SIZE - 1]]);
-      const keys = Array.isArray(chunk) ? (chunk as string[]) : [];
-      if (!keys.length) {
-        job = { ...job, done: job.total };
+      const keys = await recipientBatch(id, job.done, Math.min(CHECKED_BATCH_SIZE, job.total - job.done));
+      if (!keys) {
+        job = { ...job, status: "waiting", note: "We couldn't read the remaining recipients. The send is still pending." };
         break;
       }
       const found = await readMembers(job.community, keys);
@@ -229,17 +291,26 @@ export async function advanceAnnouncement(
           break;
         }
         const messages: BatchMessage[] = [];
-        for (const member of recipients) {
-          const token = await tokenFor(store, job.community, member);
-          const fromName = store.mail?.fromName || store.name;
-          const r = render(store, job.subject, job.body, null, {
-            page: `${SITE_URL}/unsubscribe?c=${token}`,
-            oneClick: `${SITE_URL}/api/mail/unsubscribe?c=${token}`,
-            why: communityWords(store.language).announceWhy(fromName, config.name),
-            label: communityWords(store.language).stopLabel,
-            after: communityWords(store.language).stopAfterAnnounce,
-          });
-          messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
+        try {
+          for (const member of recipients) {
+            const token = await tokenFor(store, job.community, member);
+            const fromName = store.mail?.fromName || store.name;
+            const r = render(store, job.subject, job.body, null, {
+              page: `${SITE_URL}/unsubscribe?c=${token}`,
+              oneClick: `${SITE_URL}/api/mail/unsubscribe?c=${token}`,
+              why: communityWords(store.language).announceWhy(fromName, config.name),
+              label: communityWords(store.language).stopLabel,
+              after: communityWords(store.language).stopAfterAnnounce,
+            });
+            messages.push({ from: fromLine(store), to: member.e, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
+          }
+        } catch {
+          // A stop link that could not be kept on its member (CX-123 rule 24) is never
+          // emailed: nothing of the batch is sent, its emails are given back, and the
+          // send stays where it was, to be tried again.
+          await release(store, recipients.length);
+          job = { ...job, status: "waiting", note: "We couldn't save every recipient's unsubscribe link. The send is still pending." };
+          break;
         }
         const outcome = await sendBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
         if (outcome !== "sent") {
@@ -262,7 +333,7 @@ export async function advanceAnnouncement(
     if (job.status === "sent" || job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
     return job;
   } finally {
-    await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
+    await releaseMark(lockKey(id), lock);
   }
 }
 
@@ -279,20 +350,33 @@ export async function advanceAnnouncements(load: (handle: string) => Promise<Sto
   return touched;
 }
 
-/** Who a stop link belongs to, without acting on it. */
+/**
+ * Who a stop link belongs to, without acting on it. Null only when Redis
+ * said there is no such link or member; a read in any other shape throws
+ * UnknownReplyError (CX-123 rule 24), so a link that exists is never called
+ * unknown, and the stop door and page say they could not do it just now.
+ */
 export async function readCommunityUnsub(
   token: string,
 ): Promise<{ community: string; handle: string; member: Member } | null> {
   if (!COMMUNITY_UNSUB.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", unsubKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", unsubKey(token)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community stop link");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a community stop link");
   const [community, key, handle] = raw.split("|");
   if (!community || !key || !handle) return null;
   const member = await readMember(community, key);
   return member && member.t === token ? { community, handle, member } : null;
 }
 
-/** Stops a member's announcement emails. Safe to press twice. */
+/**
+ * Stops a member's announcement emails. Safe to press twice. True only once
+ * the stop is written (or was already); throws when a read or the write was
+ * answered in another shape, so the door never says "Unsubscribed." for a
+ * stop that was not kept.
+ */
 export async function stopAnnouncements(token: string): Promise<boolean> {
   const found = await readCommunityUnsub(token);
   if (!found) return false;

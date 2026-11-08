@@ -11,9 +11,10 @@ const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   setup: "Stripe says your tax setup is not finished yet. Finish it in your Stripe dashboard, then switch this on.",
   stripe: "Connect your Stripe account first.",
+  series: "A series of calls is still running in your store. Its sessions were booked without sales tax, so you can switch tax on once the last series is over or canceled. Nothing was changed.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
-  unavailable: "Stores are not switched on yet, so nothing was saved.",
+  unavailable: "We could not check your store just now, so nothing was saved. Try again in a few minutes.",
   server_error: "We could not confirm whether your tax settings were saved. Reload this page to check before trying again.",
 };
 

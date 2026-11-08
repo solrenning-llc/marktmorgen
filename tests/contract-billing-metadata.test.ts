@@ -1,7 +1,7 @@
 import {activationObservations,switchActivationObservations} from './contract-activation-billing';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createBillingCheckout,switchPlan,readSubscription,readStartedSubscription,startedFromObservedSubscription,findStoreSubscriptions} from '@/lib/billing';
+import {createBillingCheckout,switchPlan,readSubscription,readStartedSubscription,startedFromObservedSubscription,findStoreSubscriptions,ownedBy} from '@/lib/billing';
 import type {ContractGrant} from '@/lib/contract-funding';
 import type {Store} from '@/lib/store';
 import {PUBLISHED_PLAN_PRICES} from '@/lib/plan';
@@ -72,14 +72,14 @@ test('missed-return observations and subscription search cannot adopt a funded p
  const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
  const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:[]} as Store;
  const subscription={id:'sub_Test000001',customer:{id:'cus_Test000001',email:owner.email},created,status:'active',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
- let reads=0,writes=0;globalThis.fetch=async(_input,init)=>{reads++;if(init?.method!=='GET')writes++;return Response.json({data:[subscription]});};
+ let reads=0,writes=0;globalThis.fetch=async(_input,init)=>{reads++;if(init?.method!=='GET')writes++;return Response.json({data:[subscription],has_more:false});};
  try{
   activationObservations.calls.length=0;activationObservations.accept=false;
   assert.equal(await startedFromObservedSubscription(owner,subscription),null);assert.equal(reads,0);
-  assert.equal((await findStoreSubscriptions(owner)).live,null);assert.equal(reads,1);
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search activation is unknown/);assert.equal(reads,2);
   activationObservations.accept=true;
-  assert.equal((await startedFromObservedSubscription(owner,subscription))?.subscriptionId,subscription.id);assert.equal(reads,1);
-  assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,subscription.id);assert.equal(reads,2);assert.equal(writes,0);
+  assert.equal((await startedFromObservedSubscription(owner,subscription))?.subscriptionId,subscription.id);assert.equal(reads,2);
+  assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,subscription.id);assert.equal(reads,4);assert.equal(writes,0);
   assert.equal(activationObservations.calls.length,4);
   for(const change of [{metadata:{...subscription.metadata,funding_review:undefined}},{customer:{id:'cus_Other001',email:'other@example.test'}},{pending_update:{expires_at:created+100}},{items:{data:[{...subscription.items.data[0],price:{...subscription.items.data[0].price,currency:'eur'}}]}}]){
    activationObservations.calls.length=0;
@@ -371,4 +371,398 @@ test('source phase is checked again after price, metadata and stale-price waits'
    assert.equal(metadataWrites,stage==='price'?0:1);assert.equal(changeWrites,stage==='fallback'?1:0);
   }
  }finally{globalThis.fetch=old;Date.now=oldNow;}
+});
+
+test('subscription search rejects accessor completeness even when descriptor prototypes carry a value',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:[]} as Store;
+ let getters=0,reads=0,writes=0;
+ const page=Object.defineProperty({data:[]},'has_more',{get(){getters++;return false;}});
+ const prior=Object.getOwnPropertyDescriptor(Object.prototype,'value');
+ globalThis.fetch=async(_input,init)=>{reads++;if(init?.method!=='GET')writes++;return {ok:true,json:async()=>page} as Response;};
+ try{
+  Object.defineProperty(Object.prototype,'value',{value:false,configurable:true});
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search page is incomplete/);
+  assert.equal(getters,0);assert.equal(reads,2);assert.equal(writes,0);
+ }finally{
+  delete (Object.prototype as {value?:unknown}).value;
+  if(prior)Object.defineProperty(Object.prototype,'value',prior);
+  globalThis.fetch=old;
+ }
+});
+
+test('subscription search requires a complete bounded page before treating it as empty',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,previousHandles:[],releasedHandles:[]} as Store;
+ let getterCalls=0,reads=0,writes=0;
+ const dataGetter=Object.defineProperty({has_more:false},'data',{get(){getterCalls++;return [];}});
+ const moreGetter=Object.defineProperty({data:[]},'has_more',{get(){getterCalls++;return false;}});
+ const cursorGetter=Object.defineProperty({data:[],has_more:false},'next_page',{get(){getterCalls++;return null;}});
+ const memberGetter=Object.defineProperty([],'0',{get(){getterCalls++;return {};},configurable:true});
+ const idGetter=Object.defineProperty({status:'canceled',created:1,metadata:{store:'harbor'},customer:{id:'cus_Test000001',email:owner.email}},'id',{get(){getterCalls++;return 'sub_Test000001';}});
+ const customerGetter=Object.defineProperty({id:'sub_Test000001',status:'canceled',created:1,metadata:{store:'harbor'}},'customer',{get(){getterCalls++;return {id:'cus_Test000001',email:owner.email};}});
+ const partialIncomplete={id:'sub_Test000001',status:'incomplete',metadata:{store:'harbor'},customer:{id:'cus_Test000001',email:owner.email}};
+ const inheritedMember=Array(1);Object.setPrototypeOf(inheritedMember,{'0':{},__proto__:Array.prototype});
+ const cases:unknown[]=[
+  undefined,null,[],{}, {data:null,has_more:false},{data:{},has_more:false},
+  {data:[]},{data:[],has_more:undefined},{data:[],has_more:null},
+  {data:[],has_more:'false'},{data:[],has_more:0},{data:[],has_more:true},
+  {data:[],has_more:false,next_page:'next_unknown'},
+  {data:[null],has_more:false},{data:['unknown'],has_more:false},
+  {data:[[]],has_more:false},{data:[{}],has_more:false},{data:Array(1),has_more:false},
+  {data:inheritedMember,has_more:false},{data:memberGetter,has_more:false},
+  {data:[idGetter],has_more:false},{data:[customerGetter],has_more:false},
+  {data:[partialIncomplete],has_more:false},
+  {data:[{...partialIncomplete,status:'active',created:1}],has_more:false},
+  {data:[{...partialIncomplete,created:1,customer:{id:'cus_Test000001'}}],has_more:false},
+  {data:[{...partialIncomplete,created:1,metadata:{store:'unqueried'}}],has_more:false},
+  {data:Array.from({length:101},()=>({})),has_more:false},
+  Object.assign(Object.create({data:[]}),{has_more:false}),
+  Object.assign(Object.create({has_more:false}),{data:[]}),
+  dataGetter,moreGetter,cursorGetter,
+ ];
+ try{
+  for(const page of cases){
+   let attempts=0;
+   globalThis.fetch=async(input,init)=>{
+    reads++;attempts++;if(init?.method!=='GET')writes++;
+    assert.equal(new URL(String(input)).pathname,'/v1/subscriptions/search');
+    return {ok:true,json:async()=>page} as Response;
+   };
+   await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);
+   assert.equal(attempts,1,'no additional page, retry or provider write');
+  }
+  for(const page of [{data:[],has_more:false},{data:[],has_more:false,next_page:null}]){
+   let attempts=0;
+   globalThis.fetch=async(_input,init)=>{reads++;attempts++;if(init?.method!=='GET')writes++;return {ok:true,json:async()=>page} as Response;};
+   assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});
+   assert.equal(attempts,1);
+  }
+  assert.equal(reads,cases.length+2);
+  assert.equal(writes,0);
+  assert.equal(getterCalls,0,'page or array-member getters are not evidence');
+ }finally{globalThis.fetch=old;}
+});
+
+test('documented canceled DeletedCustomer preserves only proven foreign exclusion and own legacy terminal history',async()=>{
+ const old=globalThis.fetch,now=Math.floor(Date.now()/1000);
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:['old-harbor'],releasedHandles:['released-harbor']} as Store;
+ const deleted=(handle:string,id='cus_Test000001')=>({id:'sub_Deleted001',created:now-100,status:'canceled',metadata:{store:handle},customer:{id,object:'customer',deleted:true}});
+ let page:unknown={data:[],has_more:false},reads=0,writes=0;
+ globalThis.fetch=async(input,init)=>{reads++;if(init?.method!=='GET')writes++;const list=new URL(String(input)).pathname==='/v1/subscriptions'; const body=page as {data:Record<string,unknown>[];has_more:boolean}; const data=body.data.filter(row=>{const meta=row.metadata as {store:string};const customer=row.customer as {id:string};return list?customer.id===owner.stripeCustomerId:meta.store!=='released-harbor';});return Response.json({...body,data});};
+ try{
+  const foreign=deleted('released-harbor','cus_Foreign001');
+  page={data:[foreign],has_more:false};
+  assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});
+  const live={id:'sub_OwnLive001',created:now,status:'active',metadata:{store:'harbor'},customer:{id:owner.stripeCustomerId,email:owner.email},items:{data:[{quantity:1,...sourcePeriod(),price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
+  page={data:[foreign,live],has_more:false};
+  assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,live.id);
+  for(const handle of ['harbor','old-harbor','released-harbor']){
+   page={data:[deleted(handle)],has_more:false};
+   assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:owner.stripeCustomerId,lapsed:[]},handle);
+  }
+  let idReads=0,idDescriptors=0;
+  const captured=new Proxy(owner,{
+   get(target,key,receiver){if(key==='stripeCustomerId'){idReads++;throw Error('identity must not be reread');}return Reflect.get(target,key,receiver);},
+   getOwnPropertyDescriptor(target,key){if(key==='stripeCustomerId')idDescriptors++;return Reflect.getOwnPropertyDescriptor(target,key);},
+  });
+  page={data:[deleted('old-harbor')],has_more:false};
+  assert.deepEqual(await findStoreSubscriptions(captured),{live:null,customerId:owner.stripeCustomerId,lapsed:[]});
+  assert.equal(idDescriptors,1);assert.equal(idReads,0);
+  assert.equal(reads,12);assert.equal(writes,0);
+ }finally{globalThis.fetch=old;}
+});
+
+test('DeletedCustomer exception cannot turn ambiguous, funded or active observations into absence',async()=>{
+ const old=globalThis.fetch,now=Math.floor(Date.now()/1000);
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:['old-harbor'],releasedHandles:['released-harbor']} as Store;
+ const terminal={id:'sub_Deleted001',created:now-100,status:'canceled',metadata:{store:'harbor'},customer:{id:'cus_Test000001',object:'customer',deleted:true}};
+ let page:unknown,reads=0,writes=0,getters=0,searchOnly=false;
+ globalThis.fetch=async(input,init)=>{reads++;if(init?.method!=='GET')writes++;return {ok:true,json:async()=>searchOnly&&new URL(String(input)).pathname==='/v1/subscriptions'?{data:[],has_more:false}:page} as Response;};
+ try{
+  const malformed:Record<string,unknown>[]=[
+   {...terminal,status:'active'}, {...terminal,status:'trialing'}, {...terminal,status:'incomplete'},
+   {...terminal,customer:{id:'cus_Test000001'}},
+   {...terminal,customer:{id:'cus_Test000001',object:'other',deleted:true}},
+   {...terminal,customer:{id:'cus_Test000001',object:'customer'}},
+   {...terminal,customer:{...terminal.customer,email:owner.email}},
+   {...terminal,customer:{...terminal.customer,id:'unknown'}},
+   {...terminal,metadata:Object.assign(Object.create({funding_grant:'unknown'}),{store:'harbor'})},
+   {...terminal,customer:Object.defineProperty({...terminal.customer},'email',{get(){getters++;return owner.email;}})},
+  ];
+  for(const prefix of ['funding_','restart_','cf_']){
+   malformed.push({...terminal,metadata:{...terminal.metadata,[prefix+'proof']:undefined}});
+   malformed.push({...terminal,[prefix+'proof']:undefined});
+  }
+  for(const row of malformed){page={data:[row],has_more:false};await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);}
+  for(const id of [null,'','invalid']){page={data:[terminal],has_more:false};assert.deepEqual(await findStoreSubscriptions({...owner,stripeCustomerId:id} as Store),{live:null,customerId:null,lapsed:[]});}
+  const accessor={...owner};Object.defineProperty(accessor,'stripeCustomerId',{get(){getters++;return owner.stripeCustomerId;}});
+  const inherited={...owner};delete (inherited as Partial<Store>).stripeCustomerId;Object.setPrototypeOf(inherited,{stripeCustomerId:owner.stripeCustomerId});
+  for(const context of [accessor,inherited]){page={data:[terminal],has_more:false};assert.deepEqual(await findStoreSubscriptions(context),{live:null,customerId:null,lapsed:[]});}
+  // A valid canceled DeletedCustomer is terminal history, including a prior owner of the current name.
+  searchOnly=true;
+  for(const handle of ['harbor','old-harbor']){page={data:[{...terminal,metadata:{store:handle},customer:{...terminal.customer,id:'cus_Foreign001'}}],has_more:false};assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});}
+  assert.equal(getters,0);assert.equal(writes,0);assert.ok(reads>0);
+ }finally{globalThis.fetch=old;}
+});
+
+test('DeletedCustomer ownership is captured before awaiting the provider, without renewing unknown identity',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:null,previousHandles:[],releasedHandles:['released-harbor']} as Store;
+ const terminal={id:'sub_Deleted001',created:1,status:'canceled',metadata:{store:'harbor'},customer:{id:'cus_Test000001',object:'customer',deleted:true}};
+ let writes=0;
+ try{
+  globalThis.fetch=async(_input,init)=>{if(init?.method!=='GET')writes++;owner.stripeCustomerId='cus_Test000001';return Response.json({data:[terminal],has_more:false});};
+  assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});
+  owner.stripeCustomerId='cus_Test000001';
+  const foreign={...terminal,metadata:{store:'released-harbor'},customer:{...terminal.customer,id:'cus_Foreign001'}};
+  globalThis.fetch=async(input,init)=>{if(init?.method!=='GET')writes++;owner.stripeCustomerId='cus_Foreign001';owner.releasedHandles.length=0;return Response.json({data:new URL(String(input)).pathname==='/v1/subscriptions/search'?[foreign]:[],has_more:false});};
+  assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});
+  owner.stripeCustomerId='cus_Test000001';owner.releasedHandles=[];
+  globalThis.fetch=async(_input,init)=>{if(init?.method!=='GET')writes++;owner.releasedHandles.push(owner.handle);return Response.json({data:[{...foreign,metadata:{store:owner.handle}}],has_more:false});};
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search/,'a current handle cannot become proven released during GET');
+  owner.releasedHandles=[];
+  globalThis.fetch=async(_input,init)=>{if(init?.method!=='GET')writes++;owner.releasedHandles=[owner.handle];return Response.json({data:[{...foreign,metadata:{store:owner.handle}}],has_more:false});};
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search/,'a replaced array cannot prove released ownership after GET');
+  assert.equal(writes,0);
+ }finally{globalThis.fetch=old;}
+});
+
+test('DeletedCustomer released evidence uses dense own data without extra accessor reads',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:[]} as Store;
+ const foreign={id:'sub_Deleted001',created:1,status:'canceled',metadata:{store:'released-harbor'},customer:{id:'cus_Foreign001',object:'customer',deleted:true}};
+ let slotReads=0,propertyReads=0,writes=0;
+ try{
+  globalThis.fetch=async(_input,init)=>{if(init?.method!=='GET')writes++;return Response.json({data:[foreign],has_more:false});};
+  const accessor:string[]=[];Object.defineProperty(accessor,'0',{get(){slotReads++;return 'released-harbor';},enumerable:true,configurable:true});
+  owner.releasedHandles=accessor;
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);
+  assert.equal(slotReads,1,'only the existing query spread reads the accessor, never new ownership evidence');
+  const inherited:string[]=[];inherited.length=1;Object.setPrototypeOf(inherited,Object.assign(Object.create(Array.prototype),{0:'released-harbor'}));
+  const custom=['released-harbor'];Object.defineProperty(custom,Symbol.iterator,{value:function*(){yield 'released-harbor';}});
+  for(const releases of [inherited,custom]){owner.releasedHandles=releases;await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);}
+  Object.defineProperty(owner,'releasedHandles',{get(){propertyReads++;return ['released-harbor'];},configurable:true});
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);
+  assert.equal(propertyReads,1,'new proof does not reread the store accessor');
+  assert.equal(writes,0);
+ }finally{globalThis.fetch=old;}
+});
+
+test('canceled DeletedCustomer under a proven released handle cannot block a store without a customer',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:null,previousHandles:[],releasedHandles:['released-harbor']} as Store;
+ const terminal={id:'sub_Deleted001',created:1,status:'canceled',metadata:{store:'released-harbor'},customer:{id:'cus_Foreign001',object:'customer',deleted:true}};
+ let writes=0;
+ globalThis.fetch=async(_input,init)=>{if(init?.method!=='GET')writes++;return Response.json({data:[terminal],has_more:false});};
+ try{assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});assert.equal(writes,0);}
+ finally{globalThis.fetch=old;}
+});
+
+test('subscription search covers all ten current addresses without reading released names',async()=>{
+ const old=globalThis.fetch;
+ const handles=Array.from({length:10},(_,index)=>'harbor-'+index);
+ const owner={...store,stripeCustomerId:null,handle:handles[0],previousHandles:handles.slice(1),releasedHandles:['released-harbor']} as Store;
+ let reads=0;
+ globalThis.fetch=async(input,init)=>{reads++;assert.equal(init?.method,'GET');const url=new URL(String(input));assert.equal(url.pathname,'/v1/subscriptions/search');assert.equal(url.searchParams.get('query'),handles.map(handle=>`metadata['store']:'${handle}'`).join(' OR '));return Response.json({data:[],has_more:false});};
+ try{assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});assert.equal(reads,1);}
+ finally{globalThis.fetch=old;}
+});
+
+test('both recovery pages must be complete before a funded subscription is activated',async()=>{
+ const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
+ const handles=Array.from({length:11},(_,index)=>'harbor-'+index);
+ const owner={...store,stripeCustomerId:'cus_Test000001',handle:handles[0],previousHandles:[],releasedHandles:handles.slice(1)} as Store;
+ const subscription={id:'sub_Test000001',customer:{id:owner.stripeCustomerId,email:owner.email},created,status:'active',metadata:{store:owner.handle,funding_grant:'ctr_metadata',funding_review:'test_only'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
+ let reads=0,writes=0,complete=false;
+ globalThis.fetch=async(_input,init)=>{reads++;if(init?.method!=='GET')writes++;return Response.json(reads%2===1?{data:[subscription],has_more:false}:{data:[],has_more:!complete});};
+ try{
+  activationObservations.calls.length=0;activationObservations.accept=true;
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search page is incomplete/);
+  assert.equal(reads,2);assert.equal(activationObservations.calls.length,0);
+  complete=true;
+  assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,subscription.id);
+  assert.equal(reads,4);assert.equal(activationObservations.calls.length,1);assert.equal(writes,0);
+ }finally{globalThis.fetch=old;activationObservations.accept=false;}
+});
+
+test('subscription search refuses unknown handle coverage before the provider',async()=>{
+ const old=globalThis.fetch;
+ let reads=0,writes=0;
+ const handles=Array.from({length:11},(_,index)=>'harbor-'+index);
+ globalThis.fetch=async(input,init)=>{
+  reads++;if(init?.method!=='GET')writes++;
+  const url=new URL(String(input));
+  assert.equal(url.pathname,'/v1/subscriptions/search');
+  const expected=handles.slice(0,6).map(handle=>`metadata['store']:'${handle}'`).join(' OR ');
+  assert.equal(url.searchParams.get('query'),expected,'only current and previous handles are queried');
+  assert.equal(url.searchParams.get('limit'),'100');
+  return Response.json({data:[],has_more:false});
+ };
+ try{
+  for(const owner of [
+   {...store,handle:'',previousHandles:[],releasedHandles:[]},
+   {...store,previousHandles:['invalid handle'],releasedHandles:[]},
+   {...store,handle:handles[0],previousHandles:handles.slice(1),releasedHandles:[]},
+  ]){
+   await assert.rejects(findStoreSubscriptions(owner as Store),/Subscription search handle coverage/);
+   assert.equal(reads,0,'incomplete query coverage reaches no provider');
+   assert.equal(writes,0);
+  }
+  const owner={...store,handle:handles[0],previousHandles:handles.slice(1,6),releasedHandles:handles.slice(6,10)} as Store;
+  assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});
+  assert.equal(reads,1);
+  // Repeated historical handles do not make an otherwise complete query fail.
+  assert.deepEqual(await findStoreSubscriptions({...owner,releasedHandles:[...owner.releasedHandles,handles[0],handles[1]]}),{live:null,customerId:null,lapsed:[]});
+  assert.equal(reads,2);assert.equal(writes,0);
+ }finally{globalThis.fetch=old;}
+});
+
+function recoveryPlan(handle:string,customer='cus_Test000001',funded=false){
+ const created=Math.floor(Date.now()/1000);
+ return {id:'sub_Recovery001',customer:{id:customer,email:'owner@example.test'},created,status:'active',metadata:{store:handle,...(funded?{funding_grant:'ctr_metadata',funding_review:'test_only'}:{})},items:{data:[{quantity:1,...sourcePeriod(),price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
+}
+
+test('CX-61 uses one current-address search and one complete captured-customer list regardless of released history',async()=>{
+ const old=globalThis.fetch;
+ try{
+  for(const count of [1,10,11,21,40,1000]){
+   const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:['old-harbor'],releasedHandles:Array.from({length:count},(_,i)=>'released-'+i)} as Store;
+   const live=recoveryPlan(owner.releasedHandles.at(-1)!);
+   const calls:string[]=[];
+   globalThis.fetch=async(input,init)=>{
+    const url=new URL(String(input));calls.push(url.pathname);assert.equal(init?.method,'GET');
+    assert.equal(url.searchParams.get('limit'),'100');assert.equal(url.searchParams.get('expand[]'),'data.customer');
+    if(url.pathname==='/v1/subscriptions/search'){
+     assert.equal(url.searchParams.get('query'),"metadata['store']:'harbor' OR metadata['store']:'old-harbor'");
+     return Response.json({data:[],has_more:false});
+    }
+    assert.equal(url.pathname,'/v1/subscriptions');assert.equal(url.searchParams.get('customer'),'cus_Test000001');assert.equal(url.searchParams.get('status'),'all');
+    return Response.json({data:[live],has_more:false});
+   };
+   assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,live.id);
+   assert.deepEqual(calls,['/v1/subscriptions/search','/v1/subscriptions']);
+  }
+ }finally{globalThis.fetch=old;}
+});
+
+test('CX-61 customer lists isolate other stores and bind adoption to identity captured before either read',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:['released-harbor']} as Store;
+ const live=recoveryPlan('released-harbor');
+ let calls=0;
+ globalThis.fetch=async(input)=>{
+  calls++;const url=new URL(String(input));
+  owner.stripeCustomerId='cus_Foreign001';owner.handle='other-store';owner.email='other@example.test';owner.releasedHandles.length=0;
+  if(url.pathname==='/v1/subscriptions/search')return Response.json({data:[],has_more:false});
+  assert.equal(url.pathname,'/v1/subscriptions');assert.equal(url.searchParams.get('customer'),'cus_Test000001');
+  return Response.json({data:[{...live,id:'sub_Other001',metadata:{store:'other-store'},items:null},{...live,id:'sub_Addon001',metadata:{addon:'assistant'},items:null},live],has_more:false});
+ };
+ try{assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,live.id);assert.equal(calls,2);}
+ finally{globalThis.fetch=old;}
+});
+
+test('CX-61 overlapping complete pages activate a funded subscription only once and incomplete own lists never activate',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:['released-harbor']} as Store;
+ const live=recoveryPlan('harbor','cus_Test000001',true);
+ let complete=false,calls=0;
+ globalThis.fetch=async(input)=>{calls++;const list=new URL(String(input)).pathname==='/v1/subscriptions';return Response.json({data:[live],has_more:list?!complete:false});};
+ try{
+  activationObservations.calls.length=0;activationObservations.accept=true;
+  await assert.rejects(findStoreSubscriptions(owner),/Subscription search page is incomplete/);
+  assert.equal(calls,2);assert.equal(activationObservations.calls.length,0);
+  complete=true;assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,live.id);
+  assert.equal(calls,4);assert.equal(activationObservations.calls.length,1);
+ }finally{globalThis.fetch=old;activationObservations.accept=false;}
+});
+
+test('CX-61 no captured customer cannot adopt a released name by matching email or an identity acquired during search',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:null,previousHandles:[],releasedHandles:['released-harbor']} as Store;
+ const live=recoveryPlan('released-harbor');let calls=0;
+ assert.equal(ownedBy(owner,live),false);
+ globalThis.fetch=async(input)=>{calls++;assert.equal(new URL(String(input)).pathname,'/v1/subscriptions/search');owner.stripeCustomerId='cus_Test000001';return Response.json({data:[],has_more:false});};
+ try{assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});assert.equal(calls,1);}
+ finally{globalThis.fetch=old;}
+});
+
+test('CX-61 contradictory overlap and a relevant row from another customer cannot adopt paid rights',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:['released-harbor']} as Store;
+ const live=recoveryPlan('harbor','cus_Test000001',true);
+ try{
+  activationObservations.calls.length=0;activationObservations.accept=true;
+  for(const listed of [{...live,status:'canceled'},{...live,customer:{...live.customer,id:'cus_Foreign001'}}]){
+   globalThis.fetch=async(input)=>Response.json({data:new URL(String(input)).pathname==='/v1/subscriptions/search'?[live]:[listed],has_more:false});
+   await assert.rejects(findStoreSubscriptions(owner),/Subscription search (overlap|listed customer) is unknown/);
+   assert.equal(activationObservations.calls.length,0);
+  }
+ }finally{globalThis.fetch=old;activationObservations.accept=false;}
+});
+
+test('CX-61 the customer List needs explicit own completeness and cannot read another page',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:[]} as Store;
+ let getters=0;
+ const accessor=Object.defineProperty({data:[]},'has_more',{get(){getters++;return false;}});
+ try{
+  for(const page of [{data:[]},{data:[],has_more:true},{data:[],has_more:false,next_page:'more'},Object.assign(Object.create({has_more:false}),{data:[]}),accessor,{data:Array(101),has_more:false}]){
+   let calls=0;
+   globalThis.fetch=async(input,init)=>{calls++;assert.equal(init?.method,'GET');return {ok:true,json:async()=>new URL(String(input)).pathname==='/v1/subscriptions/search'?{data:[],has_more:false}:page} as Response;};
+   await assert.rejects(findStoreSubscriptions(owner),/Subscription search/);assert.equal(calls,2);
+  }
+  assert.equal(getters,0);
+ }finally{globalThis.fetch=old;}
+});
+
+test('CX-61 overlap compares billing evidence without rejecting unrelated fractional Stripe tax fields',async()=>{
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:[]} as Store;
+ const live={...recoveryPlan('harbor'),default_tax_rates:[{percentage:8.875}]};
+ globalThis.fetch=async()=>Response.json({data:[live],has_more:false});
+ try{assert.equal((await findStoreSubscriptions(owner)).live?.subscriptionId,live.id);}
+ finally{globalThis.fetch=old;}
+});
+
+test('CX-61 independent closing fallback cannot adopt a funded row from an incomplete customer page',async()=>{
+ const {liveByCustomer}=await import('@/lib/closing-plan-guard');
+ const old=globalThis.fetch;
+ const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:[]} as Store;
+ const live=recoveryPlan('harbor','cus_Test000001',true);
+ globalThis.fetch=async()=>Response.json({data:[live],has_more:true});
+ try{
+  activationObservations.calls.length=0;activationObservations.accept=true;
+  await assert.rejects(liveByCustomer(owner),/Subscription .* incomplete/);
+  assert.equal(activationObservations.calls.length,0);
+ }finally{globalThis.fetch=old;activationObservations.accept=false;}
+});
+
+test('CX-61 malformed released-name evidence is unknown, never an empty history that can miss a paid plan',async()=>{
+ const old=globalThis.fetch;
+ const live=recoveryPlan('released-harbor');
+ try{
+  const extra=['released-harbor'];Object.defineProperty(extra,'extra',{value:'unknown'});
+  const iterator=['released-harbor'];Object.defineProperty(iterator,Symbol.iterator,{value:function*(){yield 'released-harbor';}});
+  for(const releasedHandles of [extra,iterator]){
+   const owner={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles} as Store;
+   globalThis.fetch=async(input)=>Response.json({data:new URL(String(input)).pathname==='/v1/subscriptions/search'?[]:[live],has_more:false});
+   await assert.rejects(findStoreSubscriptions(owner),/Subscription search handle coverage is unknown/);
+  }
+ }finally{globalThis.fetch=old;}
+});
+
+test('review: a reused current or previous name is not blocked by canceled DeletedCustomer history',async()=>{
+ const old=globalThis.fetch;
+ activationObservations.calls.length=0;
+ const terminal={id:'sub_Deleted001',created:1,status:'canceled',metadata:{store:'harbor'},customer:{id:'cus_Foreign001',object:'customer',deleted:true}};
+ try{
+  for(const named of ['harbor','old-harbor'])for(const customerId of [null,'cus_Test000001'])for(const marked of [false,true]){
+   const owner={...store,stripeCustomerId:customerId,previousHandles:['old-harbor'],releasedHandles:[]} as Store;
+   const row={...terminal,metadata:{store:named,...(marked?{funding_grant:'not_an_activation_proof'}:{})}};
+   globalThis.fetch=async(input)=>Response.json({data:new URL(String(input)).pathname==='/v1/subscriptions/search'?[row]:[],has_more:false});
+   assert.deepEqual(await findStoreSubscriptions(owner),{live:null,customerId:null,lapsed:[]});
+   assert.equal(activationObservations.calls.length,0,'terminal foreign or unidentified history never activates a grant');
+  }
+ }finally{globalThis.fetch=old;}
 });

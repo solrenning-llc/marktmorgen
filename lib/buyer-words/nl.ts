@@ -37,7 +37,7 @@ export const nl: BuyerWords = {
 
   fairHead: (country, percent) => `Eerlijke prijs voor jouw land (${country}): ${percent}${S}% korting`,
   fairNote: (store, plan) =>
-    `${store} verlaagt de prijzen waar geld minder waard is. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de lagere prijs geldt bij betaling in één keer" : ""}.`,
+    `${store} verlaagt de prijzen waar geld minder waard is. Deze prijs is automatisch voor jou bepaald, op basis van het land van je internetverbinding. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de lagere prijs geldt bij betaling in één keer" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% korting · ${ends}`,
   saleNote: (until, plan) =>
     `Tot ${until}. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de actieprijs geldt bij betaling in één keer" : ""}.`,
@@ -49,9 +49,11 @@ export const nl: BuyerWords = {
   callLive: (dates) => `Livesessie, online, ${dates} ${plural(dates, "datum", "data")} gepland`,
   callGroup: (minutes, seats) => `Groepsgesprek, ${minutes} minuten, tot ${seats} personen, online`,
   callOne: (minutes) => `Gesprek van ${minutes} minuten, online`,
+  callLengths: (list) => `Gesprek van ${list} minuten, online`,
   inPersonLive: (dates) => `Livesessie, ter plaatse, ${dates} ${plural(dates, "datum", "data")} gepland`,
   inPersonGroup: (minutes, seats) => `${minutes} minuten, tot ${seats} personen, ter plaatse`,
   inPersonOne: (minutes) => `${minutes} minuten, ter plaatse`,
+  inPersonLengths: (list) => `${list} minuten, ter plaatse`,
   inPersonLiveNone: "Livesessie, ter plaatse, geen data gepland",
   bundleOf: (count, worth) => `Bundel van ${count} producten${worth ? ` · ${worth}` : ""}`,
   worth: (worth, price) => `${worth} aan producten voor ${price}`,
@@ -81,7 +83,7 @@ export const nl: BuyerWords = {
   buyAsGift: "Koop als cadeau",
   buyAsGiftFor: (price) => `Koop als cadeau — ${price}`,
   giftNote: (store) =>
-    `Je betaalt op de pagina van Stripe. Direct daarna krijgt de ontvanger één e-mail van ${store} met je naam, je bericht en een link om het op het eigen adres te openen. Jij krijgt de bon, geen kopie.`,
+    `Je betaalt op de pagina van Stripe. Na betaling hoort het cadeau bij het adres van de ontvanger. Als de ene e-mail van ${store} aankomt, bevat die je naam, je bericht en een link om het te openen. Jij krijgt de bon, geen kopie.`,
   giftProblems: {
     email: "Dat lijkt geen e-mailadres. Controleer het adres van de ontvanger en probeer het opnieuw.",
     option: "Kies wat je wilt geven en probeer het opnieuw. Er is niets afgeschreven.",
@@ -131,7 +133,8 @@ export const nl: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog van ${store}`,
-  blogEmpty: "Hier staat nog niets.",
+  blogPastEnd: "Geen berichten op deze pagina",
+  blogPastEndBody: "Deze pagina komt na het laatste bericht.",
   blogMinutes: (n) => `${n} min lezen`,
   blogNewer: "Nieuwere berichten",
   blogOlder: "Oudere berichten",
@@ -144,6 +147,7 @@ export const nl: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `je bespaart ${percent}%`,
   chooseOptionFor: (title) => `Kies een optie voor ${title}`,
+  chooseOne: "Kies er een",
   recommended: "Aanbevolen",
   recommendedAfter: " (aanbevolen)",
   howToPayFor: (title) => `Hoe je ${title} betaalt`,
@@ -180,6 +184,8 @@ export const nl: BuyerWords = {
     `Zodra hij live is, wordt de betaling door Stripe geïnd op de eigen rekening van ${store}: Marktmorgen houdt het geld nooit vast en neemt er niets van.`,
   paidBy: (takers, store) =>
     `De betaling wordt door ${takers} geïnd op de eigen rekening van ${store}. Marktmorgen houdt het geld nooit vast en neemt er niets van.`,
+  whoAnswers: (store) =>
+    `${store} is de verkoper en is verantwoordelijk voor wat je koopt, voor terugbetalingen en voor een eventueel herroepingsrecht. Marktmorgen host de pagina's van de winkel en is geen partij bij de verkoop.`,
   noPaymentsTitle: "Deze winkel kan nog geen betalingen ontvangen.",
   noPaymentsBody: (store) => `De prijzen hierboven zijn echt, maar hier kan nog geen kaart worden belast. Wil je kopen, schrijf dan rechtstreeks naar ${store}.`,
   noPaymentsBodyOne: (store) => `De prijs hierboven is echt, maar hier kan nog geen kaart worden belast. Wil je kopen, schrijf dan rechtstreeks naar ${store}.`,
@@ -295,10 +301,19 @@ export const nl: BuyerWords = {
   newer: "Nieuwer",
   older: "Ouder",
   askUnknown: (store) => `Dat staat niet op deze pagina. Vraag het ${store} voordat je koopt.`,
+  askTermsCut: () => "Ik heb de volledige voorwaarden hier niet. Vraag het de maker voordat je koopt.",
 
   noLongerOnSale: "Dit product is niet meer te koop.",
+  cardUnread: "Dit product kon nu niet worden geladen. Probeer het zo meteen opnieuw.",
+  cardBuyUnread: "Kopen is nu niet mogelijk. Probeer het zo meteen opnieuw.",
   seeStore: (store) => `Bekijk ${store}`,
   cardTestMode: "Testmodus: er wordt geen echte kaart belast.",
   cardCheckout: "Veilig betalen via Stripe, in een nieuw tabblad.",
+  cardSoldBy: (store) => `Verkocht door ${store}, die ervoor verantwoordelijk is.`,
   cardOpens: (store) => `Opent in de winkel van ${store}, in een nieuw tabblad.`,
+
+  // ---- Email cards (lib/mail-product-price.ts)
+  orMore: (price) => `${price} of meer`,
+  plusTax: "+ belasting, indien van toepassing",
+  salePriceUntil: (price, when) => `Actieprijs: ${price}, tot ${when}`,
 };

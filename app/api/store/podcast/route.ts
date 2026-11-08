@@ -5,6 +5,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath } from "@/lib/product-file";
 import { readListing } from "@/lib/catalog";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { dropPodcast, editPodcast, newPodcastId, readPodcast, savePodcast, type PodcastEdit } from "@/lib/podcast";
 
 /**
@@ -41,6 +42,8 @@ export async function POST(request: NextRequest) {
     const podcastId = product.podcast.id;
 
     return await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+      // Only Redis's exact "no record" is an empty podcast; an unknown read throws (readPodcast) and nothing is
+      // written, because what is written below is the whole podcast as read.
       const podcast = (await readPodcast(podcastId)) ?? { id: podcastId, episodes: [] };
       if (action === "disable") {
         if (podcast.episodes.length > 0) return fail("not_empty");
@@ -55,6 +58,9 @@ export async function POST(request: NextRequest) {
         // In this store's folder for this very product, and what it is is read
         // from storage, not from the browser.
         if (!ownsPath(pathname, await storeFolder(ref), id)) return fail("invalid");
+        // The product's own file and its other episodes share this folder: none of them is a new episode's audio,
+        // so removing this episode later can never delete them.
+        if (product.file?.pathname === pathname || podcast.episodes.some((episode) => episode.pathname === pathname)) return fail("in_use");
         const found = await head(pathname);
         edit = { op: "add", pathname, bytes: found.size, contentType: found.contentType, title: body.title, notes: body.notes, at: Math.floor(Date.now() / 1000) };
       } else if (action === "edit") {
@@ -66,17 +72,26 @@ export async function POST(request: NextRequest) {
       }
       const result = editPodcast(podcast, edit);
       if (!result.ok) {
-        // An upload that could not be taken is not left in storage.
-        if (edit.op === "add") await del(edit.pathname).catch(() => {});
+        // Nothing is deleted for a refusal, nor for an error thrown after the file was read (a full store, a file
+        // store that did not answer, a lock lost): the browser names the file, and the product's folder also holds
+        // its episodes and its own file, so the name may be one of those. No door can write down which upload is
+        // new, because the name gets its random ending only once it is stored (app/api/store/file, the vault), so
+        // "this request's own upload" cannot be proved here. A file left behind stays, never deleted from under a
+        // record; its cost is bounded where it was let in: the door reserved its full size from the store's monthly
+        // upload room (reserveStoreUpload, never refunded) and the store's storage brake counts it (lib/storage-quota.ts).
         return fail(result.reason);
       }
       await savePodcast(result.podcast);
       await setPodcastEpisodes(ref, id, result.podcast.episodes.length);
-      if (result.removed) await del(result.removed.pathname).catch((error: unknown) => console.error("could not delete an episode's audio", error));
+      // Audio the product's file or another episode still uses (written before the check above) is kept.
+      const gone = result.removed;
+      const shared = gone !== null && (product.file?.pathname === gone.pathname || result.podcast.episodes.some((episode) => episode.pathname === gone.pathname));
+      if (gone && !shared) await del(gone.pathname).catch((error: unknown) => console.error("could not delete an episode's audio", error));
       return Response.json({ ok: true, podcast: result.podcast });
     });
   } catch (error) {
     if (error instanceof LockBusyError) return fail("busy", 409);
+    if (error instanceof UnknownReplyError) return fail("unavailable", 503);
     console.error("changing a podcast failed", error);
     return fail("server_error", 500);
   }

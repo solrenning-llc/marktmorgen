@@ -47,6 +47,7 @@ const en = {
       body: "It has as many affiliates as one store can hold. Write to the store if you would like to be considered.",
     },
     error: { title: "Something went wrong on our side", body: "Nothing was changed. Try again in a moment." },
+    resting: { title: "This store can't take this right now", body: "Accepting checks the store's partners first, and the store can't take that many requests right now. Nothing was changed. Try again later, or write to the store." },
     expired: {
       title: "This link has expired",
       body: "An emailed link works once, within 24 hours. Ask for a new one below; it takes a few seconds.",
@@ -132,7 +133,18 @@ const en = {
   nextPayment: (date: string) => `Next payment: ${date}.`,
   waitingNote: (amount: string) => `${amount} of what you are owed is still inside that wait, and is not payable yet.`,
   refundsUnchecked:
-    "Refunds and chargebacks could not all be checked just now, so a sale refunded or disputed recently may still show as earning. It is corrected the next time this page opens.",
+    "Refunds and chargebacks could not all be checked just now, so a sale refunded or disputed recently may still show as earning. It is corrected when these figures next refresh.",
+  /** When an affiliate's figures were worked out (lib/affiliate-book-snapshot.ts): `when` arrives written in the store's language, in UTC. Then figuresDaily, or figuresShort for an incomplete book worked out again sooner. */
+  figuresAsOf: (when: string) => `Figures as of ${when}, Coordinated Universal Time (UTC).`,
+  figuresDaily: "They refresh at most once a day.",
+  figuresShort: "They can refresh again after 15 minutes.",
+  /**
+   * Shown while none are kept yet and none are being worked out for this load: another load is working them out,
+   * or a recent refresh that kept nothing holds the next off (up to a day after a few incomplete ones), so no time is promised.
+   */
+  figuresSoon: "Your figures are not ready yet.",
+  /** Shown when none are kept and working them out was refused because a limit on page views was reached: no time is promised, as it may take days. */
+  figuresNoRoom: "Your figures cannot be updated right now because a limit on page views was reached. They will show again when there is room.",
   salesHead: "Sales through your link",
   noneYet: "None yet.",
   aProduct: "A product",
@@ -232,6 +244,9 @@ const en = {
       ? `${rule} None of that applies once a sale has been credited: from then on the buyer stays with that affiliate, and everything the person buys afterward earns them, with no time limit, on any device, with no cookie involved at all.`
       : rule;
   },
+  /** Added when the program credits its affiliates' confirmed leads (lib/affiliate-setting.ts, creditsContacts and CONTACTS_RULE). */
+  contactsRule:
+    "A one-off purchase not credited to an affiliate's link, an affiliate's code or an earlier purchase goes to the affiliate who brought the buyer as a confirmed lead before they bought, on any device and with no cookie involved.",
   /** When the creator pays (lib/affiliate-setting.ts, payoutPromise): `n` the day of the month, 0 for none; `days` the wait. */
   payoutPromise: (store: string, n: number, days: number) => {
     const wait = days > 0 ? ` A sale is payable ${days} ${days === 1 ? "day" : "days"} after it is made, so a refund in that time comes off it first.` : "";
@@ -257,6 +272,17 @@ const en = {
   approvedTerms: (days: number, percent: number, hasRates: boolean) =>
     `A one-time purchase made through it within ${days} ${days === 1 ? "day" : "days"} of a click earns you ${percent}% of what the buyer paid before tax${hasRates ? " (some products earn a different share; your page lists them)" : ""}. Memberships and payment plans do not earn, and a refunded sale earns nothing.`,
   approvedPage: (url: string) => `Your clicks, sales and earnings: ${url}`,
+  /** Said on the affiliate page before anyone applies, when the program removes affiliates who bring nothing. */
+  termIdle: (days: number, warn: number, withLeads: boolean) =>
+    withLeads
+      ? `An affiliate whose link brings no sale and no lead for ${days} days is removed from the program, after an email ${warn} days before with the date. One sale or one lead before then keeps them in.`
+      : `An affiliate whose link brings no sale for ${days} days is removed from the program, after an email ${warn} days before with the date. One sale before then keeps them in.`,
+  /** The warning before an affiliate who brings nothing is removed (630 [HN6](3), lib/affiliates.ts idleSweep). `date` is said in the store's language. */
+  idleSubject: (store: string, date: string) => `Your affiliate link with ${store} ends on ${date}`,
+  idleBody: (store: string, days: number, date: string, withLeads: boolean) =>
+    withLeads
+      ? `${store} removes affiliates whose link brings no sale and no lead for ${days} days. If yours brings neither before ${date}, you will be removed from the program on that day. One sale or one lead through your link before then keeps you in. Your record of clicks, sales and payments stays as it is.`
+      : `${store} removes affiliates whose link brings no sale for ${days} days. If yours brings none before ${date}, you will be removed from the program on that day. One sale through your link before then keeps you in. Your record of clicks, sales and payments stays as it is.`,
 
   // ---- Emails to an invited partner ---------------------------------------------------------------
   partnerSubject: (store: string) => `${store} wants you as a partner`,
@@ -327,6 +353,11 @@ const en = {
   reviewsAsk: (who: string) => `Stop review requests from ${who || "this store"}?`,
   reviewsFor: (email: string) => `For ${email}. One press stops them for good. A review you already wrote stays as it is.`,
   stopReviews: "Stop review requests",
+  /** Said on the stop page when the last press was not saved; the button is offered again. */
+  reviewsNotSaved: "We could not save that just now. Please try again.",
+  /** Said on a community stop page whose link could not be read just now (CX-123 rule 24): never "unknown", never stopped. */
+  linkNotReadTitle: "We could not open this link just now",
+  linkNotReadBody: "Please try again in a minute.",
 };
 
 export type AffiliatesWords = typeof en;
@@ -347,6 +378,7 @@ const es: AffiliatesWords = {
       body: "Tiene tantos afiliados como puede tener una tienda. Escribe a la tienda si quieres que te tengan en cuenta.",
     },
     error: { title: "Algo salió mal por nuestra parte", body: "No se cambió nada. Inténtalo de nuevo en un momento." },
+    resting: { title: "Esta tienda no puede atender esto ahora", body: "Para aceptar, primero se comprueban los socios de la tienda, y la tienda no puede atender tantas solicitudes en este momento. No se cambió nada. Inténtalo más tarde o escribe a la tienda." },
     expired: {
       title: "Este enlace ha caducado",
       body: "Un enlace enviado por email funciona una sola vez, dentro de las 24 horas. Pide uno nuevo abajo; solo tarda unos segundos.",
@@ -427,7 +459,12 @@ const es: AffiliatesWords = {
   nextPayment: (date) => `Próximo pago: ${date}.`,
   waitingNote: (amount) => `${amount} de lo que se te debe aún está dentro de ese plazo de espera, y todavía no se puede pagar.`,
   refundsUnchecked:
-    "No se pudieron comprobar todos los reembolsos ahora mismo, así que una venta reembolsada hace poco puede seguir apareciendo como si generara ganancias. Se corrige la próxima vez que se abra esta página.",
+    "No se pudieron comprobar todos los reembolsos ahora mismo, así que una venta reembolsada hace poco puede seguir apareciendo como si generara ganancias. Se corrige cuando estas cifras se actualicen de nuevo.",
+  figuresAsOf: (when: string) => `Cifras del ${when}, tiempo universal coordinado (UTC).`,
+  figuresDaily: "Se actualizan como máximo una vez al día.",
+  figuresShort: "Pueden actualizarse de nuevo pasados 15 minutos.",
+  figuresSoon: "Tus cifras todavía no están listas.",
+  figuresNoRoom: "Tus cifras no se pueden actualizar ahora porque se alcanzó un límite de visitas a páginas. Volverán a mostrarse cuando haya margen.",
   salesHead: "Ventas a través de tu enlace",
   noneYet: "Ninguna todavía.",
   aProduct: "Un producto",
@@ -511,6 +548,8 @@ const es: AffiliatesWords = {
       ? `${rule} Nada de eso se aplica una vez que se ha acreditado una venta: desde entonces el comprador se queda con ese afiliado, y todo lo que esa persona compre después le hace ganar, sin límite de tiempo, en cualquier dispositivo y sin ninguna cookie de por medio.`
       : rule;
   },
+  contactsRule:
+    "Una compra única que no se atribuye a ningún enlace ni código de afiliado ni a una compra anterior va al afiliado que trajo al comprador como lead confirmado antes de que comprara, en cualquier dispositivo y sin ninguna cookie de por medio.",
   payoutPromise: (store, n, days) => {
     const wait = days > 0 ? ` Una venta se puede pagar ${days} ${plural(days, "día", "días")} después de hacerse, así que un reembolso en ese tiempo se descuenta primero.` : "";
     if (n < 1) return `${store} no ha fijado un día de pago, y paga cuando decide.${wait}`;
@@ -534,6 +573,15 @@ const es: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Una compra única hecha a través de él dentro de ${days} ${plural(days, "día", "días")} desde un clic te hace ganar el ${percent}${S}% de lo que pagó el comprador antes de impuestos${hasRates ? " (algunos productos generan una parte distinta; tu página los indica)" : ""}. Las membresías y los pagos a plazos no generan nada, y una venta reembolsada no genera nada.`,
   approvedPage: (url) => `Tus clics, ventas y ganancias: ${url}`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Un afiliado cuyo enlace no trae ninguna venta ni ningún lead durante ${days} días sale del programa, tras un correo ${warn} días antes con la fecha. Una venta o un lead antes de esa fecha lo mantiene dentro.`
+      : `Un afiliado cuyo enlace no trae ninguna venta durante ${days} días sale del programa, tras un correo ${warn} días antes con la fecha. Una venta antes de esa fecha lo mantiene dentro.`,
+  idleSubject: (store, date) => `Tu enlace de afiliado de ${store} termina el ${date}`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} retira a los afiliados cuyo enlace no trae ninguna venta ni ningún lead durante ${days} días. Si el tuyo no trae ninguno antes del ${date}, saldrás del programa ese día. Una venta o un lead a través de tu enlace antes de esa fecha te mantiene dentro. Tu historial de clics, ventas y pagos se conserva tal como está.`
+      : `${store} retira a los afiliados cuyo enlace no trae ninguna venta durante ${days} días. Si el tuyo no trae ninguna antes del ${date}, saldrás del programa ese día. Una venta a través de tu enlace antes de esa fecha te mantiene dentro. Tu historial de clics, ventas y pagos se conserva tal como está.`,
 
   partnerSubject: (store) => `${store} te quiere como socio`,
   partnerOffer: (store, percent) => `${store} te ofrece el ${percent}${S}% de cada venta de:`,
@@ -597,6 +645,9 @@ const es: AffiliatesWords = {
   reviewsAsk: (who) => `¿Dejar de recibir solicitudes de reseña de ${who || "esta tienda"}?`,
   reviewsFor: (email) => `Para ${email}. Con una sola pulsación dejan de llegar para siempre. Una reseña que ya escribiste se queda como está.`,
   stopReviews: "Dejar de recibir solicitudes de reseña",
+  reviewsNotSaved: "No pudimos guardarlo ahora. Inténtalo de nuevo.",
+  linkNotReadTitle: "No pudimos abrir este enlace ahora",
+  linkNotReadBody: "Inténtalo de nuevo en un minuto.",
 };
 
 // ---- French ------------------------------------------------------------------------------------------
@@ -615,6 +666,7 @@ const fr: AffiliatesWords = {
       body: "Il compte autant d'affiliés qu'une boutique peut en avoir. Écrivez à la boutique si vous souhaitez être pris en considération.",
     },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été modifié. Réessayez dans un instant." },
+    resting: { title: "Cette boutique ne peut pas traiter cela pour le moment", body: "Accepter vérifie d'abord les partenaires de la boutique, et la boutique ne peut pas traiter autant de requêtes pour le moment. Rien n'a été modifié. Réessayez plus tard ou écrivez à la boutique." },
     expired: {
       title: "Ce lien a expiré",
       body: `Un lien envoyé par e-mail ne fonctionne qu'une fois, dans les 24${S}heures. Demandez-en un nouveau ci-dessous${S}; cela ne prend que quelques secondes.`,
@@ -693,7 +745,12 @@ const fr: AffiliatesWords = {
     `Déjà versé${S}: ${amount}. ${store} vous paie directement, depuis son propre compte. Marktmorgen ne détient jamais cet argent${S}: il n'y a donc ici aucun solde à attendre ni rien à réclamer avant une date limite.`,
   nextPayment: (date) => `Prochain paiement${S}: ${date}.`,
   waitingNote: (amount) => `${amount} de ce qui vous est dû est encore dans ce délai d'attente et n'est pas encore payable.`,
-  refundsUnchecked: `Tous les remboursements n'ont pas pu être vérifiés à l'instant${S}: une vente remboursée récemment peut donc encore apparaître comme rapportant de l'argent. C'est corrigé la prochaine fois que cette page s'ouvre.`,
+  refundsUnchecked: `Tous les remboursements n'ont pas pu être vérifiés à l'instant${S}: une vente remboursée récemment peut donc encore apparaître comme rapportant de l'argent. C'est corrigé à la prochaine mise à jour de ces chiffres.`,
+  figuresAsOf: (when: string) => `Chiffres du ${when}, temps universel coordonné (UTC).`,
+  figuresDaily: "Ils sont mis à jour au plus une fois par jour.",
+  figuresShort: "Ils peuvent être mis à jour à nouveau après 15 minutes.",
+  figuresSoon: "Vos chiffres ne sont pas encore prêts.",
+  figuresNoRoom: "Vos chiffres ne peuvent pas être mis à jour pour l'instant, car une limite de pages vues a été atteinte. Ils réapparaîtront quand il y aura de nouveau de la marge.",
   salesHead: "Ventes via votre lien",
   noneYet: "Aucune pour l'instant.",
   aProduct: "Un produit",
@@ -776,6 +833,8 @@ const fr: AffiliatesWords = {
       ? `${rule} Rien de tout cela ne s'applique une fois qu'une vente a été attribuée${S}: dès lors, l'acheteur reste lié à cet affilié, et tout ce que cette personne achète ensuite lui rapporte, sans limite de durée, sur n'importe quel appareil, sans aucun cookie.`
       : rule;
   },
+  contactsRule:
+    "Un achat unique qui n'est attribué à aucun lien ni code d'affilié ni à un achat précédent revient à l'affilié qui a amené l'acheteur comme lead confirmé avant son achat, sur n'importe quel appareil et sans aucun cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -802,6 +861,15 @@ const fr: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Un achat unique effectué via ce lien au plus ${days}${S}${pluralFr(days, "jour", "jours")} après un clic vous rapporte ${percent}${S}% de ce que l'acheteur a payé hors taxes${hasRates ? ` (certains produits rapportent une part différente${S}; votre page les indique)` : ""}. Les abonnements et les paiements échelonnés ne rapportent rien, et une vente remboursée ne rapporte rien.`,
   approvedPage: (url) => `Vos clics, ventes et gains${S}: ${url}`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Un affilié dont le lien n'apporte aucune vente ni aucun lead pendant ${days} jours est retiré du programme, après un e-mail envoyé ${warn} jours avant avec la date. Une vente ou un lead d'ici là le maintient.`
+      : `Un affilié dont le lien n'apporte aucune vente pendant ${days} jours est retiré du programme, après un e-mail envoyé ${warn} jours avant avec la date. Une vente d'ici là le maintient.`,
+  idleSubject: (store, date) => `Votre lien d'affilié de ${store} prend fin le ${date}`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} retire les affiliés dont le lien n'apporte aucune vente ni aucun lead pendant ${days} jours. Si le vôtre n'en apporte aucun avant le ${date}, vous quitterez le programme ce jour-là. Une vente ou un lead par votre lien d'ici là vous y maintient. Votre historique de clics, de ventes et de paiements reste tel quel.`
+      : `${store} retire les affiliés dont le lien n'apporte aucune vente pendant ${days} jours. Si le vôtre n'en apporte aucune avant le ${date}, vous quitterez le programme ce jour-là. Une vente par votre lien d'ici là vous y maintient. Votre historique de clics, de ventes et de paiements reste tel quel.`,
 
   partnerSubject: (store) => `${store} vous propose de devenir partenaire`,
   partnerOffer: (store, percent) => `${store} vous propose ${percent}${S}% de chaque vente de${S}:`,
@@ -865,6 +933,9 @@ const fr: AffiliatesWords = {
   reviewsAsk: (who) => `Ne plus recevoir de demandes d'avis de ${who || "cette boutique"}${S}?`,
   reviewsFor: (email) => `Pour ${email}. Une seule pression les arrête définitivement. Un avis que vous avez déjà écrit reste tel quel.`,
   stopReviews: "Arrêter les demandes d'avis",
+  reviewsNotSaved: "Nous n'avons pas pu l'enregistrer pour le moment. Veuillez réessayer.",
+  linkNotReadTitle: "Nous n'avons pas pu ouvrir ce lien pour le moment",
+  linkNotReadBody: "Veuillez réessayer dans une minute.",
 };
 
 // ---- German ------------------------------------------------------------------------------------------
@@ -883,6 +954,7 @@ const de: AffiliatesWords = {
       body: "Es hat so viele Affiliates, wie ein Shop haben kann. Schreiben Sie dem Shop, wenn Sie berücksichtigt werden möchten.",
     },
     error: { title: "Bei uns ist etwas schiefgelaufen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
+    resting: { title: "Dieser Shop kann das gerade nicht bearbeiten", body: "Beim Annehmen werden zuerst die Partner des Shops geprüft, und der Shop kann gerade nicht so viele Anfragen bearbeiten. Es wurde nichts geändert. Versuchen Sie es später erneut oder schreiben Sie dem Shop." },
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Ein per E-Mail gesendeter Link funktioniert einmal, innerhalb von 24 Stunden. Fordern Sie unten einen neuen an; das dauert nur ein paar Sekunden.",
@@ -964,7 +1036,12 @@ const de: AffiliatesWords = {
   nextPayment: (date) => `Nächste Zahlung: ${date}.`,
   waitingNote: (amount) => `${amount} von dem, was Ihnen zusteht, liegt noch in dieser Wartezeit und ist noch nicht auszahlbar.`,
   refundsUnchecked:
-    "Nicht alle Erstattungen konnten gerade geprüft werden, daher kann ein kürzlich erstatteter Verkauf noch so erscheinen, als bringe er etwas ein. Das wird beim nächsten Öffnen dieser Seite korrigiert.",
+    "Nicht alle Erstattungen konnten gerade geprüft werden, daher kann ein kürzlich erstatteter Verkauf noch so erscheinen, als bringe er etwas ein. Das wird bei der nächsten Aktualisierung dieser Zahlen korrigiert.",
+  figuresAsOf: (when: string) => `Zahlen vom ${when}, koordinierte Weltzeit (UTC).`,
+  figuresDaily: "Sie werden höchstens einmal am Tag aktualisiert.",
+  figuresShort: "Sie können nach 15 Minuten erneut aktualisiert werden.",
+  figuresSoon: "Ihre Zahlen sind noch nicht fertig.",
+  figuresNoRoom: "Ihre Zahlen können gerade nicht aktualisiert werden, weil ein Limit für Seitenaufrufe erreicht wurde. Sie erscheinen wieder, sobald wieder Spielraum besteht.",
   salesHead: "Verkäufe über Ihren Link",
   noneYet: "Noch keine.",
   aProduct: "Ein Produkt",
@@ -1047,6 +1124,8 @@ const de: AffiliatesWords = {
       ? `${rule} Nichts davon gilt mehr, sobald ein Verkauf gutgeschrieben wurde: Ab dann bleibt der Käufer diesem Affiliate zugeordnet, und alles, was die Person danach kauft, bringt ihm etwas ein, ohne Zeitlimit, auf jedem Gerät und ganz ohne Cookie.`
       : rule;
   },
+  contactsRule:
+    "Ein einmaliger Kauf, der keinem Affiliate-Link, keinem Affiliate-Code und keinem früheren Kauf zugeordnet ist, geht an den Affiliate, der den Käufer vor dem Kauf als bestätigten Lead gebracht hat, auf jedem Gerät und ganz ohne Cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -1075,6 +1154,15 @@ const de: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Ein Einmalkauf, der innerhalb von ${days} ${plural(days, "Tag", "Tagen")} nach einem Klick darüber getätigt wird, bringt Ihnen ${percent}${S}% dessen ein, was der Käufer vor Steuern gezahlt hat${hasRates ? " (einige Produkte bringen einen anderen Anteil; Ihre Seite listet sie auf)" : ""}. Mitgliedschaften und Ratenzahlungen bringen nichts ein, und ein erstatteter Verkauf bringt nichts ein.`,
   approvedPage: (url) => `Ihre Klicks, Verkäufe und Einnahmen: ${url}`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Ein Affiliate, dessen Link ${days} Tage lang keinen Verkauf und keinen Lead bringt, wird aus dem Programm entfernt, nach einer E-Mail ${warn} Tage vorher mit dem Datum. Ein Verkauf oder ein Lead bis dahin hält ihn im Programm.`
+      : `Ein Affiliate, dessen Link ${days} Tage lang keinen Verkauf bringt, wird aus dem Programm entfernt, nach einer E-Mail ${warn} Tage vorher mit dem Datum. Ein Verkauf bis dahin hält ihn im Programm.`,
+  idleSubject: (store, date) => `Ihr Affiliate-Link für ${store} endet am ${date}`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} entfernt Affiliates, deren Link ${days} Tage lang keinen Verkauf und keinen Lead bringt. Wenn Ihrer bis zum ${date} weder einen Verkauf noch einen Lead bringt, werden Sie an diesem Tag aus dem Programm entfernt. Ein Verkauf oder ein Lead über Ihren Link vor diesem Datum hält Sie im Programm. Ihre Klicks, Verkäufe und Zahlungen bleiben unverändert gespeichert.`
+      : `${store} entfernt Affiliates, deren Link ${days} Tage lang keinen Verkauf bringt. Wenn Ihrer bis zum ${date} keinen Verkauf bringt, werden Sie an diesem Tag aus dem Programm entfernt. Ein Verkauf über Ihren Link vor diesem Datum hält Sie im Programm. Ihre Klicks, Verkäufe und Zahlungen bleiben unverändert gespeichert.`,
 
   partnerSubject: (store) => `${store} möchte Sie als Partner`,
   partnerOffer: (store, percent) => `${store} bietet Ihnen ${percent}${S}% jedes Verkaufs von:`,
@@ -1141,6 +1229,9 @@ const de: AffiliatesWords = {
   reviewsFor: (email) =>
     `Für ${email}. Ein Klick beendet sie endgültig. Eine Bewertung, die Sie bereits geschrieben haben, bleibt, wie sie ist.`,
   stopReviews: "Bewertungsanfragen stoppen",
+  reviewsNotSaved: "Das konnten wir gerade nicht speichern. Bitte versuchen Sie es erneut.",
+  linkNotReadTitle: "Wir konnten diesen Link gerade nicht öffnen",
+  linkNotReadBody: "Bitte versuchen Sie es in einer Minute erneut.",
 };
 
 // ---- Italian -----------------------------------------------------------------------------------------
@@ -1159,6 +1250,7 @@ const it: AffiliatesWords = {
       body: "Ha tutti gli affiliati che un negozio può avere. Scrivi al negozio se vuoi essere preso in considerazione.",
     },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è stato cambiato nulla. Riprova tra un momento." },
+    resting: { title: "Questo negozio non può gestirlo in questo momento", body: "Per accettare si controllano prima i partner del negozio, e il negozio non può gestire così tante richieste in questo momento. Non è stato cambiato nulla. Riprova più tardi o scrivi al negozio." },
     expired: {
       title: "Questo link è scaduto",
       body: "Un link inviato per email funziona una sola volta, entro 24 ore. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
@@ -1238,7 +1330,12 @@ const it: AffiliatesWords = {
   nextPayment: (date) => `Prossimo pagamento: ${date}.`,
   waitingNote: (amount) => `${amount} di quanto ti spetta è ancora in questo periodo di attesa, e non è ancora pagabile.`,
   refundsUnchecked:
-    "Non è stato possibile controllare subito tutti i rimborsi, quindi una vendita rimborsata di recente potrebbe ancora risultare come guadagno. Viene corretto la prossima volta che si apre questa pagina.",
+    "Non è stato possibile controllare subito tutti i rimborsi, quindi una vendita rimborsata di recente potrebbe ancora risultare come guadagno. Viene corretto al prossimo aggiornamento di questi dati.",
+  figuresAsOf: (when: string) => `Dati del ${when}, tempo coordinato universale (UTC).`,
+  figuresDaily: "Si aggiornano al massimo una volta al giorno.",
+  figuresShort: "Possono aggiornarsi di nuovo dopo 15 minuti.",
+  figuresSoon: "I tuoi dati non sono ancora pronti.",
+  figuresNoRoom: "I tuoi dati non possono essere aggiornati ora perché è stato raggiunto un limite di pagine visualizzate. Torneranno visibili quando ci sarà di nuovo margine.",
   salesHead: "Vendite tramite il tuo link",
   noneYet: "Ancora nessuna.",
   aProduct: "Un prodotto",
@@ -1322,6 +1419,8 @@ const it: AffiliatesWords = {
       ? `${rule} Niente di tutto questo vale più una volta che una vendita è stata accreditata: da quel momento l'acquirente resta legato a quell'affiliato, e tutto ciò che la persona acquista in seguito gli fa guadagnare, senza limiti di tempo, su qualsiasi dispositivo, senza alcun cookie.`
       : rule;
   },
+  contactsRule:
+    "Un acquisto singolo non attribuito a nessun link né codice di affiliato né a un acquisto precedente va all'affiliato che ha portato l'acquirente come lead confermato prima dell'acquisto, su qualsiasi dispositivo e senza alcun cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -1348,6 +1447,15 @@ const it: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Un acquisto singolo fatto tramite il link entro ${days} ${plural(days, "giorno", "giorni")} da un clic ti fa guadagnare il ${percent}${S}% di quanto l'acquirente ha pagato al netto delle tasse${hasRates ? " (alcuni prodotti fanno guadagnare una quota diversa; la tua pagina li elenca)" : ""}. Abbonamenti e pagamenti rateali non fanno guadagnare, e una vendita rimborsata non fa guadagnare nulla.`,
   approvedPage: (url) => `I tuoi clic, vendite e guadagni: ${url}`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Un affiliato il cui link non porta alcuna vendita né alcun lead per ${days} giorni viene rimosso dal programma, dopo un'email inviata ${warn} giorni prima con la data. Una vendita o un lead prima di allora lo mantiene nel programma.`
+      : `Un affiliato il cui link non porta alcuna vendita per ${days} giorni viene rimosso dal programma, dopo un'email inviata ${warn} giorni prima con la data. Una vendita prima di allora lo mantiene nel programma.`,
+  idleSubject: (store, date) => `Il tuo link di affiliato di ${store} termina il ${date}`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} rimuove gli affiliati il cui link non porta alcuna vendita né alcun lead per ${days} giorni. Se il tuo non ne porta prima del ${date}, uscirai dal programma quel giorno. Una vendita o un lead tramite il tuo link prima di quella data ti mantiene nel programma. Il tuo storico di clic, vendite e pagamenti resta com'è.`
+      : `${store} rimuove gli affiliati il cui link non porta alcuna vendita per ${days} giorni. Se il tuo non ne porta prima del ${date}, uscirai dal programma quel giorno. Una vendita tramite il tuo link prima di quella data ti mantiene nel programma. Il tuo storico di clic, vendite e pagamenti resta com'è.`,
 
   partnerSubject: (store) => `${store} ti vuole come partner`,
   partnerOffer: (store, percent) => `${store} ti offre il ${percent}${S}% di ogni vendita di:`,
@@ -1411,6 +1519,9 @@ const it: AffiliatesWords = {
   reviewsAsk: (who) => `Non ricevere più richieste di recensione da ${who || "questo negozio"}?`,
   reviewsFor: (email) => `Per ${email}. Basta un clic per fermarle per sempre. Una recensione che hai già scritto resta com'è.`,
   stopReviews: "Interrompi le richieste di recensione",
+  reviewsNotSaved: "Non siamo riusciti a salvarlo ora. Riprova.",
+  linkNotReadTitle: "Non siamo riusciti ad aprire questo link ora",
+  linkNotReadBody: "Riprova tra un minuto.",
 };
 
 // ---- Dutch -------------------------------------------------------------------------------------------
@@ -1429,6 +1540,7 @@ const nl: AffiliatesWords = {
       body: "Het heeft zoveel affiliates als één winkel kan hebben. Schrijf de winkel als je in aanmerking wilt komen.",
     },
     error: { title: "Er ging iets mis aan onze kant", body: "Er is niets gewijzigd. Probeer het zo meteen opnieuw." },
+    resting: { title: "Deze winkel kan dit nu niet verwerken", body: "Bij het accepteren worden eerst de partners van de winkel gecontroleerd, en de winkel kan nu niet zoveel aanvragen verwerken. Er is niets gewijzigd. Probeer het later opnieuw of schrijf de winkel." },
     expired: {
       title: "Deze link is verlopen",
       body: "Een gemailde link werkt één keer, binnen 24 uur. Vraag hieronder een nieuwe aan; dat duurt een paar seconden.",
@@ -1508,7 +1620,12 @@ const nl: AffiliatesWords = {
   nextPayment: (date) => `Volgende betaling: ${date}.`,
   waitingNote: (amount) => `${amount} van wat je tegoed hebt, valt nog binnen die wachttijd en kan nog niet worden uitbetaald.`,
   refundsUnchecked:
-    "Niet alle terugbetalingen konden zojuist worden gecontroleerd, dus een onlangs terugbetaalde verkoop kan nog als opbrengst worden getoond. Dat wordt rechtgezet de volgende keer dat deze pagina opent.",
+    "Niet alle terugbetalingen konden zojuist worden gecontroleerd, dus een onlangs terugbetaalde verkoop kan nog als opbrengst worden getoond. Dat wordt rechtgezet bij de volgende bijwerking van deze cijfers.",
+  figuresAsOf: (when: string) => `Cijfers van ${when}, gecoördineerde wereldtijd (UTC).`,
+  figuresDaily: "Ze worden hoogstens één keer per dag bijgewerkt.",
+  figuresShort: "Ze kunnen na 15 minuten opnieuw worden bijgewerkt.",
+  figuresSoon: "Je cijfers zijn nog niet klaar.",
+  figuresNoRoom: "Je cijfers kunnen nu niet worden bijgewerkt, omdat een limiet voor paginaweergaven is bereikt. Ze verschijnen weer zodra er weer ruimte is.",
   salesHead: "Verkopen via je link",
   noneYet: "Nog geen.",
   aProduct: "Een product",
@@ -1591,6 +1708,8 @@ const nl: AffiliatesWords = {
       ? `${rule} Niets daarvan geldt meer zodra een verkoop is toegekend: vanaf dan blijft de koper bij die affiliate, en alles wat die persoon daarna koopt, levert die affiliate iets op, zonder tijdslimiet, op elk apparaat, helemaal zonder cookie.`
       : rule;
   },
+  contactsRule:
+    "Een eenmalige aankoop die niet aan een affiliatelink, een affiliatecode of een eerdere aankoop is toegekend, gaat naar de affiliate die de koper vóór de aankoop als bevestigde lead heeft aangebracht, op elk apparaat en helemaal zonder cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -1618,6 +1737,15 @@ const nl: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Een eenmalige aankoop via die link binnen ${days} ${plural(days, "dag", "dagen")} na een klik levert je ${percent}${S}% op van wat de koper vóór belasting betaalde${hasRates ? " (sommige producten leveren een ander aandeel op; je pagina noemt ze)" : ""}. Lidmaatschappen en betalingen in termijnen leveren niets op, en een terugbetaalde verkoop levert niets op.`,
   approvedPage: (url) => `Je klikken, verkopen en verdiensten: ${url}`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Een affiliate van wie de link ${days} dagen lang geen verkoop en geen lead oplevert, wordt uit het programma verwijderd, na een e-mail ${warn} dagen vooraf met de datum. Eén verkoop of één lead vóór die tijd houdt hem erin.`
+      : `Een affiliate van wie de link ${days} dagen lang geen verkoop oplevert, wordt uit het programma verwijderd, na een e-mail ${warn} dagen vooraf met de datum. Eén verkoop vóór die tijd houdt hem erin.`,
+  idleSubject: (store, date) => `Je affiliatelink bij ${store} stopt op ${date}`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} verwijdert affiliates van wie de link ${days} dagen lang geen verkoop en geen lead oplevert. Als die van jou vóór ${date} niets oplevert, word je die dag uit het programma verwijderd. Eén verkoop of één lead via je link vóór die datum houdt je erin. Je overzicht van klikken, verkopen en betalingen blijft zoals het is.`
+      : `${store} verwijdert affiliates van wie de link ${days} dagen lang geen verkoop oplevert. Als die van jou vóór ${date} geen verkoop oplevert, word je die dag uit het programma verwijderd. Eén verkoop via je link vóór die datum houdt je erin. Je overzicht van klikken, verkopen en betalingen blijft zoals het is.`,
 
   partnerSubject: (store) => `${store} wil je als partner`,
   partnerOffer: (store, percent) => `${store} biedt je ${percent}${S}% van elke verkoop van:`,
@@ -1682,6 +1810,9 @@ const nl: AffiliatesWords = {
   reviewsAsk: (who) => `Geen beoordelingsverzoeken meer van ${who || "deze winkel"}?`,
   reviewsFor: (email) => `Voor ${email}. Eén klik stopt ze voorgoed. Een beoordeling die je al hebt geschreven, blijft zoals hij is.`,
   stopReviews: "Stop de beoordelingsverzoeken",
+  reviewsNotSaved: "We konden dat nu niet opslaan. Probeer het opnieuw.",
+  linkNotReadTitle: "We konden deze link nu niet openen",
+  linkNotReadBody: "Probeer het over een minuut opnieuw.",
 };
 
 // ---- European Portuguese -------------------------------------------------------------------------------
@@ -1704,6 +1835,7 @@ const pt: AffiliatesWords = {
       body: "Tem tantos afiliados quantos uma loja pode ter. Escreva à loja se quiser ser considerado.",
     },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi alterado. Tente novamente daqui a pouco." },
+    resting: { title: "Esta loja não pode tratar disto agora", body: "Para aceitar, verificam-se primeiro os parceiros da loja, e a loja não consegue tratar tantos pedidos neste momento. Nada foi alterado. Tente novamente mais tarde ou escreva à loja." },
     expired: {
       title: "Esta ligação expirou",
       body: "Uma ligação enviada por email funciona uma vez, no prazo de 24 horas. Peça uma nova abaixo; demora poucos segundos.",
@@ -1784,7 +1916,12 @@ const pt: AffiliatesWords = {
   nextPayment: (date) => `Próximo pagamento: ${date}.`,
   waitingNote: (amount) => `${amount} do que lhe é devido ainda está dentro desse prazo de espera e ainda não pode ser pago.`,
   refundsUnchecked:
-    "Não foi possível verificar agora todos os reembolsos, por isso uma venda reembolsada recentemente pode ainda aparecer como se gerasse ganhos. Fica corrigido da próxima vez que esta página abrir.",
+    "Não foi possível verificar agora todos os reembolsos, por isso uma venda reembolsada recentemente pode ainda aparecer como se gerasse ganhos. Fica corrigido na próxima atualização destes números.",
+  figuresAsOf: (when: string) => `Números de ${when}, tempo universal coordenado (UTC).`,
+  figuresDaily: "São atualizados no máximo uma vez por dia.",
+  figuresShort: "Podem ser atualizados de novo após 15 minutos.",
+  figuresSoon: "Os seus números ainda não estão prontos.",
+  figuresNoRoom: "Os seus números não podem ser atualizados agora, porque foi atingido um limite de visualizações de páginas. Voltam a aparecer quando houver margem de novo.",
   salesHead: "Vendas através da sua ligação",
   noneYet: "Ainda nenhuma.",
   aProduct: "Um produto",
@@ -1868,6 +2005,8 @@ const pt: AffiliatesWords = {
       ? `${rule} Nada disso se aplica depois de uma venda ser creditada: a partir daí, o comprador fica associado a esse afiliado, e tudo o que essa pessoa comprar depois gera ganhos para ele, sem limite de tempo, em qualquer dispositivo, sem nenhum cookie envolvido.`
       : rule;
   },
+  contactsRule:
+    "Uma compra avulsa não atribuída a nenhuma ligação nem código de afiliado nem a uma compra anterior vai para o afiliado que trouxe o comprador como lead confirmado antes de comprar, em qualquer dispositivo e sem nenhum cookie.",
   payoutPromise: (store, n, days) => {
     const wait =
       days > 0
@@ -1894,6 +2033,15 @@ const pt: AffiliatesWords = {
   approvedTerms: (days, percent, hasRates) =>
     `Uma compra única feita através dela no prazo de ${days} ${plural(days, "dia", "dias")} após um clique dá-lhe ${percent}${S}% do que o comprador pagou antes de impostos${hasRates ? " (alguns produtos geram uma parte diferente; a sua página indica-os)" : ""}. Subscrições e pagamentos em prestações não geram nada, e uma venda reembolsada não gera nada.`,
   approvedPage: (url) => `Os seus cliques, vendas e ganhos: ${url}`,
+  termIdle: (days, warn, withLeads) =>
+    withLeads
+      ? `Um afiliado cuja ligação não traz nenhuma venda nem nenhum lead durante ${days} dias sai do programa, depois de um e-mail enviado ${warn} dias antes com a data. Uma venda ou um lead antes disso mantém-no no programa.`
+      : `Um afiliado cuja ligação não traz nenhuma venda durante ${days} dias sai do programa, depois de um e-mail enviado ${warn} dias antes com a data. Uma venda antes disso mantém-no no programa.`,
+  idleSubject: (store, date) => `A sua ligação de afiliado de ${store} termina em ${date}`,
+  idleBody: (store, days, date, withLeads) =>
+    withLeads
+      ? `${store} retira os afiliados cuja ligação não traz nenhuma venda nem nenhum lead durante ${days} dias. Se a sua não trouxer nenhum antes de ${date}, sairá do programa nesse dia. Uma venda ou um lead através da sua ligação antes dessa data mantém-no no programa. O seu histórico de cliques, vendas e pagamentos fica como está.`
+      : `${store} retira os afiliados cuja ligação não traz nenhuma venda durante ${days} dias. Se a sua não trouxer nenhuma antes de ${date}, sairá do programa nesse dia. Uma venda através da sua ligação antes dessa data mantém-no no programa. O seu histórico de cliques, vendas e pagamentos fica como está.`,
 
   partnerSubject: (store) => `${store} quer tê-lo como parceiro`,
   partnerOffer: (store, percent) => `${store} oferece-lhe ${percent}${S}% de cada venda de:`,
@@ -1957,6 +2105,9 @@ const pt: AffiliatesWords = {
   reviewsAsk: (who) => `Deixar de receber pedidos de avaliação ${deLoja(who)}?`,
   reviewsFor: (email) => `Para ${email}. Basta um clique para os parar de vez. Uma avaliação que já escreveu fica como está.`,
   stopReviews: "Parar os pedidos de avaliação",
+  reviewsNotSaved: "Não conseguimos guardar isso agora. Tente novamente.",
+  linkNotReadTitle: "Não conseguimos abrir este link agora",
+  linkNotReadBody: "Tente novamente daqui a um minuto.",
 };
 
 export const AFFILIATES_WORDS: Record<LanguageCode, AffiliatesWords> = { en, es, fr, de, it, nl, pt };

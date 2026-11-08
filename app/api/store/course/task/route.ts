@@ -8,7 +8,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { handIn, releaseBytes, submissionOf, takeRoom, takeTaskUpload } from "@/lib/assignment";
+import { handIn, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
   type HandedFile,
@@ -90,7 +90,14 @@ export async function POST(request: NextRequest) {
           await deleteFile(path).catch(() => {});
           return no("too_big");
         }
-        if (!(await takeRoom(room, found.size, taskRoomFor(store)))) {
+        // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
+        // in the store unaccounted for, and the bytes it may have taken are given back only if its mark says they entered.
+        const roomTaken = await takeRoom(room, found.size, taskRoomFor(store), path).catch(async (error: unknown) => {
+          await deleteFile(path).catch(() => {});
+          await undoTakeRoom(room, found.size, path).catch((undoError: unknown) => console.error("giving back a task file's room failed", undoError));
+          throw error;
+        });
+        if (!roomTaken) {
           await deleteFile(path).catch(() => {});
           return no("full");
         }
@@ -100,10 +107,22 @@ export async function POST(request: NextRequest) {
     }
     if (!text.trim() && !file) return no("needed");
 
-    const done = await handIn({ courseId: course.id, lessonId: lesson.id, who, email, task, text, file, data: store }).catch(async (error: unknown) => {
-      if (taken) await releaseBytes(room, taken).catch(() => {});
-      // Work that was not kept leaves no file behind it.
-      if (error instanceof DataRoomError && file) await deleteFile(file.path).catch(() => {});
+    // Whether handIn sent its write: from then on the work may keep the file even when the call fails (its answer
+    // lost, or a step after it failing), so neither the file nor its bytes may be let go (CX-123 rule 24).
+    let written = false;
+    const done = await handIn({ courseId: course.id, lessonId: lesson.id, who, email, task, text, file, data: store, writing: () => { written = true; } }).catch(async (error: unknown) => {
+      // Work that was not kept leaves no file behind it: the new file sent here (never the one the earlier work keeps)
+      // is deleted, and its bytes come back once it is gone; a file that could not be deleted stays counted. Once the
+      // write was sent, both stay counted, which only refuses sooner.
+      if (taken && file && !written) {
+        const gone = await deleteFile(file.path).then(
+          () => true,
+          (deleteError: unknown) => (console.error("deleting a task file that was not handed in failed", deleteError), false),
+        );
+        if (gone) await releaseBytes(room, taken).catch(() => {});
+      } else if (taken) {
+        console.error("a hand-in failed after its write: its file and the room it took are kept", error);
+      }
       throw error;
     });
     // Work that needs no reading is done at once, and may finish the course (lib/course-finish.ts).
@@ -111,7 +130,10 @@ export async function POST(request: NextRequest) {
     // The file it replaced is no longer anybody's work.
     if (done.replaced) {
       await deleteFile(done.replaced.path).catch((error: unknown) => console.error("could not delete a replaced assignment file", error));
-      await releaseBytes(room, done.replaced.bytes).catch(() => {});
+    }
+    // Its bytes come back only when this hand-in took it out of the files' hash (lib/assignment.ts, freedBytes).
+    if (done.freedBytes) {
+      await releaseBytes(room, done.freedBytes).catch(() => {});
     }
     // A creator who reads each one hears there is work to read.
     if (task.review) {

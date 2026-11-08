@@ -138,6 +138,100 @@ Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are smal
   - The soft accent (behind chosen, selected and highlighted things) also gives muted words 7:1. On "night" it was 4.05–4.3:1.
   - `tests/page-style.test.ts` checks 7:1 on the page, on cards, on items, on bands and on the soft accent, in every theme and across every accent tested.
 - **Not changed:**
-  - Links on a band stay at 4.5:1. Asking 7:1 there has no solution for some accents the creator may pick, so it stays a recorded gap and needs a design choice.
+  - Links on a band: decided on 2026-11-06 (C1-20261106-0100-TODOS-1) and built in 274 [AX1]: a link on a band is black or white, whichever reads more on it, always underlined (`lib/store-look.ts` `bandLink`, `app/globals.css`). `tests/band-link-contrast.test.ts` checks 7:1 for every theme across 216 accents (864 pairs). Before, links on a band were held to 4.5:1 in the creator's colour, which had no 7:1 solution for some accents; the creator's colour stays on buttons and elsewhere, not on band links.
   - Large text and non-text contrast were not changed.
   - Some backgrounds are barely set apart from the card. The soft accent on "night" moved from 1.60:1 to 1.30:1 against the card. Bands were already as close as 1.06:1 for some accents, before and after this change. Text stays readable on them, which is what 1.4.6 asks. A background difference is never the only sign that something is chosen (1.4.1), so a minimum band-to-card difference is a design choice left open.
+
+## A video in a window: Escape inside the player (4 November 2026)
+
+375 [TB1] unit 5 puts a creator's YouTube, Vimeo or Loom video in a modal `<dialog>` (`components/video-window.tsx`).
+
+- **What works:** Escape closes the window when focus is on its Close button or on the frame element itself. Close and a click on the backdrop also close it. Each of these removes the player and returns focus to the button that opened it.
+- **The case:** once the buyer clicks inside the player, or tabs into its own controls, keystrokes go to the player's document. That document is on the provider's origin, not ours. The browser does not pass Escape to our page, so the window stays open.
+- **Demonstrated** by the independent review of #2135 in Chromium with a stand-in player that has its own buttons: Escape pressed inside it left the dialog open.
+- **Why it cannot be fixed on our side:** a page cannot listen to keys inside a frame of another origin. Running our script in the frame is not possible either, because it is the provider's page.
+- **The equivalent we offer:** this is not a keyboard trap (2.1.2). One Shift+Tab from the player's first control reaches Close, which is labeled "Close", is at least 44 × 44 px and is always visible at the top of the window. Close is also the first thing focused when the window opens.
+- **Not checked:** a real screen reader with each provider's real player.
+
+## Store front lines and the narrowest glyphs (7 November 2026)
+
+WCAG 2.2 1.4.8 (AAA) asks that a block of text be no wider than 80 characters or glyphs. On a buyer's store front (`app/[handle]/page.tsx`), `app/globals.css` caps paragraphs, definitions, quotes, captions and the FAQ's questions at `34ch`. `tests/store-front-accessibility.test.ts` holds the cap.
+
+The same cap holds the rest of the buyer's side of a store. On a store's product page (`app/[handle]/p/[product]/page.tsx`), its reviews page and a call's booking page, `app/globals.css` (`.st-measure`) caps paragraphs, definitions, quotes, captions, the lines of the description's lists and of what an option includes, the FAQ's questions, and the words of a block's benefits, fit lists, steps, contents and bonuses at `34ch`. Each is capped in its own font size, so a detail smaller than its title is held as well. Cards, rows and buttons (a review, "More from", a bundle's row, a call's length) are not capped as boxes, so they keep their width; their words are. `tests/product-page-accessibility.test.ts` holds the cap.
+
+- **Measured** in Chromium 153 by `tests/e2e/store-front-audit.mjs`, which counts the characters actually on each rendered line. The run uses Geist for every store font, because the machine cannot reach Google Fonts.
+  - **At 56ch (build of 06bca7d8d):** a real sentence reached 81 characters a line (the full store at 200%). Words made only of narrow letters (i, l, t, f, j, r, s) at each field's longest reached 126 a line at 1280 px; a question of 150 such characters reached 123.
+  - **At 34ch** (the new rule laid over that same build, not a new build): real sentences reach at most 51 a line, and narrow-letter words at most 75, in the 18 cases of the full and edge stores. The one count over 80 is a card's row at 200%: a title of 79 characters (titles keep at most 80) and its price badge "$7", which is a separate box. A title is not a block of text.
+- **Measured on the product page** in Chromium at 56ch, the cap before: the product page's real sentences reached at most 78 characters a line. Words made only of narrow letters (i, l, t, f, j, r, s) reached 126 a line on the store front above, in the same font (Geist). That count is a property of the font, not of the page.
+  - **At 34ch, by arithmetic, not a new browser run:** a line holds the cap divided by its glyphs' width in `ch`, and `ch` follows each capped element's own font size. So the size does not change the count: narrow-letter words reach about 77 (126 × 34 ÷ 56) and real sentences about 47 (78 × 34 ÷ 56).
+  - A question can be 200 characters (`MAX_QUESTION`), an item 200 (`MAX_ITEM`) and its detail 300 (`MAX_ITEM_DETAIL`); before, none of them was capped.
+- **The case:** glyphs narrower than the cap allows for, 34ch ÷ 80 = 0.425ch each. Measured in Geist: an apostrophe is 0.268ch, a comma or period 0.303ch, "!" 0.321ch and "i" 0.368ch. A text of single letters and spaces ("i i i") averages 0.37ch. The spaces from U+2000 to U+200A are narrower still, and a combining mark takes no room of its own.
+- **Why no width holds it:** a line holds the cap divided by the width of its glyphs. For any cap, a run of glyphs narrower than a 1/80 share of it goes past 80.
+  - Holding 80 apostrophes would need a cap of 21ch. A real sentence would then keep about 30 characters a line in Geist (81 × 21 ÷ 56 on the store front, 78 × 21 ÷ 56 ≈ 29 on the product page).
+  - Glyphs that take almost no room need a cap near zero.
+  - So a CSS width that holds every glyph would cut ordinary sentences into short lines, and for the narrowest glyphs no width works. 34ch is the widest whole value that holds narrow-letter words with room (126 × 34 ÷ 56 ≈ 77). At 35ch the count would be about 79: no room left.
+  - A script that measures each paragraph and narrows it to its own glyphs is not demonstrated impossible. It is not built: the store front and the product page are drawn on the server and must work without script.
+- **The equivalent we offer:** the cap is in `ch`, so a line is the narrower of the cap and the window. Narrowing the window, or zooming in, narrows every line in the same proportion (WCAG technique C20). At 320 CSS px (400% zoom), the store front audit counted no line over 80 in any state. Reader views and the visitor's own style sheet also work, because the words are live text with no fixed width. The creator's words are never edited to fit.
+- **Not checked:** other store fonts (Nunito, Fraunces, Playfair Display, Bricolage Grotesque, Instrument Serif) as actually served, Firefox and WebKit, real devices, people; the product page at 34ch in a browser.
+
+## Resource-page interface captures (6 November 2026)
+
+Encanto 9 adds dated captures to `/platform/store-page` and
+`/platform/sales-pages`. These show the actual application with isolated,
+fictional Harbor Kitchen content. They are not testimonials, customer outcomes,
+or a replacement for the page's live heading, description, capability details,
+and closed-plan notice. Captions identify the fictional content, capture date,
+and substitute font. No text is placed over the captured pixels.
+
+### SC 1.4.9 assessment and alternatives
+
+The purpose is to show the interface arrangement: a creator profile above
+product cards, and a product list beside an editor with Build/Preview tabs and
+a page-coach panel. The surrounding card structure, spacing, selection and
+control placement convey visual information in addition to the text. Rendering
+a marketing paragraph as pixels is not this purpose. The capture's particular
+presentation is the evidence of how the application looked at the recorded
+revision; it does not establish the current state of a customer's store.
+
+The [W3C explanation of SC 1.4.9](https://www.w3.org/WAI/WCAG22/Understanding/images-of-text-no-exception.html),
+reviewed on November 6, 2026 (page updated September 16, 2025), distinguishes
+screenshots conveying significant other visual information from an image that
+simply styles text. Classification depends on what an individual image conveys,
+not on its file extension or the word "screenshot". This is the scoped basis
+for using these two informative interface captures; independent review must
+confirm it before merge. It is not a blanket exemption for text in future images.
+
+Each image has a specific text alternative describing its visible arrangement.
+The store alternative identifies the profile, three product cards, titles and
+price badges; the editor alternative identifies the product list, editor tabs
+and page-coach score. The latter does not claim a phone preview outside the
+captured area. Dates and provenance are live text in a visible `figcaption`.
+Page explanations and availability remain live, adjustable HTML text; these
+images introduce no separate product promise, price or testimonial.
+
+### Evidence and remaining limits
+
+Captures are 1280 by 820 pixels, with explicit intrinsic dimensions, lazy loading
+and asynchronous decoding. Local static WebP assets are 37,746 and 54,842
+bytes; the 100,000-byte per-capture publication ceiling was checked before
+creating them. There is no optimizer, external image host or runtime capture.
+The exact original SHA-256 digests are retained. Each matching resource page
+requests one separately cacheable `/feature-captures/` asset; pixels are no
+longer copied into the route module or HTML. The actual route dependency
+graph measured with esbuild (packages external and the same substitute font)
+fell from 1,769,389 to 1,645,958 bytes, and from 534,311 to 441,191 bytes gzip.
+The capture module contributes 1,179 rather than 124,610 bytes. This is a
+bundler report, not a Next production, RSC hydration, LCP or CLS measurement.
+Static-hosting request/transfer costs remain existing company costs, unknown
+rather than zero; these payload measurements do not certify global margin.
+The source revision, timestamps and SHA-256 digests are recorded with the images.
+
+The capture run used real Next server-rendered UI, local synthetic services and
+a substitute font. JavaScript was disabled to avoid automatic visit analytics;
+no hydration, editing interaction, production font fidelity or screen-reader
+journey is claimed. Isolated component checks at 390 and 1440 pixels confirm
+image decoding, readable live captions, no overflow and no violations in the
+selected automated accessibility rules. Full page integration is checked in the
+associated PR. Neither these checks nor this record certify whole-product AAA,
+all access needs, real devices, LCP/CLS or production behavior. Review of the
+image purpose and text alternatives remains part of independent PR review.

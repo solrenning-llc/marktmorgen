@@ -16,6 +16,7 @@
  *   - nobody is locked out: with nothing left, it turns off a week after it is
  *     asked for, and a login with a code, or Cancel, calls that off.
  */
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { base32Decode, base32Encode, codeAt, stepOf, STEP_SECONDS } from "@/lib/totp";
@@ -158,10 +159,31 @@ async function main(): Promise<void> {
   is("with what matters locked for a week", [Math.round(((await lockedUntil(lockedSession)) - Date.now()) / 86_400_000), (await lockedUntil(lockedSession)) === until], [RESET_DAYS, true]);
   const asStudio = (need: string, session: string) =>
     studioAccess(new NextRequest("https://marktmorgen.com/api/store/x", { method: "POST", headers: { cookie: `nl_session=${session}` } }), need as never);
-  const lockedAnswers = await Promise.all(["payments", "billing", "team", "delete", "export", "settings", "send", "import"].map(async (need) => (await asStudio(need, lockedSession)).ok === false && ((await asStudio(need, lockedSession)) as { reason: string }).reason));
-  is("payments, the plan, the team, deleting, exports, settings, sending and imports wait", lockedAnswers, new Array(8).fill("locked"));
+  const lockedAnswers = await Promise.all(["payments", "billing", "team", "delete", "export", "settings", "send", "import", "erase"].map(async (need) => (await asStudio(need, lockedSession)).ok === false && ((await asStudio(need, lockedSession)) as { reason: string }).reason));
+  is("payments, the plan, the team, deleting, exports, settings, sending, imports and erasing a person wait", lockedAnswers, new Array(9).fill("locked"));
   const openAnswers = await Promise.all(["products", "page", "orders", "stats", "draft", "reviews"].map(async (need) => { const a = await asStudio(need, lockedSession); return a.ok ? "open" : (a as { reason: string }).reason; }));
   is("products, pages, orders, numbers, drafts and reviews do not", openAnswers.every((a) => a !== "locked"), true);
+  // C2-76 (4 November 2026): what cannot be undone waits too, under a permission the session otherwise keeps.
+  const reasonOf = async (need: string, action: string) => {
+    const a = await studioAccess(new NextRequest("https://marktmorgen.com/api/store/x", { method: "POST", headers: { cookie: `nl_session=${lockedSession}` } }), need as never, action);
+    return a.ok ? "open" : (a as { reason: string }).reason;
+  };
+  is("deleting a person and everything kept about them waits", await reasonOf("erase", "erase"), "locked");
+  is("removing a product waits; adding and editing one do not", [await reasonOf("products", "remove"), await reasonOf("products", "edit") !== "locked", await reasonOf("products", "add") !== "locked"], ["locked", true, true]);
+  const { POST: personRoute } = await import("@/app/api/store/person/route");
+  const erased = await personRoute(new NextRequest("https://marktmorgen.com/api/store/person", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "erase", token: "x".repeat(40), confirm: "DELETE" }) }));
+  is("the erase route itself refuses it, before anything is read or deleted", ((await erased.json()) as { error?: string }).error, "locked");
+  const { POST: passkeyRoute } = await import("@/app/api/auth/passkey/route");
+  const { listPasskeys } = await import("@/lib/passkeys");
+  const pkList = `nl:pk:${createHash("sha256").update(`nimbus-passkeys:${LOST}`).digest("hex").slice(0, 40)}`;
+  await redis.pipeline([
+    ["SET", pkList, JSON.stringify([{ id: "a-passkey", publicKey: "pk", counter: 0, transports: [], name: "Phone", createdAt: "", lastUsedAt: "", synced: true }])],
+    ["SET", `nl:pk:cred:${createHash("sha256").update("nimbus-passkey-id:a-passkey").digest("hex").slice(0, 40)}`, LOST],
+  ]);
+  const removedKey = await passkeyRoute(new NextRequest("https://marktmorgen.com/api/auth/passkey", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "remove", id: "a-passkey" }) }));
+  // Not at once: a locked session may only ask for a removal that waits as long as its lock (tests/second-step-gate.test.ts).
+  const removedAnswer = (await removedKey.json()) as { ok?: boolean; removeOn?: number };
+  is("and the owner's passkey is not taken away at once: the removal only waits", [removedKey.status, typeof removedAnswer.removeOn === "number", (await listPasskeys(LOST)).map((p) => p.id)], [200, true, ["a-passkey"]]);
   const { POST: twoStepRoute } = await import("@/app/api/auth/two-step/route");
   const tried = await twoStepRoute(new NextRequest("https://marktmorgen.com/api/auth/two-step", { method: "POST", headers: { "content-type": "application/json", cookie: `nl_session=${lockedSession}` }, body: JSON.stringify({ action: "cancel" }) }));
   is("two-step login cannot be changed from it", [tried.status, ((await tried.json()) as { error?: string }).error], [403, "locked"]);
@@ -185,6 +207,14 @@ async function main(): Promise<void> {
   const back = await callback(post("https://marktmorgen.com/api/auth/callback", { token: await linkFor(LOST) }));
   is("and the emailed link logs in on its own", [back.headers.get("location"), cookieOf(back, "nl_session").length], ["https://marktmorgen.com/studio", 64]);
 
+  part("Codes drawn evenly");
+  // A random value taken modulo a million, or modulo the 31 letters, favours the low codes (CodeQL js/biased-cryptographic-random).
+  const source = readFileSync("lib/two-step.ts", "utf8");
+  is("the six digits and the recovery letters come from randomInt, never a random value modulo a length or a number", [/randomInt\(1_000_000\)/.test(source), /randomInt\(CODE_LETTERS\.length\)/.test(source), /%\s*(?:[\w.]+\.length\b|\d[\d_]*\b)/.test(source)], [true, true, false]);
+  const RECOVERY = /^[abcdefghjkmnpqrstuvwxyz23456789]{4}-[abcdefghjkmnpqrstuvwxyz23456789]{4}$/;
+  is("ten recovery codes, each four and four of the 31 letters nobody misreads", [finished.codes.length, finished.codes.every((c) => RECOVERY.test(c)), set2.codes.every((c) => RECOVERY.test(c))], [10, true, true]);
+  const confirmLine = /^Your code: .*$/m.exec([...mails].reverse().find((m) => m.to === "backup@example.org")?.text ?? "")?.[0] ?? "";
+  is("the recovery address's code is exactly six digits", /^Your code: \d{6}$/.test(confirmLine), true);
   done();
 }
 

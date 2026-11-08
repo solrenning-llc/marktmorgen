@@ -1,0 +1,22 @@
+SERIAL {"mode":"serial","models":1,"keeps":1,"failedCleanups":0,"jobs":1,"kept":1,"failed":0,"entries":1,"themesPerEntry":[3],"storedBytes":237,"read":{"commands":[["GET","nl:rsum:6836c0fe9fc647aebc4ed4606680f2cb:ef0ce15bf2"],["ZRANGEBYSCORE","nl:rsum:6836c0fe9fc647aebc4ed4606680f2cb:ef0ce15bf2:themes","-inf","+inf"],["GET","nl:rsum:last:6836c0fe9fc647aebc4ed4606680f2cb:ef0ce15bf2"]],"replyBytes":356,"rows":1},"summaryThemes":3}
+  FAIL  healthy serial requests keep one summary and debit one model job
+        expected [1,1,1,1,4]
+        got      [1,1,1,1,3]
+CLEANUP {"mode":"cleanup","models":16,"keeps":16,"failedCleanups":0,"jobs":16,"kept":1,"failed":15,"entries":1,"themesPerEntry":[3],"storedBytes":237,"read":{"commands":[["GET","nl:rsum:acb352e3c4f1429fa1ae60c468bf4eaa:1d86cf368d"],["ZRANGEBYSCORE","nl:rsum:acb352e3c4f1429fa1ae60c468bf4eaa:1d86cf368d:themes","-inf","+inf"],["GET","nl:rsum:last:acb352e3c4f1429fa1ae60c468bf4eaa:1d86cf368d"]],"replyBytes":356,"rows":1},"summaryThemes":3}
+  FAIL  expired snapshots with working cleanup retain only the current summary
+        expected [16,16,1,15,1,4]
+        got      [16,16,1,15,1,3]
+LOST_CLEANUP {"mode":"lost-cleanup","models":16,"keeps":16,"failedCleanups":15,"jobs":16,"kept":1,"failed":15,"entries":16,"themesPerEntry":[3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],"storedBytes":3792,"read":{"commands":[["GET","nl:rsum:1327c700dca94a20984b9fe13346b102:b336e60e34"],["ZRANGEBYSCORE","nl:rsum:1327c700dca94a20984b9fe13346b102:b336e60e34:themes","-inf","+inf"],["GET","nl:rsum:last:1327c700dca94a20984b9fe13346b102:b336e60e34"]],"replyBytes":4316,"rows":16},"summaryThemes":3}
+  ok    each dispatched model was debited, without pretending the calls were free
+  FAIL  all retained entries were emitted by actual summary producers
+        expected [4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4]
+        got      [3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3]
+  FAIL  registry's three-entry ceiling holds after expired snapshots and transport failure
+        expected true
+        got      false
+  FAIL  the real summary read stays inside its registered four KiB ceiling
+        expected true
+        got      false
+
+6 checks, 5 failing.
+Z_VOLUME {"runs":1200,"mocks":33,"over":false}

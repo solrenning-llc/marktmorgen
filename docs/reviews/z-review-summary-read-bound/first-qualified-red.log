@@ -1,0 +1,16 @@
+SERIAL {"mode":"serial","models":1,"keeps":1,"failedCleanups":0,"jobs":1,"kept":1,"failed":0,"entries":1,"themesPerEntry":[4],"storedBytes":301,"read":{"commands":[["GET","nl:rsum:5f2340e701ee485ea533293b0b746ac1:cedf8e443a"],["ZRANGEBYSCORE","nl:rsum:5f2340e701ee485ea533293b0b746ac1:cedf8e443a:themes","-inf","+inf"],["GET","nl:rsum:last:5f2340e701ee485ea533293b0b746ac1:cedf8e443a"]],"replyBytes":426,"rows":1},"summaryThemes":4}
+  ok    healthy serial requests keep one summary and debit one model job
+CLEANUP {"mode":"cleanup","models":16,"keeps":16,"failedCleanups":0,"jobs":16,"kept":1,"failed":15,"entries":1,"themesPerEntry":[4],"storedBytes":301,"read":{"commands":[["GET","nl:rsum:b4d8607b6e974d46b20a2fffe7a9560c:2a07de93b2"],["ZRANGEBYSCORE","nl:rsum:b4d8607b6e974d46b20a2fffe7a9560c:2a07de93b2:themes","-inf","+inf"],["GET","nl:rsum:last:b4d8607b6e974d46b20a2fffe7a9560c:2a07de93b2"]],"replyBytes":426,"rows":1},"summaryThemes":4}
+  ok    expired snapshots with working cleanup retain only the current summary
+LOST_CLEANUP {"mode":"lost-cleanup","models":16,"keeps":16,"failedCleanups":15,"jobs":16,"kept":1,"failed":15,"entries":16,"themesPerEntry":[4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4],"storedBytes":4816,"read":{"commands":[["GET","nl:rsum:308d9a49467945a892ad3fc48746d722:26260fb823"],["ZRANGEBYSCORE","nl:rsum:308d9a49467945a892ad3fc48746d722:26260fb823:themes","-inf","+inf"],["GET","nl:rsum:last:308d9a49467945a892ad3fc48746d722:26260fb823"]],"replyBytes":5436,"rows":16},"summaryThemes":4}
+  ok    each dispatched model was debited, without pretending the calls were free
+  ok    all retained entries were emitted by actual summary producers
+  FAIL  registry's three-entry ceiling holds after expired snapshots and transport failure
+        expected true
+        got      false
+  FAIL  the real summary read stays inside its registered four KiB ceiling
+        expected true
+        got      false
+
+6 checks, 2 failing.
+Z_VOLUME {"runs":1200,"mocks":33,"over":false}

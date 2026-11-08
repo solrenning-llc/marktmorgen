@@ -1,0 +1,259 @@
+
+FILE review-ai-summary.test.ts
+
+Made from the reviews
+  ok    made, the model's themes held to the rules, counted from the reviews
+  ok    as one of the month's AI jobs
+  ok    kept
+  ok    the reviews handed as data, a one-star one as any other, no buyer's name
+  ok    the model is told every review counts alike and nothing of its own is added
+
+At most once a week
+  ok    asked again within the week: the same summary, nothing asked or counted
+  ok    a week later, made again
+
+When the model fails
+  ok    a failed try is counted as one of the month's AI jobs
+  ok    so the screen says it counted, never that nothing was
+
+Only from enough reviews
+  ok    too few: nothing asked
+  ok    a product id that is not one
+
+Through the studio's route
+  ok    the owner gets the summary kept this week
+  ok    no session: refused
+  ok    < and > in a review never close the data
+
+Edge tests of 4 November 2026: an empty answer, a lock of another call, a review that goes
+  ok    the review later rewritten is first in the adverse fixture
+  ok    no theme held to the reviews' words: said so, nothing kept, the week not taken
+  ok    the next try the same day may be made
+  ok    the lock is let go only by the call that took it
+  ok    and a summary found under the lock is the answer, not a second AI job
+  ok    a review deleted takes the summary that counted it
+
+Review of the fixes: a rewritten review, and a review that goes while the model answers
+  ok    made again
+  ok    a review rewritten takes the summary built from its old words
+  ok    a review gone while the model answered: the summary is not kept
+
+Review of 4 November 2026: a new review, a review gone just before keeping, the week kept after a delete
+  ok    a review written while the model answered: the summary is kept, the new one not counted yet
+  ok    a review deleted between the last read and the keeping: the summary is not kept
+  ok    and the review is gone
+  ok    made
+  ok    a review deleted takes the summary
+  ok    but not the week: no second AI job, said when the next may be made
+  ok    through the route: 429, with the next date
+  ok    a week later, made again
+
+Second review of 4 November 2026: a summary's deletion that fails fails the change with it
+  ok    the summary kept holds only its themes and counts: no review's id, words or writer
+  ok    its themes scored by the newest review it read
+  ok    a summary kept before version 3 (themes in the head, taken away by any review's change), or with no version, is never read
+  ok    a review deleted while the summary cannot be taken away: the change fails, the review as it was, the summary still true
+  ok    a review rewritten while the summary cannot be taken away: the change fails, the review as it was, the summary still true
+  ok    a review hidden while the summary cannot be taken away: the change fails, the review as it was, the summary still true
+  ok    a review refunded while the summary cannot be taken away: the change fails, the review as it was, the summary still true
+  ok    the same review hidden when Redis answers: the summary goes with it
+  ok    so the studio page only reads the summaries: one request for every product, no review read for it
+
+A person's deletion that cannot take the summary away fails as a whole
+  ok    their deletion fails, their review still there, so nothing counts a review that is gone
+  ok    tried again, it goes with the summary
+
+The keeping's script, pinned against its stand-in
+  ok    four keys and five values, the lock among them, read the same way by Redis and by the stand-in
+
+Fifth review of 4 November 2026: the room, the lock and a busy refund
+  ok    a deletion whose request fails gives no room back
+  ok    a shorter answer whose write fails gives no room back
+  ok    written, it gives back what it freed
+  ok    a deletion whose review was already removed gives no room back twice
+  ok    and leaves the lock another call took to it
+  ok    the reviews' lock is lib/redis-lock.ts's, let go of in one step
+  ok    a refund of a busy review throws, one or by payment
+  ok    once free, it is marked
+  ok    (a summary there before the product goes)
+  ok    a deletion that ran but timed out is tried again, and the photos read before it are still given back
+  ok    one that cannot be deleted says so, never dropped silently
+  ok    the product route tries it three times and logs a failure
+  ok    the pass stops at the busy review, the first marked
+  ok    and the store's quotes are refreshed for what it marked, the refunded review left out
+  ok    the next pass marks the review that was busy
+  ok    a pass over refunds already taken: one request reads the page's, nothing written for them (#2066 review)
+  ok    a call whose lock ran out keeps nothing, nor takes the week
+  ok    and leaves the other call's lock to it
+  ok    nor any themes: the entry of a try not kept is taken out at once
+
+Review of #2066: only a review the summary counted takes it away
+  ok    made
+  ok    a review written after the summary and then rewritten: the summary stays
+  ok    a review written after the summary and then hidden: the summary stays
+  ok    a review written after the summary and then refunded: the summary stays
+  ok    a review written after the summary and then deleted: the summary stays
+  ok    and the week's limit is the same, nothing given back or taken
+  ok    a review the summary counted, rewritten: the summary goes
+  ok    a review the summary counted, hidden: the summary goes
+  ok    a review the summary counted, refunded: the summary goes
+  ok    a review the summary counted, deleted: the summary goes
+
+Second review of #2066: a hidden or refunded review was never counted
+  ok    a review hidden before the summary, then rewritten by its buyer: the summary stays
+  ok    a review hidden before the summary, then refunded: the summary stays
+  ok    a review hidden before the summary, then deleted by its buyer: the summary stays
+  ok    (a review refunded earlier, still shown, marked so)
+  ok    a review refunded before the summary, then deleted: the summary stays
+
+Review of #2066: the race with the keeping
+  ok    a review written while the model answered and hidden right after the keeping: the summary is kept and stays
+  ok    a review it counted hidden right after the keeping: the summary goes, the week stays taken
+  ok    what is left of the summaries kept and replaced is only the last head and no themes
+  ok    a new summary kept: the one it replaced and the one a failed clean-up left are taken out, its own alone in the set
+  ok    the studio's read of several products, in one request
+
+82 checks, all passing.
+Z_VOLUME {"runs":2420,"mocks":30,"over":false}
+the writing model refused 500 {}
+
+Z_STATUS 0 null
+
+FILE review-ai-summary-rules.test.ts
+
+What is read
+  ok    only what the page shows of this product, newest first, numbered
+  ok    a one-star review is read as a five-star one
+  ok    addresses, links and phone numbers taken out
+  ok    a sentence run on after a dot, and a library's name, are words, never links (#2066 review)
+  ok    an address ending in a known ending after a name is masked again, a sentence after a plain word is not (#2066 second review)
+  ok    while an address with a capitalised ending, or a path, is still one
+  ok    a web address with neither http nor www is taken out too
+  ok    but a price, a rating or an abbreviation is kept
+  ok    the source never chooses by stars
+
+When
+  ok    enough reviews, never made: may
+  ok    too few: may not
+  ok    at most once a week
+
+The model only sorts
+  ok    kept only when two different reviews sent say it, the name held to no facts, once
+  ok    at most a few
+  ok    an answer that is not one keeps nothing
+
+As a page says it
+  ok    each theme with how many of the reviews read say it
+  ok    nothing to say, nothing said
+
+Edge tests of 4 November 2026: what a theme's name may say
+  ok    a name the reviews do not say is not shown
+  ok    numbers in words and ratings are not shown
+  ok    an address, a link, a handle or markup is not shown
+  ok    a name of hidden characters only, or not in plain English letters, is not shown
+  ok    a name the reviews do say is
+
+Edge tests: what a review sends
+  ok    short phone numbers, other digits and handles are taken out
+  ok    an address written out is taken out
+  ok    cut at whole characters, never inside an emoji
+
+Still shown when kept (review of 4 November 2026)
+  ok    a review written since: still kept
+  ok    a review deleted: not kept
+  ok    hidden or refunded: not kept
+  ok    rewritten: not kept
+  ok    two reviews with the same words count as two: one gone is not kept
+
+30 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE review-summary-read-exact.test.ts
+EVIDENCE {"reader":"single","envelope":"empty","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"last-week","envelope":"empty","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"studio-map","envelope":"empty","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"single","envelope":"partial","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"last-week","envelope":"partial","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"studio-map","envelope":"partial","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"single","envelope":"malformed","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"last-week","envelope":"malformed","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"studio-map","envelope":"malformed","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"single","envelope":"extra","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"last-week","envelope":"extra","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+EVIDENCE {"reader":"studio-map","envelope":"extra","appCommands":3,"rejected":true,"storedSummaryPresent":true,"storedWeeklyMark":1793952000}
+✔ single: empty envelope must remain unknown (5.186988ms)
+✔ last-week: empty envelope must remain unknown (0.5898ms)
+✔ studio-map: empty envelope must remain unknown (0.399313ms)
+✔ single: partial envelope must remain unknown (0.337379ms)
+✔ last-week: partial envelope must remain unknown (0.315085ms)
+✔ studio-map: partial envelope must remain unknown (0.209817ms)
+✔ single: malformed envelope must remain unknown (0.337389ms)
+✔ last-week: malformed envelope must remain unknown (0.247173ms)
+✔ studio-map: malformed envelope must remain unknown (0.437931ms)
+✔ single: extra envelope must remain unknown (0.453064ms)
+✔ last-week: extra envelope must remain unknown (0.293853ms)
+✔ studio-map: extra envelope must remain unknown (0.330849ms)
+✔ healthy readers retain the exact summary and weekly mark (0.796693ms)
+✔ confirmed absence remains absence and zero (0.210848ms)
+✔ invalid identity does not spend a reader command (0.095734ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18.10251
+Z_VOLUME {"runs":81,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE review-summary-read-slots.test.ts
+✔ invalid weekly timestamp false remains unknown (1.405121ms)
+✔ invalid weekly timestamp 1 remains unknown (0.175434ms)
+✔ invalid weekly timestamp "01" remains unknown (0.221544ms)
+✔ invalid weekly timestamp "-1" remains unknown (0.183898ms)
+✔ invalid weekly timestamp "1.5" remains unknown (0.176075ms)
+✔ invalid weekly timestamp "bad" remains unknown (0.174984ms)
+✔ invalid weekly timestamp "1000000000000" remains unknown (0.127212ms)
+✔ invalid weekly timestamp {} remains unknown (0.107191ms)
+✔ non-string head remains unknown (0.290508ms)
+✔ a malformed theme member is not silently removed (0.275005ms)
+✔ one unknown product prevents a partially certified summary map (0.33798ms)
+✔ confirmed null and canonical zero retain known absence (0.252501ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 11.480825
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE review-summary-keep-receipts.test.ts
+EVIDENCE {"label":"boolean","appCommands":19,"syntheticModelCalls":1,"confirmedMonthlyJobs":1,"headAbsent":true,"weeklyMarkAbsent":true,"reportedFresh":false}
+✔ summary keep boolean never certifies an unapplied write (46.898346ms)
+EVIDENCE {"label":"numeric text","appCommands":19,"syntheticModelCalls":1,"confirmedMonthlyJobs":1,"headAbsent":true,"weeklyMarkAbsent":true,"reportedFresh":false}
+✔ summary keep numeric text never certifies an unapplied write (8.698667ms)
+EVIDENCE {"label":"nested","appCommands":19,"syntheticModelCalls":1,"confirmedMonthlyJobs":1,"headAbsent":true,"weeklyMarkAbsent":true,"reportedFresh":false}
+✔ summary keep nested never certifies an unapplied write (6.962918ms)
+EVIDENCE {"label":"extra pipeline","appCommands":19,"syntheticModelCalls":1,"confirmedMonthlyJobs":1,"headAbsent":true,"weeklyMarkAbsent":true,"reportedFresh":false}
+✔ summary keep extra pipeline never certifies an unapplied write (4.391258ms)
+✔ summary keep healthy never certifies an unapplied write (5.301291ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 77.371284
+Z_VOLUME {"runs":785,"mocks":5,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z2741dep-QrzE9P

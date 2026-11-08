@@ -1,0 +1,24 @@
+SERIAL {"mode":"serial","producers":16,"maximumSuspensionMs":0,"models":1,"keeps":1,"failedCleanups":0,"jobs":1,"kept":1,"failed":0,"entries":1,"themesPerEntry":[4],"storedBytes":301,"read":{"commands":[["GET","nl:rsum:bd784b05ef5a4d29b098e9cb66f41315:b03c580a4f"],["ZRANGEBYSCORE","nl:rsum:bd784b05ef5a4d29b098e9cb66f41315:b03c580a4f:themes","-inf","+inf"],["GET","nl:rsum:last:bd784b05ef5a4d29b098e9cb66f41315:b03c580a4f"]],"replyBytes":426,"rows":1},"summaryThemes":4}
+  ok    healthy serial requests keep one summary and debit one model job
+CLEANUP {"mode":"cleanup","producers":16,"maximumSuspensionMs":1815000,"models":16,"keeps":16,"failedCleanups":0,"jobs":16,"kept":1,"failed":15,"entries":1,"themesPerEntry":[4],"storedBytes":301,"read":{"commands":[["GET","nl:rsum:4146fe10ac66479d95c8dafe5804920b:5d31f1e380"],["ZRANGEBYSCORE","nl:rsum:4146fe10ac66479d95c8dafe5804920b:5d31f1e380:themes","-inf","+inf"],["GET","nl:rsum:last:4146fe10ac66479d95c8dafe5804920b:5d31f1e380"]],"replyBytes":426,"rows":1},"summaryThemes":4}
+  ok    expired snapshots with working cleanup retain only the current summary
+FOUR_PRODUCERS {"mode":"lost-cleanup","producers":4,"maximumSuspensionMs":363000,"models":4,"keeps":4,"failedCleanups":3,"jobs":4,"kept":1,"failed":3,"entries":4,"themesPerEntry":[4,4,4,4],"storedBytes":1204,"read":{"commands":[["GET","nl:rsum:7de9e28d246c4817a2723fc740ec720c:fa0de07ceb"],["ZRANGEBYSCORE","nl:rsum:7de9e28d246c4817a2723fc740ec720c:fa0de07ceb:themes","-inf","+inf"],["GET","nl:rsum:last:7de9e28d246c4817a2723fc740ec720c:fa0de07ceb"]],"replyBytes":1428,"rows":4},"summaryThemes":4}
+  ok    four expired producers remain individually debited
+  FAIL  the registered cardinality holds even with four expired producers
+        expected true
+        got      false
+LOST_CLEANUP {"mode":"lost-cleanup","producers":16,"maximumSuspensionMs":1815000,"models":16,"keeps":16,"failedCleanups":15,"jobs":16,"kept":1,"failed":15,"entries":16,"themesPerEntry":[4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4],"storedBytes":4816,"read":{"commands":[["GET","nl:rsum:97edaea104ee48d9aad149bd52e94c51:925f6555ef"],["ZRANGEBYSCORE","nl:rsum:97edaea104ee48d9aad149bd52e94c51:925f6555ef:themes","-inf","+inf"],["GET","nl:rsum:last:97edaea104ee48d9aad149bd52e94c51:925f6555ef"]],"replyBytes":5436,"rows":16},"summaryThemes":4}
+  ok    each dispatched model was debited, without pretending the calls were free
+  ok    all retained entries were emitted by actual summary producers
+  FAIL  registry's three-entry ceiling holds after expired snapshots and transport failure
+        expected true
+        got      false
+  FAIL  actual stored themes stay inside the registered four KiB capacity
+        expected true
+        got      false
+  FAIL  the real summary read stays inside its registered four KiB ceiling
+        expected true
+        got      false
+
+9 checks, 4 failing.
+Z_VOLUME {"runs":1437,"mocks":37,"over":false}

@@ -1,0 +1,5 @@
+{"roots":1,"sources":446,"target":"ES2017","strict":true,"moduleResolution":"Bundler","diagnostics":1}
+[96mtests/z-review-summary-read-bound.test.ts[0m:[93m129[0m:[93m88[0m - [91merror[0m[90m TS2339: [0mProperty 'replyBytes' does not exist on type 'never'.
+
+[7m129[0m   is("the real summary read stays inside its registered four KiB ceiling", (lost.read?.replyBytes ?? Infinity) <= 4096, true);
+[7m   [0m [91m                                                                                       ~~~~~~~~~~[0m

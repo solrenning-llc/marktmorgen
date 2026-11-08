@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/member-health.ts",
+    "../../../lib/person-erasure.ts",
+    "../../../tests/member-health-copy-erase-exact.test.ts",
+    "../../../tests/s-3239-applied-erase.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "command": [
+    "timeout",
+    "120s",
+    "node",
+    "--max-old-space-size=1024",
+    "node_modules/typescript/bin/tsc",
+    "-p",
+    "proofs/s/3239/tsconfig.json"
+  ],
+  "head": "8ca395ef416d5ccbaf2e8fde10bf7b81b54f118a",
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3239-applied-erase.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "8ca395ef416d5ccbaf2e8fde10bf7b81b54f118a",
+  "stdout": "  ok    healthy actual deletion\n  ok    healthy absent key\n  ok    text: applied unknown ACK is not confirmed\n  ok    text: actual DEL reached and removed cache\n  ok    text: healthy retry confirms absent\n  ok    extra: applied unknown ACK is not confirmed\n  ok    extra: actual DEL reached and removed cache\n  ok    extra: healthy retry confirms absent\n  ok    hole: applied unknown ACK is not confirmed\n  ok    hole: actual DEL reached and removed cache\n  ok    hole: healthy retry confirms absent\n\n11 checks, all passing.\nS_VOLUME {\"runs\":15,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

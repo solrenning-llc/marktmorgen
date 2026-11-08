@@ -1,0 +1,11 @@
+{
+  "file": "tests/person-copy-world.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "8ca395ef416d5ccbaf2e8fde10bf7b81b54f118a",
+  "stdout": "\nBefore the erasure\n  ok    the protected-mail fixture exclusion requires never activated\n  ok    the world has no protected-mail records to omit\n  (copied modules with nothing for them: lib/shipment-mail-outbox.ts, lib/order-confirmation-outbox.ts, lib/agreement-store.ts, lib/affiliate-leads.ts, lib/assistant-reminder.ts, lib/paypal-sales.ts, lib/licence-keys.ts, lib/gifts.ts, lib/group-buy.ts, lib/preorders.ts, lib/call-packages.ts, lib/meet-records.ts, lib/shipments.ts, lib/closing-buyers.ts, lib/closing-holds.ts)\n  ok    every module that keeps something about them is in their copy\n  ok    inactive mail readers created no records\n  ok    the other person's address is not in it\n  ok    the store's owner's is not either\n  ok    what they said in the community's room, and the event they are coming to\n\nAfter the erasure\n  ok    erased\n  ok    nothing the erasure reaches is left to copy\n\n9 checks, all passing.\nS_VOLUME {\"runs\":1079,\"attempts\":2,\"forwarded\":2}\n",
+  "stderr": "deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.\n    at resolveBlobAuth ([stdin]:44023:9)\n    at async requestApi ([stdin]:44192:16)\n    at async del ([stdin]:45371:3)\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

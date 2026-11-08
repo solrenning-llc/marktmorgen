@@ -1,0 +1,146 @@
+
+FILE call-team-read-failure.test.ts
+
+Confirming a paid team booking while its team cannot be read
+  ok    the hold claims its host's time for as long as the checkout can be paid
+  ok    a failed team read throws and leaves the booking unconfirmed, for the next confirmation
+  ok    confirmed once the team can be read, its host's claim is kept for good
+
+Moving a team booking while its team cannot be read
+  ok    the booking is confirmed with its host's claim for good
+  ok    the move is refused, and the host keeps the booked time
+  ok    once the team can be read, the move keeps its host at the new time
+
+6 checks, all passing.
+Z_VOLUME {"runs":284,"mocks":5,"over":false}
+reading a moved booking's team failed Error: Redis request failed with status 503
+    at store.pipeline ([stdin]:56143:111)
+    at redisPipeline ([stdin]:2355:41)
+    at readTeams ([stdin]:55108:23)
+    at teamForMove ([stdin]:55840:22)
+    at moveBooking ([stdin]:55688:18)
+    at main ([stdin]:56224:23)
+
+Z_STATUS 0 null
+
+FILE call-team-read-job-retry.test.ts
+  ok    healthy real job confirms once, preserves permanent host claim, and consumes queue
+  ok    confirmation entry written by real hold is due before fault
+  ok    unknown team is never counted as a confirmed booking
+  ok    unconfirmed paid booking stays queued for retry
+  ok    failed team read does not mark booking confirmed
+  ok    healthy next mail run confirms booking and retains its host
+  ok    confirmation queue is clear after next run
+  ok    paid host claim stays permanent beyond the original hold margin
+
+8 checks, all passing.
+Z_VOLUME {"runs":257,"mocks":7,"over":false}
+sending a call reminder failed Error: reading a team booking's hosts failed; confirmed later
+    at confirmBooking ([stdin]:55673:11)
+    at async sendCallReminders ([stdin]:56005:13)
+    at async main ([stdin]:56172:20) {
+  [cause]: Error: Redis request failed with status 503
+      at store.pipeline ([stdin]:56089:111)
+      at redisPipeline ([stdin]:2355:41)
+      at readTeams ([stdin]:55024:23)
+      at bookingTeam ([stdin]:55800:23)
+      at confirmBooking ([stdin]:55671:18)
+      at sendCallReminders ([stdin]:56005:19)
+      at async main ([stdin]:56172:20)
+}
+
+Z_STATUS 0 null
+
+FILE call-moves-read.test.ts
+✔ five hundred bookings: five MGETs of a hundred in one trip, and every move as written (11.437907ms)
+✔ a key that is gone, unreadable, not a move or not a string is read as never moved; the others still are (0.951506ms)
+✔ one booking is one MGET; none, or only empty sessions, reads nothing (0.295486ms)
+✔ the same session twice is read twice and found once, as before (0.294384ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20.63024
+Z_VOLUME {"runs":93,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE call-lengths-booking.test.ts
+
+The setup keeps them only in the shape the rules allow
+  ok    two lengths, shortest first, the first the setup's own
+  ok    one length, or none, is no list
+  ok    out of order, not the setup's own first, twice, no price, a part of a cent, an unknown length, four, a group, too long for the hours, a deposit not below every price, one that is not the setup's own, not a list
+  ok    the setup and the rules allow the same number of lengths
+  ok    read back from storage, lengths the rules no longer allow are dropped, never the call: it sells at its own length alone
+  ok    a setup broken elsewhere is still refused from storage
+  ok    a deposit below every price is kept
+
+The length of a new booking
+  ok    none sent is the setup's own; one of the list at its own price
+  ok    a length the call does not have is refused
+  ok    a product whose price was changed elsewhere sells only the setup's own length, at the price now
+  ok    a call with one length: its own length at the product's price, and nothing else
+  ok    dated sessions have their own lengths
+  ok    a paid booking keeps its own length when it moves, with or without the list
+
+Booked and charged at the length chosen
+  ok    the product carries them
+  ok    the hour is charged at the hour's price, said on the line and kept on the sale
+  ok    its whole hour is held: half an hour inside it cannot be booked
+  ok    none chosen is the setup's own, at the product's price
+  ok    refused before anything is opened: an unknown length, a price changed since, another length from a package, with a deposit or with a code
+  ok    a call with one length is charged its own price, whatever is passed
+  ok    back from Stripe's page, the length chosen is still chosen; the call's own length needs nothing said
+
+A paid booking moves at its own length
+  ok    an hour stays an hour, though the setup's own is half of one
+  ok    a booking whose length is not one a call may have is never moved at a guess
+  ok    the times offered to move it are a whole hour each: none starts after 4 p.m.
+  ok    the studio's save route refuses several lengths for now
+
+Once the list is gone, a paid hour still moves as an hour
+  ok    the setup's own is half an hour, the booking stays an hour
+
+25 checks, all passing.
+Z_VOLUME {"runs":181,"mocks":8,"over":false}
+
+Z_STATUS 0 null
+
+FILE booking-block-save.test.ts
+
+The page route and the booking block
+  ok    a page with a booking block is refused
+  ok    in the second version too
+  ok    the same page without it is saved
+
+3 checks, all passing.
+Z_VOLUME {"runs":69,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+✘ [ERROR] Could not resolve "/workspace/scratch/9378b617fa73/z-3233-review/tests/call-setup.test.ts"
+
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+error: Could not resolve "/workspace/scratch/9378b617fa73/z-3233-review/tests/call-setup.test.ts"
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at runOnEndCallbacks (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1592:45)
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1

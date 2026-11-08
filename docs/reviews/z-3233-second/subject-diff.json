@@ -1,0 +1,10 @@
+{
+  "from": "1adac35cd49e0c82ac34f6210afa44972d97e40b",
+  "to": "0c6c17f560e53260f7161ecb27c3dde742ebc2e3",
+  "diff_sha256": "7bf602a7167bbbd1e3f44172718d6c33099a2ebb995670f77a1769469507bd4c",
+  "paths": [
+    "lib/calls.ts",
+    "tests/calls-busy-shape.test.ts"
+  ],
+  "note": "Reconstruct exact diff with git diff from/to. Do not embed removed long synthetic account ids from the original author fixture in a new public artifact."
+}

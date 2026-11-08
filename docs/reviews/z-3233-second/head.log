@@ -1,0 +1,197 @@
+
+FILE calls-busy-shape.test.ts
+
+A time paid at Stripe, while Stripe's list answers in another shape
+  ok    control: a list read to its end with no booking offers the time
+  ok    control: the paid time is not offered, the others are
+  ok    control: the paid time is not sold again
+  ok    a page that is a list, not an object: no time is offered
+  ok    a page that is a list, not an object: the paid time is not sold, and no checkout is opened
+  ok    data that is null: no time is offered
+  ok    data that is null: the paid time is not sold, and no checkout is opened
+  ok    data that is text: no time is offered
+  ok    data that is text: the paid time is not sold, and no checkout is opened
+  ok    has_more missing: no time is offered
+  ok    has_more missing: the paid time is not sold, and no checkout is opened
+  ok    has_more as text: no time is offered
+  ok    has_more as text: the paid time is not sold, and no checkout is opened
+  ok    a row that is text: no time is offered
+  ok    a row that is text: the paid time is not sold, and no checkout is opened
+  ok    a row with no id: no time is offered
+  ok    a row with no id: the paid time is not sold, and no checkout is opened
+  ok    more said, with no row to go on from: no time is offered
+  ok    more said, with no row to go on from: the paid time is not sold, and no checkout is opened
+  ok    once Stripe answers in its shape again, the paid time is still not offered
+
+A time held in Redis, while its HGETALL answers in another shape
+  ok    control: an empty diary offers the time
+  ok    control: an HGETALL confirmed empty offers the time
+  ok    a first buyer opens a checkout for the time
+  ok    control: the held time is not offered, the others are
+  ok    HGETALL as text: no time is offered
+  ok    HGETALL as text: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    HGETALL as a number: no time is offered
+  ok    HGETALL as a number: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    HGETALL as an object: no time is offered
+  ok    HGETALL as an object: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    HGETALL as null: no time is offered
+  ok    HGETALL as null: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    HGETALL as a list holding a number: no time is offered
+  ok    HGETALL as a list holding a number: the held time is not sold, no checkout is opened, nothing is deleted
+  ok    once Redis answers in its shape again, the held time is still not offered
+
+35 checks, all passing.
+Z_VOLUME {"runs":298,"mocks":26,"over":false}
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage ([stdin]:49880:33)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53332:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: not an object
+    at readStripePage ([stdin]:49880:33)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53333:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:49883:77)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53332:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:49883:77)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53333:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:49883:77)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53332:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: data is not a list
+    at readStripePage ([stdin]:49883:77)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53333:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:49884:43)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53332:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:49884:43)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53333:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:49884:43)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53332:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: has_more is not true or false
+    at readStripePage ([stdin]:49884:43)
+    at readCallSessions ([stdin]:52862:18)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53333:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52870:36)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53332:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52870:36)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53333:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52870:36)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53332:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52870:36)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53333:75)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: more checkouts, with no row to read on from
+    at readCallSessions ([stdin]:52871:45)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53332:40)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: more checkouts, with no row to read on from
+    at readCallSessions ([stdin]:52871:45)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53333:75)
+
+Z_STATUS 0 null
+
+FILE z-3233-refusal.proof.ts
+
+Independent Z cases, using the author's synthetic fixture helpers
+  ok    healthy paid time remains unavailable
+  ok    metadata null refuses listing
+  ok    metadata null refuses a second checkout
+  ok    metadata undefined refuses listing
+  ok    metadata undefined refuses a second checkout
+  ok    confirmed empty Stripe list and diary offer time
+  ok    odd HGETALL pairs refuse listing
+  ok    odd HGETALL pairs refuse checkout and cleanup
+  ok    extra outer diary reply refuses listing
+  ok    extra outer diary reply refuses checkout and cleanup
+  ok    restoring the exact empty envelope restores listing
+
+11 checks, all passing.
+Z_VOLUME {"runs":113,"mocks":7,"over":false}
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52870:36)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53316:57)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52870:36)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53317:68)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52870:36)
+    at async readBusy ([stdin]:52895:27)
+    at async slotsForProduct ([stdin]:53156:47)
+    at async offered ([stdin]:53285:17)
+    at async main ([stdin]:53316:57)
+reading paid calls failed StripeListUnreadable: Stripe answered a list in another shape: 1 checkout row(s) could not be read
+    at readCallSessions ([stdin]:52870:36)
+    at async readBusy ([stdin]:52895:27)
+    at async holdAndCheckout ([stdin]:53091:22)
+    at async sell ([stdin]:53289:16)
+    at async main ([stdin]:53317:68)
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3233-UWeJhT

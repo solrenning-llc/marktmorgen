@@ -18,6 +18,7 @@ import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
 import { maximumUploadBytes, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { handedBack } from "@/lib/upload-hand-back";
+import { SESSION_COOKIE, sessionIdShaped } from "@/lib/session-id";
 import { isVaultConfigured } from "@/lib/vault";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
@@ -57,6 +58,9 @@ export async function POST(request: NextRequest) {
     // the file store's library now asks for what was issued then, and is given it back unchanged: nothing is checked,
     // counted or signed twice, and it grants nothing the browser does not already hold.
     const issued = handedBack(body);
+    // Only to a browser holding a session id's shape: a caller with none has no counted upload to hand back, so it is
+    // refused as the signed path refuses it, with nothing read (lib/session-id.ts, as lib/auth.ts emailForSession).
+    if (issued && !sessionIdShaped(request.cookies.get(SESSION_COOKIE)?.value)) return Response.json({ ok: false, error: "signed_out" }, { status: 401 });
     if (issued) return Response.json(issued);
     const answer = await handleUploadPresigned({
       body,

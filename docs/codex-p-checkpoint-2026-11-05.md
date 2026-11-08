@@ -1532,3 +1532,32 @@ C1-20261108-0025-TODOS22 FULL read from immutableaa3a137bf1e15f419fa234f3d1a18bc
 NominalP2954 requested6716714090/C4-0030; newhead **2b172fe82fd8bf8d9585ad4fd335c030676fb61b**, prior75df300b468d0f58cf441eabd7b8878f730c3ac6, REDb4f4082f7. Claim **6716767629** BEFOREnewsource/diff/tests. Exact isolated archive/index preparation; source/ref/CIauthorreadonly. CorrectiveTWOpaths only community-event-mail/parser and permanentnx test, no unrelatedmainchanges. Preserve originalP9blob945bc92c/P11e16b1073 unmodified; author's reported3healthycontrolsFAILbefore+after not silentlyGREEN. Investigate world mismatch separately; no oracle weakening. Beforeeachchild20knestedMemoryRedis.run/100response-onlymockHTTP/120s512MiB256KiB/socketHTTPtlsdeniedbeforegraph/types1024;serial0agents/providers. This is nominalfocal, not newglobalrevieworPproductrepair. 3135/3077/3087focalsnotrepeated. Results pending, no closure claimed yet.
 
 Fresh00h33 sevenheadsallOPEN/notMERGED:3135/3974cac3f0d6801fb3d62b5c6cd8a73a032e4ff0;3077/82c45393eaee9138de20e3e71e9130ee4ad8ad6b;3087/8015b59367dc6ddf1057ac4b1b792b89eb0024a4;2954/2b172fe82fd8bf8d9585ad4fd335c030676fb61b;3034/0cdb49725fbb78d341e648ae4758a5f0ab88f0f4;3035/9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a;2928/7463a1b38d0cd6cc69f807e021921d4b0f05026a. PriororiginalfourMERGEDimmutablehistorypreserved. ClaimsSdate3145/G3037+3144/Z2924/T3064/J2844/Ucoverage/C2C3C4C6newunitsrespected; P takesONLYown2954focal, no duplication.
+
+
+## Continuation — 08/11/2026 00h42 Fortaleza — #2954 nominal focal CLOSED
+
+Authoritative current state supersedes the pending-results paragraph above. Requested C4-0030/6716714090, claim6716767629 BEFORE source/diff/tests; channel summary is necessarily AFTER execution and is not represented as a prior claim. Read FULL current module, exact75df→2b17 TWOpath delta(+62/-7), complete permanent additions; source/native/index tree **7617353f8b633799cddecee0c6df14f36791b57a** exact before+after. No author product/ref/index mutation. ProperTEN normative main d64 vs9ed: ONLY2queue lines AAA RN3/274, FULLdiff read, other9byte-ID. No new numerical/product grant. C1-0025TODOS22 explicit MV end despite stale3139OPEN remains authoritative; C1coord/C4executor/serialMedium0agents.
+
+P focal **5816466360**, COMMENT at **2b172fe82fd8bf8d9585ad4fd335c030676fb61b**, submitted03:41:02UTC. Direct REST review readback FULLbodyEXACT + commit_idEXACT, not an APPROVED/merge/CI certificate. **PODE ENTRAR within P's focal scope; conditional partial-record MEDIUM from5813317263 CLOSED, no new HIGH/MEDIUM in TWOpath delta.** parseJob requires all saved fields/knownkind/status/finitenumbers; madeOrTakeOver and locked read use it+identity. Malformed keepsdue/queue/record/progress; halfdone resumes remainingonce. Not broad semanticcorruption/concurrency/provider/writercertification, otherqualifiedopinions/C1exactchecksremainseparate.
+
+Frozen SAMEP9 **945bc92c1799b4ac6c7c7e44154c5d4fd1e401f5**: prior75df MODULEONLY infinalgraph9checks4FAIL→exactnew9/9. Healthyagedorphan controlPASSboth; two partialshapeeachdroppeddue+failedretrybeforefourFAIL. Frozen SAMEP11 **e16b1073ddd5bae035e4a3c13ec158ad1afdfb51**11/11current. Unchangedauthorpermanent78/11FAILold75dfmodule→78/78new. No assertion/world/sourceedits. P9/P11explicitcanonicalnxaliasesCURRENTgraph; author'scopied3healthyFAILnotreproducedbyP, notsilentlyGREENorrootcaused. Originalhistoricalevidenceb9746da28/report remainsimmutableandqualifiedgraph; no earliestimmediatetakeoverreplay or retroactiveGREEN.
+
+CurrentPchecks9+11+78+120reader+5claim+42English=**265PASSassertions overlappingpaths**; RSVP19+costregistry24=43node:testcasesPASS, not308independentbugs/globalmoneycertificate. CurrentnestedMemoryRedis dispatches **1567**,response-onlymockHTTP0; oldP9=56/permanent624intentionalexit1. Beforeeachchild20krunnested100response-onlyHTTP120s512MiB256KiB,pregraphsocketHTTPtlsdeny; types1024MiB. RealES2017strictBundler4roots+imports tsc0/empty;eslint5files0/empty;officialscanner4256indexed0+own5artifacts0. Actual75df→2b17diffcheck0, subjecttreeunchanged. One nonexistentcommunity-rsvpfilename causedpreservedesbuildSTOPafterregistrypass/beforeRSVP+Englishexecution, notproductRED; correctrsvp-list-exact+EnglishseparaterunPASS. Tsc/lintconfirmedexit0captured. No capreached/providerIO/nativeLua/SES/Upstash/browser/AT/fullsuite/build/CIqueryretrycancel/queue/merge/globalMR.
+
+Durable evidence BEFOREreview: **codex/p-focal-2954-whole-job@b2945e33bc9ad7c72c7c7e146e4eab6995f77d2c**, tree **6a179709db8c830ec727f59be54aff7f7256f9be**, parentexact2b17. Ownref404thencreateONCE, noPR/productpush. FIVEFULLreadbackBYTE-ID:
+- docs/reviews/p-2954-whole-job.md **5c3d8ef4b3c6e85c26ff19c108f90b87b427b0b4**;
+- proofs/p-2954-whole-job-run.mjs **6ebe86b3c78a8583465d2780002da6f4e24b55e8**;
+- proofs/p-2954-whole-job-output.txt **0e436194137f5a4d666bd8a1b238455d9282fb8d**;
+- frozenP9 **945bc92c1799b4ac6c7c7e44154c5d4fd1e401f5**;
+- frozenP11 **e16b1073ddd5bae035e4a3c13ec158ad1afdfb51**.
+Local /workspace/scratch/452ffd7d3d6c/p-focal-2954-whole-job; old75df module /tmp/p2954-old-event-mail.ts; reproductionpinnedreport. DoNOTmergeevidencetreeintoproduct. Source/refCIauthorread-only.
+
+Fresh00h41/42 directed metadata, allOPEN/notMERGED (no CI lookup):
+#2954 **2b172fe82fd8bf8d9585ad4fd335c030676fb61b**, recheckedimmediatelyBEFOREformal;
+#3135 **3974cac3f0d6801fb3d62b5c6cd8a73a032e4ff0**;
+#3077 **82c45393eaee9138de20e3e71e9130ee4ad8ad6b**;
+#3087 **8015b59367dc6ddf1057ac4b1b792b89eb0024a4**;
+#3034 **0cdb49725fbb78d341e648ae4758a5f0ab88f0f4**;
+#3035 **9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a**;
+#2928 **7463a1b38d0cd6cc69f807e021921d4b0f05026a**.
+DirectfreshGitHubmain **d64aa0e7b01dd7facfe52ddd937f59c6a116ec95**. OwnOPENheadcodex/p-query0/incompletefalse. OriginalfourandalloldproofrefsMERGEDhistorypreserved/no recreation. Prior3135P+N/3077/3087qualificationsnotrepeated;3034/35P/Jand2928legallimitsremain. C1-0033CLAUDES23 is Claudes' backlog, Codexlistfuture; not newPproduct/financialgrant. M3146/3156,G3037/3144,U3152/3155,S3145,T3064,Z2924,J2844andC2C3C4C6ownworkrespected. New3157moneyasks2reviews, noPclaim/source/test/thirdglobalopinion. Nextnominalnewdelta/freerequestrequiresfreshclaimpreflight. Projectongoing/existingcontinuityunchanged; no newautomation/disabling/backgroundwatch. FinishchannelPONTO **CXP-20261108-0043-C1-1** withthischeckpointSHAandexactheads; deliveryunconfirmeduntilCAS+FULLreadback. Neverrepostonceconfirmed.

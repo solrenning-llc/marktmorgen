@@ -119,7 +119,7 @@ test("a waiting send that finishes after it left the studio's log is not left be
 test("the studio still shows the newest LOG_SIZE jobs, and the log stays that long", async () => {
   await seed(LOG_SIZE + 3);
   assert.equal(Number(redis.run(["LLEN", logKey])), LOG_SIZE);
-  assert.equal((await syncView(store)).log.length, LOG_SIZE);
+  assert.equal((await syncView(store)).log?.length, LOG_SIZE);
 });
 
 const isQueueScan = (batch: Batch) => batch.length === 1 && batch[0]?.[1] === QUEUE_KEY && (batch[0]?.[0] === "ZSCAN" || batch[0]?.[0] === "ZRANGEBYSCORE");

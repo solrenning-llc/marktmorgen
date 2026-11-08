@@ -1,0 +1,13 @@
+{
+  "command": [
+    "node",
+    "--max-old-space-size=1024",
+    "node_modules/typescript/bin/tsc",
+    "--noEmit",
+    "-p",
+    "proofs/s/3234-focal/tsconfig.json"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

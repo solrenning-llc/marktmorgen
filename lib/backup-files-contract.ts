@@ -22,6 +22,12 @@
  * deletion: deletion records come on their own page (kind "deletions"), from
  * the records the site keeps, never from what a listing misses.
  *
+ * A stores page (kind "stores") names each store to copy with R, the room of
+ * its plan in bytes (docs/backup-costs-2026-11-08.md, 5b: plan storage, the
+ * students' room and the community pictures), from which the Worker takes
+ * its per-store ceilings (5R held, 4R copied in 32 days). The route does not
+ * answer it yet (503 "stores_unavailable"), so the Worker copies nothing.
+ *
  * Rule 24: anything else (an extra or missing field, a wrong type, an entry
  * of another source or folder) throws BackupFilesContractError. Unknown is
  * never an empty or complete page.
@@ -76,6 +82,16 @@ export type BackupDeletionPage = {
   version: 1;
   kind: "deletions";
   records: BackupDeletionRecord[];
+  cursor: string | null;
+  complete: boolean;
+  reason: "done" | "more" | "cutoff";
+};
+
+export type BackupStoreRoom = { store: string; roomBytes: number };
+export type BackupStoresPage = {
+  version: 1;
+  kind: "stores";
+  stores: BackupStoreRoom[];
   cursor: string | null;
   complete: boolean;
   reason: "done" | "more" | "cutoff";
@@ -213,4 +229,30 @@ export function parseDeletionPage(raw: unknown): BackupDeletionPage {
   });
   const end = pageEnd(value, ["done", "more", "cutoff"]);
   return { version: 1, kind: "deletions", records, cursor: end.cursor, complete: end.complete, reason: end.reason as BackupDeletionPage["reason"] };
+}
+
+const STORES_FIELDS = ["version", "kind", "stores", "cursor", "complete", "reason"] as const;
+const STORE_ROOM_FIELDS = ["store", "roomBytes"] as const;
+
+/** A page of the stores to copy, each with the room R of its plan in bytes, exactly; throws BackupFilesContractError on anything else. */
+export function parseStoresPage(raw: unknown): BackupStoresPage {
+  const parsed = textOf(raw);
+  const value = exactObject(parsed, STORES_FIELDS, "stores page");
+  if (value.version !== BACKUP_FILES_CONTRACT_VERSION) fail("version is not 1");
+  if (value.kind !== "stores") fail("kind is not stores");
+  if (!Array.isArray(value.stores)) fail("stores is not a list");
+  const list = value.stores as unknown[];
+  if (list.length > BACKUP_FILES_PAGE_ENTRIES) fail("more than 1,000 stores");
+  sizeCheck(parsed);
+  const seen = new Set<string>();
+  const stores: BackupStoreRoom[] = list.map((item, i) => {
+    const room = exactObject(item, STORE_ROOM_FIELDS, `stores[${i}]`);
+    if (typeof room.store !== "string" || !STORE_PATTERN.test(room.store)) fail(`stores[${i}].store is not a folder`);
+    if (seen.has(room.store as string)) fail(`stores[${i}].store is listed twice`);
+    seen.add(room.store as string);
+    if (typeof room.roomBytes !== "number" || !Number.isSafeInteger(room.roomBytes) || room.roomBytes <= 0) fail(`stores[${i}].roomBytes is not a positive count of bytes`);
+    return { store: room.store as string, roomBytes: room.roomBytes as number };
+  });
+  const end = pageEnd(value, ["done", "more", "cutoff"]);
+  return { version: 1, kind: "stores", stores, cursor: end.cursor, complete: end.complete, reason: end.reason as BackupStoresPage["reason"] };
 }

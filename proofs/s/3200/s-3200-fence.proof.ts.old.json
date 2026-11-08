@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3200-fence.proof.ts",
+  "oldSource": "dcb04193e",
+  "mode": "old-module-overlay",
+  "head": "29c4b1b7a564ec6b7ec82fb99d392cbd79620878",
+  "stdout": "  FAIL  stale writer reports lost lock with a newer record still present\n        expected \"lock lost\"\n        got      \"an answer\"\n  FAIL  stale writer does not overwrite the new holder's record\n        expected \"New owner version\"\n        got      \"Dana\"\n  ok    stale release cannot delete the next holder's lock\n  FAIL  a refused stale write cannot alter open/reminder indexes\n        expected [[\"6825977e885700739d59c6a4f1e5a4a5\"],[]]\n        got      [[],[]]\n  FAIL  extra: applied write with unknown ACK is never reported confirmed\n        expected [true,\"threw\"]\n        got      [true,\"an answer\"]\n  ok    extra: unknown ACK does not imply rollback of the applied change\n  FAIL  sparse: applied write with unknown ACK is never reported confirmed\n        expected [true,\"threw\"]\n        got      [true,\"an answer\"]\n  ok    sparse: unknown ACK does not imply rollback of the applied change\n\n8 checks, 5 failing.\nS_VOLUME {\"runs\":169,\"attempts\":0,\"forwarded\":0}\n",
+  "stderr": "",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

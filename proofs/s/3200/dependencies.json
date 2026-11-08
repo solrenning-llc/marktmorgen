@@ -1,0 +1,22 @@
+[
+  {
+    "package": "next",
+    "wanted": "16.4.5",
+    "installed": "16.4.5"
+  },
+  {
+    "package": "esbuild",
+    "wanted": "0.28.2",
+    "installed": "0.28.2"
+  },
+  {
+    "package": "typescript",
+    "wanted": "5.9.3",
+    "installed": "5.9.3"
+  },
+  {
+    "package": "eslint",
+    "wanted": "9.39.5",
+    "installed": "9.39.5"
+  }
+]

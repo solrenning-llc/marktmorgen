@@ -288,7 +288,10 @@ export async function settleUsage(meter: Meter, folder: string, month: string, f
     // asked or not answering, the record is kept for the next run.
     let there: boolean | null = null;
     if (isBillingConfigured()) {
-      there = await findInvoiceLine(unfinished.customerId, mark(meter, folder, month, unfinished.from), Math.floor(unfinished.at / 1000) - 60).catch((error) => {
+      there = await findInvoiceLine(unfinished.customerId, mark(meter, folder, month, unfinished.from), Math.floor(unfinished.at / 1000) - 60, {
+        subscriptionId: unfinished.subscriptionId,
+        cents: unfinished.to - unfinished.from,
+      }).catch((error) => {
         console.error(`looking up a ${meter.name} line past what is owed failed`, error);
         return null;
       });

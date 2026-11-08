@@ -1,0 +1,14 @@
+✔ Chile evidence dates original Spanish rules and separates the platform transition (1.057335ms)
+✔ Chile evidence preserves return periods, currency, no-activity limits and payment uncertainty (1.588767ms)
+✔ Chile public evidence cannot fill or fund the complete compliance ceiling (0.475758ms)
+✔ Chile evidence says no registration threshold was found and the statute was not read (0.247013ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12.793675
+
+V2633 {"status":0,"signal":null,"error":null}

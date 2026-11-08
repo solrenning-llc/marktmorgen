@@ -1,0 +1,2 @@
+import js from '@eslint/js';import parser from '@typescript-eslint/parser';import plugin from '@typescript-eslint/eslint-plugin';
+export default [{files:['**/*.ts','**/*.mjs'],languageOptions:{ecmaVersion:'latest',sourceType:'module',globals:{process:'readonly',console:'readonly',Buffer:'readonly'}},rules:{...js.configs.recommended.rules}},{files:['**/*.ts'],languageOptions:{parser},plugins:{'@typescript-eslint':plugin},rules:{'no-undef':'off','no-unused-vars':'off','@typescript-eslint/no-unused-vars':'error'}}];

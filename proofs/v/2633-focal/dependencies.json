@@ -1,0 +1,56 @@
+[
+  {
+    "name": "typescript",
+    "actual": "5.9.3",
+    "lock": "5.9.3",
+    "matches": true
+  },
+  {
+    "name": "esbuild",
+    "actual": "0.28.2",
+    "lock": "0.28.2",
+    "matches": true
+  },
+  {
+    "name": "@types/node",
+    "actual": "20.19.43",
+    "lock": "20.19.43",
+    "matches": true
+  },
+  {
+    "name": "next",
+    "actual": "16.4.5",
+    "lock": "16.4.2",
+    "matches": false
+  },
+  {
+    "name": "eslint-config-next",
+    "actual": "16.4.5",
+    "lock": "16.4.2",
+    "matches": false
+  },
+  {
+    "name": "eslint",
+    "actual": "9.39.5",
+    "lock": "9.39.5",
+    "matches": true
+  },
+  {
+    "name": "@eslint/js",
+    "actual": "9.39.5",
+    "lock": "9.39.5",
+    "matches": true
+  },
+  {
+    "name": "@typescript-eslint/parser",
+    "actual": "8.67.0",
+    "lock": "8.67.0",
+    "matches": true
+  },
+  {
+    "name": "@typescript-eslint/eslint-plugin",
+    "actual": "8.67.0",
+    "lock": "8.67.0",
+    "matches": true
+  }
+]

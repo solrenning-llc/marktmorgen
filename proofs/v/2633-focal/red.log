@@ -1,0 +1,34 @@
+✔ Chile evidence dates original Spanish rules and separates the platform transition (1.167401ms)
+✔ Chile evidence preserves return periods, currency, no-activity limits and payment uncertainty (0.31785ms)
+✔ Chile public evidence cannot fill or fund the complete compliance ceiling (0.411712ms)
+✖ Chile evidence says no registration threshold was found and the statute was not read (2.127931ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 15.962157
+
+✖ failing tests:
+
+test at ../../../tmp/v2633-BBFc9w/test.cjs:99:30
+✖ Chile evidence says no registration threshold was found and the statute was not read (2.127931ms)
+  AssertionError [ERR_ASSERTION]: No monetary registration threshold was identified in the sources read
+      at TestContext.<anonymous> (/tmp/v2633-BBFc9w/test.cjs:101:179)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+V2633 {"status":1,"signal":null,"error":null}

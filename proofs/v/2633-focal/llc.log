@@ -1,0 +1,22 @@
+✔ every entire LLC cost is allocated to Marktmorgen with no Hazelsong subsidy (5.278945ms)
+✔ unknown costs, evidence, reserves or incomplete identities never become zero (6.202369ms)
+✔ source observations preserve full taxes, INSS and higher monthly mailbox rate (0.176567ms)
+✔ TX4 and SR obligations cannot disappear inside the old fixed-cost inventory (0.76834ms)
+✔ cost evidence accessors never execute or substitute a lower second value (0.426704ms)
+✔ inherited cost records, sparse arrays and accessor entries are not complete evidence (0.170137ms)
+✔ detached cost evidence retains valid totals and refuses unsafe aggregate amounts (1.015562ms)
+✔ SD1 initial LLC formation cannot disappear from the complete company cost review (0.174403ms)
+✔ deployment and function artifact retention is an explicit unknown whole-LLC cost (0.226371ms)
+✔ missing fixed-cost fields cannot inherit a zero ceiling or review evidence (0.428987ms)
+✔ missing fixed-cost fields never execute descriptor-map prototype getters (0.495347ms)
+✔ detaching own fixed costs never invokes inherited setters or replacement zero getters (1.946867ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25.521816
+
+V2633 {"status":0,"signal":null,"error":null}

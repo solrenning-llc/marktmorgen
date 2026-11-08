@@ -1,0 +1,4 @@
+[
+  "lib/llc-fixed-costs.ts",
+  "tests/llc-fixed-costs.test.ts"
+]

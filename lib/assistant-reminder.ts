@@ -286,12 +286,14 @@ const dayWords = (store: Store, ms: number) =>
  * consent kept (erased, or gone with its week), switched off or no postal
  * address, the store's requests or emails used, the checkout paid or not
  * found, or every rule of lib/checkout-recovery.ts's deliver. "failed" when
- * it could not be sent for a reason that may pass (no email room, Stripe or
- * the email service not answering): the job tries it again. `ai` false (a
- * try again after a failed send) sends the fixed reminder without asking
- * the model, so one checkout never asks it twice.
+ * the store has no email room, or the email service was asked and did not
+ * take it: never tried again (lib/reminder-retry.ts). "retry" when Stripe
+ * did not answer the checkout's read for a reason that may pass, before
+ * the email service was asked: the job tries it again. `ai` false (a try
+ * again) sends the fixed reminder without asking the model, so one checkout
+ * never asks it twice.
  */
-export async function remindFromConsent(store: Store, session: string, now = Date.now(), ai = true): Promise<RemindOutcome | "open"> {
+export async function remindFromConsent(store: Store, session: string, now = Date.now(), ai = true): Promise<RemindOutcome | "open" | "retry"> {
   if (!SESSION.test(session) || !isRedisConfigured()) return "skip";
   const key = assistRemindKey(session);
   const [raw, ttl] = await redisPipeline([["GET", key], ["TTL", key]]);
@@ -306,8 +308,8 @@ export async function remindFromConsent(store: Store, session: string, now = Dat
   } catch (error) {
     console.error("reading a checkout for its reminder failed", error);
     // Stripe said no to this checkout (not found, not this account's): nothing to send. No answer, or one it may
-    // change (busy, its own error), is a send that failed for now, tried again by the job.
-    return error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 429 ? "skip" : "failed";
+    // change (busy, its own error), is a try that failed on the way, before any email: tried again by the job.
+    return error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 429 ? "skip" : "retry";
   }
   if (record.status === "complete") return "skip";
   const seconds = now / 1000;
@@ -358,8 +360,10 @@ async function again(statsId: string, handle: string, session: string, at: numbe
 /**
  * Sends every reminder that is due. For the five-minute job. Each is taken
  * off the queue before anything is sent, so two runs never send the same
- * one. One that is no longer to be sent is dropped; one whose send failed
- * is put back for a later try (again), which never asks the model.
+ * one. One that is no longer to be sent is dropped, and so is one the email
+ * service was asked for and did not take; one that failed on the way, before
+ * the email service was asked, is put back for a later try (again), which
+ * never asks the model.
  */
 export async function sendAssistReminders(load: (handle: string) => Promise<Store | null>, deadline: number): Promise<{ sent: number; skipped: number; retried: number }> {
   const counts = { sent: 0, skipped: 0, retried: 0 };
@@ -382,17 +386,18 @@ export async function sendAssistReminders(load: (handle: string) => Promise<Stor
       continue;
     }
     const tries = retriesOf(tried);
-    let outcome: RemindOutcome | "open";
+    let outcome: RemindOutcome | "open" | "retry";
     try {
       const store = await load(handle);
       // The store the yes was given on, and not another that has since taken its address.
       outcome = store && store.statsId === statsId ? await remindFromConsent(store, session, Date.now(), tries === 0) : "skip";
     } catch (error) {
       console.error("sending a Store assistant checkout reminder failed", handle, error);
-      outcome = "failed";
+      outcome = "retry";
     }
     if (outcome === "sent") counts.sent += 1;
-    else if (outcome === "failed" && (await again(statsId, handle, session, at, tries, Math.floor(now / 1000)))) counts.retried += 1;
+    // "failed" (no email room, or the email service asked and not taking it) is never tried again (lib/reminder-retry.ts).
+    else if (outcome === "retry" && (await again(statsId, handle, session, at, tries, Math.floor(now / 1000)))) counts.retried += 1;
     else counts.skipped += 1;
   }
   return counts;

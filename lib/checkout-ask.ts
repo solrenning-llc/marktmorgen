@@ -185,8 +185,10 @@ async function again(ask: Ask, now: number): Promise<boolean> {
  * Sends every ask that is due. For the five-minute job. Each is taken off the
  * queue before anything is sent, so two runs never send the same one. One
  * that is no longer to be sent (another store at the handle, too late, paid
- * since, stopped) is dropped; one whose send failed (an error on the way, or
- * the email not taken) is put back for a later try (again).
+ * since, stopped) is dropped, and so is one the email service was asked for
+ * and did not take; one that failed on the way, before the email service was
+ * asked (an error reading the store or Stripe), is put back for a later try
+ * (again).
  */
 export async function sendAsked(
   load: (handle: string) => Promise<Store | null>,
@@ -206,7 +208,8 @@ export async function sendAsked(
       counts.skipped += 1;
       continue;
     }
-    let outcome: RemindOutcome;
+    // "retry": it failed on the way, before the email service was asked (lib/reminder-retry.ts).
+    let outcome: RemindOutcome | "retry";
     try {
       const store = await load(ask.handle);
       // The store the ask was made on, and not another that has since taken its address.
@@ -216,10 +219,11 @@ export async function sendAsked(
           : "skip";
     } catch (error) {
       console.error("sending an asked-for reminder failed", ask.handle, error);
-      outcome = "failed";
+      outcome = "retry";
     }
     if (outcome === "sent") counts.sent += 1;
-    else if (outcome === "failed" && (await again(ask, now))) counts.retried += 1;
+    // "failed" is a send the email service was asked for and did not take: never again (lib/reminder-retry.ts).
+    else if (outcome === "retry" && (await again(ask, now))) counts.retried += 1;
     else counts.skipped += 1;
   }
   return counts;

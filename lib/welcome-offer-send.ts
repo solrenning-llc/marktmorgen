@@ -110,7 +110,7 @@ function moment(seconds: number, language: unknown): string {
 type DueReminder = { s?: string; i?: string; h?: string; e?: string; t?: string; a?: unknown };
 
 /**
- * Puts a reminder whose send failed back in the queue (lib/reminder-retry.ts),
+ * Puts a reminder that failed before its email was asked for back in the queue (lib/reminder-retry.ts),
  * a few times at the most, at the score it had: the hour its person's mark
  * keeps, so an erasure still finds it there (forgetWelcomePerson, dueAt), and
  * the next run tries it again. Every rule is read again before that try (the
@@ -163,7 +163,8 @@ export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.f
     const member = due[at];
     const score = due[at + 1];
     if (Date.now() >= deadline) break;
-    // Taken off first, so two runs never send the same one; put back only after a failed send (again).
+    // Taken off first, so two runs never send the same one; put back only after a try that failed before its email
+    // was asked for (again).
     const [removed] = await redisPipeline([["ZREM", DUE_KEY, member]]);
     if (!Number(removed)) continue;
     let parsed: unknown = null;
@@ -174,6 +175,9 @@ export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.f
     }
     const v: DueReminder = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as DueReminder) : {};
     let failed = false;
+    // Whether the email service was asked: once it was, never again (lib/reminder-retry.ts). Its answer cannot tell a
+    // refusal from a failure that may pass, and each ask takes the store's email room again (Claude 2 on #3214).
+    let asked = false;
     try {
       const store = v.s ? await storeForId(v.s) : null;
       if (!store || store.statsId !== v.i || !v.e || !v.t || !welcomeOn(store) || !store.listId || !store.welcomeOffer.remind || !store.welcomeOffer.address) {
@@ -207,6 +211,7 @@ export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.f
       ].join("\n");
       const withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.welcomeOffer.address } };
       const rendered = render(withAddress, subject, body, unsub);
+      asked = true;
       const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
         from: fromLine(withAddress),
         to: v.e,
@@ -223,7 +228,7 @@ export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.f
       failed = true;
     }
     if (!failed) continue;
-    if (await again(v, score)) counts.retried += 1;
+    if (!asked && (await again(v, score))) counts.retried += 1;
     else counts.dropped += 1;
   }
   return counts;

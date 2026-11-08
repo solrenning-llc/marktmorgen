@@ -1,0 +1,45 @@
+# MV (AGENTS.md): opens the main-vermelho issue when main's own CI fails (on the current head, or on
+# an earlier head while the current one has no result) and closes it when all nine required
+# workflows passed on main's current head. Not a required check and not part of
+# CI itself: it runs only after a required workflow completes on main, from main's own copy of
+# scripts/main_red_alarm.mjs (the decision; tests/main-red-alarm.test.ts).
+name: Main red alarm
+on:
+  workflow_run:
+    workflows:
+      - Buyer action accessibility matrix
+      - Product action accessibility matrix
+      - Public accessibility matrix
+      - AX2 real screen reader entry pilot
+      - Signup action accessibility matrix
+      - Studio accessibility matrix
+      - CodeQL
+      - Dependency security
+      - Product checks
+    types: [completed]
+    branches: [main]
+permissions:
+  actions: read
+  contents: read
+  issues: write
+concurrency:
+  group: main-red-alarm
+  cancel-in-progress: false
+jobs:
+  alarm:
+    name: Main red alarm
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/main_red_alarm.mjs
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+      - name: Decide from main's runs (current head, and earlier heads where it has no result), then open, comment or close
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/main_red_alarm.mjs

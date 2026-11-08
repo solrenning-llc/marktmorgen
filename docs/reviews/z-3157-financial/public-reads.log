@@ -1,0 +1,292 @@
+
+FILE public-reads-ceiling.test.ts
+
+The program's book is counted before it is worked out
+  ok    eight commands, none of which reads a record
+  ok    its size: every field of the program's records
+
+Fifty affiliates, ten loads each, in one period
+  ok    all five hundred admitted, each with its own figures
+  ok    the book worked out once: one read of each of its seven hashes
+  ok    and Stripe asked for it once (3 calls: its invoices, refunds and disputes)
+  ok    one charge in full (35), and every load its own part (2 each)
+  fifty affiliates loading ten times: 1035 requests, against 17500 when each load worked the book out
+
+What an affiliate sees is what their own book said
+  ok    affiliate aaaaaaaaaaaa: the same row, lines and payouts, as the page shows them
+  ok    and the slice of the whole book is the same
+  ok    affiliate bbbbbbbbbbb1: the same row, lines and payouts, as the page shows them
+  ok    and the slice of the whole book is the same
+  ok    affiliate bbbbbbbbbbb7: the same row, lines and payouts, as the page shows them
+  ok    and the slice of the whole book is the same
+
+One refresh at a time
+  ok    another load holds the refresh
+  ok    this load reads the last book kept, and works nothing out
+  ok    and pays only its own part
+  ok    the lock let go, the next load past a day works it out again, once
+
+An affiliate not approved sees no book
+  ok    admitted as a public page, no book, nothing of it read
+  ok    declined with nothing kept: no book
+  ok    removed with nothing kept: no book
+
+Removed, and still owed
+  ok    a removed affiliate with a balance sees it: five sales at $6.00
+  ok    the book out of date, they work it out once, as an approved affiliate would, paid the same
+  ok    a second load the same day reads the kept book and pays its own part
+  ok    a removed affiliate who never sold: no book, the page as it was, and no refresh though the book is out of date
+  ok    declined after being approved, and still owed: sees their own part, as one removed does
+
+Only what the page shows is kept, and deleting the person deletes it
+  ok    the lead's full address is not in the kept book; its masked form is
+  ok    nor any affiliate's own address
+  ok    the person deleted
+  ok    the kept book with them is gone; the next load works it out again
+  ok    worked out again, without the address
+
+A book written whole, or only its time
+  ok    a newer book replaces the older whole: no part of the old one stays behind
+  ok    a book that could not be kept still marks when it was worked out
+  ok    and leaves no draft behind
+  ok    so the next load that day does not refresh it for everybody: it works out its own book
+  ok    paid in full from its own connection's share of the day
+  ok    and the page promises no daily refresh for it: the figures are this load's own
+  ok    one removed and still owed, with no part kept, works out their own book the same way and sees what they are owed
+  ok    paid from their own connection's share: their load and the book
+  ok    one removed who never sold still sees no book
+
+An incomplete book is worked out again sooner, a few times
+  ok    refunds not all read: in date for a quarter of an hour, and the page says so
+  ok    after 3 times running, once a day like any other
+  ok    still incomplete a day later (day 1): once a day, with no new run of short refreshes, and the page says once a day
+  ok    still incomplete a day later (day 2): once a day, with no new run of short refreshes, and the page says once a day
+  ok    still incomplete a day later (day 3): once a day, with no new run of short refreshes, and the page says once a day
+  ok    a complete book kept sets the count back
+  ok    so a later incomplete one is worked out again soon once more
+
+One refresh's lock is its own
+  ok    a load whose lock ran out cannot let go of the next one's
+
+A kept book is measured in bytes, as Redis counts them
+  ok    a book of 2577390 such characters is under the cap by its length, over it by its bytes
+  ok    so it is not kept: only when it was worked out
+  ok    one just under the cap in bytes is kept, and its part's size is its bytes
+
+Two refreshes that overlap never share a draft or undo each other
+  ok    B, holding the lock, keeps its whole book
+  ok    A, whose lock ran out midway, keeps nothing
+  ok    the kept book is B's whole one: written by B, at B's time, with the affiliate A's left out
+  ok    and neither draft is left
+  ok    A letting go does not free B's lock
+  ok    a refresh whose rename failed after its lock ran out marks nothing
+  ok    the newer refresh's whole book stays, kept
+  ok    a draft a stopped refresh left is deleted by the next
+  ok    the read stops well inside the page's maxDuration, which the page declares, and the lock outlasts both
+
+A person deleted while the book is worked out is never kept in it
+  ok    the refresh read the address (masked in what it would keep)
+  ok    the person is deleted meanwhile
+  ok    so what it read is thrown away: nothing kept, no draft
+  ok    the load shows nothing it read before the deletion, and nothing is kept
+
+A deletion tried again after its first try stopped still deletes the book
+  ok    a book is kept
+  ok    the address is already off the lead: nothing more to take off it
+  ok    but the kept book is deleted all the same
+
+A Redis that cannot run the scripts writes nothing
+  ok    no refresh is counted and nothing is written: the book stays as it was, no draft
+  ok    a deletion without them still raises the version and deletes the book, and fails so it is tried again
+  ok    the privacy line says how long it is really kept
+
+A refused load reads nothing
+  ok    the window used up
+  ok    refused, and no record of the program read
+  ok    somebody not signed in: the page rests with the store's others
+  ok    the page asks before it reads listings or codes, never works the book out itself, and says when its figures are from
+
+Only the affiliate book and the community archive's walk are counted outside a connection's share
+  ok    a closed list: the work done for everybody
+  ok    and the reading finds a call over several lines, { shared } from a variable, options passed whole and an alias, and not a plain call
+
+Working the book out is not held against one connection's share of the day
+  ok    a large program's book (428 requests) is more than one connection's day (300)
+  ok    worked out all the same, for every affiliate
+  ok    the same requests taken from the connection's own count would be refused
+
+A slow Stripe: the refresh stops in time, keeps a short book, and is paid once
+  ok    Stripe asked no longer than BOOK_READ_SECONDS (12 calls of 20 s, 240 s), where it would have taken 23 calls
+  ok    what it read is kept as an incomplete book, worked out again soon, and the page says so
+  ok    one charge: this load and the book
+  ok    a minute later: no second charge for the book, only the load's own part
+  ok    after the short wait, Stripe answering again: worked out once more, complete
+
+A refresh stopped before it writes still counts
+  ok    the refresh was paid for and stopped with nothing written
+  ok    counted before it read: one refresh without a complete book, begun then
+  ok    so the next load does not pay for it again before the short wait: the last book kept, its own part paid
+  ok    after it, once more, and a complete book sets the count back
+  ok    a refresh counted before its charge
+  ok    whose charge is refused takes its count back: nothing left of it
+
+No room for the book: the page promises no time
+  ok    none kept and no room to work it out: told so, not told to look again in minutes
+  ok    and the refresh refused is not counted against the next
+  ok    with room again, while another load works it out: the figures are not ready yet
+  ok    en: the words for no room promise no time, and the short refresh says only that it can
+  ok    es: the words for no room promise no time, and the short refresh says only that it can
+  ok    fr: the words for no room promise no time, and the short refresh says only that it can
+  ok    de: the words for no room promise no time, and the short refresh says only that it can
+  ok    it: the words for no room promise no time, and the short refresh says only that it can
+  ok    nl: the words for no room promise no time, and the short refresh says only that it can
+  ok    pt: the words for no room promise no time, and the short refresh says only that it can
+  ok    en: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    es: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    fr: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    de: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    it: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    nl: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    pt: "not ready yet" promises no minutes, since a refresh that kept nothing can hold the next off for up to a day
+  ok    in English, plainly
+  ok    in English: "can refresh again", as "at most once a day" says
+  ok    the page draws each in its own place
+
+The store's map
+  ok    counted with one command
+  ok    its size: three products the store record carries (nothing read for them) and two pages of posts
+  ok    the same map as before, every product, the blog and its posts
+  ok    it took 2 requests first, the size it reads
+  ok    and read no more pages of posts than were paid for
+  ok    its bytes (2193) stay inside what was priced
+
+A refused map reads nothing
+  ok    the window used up
+  ok    refused
+  ok    no listing and no post read (ZCARD GET INCRBY)
+  ok    the route answers a refusal with 503 and Retry-After, kept by no cache
+
+118 checks, all passing.
+Z_VOLUME {"runs":5254,"mocks":100,"over":false}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5805:11)
+    at async refundsSince ([stdin]:49134:20)
+    at async readBook ([stdin]:49273:45)
+    at async refreshBook ([stdin]:49707:16)
+    at async refreshFor ([stdin]:117051:19)
+    at async bookFor ([stdin]:117066:48)
+    at async admitAffiliatePage ([stdin]:117098:34)
+    at async watched ([stdin]:120846:19)
+    at async main ([stdin]:121118:19) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5805:11)
+    at async refundsSince ([stdin]:49134:20)
+    at async readBook ([stdin]:49273:45)
+    at async refreshBook ([stdin]:49707:16)
+    at async refreshFor ([stdin]:117051:19)
+    at async bookFor ([stdin]:117066:48)
+    at async admitAffiliatePage ([stdin]:117098:34)
+    at async main ([stdin]:121124:5) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5805:11)
+    at async refundsSince ([stdin]:49134:20)
+    at async readBook ([stdin]:49273:45)
+    at async refreshBook ([stdin]:49707:16)
+    at async refreshFor ([stdin]:117051:19)
+    at async bookFor ([stdin]:117066:48)
+    at async admitAffiliatePage ([stdin]:117098:34)
+    at async main ([stdin]:121124:5) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5805:11)
+    at async refundsSince ([stdin]:49134:20)
+    at async readBook ([stdin]:49273:45)
+    at async refreshBook ([stdin]:49707:16)
+    at async refreshFor ([stdin]:117051:19)
+    at async bookFor ([stdin]:117066:48)
+    at async admitAffiliatePage ([stdin]:117098:34)
+    at async main ([stdin]:121124:5) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5805:11)
+    at async refundsSince ([stdin]:49134:20)
+    at async readBook ([stdin]:49273:45)
+    at async refreshBook ([stdin]:49707:16)
+    at async refreshFor ([stdin]:117051:19)
+    at async bookFor ([stdin]:117066:48)
+    at async admitAffiliatePage ([stdin]:117098:34)
+    at async main ([stdin]:121129:18) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5805:11)
+    at async refundsSince ([stdin]:49134:20)
+    at async readBook ([stdin]:49273:45)
+    at async refreshBook ([stdin]:49707:16)
+    at async refreshFor ([stdin]:117051:19)
+    at async bookFor ([stdin]:117066:48)
+    at async admitAffiliatePage ([stdin]:117098:34)
+    at async main ([stdin]:121129:18) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5805:11)
+    at async refundsSince ([stdin]:49134:20)
+    at async readBook ([stdin]:49273:45)
+    at async refreshBook ([stdin]:49707:16)
+    at async refreshFor ([stdin]:117051:19)
+    at async bookFor ([stdin]:117066:48)
+    at async admitAffiliatePage ([stdin]:117098:34)
+    at async main ([stdin]:121129:18) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+reading refunds for the affiliate book failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5805:11)
+    at async refundsSince ([stdin]:49134:20)
+    at async readBook ([stdin]:49273:45)
+    at async refreshBook ([stdin]:49707:16)
+    at async refreshFor ([stdin]:117051:19)
+    at async bookFor ([stdin]:117066:48)
+    at async admitAffiliatePage ([stdin]:117098:34)
+    at async main ([stdin]:121138:3) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+counting an affiliate book's refresh failed Error: ERR unknown command 'EVAL'
+    at store.pipeline ([stdin]:121249:54)
+    at redisPipeline ([stdin]:2255:41)
+    at script2 ([stdin]:49605:23)
+    at beginAttempt ([stdin]:49636:25)
+    at main ([stdin]:121253:32)
+keeping an affiliate book failed Error: ERR unknown command 'EVAL'
+    at store.pipeline ([stdin]:121249:54)
+    at redisPipeline ([stdin]:2255:41)
+    at script2 ([stdin]:49605:23)
+    at markOnly ([stdin]:49673:26)
+    at write ([stdin]:49700:12)
+    at async writeSnapshot ([stdin]:49650:12)
+    at async main ([stdin]:121254:26)
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3157-A4gHmw

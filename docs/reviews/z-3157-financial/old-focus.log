@@ -1,0 +1,38 @@
+
+FILE z-3157-copy-and-envelope.proof.ts
+
+C4 LOW 6716917431: a healthy person's copy survives another person's unreadable lead
+  ok    healthy two-person control: only A is copied
+  ok    text amount: A's own healthy lead remains copyable
+  ok    broken JSON: A's own healthy lead remains copyable
+  FAIL  own unreadable lead: unknown, never an apparently complete empty copy
+        expected "unknown"
+        got      []
+  ok    exact empty healthy control
+
+Exact envelope controls: no missing, extra or non-string reply is treated as empty
+  FAIL  missing outer reply: read is unknown
+        expected "unknown"
+        got      []
+  FAIL  extra outer reply: read is unknown
+        expected "unknown"
+        got      []
+  FAIL  nil HGETALL: read is unknown
+        expected "unknown"
+        got      []
+  FAIL  numeric HGETALL: read is unknown
+        expected "unknown"
+        got      []
+  FAIL  outer hole: read is unknown
+        expected "unknown"
+        got      []
+  FAIL  non-string field: read is unknown
+        expected "unknown"
+        got      [{"id":"bb7d15335789001bc83177a1","aff":"aaaaaaaaaaaa","kind":"signup","at":1780000000,"end":0,"ref":"","pi":"","paid":0,"title":"","email":"person.a@example.com","cents":500,"currency":"usd","hold":7,"daily":10,"budget":1000,"state":"open","d":0,"why":""}]
+Z_DIRECT_READ_VOLUMES [{"commands":1,"requestJsonBytes":43,"replyJsonBytes":685},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":689},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":424},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":83},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":4},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":2},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":7},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":3},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":319}]
+
+11 checks, 7 failing.
+Z_VOLUME {"runs":14,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3157-nbDAak

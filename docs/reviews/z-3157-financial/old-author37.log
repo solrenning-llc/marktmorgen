@@ -1,0 +1,105 @@
+
+FILE affiliate-leads-read-unknown.test.ts
+
+Controls: the exact empty list, healthy leads, and the budget and the cap reached by healthy leads
+  ok    no leads kept: the exact empty list is none
+  ok    no leads kept: a decision on a lead that is not there is unknown
+  ok    healthy leads read whole
+  ok    one approved ($5 of $10): the new lead is approved
+  ok    two approved reach the $10 budget: the new lead is refused
+  ok    two approved reach the cap of two a day: the new lead is refused
+
+1. An approved lead that does not read never drops out of the budget or the cap
+  FAIL  budget, the second approved lead with broken JSON: readLeads throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [{\"id\":\"000000000000000000000001\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350401,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p1@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000003\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350403,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p3@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"open\",\"d\":0,\"why\":\"\"}]"
+  FAIL  budget, broken JSON: the approval answers 503 unavailable and the new lead stays open
+        expected [{"status":503,"body":{"ok":false,"error":"unavailable"}},"open"]
+        got      [{"status":200,"body":{"ok":true,"changed":1}},"approved"]
+  FAIL  budget, the second approved lead with its amount as text: readLeads throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [{\"id\":\"000000000000000000000001\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350401,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p1@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000002\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350402,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p2@example.com\",\"cents\":0,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000003\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350403,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p3@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"open\",\"d\":0,\"why\":\"\"}]"
+  FAIL  budget, its amount as text: the approval answers 503 unavailable and the new lead stays open
+        expected [{"status":503,"body":{"ok":false,"error":"unavailable"}},"open"]
+        got      [{"status":200,"body":{"ok":true,"changed":1}},"approved"]
+  FAIL  budget, the second approved lead with its currency in capitals (a euro lead read as dollars): readLeads throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [{\"id\":\"000000000000000000000001\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350401,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p1@example.com\",\"cents\":500,\"currency\":\"eur\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000002\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350402,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p2@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000003\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350403,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p3@example.com\",\"cents\":500,\"currency\":\"eur\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"open\",\"d\":0,\"why\":\"\"}]"
+  FAIL  budget, its currency in capitals (a euro lead read as dollars): the approval answers 503 unavailable and the new lead stays open
+        expected [{"status":503,"body":{"ok":false,"error":"unavailable"}},"open"]
+        got      [{"status":200,"body":{"ok":true,"changed":1}},"approved"]
+  FAIL  budget, the second approved lead with its state of another shape: readLeads throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [{\"id\":\"000000000000000000000001\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350401,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p1@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000002\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350402,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p2@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"open\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000003\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350403,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p3@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"open\",\"d\":0,\"why\":\"\"}]"
+  FAIL  budget, its state of another shape: the approval answers 503 unavailable and the new lead stays open
+        expected [{"status":503,"body":{"ok":false,"error":"unavailable"}},"open"]
+        got      [{"status":400,"body":{"ok":false,"error":"lead_not_ready"}},"open"]
+  FAIL  cap, the second approved lead with its time as text: readLeads throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [{\"id\":\"000000000000000000000001\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788354000,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p1@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":2,\"budget\":100000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000002\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":0,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p2@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":2,\"budget\":100000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000003\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788361200,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p3@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":2,\"budget\":100000,\"state\":\"open\",\"d\":0,\"why\":\"\"}]"
+  FAIL  cap, its time as text: the approval answers 503 unavailable and the new lead stays open
+        expected [{"status":503,"body":{"ok":false,"error":"unavailable"}},"open"]
+        got      [{"status":200,"body":{"ok":true,"changed":1}},"approved"]
+
+1b. A HGETALL reply of another shape is never an empty or a partial list
+  FAIL  leads-object: readLeads throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  leads-object: the approval answers 503 unavailable
+        expected 503
+        got      400
+  FAIL  leads-queued: readLeads throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  leads-queued: the approval answers 503 unavailable
+        expected 503
+        got      400
+  FAIL  leads-odd: readLeads throws UnknownReplyError
+        expected "UnknownReplyError"
+        got      "no error: [{\"id\":\"000000000000000000000001\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350401,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p1@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"},{\"id\":\"000000000000000000000003\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350403,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"p3@example.com\",\"cents\":500,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"open\",\"d\":0,\"why\":\"\"}]"
+  FAIL  leads-odd: the approval answers 503 unavailable
+        expected 503
+        got      200
+  FAIL  the new lead was never approved on a reply of another shape
+        expected "open"
+        got      "approved"
+
+2. The person's copy never comes out complete with a lead missing
+  ok    healthy: the person's own lead is copied
+  ok    no leads kept: nothing to copy, exactly
+  FAIL  leads-object: the copier throws, never an empty copy
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  leads-queued: the copier throws, never an empty copy
+        expected "UnknownReplyError"
+        got      "no error: []"
+  FAIL  their own lead unreadable: the copier throws, never a copy without it
+        expected "UnknownReplyError"
+        got      "no error: []"
+
+3. The sibling readers: deleting a person, and the contact credit
+  ok    no lead for the person: nothing to forget
+  FAIL  their lead unreadable, the address maybe in it: the deletion throws and is tried again
+        expected "UnknownReplyError"
+        got      "no error: 0"
+  ok    and the record is left as it was
+  ok    a healthy lead: the address comes off
+  FAIL  an amount of another type: the address comes off, and the amount is written back as kept, never a readable 0
+        expected [1,"","500"]
+        got      [1,"",0]
+  FAIL  so the program's leads still do not read after the deletion
+        expected "UnknownReplyError"
+        got      "no error: [{\"id\":\"9f02e2975467daa8acd9c1c6\",\"aff\":\"aaaaaaaaaaaa\",\"kind\":\"signup\",\"at\":1788350406,\"end\":0,\"ref\":\"\",\"pi\":\"\",\"paid\":0,\"title\":\"\",\"email\":\"\",\"cents\":0,\"currency\":\"usd\",\"hold\":7,\"daily\":10,\"budget\":1000,\"state\":\"approved\",\"d\":1788436800,\"why\":\"\"}]"
+  FAIL  an address of another type: the deletion throws and is tried again
+        expected "UnknownReplyError"
+        got      "no error: 0"
+  ok    control: a healthy lead before the checkout credits its affiliate
+  FAIL  a reversal whose state no longer reads never credits the affiliate
+        expected ""
+        got      "aaaaaaaaaaaa"
+
+37 checks, 25 failing.
+Z_VOLUME {"runs":283,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3157-qFQXMy

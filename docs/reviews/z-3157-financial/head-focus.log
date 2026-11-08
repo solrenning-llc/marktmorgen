@@ -1,0 +1,146 @@
+
+FILE affiliate-leads-read-unknown.test.ts
+
+Controls: the exact empty list, healthy leads, and the budget and the cap reached by healthy leads
+  ok    no leads kept: the exact empty list is none
+  ok    no leads kept: a decision on a lead that is not there is unknown
+  ok    healthy leads read whole
+  ok    one approved ($5 of $10): the new lead is approved
+  ok    two approved reach the $10 budget: the new lead is refused
+  ok    two approved reach the cap of two a day: the new lead is refused
+
+1. An approved lead that does not read never drops out of the budget or the cap
+  ok    budget, the second approved lead with broken JSON: readLeads throws UnknownReplyError
+  ok    budget, broken JSON: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its amount as text: readLeads throws UnknownReplyError
+  ok    budget, its amount as text: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its currency in capitals (a euro lead read as dollars): readLeads throws UnknownReplyError
+  ok    budget, its currency in capitals (a euro lead read as dollars): the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its state of another shape: readLeads throws UnknownReplyError
+  ok    budget, its state of another shape: the approval answers 503 unavailable and the new lead stays open
+  ok    cap, the second approved lead with its time as text: readLeads throws UnknownReplyError
+  ok    cap, its time as text: the approval answers 503 unavailable and the new lead stays open
+
+1b. A HGETALL reply of another shape is never an empty or a partial list
+  ok    leads-object: readLeads throws UnknownReplyError
+  ok    leads-object: the approval answers 503 unavailable
+  ok    leads-queued: readLeads throws UnknownReplyError
+  ok    leads-queued: the approval answers 503 unavailable
+  ok    leads-odd: readLeads throws UnknownReplyError
+  ok    leads-odd: the approval answers 503 unavailable
+  ok    the new lead was never approved on a reply of another shape
+
+2. The person's copy never comes out complete with a lead missing
+  ok    healthy: the person's own lead is copied
+  ok    no leads kept: nothing to copy, exactly
+  ok    leads-object: the copier throws, never an empty copy
+  ok    leads-queued: the copier throws, never an empty copy
+  ok    their own lead unreadable: the copier throws, never a copy without it
+
+3. The sibling readers: deleting a person, and the contact credit
+  ok    no lead for the person: nothing to forget
+  ok    their lead unreadable, the address maybe in it: the deletion throws and is tried again
+  ok    and the record is left as it was
+  ok    a healthy lead: the address comes off
+  ok    an amount of another type: the address comes off, and the amount is written back as kept, never a readable 0
+  ok    so the program's leads still do not read after the deletion
+  ok    an address of another type: the deletion throws and is tried again
+  ok    control: a healthy lead before the checkout credits its affiliate
+  ok    a reversal whose state no longer reads never credits the affiliate
+
+37 checks, all passing.
+Z_VOLUME {"runs":274,"mocks":0,"over":false}
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53788:23)
+    at async [stdin]:53809:19
+    at async withLock ([stdin]:10116:12)
+    at async decideLeads ([stdin]:53808:12)
+    at async POST ([stdin]:67954:21)
+    at async approve ([stdin]:68206:22)
+    at async main ([stdin]:68262:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53788:23)
+    at async [stdin]:53809:19
+    at async withLock ([stdin]:10116:12)
+    at async decideLeads ([stdin]:53808:12)
+    at async POST ([stdin]:67954:21)
+    at async approve ([stdin]:68206:22)
+    at async main ([stdin]:68262:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53788:23)
+    at async [stdin]:53809:19
+    at async withLock ([stdin]:10116:12)
+    at async decideLeads ([stdin]:53808:12)
+    at async POST ([stdin]:67954:21)
+    at async approve ([stdin]:68206:22)
+    at async main ([stdin]:68262:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53788:23)
+    at async [stdin]:53809:19
+    at async withLock ([stdin]:10116:12)
+    at async decideLeads ([stdin]:53808:12)
+    at async POST ([stdin]:67954:21)
+    at async approve ([stdin]:68206:22)
+    at async main ([stdin]:68262:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53788:23)
+    at async [stdin]:53809:19
+    at async withLock ([stdin]:10116:12)
+    at async decideLeads ([stdin]:53808:12)
+    at async POST ([stdin]:67954:21)
+    at async approve ([stdin]:68206:22)
+    at async main ([stdin]:68262:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53784:47)
+    at async [stdin]:53809:19
+    at async withLock ([stdin]:10116:12)
+    at async decideLeads ([stdin]:53808:12)
+    at async POST ([stdin]:67954:21)
+    at async approve ([stdin]:68206:22)
+    at async main ([stdin]:68269:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53784:47)
+    at async [stdin]:53809:19
+    at async withLock ([stdin]:10116:12)
+    at async decideLeads ([stdin]:53808:12)
+    at async POST ([stdin]:67954:21)
+    at async approve ([stdin]:68206:22)
+    at async main ([stdin]:68269:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53784:47)
+    at async [stdin]:53809:19
+    at async withLock ([stdin]:10116:12)
+    at async decideLeads ([stdin]:53808:12)
+    at async POST ([stdin]:67954:21)
+    at async approve ([stdin]:68206:22)
+    at async main ([stdin]:68269:60)
+
+Z_STATUS 0 null
+
+FILE z-3157-copy-and-envelope.proof.ts
+
+C4 LOW 6716917431: a healthy person's copy survives another person's unreadable lead
+  ok    healthy two-person control: only A is copied
+  FAIL  text amount: A's own healthy lead remains copyable
+        expected ["bb7d15335789001bc83177a1"]
+        got      "unknown"
+  FAIL  broken JSON: A's own healthy lead remains copyable
+        expected ["bb7d15335789001bc83177a1"]
+        got      "unknown"
+  ok    own unreadable lead: unknown, never an apparently complete empty copy
+  ok    exact empty healthy control
+
+Exact envelope controls: no missing, extra or non-string reply is treated as empty
+  ok    missing outer reply: read is unknown
+  ok    extra outer reply: read is unknown
+  ok    nil HGETALL: read is unknown
+  ok    numeric HGETALL: read is unknown
+  ok    outer hole: read is unknown
+  ok    non-string field: read is unknown
+Z_DIRECT_READ_VOLUMES [{"commands":1,"requestJsonBytes":43,"replyJsonBytes":685},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":689},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":424},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":83},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":4},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":2},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":7},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":3},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":319}]
+
+11 checks, 2 failing.
+Z_VOLUME {"runs":14,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3157-p7YBOx

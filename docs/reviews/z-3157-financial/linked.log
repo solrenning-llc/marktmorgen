@@ -1,0 +1,666 @@
+
+FILE affiliate-leads.test.ts
+
+The terms
+  ok    none until a creator chooses, on every program saved before
+  ok    a choice is kept
+  ok    a hold shorter than a week is not kept
+  ok    out of range is refused, with the reason, not replaced
+  ok    an hour holds a quarter of the day, at least one
+
+How each lead stands
+  ok    inside its hold it earns and waits
+  ok    after it, it needs the creator's approval
+  ok    approved, it is payable
+  ok    reversed, it earns nothing
+  ok    past the daily cap a lead is listed and earns nothing
+  ok    and past the hour's share of it, even under the day's
+  ok    another affiliate's leads use their own day
+  ok    the monthly budget is the whole program's
+  ok    each lead is judged by the budget of its own day
+  ok    a lead reversed frees its place for the next
+  ok    a booking waits for its call, and its hold counts from the call's end
+  ok    a move is read: a call its buyer moved earlier holds from its new end
+  ok    refunded in full, it is reversed whatever it was
+  ok    a partial refund leaves it
+  ok    an affiliate sees the address as its first letter and its domain
+
+A program that pays per sign-up
+  ok    the visit through Ana's link credits Ana
+  ok    not a pending affiliate
+  ok    not her own address, written another way, nor the creator's
+  ok    not a kind the program does not pay
+  ok    not a click past the window
+  ok    asked to join
+  ok    the link carries Ana, and nothing is recorded before it is pressed
+  ok    confirmed, new to the list
+  ok    the route credits only a confirmed address new to the list, counted as a request first
+  ok    credited
+  ok    its write, with the request it takes, stays inside a later page's commands
+  ok    and the store's request was counted
+  ok    kept with the terms of its day and the person's address
+  ok    its id is a fingerprint of the address in this program
+
+One lead per person, never their own
+  ok    the same person, written another way, is not a second lead
+  ok    Ana's own address is refused
+  ok    so is the PayPal address she is paid at
+  ok    and the creator's own
+  ok    an affiliate not approved earns no lead
+  ok    a kind the program does not pay is not recorded
+  ok    still one lead
+
+The book
+  ok    a lead line beside the sales, with its amount
+  ok    earned and owed, but waiting and not payable, and not a sale
+  ok    approving inside the hold is refused
+  ok    past its hold it needs the creator
+  ok    approved, it is payable
+  ok    a reversal needs a reason
+  ok    reversed: nothing owed, and the affiliate sees why
+  ok    undone, it waits for approval again
+  ok    in the spreadsheet as a lead
+  ok    Ana's own page has her lead
+  ok    held with everything else when flagged
+
+A free product, and a booking
+  ok    credited for a free product claimed
+  ok    the free download credits only the first time that address got the product
+  ok    a booking's checkout carries the lead whatever the share, never from a package
+  ok    the booking route carries it only where the store pays per booking
+
+Deleting a person
+  ok    their address comes off the lead
+  ok    the lead stays, as the affiliate's record
+  ok    and the same person joining again is not a new lead
+  ok    the erasure runs it, and says so
+
+What affiliates are told, in every language
+  ok    en: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    es: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    fr: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    de: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    it: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    nl: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    pt: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    no word the owner forbids
+
+68 checks, all passing.
+Z_VOLUME {"runs":241,"mocks":1,"over":false}
+
+Z_STATUS 0 null
+
+FILE affiliate-contact-credit.test.ts
+
+Off until the creator asks, and only while leads are paid
+  ok    missing: off
+  ok    "true" is not a yes
+  ok    1 is not a yes
+  ok    "yes" is not a yes
+  ok    {} is not a yes
+  ok    null is not a yes
+  ok    an explicit yes with leads paid: on
+  ok    a yes with no leads paid is kept off, so it cannot turn itself back on unseen
+  ok    the default program has it off
+  ok    a program switched off credits no contact
+  ok    on, enabled and paying leads: credits contacts
+
+What the affiliate reads
+  ok    off: the rule says nothing about leads who buy
+  ok    on: the rule ends with the contact sentence
+  ok    which says a link, a code and an earlier purchase come first
+  ok    and that the lead came before the purchase
+  ok    and promises no time limit it cannot keep
+  ok    every language has the sentence
+  ok    in English it is the same sentence the rule uses
+  ok    and every other language has its own words
+  ok    the affiliate page adds it only where the program credits contacts
+  ok    the studio shows the switch only while leads are paid
+  ok    and never sends it on with leads off
+
+A lead who buys later
+  ok    the switch survives the save
+  ok    Ana's lead confirmed through her link
+  ok    the contact reads back as Ana's for a later checkout
+  ok    never for a checkout opened before the lead was confirmed
+  ok    no link, no code: the sale goes to Ana at today's share, as a contact, the address written another way
+
+Only a lead that came before the purchase
+  ok    bought with nobody's link: credits nobody
+  ok    the same sale written down again after the person became a lead: still nobody's
+  ok    a paid booking's own lead
+  ok    never credits the very checkout that made it
+  ok    a later purchase by the same person does
+  ok    a lead still in its hold, not yet approved, counts from when it was confirmed
+
+A link, a code and a bond come first
+  ok    a link followed wins over the contact
+  ok    a code typed wins over the contact
+  ok    a buyer already bonded to somebody stays with them
+
+Never a lead that does not stand
+  ok    a lead reversed as not genuine credits nobody
+  ok    before the deletion it would credit Ana
+  ok    a person deleted from the store is not tied back to anybody
+  ok    so their next purchase credits nobody
+  ok    an affiliate removed since earns nothing through a contact
+  ok    nobody is their own lead
+  ok    so her own purchase is not a contact of hers
+  ok    somebody nobody brought credits nobody
+
+Switched off, or leads no longer paid
+  ok    switched off: the contact is not read
+  ok    and the sale credits nobody
+  ok    leads no longer paid: the switch is saved off
+  ok    and no contact is read
+
+Counted as a sale somebody brought
+  ok    the book keeps how it was credited
+  ok    and counts it among Ana's sales
+  ok    the promotion rows count it as a paid record
+  ok    the second tier counts it as a sale brought
+  ok    a contact is read only after a click, a code and a bond found nobody
+
+The privacy policy says so
+  ok    how a purchase was credited includes an earlier lead
+  ok    and how the lead is found, with nothing more kept
+
+55 checks, all passing.
+Z_VOLUME {"runs":430,"mocks":63,"over":false}
+
+Z_STATUS 0 null
+
+FILE affiliate-idle-sweep.test.ts
+
+Off: nothing happens
+  ok    no choice made: nobody warned, nobody removed
+  ok    and no email
+
+Switched on: counted from that day, never back before it
+  ok    the choice is kept
+  ok    75 days after switching it on: nobody yet
+
+The warning first, and only when it went out
+  ok    the provider refuses: nobody is warned
+  ok    so nothing is written down, and nobody can be removed for it
+  ok    the provider answers: the two who brought nothing are warned
+  ok    to them alone
+  ok    the subject names the store and the date
+  ok    the email says what happens, when, and how to stay
+  ok    and says it as a condition, not as a fact about the past
+  ok    and links to their page
+  ok    the warning is written on their record
+  ok    a sale 50 days ago (paid) keeps the seller in
+  ok    a sale by somebody they invited keeps the recruiter in
+  ok    a lead 60 days ago keeps its affiliate in
+  ok    somebody who may still be owed is never warned
+  ok    a partner with a standing share is never warned
+  ok    nor somebody still pending
+
+No second warning, and no removal before the date
+  ok    the day after: nothing
+  ok    the day before the date: nothing
+  ok    still two emails in all
+
+On the date: removed if still nothing, kept if a sale came
+  ok    one removed
+  ok    the one who still brought nothing; their record stays
+  ok    the one whose sale came in time stays
+  ok    nobody else touched
+
+Restored by the creator: counted again from then
+  ok    not warned again on the old dates
+  ok    approved again
+
+Never while memberships earn commission
+  ok    a program crediting memberships cannot use it
+  ok    one crediting none can
+  ok    its sweep does nothing, however long anybody was quiet
+
+Bounded, and within the run's time
+  ok    at most 25 warnings and removals a run
+  ok    and as many emails at most
+  ok    past its deadline, a store's run does nothing
+  ok    and sends nothing
+
+Words and wiring
+  ok    every language has the warning, with and without leads
+  ok    without leads, no language speaks of leads
+  ok    no language promises money in the warning
+  ok    every language says the rule before anyone applies
+  ok    the daily schedule runs it only after the payday finished
+  ok    and gives each store the run's deadline
+  ok    the studio route refuses a number out of range
+  ok    keeps the choice when it is not sent
+  ok    never with memberships credited
+  ok    and restarts the count when the program is switched back on
+  ok    the affiliate page says it only when the program has it
+  ok    the studio offers it, never by default
+  ok    and never with memberships credited
+
+The privacy policy says so
+  ok    what is kept, the warning, from the rule's own number
+  ok    and that a removed affiliate keeps their records
+
+50 checks, all passing.
+Z_VOLUME {"runs":589,"mocks":25,"over":false}
+an email was not sent: the store's email figure (used)
+
+Z_STATUS 0 null
+
+FILE affiliate-payouts.test.ts
+
+What can be paid today
+  ok    nothing waiting, nothing paid
+  ok    some still clearing
+  ok    what cleared has been paid
+  ok    paid past what cleared
+  ok    all of it still clearing
+  ok    a refund after a payout is money back
+  ok    no wait behaves exactly as before
+
+When the creator said they pay
+  ok    the 1st, seen on the 15th, is next month
+  ok    the 1st, seen on the 1st, is today
+  ok    the 28th exists in February
+  ok    the day after it is next month
+  ok    no promised day gives no date
+  ok    nothing past the 28th is allowed
+  ok    the date reads in American English
+
+How the promise reads
+  ok    1st
+  ok    2nd
+  ok    3rd
+  ok    11th, not 11st
+  ok    21st
+  ok    23rd
+  ok    a day and a wait
+  ok    no day promised says so plainly
+
+22 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE public-reads-ceiling.test.ts
+[stdin]:59
+function current() {
+^
+
+SyntaxError: Identifier 'current' has already been declared
+    at makeContextifyScript (node:internal/vm:194:14)
+    at compileScript (node:internal/process/execution:388:10)
+    at evalTypeScript (node:internal/process/execution:270:24)
+    at node:internal/main/eval_stdin:51:5
+    at Socket.<anonymous> (node:internal/process/execution:205:5)
+    at Socket.emit (node:events:526:24)
+    at endReadableNT (node:internal/streams/readable:1783:12)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+
+Node.js v24.22.1
+
+Z_STATUS 1 null
+
+FILE person-copy.test.ts
+
+Every module the erasure reaches is said
+  ok    each eraser's module has a line in the copy's plan
+  ok    and so does each module that keeps something on purpose
+  ok    and no line names a module that keeps nothing about people
+  ok    each module the copy reads has its reader
+  ok    each line says what it is, in words
+  ok    nothing is pending: the copy is complete
+  ok    no page gives it out yet (its door is the next unit)
+  ok    a task about them, given to a teammate and done
+
+The copy
+  ok    only reads: nothing in the database changed
+  ok    the conversation is not marked read
+  ok    for this person and store, with the day it was made
+  ok    their place on the list
+  ok    the team's note about them, without who wrote it
+  ok    the deal with them
+  ok    the team's task about them: its words, date, done and when
+  ok    their conversation, both sides, said as you and the store
+  ok    a teammate's address is nowhere in it
+  ok    nor anybody else's
+  ok    what is held only as marks is said in words
+
+Nobody's copy for an address the store does not know
+  ok    empty
+
+20 checks, all passing.
+Z_VOLUME {"runs":152,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE person-copy-world.test.ts
+
+Before the erasure
+  ok    the protected-mail fixture exclusion requires never activated
+  ok    the world has no protected-mail records to omit
+  (copied modules with nothing for them: lib/shipment-mail-outbox.ts, lib/order-confirmation-outbox.ts, lib/agreement-store.ts, lib/affiliate-leads.ts, lib/assistant-reminder.ts, lib/paypal-sales.ts, lib/licence-keys.ts, lib/gifts.ts, lib/group-buy.ts, lib/preorders.ts, lib/call-packages.ts, lib/meet-records.ts, lib/shipments.ts, lib/closing-buyers.ts, lib/closing-holds.ts)
+  ok    every module that keeps something about them is in their copy
+  ok    inactive mail readers created no records
+  ok    the other person's address is not in it
+  ok    the store's owner's is not either
+  ok    what they said in the community's room, and the event they are coming to
+
+After the erasure
+  ok    erased
+  ok    nothing the erasure reaches is left to copy
+
+9 checks, all passing.
+Z_VOLUME {"runs":1079,"mocks":2,"over":false}
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:43932:9)
+    at async requestApi ([stdin]:44101:16)
+    at async del ([stdin]:45280:3)
+
+Z_STATUS 0 null
+
+FILE person-erasure.test.ts
+
+A person in every part of a store, deleted
+  ok    the person is in many parts of the store
+  ok    and their seeding changed many keys, so the comparison below means something
+  ok    the store finds them for every-store requests
+  ok    asking sends a link
+  ok    the email carries a link that works
+  ok    asking about an address no store knows sends nothing, and says the same
+  ok    the link names the address and the store
+  ok    the link deletes them
+  ok    it sent no more commands than it took units for (242 of 602)
+  ok    and moved no more bytes (60888 of 396850)
+  ok    the units it takes cover that work
+  ok    the link works once
+  ok    the store's owner is told, not asked
+  (left as allowed: nl:allow:email:…:2026-10-29, nl:allow:studio:…:2026-10-29, nl:allow:transactional:…:2026-10-29, nl:data:…, nl:data:room-test-store, nl:erased:…, nl:health:…, nl:mail:flowstats:dd84b0d18df483e5, nl:rl:erase-address:…, nl:rl:erase-address:…, nl:rl:erase-ip:…, nl:rl:erase-ip:…, nl:rsum:ver:…:94adbc21f4, nl:sender:2026-11, nl:stats:…:ledger, nl:tasks:doors, nl:wf:day:…:2026-11-08, nl:wl:…:94adbc21f4:send)
+  ok    everything is as it was before them, but what is allowed to change
+  ok    no key or value names them, by address or by any key made from it
+  ok    only a fingerprint is kept, under the store's list
+  ok    which cannot be read back to the address
+  ok    the other person is untouched
+  ok    the store knows the address was deleted
+  ok    an import leaves them out
+  ok    a purchase without their own yes notes the purchase, not a yes
+  ok    their own yes, given again, puts them back and lifts the fingerprint
+  ok    the studio deletes them
+  ok    what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them
+  ok    their review stays, without their address (a store may not take reviews down)
+  ok    and everything else is as it was before them
+  ok    the activity log says a person was deleted, never who
+
+What it takes covers what it costs
+  ok    the base units cover the request itself and Discord
+  ok    units cover 550 commands and 310000 bytes
+  ok    units cover 1272 commands and 1709000 bytes
+  ok    units cover 39130 commands and 20115000 bytes
+  ok    the least a deletion takes is what the help says
+
+32 checks, all passing.
+Z_VOLUME {"runs":3342,"mocks":2,"over":false}
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:44103:9)
+    at async requestApi ([stdin]:44272:16)
+    at async del ([stdin]:45451:3)
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:44103:9)
+    at async requestApi ([stdin]:44272:16)
+    at async del ([stdin]:45451:3)
+
+Z_STATUS 0 null
+
+FILE sg2-unknown-replies.test.ts
+
+4: forgetNoted never deletes the note without the records it leads to
+  ok    a note read as nothing: fails, the note and its record kept
+  ok    a note read as null: fails, the note and its record kept
+  ok    a note read as "nl:x": fails, the note and its record kept
+  ok    a note read as 0: fails, the note and its record kept
+  ok    a note read as {}: fails, the note and its record kept
+  ok    a note read as {"0":"nl:x"}: fails, the note and its record kept
+  ok    a note read as ["nl:x",7]: fails, the note and its record kept
+  ok    a note read as [null]: fails, the note and its record kept
+  ok    an old-kind note read in another shape: the same
+  ok    a pipeline answering one reply for two commands: the same
+  ok    a deletion answered nothing: not a receipt of none, the step fails
+  ok    a deletion answered null: not a receipt of none, the step fails
+  ok    a deletion answered "1": not a receipt of none, the step fails
+  ok    a deletion answered -1: not a receipt of none, the step fails
+  ok    a deletion answered 1.5: not a receipt of none, the step fails
+  ok    a deletion answered null: not a receipt of none, the step fails
+  ok    a deletion answered [1]: not a receipt of none, the step fails
+  ok    a deletion answered {}: not a receipt of none, the step fails
+  ok    through the erasure's own step: it fails (said as an unfinished step), the note kept
+  ok    read in its shape: the record and the note go, with a count
+
+5: endLocked keeps the locked sessions it could not read, and says so
+  ok    a session let in without the second step, locked
+  ok    Cancel with the set read in another shape: canceled, said as not logged out; the session still listed and still locked
+  ok    and still locked once the day it would have lifted is past (a week, and nearly the session's thirty days)
+  ok    and the email says they could not be logged out, never that they were
+  ok    what it says stays locked is the one list of what a locked session cannot do
+  ok    the studio says it inline, never in a passing toast, and no longer promises they are logged out at once
+  ok    a removal set with the sessions unread: kept, its browser still open, said as not logged out
+  ok    and the email says so, never that they were
+  ok    asked again later: still said as not logged out
+  ok    a full login with the set unread: the session kept and locked, the set kept
+  ok    and the email asks for Log out of all devices, never says they were logged out
+  ok    read in its shape: logged out, the set gone, and the email says so
+  ok    (a locked session opened directly is listed too)
+  ok    (and logged out by the next full login)
+
+6: dropSecondStep and endAllSessions never read unknown as no sessions
+  ok    sessions read as nothing: fails, nobody logged out, the set kept
+  ok    sessions read as null: fails, nobody logged out, the set kept
+  ok    sessions read as "nl:x": fails, nobody logged out, the set kept
+  ok    sessions read as 0: fails, nobody logged out, the set kept
+  ok    sessions read as {}: fails, nobody logged out, the set kept
+  ok    sessions read as {"0":"nl:x"}: fails, nobody logged out, the set kept
+  ok    sessions read as ["nl:x",7]: fails, nobody logged out, the set kept
+  ok    sessions read as [null]: fails, nobody logged out, the set kept
+  ok    marks answered short: fails, nobody logged out
+  ok    a mark of another shape: fails, nobody logged out
+  ok    the error is the one callers tell apart
+  ok    read in their shape: the other is logged out, the one asking keeps its session
+  ok    a passkey removed with its sessions unread: gone, its session not said as logged out
+  ok    and its email says to log them out
+  ok    Log out of all devices with the set unread: unknown, not none; the set kept; the page says the others may still be in
+  ok    the sign-in page has words for it, said as not done
+  ok    read in its shape: done, and said as done
+  ok    the app turned off with its sessions unread: off, said as not logged out
+  ok    the studio says each inline, never in a passing toast
+  ok    unread, the new app is not turned on
+  ok    read in their shape: on, and the old app's browser is logged out
+  ok    a move with the sessions unread: it stands, and says other sessions may still be open
+  ok    the studio has words for it
+  ok    an undone move whose sessions could not be read is left marked to repair
+
+22: unknown counts as moving
+  ok    nothing moving, read in its shape: not moving
+  ok    a mark read as nothing: moving, so nothing a move forbids is let through
+  ok    a mark read as null: moving, so nothing a move forbids is let through
+  ok    a mark read as "1": moving, so nothing a move forbids is let through
+  ok    a mark read as -1: moving, so nothing a move forbids is let through
+  ok    a mark read as 1.5: moving, so nothing a move forbids is let through
+  ok    a mark read as null: moving, so nothing a move forbids is let through
+  ok    a mark read as [1]: moving, so nothing a move forbids is let through
+  ok    a mark read as {}: moving, so nothing a move forbids is let through
+  ok    one reply for two marks: moving
+
+19: forgetStoreWebhooks never deletes the log without the deliveries in it
+  ok    a log read as nothing: fails, the log and the body kept
+  ok    a log read as null: fails, the log and the body kept
+  ok    a log read as "nl:x": fails, the log and the body kept
+  ok    a log read as 0: fails, the log and the body kept
+  ok    a log read as {}: fails, the log and the body kept
+  ok    a log read as {"0":"nl:x"}: fails, the log and the body kept
+  ok    a log read as ["nl:x",7]: fails, the log and the body kept
+  ok    a log read as [null]: fails, the log and the body kept
+  ok    the endpoints told read in another shape: the same
+  ok    the endpoints read in another shape: the same
+  ok    one reply for five commands: the same
+  ok    read in its shape: the log and the body go
+
+23: the keys are said as unread, never as none
+  ok    the list read as nothing: unread, not empty
+  ok    the list read as null: unread, not empty
+  ok    the list read as "nl:x": unread, not empty
+  ok    the list read as 0: unread, not empty
+  ok    the list read as {}: unread, not empty
+  ok    the list read as {"0":"nl:x"}: unread, not empty
+  ok    the list read as ["nl:x",7]: unread, not empty
+  ok    the list read as [null]: unread, not empty
+  ok    the list read as ["only-a-field"]: unread, not empty
+  ok    the studio's read of the keys (shownKeys, keyRecords strict) fails; the pause code's read is as before
+  ok    a deleted store's keys with the list unread: fails, and the key still in the list it is checked against
+  ok    a count read as nothing: no key made, said as unavailable
+  ok    a count read as null: no key made, said as unavailable
+  ok    a count read as "1": no key made, said as unavailable
+  ok    a count read as -1: no key made, said as unavailable
+  ok    a count read as 1.5: no key made, said as unavailable
+  ok    a count read as null: no key made, said as unavailable
+  ok    a count read as [1]: no key made, said as unavailable
+  ok    a count read as {}: no key made, said as unavailable
+  ok    the studio says it could not read the keys, never 0 keys
+  ok    the studio passes an unread list as such, and the route sends it as null after a change that was made
+  ok    (the words)
+  ok    (read in its shape, the key is listed)
+  ok    (and a deleted store's keys go)
+
+C (review of #2556): two-step login moved onto an address takes the marks an earlier app of it left
+  ok    unread, nothing moves
+  ok    read in their shape: it moves, and the old mark's browser is logged out
+
+Review of #2556 at df8030300: lockedUntil costs one command for every other account
+  ok    another account's session: one command; the kept account's own: four at most; the locked one: still locked
+
+Review of #2556 at c6267d1e: the list of kept accounts never grows past its ceiling, nor twice for one account
+  ok    the same account failing again adds nothing
+  ok    past 100 accounts it never grows: at most 100 tags of 41 bytes
+  ok    and one more adds nothing
+  ok    over the ceiling: a kept locked session stays locked, a session never locked is not, at four commands
+  ok    and it is said: counted for the month, the owner's line with numbers only, the extra within its cost line
+
+Review of #2556 at df8030300: a move refused because the new address's sessions are unread says so
+Z_VOLUME {"runs":2171,"mocks":128,"over":true}
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+Error: unsent
+    at main ([stdin]:159878:39)
+
+Z_STATUS 1 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (196.175339ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (188.960301ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (111.798802ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (4.172342ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.218534ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.890957ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.818646ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (118.471887ms)
+✔ every store figure taken in the code is a kind a line prices (62.395369ms)
+✔ every email sent names a meter, and each file only the meters it may use (142.290004ms)
+✔ the units a figure is taken in cost at least what they stand for (11.639553ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.576332ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.307449ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.39663ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.198759ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.108942ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.418206ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.217113ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.23831ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.201759ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (4.587377ms)
+✔ Path push fits its reserved studio requests (0.154834ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.074556ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.066651ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.09654ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (52.978619ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 936.155998
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 121.5 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 288.3 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 704.9 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (343.495294ms)
+✔ each family is bounded one way at least, and what it says can be checked (86.857932ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (11.99502ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.74862ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.687865ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (12.023257ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.460781ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 486.477293
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE spend-floor.test.ts
+creator, month: paid $69.00, costs allowed $60.8300; receiving $9.0200 + 1 x ($6.5995 other + $0.0000 AI + $0.0574 uploads) + $0.2672 kept after the plan ends = $15.9500; room $44.8800; net 65.05%
+creator, year: paid $690.00, costs allowed $609.1800; receiving $84.4900 + 12 x ($6.5995 other + $0.0000 AI + $0.0574 uploads) + $0.2672 kept after the plan ends = $164.6500; room $444.5300; net 64.42%
+pro, month: paid $449.00, costs allowed $392.1500; receiving $55.2100 + 1 x ($19.1832 other + $3.3537 AI + $0.3593 uploads) + $1.3548 kept after the plan ends = $79.4700; room $312.6800; net 69.64%
+pro, year: paid $4490.00, costs allowed $3925.9000; receiving $546.2600 + 12 x ($19.1832 other + $3.3537 AI + $0.3593 uploads) + $1.3548 kept after the plan ends = $822.3700; room $3103.5300; net 69.12%
+scale, month: paid $999.00, costs allowed $871.5600; receiving $122.0400 + 1 x ($38.7297 other + $6.3691 AI + $0.7187 uploads) + $2.6236 kept after the plan ends = $170.4900; room $701.0700; net 70.17%
+scale, year: paid $9990.00, costs allowed $8725.2900; receiving $1214.6200 + 12 x ($38.7297 other + $6.3691 AI + $0.7187 uploads) + $2.6236 kept after the plan ends = $1767.0600; room $6958.2300; net 69.65%
+creator: platform-subscription-search $0.1431, storage $0.1150, free-delivery $0.0000, video $0.0576, visits $0.8968, orders $0.4206, list-email $0.0000, transactional-email $0.1380, store-email $0.0681, ai $0.0000, uploads $0.0574, workflows $0.0000, imports $0.0485, clickfunnels $0.0316, funnel-share $0.0595, team-scheduling $0.0272, quizzes $0.0278, collections $0.0000, embed $0.0000, public-requests $0.0573, studio $0.1991, store-readings $0.4084, calendar-feed $3.5903, rest-api $0.0302, inbox $0.0044, integrations $0.0048, free-share $0.1327, buyer-actions $0.0589, webhooks $0.0347, task-files $0.0056, database-storage $0.0349, community-pictures $0.0043; total $6.6569
+pro: platform-subscription-search $0.1431, storage $0.9200, free-delivery $0.0000, video $0.4610, visits $2.6376, orders $0.9464, list-email $6.3000, transactional-email $0.3680, store-email $0.2724, ai $3.3537, uploads $0.3593, workflows $0.5069, imports $0.1559, clickfunnels $0.0966, funnel-share $0.2164, team-scheduling $0.6269, quizzes $0.0278, collections $0.0000, embed $0.0000, public-requests $0.2034, studio $0.4152, store-readings $0.4491, calendar-feed $3.5903, rest-api $0.1208, inbox $0.0132, integrations $0.0190, free-share $0.1327, buyer-actions $0.2945, webhooks $0.1158, task-files $0.0230, database-storage $0.1058, community-pictures $0.0214; total $22.8962
+scale: platform-subscription-search $0.1431, storage $1.8400, free-delivery $0.0000, video $0.9220, visits $10.5506, orders $3.1546, list-email $9.0000, transactional-email $0.9200, store-email $0.7264, ai $6.3691, uploads $0.7187, workflows $0.8166, imports $0.3606, clickfunnels $0.1379, funnel-share $0.4480, team-scheduling $1.3469, quizzes $0.0278, collections $0.0000, embed $0.0000, public-requests $0.6165, studio $1.1356, store-readings $0.5845, calendar-feed $3.5903, rest-api $0.6041, inbox $0.0439, integrations $0.0476, free-share $0.1327, buyer-actions $0.8835, webhooks $0.3474, task-files $0.0460, database-storage $0.2387, community-pictures $0.0643; total $45.8175
+✔ each plan's AI ceiling is its published writing jobs and answers at the priced units (2.579163ms)
+✔ creator, month: every allowance used in full, the AI and upload ceilings included, keeps positive modeled net with complete dated TX books/operations/FX (15.067879ms)
+✔ creator, year: every allowance used in full, the AI and upload ceilings included, keeps positive modeled net with complete dated TX books/operations/FX (7.775136ms)
+✔ pro, month: every allowance used in full, the AI and upload ceilings included, keeps positive modeled net with complete dated TX books/operations/FX (11.199171ms)
+✔ pro, year: every allowance used in full, the AI and upload ceilings included, keeps positive modeled net with complete dated TX books/operations/FX (6.51246ms)
+✔ scale, month: every allowance used in full, the AI and upload ceilings included, keeps positive modeled net with complete dated TX books/operations/FX (8.504981ms)
+✔ scale, year: every allowance used in full, the AI and upload ceilings included, keeps positive modeled net with complete dated TX books/operations/FX (8.507036ms)
+✔ every current plan keeps its unchanged cost room on both cycles, and Store still without AI (43.210227ms)
+✔ missing real commercial review remains closed despite modeled positive units (0.437294ms)
+✔ the worst month, line by line (18.603638ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 131.160007
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3157-veFUK0

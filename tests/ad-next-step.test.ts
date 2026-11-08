@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { nextStepFor, NEXT_STEP_UNKNOWN, type NextStep, type NextStepInput } from "@/lib/ad-next-step";
-import { MIN_SALES_TO_RAISE, RAISE_PERCENT, withinLimits, type AutopilotRules, type CampaignNow } from "@/lib/ad-autopilot-rules";
+import { MIN_SALES_TO_RAISE, RAISE_PERCENT, autopilotChanges, withinLimits, type AutopilotRules, type CampaignNow } from "@/lib/ad-autopilot-rules";
 import { checkAdText } from "@/lib/ad-creative-check";
 import { britishCopyHits } from "./us-english-source";
 import { done, is, part } from "./check";
@@ -81,6 +81,38 @@ is("too few sales prepare no raise", [nextStepFor(base({ campaign: camp({ sales:
 is("a paused campaign is never switched on", [nextStepFor(base({ campaign: camp({ status: "PAUSED" }) })).change, nextStepFor(base({ campaign: camp({ status: "PAUSED" }) })).note], [null, "It is paused, so no change is suggested."]);
 is("an ended campaign prepares nothing", nextStepFor(base({ campaign: camp({ daysLeft: 0 }) })).change, null);
 
+part("A raise only where the autopilot would raise: cost per sale over the same period, under 70% of the most");
+// Claude 4's probe on #3196: the spend of the days shown was divided by the sales of the campaign's whole life.
+const dear = camp({ spentCents: 60_000, sales: 5 });
+const over = nextStepFor(base({ campaign: dear, all: [dear] }));
+is("a cost per sale above the creator's most ($120 > $100) prepares no raise, and says why", [over.change, over.ask, over.note], [null, null, "Each sale cost $120 in ads after refunds, above your most of $100, so no raise is suggested."]);
+const near = camp({ spentCents: 40_000, sales: 5 });
+const margin = nextStepFor(base({ campaign: near, all: [near] }));
+is("a cost per sale under the most but above 70% of it ($80) prepares no raise, as the autopilot", [margin.change, margin.note], [null, "Each sale cost $80 in ads after refunds. A raise is suggested only at $70 or less."]);
+const young = camp({ spentCents: 10_000, sales: 5 });
+const tooEarly = nextStepFor(base({ campaign: young, all: [young] }));
+is("a campaign not yet judged by the autopilot prepares no raise", [tooEarly.change, tooEarly.note], [null, "It is too early to judge: wait until it spends $200."]);
+const disagree: string[] = [];
+for (const spentCents of [10_000, 19_999, 20_000, 28_000, 35_000, 35_001, 40_000, 50_000, 50_001, 60_000]) {
+  for (const n of [2, 3, 5, 10]) {
+    const c = camp({ spentCents, sales: n });
+    const mine = nextStepFor(base({ campaign: c, all: [c] })).change;
+    const pilot = autopilotChanges(limits, [c]).find((x) => x.kind === "raise");
+    if (JSON.stringify(mine?.kind === "raise" ? mine.after : null) !== JSON.stringify(pilot?.after ?? null)) disagree.push(`${spentCents}/${n}`);
+  }
+}
+is("for every cost per sale, a raise is prepared exactly when the autopilot raises, to the same budget", disagree, []);
+
+part("Only campaigns the creator's limits cover");
+const tiktok = camp({ platform: "tiktok" });
+const otherNet = nextStepFor(base({ campaign: tiktok, all: [tiktok] }));
+is("a network the creator did not approve: no raise, and the note says why", [otherNet.change, otherNet.ask, otherNet.note], [null, null, "Your ad limits do not include this ad platform or product, so no change is suggested."]);
+const p9 = camp({ product: "p9" });
+const otherProduct = nextStepFor(base({ campaign: p9, all: [p9] }));
+is("a product the creator did not approve: no raise", [otherProduct.change, otherProduct.note], [null, "Your ad limits do not include this ad platform or product, so no change is suggested."]);
+const outPause = nextStepFor(base({ campaign: tiktok, all: [tiktok], salesByDay: { "2026-10-22": 5_000 } }));
+is("a network the creator did not approve: no pause either, as the autopilot leaves it alone", [outPause.state, outPause.change, outPause.ask], ["not_paid_back", null, null]);
+
 part("Not paid for itself");
 const notYet = nextStepFor(base({ salesByDay: { "2026-10-22": 5_000 } }));
 is("the state, no days, the money as measured", [notYet.state, notYet.days, notYet.spentCents, notYet.backCents], ["not_paid_back", null, 20_000, 5_000]);
@@ -113,17 +145,35 @@ const unknowns: [string, Partial<NextStepInput>, keyof typeof NEXT_STEP_UNKNOWN]
   ["spend of another campaign does not count", { spends: [{ ...spends[0], campaign: "autumn" }] }, "spend"],
   ["too little was spent to say", { spends: [{ ...spends[0], cents: 900 }] }, "little"],
   ["the days are not real", { from: "2026-11-31", to: "2026-11-02" }, "days"],
+  // Claude 4's probes on #3196: a malformed figure became "$NaN back" or a raise.
+  ["a day's sales are not a number", { salesByDay: { ...sales, "2026-10-21": NaN } }, "sales"],
+  ["a day's sales are infinite", { salesByDay: { ...sales, "2026-10-21": Infinity } }, "sales"],
+  ["a day's sales are below zero", { salesByDay: { ...sales, "2026-10-21": -1 } }, "sales"],
+  ["a day's sales are not whole cents", { salesByDay: { ...sales, "2026-10-21": 0.5 } }, "sales"],
+  ["a day's refunds are not a number", { refundsByDay: { "2026-10-25": NaN } }, "refunds"],
+  ["a day's refunds are below zero", { refundsByDay: { "2026-10-25": -6_000 } }, "refunds"],
+  ["the campaign's sales are not a number", { campaign: camp({ sales: NaN }) }, "sales"],
+  ["the campaign's sales are not whole", { campaign: camp({ sales: 4.5 }) }, "sales"],
+  ["its spend so far is not a number", { campaign: camp({ spentCents: NaN }) }, "campaign"],
+  ["its daily budget is not a number", { campaign: camp({ dailyBudgetCents: NaN }) }, "campaign"],
+  ["its days left are not a number", { campaign: camp({ daysLeft: NaN }) }, "campaign"],
+  ["today is not a number", { campaign: camp({ today: NaN }) }, "campaign"],
+  ["a spend line is not a number", { spends: [{ ...spends[0], cents: NaN }] }, "spend"],
+  ["a spend line is below zero", { spends: [spends[0], { ...spends[0], id: "s2", cents: -5_000 }] }, "spend"],
+  ["an active campaign with a daily budget of 0", { campaign: camp({ dailyBudgetCents: 0 }) }, "budget"],
 ];
 for (const [what, extra, reason] of unknowns) {
   const s = nextStepFor(base(extra));
   is(`${what}: unknown, with its reason, no figure and no step`, [s.state, s.unknown, s.spentCents, s.backCents, s.days, s.change, s.ask], ["unknown", reason, null, null, null, null, null]);
   is(`${what}: says it is unknown, never $0`, [s.says === NEXT_STEP_UNKNOWN[reason], /\$0\b|\$0\.00/.test(words(s).join(" "))], [true, false]);
+  is(`${what}: no NaN or Infinity in any word`, /NaN|Infinity/.test(words(s).join(" ")), false);
 }
 is("a partial read stays unknown even when the money would have paid back", nextStepFor(base({ results: { partial: true, salesKnown: true }, salesByDay: { "2026-10-20": 90_000 } })).state, "unknown");
 
 part("The words pass the ad honesty check and read simply");
 const scenarios: NextStep[] = [paid, tightDay, full, none, notYet, early, refunded, again,
   nextStepFor(base({ campaign: camp({ sales: 1 }) })), nextStepFor(base({ campaign: camp({ status: "PAUSED" }) })),
+  over, margin, tooEarly, otherNet, otherProduct, outPause,
   ...unknowns.map(([, extra]) => nextStepFor(base(extra))), ...Object.values(NEXT_STEP_UNKNOWN).map((says) => ({ ...paid, says, note: null, ask: null, change: null }))];
 const all = [...new Set(scenarios.flatMap(words))];
 is("there are sentences to check", all.length > 15, true);

@@ -9,7 +9,7 @@
  *   nl:payreq:due                  reminders waiting: "<sid>|<id>" -> when due, read by the daily job
  *   nl:payreq:stores               stores with open requests, read by the five-minute job (lib/checkout-sweep.ts)
  *   nl:payreq:lock:<id>            a checkout being opened for it, a minute
- *   nl:payreq:w:<id>               its record being changed, ten seconds at the most
+ *   nl:payreq:w:<id>               its record being made or changed, ten seconds at the most
  *
  * Every request is counted in the store's data room before it is written
  * (lib/store-data.ts), at its record, its four index entries and what its
@@ -22,7 +22,11 @@
  * (changeRequest), so one hand never writes back what it read before another
  * hand's change: a reminder that was still being emailed, or a checkout still
  * being opened at Stripe, could otherwise put a paid request back to open
- * (docs/security-audit-2026-10-18.md, MM-SA-02).
+ * (docs/security-audit-2026-10-18.md, MM-SA-02). The write itself is fenced
+ * (SAVE): it lands only while that lock still holds its writer's token, and a
+ * change lands only over a record still there, so a hand held up past its
+ * lock, or a record erased or deleted meanwhile, is never written back
+ * (lib/person-erasure.ts). A request is made under its lock the same way.
  *
  * Nothing here is the record of a payment: that is the checkout and the
  * charge on the creator's own Stripe account, read by every door that asks
@@ -83,6 +87,51 @@ export type Created =
 
 const unavailable = (): Created => ({ ok: false, reason: "unavailable", message: "This can't be saved right now. Try again in a minute." });
 
+/**
+ * A request's record written in one step on the Redis side, only while its
+ * write lock still holds the writer's token: "new" only when no record is
+ * there yet, "edit" only over the record still there, with its open entry
+ * and its reminder kept in step (an empty score takes the entry off). 1
+ * written; 0 the lock is no longer the writer's; 2 the record is not as the
+ * mode needs (already made, or gone: erased or deleted). The first line names
+ * it for the local stand-in (lib/redis-memory.ts).
+ */
+const SAVE =
+  '-- marktmorgen:payreq-save:v1\n' +
+  'if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end\n' +
+  'local there = redis.call("EXISTS", KEYS[2])\n' +
+  'if (ARGV[2] == "new" and there ~= 0) or (ARGV[2] ~= "new" and there ~= 1) then return 2 end\n' +
+  'redis.call("SET", KEYS[2], ARGV[3], "EX", ARGV[4])\n' +
+  'if ARGV[2] == "edit" then\n' +
+  '  if ARGV[6] == "" then redis.call("ZREM", KEYS[3], ARGV[5]) else redis.call("ZADD", KEYS[3], ARGV[6], ARGV[5]) end\n' +
+  '  if ARGV[8] == "" then redis.call("ZREM", KEYS[4], ARGV[7]) else redis.call("ZADD", KEYS[4], ARGV[8], ARGV[7]) end\n' +
+  'end\n' +
+  'return 1';
+
+/**
+ * Writes a request's record under its write lock (SAVE): "saved"; "lost" when
+ * the lock ran out and may be another hand's, so nothing was written; "gone"
+ * when the record is not as `mode` needs, so nothing was written either. A
+ * reply of another shape throws UnknownReplyError (rule 24): never "saved".
+ */
+async function writeRecord(held: fencedLock.Held, request: PaymentRequest, mode: "new" | "edit", now: number): Promise<"saved" | "lost" | "gone"> {
+  const member = `${request.sid}|${request.id}`;
+  const open = mode === "edit" && statusOf(request, now) === "open" ? String(request.expiresAt) : "";
+  const next = mode === "edit" ? nextReminderAt(request, now) : null;
+  const reply = exactReply.repliesFor(
+    await redisPipeline([[
+      "EVAL", SAVE, 4, held.key, recordKey(request.id), openKey(request.sid), DUE,
+      held.token, mode, JSON.stringify(request), keepSeconds(request, now), request.id, open, member, next === null ? "" : String(next),
+    ]]),
+    1,
+  );
+  const answer = reply?.[0];
+  if (answer === 1) return "saved";
+  if (answer === 0) return "lost";
+  if (answer === 2) return "gone";
+  throw new exactReply.UnknownReplyError("writing a payment request");
+}
+
 /** One request kept, within every count, before anything is sent. */
 export async function createRequest(store: Store, draft: RequestDraft, now = Date.now()): Promise<Created> {
   if (!isRedisConfigured() || !store.sid) return unavailable();
@@ -107,6 +156,7 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
     closedAt: 0,
   };
   const person = personSet(store.sid, draft.email);
+  let held: fencedLock.Held | null = null;
   try {
     // A person's requests that are no longer kept leave their count first.
     const memberReply = await redisPipeline([["SMEMBERS", person]]);
@@ -121,6 +171,9 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
       if (gone.length) await redisPipeline([["SREM", person, ...gone]]);
     }
     const keep = KEEP_DAYS * 86_400;
+    // Its write lock, held from before its id is counted until its record is written: an erasure that finds the id
+    // waits for the record and deletes it, and a creation held up past the lock writes nothing (writeRecord).
+    held = await fencedLock.takeLock(writeKey(request.id), 10, 5_000);
     const counts = await redisPipeline([
       ["ZREMRANGEBYSCORE", openKey(store.sid), "-inf", String(now)],
       ["ZREMRANGEBYSCORE", storeKey(store.sid), "-inf", String(now - KEEP_DAYS * DAY)],
@@ -158,14 +211,17 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
       await undo();
       return room.reason === "full" ? { ok: false, reason: "full", message: room.message } : unavailable();
     }
-    await redisPipeline([
-      ["SET", recordKey(request.id), JSON.stringify(request), "EX", keepSeconds(request, now)],
-      ["SADD", STORES, store.sid],
-    ]);
+    if ((await writeRecord(held, request, "new", now)) !== "saved") {
+      await undo();
+      return unavailable();
+    }
+    await redisPipeline([["SADD", STORES, store.sid]]);
     return { ok: true, request };
   } catch (error) {
     console.error("keeping a payment request failed", error);
     return unavailable();
+  } finally {
+    if (held) await fencedLock.releaseLock(held);
   }
 }
 
@@ -191,8 +247,11 @@ export async function requestOf(store: Pick<Store, "sid">, id: string): Promise<
  * The one way a request's record is changed after it is made: under its write
  * lock, `change` is handed the record as it is now and says what it becomes
  * (null leaves it as it is) and what to answer. Null when the request is not
- * one of this store's. Throws LockBusyError (lib/redis-lock.ts) when another
- * change held it for longer than five seconds: nothing was written.
+ * one of this store's, or when its record was deleted (erased, or deleted by
+ * the creator) before the change was written: nothing is written back. Throws
+ * LockBusyError (lib/redis-lock.ts) when another change held it for longer
+ * than five seconds, or when this change outlived its own lock: nothing was
+ * written. A write that does not answer exactly throws UnknownReplyError.
  */
 export async function changeRequest<T>(
   store: Pick<Store, "sid">,
@@ -201,25 +260,18 @@ export async function changeRequest<T>(
   now = Date.now(),
 ): Promise<{ request: PaymentRequest; answer: T } | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
-  return withLock(writeKey(id), 10, 5_000, async () => {
+  return withLock(writeKey(id), 10, 5_000, async (held) => {
     const current = await requestOf(store, id);
     if (!current) return null;
     const { next, answer } = change(current);
-    if (next) await saveRequest(next, now);
+    if (next) {
+      // Written back as it now is, for the rest of the days it is kept, its open entry and reminder in step.
+      const written = await writeRecord(held, next, "edit", now);
+      if (written === "gone") return null;
+      if (written === "lost") throw new fencedLock.LockBusyError("a payment request's lock ran out before its change was written");
+    }
     return { request: next ?? current, answer };
   });
-}
-
-/** Writes a request back as it now is, for the rest of the days it is kept, and keeps its open entry and reminder in step. Only under its write lock (changeRequest), or when it is first made. */
-export async function saveRequest(request: PaymentRequest, now = Date.now()): Promise<void> {
-  const member = `${request.sid}|${request.id}`;
-  const open = statusOf(request, now) === "open";
-  const next = nextReminderAt(request, now);
-  await redisPipeline([
-    ["SET", recordKey(request.id), JSON.stringify(request), "EX", keepSeconds(request, now)],
-    open ? ["ZADD", openKey(request.sid), String(request.expiresAt), request.id] : ["ZREM", openKey(request.sid), request.id],
-    next !== null ? ["ZADD", DUE, String(next), member] : ["ZREM", DUE, member],
-  ]);
 }
 
 /** The store's requests, newest first, at most its plan's kept figure; null when they cannot be read. */

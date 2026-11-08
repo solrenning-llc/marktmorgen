@@ -180,7 +180,11 @@ try {
   is("removing the last picture while another is sent puts the focus on its Add button, which says it is sending", await where(), { tag: "BUTTON", words: "Sending 1 picture…", busy: "true" });
   await page.keyboard.press("Enter");
   await settled();
-  is("pressing it while it sends starts nothing more: one send held", uploads.length, 1);
+  // A send asks the picture door first through the page's fetch (lib/upload-refusal.ts askDoor), which the harness
+  // holds in the page; the file store's library asks the same door through the network route only after that answer.
+  // Both are counted, so a second send started either way is seen.
+  const doorAsks = await page.evaluate(() => window.harness.held.filter((each) => new URL(each.url, location.href).pathname === "/api/store/image/upload").length);
+  is("pressing it while it sends starts nothing more: one send held", uploads.length + doorAsks, 1);
 
   // The Add button pressed, a picture chosen, and the send starting under the focus: the focus stays on it.
   await pictures();

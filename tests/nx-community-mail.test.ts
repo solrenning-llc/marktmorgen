@@ -195,7 +195,15 @@ async function main(): Promise<void> {
   part("event: a taken mark whose send reads back as something else keeps the reminder");
   const sendKey = reminder.slice(0, -":made".length);
   const otherSend = JSON.stringify({ ...job, id: "a".repeat(24), kind: "24" });
-  for (const [name, text] of [["cut text", "{cut"], ["an id this code never writes", '{"id":"invalid"}'], ["another send's record", otherSend], ["a JSON list", "[1]"]] as const) {
+  // Codex P on #2954 (second focal return): this send's id alone, or with fields this code never writes, is a
+  // partial record, not a send; it is unknown too.
+  const reminderId = sendKey.slice("nl:cm:evmail:".length);
+  const partial: (readonly [string, string])[] = [
+    ["only this send's id", JSON.stringify({ id: reminderId })],
+    ["this send's id with a status this code never writes", JSON.stringify({ id: reminderId, status: 12 })],
+    ["this send written down as sent, cut short", JSON.stringify({ id: reminderId, status: "sent", total: 1 })],
+  ];
+  for (const [name, text] of [["cut text", "{cut"], ["an id this code never writes", '{"id":"invalid"}'], ["another send's record", otherSend], ["a JSON list", "[1]"], ...partial] as const) {
     reset();
     db.run(["ZADD", "nl:cm:evq", 1, due]);
     const aged = `${Date.now() - 20 * 60_000}.000000001`;
@@ -228,6 +236,32 @@ async function main(): Promise<void> {
     is("unknown record: nothing sent, still in line, the lock let go", [blank === null || blank === "threw", sent.length, db.run(["SISMEMBER", queue, id]), db.run(["GET", `${prefix}${id}:lock`])], [true, 0, 1, null]);
     const resumed = await advance(id, async () => store, Date.now() + 10_000);
     is("the next run sends it, once", [resumed?.status, sent.flat().length], ["sent", 2]);
+  }
+
+  // Codex P on #2954 (second focal return): the send's record read back under the lock as a partial record (its id
+  // with fields missing or in a shape this code never writes) is unknown: nothing is sent, it stays in line and its
+  // record is not written over; a send half done goes on from where it was, so nobody gets it twice.
+  part("event: the send's record read back partial under the lock");
+  const half = { ...job, done: 1, sent: 1 };
+  const { failures: _dropped, ...noFailures } = half;
+  void _dropped;
+  for (const [name, text] of [
+    ["its id alone", JSON.stringify({ id })],
+    ["its id with a status this code never writes", JSON.stringify({ id, status: 12 })],
+    ["its id, still sending, nothing else", JSON.stringify({ id, status: "sending" })],
+    ["half sent, a count missing", JSON.stringify(noFailures)],
+  ] as const) {
+    reset();
+    db.run(["SET", "nl:cm:evmail:" + id, JSON.stringify(half)]);
+    db.run(["RPUSH", "nl:cm:evmail:" + id + ":to", ...keys]);
+    db.run(["SADD", "nl:cm:evmailq", id]);
+    answerOnly((c) => (c[0] === "GET" && c[1] === "nl:cm:evmail:" + id ? [text] : undefined));
+    let partly: unknown = "threw";
+    try { partly = await advanceEventJob(id, async () => store, Date.now() + 10_000); } catch { /* checked below */ }
+    restore();
+    is(`${name}: nothing sent, still in line, the record as it was, the lock let go`, [partly === null || partly === "threw", sent.length, db.run(["SISMEMBER", "nl:cm:evmailq", id]), db.run(["GET", "nl:cm:evmail:" + id]), db.run(["GET", `nl:cm:evmail:${id}:lock`])], [true, 0, 1, JSON.stringify(half), null]);
+    const onward = await advanceEventJob(id, async () => store, Date.now() + 10_000);
+    is(`${name}: the next run sends the rest only, once`, [onward?.status, sent.flat().length], ["sent", 1]);
   }
   done();
 }

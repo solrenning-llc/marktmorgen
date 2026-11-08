@@ -170,6 +170,87 @@ async function main(): Promise<void> {
   const late = await noticeHeldStores({ now: ms(t2 + 60), until: ms(t2 + 60) - 1, load, sendEmail: sendEmail as never });
   is("past its deadline, a run reads nothing", [late.sent, outbox.length], [0, 0]);
 
+  // Review of #3033 (Claude 1, LOW): the run's time used to go to the stores held from most lately, every day,
+  // so a store whose item had waited longest could never be told. Now the stores take turns: the one waiting
+  // its turn longest goes first, a store goes to the back of the line once its run answered, and a new hold
+  // never moves a store already in line. The clock is the test's: each email takes 60 ms of a 50 ms run.
+  part("Every listed store gets its turn, the one held first first, however short the run");
+  redis.clear();
+  outbox = [];
+  const t3 = t0 + 40 * DAY;
+  const turn = [0, 1, 2].map((n) => ({ sid: "c".repeat(31) + n, id: "7".repeat(31) + n, email: `creator${n}@example.test` }));
+  for (const [n, s] of turn.entries()) {
+    const held = await holdPost(s.id, post(ada, `Waiting ${n}`), { ...ROOM, sid: s.sid }, t3 + 60 * n);
+    if (!held.ok) throw new Error("not held");
+  }
+  stores = new Map(turn.map((s) => [s.sid, creatorStore({ sid: s.sid, email: s.email, community: { id: s.id, on: true } } as Partial<Store>)]));
+  const realNow = Date.now;
+  let clock = realNow();
+  const slowSend = async (message: Sent) => {
+    clock += 60;
+    return sendEmail(message);
+  };
+  const shortRun = async (at: number): Promise<string> => {
+    const before = outbox.length;
+    Date.now = () => clock;
+    try {
+      await noticeHeldStores({ now: ms(at), until: ms(at) + 50, load, sendEmail: slowSend as never });
+    } finally {
+      Date.now = realNow;
+    }
+    return outbox.slice(before).map((m) => m.to).join(",");
+  };
+  const days: string[] = [];
+  for (let day = 1; day <= 4; day += 1) days.push(await shortRun(t3 + day * DAY));
+  is(
+    "one email a run, each store in turn, the store held first told on the first day",
+    days,
+    ["creator0@example.test", "creator1@example.test", "creator2@example.test", "creator0@example.test"],
+  );
+  const heldAgain = await holdPost(turn[2].id, post(bob, "Waiting again"), { ...ROOM, sid: turn[2].sid }, t3 + 4 * DAY + 600);
+  if (!heldAgain.ok) throw new Error("not held");
+  is(
+    "a store that holds again keeps its place in line",
+    [await shortRun(t3 + 5 * DAY), await shortRun(t3 + 6 * DAY)],
+    ["creator1@example.test", "creator2@example.test"],
+  );
+  // Rule 24: an unknown answer is never read as the store's turn being done.
+  const queue0 = `nl:cm:${turn[0].id}:ap:q`;
+  const realPipe = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "ZRANGEBYSCORE" && c[1] === queue0) ? ([{}] as never) : realPipe(commands));
+  let day7 = "";
+  try {
+    day7 = await shortRun(t3 + 7 * DAY);
+  } finally {
+    redis.pipeline = realPipe;
+  }
+  is("an unreadable queue: that store is not told, and the run goes on to the next", day7, "creator1@example.test");
+  is("and the store keeps its turn: it goes first on the next run", await shortRun(t3 + 8 * DAY), "creator0@example.test");
+
+  part("A store let go from the list leaves the line, unless it holds again meanwhile");
+  redis.clear();
+  outbox = [];
+  const t4 = t0 + 80 * DAY;
+  await holdPost(turn[0].id, post(ada, "Waiting"), { ...ROOM, sid: turn[0].sid }, t4);
+  const tLate = t4 + (HELD_DAYS + 2) * DAY;
+  // While the run lets the store go, the store holds again, and the hold lands just before the run's removal.
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "ZREM" && c.includes(turn[0].sid))) {
+      redis.pipeline = realPipe;
+      const back = await holdPost(turn[0].id, post(bob, "Back"), { ...ROOM, sid: turn[0].sid }, tLate);
+      if (!back.ok) throw new Error("not held");
+    }
+    return realPipe(commands);
+  };
+  try {
+    await storesWithHeld(tLate);
+  } finally {
+    redis.pipeline = realPipe;
+  }
+  is("a hold that lands while the run lets the store go keeps it listed", await storesWithHeld(tLate + 60), [turn[0].sid]);
+  is("and its creator is told on the next run", await shortRun(tLate + 120), "creator0@example.test");
+  is("once nothing it held can wait, it is let go", await storesWithHeld(tLate + (HELD_DAYS + 2) * DAY), []);
+
   part("Wired into the daily job, and its email registered");
   const cron = read("app/api/cron/courses/route.ts");
   is("the courses job runs the notice", /noticeHeldStores\(/.test(cron), true);

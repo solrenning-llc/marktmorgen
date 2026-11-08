@@ -102,7 +102,7 @@ import {
   RECURRING_ALWAYS,
   readViaCookie,
 } from "@/lib/affiliate-setting";
-import { productIds, readListings } from "@/lib/catalog";
+import { type Card, productIds, readCardsFor } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
@@ -3101,7 +3101,9 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     after = last.id;
   }
   const ids = [...new Set(found.map((f) => f.meta.product).filter((id): id is string => Boolean(id)))];
-  const titles = new Map((ids.length ? await readListings(store, ids).catch(() => []) : []).map((p) => [p.id, p.title]));
+  // Named from the products' cards, not their whole listings (a title, not up to MAX_PRODUCT_BYTES a product). A
+  // reading that fails, or answers in a shape not known, leaves the names empty and every line in, as it always did.
+  const titles = new Map([...(ids.length ? await readCardsFor(store, ids).catch(() => new Map<string, Card>()) : new Map<string, Card>())].map(([id, card]) => [id, card.title]));
   const lines: Referral[] = [];
   for (const { invoice, meta } of found) {
     const total = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;

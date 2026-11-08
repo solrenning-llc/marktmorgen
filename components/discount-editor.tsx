@@ -329,7 +329,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                         type="button"
                         aria-busy={busy} disabled={busy}
                         onClick={() => run({ action: "unschedule", id: entry.id }, () => {}, (answer) => canceledMessage(entry.code, answer.canceled))}
-                        className="mt-2 min-h-11 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger disabled:no-underline disabled:opacity-40"
+                        className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger disabled:no-underline disabled:opacity-40"
                       >
                         {`Cancel ${entry.code}`}
                       </button>

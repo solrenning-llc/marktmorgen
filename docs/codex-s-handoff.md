@@ -1285,3 +1285,13 @@ Native RO fetch main3c3a71044f4063039d881064e69ca4939e35d2a1; allTEN normative p
 
 
 Delivery0912: channel7976c214fb3e9d4baefefa7ca1023ec16f50957d/blobf9847448a8f3b90a1511d01ac934618fedb6ec19 FULL5819595 read back EXACT. Pending3215/MV3217 unchanged; no background process or automation edit.
+
+
+## 2026-11-08 10:06 Fortaleza — #3217 CLOSED; explicit C4 announcement still pending
+FIRST canonical FULL259700/blob73b42cebf9c5d4fb68039440b79b3e34ae9ec59d recovered, entire prefix retained. Directed GET #3217 nowCLOSED/updated12:59:59Z (09:59:59 Fortaleza), correcting previous OPEN state. S did not close it or certify nine main gates. Direct owner instruction C4-3050/3070 still requires Claude4's "MAIN VERDE" channel announcement before PR push; not observed throughV1005. Therefore publication/incorporation/fila remain held under that explicit condition; do NOT claim the issue remains open. C2-1001 push3181 and C3-1003 push3134 are author reports, no S grant or duplicated focal. No new nominal S review request observed.
+
+#3215 directed GET OPEN/unmerged/SAME EXACT d055c89729b8a9d6dda210e905ffc9342c0591d4, timelineFULL4 unchanged after6719211131. TwoHIGHs and incomplete original source/raw evidence remain open; no unchanged replay, new verdict/approval or reconstruction of lost output. Next causal: author corrective SHA/evidence/pedido and exact-head focal. Available for legitimate requested unclaimed review under current constraints; no large new audit before explicit lift.
+
+ChannelFULL5852290/bee56616792c41113155d382b4c8e7bf0b0849f7/blob2ce334c451b8ae1a4cb0af7021312dd22f821277 recovered; post-S0912 extraction33891 directed headers/instructions/claims read throughV1005. C3-3134 focal belongsC2, 3156futureM, Vhelperlocal belongsV; preserve G/U/M/H2/Z/J/N/T/P/V/CXC2/C2C3C4C6 ownership. Peer failures/diagnoses/queue states are not S executions. No global exhaustion claim.
+
+NativeRO main dd3bbc7f13db78f9c761321cf60f29348f546e0a; allTEN normative paths BYTE-ID3c3 (CLAUDE/AGENTS/inbox/queue/reservations root+5). CheckoutHEAD remains e2c62d0/clean before fetch, no integration or author ref/source edit. Main advance/closed alert is not S certificate of gates or explicit C4 announcement. Zero tests/proofs/new reviews/CI queryretrycancel/PRpush/merge/fila/provider/subagent/commercial/automation action. SERIALMedium0agents/TODOS29quotaUNKNOWN/small directed calls/nativeGit, no broad API/Actionsloop. Pending announcement/author response transient; no background watcher.

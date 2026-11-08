@@ -688,7 +688,8 @@ const AD_RENEWAL_PAGES = 10;
  * Each membership renewal paid in the last day, as a purchase of its own, for
  * a membership whose first checkout carried the buyer's yes: the creator's
  * invoices of the day, every page of them up to AD_RENEWAL_PAGES, read once per
- * pass, only on a store that sends from the server.
+ * pass, only on a store that sends from the server. A day with more pages than
+ * the cap sends the renewals read and then fails for the unread rest.
  */
 export async function sendRenewals(store: Store, now = Date.now(), deadline = Infinity): Promise<number> {
   if (!store.statsId || !store.stripeAccountId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
@@ -716,7 +717,16 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     if (!last || typeof last.id !== "string") throw new Error("Stripe gave a page of invoices with no last one to go on from");
     after = last.id;
   }
-  if (!whole) throw new Error(`Stripe has more paid invoices of the day than ${AD_RENEWAL_PAGES} pages`);
+  const count = await sendRenewalRows(store, store.statsId, listedRows, now, deadline);
+  // More pages than the cap: the renewals read in their exact shape are sent above, each a purchase of its
+  // own with its own mark, so nothing unread is taken as absent; the pass still fails for the unread rest,
+  // never "no renewals" (Claude 1, independent review on #3054 at 31b99d82: main sent the newest 100).
+  if (!whole) throw new Error(`Stripe has more paid invoices of the day than ${AD_RENEWAL_PAGES} pages; ${count} renewal(s) of the pages read sent`);
+  return count;
+}
+
+/** Sends the renewals among invoice rows read in their exact shape, each once (its own SET NX mark); answers how many went. */
+async function sendRenewalRows(store: Store, statsId: string, listedRows: InvoiceRow[], now: number, deadline: number): Promise<number> {
   const handles = saleHandles(store);
   const rows = listedRows.filter((row) => {
     if (typeof row.id !== "string" || row.billing_reason !== "subscription_cycle" || row.status !== "paid") return false;
@@ -731,7 +741,7 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
   const marks = await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)]));
   const left = rows.filter((_, i) => Number(marks[i]) !== 1);
   if (!left.length) return 0;
-  const stored = await readStored(store.statsId);
+  const stored = await readStored(statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
   const kept = await redisPipeline(left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]));
   let count = 0;

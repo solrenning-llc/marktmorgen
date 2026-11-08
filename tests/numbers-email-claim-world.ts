@@ -19,6 +19,7 @@ export async function storeOf(folder: string) {
 export async function weeklySummary(): Promise<string | null> { return null; }
 export function aiAvailableFor(): boolean { return false; }
 export async function readTeam() { return { members: [] }; }
+export async function readTeamMembers() { return []; }
 const day = { visitors: 0, checkouts: 0, sales: 0, cents: 0 };
 export async function readStats() {
   if (control.numbers === "throws") throw new Error("synthetic stats read failure");

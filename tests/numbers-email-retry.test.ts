@@ -79,6 +79,9 @@ async function main(): Promise<void> {
   is("the next run sends the email and the team copy", [body.sent, body.failed, owner(), member()], [1, 0, 2, 1]);
   is("the channel is not posted to twice", retry.posts.length, 1);
   is("the week is claimed now", held("nl:weekly:sent:"), true);
+  const ownerKeys = retry.keys.filter((_, i) => retry.mails[i] === "owner@example.test");
+  is("both tries of the owner's email go under one key for the week, so one the sender could not confirm is not sent twice",
+    [ownerKeys.length, typeof ownerKeys[0] === "string" && ownerKeys[0].startsWith("numbers-summary:nl:weekly:sent:"), ownerKeys[0] === ownerKeys[1]], [2, true, true]);
 
   part(`Weekly: an email refused every time is tried by ${TRIES} runs, never more`);
   reset();

@@ -7,6 +7,8 @@ export const retry = {
   /** Whether the provider takes an email to this address. */
   sendOk: (to: string): boolean => Boolean(to),
   mails: [] as string[],
+  /** The idempotency key each email was sent under, in order. */
+  keys: [] as (string | undefined)[],
   chat: "none" as "none" | "channel" | "throws",
   postOk: true,
   posts: [] as string[],
@@ -17,6 +19,7 @@ export const retry = {
 export function resetRetry(): void {
   retry.sendOk = () => true;
   retry.mails.length = 0;
+  retry.keys.length = 0;
   retry.chat = "none";
   retry.postOk = true;
   retry.posts.length = 0;
@@ -24,8 +27,9 @@ export function resetRetry(): void {
   retry.team = "members";
 }
 
-export async function sendEmail(message: { to: string; subject: string }): Promise<boolean> {
+export async function sendEmail(message: { to: string; subject: string; idempotencyKey?: string }): Promise<boolean> {
   retry.mails.push(message.to);
+  retry.keys.push(message.idempotencyKey);
   return retry.sendOk(message.to);
 }
 

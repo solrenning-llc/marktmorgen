@@ -7,7 +7,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimMonth, lastMonthOf, releaseMonth, monthlyMessage, readNumbers, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { claimMonth, lastMonthOf, releaseMonth, monthPeriod, monthlyMessage, readNumbers, sendPart, tryPeriodAgain, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { UNKNOWN_SALES_GOAL_CENTS, goalForMonth, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
 
@@ -21,6 +21,10 @@ import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
  * gets two. Only stores with a plan running, paid or in its trial. "Stop" in
  * any numbers email stops this one too; the channel is the creator's own
  * choice and is posted to still.
+ *
+ * The post and the email are each marked once for the month (lib/stats-report.ts,
+ * sendPart); one that did not go lets the month go, so a later run sends what is
+ * missing and nothing twice, at most SUMMARY_TRIES runs for the month.
  */
 export const maxDuration = 60;
 const MAX_PER_RUN = 25;
@@ -81,17 +85,31 @@ export async function GET(request: NextRequest) {
         out.quiet += 1;
         continue;
       }
-      if (chat && (await postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`).catch(() => false))) out.posted += 1;
-      if (emailOff) continue;
-      const ok = await sendEmail({ meter: { by: "company" },
-        from: NIMBUS_FROM,
-        to: store.email,
-        subject: message.subject,
-        text: message.text,
-        headers: { "List-Unsubscribe": `<${stopUrl}>` },
-      }).catch(() => false);
-      if (ok) out.sent += 1;
-      else out.failed += 1;
+      const period = monthPeriod(store.handle, month);
+      let missed = false;
+      if (chat) {
+        const post = await sendPart(period, "posted", () => postToChat(chat, `${message.subject}\n\n${forChat(message.text)}`));
+        if (post === "sent") out.posted += 1;
+        if (post === "missed") missed = true;
+      }
+      if (!emailOff) {
+        const email = await sendPart(period, "emailed", () => sendEmail({ meter: { by: "company" },
+          from: NIMBUS_FROM,
+          to: store.email,
+          subject: message.subject,
+          text: message.text,
+          headers: { "List-Unsubscribe": `<${stopUrl}>` },
+          // One key for the period, so a try that the sender could not confirm is not sent again by a later try.
+          idempotencyKey: `numbers-summary:${period.key}`,
+        }));
+        if (email === "sent") out.sent += 1;
+        if (email === "missed") missed = true;
+      }
+      if (missed) {
+        // What did not go is sent by a later run, a bounded number of times; what went is not sent again.
+        out.failed += 1;
+        await tryPeriodAgain(period);
+      }
     }
     console.log(`monthly: ${JSON.stringify(out)}`);
     return Response.json({ ok: true, ...out }, { headers: { "Cache-Control": "no-store" } });

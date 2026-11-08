@@ -8,7 +8,8 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { nextStepFor, NEXT_STEP_UNKNOWN, type NextStep, type NextStepInput } from "@/lib/ad-next-step";
+import * as next from "@/lib/ad-next-step";
+import { nextStepFor, NEXT_STEP_UNKNOWN, type NextStep, type NextStepChange, type NextStepInput } from "@/lib/ad-next-step";
 import { MIN_SALES_TO_RAISE, RAISE_PERCENT, autopilotChanges, withinLimits, type AutopilotRules, type CampaignNow } from "@/lib/ad-autopilot-rules";
 import { checkAdText } from "@/lib/ad-creative-check";
 import { britishCopyHits } from "./us-english-source";
@@ -33,6 +34,7 @@ const base = (extra: Partial<NextStepInput> = {}): NextStepInput => ({
   refundsByDay: {},
   limits,
   all: [camp()],
+  lastRaisedDay: "never",
   ...extra,
 });
 const words = (s: NextStep) => [s.says, s.note, s.ask, s.change?.what].filter((w): w is string => Boolean(w));
@@ -45,7 +47,7 @@ is("the sentence says the days and the money", paid.says, "This campaign paid fo
 is("the prepared change raises the daily budget by the most a day allows", [paid.change?.kind, paid.change?.before.dailyBudgetCents, paid.change?.after.dailyBudgetCents, paid.change?.after.status], ["raise", 5_000, 5_000 * (100 + RAISE_PERCENT) / 100, "ACTIVE"]);
 is("the question names the change and asks for it", paid.ask, `Raise its daily budget by ${RAISE_PERCENT}%, from $50 to $60, within your limits?`);
 is("the change only waits for the creator", paid.change?.apply, "ask");
-is("the change says what changes and that it waits", paid.change?.what, "Its daily budget goes from $50 to $60 only after you confirm. Nothing changes before that.");
+is("the change says what changes and that it waits", paid.change?.what, "Its daily budget goes from $50 to $60 only after you confirm, and only if your limits still hold then. Nothing changes before that.");
 is("one day of payback reads as a day", nextStepFor(base({ salesByDay: { "2026-10-20": 25_000 } })).says.startsWith("This campaign paid for itself in 1 day:"), true);
 is("another currency is written as that currency", nextStepFor(base({ currency: "eur" })).says, "This campaign paid for itself in 4 days: €200 of ads, €210 back after refunds.");
 is("the same numbers give the same step", JSON.stringify(nextStepFor(base())), JSON.stringify(paid));
@@ -134,6 +136,91 @@ is("paid back once more counts from the day it held", [again.state, again.days, 
 is("a refund on the same day counts that day", nextStepFor(base({ refundsByDay: { "2026-10-23": 1_001 } })).state, "not_paid_back");
 is("refunds of sales before the first day of ads are not counted", nextStepFor(base({ refundsByDay: { "2026-10-19": 50_000 } })).days, 4);
 
+part("Two cards shown together never add up past a limit (Claude 1's review on #3196, MÉDIO 1)");
+// Daily limit $110, A and B at $50 a day, both paid back: each card alone offered $50 to $60, together $120.
+const pair = { ...limits, maxDailyCents: 11_000 };
+const campA = camp({ id: "a" });
+const campB = camp({ id: "b" });
+const cardFor = (c: CampaignNow) => base({ campaign: c, all: [campA, campB], limits: pair });
+const attempt = <T,>(f: () => T): T | string => { try { return f(); } catch (e) { return `throws: ${String(e)}`; } };
+const reasonOf = (r: unknown) => (typeof r === "object" && r ? [(r as { ok: boolean }).ok, (r as { reason?: string }).reason ?? null] : r);
+const together = attempt(() => next.nextStepsFor([cardFor(campA), cardFor(campB)]));
+const budgetsAfter = (cards: NextStep[], list: CampaignNow[]) => new Map(list.map((c, i) => [c.id, cards[i].change?.kind === "raise" ? cards[i].change!.after.dailyBudgetCents : c.dailyBudgetCents] as const));
+is("the cards shown together keep every limit when all their raises are confirmed", Array.isArray(together) ? withinLimits(pair, [campA, campB], budgetsAfter(together, [campA, campB])) : together, true);
+is("the first card gets the room, the second says there is none", Array.isArray(together) ? together.map((s) => [s.change?.after.dailyBudgetCents ?? null, s.note]) : together, [[6_000, null], [null, "Your ad limits leave no room to raise its budget."]]);
+is("one card alone reads the same through either function", JSON.stringify(attempt(() => next.nextStepsFor([base()]))), JSON.stringify([nextStepFor(base())]));
+// The creator confirmed A ($50 to $60); B's card, prepared before that on its own, offered $50 to $60 too.
+const cardB = nextStepFor(cardFor(campB)).change as NextStepChange;
+const liveAfterA = [camp({ id: "a", dailyBudgetCents: 6_000 }), campB];
+const confirmB = attempt(() => next.confirmChange(cardB, { limits: pair, all: liveAfterA, lastRaisedDay: "never" }));
+is("confirming the second raise, against the budgets as they are, is refused", reasonOf(confirmB), [false, "limits"]);
+is("and it says why, honestly, with nothing changed", typeof confirmB === "object" && !confirmB.ok ? confirmB.message : confirmB, "With your other campaigns' budgets as they are, this raise would pass your ad limits, so nothing was changed.");
+const confirmA = attempt(() => next.confirmChange(nextStepFor(cardFor(campA)).change as NextStepChange, { limits: pair, all: [campA, campB], lastRaisedDay: "never" }));
+is("the first raise, still inside the limits with the live budgets, may be applied; the day to keep is today", confirmA, { ok: true, raisedOn: TODAY });
+const moved = attempt(() => next.confirmChange(cardB, { limits: pair, all: [campA, camp({ id: "b", dailyBudgetCents: 5_500 })], lastRaisedDay: "never" }));
+is("a budget changed since the card was made is refused", reasonOf(moved), [false, "changed"]);
+const gone = attempt(() => next.confirmChange(cardB, { limits: pair, all: [campA], lastRaisedDay: "never" }));
+is("a campaign missing from the live budgets is unknown, refused", reasonOf(gone), [false, "unknown"]);
+const badLive = attempt(() => next.confirmChange(cardB, { limits: pair, all: [camp({ id: "a", dailyBudgetCents: -50_000 }), campB], lastRaisedDay: "never" }));
+is("a live budget that is not a whole number at or above zero is unknown, refused", reasonOf(badLive), [false, "unknown"]);
+const noRules = attempt(() => next.confirmChange(cardB, { limits: null, all: [campA, campB], lastRaisedDay: "never" }));
+is("no approved limits at confirmation: refused", reasonOf(noRules), [false, "rules"]);
+const stretched: NextStepChange = { ...cardB, after: { status: "ACTIVE", dailyBudgetCents: 6_100 } };
+const tooFar = attempt(() => next.confirmChange(stretched, { limits, all: [campA, campB], lastRaisedDay: "never" }));
+is("a raise of more than the most a day allows is refused, even inside the limits", reasonOf(tooFar), [false, "step"]);
+const pausing = nextStepFor(base({ salesByDay: { "2026-10-22": 5_000 } })).change as NextStepChange;
+is("a pause lowers spend and is never refused by the limits", attempt(() => next.confirmChange(pausing, { limits: { ...limits, maxDailyCents: 1_000 }, all: [camp()], lastRaisedDay: TODAY })), { ok: true, raisedOn: null });
+let summed = 0;
+for (const day of [5_000, 9_000, 10_000, 11_000, 11_999, 12_000, 13_000]) {
+  const r = { ...limits, maxDailyCents: day };
+  const cards = attempt(() => next.nextStepsFor([campA, campB].map((c) => base({ campaign: c, all: [campA, campB], limits: r }))));
+  if (!Array.isArray(cards)) { summed += 1; continue; }
+  if (!withinLimits(r, [campA, campB], budgetsAfter(cards, [campA, campB]))) summed += 1;
+  // Each card made on its own, then confirmed one after the other against the live budgets: never past the limit.
+  const liveNow = [campA, campB].map((c) => ({ ...c }));
+  for (const [i, c] of [campA, campB].entries()) {
+    const change = nextStepFor(base({ campaign: c, all: [campA, campB], limits: r })).change;
+    if (!change) continue;
+    const ok = attempt(() => next.confirmChange(change, { limits: r, all: liveNow, lastRaisedDay: "never" }));
+    if (typeof ok === "object" && ok.ok) liveNow[i].dailyBudgetCents = change.after.dailyBudgetCents;
+  }
+  if (!withinLimits(r, liveNow, new Map(liveNow.map((c) => [c.id, c.dailyBudgetCents] as const)))) summed += 1;
+}
+is("for every daily limit, the cards together and the confirmations one by one stay inside it", summed, 0);
+
+part("At most one raise a day, by at most 20% (Claude 1's review on #3196, BAIXO 2)");
+const at6000 = camp({ dailyBudgetCents: 6_000 });
+const raisedToday = nextStepFor(base({ campaign: at6000, all: [at6000], lastRaisedDay: TODAY }));
+is("raised today ($50 to $60): recomputing offers no second raise ($60 to $72)", [raisedToday.state, raisedToday.change, raisedToday.ask], ["paid_back", null, null]);
+is("and the note says why", raisedToday.note, "Its budget was already raised today. A budget is raised at most once a day.");
+is("raised yesterday: a raise may be offered again", nextStepFor(base({ lastRaisedDay: TODAY - 1 })).change?.after.dailyBudgetCents, 6_000);
+const twice = attempt(() => next.confirmChange(paid.change as NextStepChange, { limits, all: [camp()], lastRaisedDay: TODAY }));
+is("confirming a second raise on the same day is refused", reasonOf(twice), [false, "rate"]);
+is("a pause on a campaign raised today is still offered", nextStepFor(base({ salesByDay: { "2026-10-22": 5_000 }, lastRaisedDay: TODAY })).change?.kind, "pause");
+for (const [what, day] of [["not a number", NaN], ["not a whole day", TODAY - 0.5], ["in the future", TODAY + 1], ["missing", undefined], ["null", null]] as const) {
+  const s = nextStepFor(base({ lastRaisedDay: day as unknown as number }));
+  is(`the day of the last raise ${what}: unknown, never read as "never", no change`, [s.state, s.unknown, s.change], ["unknown", "raised", null]);
+  const c = attempt(() => next.confirmChange(paid.change as NextStepChange, { limits, all: [camp()], lastRaisedDay: day as unknown as number }));
+  is(`the day of the last raise ${what}: confirming is refused`, reasonOf(c), [false, "unknown"]);
+}
+
+part("Every other campaign's figures are read whole too (Claude 1's review on #3196, BAIXO 3)");
+// A negative budget elsewhere lowered the sum: with a $50 daily limit, the campaign was offered $50 to $60.
+const badOthers: [string, CampaignNow[]][] = [
+  ["a daily budget below zero", [camp(), camp({ id: "c2", dailyBudgetCents: -50_000 })]],
+  ["a daily budget that is not a number", [camp(), camp({ id: "c2", dailyBudgetCents: NaN })]],
+  ["a daily budget that is not whole", [camp(), camp({ id: "c2", dailyBudgetCents: 100.5 })]],
+  ["a spend so far below zero", [camp(), camp({ id: "c2", spentCents: -900_000 })]],
+  ["days left that are not a number", [camp(), camp({ id: "c2", daysLeft: NaN })]],
+  ["sales that are not whole", [camp(), camp({ id: "c2", sales: 1.5 })]],
+  ["a status that is not known", [camp(), camp({ id: "c2", status: "DELETED" as unknown as "ACTIVE" })]],
+  ["the same campaign listed twice", [camp(), camp({ id: "c2", dailyBudgetCents: 40_000 }), camp({ id: "c2", status: "PAUSED" })]],
+];
+for (const [what, list] of badOthers) {
+  const s = nextStepFor(base({ limits: { ...limits, maxDailyCents: 5_000 }, all: list }));
+  is(`another campaign with ${what}: unknown, no raise`, [s.state, s.unknown, s.change, s.ask], ["unknown", "others", null, null]);
+}
+
 part("Unknown or partial: unknown, never zero, never a suggestion");
 const unknowns: [string, Partial<NextStepInput>, keyof typeof NEXT_STEP_UNKNOWN][] = [
   ["the numbers are partial", { results: { partial: true, salesKnown: true } }, "partial"],
@@ -173,9 +260,12 @@ is("a partial read stays unknown even when the money would have paid back", next
 part("The words pass the ad honesty check and read simply");
 const scenarios: NextStep[] = [paid, tightDay, full, none, notYet, early, refunded, again,
   nextStepFor(base({ campaign: camp({ sales: 1 }) })), nextStepFor(base({ campaign: camp({ status: "PAUSED" }) })),
-  over, margin, tooEarly, otherNet, otherProduct, outPause,
+  over, margin, tooEarly, otherNet, otherProduct, outPause, raisedToday,
+  ...(Array.isArray(together) ? together : []),
   ...unknowns.map(([, extra]) => nextStepFor(base(extra))), ...Object.values(NEXT_STEP_UNKNOWN).map((says) => ({ ...paid, says, note: null, ask: null, change: null }))];
-const all = [...new Set(scenarios.flatMap(words))];
+const refusals = [confirmB, moved, gone, badLive, noRules, tooFar, twice].flatMap((r) => (typeof r === "object" && !r.ok ? [r.message] : []));
+is("every refusal at confirmation is said in words", refusals.length, 7);
+const all = [...new Set([...scenarios.flatMap(words), ...refusals])];
 is("there are sentences to check", all.length > 15, true);
 const context = { priceCents: null, currency: "usd", ownHosts: [], realDeadline: false, realStockLimit: false, verifiedReviews: [] };
 const refused = all.filter((text) => { const c = checkAdText({ headline: "", text, description: "", button: "" }, context); return !c.sendable || c.warnings.length > 0; });

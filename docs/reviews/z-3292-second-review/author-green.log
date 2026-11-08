@@ -1,0 +1,60 @@
+
+FILE invite-credit-store-unknown.test.ts
+
+A store read answered in another shape is unknown: the credit stays owed, never gone
+  ok    a number: one failure, not complete, nothing added
+  ok    a number: the credit is still owed and still listed
+  ok    a number: nothing reached Stripe
+  ok    a list: one failure, not complete, nothing added
+  ok    a list: the credit is still owed and still listed
+  ok    a list: nothing reached Stripe
+  ok    an empty string: one failure, not complete, nothing added
+  ok    an empty string: the credit is still owed and still listed
+  ok    an empty string: nothing reached Stripe
+  ok    no reply: one failure, not complete, nothing added
+  ok    no reply: the credit is still owed and still listed
+  ok    no reply: nothing reached Stripe
+
+Read healthily afterward, the same credit is paid, once
+  ok    added once, complete
+  ok    done and off the owed list
+  ok    Ana's plan got the credit once
+  ok    a later run pays nothing more
+
+A store confirmed gone (its id key an exact null) still turns the credit gone
+  ok    no failure, complete
+  ok    gone and off the owed list
+
+The credit's own record answered in another shape is unknown: it stays on the owed list
+  ok    a number: one failure, not complete
+  ok    a number: still owed and still listed
+  ok    a record that does not read: one failure, not complete
+  ok    a record that does not read: still owed and still listed
+  ok    no reply: one failure, not complete
+  ok    no reply: still owed and still listed
+  ok    read healthily, it is paid once
+
+A listed id whose record is confirmed absent, or no longer owed, leaves the list without a failure
+  ok    no failure, complete, nothing paid again
+  ok    both off the list
+
+The owed list answered in another shape is a failed, incomplete run, never an empty list
+  ok    one failure, not complete, nothing added
+  ok    still owed
+  ok    read healthily, it is paid
+
+An invited store read answered in another shape fails the run; it earns once read healthily
+  ok    one failure, not complete, nothing earned
+  ok    no credit written
+
+The invited list answered in another shape is a failed, incomplete run, and the walk's place is kept
+  ok    one failure, not complete, nothing walked
+  ok    no credit written, the walk's place kept
+  ok    read healthily, Bea's first payment earns Ana's share and Bea's welcome bonus
+  ok    both credits reach the plans, once
+
+36 checks, all passing.
+Z_VOLUME {"runs":213,"mocks":13,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3292-g8vYWm

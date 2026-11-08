@@ -1,0 +1,41 @@
+
+FILE z-3292-retention.proof.ts
+
+Healthy id reference plus unreadable real owner record retains actual owed credit
+  ok    owner 0: unavailable, incomplete, no Stripe request
+  ok    owner 0: actual owed record and membership retained
+Z_OWNER_VOLUME {"i":0,"commands":7,"commandBytes":269,"retainedCents":700}
+  ok    owner 1: unavailable, incomplete, no Stripe request
+  ok    owner 1: actual owed record and membership retained
+Z_OWNER_VOLUME {"i":1,"commands":7,"commandBytes":269,"retainedCents":700}
+  ok    owner 2: unavailable, incomplete, no Stripe request
+  ok    owner 2: actual owed record and membership retained
+Z_OWNER_VOLUME {"i":2,"commands":7,"commandBytes":269,"retainedCents":700}
+  ok    owner 3: unavailable, incomplete, no Stripe request
+  ok    owner 3: actual owed record and membership retained
+Z_OWNER_VOLUME {"i":3,"commands":7,"commandBytes":269,"retainedCents":700}
+  ok    owner 4: unavailable, incomplete, no Stripe request
+  ok    owner 4: actual owed record and membership retained
+Z_OWNER_VOLUME {"i":4,"commands":7,"commandBytes":269,"retainedCents":700}
+
+Applied credit plus lost local done write recovers from actual provider metadata, without provider deduplication
+  ok    local write failure retains owed after one applied 700-cent credit
+  ok    next run finds metadata and finishes without a second POST
+  ok    actual outgoing idempotency header names the credit
+
+Provider response lost after applying the credit has the same recovery
+  ok    network failure preserves owed after provider application
+  ok    history closes credit once, with no new POST
+
+Unknown and bounded incomplete history never authorize payment
+  ok    unknown list remains owed and incomplete with no POST
+  ok    history bound is ten requests, never payment or completion
+  ok    healthy history pays the pending credit once
+  ok    later run makes no request and pays nothing more
+Z_PROVIDER_VOLUME {"requests":19,"posts":3,"formBodyBytes":383,"creditedCents":2100}
+
+19 checks, all passing.
+Z_VOLUME {"runs":169,"mocks":19,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3292-MhcuPp

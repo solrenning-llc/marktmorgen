@@ -1,0 +1,699 @@
+
+FILE creator-invites.test.ts
+
+The link
+  ok    a code looks like one
+  ok    asked again, it is the same code
+  ok    it leads to its store
+  ok    a code nobody has leads nowhere
+
+Who counts as invited
+  ok    a creator is never their own invite
+  ok    nor is one of their other stores
+  ok    an unknown code counts for nobody
+  ok    Bea, invited by Ana
+  ok    a second invite for Bea does not take her over
+  ok    Cal, invited by Ana
+  ok    Eve, invited by Dan
+
+Terms stay with the invitation
+  ok    new invites snapshot the terms on offer: while the program is paused, the original ones
+  ok    legacy records retain their original bonus
+  ok    unknown versions are not legacy offers
+  ok    invalid stored terms do not earn credit
+  ok    fractional bonuses are rejected
+  ok    snapshot controls the share
+
+Accepting an invite keeps it; a bad one keeps nothing
+  ok    new acceptances are paused
+  ok    it explains the pause at sign-up
+  ok    no new invite cookie is issued
+  ok    existing cookies are not overwritten or cleared
+  ok    previous acceptances can finish before expiry
+  ok    the grace cannot run forever
+  ok    invalid clocks cannot grant a referral
+  ok    expired grace refuses a new record
+  ok    a code nobody has sets nothing
+
+What one payment earns
+  ok    half of it, rounded down
+  ok    an odd cent is not rounded up
+  ok    nothing paid, nothing earned
+  ok    a refund comes off first
+  ok    so does a credit note
+
+The daily run
+  ok    it finished
+  ok    it read Stripe at the pinned version, and only that
+  ok    Ana: half of Bea's first payment, once
+  ok    in dollars
+  ok    Bea: her own credit after her first payment
+  ok    the refunded payment earned nothing
+  ok    the payment inside its refund window is not read yet
+  ok    Cal had paid us before: nothing for anyone
+  ok    Dan is not paying us yet: his credit waits
+  ok    Eve still gets hers
+  ok    each request carried its credit's own key
+
+Nothing twice
+  ok    a second run sends nothing
+  ok    a credit whose note was lost is found at Stripe, not sent again
+  ok    and is written down as done again
+
+Later
+  ok    Dan started paying: what he earned is on his plan
+  ok    Bea's recent payment, out of its window, earned Ana her half
+  ok    and Bea's own credit is not given twice
+
+What Ana sees
+  ok    two creators
+  ok    credit added
+  ok    nothing left on its way
+  ok    each with where they stand
+
+52 checks, all passing.
+Z_VOLUME {"runs":287,"mocks":24,"over":false}
+
+Z_STATUS 0 null
+
+FILE invite-two-step.test.ts
+
+A team invitation does not skip two-step login
+  ok    the invitation is sent
+  ok    an address with two-step login on, and no store, team or passkey, counts as an account
+  ok    an address with nothing still does not
+
+The invitation taken, through the route itself (review of #2101, inbox C4-20)
+  ok    an address with two-step login on is put on the team and sent to log in the usual way, with no session opened
+  ok    an address with no account is logged in by the tap, the store open
+  ok    both are on the team after the tap
+  ok    and the owner was told of each, by email
+  ok    an invitation already taken opens nothing
+
+8 checks, all passing.
+Z_VOLUME {"runs":174,"mocks":6,"over":false}
+
+Z_STATUS 0 null
+
+FILE invites-voice-unknown.test.ts
+✔ offers in their exact shape are read; none is a confirmed none (6.662564ms)
+✔ offers answered with no reply at all are unknown, never "none" (0.700937ms)
+✔ offers answered with a null where the hash should be are unknown, never "none" (0.220002ms)
+✔ offers answered with a word where the hash should be are unknown, never "none" (0.271069ms)
+✔ offers answered with a number where the hash should be are unknown, never "none" (0.240934ms)
+✔ offers answered with a field without its value are unknown, never "none" (0.300413ms)
+✔ offers answered with a value that is not text are unknown, never "none" (0.262095ms)
+✔ an offer row that is text that is not JSON, beside a whole one, is unknown, never skipped (0.740488ms)
+✔ an offer row that is a row with no valid share, beside a whole one, is unknown, never skipped (0.962903ms)
+✔ an offer row that is a row with a bad id, beside a whole one, is unknown, never skipped (0.863553ms)
+✔ an offer row that is a row with no store, beside a whole one, is unknown, never skipped (0.515428ms)
+✔ an offer row that is a row kept under another offer's id, beside a whole one, is unknown, never skipped (0.493875ms)
+✔ the affiliates page says the offers could not be loaded, never shows them as none (0.785956ms)
+✔ a list whose read failed is named by gatherVoice, the rest still read (39.24528ms)
+✔ enough texts but a list unread: nothing asked, nothing counted, nothing kept, and the list is named (15.40852ms)
+✔ too few texts while a list is unread: nothing asked, nothing counted, and the reason is the unread list (10.850653ms)
+✔ a whole read with enough texts is sorted as before (10.595719ms)
+✔ the studio names the lists that could not be read when it refuses (0.466624ms)
+✔ the route answers the unread refusal as unavailable, with the names (0.205571ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 98.742979
+Z_VOLUME {"runs":2122,"mocks":2,"over":false}
+reading the review texts for what customers are saying failed Error: Redis did not answer (synthetic)
+    at failing ([stdin]:58167:9)
+    at store.pipeline ([stdin]:58087:22)
+    at redisPipeline ([stdin]:2232:41)
+    at studioReviews ([stdin]:57770:23)
+    at gatherVoice ([stdin]:57863:25)
+    at async withReads ([stdin]:58090:12)
+    at async TestContext.<anonymous> ([stdin]:58174:19)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading the review texts for what customers are saying failed Error: Redis did not answer (synthetic)
+    at failing ([stdin]:58167:9)
+    at store.pipeline ([stdin]:58087:22)
+    at redisPipeline ([stdin]:2232:41)
+    at studioReviews ([stdin]:57770:23)
+    at gatherVoice ([stdin]:57863:25)
+    at async withReads ([stdin]:58090:12)
+    at async TestContext.<anonymous> ([stdin]:58177:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading the search texts for what customers are saying failed Error: Redis did not answer (synthetic)
+    at failing ([stdin]:58167:9)
+    at store.pipeline ([stdin]:58087:22)
+    at redisPipeline ([stdin]:2232:41)
+    at readStats ([stdin]:51833:25)
+    at gatherVoice ([stdin]:57867:23)
+    at async withReads ([stdin]:58090:12)
+    at async TestContext.<anonymous> ([stdin]:58177:15)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading the review texts for what customers are saying failed Error: Redis did not answer (synthetic)
+    at failing ([stdin]:58167:9)
+    at store.pipeline ([stdin]:58087:22)
+    at redisPipeline ([stdin]:2232:41)
+    at studioReviews ([stdin]:57770:23)
+    at gatherVoice ([stdin]:57863:25)
+    at async makeVoice ([stdin]:57949:31)
+    at async withReads ([stdin]:58090:12)
+    at async TestContext.<anonymous> ([stdin]:58184:18)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+reading the review texts for what customers are saying failed Error: Redis did not answer (synthetic)
+    at failing ([stdin]:58167:9)
+    at store.pipeline ([stdin]:58087:22)
+    at redisPipeline ([stdin]:2232:41)
+    at studioReviews ([stdin]:57770:23)
+    at gatherVoice ([stdin]:57863:25)
+    at async makeVoice ([stdin]:57949:31)
+    at async withReads ([stdin]:58090:12)
+    at async TestContext.<anonymous> ([stdin]:58198:18)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE l9-c5-review.test.ts
+✔ A: an unknown claim on an invite credit is not a complete run, and the bonus is still paid, once (34.421316ms)
+✔ B: an unreadable balance history after a failed done write never sends the credit again (7.301638ms)
+✔ B: a history still going on after the last page read is unknown, not 'not sent' (6.850456ms)
+✔ B: a history row without a string id, or with an odd credit mark, is unknown (17.114075ms)
+✔ C: an unknown first-sale claim is retried later, and the yearly offer goes out exactly once (13.639522ms)
+✔ C: an unknown once-per-subscription claim is retried at the next pass, once (5.817989ms)
+✔ C: an unknown review-request claim is retried later, and the request is sent exactly once (30.147195ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 121.538406
+Z_VOLUME {"runs":729,"mocks":72,"over":false}
+
+Z_STATUS 0 null
+
+FILE l9-invite-credit-exact.test.ts
+
+The credit's record is written, then the write that lists it as owed fails once
+  ok    the write that lists it failed, after the record was kept
+
+An unknown EXISTS result is never a complete successful settlement
+  ok    unknown existence is reported for retry and remains unpaid
+
+An unreadable stored credit is unknown, never a complete successful settlement
+  ok    unknown credit is reported for retry and remains unpaid
+
+A relisting write answered oddly, without landing, is unknown too (Codex N on #2722)
+  ok    an odd relisting reply is reported for retry and pays nothing
+
+Later runs still pay it, once
+  ok    Ana's half of Bea's first payment reaches her plan, once
+
+The credits already written are read back together, not one trip each (Claude 4 on #2722)
+  ok    one read for the five credits written before and the bonus
+
+6 checks, all passing.
+Z_VOLUME {"runs":181,"mocks":22,"over":false}
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: EXISTS in an unknown shape
+    at earnFrom ([stdin]:11552:90)
+    at async settleInvites ([stdin]:11669:26)
+    at async main ([stdin]:11818:21)
+reading an invited creator's payments failed UnknownReplyError: Redis answered relisting invite credits: in_BeaFirst01 does not read back in an unknown shape
+    at [stdin]:11488:24
+    at Array.forEach (<anonymous>)
+    at relist ([stdin]:11481:8)
+    at async earnFrom ([stdin]:11553:12)
+    at async settleInvites ([stdin]:11669:26)
+    at async main ([stdin]:11830:16)
+reading an invited creator's payments failed UnknownReplyError: Redis answered relisting invite credits: the write in an unknown shape
+    at relist ([stdin]:11505:71)
+    at async earnFrom ([stdin]:11553:12)
+    at async settleInvites ([stdin]:11669:26)
+    at async main ([stdin]:11842:16)
+
+Z_STATUS 0 null
+
+FILE l9-invite-invoice-list.test.ts
+
+Controls: a whole single page and a confirmed empty list read as before
+  ok    a ripe invoice after the invite earns its share once and is posted
+  ok    with one read of the invoices, asked exactly as before
+  ok    a confirmed empty list earns nothing and the run is complete
+  ok    a payment before the invite on the whole page marks the store and earns nothing
+
+A reply in another shape is not "no invoices" (B1 a)
+  ok    no-object: the store fails the run, earns nothing, is not marked, nothing is posted
+  ok    no-has-more: the store fails the run, earns nothing, is not marked, nothing is posted
+  ok    odd-has-more: the store fails the run, earns nothing, is not marked, nothing is posted
+  ok    no-data: the store fails the run, earns nothing, is not marked, nothing is posted
+  ok    data-object: the store fails the run, earns nothing, is not marked, nothing is posted
+  ok    too-many: the store fails the run, earns nothing, is not marked, nothing is posted
+  ok    odd-row: the store fails the run, earns nothing, is not marked, nothing is posted
+  ok    null-row: the store fails the run, earns nothing, is not marked, nothing is posted
+  ok    unpaid-row: the store fails the run, earns nothing, is not marked, nothing is posted
+
+More than one page: the older invoices are read before anything is decided (B1 b)
+  ok    the payment before the invite on the second page marks the store and earns nothing
+  ok    the second page is read after the first one's last invoice
+  ok    two whole pages after the invite: the oldest invoice earns its share
+  ok    a page that says there is more but has no rows is unknown
+  ok    a list still going on after the last page read is unknown: nothing earned or marked
+  ok    and it is read a bounded number of times
+  ok    a second page in another shape is unknown
+
+The fields that set the money are read exactly (Claude 2's review of #3221)
+  ok    notes-as-text: the store fails the run, nothing is written or marked, nothing is posted
+  ok    notes-negative: the store fails the run, nothing is written or marked, nothing is posted
+  ok    notes-missing: the store fails the run, nothing is written or marked, nothing is posted
+  ok    created-as-text-on-an-older-row: the store fails the run, nothing is written or marked, nothing is posted
+  ok    created-zero: the store fails the run, nothing is written or marked, nothing is posted
+  ok    created-missing: the store fails the run, nothing is written or marked, nothing is posted
+  ok    amount-as-text: the store fails the run, nothing is written or marked, nothing is posted
+  ok    amount-fraction: the store fails the run, nothing is written or marked, nothing is posted
+  ok    amount-negative: the store fails the run, nothing is written or marked, nothing is posted
+  ok    currency-number: the store fails the run, nothing is written or marked, nothing is posted
+  ok    currency-uppercase: the store fails the run, nothing is written or marked, nothing is posted
+  ok    currency-odd-text: the store fails the run, nothing is written or marked, nothing is posted
+  ok    currency-missing: the store fails the run, nothing is written or marked, nothing is posted
+  ok    paid-at-missing: the store fails the run, nothing is written or marked, nothing is posted
+  ok    paid-at-as-text: the store fails the run, nothing is written or marked, nothing is posted
+  ok    paid-at-zero: the store fails the run, nothing is written or marked, nothing is posted
+  ok    status-transitions-null: the store fails the run, nothing is written or marked, nothing is posted
+  ok    parent-as-text: the store fails the run, nothing is written or marked, nothing is posted
+  ok    parent-list: the store fails the run, nothing is written or marked, nothing is posted
+  ok    parent-missing: the store fails the run, nothing is written or marked, nothing is posted
+  ok    control: a paid invoice with no parent is known (not a plan's), earns nothing, the plan's invoice earns
+  ok    control: an older invoice that paid nothing does not mark the store; the ripe one earns
+  ok    control: the healthy share keeps its amount, currency and day
+
+43 checks, all passing.
+Z_VOLUME {"runs":1766,"mocks":65,"over":false}
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a customer's paid invoices in an unknown shape
+    at paidInvoices ([stdin]:11467:22)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a customer's paid invoices in an unknown shape
+    at paidInvoices ([stdin]:11467:22)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a customer's paid invoices in an unknown shape
+    at paidInvoices ([stdin]:11467:22)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a customer's paid invoices in an unknown shape
+    at paidInvoices ([stdin]:11467:22)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a customer's paid invoices in an unknown shape
+    at paidInvoices ([stdin]:11467:22)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a customer's paid invoices in an unknown shape
+    at paidInvoices ([stdin]:11467:22)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11750:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a customer's paid invoices in an unknown shape
+    at paidInvoices ([stdin]:11473:29)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11759:18)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: more paid invoices than read in an unknown shape
+    at paidInvoices ([stdin]:11476:9)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11761:19)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a customer's paid invoices in an unknown shape
+    at paidInvoices ([stdin]:11467:22)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11764:24)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a paid invoice in an unknown shape
+    at paidInvoices ([stdin]:11469:38)
+    at async earnFrom ([stdin]:11491:20)
+    at async settleInvites ([stdin]:11618:26)
+    at async runCase ([stdin]:11712:16)
+    at async main ([stdin]:11792:15)
+
+Z_STATUS 0 null
+
+FILE l9-invite-refund-list.test.ts
+
+Refunds read exactly before a credit is earned
+  ok    unknown refund evidence creates no credit record
+  ok    and the run says a store failed and is not complete
+  ok    an invoice whose payments were not expanded earns nothing
+  ok    an invoice whose payments say there are more earns nothing
+  ok    and neither is posted
+  ok    in_Record001: a payment whose refunds cannot be read earns nothing and is not posted
+  ok    in_OddType01: a payment whose refunds cannot be read earns nothing and is not posted
+  ok    in_Mixed0001: a payment whose refunds cannot be read earns nothing and is not posted
+  ok    and the run fails each of those stores
+  ok    a confirmed full refund earns nothing
+  ok    a confirmed empty refund list earns its clean payment once
+
+11 checks, all passing.
+Z_VOLUME {"runs":214,"mocks":13,"over":false}
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a payment of an invoice in an unknown shape
+    at refundedOn ([stdin]:11401:48)
+    at earnFrom ([stdin]:11510:58)
+    at async settleInvites ([stdin]:11618:26)
+    at async main ([stdin]:11732:16)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: the payments of an invoice in an unknown shape
+    at refundedOn ([stdin]:11395:11)
+    at earnFrom ([stdin]:11510:58)
+    at async settleInvites ([stdin]:11618:26)
+    at async main ([stdin]:11732:16)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a payment of an invoice in an unknown shape
+    at refundedOn ([stdin]:11401:48)
+    at earnFrom ([stdin]:11510:58)
+    at async settleInvites ([stdin]:11618:26)
+    at async main ([stdin]:11732:16)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: a payment of an invoice in an unknown shape
+    at refundedOn ([stdin]:11401:48)
+    at earnFrom ([stdin]:11510:58)
+    at async settleInvites ([stdin]:11618:26)
+    at async main ([stdin]:11732:16)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: the refunds of a payment in an unknown shape
+    at refundedOn ([stdin]:11406:22)
+    at async earnFrom ([stdin]:11510:52)
+    at async settleInvites ([stdin]:11618:26)
+    at async main ([stdin]:11732:16)
+reading an invited creator's payments failed UnknownReplyError: Redis answered invite credits: the payments of an invoice in an unknown shape
+    at refundedOn ([stdin]:11395:11)
+    at earnFrom ([stdin]:11510:58)
+    at async settleInvites ([stdin]:11618:26)
+    at async main ([stdin]:11732:16)
+
+Z_STATUS 0 null
+
+FILE nx-invites.test.ts
+
+a store's invite code
+  ok    undefined on a code another store holds: ana's link never leads to the other store
+  ok    no reply on a code another store holds: ana's link never leads to the other store
+  ok    text on a code another store holds: ana's link never leads to the other store
+  ok    a number on a code another store holds: ana's link never leads to the other store
+  ok    a code written whose reply was lost: read back as ana's, her link is made
+  ok    healthy: a code, leading to ana, the same one asked again
+
+who invited a new store
+  ok    ana's invite is the first, written down
+  ok    undefined on a store already invited by ana: never written down under bea
+  ok    ana's invite is the first, written down
+  ok    no reply on a store already invited by ana: never written down under bea
+  ok    ana's invite is the first, written down
+  ok    text on a store already invited by ana: never written down under bea
+  ok    ana's invite is the first, written down
+  ok    a number on a store already invited by ana: never written down under bea
+  ok    an invite written whose reply was lost: read back as this one, listed under ana
+  ok    answered and read back in no known shape: not said recorded, not listed
+  ok    and the record written stays on the settlement walk, under its own inviter
+  ok    a later try answers already
+  ok    not applied, answered and read back in no known shape: no record, not on ana's list
+  ok    and a later try records it
+  ok    and its place on the settlement walk keeps bea's time
+  ok    held by bea, unknown for ana: bea's record and lists kept, ana's list never gains it
+  ok    healthy: the first invite is recorded, a second is already
+
+23 checks, all passing.
+Z_VOLUME {"runs":366,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE partner-invites.test.ts
+✔ an offer waits for the creator it was left for (4.708335ms)
+✔ nobody else can see it (0.625404ms)
+✔ the address is matched however it is typed (0.253152ms)
+✔ an offer can be read back by its id, and only with the right address (0.464401ms)
+✔ changing your mind leaves one current offer, not a pile to choose from (0.641858ms)
+✔ two different stores can both be waiting (0.389488ms)
+✔ answering takes it out, whichever way it was answered (0.358731ms)
+✔ a studio cannot be flooded with offers (3.224766ms)
+✔ the sentence names the share, the products, and the part that is easy to miss (0.28528ms)
+✔ the terms are on the card they press, not in a message somewhere else (0.613156ms)
+✔ nothing is written into the programme until the person answers (0.578033ms)
+✔ only the address the offer was left for can accept it (0.49699ms)
+✔ accepting goes through the same record every other partner is made from (0.474977ms)
+✔ a creator is never offered a partnership on their own store (0.203237ms)
+✔ the offer is still emailed, because a studio nobody opens is a letter nobody sent (0.526134ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.641307
+Z_VOLUME {"runs":109,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE wg16-site-invite-empty.test.ts
+
+The pages list: shared studio empty state with a working jump
+  ok    the page imports StudioEmptyState
+  ok    the empty list draws the shared state at level 2
+  ok    the bare heading-like paragraph is gone
+  ok    the jump target exists on the page
+  ok    the list renders the target while there is room for a page
+
+Spots left as they are
+  ok    invite: the credit line is one value in a row, unchanged
+  ok    preview: the module line is unchanged
+
+7 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (80.302446ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (110.555116ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (32.358152ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.283066ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.195786ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.114583ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.502348ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (68.047463ms)
+✔ every store figure taken in the code is a kind a line prices (50.459926ms)
+✔ every email sent names a meter, and each file only the meters it may use (68.824305ms)
+✔ the units a figure is taken in cost at least what they stand for (8.211354ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.909372ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.15259ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.298341ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.104628ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.077878ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.277048ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.140473ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.711594ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.074192ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.116925ms)
+✔ Path push fits its reserved studio requests (0.147904ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.067061ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.08626ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.090937ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (30.170461ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 478.448499
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (114.019384ms)
+✔ each family is bounded one way at least, and what it says can be checked (46.958731ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.054409ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.132139ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.322096ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.678842ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.161914ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 179.250846
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3292-BHcMtJ

@@ -1,0 +1,112 @@
+
+FILE invite-credit-store-unknown.test.ts
+
+A store read answered in another shape is unknown: the credit stays owed, never gone
+  FAIL  a number: one failure, not complete, nothing added
+        expected [1,false,0]
+        got      [0,true,0]
+  FAIL  a number: the credit is still owed and still listed
+        expected ["owed",1]
+        got      ["gone",0]
+  ok    a number: nothing reached Stripe
+  FAIL  a list: one failure, not complete, nothing added
+        expected [1,false,0]
+        got      [0,true,0]
+  FAIL  a list: the credit is still owed and still listed
+        expected ["owed",1]
+        got      ["gone",0]
+  ok    a list: nothing reached Stripe
+  FAIL  an empty string: one failure, not complete, nothing added
+        expected [1,false,0]
+        got      [0,true,0]
+  FAIL  an empty string: the credit is still owed and still listed
+        expected ["owed",1]
+        got      ["gone",0]
+  ok    an empty string: nothing reached Stripe
+  FAIL  no reply: one failure, not complete, nothing added
+        expected [1,false,0]
+        got      [0,true,0]
+  FAIL  no reply: the credit is still owed and still listed
+        expected ["owed",1]
+        got      ["gone",0]
+  ok    no reply: nothing reached Stripe
+
+Read healthily afterward, the same credit is paid, once
+  FAIL  added once, complete
+        expected [1,0,true]
+        got      [0,0,true]
+  FAIL  done and off the owed list
+        expected ["done",0]
+        got      ["gone",0]
+  FAIL  Ana's plan got the credit once
+        expected [-700]
+        got      []
+  FAIL  a later run pays nothing more
+        expected [-700]
+        got      []
+
+A store confirmed gone (its id key an exact null) still turns the credit gone
+  ok    no failure, complete
+  ok    gone and off the owed list
+
+The credit's own record answered in another shape is unknown: it stays on the owed list
+  FAIL  a number: one failure, not complete
+        expected [1,false]
+        got      [0,true]
+  FAIL  a number: still owed and still listed
+        expected ["owed",1]
+        got      ["owed",0]
+  FAIL  a record that does not read: one failure, not complete
+        expected [1,false]
+        got      [0,true]
+  FAIL  a record that does not read: still owed and still listed
+        expected ["owed",1]
+        got      ["owed",0]
+  FAIL  no reply: one failure, not complete
+        expected [1,false]
+        got      [0,true]
+  FAIL  no reply: still owed and still listed
+        expected ["owed",1]
+        got      ["owed",0]
+  FAIL  read healthily, it is paid once
+        expected ["done",0,[-700,-300]]
+        got      ["owed",0,[]]
+
+A listed id whose record is confirmed absent, or no longer owed, leaves the list without a failure
+  FAIL  no failure, complete, nothing paid again
+        expected [0,true,0,[-700,-300]]
+        got      [0,true,1,[-300]]
+  ok    both off the list
+
+The owed list answered in another shape is a failed, incomplete run, never an empty list
+  FAIL  one failure, not complete, nothing added
+        expected [1,false,0]
+        got      [0,true,0]
+  ok    still owed
+  FAIL  read healthily, it is paid
+        expected ["done",[-700,-300,-200]]
+        got      ["done",[-300,-200]]
+
+An invited store read answered in another shape fails the run; it earns once read healthily
+  FAIL  one failure, not complete, nothing earned
+        expected [1,false,0]
+        got      [0,true,0]
+  ok    no credit written
+
+The invited list answered in another shape is a failed, incomplete run, and the walk's place is kept
+  FAIL  one failure, not complete, nothing walked
+        expected [1,false,0]
+        got      [0,true,0]
+  FAIL  no credit written, the walk's place kept
+        expected [0,"1"]
+        got      [0,"0"]
+  ok    read healthily, Bea's first payment earns Ana's share and Bea's welcome bonus
+  FAIL  both credits reach the plans, once
+        expected [[-700,-300,-200,-1450],1,true]
+        got      [[-300,-200,-1450],1,true]
+
+36 checks, 26 failing.
+Z_VOLUME {"runs":202,"mocks":11,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3292-S40i2O

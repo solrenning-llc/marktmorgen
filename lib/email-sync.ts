@@ -42,13 +42,14 @@
  *   nl:esync:j:<job>            one job and how it went, for a week
  *   nl:esync:log:<statsId>      the store's last jobs, newest first
  *   nl:esync:q                  jobs waiting for a try, by when
+ *   nl:esync:pj:<hash>          one person's jobs in a store, by when each record ends: for their erasure and copy
  *   nl:esync:seen:<hash>        a person and event already sent, thirty days
  */
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
@@ -86,6 +87,14 @@ const MAX_PER_RUN = 60;
 const JOB_SECONDS = 7 * 86400;
 const GRACE_MS = 3600_000;
 const SEEN_SECONDS = 30 * 86400;
+/** A person's jobs read whole for their erasure or copy, at most; more is refused, never cut short. */
+const MAX_PERSON_JOBS = 1000;
+/** A store's jobs on the queue read whole for an erasure or a copy, at most, a page at a time. */
+const MAX_STORE_QUEUED = 10_000;
+const QUEUE_PAGE = 500;
+const QUEUE_PAGES = 400;
+/** Job records read in one request. */
+const READ_BATCH = 500;
 
 export type Buyers = "none" | "all" | "some";
 
@@ -132,6 +141,9 @@ const badKey = (statsId: string) => `nl:esync:bad:${statsId}`;
 const jobKey = (id: string) => `nl:esync:j:${id}`;
 const logKey = (statsId: string) => `nl:esync:log:${statsId}`;
 export const QUEUE_KEY = "nl:esync:q";
+/** The jobs of one person in one store, each scored by when its record ends, so none is missed once out of the log. */
+const personKey = (statsId: string, email: string) =>
+  `nl:esync:pj:${createHash("sha256").update(`${statsId}|person|${normaliseEmail(email)}`).digest("hex").slice(0, 40)}`;
 const seenKey = (statsId: string, seed: string) =>
   `nl:esync:seen:${createHash("sha256").update(`${statsId}|${seed}`).digest("hex").slice(0, 40)}`;
 
@@ -361,9 +373,19 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
     lastAt: agreed ? 0 : now,
     createdAt: now,
   };
+  // A job that keeps an address is also indexed under its person for as long as its record lives (after it, so the
+  // index never ends first), with the ones already ended taken off: the erasure and the copy find it once out of the log.
+  const index = agreed ? personKey(statsId, email) : "";
   await redisPipeline([
     ["SET", jobKey(job.id), JSON.stringify(job), "EX", JOB_SECONDS],
-    ...(agreed ? [["ZADD", QUEUE_KEY, now, `${statsId}|${job.id}`]] : []),
+    ...(agreed
+      ? [
+          ["ZADD", index, now + JOB_SECONDS * 1000, job.id],
+          ["ZREMRANGEBYSCORE", index, "-inf", now],
+          ["EXPIRE", index, JOB_SECONDS],
+          ["ZADD", QUEUE_KEY, now, `${statsId}|${job.id}`],
+        ]
+      : []),
     ["LPUSH", logKey(statsId), job.id],
     ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1],
   ]);
@@ -428,10 +450,16 @@ async function runClaimed(statsId: string, id: string, budget: number, now = Dat
     return job;
   }
   const done = await attempt(job, now, budget);
-  const commands: (string | number)[][] = [["SET", jobKey(id), JSON.stringify(done), "EX", JOB_SECONDS]];
-  commands.push(
-    done.state === "retrying" ? ["ZADD", QUEUE_KEY, done.next, `${statsId}|${id}`] : ["ZREM", QUEUE_KEY, `${statsId}|${id}`],
-  );
+  // Written back only over what is still there (Claude 2 on #3223): the record with SET XX, its place in the person's
+  // index and on the queue with ZADD XX, each in one step. An erasure (forgetSyncPerson) or a store's deletion made
+  // while the platform was being asked deleted them, and is not undone: no record, no index, nothing queued to send.
+  const member = `${statsId}|${id}`;
+  const commands: (string | number)[][] = [["SET", jobKey(id), JSON.stringify(done), "EX", JOB_SECONDS, "XX"]];
+  if (done.email) {
+    const person = personKey(statsId, done.email);
+    commands.push(["ZADD", person, "XX", Date.now() + JOB_SECONDS * 1000, id], ["EXPIRE", person, JOB_SECONDS]);
+  }
+  commands.push(done.state === "retrying" ? ["ZADD", QUEUE_KEY, "XX", done.next, member] : ["ZREM", QUEUE_KEY, member]);
   await redisPipeline(commands);
   return done;
 }
@@ -786,30 +814,89 @@ export async function disconnect(store: Store): Promise<SyncView> {
  * Deletes the jobs that sent one person to the creator's email platform, and
  * any still waiting for a try (lib/person-erasure.ts). What the platform
  * already took is in the creator's own account there, to be deleted there.
+ * Every job of theirs that still exists is found, not only the store's last
+ * LOG_SIZE (personJobs), so none is sent after the erasure.
  */
 export async function forgetSyncPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const { logged, ids } = await loggedJobIds(statsId);
-  if (!ids.length) return 0;
-  const jobs = await loggedJobs(ids);
+  const { logged, indexed, ids, jobs } = await personJobs(statsId, address);
   const theirs = ids.filter((_, i) => {
     const job = jobs[i];
     return job !== null && normaliseEmail(job.email) === address;
   });
-  if (!theirs.length) return 0;
-  // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length.
-  // Another shape throws, so the erasure is said as not finished and a retry finds what is left.
-  const commands = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]];
+  if (!theirs.length && !indexed) return 0;
+  // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length,
+  // the index's DEL at most one. Another shape throws, so the erasure is said as not finished and a retry finds what is left.
+  const commands = [
+    ...(theirs.length ? [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]] : []),
+    ...(indexed ? [["DEL", personKey(statsId, address)]] : []),
+  ];
   const replies = repliesFor(await redisPipeline(commands), commands.length);
   const within = (reply: unknown, most: number) => {
     const n = countOf(reply);
     return n !== null && n <= most;
   };
-  if (!replies || !within(replies[0], theirs.length) || !within(replies[replies.length - 1], theirs.length) || !replies.slice(1, -1).every((reply) => within(reply, logged))) {
+  const bounds = [...(theirs.length ? [theirs.length, ...theirs.map(() => logged), theirs.length] : []), ...(indexed ? [1] : [])];
+  if (!replies || !replies.every((reply, i) => within(reply, bounds[i]))) {
     throw new UnknownReplyError("deleting a person's email-platform jobs");
   }
   return theirs.length;
+}
+
+/**
+ * Every job of one person in a store that may still exist, whatever the studio log kept (Claude 2 on #3223): the
+ * log's; the person's index, written with each job that keeps their address and lasting as long as its record; and,
+ * for a job written before that index existed, every one of the store's jobs still on the queue. `ids` are all of
+ * them, `jobs` their records (null for one that has ended), `indexed` whether the person has an index to delete.
+ * Each read is exact (CX-123 rule 24) and bounded: another shape throws UnknownReplyError, and more than can be read
+ * whole throws too, never taken as "none".
+ */
+async function personJobs(statsId: string, address: string): Promise<{ logged: number; indexed: boolean; ids: string[]; jobs: (Job | null)[] }> {
+  const { logged, ids: inLog } = await loggedJobIds(statsId);
+  const indexed = await indexedJobIds(statsId, address);
+  const queued = await queuedJobIds(statsId);
+  const ids = [...new Set([...inLog, ...indexed, ...queued])];
+  const jobs: (Job | null)[] = [];
+  for (let i = 0; i < ids.length; i += READ_BATCH) jobs.push(...(await loggedJobs(ids.slice(i, i + READ_BATCH))));
+  return { logged, indexed: indexed.length > 0, ids, jobs };
+}
+
+/** A person's indexed job ids, read whole and exactly: an exact empty list (no index) is none; another shape throws. */
+async function indexedJobIds(statsId: string, address: string): Promise<string[]> {
+  const read = repliesFor(await redisPipeline([["ZRANGEBYSCORE", personKey(statsId, address), "-inf", "+inf"]]), 1);
+  const ids = read ? stringList(read[0]) : null;
+  if (!ids || !ids.every((id) => JOB_ID.test(id))) throw new UnknownReplyError("a person's email-platform job index");
+  if (ids.length > MAX_PERSON_JOBS) throw new Error("A person's email-platform jobs are more than can be read whole; nothing was deleted");
+  return ids;
+}
+
+/**
+ * The store's job ids on the queue, read whole with ZSCAN, which returns every member there for the whole walk
+ * (leases and new jobs move scores, and paging by rank could skip one). Each page is read exactly, a cursor and
+ * member-score pairs of text; another shape throws UnknownReplyError, and a queue or a store's share of it larger than
+ * the bound throws too.
+ */
+async function queuedJobIds(statsId: string): Promise<string[]> {
+  const prefix = `${statsId}|`;
+  const found: string[] = [];
+  let cursor = "0";
+  for (let page = 0; page < QUEUE_PAGES; page += 1) {
+    const read = repliesFor(await redisPipeline([["ZSCAN", QUEUE_KEY, cursor, "MATCH", `${prefix.replace(/[*?[\]\\]/g, "\\$&")}*`, "COUNT", QUEUE_PAGE]]), 1);
+    const reply = read ? listSlots(read[0]) : null;
+    const next = reply?.length === 2 && typeof reply[0] === "string" && /^\d+$/.test(reply[0]) ? reply[0] : null;
+    const pairs = next !== null && reply ? stringList(reply[1]) : null;
+    if (next === null || !pairs || pairs.length % 2 !== 0) throw new UnknownReplyError("a page of the email-platform queue");
+    for (let i = 0; i < pairs.length; i += 2) {
+      // Another store's member, or one that names no job (syncDue drops it), is not a person's job.
+      const id = pairs[i].startsWith(prefix) ? pairs[i].slice(prefix.length) : "";
+      if (JOB_ID.test(id)) found.push(id);
+    }
+    if (found.length > MAX_STORE_QUEUED) throw new Error("A store's queued email-platform jobs are more than can be read whole; nothing was deleted");
+    if (next === "0") return found;
+    cursor = next;
+  }
+  throw new Error("The email-platform queue is longer than can be read whole; nothing was deleted");
 }
 
 /**
@@ -821,7 +908,9 @@ async function loggedJobIds(statsId: string): Promise<{ logged: number; ids: str
   const listed = repliesFor(await redisPipeline([["LRANGE", logKey(statsId), 0, -1]]), 1);
   const all = listed ? stringList(listed[0]) : null;
   if (!all) throw new UnknownReplyError("listing a store's email-platform jobs");
-  return { logged: all.length, ids: all.slice(0, LOG_SIZE * 2) };
+  // The log is trimmed to LOG_SIZE; one far longer is not read in part (Claude 2 on #3223), it is refused.
+  if (all.length > LOG_SIZE * 2) throw new Error("A store's email-platform log is longer than can be read whole; nothing was deleted");
+  return { logged: all.length, ids: all };
 }
 
 /**
@@ -849,10 +938,10 @@ async function loggedJobs(ids: string[]): Promise<(Job | null)[]> {
 export async function syncJobsOf(statsId: string | null, email: string): Promise<JobView[]> {
   if (!statsId || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
-  // Read as the erasure reads them (rule 30): another shape throws, so the copy fails whole rather than miss a part.
-  const { ids } = await loggedJobIds(statsId);
-  if (!ids.length) return [];
-  return (await loggedJobs(ids)).flatMap((job) => {
+  // Read as the erasure reads them (rule 30), every job of theirs that still exists: another shape throws, so the copy
+  // fails whole rather than miss a part.
+  const { jobs } = await personJobs(statsId, address);
+  return jobs.flatMap((job) => {
     if (job === null || normaliseEmail(job.email) !== address) return [];
     const { id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt } = job;
     return [{ id, email: sent, title, source, state, attempts, next, lastError, note, lastAt, createdAt }];

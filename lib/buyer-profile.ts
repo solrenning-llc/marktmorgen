@@ -40,6 +40,7 @@ import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { onAccount } from "@/lib/stripe-account";
@@ -137,18 +138,30 @@ export function personNoteText(raw: unknown): string {
   return raw.replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_PERSON_NOTE);
 }
 
-function parsePersonNotes(raw: unknown): PersonNote[] {
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+/**
+ * The notes' hash (one HGETALL) read exactly, as addPersonNote writes it (rule 24; Claude 2 on #3159): one reply,
+ * a list of strings with an even count, each field a note's id and each value its JSON { at, by, text } with words.
+ * An empty list is a hash with nothing in it, so no notes; anything else throws UnknownReplyError, never "no notes",
+ * so the studio never says "No notes yet." about a buyer whose notes it could not read.
+ */
+function parsePersonNotes(replies: unknown): PersonNote[] {
+  const flat = stringList(repliesFor(replies, 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a buyer's notes");
   const out: PersonNote[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
+  for (let i = 0; i < flat.length; i += 2) {
     const id = flat[i];
-    if (!NOTE_ID.test(id)) continue;
+    let value: unknown;
     try {
-      const value = JSON.parse(flat[i + 1]) as Record<string, unknown>;
-      const text = personNoteText(value.text);
-      if (!text) continue;
-      out.push({ id, at: Number(value.at) || 0, by: typeof value.by === "string" ? value.by.slice(0, MAX_EMAIL_LENGTH) : "", text });
-    } catch {}
+      value = JSON.parse(flat[i + 1]);
+    } catch {
+      throw new UnknownReplyError("a buyer's notes");
+    }
+    const note = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+    const text = note && typeof note.text === "string" ? personNoteText(note.text) : "";
+    if (!NOTE_ID.test(id) || !note || !text || !Number.isSafeInteger(note.at) || (note.at as number) < 0 || typeof note.by !== "string") {
+      throw new UnknownReplyError("a buyer's notes");
+    }
+    out.push({ id, at: note.at as number, by: note.by.slice(0, MAX_EMAIL_LENGTH), text });
   }
   return out.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
 }
@@ -157,10 +170,10 @@ function parsePersonNotes(raw: unknown): PersonNote[] {
 const NOTES_SLOT = "pn";
 const noteBytes = (note: PersonNote) => dataBytes([note.id, JSON.stringify({ at: note.at, by: note.by, text: note.text })], 1);
 
+/** A buyer's notes, newest first; throws UnknownReplyError when they could not be read exactly (parsePersonNotes). */
 export async function readPersonNotes(statsId: string | null, person: string): Promise<PersonNote[]> {
   if (!statsId || !PERSON_KEY.test(person) || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", notesKey(statsId, person)]]);
-  return parsePersonNotes(raw);
+  return parsePersonNotes(await redisPipeline([["HGETALL", notesKey(statsId, person)]]));
 }
 
 /**
@@ -257,16 +270,18 @@ export type ProfileCourse = { title: string; done: number; lessons: number; sinc
 /**
  * A part of the page read apart from Stripe, which may fail on its own
  * (rule 24): purchases handed over without a Stripe payment, the amount of a
- * PayPal sale, the calls coming up, the sequences they were started on. A part
- * that could not be read is named, never shown as "none".
+ * PayPal sale, the calls coming up, the sequences they were started on, the
+ * team's notes about them. A part that could not be read is named, never
+ * shown as "none".
  */
-export type ProfilePart = "imported" | "paypal" | "calls" | "sequences";
-const PROFILE_PARTS: ProfilePart[] = ["imported", "paypal", "calls", "sequences"];
+export type ProfilePart = "imported" | "paypal" | "calls" | "sequences" | "notes";
+const PROFILE_PARTS: ProfilePart[] = ["imported", "paypal", "calls", "sequences", "notes"];
 const PART_WORDS: Record<ProfilePart, string> = {
   imported: "purchases brought from another platform, given, bought for others or paid with PayPal",
   paypal: "the amounts of their PayPal sales",
   calls: "their calls coming up",
   sequences: "the sequences they were started on",
+  notes: "your team's notes about them",
 };
 
 /** What the page says when some of its parts could not be read; "" when all were. */
@@ -644,7 +659,13 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
       unread.add("calls");
       return [];
     }),
-    store.statsId ? readPersonNotes(store.statsId, person) : Promise.resolve([]),
+    store.statsId
+      ? readPersonNotes(store.statsId, person).catch((error): PersonNote[] => {
+          console.error("reading a buyer's notes failed", error);
+          unread.add("notes");
+          return [];
+        })
+      : Promise.resolve([] as PersonNote[]),
   ]);
   const contact = parseContact(contactRaw);
   const started = new Set(

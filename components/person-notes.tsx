@@ -27,13 +27,15 @@ export function PersonNotes({ person, initial }: { person: string; initial: Pers
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...body, person }),
       });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[] };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[]; error?: string };
       if (answer.ok && answer.notes) {
         setNotes(answer.notes);
         toast(done);
         return true;
       }
-      toast("That did not save. Try again in a moment.");
+      // The notes could not be read after the change: whether it saved is not known, so it is not said.
+      if (answer.error === "unavailable") toast("Your notes could not be loaded just now. Open this page again in a moment to see whether that saved.");
+      else toast("That did not save. Try again in a moment.");
     } catch {
       toast("That did not save. Check your connection and try again.");
     } finally {

@@ -112,7 +112,7 @@ async function freshStore(): Promise<Store> {
   redis.clear();
   await claimHandle(OWNER, "r24sales", "Harbor Kitchen", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestR24Sale0001", true);
+  await setStripeAccount(OWNER, "acct_1TestR24Sale", true);
   await setSubscription(OWNER, { customerId: "cus_R24Sale0001", subscriptionId: "sub_R24Sale0001", active: true, period: paidPeriod() });
   let store = (await storeForEmail(OWNER))!;
   await setChatAddress(store.statsId!, "Harbor Kitchen", SLACK);

@@ -214,5 +214,6 @@ export async function removeMember(serverId: string, userId: string, reason: str
 export async function leaveServer(serverId: string): Promise<boolean> {
   const answer = await call(`/users/@me/guilds/${serverId}`, { method: "DELETE" }).catch(() => null);
   if (answer && answer.status >= 200 && answer.status < 300) return true;
-  return answer?.status === 404 && Number((answer.data as { code?: unknown } | null)?.code) === 10004;
+  // Discord's own whole number only, as in `changed`: "10004" or [10004] is not known (CX-123 rule 24).
+  return answer?.status === 404 && (answer.data as { code?: unknown } | null)?.code === 10004;
 }

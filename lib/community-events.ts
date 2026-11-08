@@ -57,7 +57,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -165,6 +165,12 @@ export function isUpcoming(event: CommunityEvent, now = Date.now()): boolean {
 
 // ------------------------------------------------------------------ records
 
+/** An event's product list as the code writes it (ids of 1 to 40 characters), or null for anything else. */
+function productList(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.every((x) => typeof x === "string" && x.length >= 1 && x.length <= 40)) return null;
+  return [...new Set(value as string[])].slice(0, 200);
+}
+
 function parseEvent(raw: unknown): CommunityEvent | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -175,6 +181,11 @@ function parseEvent(raw: unknown): CommunityEvent | null {
     const link = typeof v.link === "string" ? cleanRoom(v.link) : null;
     const room = typeof v.room === "string" && isVideoRoom(v.room) ? v.room : "";
     const ownLink = typeof link === "string" ? link : "";
+    // Who may come, read exactly (CX-123 rule 24): no list is an event for every member, as the code writes one; a
+    // list in another shape, or holding an id this code never writes, is not "for everyone", so the record is not
+    // read at all and nobody is let in on it (mayAttend), rather than every member.
+    const only = v.only === undefined ? [] : productList(v.only);
+    if (only === null) return null;
     return {
       id: v.id,
       title: cleanLine(v.title, MAX_EVENT_TITLE) || "Live event",
@@ -189,7 +200,7 @@ function parseEvent(raw: unknown): CommunityEvent | null {
       meet: v.where === "meet" && isMeetProvider(v.meet) ? v.meet : null,
       room,
       link: ownLink,
-      only: Array.isArray(v.only) ? [...new Set(v.only.filter((x): x is string => typeof x === "string" && x.length <= 40))].slice(0, 200) : [],
+      only,
       replay: parseVideo(v.replay),
       cancelled: v.cancelled === true,
       post: typeof v.post === "string" && ITEM_ID.test(v.post) ? v.post : "",
@@ -691,16 +702,27 @@ export async function rsvpNumbers(id: string, events: CommunityEvent[], member: 
   return out;
 }
 
-/** Everyone coming, as member keys with when they said so (seconds), a page of Redis's at a time. */
+/** The most pages of who is coming one read takes (a thousand asked for a page). */
+const RSVP_PAGES = 200;
+
+/**
+ * Everyone coming, as member keys with when they said so (seconds), a page of Redis's at a time.
+ *
+ * Everyone or not at all (rules 24 and 30, review of #2921): a page that does not read, or a walk not at its end
+ * after RSVP_PAGES before `limit` is reached, throws UnknownReplyError, never fewer people coming. A reminder, move
+ * or cancellation is then not sent to a short list as if it were everyone (lib/community-event-mail.ts, startJob).
+ */
 export async function rsvpList(id: string, eventId: string, limit = 100_000): Promise<{ key: string; at: number }[]> {
   const out: { key: string; at: number }[] = [];
   let cursor = "0";
-  for (let page = 0; page < 200; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
+  for (let page = 0; ; page += 1) {
+    if (page === RSVP_PAGES) throw new UnknownReplyError(`an event's HSCAN, not at its end after ${RSVP_PAGES} pages,`);
+    const read = scanPage(await redisPipeline([["HSCAN", rsvpKey(id, eventId), cursor, "COUNT", 1000]]));
+    // A hash answers field and value: an odd page is not one.
+    if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("an event's HSCAN");
+    const flat = read.items;
     for (let i = 0; i + 1 < flat.length; i += 2) out.push({ key: flat[i], at: Number(flat[i + 1]) || 0 });
-    cursor = String(reply[0]);
+    cursor = read.next;
     if (cursor === "0" || out.length >= limit) break;
   }
   return out.slice(0, limit).sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));

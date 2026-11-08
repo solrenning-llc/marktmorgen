@@ -23,8 +23,8 @@ import type { Store } from "@/lib/store";
 import { type StatsData, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
 import { readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
-import { readAbout } from "@/lib/product-about";
-import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
+import { readAboutExact } from "@/lib/product-about";
+import { type Course, findLesson, readBody, readCourseExact } from "@/lib/course";
 import { readQuizFor } from "@/lib/quiz";
 import { readTaskFor } from "@/lib/assignment";
 import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";
@@ -93,8 +93,10 @@ export async function readFullNumbersPaid(store: Store, charge: Charge | null, n
   const named = productsInStats(store, stats, sales);
   const refused = charge ? await charge(apiReadUnits(listingsWork(listingsToRead(store, named))), taken) : null;
   if (refused) return { data: studioStats(store, stats, sales, state, []), listed: false };
-  const listings = await readListings(store, named).catch(() => []);
-  return { data: studioStats(store, stats, sales, state, listings), listed: true };
+  // Listings that could not be read are not listed: the answer says so and the hour's copy is not kept without them,
+  // never "this store has no products" (CX-123 rule 24).
+  const listings = await readListings(store, named).catch(() => null);
+  return { data: studioStats(store, stats, sales, state, listings ?? []), listed: listings !== null };
 }
 
 const share = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 10_000) / 10_000 : null);
@@ -224,6 +226,8 @@ export function funnelTool(data: StatsData, w: Window) {
  * listings, once what reading them costs is taken (lib/api-read-rules.ts,
  * listingsWork, counted first). When that is not left, those are named by
  * their id (`named` false): what was already read and paid for is never lost.
+ * Listings that could not be read name them by their id too, and say so
+ * (`named` false), never that their names were read (CX-123 rule 24).
  * Without `charge` (not the API), they are read as they are.
  */
 async function titlesFor(store: Store, ids: Iterable<string>, known: Map<string, string>, charge: Charge | null, taken: number): Promise<{ titles: Map<string, string>; named: boolean }> {
@@ -231,8 +235,9 @@ async function titlesFor(store: Store, ids: Iterable<string>, known: Map<string,
   const missing = [...new Set(ids)].filter((id) => !titles.has(id));
   if (!missing.length) return { titles, named: true };
   if (charge && (await charge(apiReadUnits(listingsWork(listingsToRead(store, missing))), taken))) return { titles, named: false };
-  for (const listing of await readListings(store, missing).catch(() => [])) titles.set(listing.id, listing.title);
-  return { titles, named: true };
+  const listings = await readListings(store, missing).catch(() => null);
+  for (const listing of listings ?? []) titles.set(listing.id, listing.title);
+  return { titles, named: listings !== null };
 }
 
 /**
@@ -271,7 +276,7 @@ export async function productsTool(store: Store, data: StatsData, w: Window, met
           .slice(0, 5)
           .map(([id, buyers]) => ({ product: name(id), buyers })),
         sequences: Object.entries(paths.next).flatMap(([from, steps]) => steps.map((s) => ({ first: name(from), then: name(s.id), buyers: s.buyers, days_later: s.days }))),
-        ...(named ? {} : { names_note: "Some products are named by their id: your store's API requests left did not cover reading their names." }),
+        ...(named ? {} : { names_note: "Some products are named by their id: your store's API requests left did not cover reading their names, or they could not be read just now." }),
       }
     : null;
   // What was set aside is settled at what is sent of it; past it (it never is, at its most), it is not sent.
@@ -340,11 +345,13 @@ export async function membershipsTool(store: Store, charge: Charge) {
     churn_last_30_days: n.churn30,
     trials_ended_last_90_days: { ended: n.trialsEnded, became_paying: n.trialsConverted },
     by_product: n.byProduct.map((p) => ({ product: titles.get(p.product) ?? p.product, members: p.members, trialing: p.trialing, mrr: Math.round(p.mrr) })),
-    // False when the products are named by their id: the store's API requests left did not cover reading their names.
+    // False when the products are named by their id: the store's API requests left did not cover reading their names, or they could not be read.
     by_product_named: named,
-    by_channel: (n.byChannel ?? []).map((c) => ({ channel: c.channel, started: c.started, running: c.running, still_running_at_3_months: c.stayed3, average_months: c.months })),
+    // Null when the reading does not hold it, never an empty list (CX-123 rule 24).
+    by_channel: n.byChannel ? n.byChannel.map((c) => ({ channel: c.channel, started: c.started, running: c.running, still_running_at_3_months: c.stayed3, average_months: c.months })) : null,
     why_members_left: n.leaving ? { canceled: n.leaving.canceled, answered: n.leaving.answered, reasons: n.leaving.reasons.map((r) => ({ reason: r.reason, members: r.members, mrr: Math.round(r.mrr) })), payment_failed: n.leaving.paymentFailed } : null,
-    mrr_by_month: n.movements?.months ?? [],
+    // Null when the invoices could not be read (lib/membership-numbers.ts keeps the reading without movements), never [].
+    mrr_by_month: n.movements ? n.movements.months : null,
     arpu: n.movements?.arpu ?? null,
     net_revenue_retention: n.movements?.nrr ?? null,
     forecast_next_3_months: n.forecast ?? null,
@@ -518,7 +525,10 @@ export async function productTextTool(store: Store, id: string, charge: Charge):
   if (refused) return refused;
   const listing = await readListing(store, id);
   if (!listing) return null;
-  return { product: listing.id, title: listing.title, description: listing.about ? await readAbout(store.statsId, listing.id) : "" };
+  if (!listing.about) return { product: listing.id, title: listing.title, description: "" };
+  // Read exactly: a description the listing says exists that does not read is unknown and throws, never "" (CX-123 rule 24).
+  if (!store.statsId) throw new Error("the description could not be read");
+  return { product: listing.id, title: listing.title, description: await readAboutExact(store.statsId, listing.id) };
 }
 
 /** A product's sales page, or null when the store has no such product; the refusal when the store's API requests are used up. */
@@ -567,7 +577,8 @@ export async function readCourseTool(store: Store, id: string, charge: Charge) {
   const refused = await payFor(store, id, courseOutlineWork(), charge);
   if (refused) return refused;
   const listing = await readListing(store, id);
-  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  // Read exactly: only a course Redis says is not there is none; another answer throws, never "no course" (CX-123 rule 24).
+  const course = listing?.course ? await readCourseExact(listing.course.id) : null;
   return listing && course ? courseOutlineTool(listing.id, listing.title, course) : null;
 }
 
@@ -576,7 +587,7 @@ export async function readLessonTool(store: Store, id: string, lessonId: string,
   const refused = await payFor(store, id, lessonWork(), charge);
   if (refused) return refused;
   const listing = await readListing(store, id);
-  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  const course = listing?.course ? await readCourseExact(listing.course.id) : null;
   const found = course ? findLesson(course, lessonId) : null;
   if (!listing || !course || !found) return null;
   const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);

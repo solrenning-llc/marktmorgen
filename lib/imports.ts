@@ -328,7 +328,8 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
 /**
  * The store's imports, read only on Redis's exact answers (the MCP tool
  * get_imports; Codex A3 on #1933): one list from LRANGE, then a text or null
- * for each GET, each text an import (one of another store is never shown).
+ * for each GET, each text an import (one that names another store is never
+ * shown; one that names no store is unknown).
  * Any other answer is null, unknown, never an empty or shorter history.
  */
 export async function storeImportsRead(store: Store): Promise<ImportJob[] | null> {
@@ -350,7 +351,11 @@ export async function storeImportsRead(store: Store): Promise<ImportJob[] | null
     if (raw === null) continue;
     const job = parseJob(raw);
     if (!job) return null;
-    if (job.sid === store.sid) jobs.push(job);
+    // Another store's only when it names one: an import whose store is missing, null, empty or not text says nothing of
+    // whose it is, so it is unknown, never left out as another store's (Codex G on #1933).
+    const sid: unknown = (job as { sid?: unknown }).sid;
+    if (typeof sid !== "string" || !sid) return null;
+    if (sid === store.sid) jobs.push(job);
   }
   return jobs;
 }

@@ -272,7 +272,13 @@ export async function hostSync(
   if (good && good.source !== source) good = null;
   if (source === "google") {
     if (!hostSyncOn()) return result(source, "off", good, "Google Calendar sync is not switched on for hosts yet. Add your calendar's private iCal address instead.");
-    const conn = options.known ? hostConnectionFrom(options.known.conn) : await hostConnectionView(store.statsId, host).catch(() => null);
+    let conn: Awaited<ReturnType<typeof hostConnectionView>>;
+    try {
+      conn = options.known ? hostConnectionFrom(options.known.conn) : await hostConnectionView(store.statsId, host);
+    } catch {
+      // A connection that could not be read is not a missing one: the host stays blocked, told the truth.
+      return result(source, "failed", good, "Your Google Calendar connection could not be checked just now.");
+    }
     if (!conn) return result(source, "failed", good, "Google Calendar is not connected.");
     if (conn.broken) return result(source, "failed", good, `Google Calendar needs connecting again: ${conn.broken}`);
     if (!grantedParts(conn.scope).freebusy) return result(source, "scope", good, "Google was connected without permission to see your free/busy times. Connect again and allow it.");
@@ -326,6 +332,8 @@ export type HostCalendarView = {
   /** Whether hosts may connect Google Calendar here at all (hostSyncOn). */
   googleOffered: boolean;
   google: { account: string; connectedAt: number; broken: string; events: boolean; freebusy: boolean; calendars: boolean } | null;
+  /** True when the host's Google connection could not be read just now: `google` is then null, but not because none exists. */
+  googleUnread: boolean;
   /** Their calendars, read live from Google, when connected with the permission to list them. */
   calendars: GoogleCalendar[] | null;
   calendarsError: string;
@@ -340,7 +348,17 @@ export async function hostCalendarView(store: Store, email: string, tz: string):
   const host = hostId(email);
   const statsId = store.statsId ?? "";
   const config = (statsId ? await readConfig(host) : null) ?? emptyConfig(email);
-  const conn = statsId ? await hostConnectionView(statsId, host).catch(() => null) : null;
+  let conn: Awaited<ReturnType<typeof hostConnectionView>> = null;
+  let googleUnread = false;
+  if (statsId) {
+    try {
+      conn = await hostConnectionView(statsId, host);
+    } catch (error) {
+      // Not knowing is not "not connected": the page must not send the host to connect again for nothing.
+      console.error("reading a host's Google connection failed", error);
+      googleUnread = true;
+    }
+  }
   const parts = conn ? grantedParts(conn.scope) : null;
   let calendars: GoogleCalendar[] | null = null;
   let calendarsError = "";
@@ -372,6 +390,7 @@ export async function hostCalendarView(store: Store, email: string, tz: string):
     google: conn
       ? { account: conn.account, connectedAt: conn.connectedAt, broken: conn.broken, events: parts?.events ?? false, freebusy: parts?.freebusy ?? false, calendars: parts?.calendars ?? false }
       : null,
+    googleUnread,
     calendars,
     calendarsError,
     read: config.read,
@@ -381,7 +400,19 @@ export async function hostCalendarView(store: Store, email: string, tz: string):
   };
 }
 
-/** What a busy-time source change can be refused for. */
+/** The host's Google connection, null when confirmed absent, "unread" when it could not be read just now. */
+async function connectionOrUnread(statsId: string, host: string): Promise<Awaited<ReturnType<typeof hostConnectionView>> | "unread"> {
+  try {
+    return await hostConnectionView(statsId, host);
+  } catch {
+    return "unread";
+  }
+}
+
+/**
+ * What a busy-time source change can be refused for. "unavailable": nothing
+ * was changed because something could not be checked or reserved just now.
+ */
 export type HostChangeProblem = "google_off" | "google_none" | "ics_none" | "calendars" | "write" | "invalid" | "unavailable";
 
 /** Picks where a host's busy times come from. A new source is read at the next look. */
@@ -391,7 +422,9 @@ export async function setHostSource(store: Store, email: string, source: HostSou
   const config = (await readConfig(host)) ?? emptyConfig(email);
   if (source === "google") {
     if (!hostSyncOn()) return "google_off";
-    if (!(await hostConnectionView(store.statsId, host).catch(() => null))) return "google_none";
+    const conn = await connectionOrUnread(store.statsId, host);
+    if (conn === "unread") return "unavailable";
+    if (!conn) return "google_none";
   }
   if (source === "ics" && !config.ics) return "ics_none";
   if (source !== "none" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "unavailable";
@@ -407,15 +440,17 @@ export async function setHostSource(store: Store, email: string, source: HostSou
 export async function setHostCalendars(store: Store, email: string, read: string[], write: string): Promise<HostChangeProblem | null> {
   if (!store.statsId || !hostSyncOn()) return "google_off";
   const host = hostId(email);
-  const conn = await hostConnectionView(store.statsId, host).catch(() => null);
+  const conn = await connectionOrUnread(store.statsId, host);
+  if (conn === "unread") return "unavailable";
   if (!conn || conn.broken) return "google_none";
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "unavailable";
   let listed: GoogleCalendar[];
   try {
     const access = await accessFor(store.statsId, "google", undefined, host);
     listed = await googleCalendars(access.token);
-  } catch {
-    return "google_none";
+  } catch (error) {
+    // Only a connection that no longer works is fixed by connecting again; anything else is a passing failure.
+    return error instanceof NotConnected || (error instanceof ProviderError && (error.kind === "auth" || error.kind === "scope")) ? "google_none" : "unavailable";
   }
   const ids = new Set(listed.map((c) => c.id));
   const chosen = [...new Set(read)].slice(0, MAX_READ_CALENDARS + 1);

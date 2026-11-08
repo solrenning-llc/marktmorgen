@@ -20,6 +20,7 @@ const MESSAGES: Record<string, string> = {
   calendars: "Pick up to 10 of the calendars listed.",
   write: "Bookings can only be written to a calendar you can edit.",
   invalid: "That could not be saved. Reload the page and try again.",
+  unavailable: "That could not be checked just now. Nothing was changed. Try again in a moment.",
 };
 
 const STATE_WORDS: Record<SyncState, { tag: string; tone: "ok" | "warn" | "off" }> = {
@@ -81,9 +82,11 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
     {
       value: "google",
       label: "My Google Calendar (two-way)",
-      note: view.googleOffered
-        ? "Busy times read from the calendars you select; bookings you host written to the one you choose, with a Google Meet link, and moved or deleted with them."
-        : "Not switched on on Marktmorgen yet. Until it is, use your calendar's private iCal address.",
+      note: !view.googleOffered
+        ? "Not switched on on Marktmorgen yet. Until it is, use your calendar's private iCal address."
+        : view.googleUnread
+          ? "Your Google connection could not be checked just now. Check again in a moment."
+          : "Busy times read from the calendars you select; bookings you host written to the one you choose, with a Google Meet link, and moved or deleted with them.",
       disabled: !view.googleOffered || !view.google,
     },
     { value: "ics", label: "A private iCal address", note: "Read-only: Google, Outlook or iCloud busy times, by the calendar's secret address.", disabled: !view.ics },
@@ -155,6 +158,17 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
               Two-way Google Calendar sync for hosts is not switched on on Marktmorgen yet: it needs a permission Google has to approve
               for our app first. Until then, add your Google Calendar&apos;s secret address in iCal format below, and your busy times are read from it.
             </p>
+          ) : view.googleUnread ? (
+            <>
+              <p className="notice notice-warn mt-3" role="status">
+                We could not check your Google Calendar connection just now. It may still be connected, so you do not need to
+                connect again. Nothing was changed. Check again in a moment.
+              </p>
+              <a href={`/studio/calendar${pin}`} className="btn btn-secondary btn-sm mt-4">
+                <Icon name="refresh" size={16} />
+                Check your Google connection again
+              </a>
+            </>
           ) : view.google ? (
             <>
               <p className="mt-2 text-sm text-ink-soft">

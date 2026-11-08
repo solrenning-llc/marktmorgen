@@ -47,6 +47,7 @@ import { mintReviewLink, provePurchase } from "@/lib/review-proof";
 import { readReview, reviewId } from "@/lib/reviews";
 import { REVIEW_SITES, parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { type Store, storeForHandle } from "@/lib/store";
+import { storeOrGone } from "@/lib/store-gone";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { noteForErasure } from "@/lib/erasure-index";
@@ -263,10 +264,11 @@ export async function sendReviewRequests(
       await drop(member);
       continue;
     }
-    // Only a nil answer is "no store" (CX-123 rule 24). A read that threw is not known: the order waits, as it does when
-    // Stripe cannot be read, and the failure is not kept for the run, so the store's other orders are read again.
+    // Only an exact nil (or a released name) at the store's address is "no store" (CX-123 rule 24, lib/store-gone.ts). A
+    // read that threw or answered in another shape is not known: the order waits, as it does when Stripe cannot be read,
+    // and the failure is not kept for the run, so the store's other orders are read again.
     if (!stores.has(entry.handle)) {
-      const loaded = await load(entry.handle).then(
+      const loaded = await storeOrGone(load, entry.handle).then(
         (found) => ({ found }),
         (error: unknown) => {
           console.error("reading a store for a review request failed", error);

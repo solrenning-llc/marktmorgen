@@ -71,7 +71,7 @@ import { toldOf } from "@/lib/closing-buyers";
 import { paidCheckoutsOf } from "@/lib/person-copy-stripe";
 import { readGift } from "@/lib/gifts";
 import { isGroupJob, readGroup } from "@/lib/group-buy";
-import { boughtForCopy, packagesKey } from "@/lib/call-packages";
+import { type Bought, packageKeys, packagesKey } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
 import { heldPaymentsOf } from "@/lib/closing-holds";
@@ -180,6 +180,37 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]);
 
 /** One reader per copied module, each only reading. */
+// A Stripe Checkout Session id, the same shape lib/call-packages.ts keeps a package under.
+const PACKAGE_CHECKOUT = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
+
+/**
+ * A call package's record for the data copy, read exactly (CX-123 rule 24) from the same key
+ * lib/call-packages.ts writes (packageKeys(checkout, "")[0]): the record is the only place that
+ * says whose package it is, so one that cannot be read is never taken as somebody else's. Null
+ * only when GET answered null (the record ran out); a checkout id that is not one, a reply of
+ * another shape, text that is not a JSON object or a record with no buyer's address throws
+ * UnknownReplyError, and the copy is made again rather than handed over without it. Kept here,
+ * not in lib/call-packages.ts, because only the copy reads a package this strictly.
+ */
+async function packageForCopy(checkout: string): Promise<Bought | null> {
+  if (!PACKAGE_CHECKOUT.test(checkout)) throw new UnknownReplyError("a call package's checkout id");
+  const replies = repliesFor(await redisPipeline([["GET", packageKeys(checkout, "")[0]]]), 1);
+  if (!replies) throw new UnknownReplyError("a call package");
+  const [raw] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a call package");
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("a call package");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value) || typeof (value as { e?: unknown }).e !== "string") {
+    throw new UnknownReplyError("a call package");
+  }
+  return value as Bought;
+}
+
 export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/shipment-mail-outbox.ts": s => shipmentMailOf(s.statsId, s.email),
   "lib/order-confirmation-outbox.ts": s => orderConfirmationMailOf(s.statsId, s.email),
@@ -411,9 +442,9 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     if (!checkouts) throw new UnknownReplyError("the store's call packages");
     const out: unknown[] = [];
     // Each listed package read exactly too: one that cannot be read, or a member that is not a checkout id, fails
-    // the copy, never taken as somebody else's (boughtForCopy). A record that ran out is none.
+    // the copy, never taken as somebody else's (packageForCopy). A record that ran out is none.
     for (const checkout of checkouts) {
-      const bought = await boughtForCopy(checkout);
+      const bought = await packageForCopy(checkout);
       // The booking link's token is a key, left out: they have it in the email that sent it.
       if (bought && same(bought.e, s.email)) out.push({ product: bought.p, sessions: bought.total, bought: iso(bought.at), bookBy: iso(bought.until), booked: bought.holds });
     }

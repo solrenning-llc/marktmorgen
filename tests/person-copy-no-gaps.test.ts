@@ -97,7 +97,7 @@ for (const [label, reply] of [
 }
 
 // A package listed for the store whose record cannot be read: the record is the only place that says whose it is,
-// so it is never taken as "not theirs" (lib/call-packages.ts, boughtForCopy).
+// so it is never taken as "not theirs" (lib/person-copy.ts, packageForCopy).
 const listed = "cs_test_nogapspackage00";
 const packageRead = (c: unknown[]) => c[0] === "GET" && c[1] === `nl:pkg:${listed}`;
 const packageRecord = (e: string) => JSON.stringify({ s: "x", h: "nogapscopy", p: "synthetic_call", e, total: 3, at: 1_700_000_000, until: 0, token: "t", holds: [] });

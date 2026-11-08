@@ -20,7 +20,6 @@
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -85,34 +84,6 @@ export async function readBought(checkout: string): Promise<Bought | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * A package's record for the person's data copy (lib/person-copy.ts), read
- * exactly (CX-123 rule 24): the record is the only place that says whose
- * package it is, so one that cannot be read is never taken as somebody
- * else's. Null only when GET answered null (the record ran out); a checkout
- * id that is not one, a reply of another shape, text that is not a JSON
- * object or a record with no buyer's address throws UnknownReplyError, and
- * the copy is made again rather than handed over without it.
- */
-export async function boughtForCopy(checkout: string): Promise<Bought | null> {
-  if (!SESSION_ID.test(checkout)) throw new UnknownReplyError("a call package's checkout id");
-  const replies = repliesFor(await redisPipeline([["GET", pkgKey(checkout)]]), 1);
-  if (!replies) throw new UnknownReplyError("a call package");
-  const [raw] = replies;
-  if (raw === null) return null;
-  if (typeof raw !== "string") throw new UnknownReplyError("a call package");
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    throw new UnknownReplyError("a call package");
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value) || typeof (value as { e?: unknown }).e !== "string") {
-    throw new UnknownReplyError("a call package");
-  }
-  return value as Bought;
 }
 
 export async function boughtByToken(token: string): Promise<{ checkout: string; bought: Bought } | null> {

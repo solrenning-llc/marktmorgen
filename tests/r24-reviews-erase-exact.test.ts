@@ -9,7 +9,8 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deleteReview, forgetReviewsPerson, reviewId, saveReview } from "@/lib/reviews";
+import { deleteReview, forgetReviewsPerson, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
+import { reviewPhotoPath } from "@/lib/review-photo";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { dataUsed } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
@@ -138,14 +139,94 @@ for (const [name, mangle] of [
   ["a ZREM as 2", (r: unknown[]) => r.map((x, i) => (i === 1 ? 2 : x))],
   ["the summary's SET as null", (r: unknown[]) => r.map((x) => (x === "OK" ? null : x))],
 ] as [string, (r: unknown[]) => unknown][]) {
-  test(`a deletion answered with ${name}: thrown as unknown, no room given back, never counted as erased`, async () => {
+  test(`a deletion that ran but was answered with ${name}: read again, confirmed gone, "deleted", no room given back`, async () => {
     const { id1 } = await setup();
     const before = await used();
     mangleOnce(deletesReview, mangle);
-    await assert.rejects(deleteReview(STATS, P1, id1, ROOM), unknown);
-    assert.equal(await used(), before);
+    assert.equal(await deleteReview(STATS, P1, id1, ROOM), "deleted");
+    assert.equal(stored(P1, id1), null);
+    assert.equal(await used(), before, "only an exact 1 from its own HDEL gives the room back");
   });
 }
+
+/** A photo on the person's review of P1, as the buyer's own photo is kept (lib/review-photo.ts). */
+async function withPhoto(id1: string): Promise<string> {
+  const path = await reviewPhotoPath("erase-owner@example.test", "image/jpeg");
+  const put = await setReviewPhoto(STATS, P1, id1, { path, width: 1200, height: 900 });
+  assert.equal(typeof put, "object");
+  return path;
+}
+
+/** One ZREM reply of the delete request turned into text (Claude 2's probe on #3224): the request ran, its reply is unknown. */
+const zremAsText = (r: unknown[]) => r.map((x, i) => (i === 1 ? String(x) : x));
+
+/** The erasure as lib/person-erasure.ts runs it, then once more: every photo path it was handed, on either run. */
+async function eraseTwice(): Promise<{ first: unknown; handed: Set<string> }> {
+  const files: string[] = [];
+  const handed = new Set<string>();
+  const forget = forgetReviewsPerson as (...args: unknown[]) => Promise<{ records: number; photos: string[] }>;
+  const first = await forget(STATS, [P1], BUYER, ROOM, files).catch((error: unknown) => error);
+  if (!(first instanceof Error)) for (const path of first.photos) handed.add(path);
+  for (const path of files) handed.add(path);
+  redis.pipeline = realPipeline;
+  const again = await forget(STATS, [P1], BUYER, ROOM, files);
+  for (const path of [...again.photos, ...files]) handed.add(path);
+  return { first, handed };
+}
+
+test("the erasure's delete ran but its reply is unknown: the photo path still reaches the eraser, the room is not given back", async () => {
+  const { id1 } = await setup();
+  const path = await withPhoto(id1);
+  const before = await used();
+  mangleOnce(deletesReview, zremAsText);
+  const { handed } = await eraseTwice();
+  assert.equal(stored(P1, id1), null);
+  assert.ok(handed.has(path), "the photo is handed to the eraser on the first run or the retry, never lost");
+  assert.equal(await used(), before);
+});
+
+test("the buyer's delete ran but its reply is unknown: \"deleted\" (so the route drops the photo), the room is not given back", async () => {
+  const { id1 } = await setup();
+  await withPhoto(id1);
+  const before = await used();
+  mangleOnce(deletesReview, zremAsText);
+  // app/api/store/review/route.ts drops the review's photo exactly when this answers "deleted".
+  assert.equal(await deleteReview(STATS, P1, id1, ROOM), "deleted");
+  assert.equal(stored(P1, id1), null);
+  assert.equal(await used(), before);
+});
+
+test("a delete answered oddly that did not run: read again, still there, thrown as unknown, the review and its room kept", async () => {
+  const { id1 } = await setup();
+  const before = await used();
+  answerOnce(deletesReview, ["1"]);
+  await assert.rejects(deleteReview(STATS, P1, id1, ROOM), unknown);
+  assert.notEqual(stored(P1, id1), null);
+  assert.equal(await used(), before);
+});
+
+test("the delete's reply and its read again both unknown: thrown, yet the erasure was handed the photo before it tried", async () => {
+  const { id1 } = await setup();
+  const path = await withPhoto(id1);
+  const before = await used();
+  let step: "delete" | "read again" | "done" = "delete";
+  redis.pipeline = (async (commands: Command[]) => {
+    if (step === "read again" && readsReviews(commands)) {
+      step = "done";
+      return [42] as unknown[];
+    }
+    const replies = await realPipeline(commands);
+    if (step === "delete" && deletesReview(commands)) {
+      step = "read again";
+      return zremAsText(replies) as unknown[];
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  const { first, handed } = await eraseTwice();
+  assert.ok(unknown(first), "never said as done on an unknown read");
+  assert.ok(handed.has(path));
+  assert.equal(await used(), before);
+});
 
 for (const [name, shape] of [
   ["[undefined]", [undefined]],

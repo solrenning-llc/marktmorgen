@@ -1,0 +1,68 @@
+
+FILE z-2924-operation-id-removal.proof.ts
+{"originalCompletion":"before remove","final":[]}
+{"originalCompletion":"after remove","final":[1200]}
+{"valueBytes":154,"oldFieldAndValue":162,"newFieldAndValue":186,"extra":24,"withBookkeeping":314,"registryPerEntry":512}
+{"callerVolume":{"legacy":{"commands":6,"writes":["HSET"],"requestBytes":406,"replyBytes":140},"fresh":{"commands":6,"writes":["HSETNX"],"requestBytes":432,"replyBytes":164},"retry":{"commands":4,"writes":[],"requestBytes":188,"replyBytes":302}},"bytes":"JSON batches/replies only; excludes REST envelope, headers and TLS"}
+✔ a confirmed removal stays removed: original completion before removal (11.89666ms)
+✖ a confirmed removal stays removed: original completion after removal (3.226435ms)
+✔ operation identity adds 24 field bytes; one maximally shaped entry stays inside the existing 512-byte allowance (0.563101ms)
+✔ measured caller command counts: HSETNX replaces HSET and an already kept operation sends no write (5.888002ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31.716738
+
+✖ failing tests:
+
+test at [stdin]:10353:29
+✖ a confirmed removal stays removed: original completion after removal (3.226435ms)
+  AssertionError [ERR_ASSERTION]: the confirmed removal must not be silently reversed by the first add
+  + actual - expected
+
+  + [
+  +   1200
+  + ]
+  - []
+
+      at TestContext.<anonymous> ([stdin]:10377:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":48,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: synthetic first completion unresolved
+    at store.pipeline ([stdin]:10359:15)
+    at redisPipeline ([stdin]:3454:41)
+    at keptOnce ([stdin]:10297:25)
+    at addSpend ([stdin]:10318:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async waitForActual (node:assert:646:5)
+    at async strict.rejects (node:assert:769:25)
+    at async TestContext.<anonymous> ([stdin]:10364:7)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+writing an ad spend line answered no receipt Error: synthetic first completion unresolved
+    at store.pipeline ([stdin]:10359:15)
+    at redisPipeline ([stdin]:3454:41)
+    at keptOnce ([stdin]:10297:25)
+    at addSpend ([stdin]:10318:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async waitForActual (node:assert:646:5)
+    at async strict.rejects (node:assert:769:25)
+    at async TestContext.<anonymous> ([stdin]:10364:7)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z2924-op-txtJpo

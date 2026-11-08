@@ -1,0 +1,413 @@
+
+FILE z-2924-operation-id-author-red.proof.ts
+✖ Codex Z's scenario with the operation id: a late first write and a retry of the same add leave exactly one line (16.958675ms)
+✖ the first write landed and its receipt was lost: the retry of the same add finds it and writes nothing (1.422023ms)
+✖ the same add sent twice (a double click, a replayed request) is one line (2.91749ms)
+✖ the write of an id already kept by a concurrent try answers [0, 1]: saved, once (1.69495ms)
+✖ with an operation id, an empty receipt is unknown, never saved, never undone (1.172678ms)
+✖ with an operation id, a short receipt is unknown, never saved, never undone (0.827214ms)
+✖ with an operation id, a write count of 2 is unknown, never saved, never undone (1.012432ms)
+✖ with an operation id, a write count as text is unknown, never saved, never undone (0.610637ms)
+✖ with an operation id, an expiry not set is unknown, never saved, never undone (0.744513ms)
+✖ with an operation id, not a list is unknown, never saved, never undone (0.90632ms)
+✔ control: two adds with two operation ids are two lines (1.348858ms)
+✔ control: no id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (1.096586ms)
+✔ control: an id in capitals keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.989034ms)
+✔ control: a short id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.90158ms)
+✔ control: a long id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (1.005494ms)
+✔ control: a number keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.651007ms)
+✖ a line kept under an operation id is read back and can be removed by it (1.129997ms)
+✖ the route passes the add's operation id: a late first write and the retry through the route are one line (34.355382ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 6
+ℹ fail 12
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 82.621223
+
+✖ failing tests:
+
+test at [stdin]:50452:27
+✖ Codex Z's scenario with the operation id: a late first write and a retry of the same add leave exactly one line (16.958675ms)
+  AssertionError [ERR_ASSERTION]: one expense stays one line when the first write lands late
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> ([stdin]:50461:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50464:27
+✖ the first write landed and its receipt was lost: the retry of the same add finds it and writes nothing (1.422023ms)
+  AssertionError [ERR_ASSERTION]: a lost receipt is never 'nothing saved' under an id a retry shares
+  + actual - expected
+
+  + {
+  +   ok: false,
+  +   reason: 'unavailable'
+  + }
+  - 'unknown'
+
+      at TestContext.<anonymous> ([stdin]:50470:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50482:27
+✖ the same add sent twice (a double click, a replayed request) is one line (2.91749ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> ([stdin]:50486:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50490:27
+✖ the write of an id already kept by a concurrent try answers [0, 1]: saved, once (1.69495ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> ([stdin]:50497:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50508:29
+✖ with an operation id, an empty receipt is unknown, never saved, never undone (1.172678ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   ok: false,
+  +   reason: 'unavailable'
+  + }
+  - 'unknown'
+
+      at TestContext.<anonymous> ([stdin]:50514:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50508:29
+✖ with an operation id, a short receipt is unknown, never saved, never undone (0.827214ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   ok: false,
+  +   reason: 'unavailable'
+  + }
+  - 'unknown'
+
+      at TestContext.<anonymous> ([stdin]:50514:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50508:29
+✖ with an operation id, a write count of 2 is unknown, never saved, never undone (1.012432ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   ok: false,
+  +   reason: 'unavailable'
+  + }
+  - 'unknown'
+
+      at TestContext.<anonymous> ([stdin]:50514:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50508:29
+✖ with an operation id, a write count as text is unknown, never saved, never undone (0.610637ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   ok: false,
+  +   reason: 'unavailable'
+  + }
+  - 'unknown'
+
+      at TestContext.<anonymous> ([stdin]:50514:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50508:29
+✖ with an operation id, an expiry not set is unknown, never saved, never undone (0.744513ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   ok: false,
+  +   reason: 'unavailable'
+  + }
+  - 'unknown'
+
+      at TestContext.<anonymous> ([stdin]:50514:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50508:29
+✖ with an operation id, not a list is unknown, never saved, never undone (0.90632ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + {
+  +   ok: false,
+  +   reason: 'unavailable'
+  + }
+  - 'unknown'
+
+      at TestContext.<anonymous> ([stdin]:50514:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50535:27
+✖ a line kept under an operation id is read back and can be removed by it (1.129997ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+  +   '281c5dfb'
+  -   '0123456789abcdef0123456789abcdef'
+    ]
+
+      at TestContext.<anonymous> ([stdin]:50539:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:50553:27
+✖ the route passes the add's operation id: a late first write and the retry through the route are one line (34.355382ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> ([stdin]:50566:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":199,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: synthetic: the client gave up; whether the write completes is unresolved
+    at [stdin]:50448:11
+    at store.pipeline ([stdin]:50437:61)
+    at redisPipeline ([stdin]:9185:41)
+    at written ([stdin]:49688:25)
+    at addSpend ([stdin]:49717:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async withWrite ([stdin]:50439:12)
+    at async heldTry ([stdin]:50446:19)
+    at async TestContext.<anonymous> ([stdin]:50454:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+writing an ad spend line answered no receipt Error: synthetic: the write was applied and its receipt lost
+    at addSpend ([stdin]:50468:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+reading the ad spend back after adding failed UnknownReplyError: Redis answered the ad spend typed in an unknown shape
+    at keptSpends ([stdin]:49672:22)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async typedSpends ([stdin]:49668:11)
+    at async Promise.all (index 0)
+    at async readSpendLines ([stdin]:49677:25)
+    at async addSpend ([stdin]:49723:27)
+    at async withWrite ([stdin]:50439:12)
+    at async TestContext.<anonymous> ([stdin]:50492:18)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic: the client gave up; whether the write completes is unresolved
+    at post.action ([stdin]:50559:11)
+    at store.pipeline ([stdin]:50437:61)
+    at redisPipeline ([stdin]:9185:41)
+    at written ([stdin]:49688:25)
+    at addSpend ([stdin]:49717:14)
+    at async POST ([stdin]:50394:21)
+    at async withWrite ([stdin]:50439:12)
+    at async TestContext.<anonymous> ([stdin]:50557:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 1 null
+
+FILE z-2924-operation-id-derived.proof.ts
+{"phase":"before delayed completion","threw":true}
+{"phase":"after retry and delayed completion","kept":[1200,1200]}
+✔ control: a healthy write records one expense (8.471337ms)
+✔ control: failure before dispatch leaves nothing and a healthy retry records one (3.066229ms)
+✔ cleanup count zero cannot prove a still-pending write will never apply (0.96381ms)
+✖ a pending first write completing after cleanup and retry must not duplicate the expense (2.929506ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.353761
+
+✖ failing tests:
+
+test at [stdin]:10367:27
+✖ a pending first write completing after cleanup and retry must not duplicate the expense (2.929506ms)
+  AssertionError [ERR_ASSERTION]: one expense remains one even when the first transport completes late
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> ([stdin]:10376:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":32,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10333:13)
+    at redisPipeline ([stdin]:3454:41)
+    at written ([stdin]:10273:25)
+    at addSpend ([stdin]:10302:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10338:14)
+    at async TestContext.<anonymous> ([stdin]:10353:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10333:13)
+    at redisPipeline ([stdin]:3454:41)
+    at written ([stdin]:10273:25)
+    at addSpend ([stdin]:10302:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10338:14)
+    at async TestContext.<anonymous> ([stdin]:10361:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10333:13)
+    at redisPipeline ([stdin]:3454:41)
+    at written ([stdin]:10273:25)
+    at addSpend ([stdin]:10302:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10338:14)
+    at async TestContext.<anonymous> ([stdin]:10369:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z2924-op-miUWG0

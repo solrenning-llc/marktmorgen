@@ -1,0 +1,327 @@
+
+FILE z-2924-operation-id-original-ack.proof.ts
+{"firstFailed":false,"beforeRetry":[],"afterRetry":[1200],"total":1200}
+{"ok":false,"kept":[]}
+✔ control: a healthy add records one real line (8.718711ms)
+✔ a lost receipt after applying a write must not make the same retry record the expense twice (6.515141ms)
+✔ a write not applied with an unknown empty receipt must not be reported saved (1.165449ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28.54596
+Z_VOLUME {"runs":22,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: Synthetic applied write receipt lost
+    at store.pipeline ([stdin]:10358:54)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async written ([stdin]:10274:19)
+    at async addSpend ([stdin]:10322:10)
+    at async TestContext.<anonymous> ([stdin]:10362:5)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE z-2924-operation-id-original-deferred.proof.ts
+{"phase":"before delayed completion","threw":true}
+{"phase":"after retry and delayed completion","kept":[1200,1200]}
+✔ control: a healthy write records one expense (9.423726ms)
+✔ control: failure before dispatch leaves nothing and a healthy retry records one (3.919472ms)
+✔ cleanup count zero cannot prove a still-pending write will never apply (1.822295ms)
+✖ a pending first write completing after cleanup and retry must not duplicate the expense (6.920982ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31.887206
+
+✖ failing tests:
+
+test at [stdin]:10388:27
+✖ a pending first write completing after cleanup and retry must not duplicate the expense (6.920982ms)
+  AssertionError [ERR_ASSERTION]: one expense remains one even when the first transport completes late
+  + actual - expected
+
+    [
+      1200,
+  +   1200
+    ]
+
+      at TestContext.<anonymous> ([stdin]:10397:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [Array],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":32,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10354:13)
+    at redisPipeline ([stdin]:3454:41)
+    at written ([stdin]:10274:25)
+    at addSpend ([stdin]:10322:16)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10359:14)
+    at async TestContext.<anonymous> ([stdin]:10374:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10354:13)
+    at redisPipeline ([stdin]:3454:41)
+    at written ([stdin]:10274:25)
+    at addSpend ([stdin]:10322:16)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10359:14)
+    at async TestContext.<anonymous> ([stdin]:10382:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10354:13)
+    at redisPipeline ([stdin]:3454:41)
+    at written ([stdin]:10274:25)
+    at addSpend ([stdin]:10322:16)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10359:14)
+    at async TestContext.<anonymous> ([stdin]:10390:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 1 null
+
+FILE z-2924-operation-id-author-red.proof.ts
+✔ Codex Z's scenario with the operation id: a late first write and a retry of the same add leave exactly one line (19.058206ms)
+✔ the first write landed and its receipt was lost: the retry of the same add finds it and writes nothing (2.332331ms)
+✔ the same add sent twice (a double click, a replayed request) is one line (2.493134ms)
+✔ the write of an id already kept by a concurrent try answers [0, 1]: saved, once (3.756219ms)
+✔ with an operation id, an empty receipt is unknown, never saved, never undone (3.614119ms)
+✔ with an operation id, a short receipt is unknown, never saved, never undone (0.575389ms)
+✔ with an operation id, a write count of 2 is unknown, never saved, never undone (0.361244ms)
+✔ with an operation id, a write count as text is unknown, never saved, never undone (0.478545ms)
+✔ with an operation id, an expiry not set is unknown, never saved, never undone (0.438068ms)
+✔ with an operation id, not a list is unknown, never saved, never undone (0.524878ms)
+✔ control: two adds with two operation ids are two lines (3.680488ms)
+✔ control: no id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (1.306568ms)
+✔ control: an id in capitals keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.436053ms)
+✔ control: a short id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.390042ms)
+✔ control: a long id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.832973ms)
+✔ control: a number keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.480473ms)
+✔ a line kept under an operation id is read back and can be removed by it (0.508406ms)
+✔ the route passes the add's operation id: a late first write and the retry through the route are one line (48.75351ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 116.198113
+Z_VOLUME {"runs":251,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: synthetic: the client gave up; whether the write completes is unresolved
+    at [stdin]:50469:11
+    at store.pipeline ([stdin]:50458:61)
+    at redisPipeline ([stdin]:9185:41)
+    at keptOnce ([stdin]:49712:25)
+    at addSpend ([stdin]:49733:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async withWrite ([stdin]:50460:12)
+    at async heldTry ([stdin]:50467:19)
+    at async TestContext.<anonymous> ([stdin]:50475:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+writing an ad spend line answered no receipt Error: synthetic: the write was applied and its receipt lost
+    at addSpend ([stdin]:50489:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+writing an ad spend line answered no receipt Error: synthetic: the client gave up; whether the write completes is unresolved
+    at post.action ([stdin]:50580:11)
+    at store.pipeline ([stdin]:50458:61)
+    at redisPipeline ([stdin]:9185:41)
+    at keptOnce ([stdin]:49712:25)
+    at addSpend ([stdin]:49733:49)
+    at async POST ([stdin]:50415:21)
+    at async withWrite ([stdin]:50460:12)
+    at async TestContext.<anonymous> ([stdin]:50578:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE ad-spend-operation-id.test.ts
+✔ Codex Z's scenario with the operation id: a late first write and a retry of the same add leave exactly one line (10.790324ms)
+✔ the first write landed and its receipt was lost: the retry of the same add finds it and writes nothing (2.554047ms)
+✔ the same add sent twice (a double click, a replayed request) is one line (1.178355ms)
+✔ the write of an id already kept by a concurrent try answers [0, 1]: saved, once (0.919621ms)
+✔ with an operation id, an empty receipt is unknown, never saved, never undone (1.130491ms)
+✔ with an operation id, a short receipt is unknown, never saved, never undone (1.096313ms)
+✔ with an operation id, a write count of 2 is unknown, never saved, never undone (0.496966ms)
+✔ with an operation id, a write count as text is unknown, never saved, never undone (0.718203ms)
+✔ with an operation id, an expiry not set is unknown, never saved, never undone (0.665799ms)
+✔ with an operation id, not a list is unknown, never saved, never undone (0.599651ms)
+✔ control: two adds with two operation ids are two lines (2.548833ms)
+✔ control: no id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (1.628312ms)
+✔ control: an id in capitals keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.744731ms)
+✔ control: a short id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.51624ms)
+✔ control: a long id keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.862232ms)
+✔ control: a number keeps the earlier behavior (a fresh id chosen on the server, never the one sent) (0.799416ms)
+✔ a line kept under an operation id is read back and can be removed by it (0.577729ms)
+✔ the route passes the add's operation id: a late first write and the retry through the route are one line (37.869291ms)
+✔ the editor keeps one operation id across the tries of one add and makes a new one for a new add (1.153631ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 78.646635
+Z_VOLUME {"runs":251,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: synthetic: the client gave up; whether the write completes is unresolved
+    at [stdin]:51195:11
+    at store.pipeline ([stdin]:51184:61)
+    at redisPipeline ([stdin]:9226:41)
+    at keptOnce ([stdin]:50438:25)
+    at addSpend ([stdin]:50459:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async withWrite ([stdin]:51186:12)
+    at async heldTry ([stdin]:51193:19)
+    at async TestContext.<anonymous> ([stdin]:51201:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+writing an ad spend line answered no receipt Error: synthetic: the write was applied and its receipt lost
+    at addSpend ([stdin]:51215:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+writing an ad spend line answered no receipt Error: synthetic: the client gave up; whether the write completes is unresolved
+    at post.action ([stdin]:51306:11)
+    at store.pipeline ([stdin]:51184:61)
+    at redisPipeline ([stdin]:9226:41)
+    at keptOnce ([stdin]:50438:25)
+    at addSpend ([stdin]:50459:49)
+    at async POST ([stdin]:51141:21)
+    at async withWrite ([stdin]:51186:12)
+    at async TestContext.<anonymous> ([stdin]:51304:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE z-2924-operation-id-derived.proof.ts
+{"phase":"before delayed completion","threw":true}
+{"phase":"after retry and delayed completion","kept":[1200]}
+✔ control: a healthy write records one expense (9.482616ms)
+✔ control: failure before dispatch leaves nothing and a healthy retry records one (2.286133ms)
+✔ cleanup count zero cannot prove a still-pending write will never apply (1.60448ms)
+✔ a pending first write completing after cleanup and retry must not duplicate the expense (0.920339ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20.985544
+Z_VOLUME {"runs":29,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10354:13)
+    at redisPipeline ([stdin]:3454:41)
+    at keptOnce ([stdin]:10297:25)
+    at addSpend ([stdin]:10318:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10359:14)
+    at async TestContext.<anonymous> ([stdin]:10374:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10354:13)
+    at redisPipeline ([stdin]:3454:41)
+    at keptOnce ([stdin]:10297:25)
+    at addSpend ([stdin]:10318:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10359:14)
+    at async TestContext.<anonymous> ([stdin]:10382:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+writing an ad spend line answered no receipt Error: synthetic client transport failed; command completion is unresolved
+    at store.pipeline ([stdin]:10354:13)
+    at redisPipeline ([stdin]:3454:41)
+    at keptOnce ([stdin]:10297:25)
+    at addSpend ([stdin]:10318:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async interrupted ([stdin]:10359:14)
+    at async TestContext.<anonymous> ([stdin]:10390:17)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE z-2924-operation-id-removal.proof.ts
+{"originalCompletion":"before remove","final":[]}
+{"originalCompletion":"after remove","final":[1200]}
+{"valueBytes":154,"oldFieldAndValue":162,"newFieldAndValue":186,"extra":24,"withBookkeeping":314,"registryPerEntry":512}
+✔ a confirmed removal stays removed: original completion before removal (10.7305ms)
+✖ a confirmed removal stays removed: original completion after removal (2.275015ms)
+✔ operation identity adds 24 field bytes; one maximally shaped entry stays inside the existing 512-byte allowance (0.864815ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 21.951669
+
+✖ failing tests:
+
+test at [stdin]:10353:29
+✖ a confirmed removal stays removed: original completion after removal (2.275015ms)
+  AssertionError [ERR_ASSERTION]: the confirmed removal must not be silently reversed by the first add
+  + actual - expected
+
+  + [
+  +   1200
+  + ]
+  - []
+
+      at TestContext.<anonymous> ([stdin]:10377:31)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Array],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":32,"mocks":0,"over":false}
+writing an ad spend line answered no receipt Error: synthetic first completion unresolved
+    at store.pipeline ([stdin]:10359:15)
+    at redisPipeline ([stdin]:3454:41)
+    at keptOnce ([stdin]:10297:25)
+    at addSpend ([stdin]:10318:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async waitForActual (node:assert:646:5)
+    at async strict.rejects (node:assert:769:25)
+    at async TestContext.<anonymous> ([stdin]:10364:7)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+writing an ad spend line answered no receipt Error: synthetic first completion unresolved
+    at store.pipeline ([stdin]:10359:15)
+    at redisPipeline ([stdin]:3454:41)
+    at keptOnce ([stdin]:10297:25)
+    at addSpend ([stdin]:10318:49)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async waitForActual (node:assert:646:5)
+    at async strict.rejects (node:assert:769:25)
+    at async TestContext.<anonymous> ([stdin]:10364:7)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z2924-op-Cr7IcT

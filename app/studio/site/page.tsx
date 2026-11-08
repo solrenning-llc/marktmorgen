@@ -9,7 +9,7 @@ import { StudioEmptyState } from "@/components/empty-state";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { photoUrl } from "@/lib/photo-limits";
 import { EMPTY_PAGE, MAX_BLOCKS } from "@/lib/sales-page";
-import { readPage } from "@/lib/sales-page-store";
+import { readPageExact } from "@/lib/sales-page-store";
 import { PageEditor } from "@/components/page-editor";
 import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
@@ -43,7 +43,13 @@ export default async function StudioSitePage({ searchParams }: Params) {
   const pages = store.sitePages;
   const asked = typeof query.page === "string" ? query.page : "";
   const selected = pages.find((p) => p.id === asked) ?? pages[0] ?? null;
-  const page = selected ? await readPage(store.statsId, siteKey(selected.id)).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : null;
+  // Rule 23: the chosen page is read exactly. Only Redis's own "no such key" is a new, empty page; a reply that cannot be
+  // read is undefined, so the editor is not drawn and nothing can be saved over blocks nobody could read.
+  const page = selected
+    ? store.statsId
+      ? await readPageExact(store.statsId, siteKey(selected.id)).then((kept) => kept.page ?? { ...EMPTY_PAGE, blocks: [] }).catch(() => undefined)
+      : { ...EMPTY_PAGE, blocks: [] }
+    : null;
   // The products a page's buttons may lead to: published ones.
   const products = store.catalog.head.filter((p) => !p.hidden).map((p) => ({ id: p.id, title: p.title }));
   const base = storeBase(store);
@@ -75,6 +81,11 @@ export default async function StudioSitePage({ searchParams }: Params) {
           <div className="mt-8 grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,17rem)_minmax(0,1fr)]">
             <SitePagesList pages={pages} selected={selected?.id ?? null} sid={store.sid} />
             <div className="min-w-0">
+              {selected && page === undefined ? (
+                <p role="status" className="notice">
+                  This page could not be read just now. Reload in a moment; nothing was changed, and its blocks are still kept.
+                </p>
+              ) : null}
               {selected && page ? (
                 <>
                   <SitePageSettings key={`settings-${selected.id}-${selected.slug}-${selected.title}`} page={selected} pages={pages} products={products} base={base} sid={store.sid} />
@@ -107,7 +118,7 @@ export default async function StudioSitePage({ searchParams }: Params) {
                     />
                   </AiOn>
                 </>
-              ) : (
+              ) : selected ? null : (
                 <StudioEmptyState title="No pages yet" body="Pick a starter from the list, such as About or Start here, or type a title of your own." action={{ href: "#new-page-title", label: "Start a page" }} level={2} className="card p-6 sm:p-8" />
               )}
             </div>

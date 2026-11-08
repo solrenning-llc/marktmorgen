@@ -61,6 +61,12 @@ const UNKNOWN: ReadonlyArray<readonly [string, string]> = [
   ["minimum_deadline an array", shaped("active", { summary: { minimum_deadline: [] } })],
   ["minimum_deadline without status", shaped("active", { summary: { minimum_deadline: {} } })],
   ["minimum_deadline status a number", shaped("active", { summary: { minimum_deadline: { status: 3 } } })],
+  // Codex Z on #3311 (review 5820295862): a status that is not one Stripe documents is not known either.
+  ["card status a single space", shaped(" ", { summary: {} })],
+  ["card status a value Stripe does not document", shaped("future_unknown", { summary: {} })],
+  ["card status in other letter case", shaped("Active", { summary: {} })],
+  ["deadline status a value Stripe does not document", shaped("active", { summary: { minimum_deadline: { status: "someday_due" } } })],
+  ["deadline status empty", shaped("active", { summary: { minimum_deadline: { status: "" } } })],
   ["only an id", JSON.stringify({ id: ACCOUNT })],
   ["empty object", "{}"],
   ["JSON null", "null"],
@@ -80,6 +86,7 @@ const HEALTHY: ReadonlyArray<readonly [string, string, { chargesEnabled: boolean
   ["active, summary null (confirmed none)", shaped("active", { summary: null }), { chargesEnabled: true, detailsSubmitted: true }],
   ["active, requirements null (confirmed none)", shaped("active", null), { chargesEnabled: true, detailsSubmitted: true }],
   ["inactive, nothing due", shaped("inactive", { summary: {} }), { chargesEnabled: false, detailsSubmitted: true }],
+  ["unsupported, nothing due", shaped("unsupported", { summary: {} }), { chargesEnabled: false, detailsSubmitted: true }],
 ];
 
 async function read(): Promise<string> {

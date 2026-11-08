@@ -33,7 +33,7 @@ is("the page imports the studio empty state", /import \{[^}]*\bStudioEmptyState\
 is("the page imports how a product's sale page is addressed", /import \{[^}]*\bproductSegment\b[^}]*\} from "@\/lib\/product-slug";/.test(course), true);
 is(
   "no students: the studio empty state, an h3 under the section's h2",
-  course.includes('{students.length === 0 ? (\n            <StudioEmptyState\n              level={3}\n              compact\n              className="mt-5"\n              title="No students yet"'),
+  course.includes(' students.length === 0 ? (\n            <StudioEmptyState\n              level={3}\n              compact\n              className="mt-5"\n              title="No students yet"'),
   true,
 );
 is(
@@ -52,7 +52,7 @@ is("no bare sentence left where nobody opened it", course.includes(">Nobody has 
 part("The course's completions: no certificate issued");
 is(
   "no certificate: the studio empty state, an h3 like the list's own heading",
-  course.includes('{certificates.list.length === 0 ? (\n            <StudioEmptyState\n              level={3}\n              compact\n              className="mt-3"\n              title={course.certificate ? "No certificates yet" : "Certificates are off"}'),
+  course.includes(' certificates.list.length === 0 ? (\n            <StudioEmptyState\n              level={3}\n              compact\n              className="mt-3"\n              title={course.certificate ? "No certificates yet" : "Certificates are off"}'),
   true,
 );
 is(
@@ -67,7 +67,7 @@ part("The Discord page: nobody joined yet");
 is("the component imports the studio empty state", /import \{[^}]*\bStudioEmptyState\b[^}]*\} from "@\/components\/empty-state";/.test(discord), true);
 is(
   "nobody joined: the studio empty state, an h3 under the section's h2, its sentence kept, no action",
-  discord.includes('{members.length === 0 ? (\n          <StudioEmptyState\n            level={3}\n            compact\n            className="mt-5"\n            title="Nobody has joined yet"\n            body="Buyers see “Join the Discord” after paying, and on their orders."\n          />'),
+  discord.includes(' members.length === 0 ? (\n          <StudioEmptyState\n            level={3}\n            compact\n            className="mt-5"\n            title="Nobody has joined yet"\n            body="Buyers see “Join the Discord” after paying, and on their orders."\n          />'),
   true,
 );
 is("the section's heading it sits under is an h2", discord.includes('<h2 id="discord-people"'), true);

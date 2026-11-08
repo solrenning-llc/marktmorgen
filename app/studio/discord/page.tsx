@@ -48,7 +48,7 @@ export default async function StudioDiscordPage({ searchParams }: Params) {
   const [read, mapping, members, titles] = await Promise.all([
     server ? serverRoles(server.id).catch(() => null) : Promise.resolve(null),
     productRoles(room),
-    server ? membersOf(room, 200) : Promise.resolve([]),
+    server ? membersOf(room, 200).catch(() => null) : Promise.resolve([]),
     readTitles(store),
   ]);
   // The store's calls to connected services used, no place this month, or not counted (lib/metered-limits.ts).
@@ -76,7 +76,7 @@ export default async function StudioDiscordPage({ searchParams }: Params) {
             roles={read && server ? assignable(read.roles, server.id, read.botTop) : []}
             allRoles={read ? read.roles.map((r) => ({ id: r.id, name: r.name })) : []}
             products={[...titles].map(([id, title]) => ({ id, title, roles: mapping.get(id) ?? [] }))}
-            members={members.map(({ id, member }) => ({ id, name: member.n, email: member.e, roles: member.r.length, at: member.at }))}
+            members={members === null ? null : members.map(({ id, member }) => ({ id, name: member.n, email: member.e, roles: member.r.length, at: member.at }))}
             limits={{ roles: MAX_PRODUCT_ROLES, products: MAX_DISCORD_PRODUCTS, hours: CHECK_HOURS }}
           />
         </main>

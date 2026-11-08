@@ -116,7 +116,7 @@ export function DiscordStudio({
   roles: DiscordRole[];
   allRoles: { id: string; name: string }[];
   products: Product[];
-  members: Person[];
+  members: Person[] | null;
   limits: { roles: number; products: number; hours: number };
 }) {
   const router = useRouter();
@@ -233,9 +233,13 @@ export function DiscordStudio({
       ) : null}
 
       <section className="card mt-8 p-6 sm:p-8" aria-labelledby="discord-people">
-        <h2 id="discord-people" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Who joined · ${members.length}`}</h2>
+        <h2 id="discord-people" className="text-lg font-semibold tracking-[-0.02em] text-ink">{members === null ? "Who joined" : `Who joined · ${members.length}`}</h2>
         <p className="mt-2 max-w-2xl text-ink-soft">{`Everyone given roles by a purchase, checked again about every ${limits.hours} hours. Somebody whose access ended is taken off this list once their roles are taken back.`}</p>
-        {members.length === 0 ? (
+        {members === null ? (
+          <p role="status" className="notice mt-5">
+            Who joined could not be read just now. Reload this page in a moment; this does not mean nobody has joined.
+          </p>
+        ) : members.length === 0 ? (
           <StudioEmptyState
             level={3}
             compact

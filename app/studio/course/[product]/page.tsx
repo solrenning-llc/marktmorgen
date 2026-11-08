@@ -85,15 +85,18 @@ export default async function StudioCoursePage({
   const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
-  const { students, total } = await studentsOf(course, 500);
+  // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
+  const studentsRead = await studentsOf(course, 500).catch(() => null);
+  const students = studentsRead?.students ?? [];
+  const total = studentsRead?.total ?? 0;
   const lessons = lessonCount(course);
   const finished = students.filter((s) => lessons > 0 && s.done >= lessons).length;
   const started = students.filter((s) => s.done > 0).length;
   const selling = canSellProduct(store, product);
   const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
-  const certificates = await certificatesFor(course.id);
-  const standing = certificates.list.filter((c) => !c.withdrawnAt).length;
+  const certificates = await certificatesFor(course.id).catch(() => null);
+  const standing = certificates ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
   // The newest comments under the lessons, marked new since this page last showed them.
   const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
   await markSeen(course.id);
@@ -252,8 +255,12 @@ export default async function StudioCoursePage({
             ) : null}
           </div>
 
-          <h3 className="mt-7 font-semibold text-ink">{`Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
-          {certificates.list.length === 0 ? (
+          <h3 className="mt-7 font-semibold text-ink">{standing === null ? "Completions" : `Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
+          {certificates === null ? (
+            <p role="status" className="notice mt-3">
+              The certificates could not be read just now. Reload this page in a moment; this does not mean none were issued.
+            </p>
+          ) : certificates.list.length === 0 ? (
             <StudioEmptyState
               level={3}
               compact
@@ -308,21 +315,27 @@ export default async function StudioCoursePage({
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
           </p>
-          <div className="mt-5 grid grid-cols-3 gap-3 text-center">
-            <div className="rounded-[var(--r-sm)] bg-sand p-4">
-              <p className="text-2xl font-semibold tabular-nums">{total}</p>
-              <p className="text-sm text-ink-soft">opened it</p>
+          {studentsRead === null ? null : (
+            <div className="mt-5 grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-[var(--r-sm)] bg-sand p-4">
+                <p className="text-2xl font-semibold tabular-nums">{total}</p>
+                <p className="text-sm text-ink-soft">opened it</p>
+              </div>
+              <div className="rounded-[var(--r-sm)] bg-sand p-4">
+                <p className="text-2xl font-semibold tabular-nums">{started}</p>
+                <p className="text-sm text-ink-soft">finished a lesson</p>
+              </div>
+              <div className="rounded-[var(--r-sm)] bg-sand p-4">
+                <p className="text-2xl font-semibold tabular-nums">{finished}</p>
+                <p className="text-sm text-ink-soft">finished it all</p>
+              </div>
             </div>
-            <div className="rounded-[var(--r-sm)] bg-sand p-4">
-              <p className="text-2xl font-semibold tabular-nums">{started}</p>
-              <p className="text-sm text-ink-soft">finished a lesson</p>
-            </div>
-            <div className="rounded-[var(--r-sm)] bg-sand p-4">
-              <p className="text-2xl font-semibold tabular-nums">{finished}</p>
-              <p className="text-sm text-ink-soft">finished it all</p>
-            </div>
-          </div>
-          {students.length === 0 ? (
+          )}
+          {studentsRead === null ? (
+            <p role="status" className="notice mt-5">
+              The students could not be read just now. Reload this page in a moment; this does not mean nobody has opened the course.
+            </p>
+          ) : students.length === 0 ? (
             <StudioEmptyState
               level={3}
               compact

@@ -9,7 +9,9 @@
  *    ceiling. Now readLeads throws UnknownReplyError, the route answers 503 "unavailable", and nothing is written.
  * 2. (privacy) The person's copy of their data (lib/person-copy.ts) read their leads the same way: a reply of another
  *    shape, or their own lead unreadable, gave a copy without it that looked complete. Now the copier throws, and
- *    copyPerson fails the whole copy (it never hands one over with a part missing).
+ *    copyPerson fails the whole copy (it never hands one over with a part missing). It reads only the person's own
+ *    field (leadId), so another person's unreadable lead never blocks their copy (review of #3157, LOW): the decision
+ *    still reads, and fails closed on, every lead of the program.
  * 3. (rule 30, the sibling readers) Deleting a person (forgetLeadPerson) answered "nothing to forget" on a kept lead
  *    that did not read, though the address could still be in it: now it throws, and the erasure retries; and it
  *    wrote the lead back filled in with parseLead's defaults, turning an amount of another type into a readable 0
@@ -35,13 +37,17 @@ import { paidPeriod } from "./billing-period-fixture";
 globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;
 
 const real = redis.pipeline.bind(redis);
-type Break = "none" | "leads-object" | "leads-queued" | "leads-odd";
+type Break = "none" | "leads-object" | "leads-queued" | "leads-null" | "leads-odd";
 let breakWhat: Break = "none";
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const one = commands.length === 1 ? commands[0] : null;
-  const leads = one?.[0] === "HGETALL" && /^nl:aff:[^:]+:leads$/.test(String(one[1]));
-  if (leads && breakWhat === "leads-object") return [{ a: "b" }];
-  if (leads && breakWhat === "leads-queued") return ["QUEUED"];
+  const leadsKeyed = /^nl:aff:[^:]+:leads$/.test(String(one?.[1]));
+  const leads = one?.[0] === "HGETALL" && leadsKeyed;
+  // The whole-program read and a single lead's read alike: a reply of another shape is never "no lead".
+  const anyLeads = leads || (one?.[0] === "HGET" && leadsKeyed);
+  if (anyLeads && breakWhat === "leads-object") return [{ a: "b" }];
+  if (anyLeads && breakWhat === "leads-queued") return ["QUEUED"];
+  if (anyLeads && breakWhat === "leads-null") return null;
   if (leads && breakWhat === "leads-odd") {
     const [list] = (await real(commands)) as unknown[][];
     return [[...list, "stray"]];
@@ -176,19 +182,61 @@ async function main(): Promise<void> {
 
   part("2. The person's copy never comes out complete with a lead missing");
   const copier = COPIERS["lib/affiliate-leads.ts"];
-  const scope = { store, email: "p1@example.com" } as unknown as Parameters<typeof copier>[0];
-  await put([[id(1), JSON.stringify(lead(1))], [id(2), JSON.stringify(lead(2))]]);
-  is("healthy: the person's own lead is copied", ((await copier(scope)) as LeadRecord[]).map((l) => l.id), [id(1)]);
+  const scopeOf = (email: string) => ({ store, email }) as unknown as Parameters<typeof copier>[0];
+  const scope = scopeOf("p1@example.com");
+  // Kept as recordLead keeps them: one lead a person, under the field leadId(statsId, address).
+  const field = (email: string) => leadId(statsId, email);
+  const leadOfPerson = (n: number, email: string, over: Partial<LeadRecord> = {}) => JSON.stringify(lead(n, { id: field(email), email, ...over }));
+  await put([[field("p1@example.com"), leadOfPerson(1, "p1@example.com")], [field("p2@example.com"), leadOfPerson(2, "p2@example.com")]]);
+  is("healthy: the person's own lead is copied", ((await copier(scope)) as LeadRecord[]).map((l) => l.id), [field("p1@example.com")]);
   await put([]);
   is("no leads kept: nothing to copy, exactly", await copier(scope), []);
-  for (const shape of ["leads-object", "leads-queued"] as const) {
-    await put([[id(1), JSON.stringify(lead(1))]]);
+  for (const shape of ["leads-object", "leads-queued", "leads-null"] as const) {
+    await put([[field("p1@example.com"), leadOfPerson(1, "p1@example.com")]]);
     breakWhat = shape;
     is(`${shape}: the copier throws, never an empty copy`, await thrown(() => copier(scope)), "UnknownReplyError");
     breakWhat = "none";
   }
-  await put([[id(1), `{"id":"${id(1)}","email":"p1@example.com","aff":`]]);
+  await put([[field("p1@example.com"), `{"id":"${field("p1@example.com")}","email":"p1@example.com","aff":`]]);
   is("their own lead unreadable: the copier throws, never a copy without it", await thrown(() => copier(scope)), "UnknownReplyError");
+
+  part("2b. Another person's unreadable lead never blocks a person's copy (Art. 15); their own still does");
+  const A = "ana.copy@example.com";
+  const B = "ben.copy@example.com";
+  const healthyA = leadOfPerson(11, A);
+  // What a copy came out as, or the error it threw, so each check below is judged on its own.
+  const copyOf = async (email: string): Promise<unknown> => {
+    try {
+      return await copier(scopeOf(email));
+    } catch (error) {
+      return error instanceof UnknownReplyError ? "UnknownReplyError" : `other: ${String(error)}`;
+    }
+  };
+  const others: [string, string][] = [
+    ["an amount as text", leadOfPerson(12, B, { cents: "500" as unknown as number })],
+    ["broken JSON", `{"id":"${field(B)}","aff":"${ANA}","email":"${B}","kind":"signup","cents":500,`],
+  ];
+  for (const [what, json] of others) {
+    await put([[field(A), healthyA], [field(B), json]]);
+    is(`B's lead with ${what}: A's copy is A's lead, whole`, await copyOf(A), [JSON.parse(healthyA)]);
+    is(`B's lead with ${what}: B's own copy throws, never a copy without it`, await thrown(() => copier(scopeOf(B))), "UnknownReplyError");
+    // The approval still sums every lead of the program, so it still fails closed on B's.
+    is(`B's lead with ${what}: the program's leads still do not read for a decision`, await thrown(() => readLeads(store)), "UnknownReplyError");
+    is(`B's lead with ${what}: a person with no lead gets an empty copy, exactly`, await copyOf("nobody.copy@example.com"), []);
+  }
+  for (const [what, json] of [
+    ["an amount as text", leadOfPerson(11, A, { cents: "500" as unknown as number })],
+    ["broken JSON", `{"id":"${field(A)}","aff":"${ANA}","email":"${A}","kind":"signup","cents":500,`],
+    ["a state of another shape", leadOfPerson(11, A, { state: "APPROVED" as LeadRecord["state"] })],
+  ] as const) {
+    await put([[field(A), json], [field(B), leadOfPerson(12, B)]]);
+    is(`A's own lead with ${what}: A's copy throws, never a copy without it`, await thrown(() => copier(scopeOf(A))), "UnknownReplyError");
+    is(`A's own lead with ${what}: B's copy is B's lead, whole`, await copyOf(B), [JSON.parse(leadOfPerson(12, B))]);
+  }
+  await put([[field(A), healthyA]]);
+  is("the address asked for written in capitals: the same person's lead", await copyOf("Ana.Copy@Example.com"), [JSON.parse(healthyA)]);
+  await put([[field(A), leadOfPerson(11, A, { email: "" })]]);
+  is("a lead whose address already came off (deleted person): nothing to copy", await copyOf(A), []);
 
   part("3. The sibling readers: deleting a person, and the contact credit");
   const email = "erase.me@example.com";

@@ -1,0 +1,75 @@
+
+FILE erasure-forget-atomic.test.ts
+
+a writer's note landing between the read and the delete: the erasure reads again and deletes it too
+  ok    the writer did land between the read and the delete
+  ok    the record that was there before is deleted
+  ok    the late record is deleted by the same erasure
+  ok    and the notes are gone
+  ok    both records counted, each once
+  ok    a second erasure finds nothing left
+
+notes that change after every read: 3 tries, then the step fails with nothing deleted
+  ok    it fails as not finished
+  ok    nothing was deleted: every record and the notes kept
+  ok    the next erasure deletes them all
+
+the healthy erasure: every noted record and the notes, and the same count
+  ok    three records, both notes
+  ok    answers the records deleted, each once (index and notes not counted)
+  ok    every noted record is gone
+  ok    both notes are gone
+  ok    a member that is not an nl: key is never deleted
+  ok    no stats id: 0, Redis not asked
+
+as Redis counts: a missing note is not a key, and a note of another type is refused before any delete
+  ok    one record noted in the scored note only: 1
+  ok    a note whose record already expired: the note goes, 0 records
+  ok    nothing noted: 0
+  ok    an index of another type: Redis refuses the read, the step fails
+  ok    and nothing was deleted: the notes, the index and the record kept
+  ok    an index turned to another type after the read: the script refuses, the step fails
+  ok    and nothing was deleted
+
+more than 1000 records: in batches, each with its own note entries, all counted once
+  ok    two batches, then the rest in the checked step
+  ok    2,500 records and one noted during the batches: all deleted, each counted once
+
+a reply not in its exact shape: the step fails, never 'nothing to delete'
+  ok    the step answered nothing: UnknownReplyError
+  ok    the step answered null: UnknownReplyError
+  ok    the step answered "OK": UnknownReplyError
+  ok    the step answered "Changed": UnknownReplyError
+  ok    the step answered 0: UnknownReplyError
+  ok    the step answered 2: UnknownReplyError
+  ok    the step answered {}: UnknownReplyError
+  ok    the step answered []: UnknownReplyError
+  ok    the step answered [1]: UnknownReplyError
+  ok    the step answered [1,1,0]: UnknownReplyError
+  ok    the step answered ["1","0"]: UnknownReplyError
+  ok    the step answered [-1,0]: UnknownReplyError
+  ok    the step answered [1.5,0]: UnknownReplyError
+  ok    the step answered [null,0]: UnknownReplyError
+  ok    the step answered [null,0]: UnknownReplyError
+  ok    the step answered [1,3]: UnknownReplyError
+  ok    the step answered [0,1]: UnknownReplyError
+  ok    the step answered [1,0]: UnknownReplyError
+  ok    the step answered [1,2]: UnknownReplyError
+  ok    the step answered [5,1]: UnknownReplyError
+  ok    the step answered [1,-1]: UnknownReplyError
+  ok    the step answered {"0":1,"1":0}: UnknownReplyError
+  ok    the notes read as nothing: fails, the notes and the record kept
+  ok    the notes read as null: fails, the notes and the record kept
+  ok    the notes read as "nl:x": fails, the notes and the record kept
+  ok    the notes read as {}: fails, the notes and the record kept
+  ok    the notes read as ["nl:x",7]: fails, the notes and the record kept
+  ok    the notes read as [null]: fails, the notes and the record kept
+  ok    no reply for the step: UnknownReplyError
+  ok    one reply too many: UnknownReplyError
+  ok    a pipeline that throws: the step fails
+
+55 checks, all passing.
+Z_VOLUME {"runs":12983,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3308-6KNM2d

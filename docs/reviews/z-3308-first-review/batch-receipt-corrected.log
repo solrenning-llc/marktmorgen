@@ -1,0 +1,22 @@
+
+FILE z-3308-batch-receipt.proof.ts
+Z_BATCH_RECEIPT {"mode":"nested","batches":1,"errorName":"UnknownReplyError","remainingRecords":1,"productCommands":3,"jsonPipelineBytes":21384}
+Z_BATCH_RECEIPT {"mode":"oversized","batches":1,"errorName":"UnknownReplyError","remainingRecords":1,"productCommands":3,"jsonPipelineBytes":21384}
+Z_BATCH_RECEIPT {"mode":"throw","batches":1,"errorName":"Error","remainingRecords":1,"productCommands":3,"jsonPipelineBytes":21384}
+Z_BATCH_RECEIPT {"mode":"zero control","batches":1,"result":0,"errorName":null,"remainingRecords":0,"productCommands":6,"jsonPipelineBytes":22266}
+✔ batch acknowledgment nested: never falsely completes an uncertain deletion (39.091739ms)
+✔ batch acknowledgment oversized: never falsely completes an uncertain deletion (21.238622ms)
+✔ batch acknowledgment throw: never falsely completes an uncertain deletion (22.919379ms)
+✔ batch acknowledgment zero control: never falsely completes an uncertain deletion (9.958779ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 99.844695
+Z_VOLUME {"runs":7066,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3308-7qa1G9

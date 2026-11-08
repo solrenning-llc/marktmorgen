@@ -1,0 +1,33 @@
+
+FILE z-3308-batch-bound.proof.ts
+Z_BATCH_BOUND {"batches":101,"reads":101,"commands":303,"jsonRequestBytes":2768107,"errorName":"UnknownReplyError","physicalRedisExecution":false}
+✖ LOW: the stated maximum of one hundred batch requests must be enforced before the next request (46.777762ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.264964
+
+✖ failing tests:
+
+test at [stdin]:10430:27
+✖ LOW: the stated maximum of one hundred batch requests must be enforced before the next request (46.777762ms)
+  AssertionError [ERR_ASSERTION]: FORGET_BATCHES100 must reject before issuing a101st thousand-key batch
+      at TestContext.<anonymous> ([stdin]:10455:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3308-9vMQxD

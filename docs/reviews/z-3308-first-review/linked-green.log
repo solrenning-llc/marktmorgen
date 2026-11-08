@@ -1,0 +1,454 @@
+
+FILE sg2-unknown-replies.test.ts
+
+4: forgetNoted never deletes the note without the records it leads to
+  ok    a note read as nothing: fails, the note and its record kept
+  ok    a note read as null: fails, the note and its record kept
+  ok    a note read as "nl:x": fails, the note and its record kept
+  ok    a note read as 0: fails, the note and its record kept
+  ok    a note read as {}: fails, the note and its record kept
+  ok    a note read as {"0":"nl:x"}: fails, the note and its record kept
+  ok    a note read as ["nl:x",7]: fails, the note and its record kept
+  ok    a note read as [null]: fails, the note and its record kept
+  ok    an old-kind note read in another shape: the same
+  ok    a pipeline answering one reply for two commands: the same
+  ok    a deletion answered nothing: not a receipt of none, the step fails
+  ok    a deletion answered null: not a receipt of none, the step fails
+  ok    a deletion answered "1": not a receipt of none, the step fails
+  ok    a deletion answered -1: not a receipt of none, the step fails
+  ok    a deletion answered 1.5: not a receipt of none, the step fails
+  ok    a deletion answered null: not a receipt of none, the step fails
+  ok    a deletion answered [1]: not a receipt of none, the step fails
+  ok    a deletion answered {}: not a receipt of none, the step fails
+  ok    through the erasure's own step: it fails (said as an unfinished step), the note kept
+  ok    read in its shape: the record and the note go, with their count
+
+5: endLocked keeps the locked sessions it could not read, and says so
+  ok    a session let in without the second step, locked
+  ok    Cancel with the set read in another shape: canceled, said as not logged out; the session still listed and still locked
+  ok    and still locked once the day it would have lifted is past (a week, and nearly the session's thirty days)
+  ok    and the email says they could not be logged out, never that they were
+  ok    what it says stays locked is the one list of what a locked session cannot do
+  ok    the studio says it inline, never in a passing toast, and no longer promises they are logged out at once
+  ok    a removal set with the sessions unread: kept, its browser still open, said as not logged out
+  ok    and the email says so, never that they were
+  ok    asked again later: still said as not logged out
+  ok    a full login with the set unread: the session kept and locked, the set kept
+  ok    and the email asks for Log out of all devices, never says they were logged out
+  ok    read in its shape: logged out, the set gone, and the email says so
+  ok    (a locked session opened directly is listed too)
+  ok    (and logged out by the next full login)
+
+6: dropSecondStep and endAllSessions never read unknown as no sessions
+  ok    sessions read as nothing: fails, nobody logged out, the set kept
+  ok    sessions read as null: fails, nobody logged out, the set kept
+  ok    sessions read as "nl:x": fails, nobody logged out, the set kept
+  ok    sessions read as 0: fails, nobody logged out, the set kept
+  ok    sessions read as {}: fails, nobody logged out, the set kept
+  ok    sessions read as {"0":"nl:x"}: fails, nobody logged out, the set kept
+  ok    sessions read as ["nl:x",7]: fails, nobody logged out, the set kept
+  ok    sessions read as [null]: fails, nobody logged out, the set kept
+  ok    marks answered short: fails, nobody logged out
+  ok    a mark of another shape: fails, nobody logged out
+  ok    the error is the one callers tell apart
+  ok    read in their shape: the other is logged out, the one asking keeps its session
+  ok    a passkey removed with its sessions unread: gone, its session not said as logged out
+  ok    and its email says to log them out
+  ok    Log out of all devices with the set unread: unknown, not none; the set kept; the page says the others may still be in
+  ok    the sign-in page has words for it, said as not done
+  ok    read in its shape: done, and said as done
+  ok    the app turned off with its sessions unread: off, said as not logged out
+  ok    the studio says each inline, never in a passing toast
+  ok    unread, the new app is not turned on
+  ok    read in their shape: on, and the old app's browser is logged out
+  ok    a move with the sessions unread: it stands, and says other sessions may still be open
+  ok    the studio has words for it
+  ok    an undone move whose sessions could not be read is left marked to repair
+
+22: unknown counts as moving
+  ok    nothing moving, read in its shape: not moving
+  ok    a mark read as nothing: moving, so nothing a move forbids is let through
+  ok    a mark read as null: moving, so nothing a move forbids is let through
+  ok    a mark read as "1": moving, so nothing a move forbids is let through
+  ok    a mark read as -1: moving, so nothing a move forbids is let through
+  ok    a mark read as 1.5: moving, so nothing a move forbids is let through
+  ok    a mark read as null: moving, so nothing a move forbids is let through
+  ok    a mark read as [1]: moving, so nothing a move forbids is let through
+  ok    a mark read as {}: moving, so nothing a move forbids is let through
+  ok    one reply for two marks: moving
+
+19: forgetStoreWebhooks never deletes the log without the deliveries in it
+  ok    a log read as nothing: fails, the log and the body kept
+  ok    a log read as null: fails, the log and the body kept
+  ok    a log read as "nl:x": fails, the log and the body kept
+  ok    a log read as 0: fails, the log and the body kept
+  ok    a log read as {}: fails, the log and the body kept
+  ok    a log read as {"0":"nl:x"}: fails, the log and the body kept
+  ok    a log read as ["nl:x",7]: fails, the log and the body kept
+  ok    a log read as [null]: fails, the log and the body kept
+  ok    the endpoints told read in another shape: the same
+  ok    the endpoints read in another shape: the same
+  ok    one reply for five commands: the same
+  ok    read in its shape: the log and the body go
+
+23: the keys are said as unread, never as none
+  ok    the list read as nothing: unread, not empty
+  ok    the list read as null: unread, not empty
+  ok    the list read as "nl:x": unread, not empty
+  ok    the list read as 0: unread, not empty
+  ok    the list read as {}: unread, not empty
+  ok    the list read as {"0":"nl:x"}: unread, not empty
+  ok    the list read as ["nl:x",7]: unread, not empty
+  ok    the list read as [null]: unread, not empty
+  ok    the list read as ["only-a-field"]: unread, not empty
+  ok    the studio's read of the keys (shownKeys, keyRecords strict) fails; the pause code's read is as before
+  ok    a deleted store's keys with the list unread: fails, and the key still in the list it is checked against
+  ok    a count read as nothing: no key made, said as unavailable
+  ok    a count read as null: no key made, said as unavailable
+  ok    a count read as "1": no key made, said as unavailable
+  ok    a count read as -1: no key made, said as unavailable
+  ok    a count read as 1.5: no key made, said as unavailable
+  ok    a count read as null: no key made, said as unavailable
+  ok    a count read as [1]: no key made, said as unavailable
+  ok    a count read as {}: no key made, said as unavailable
+  ok    the studio says it could not read the keys, never 0 keys
+  ok    the studio passes an unread list as such, and the route sends it as null after a change that was made
+  ok    (the words)
+  ok    (read in its shape, the key is listed)
+  ok    (and a deleted store's keys go)
+
+C (review of #2556): two-step login moved onto an address takes the marks an earlier app of it left
+  ok    unread, nothing moves
+  ok    read in their shape: it moves, and the old mark's browser is logged out
+
+Review of #2556 at df8030300: lockedUntil costs one command for every other account
+  ok    another account's session: one command; the kept account's own: four at most; the locked one: still locked
+
+Review of #2556 at c6267d1e: the list of kept accounts never grows past its ceiling, nor twice for one account
+  ok    the same account failing again adds nothing
+  ok    past 100 accounts it never grows: at most 100 tags of 41 bytes
+  ok    and one more adds nothing
+  ok    over the ceiling: a kept locked session stays locked, a session never locked is not, at four commands
+  ok    and it is said: counted for the month, the owner's line with numbers only, the extra within its cost line
+
+Review of #2556 at df8030300: a move refused because the new address's sessions are unread says so
+Z_VOLUME {"runs":2207,"mocks":128,"over":true}
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+more than 100 accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until 31 days after the last
+Error: unsent
+    at main ([stdin]:159151:39)
+
+Z_STATUS 1 null
+
+FILE person-erasure.test.ts
+
+A person in every part of a store, deleted
+  ok    the person is in many parts of the store
+  ok    and their seeding changed many keys, so the comparison below means something
+  ok    the store finds them for every-store requests
+  ok    asking sends a link
+  ok    the email carries a link that works
+  ok    asking about an address no store knows sends nothing, and says the same
+  ok    the link names the address and the store
+  ok    the link deletes them
+  ok    it sent no more commands than it took units for (242 of 602)
+  ok    and moved no more bytes (61683 of 396850)
+  ok    the units it takes cover that work
+  ok    the link works once
+  ok    the store's owner is told, not asked
+  (left as allowed: nl:allow:email:…:2026-10-29, nl:allow:studio:…:2026-10-29, nl:allow:transactional:…:2026-10-29, nl:data:…, nl:data:room-test-store, nl:erased:…, nl:health:…, nl:mail:flowstats:6f0b768bb4a13d56, nl:rl:erase-address:…, nl:rl:erase-address:…, nl:rl:erase-ip:…, nl:rl:erase-ip:…, nl:rsum:ver:…:684ca1cb1a, nl:sender:2026-11, nl:stats:…:ledger, nl:tasks:doors, nl:wf:day:…:2026-11-08, nl:wl:…:684ca1cb1a:send)
+  ok    everything is as it was before them, but what is allowed to change
+  ok    no key or value names them, by address or by any key made from it
+  ok    only a fingerprint is kept, under the store's list
+  ok    which cannot be read back to the address
+  ok    the other person is untouched
+  ok    the store knows the address was deleted
+  ok    an import leaves them out
+  ok    a purchase without their own yes notes the purchase, not a yes
+  ok    their own yes, given again, puts them back and lifts the fingerprint
+  ok    the studio deletes them
+  ok    what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them
+  ok    their review stays, without their address (a store may not take reviews down)
+  ok    and everything else is as it was before them
+  ok    the activity log says a person was deleted, never who
+
+What it takes covers what it costs
+  ok    the base units cover the request itself and Discord
+  ok    units cover 550 commands and 310000 bytes
+  ok    units cover 1272 commands and 1709000 bytes
+  ok    units cover 39130 commands and 20115000 bytes
+  ok    the least a deletion takes is what the help says
+
+32 checks, all passing.
+Z_VOLUME {"runs":3356,"mocks":2,"over":false}
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:44268:9)
+    at async requestApi ([stdin]:44437:16)
+    at async del ([stdin]:45616:3)
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:44268:9)
+    at async requestApi ([stdin]:44437:16)
+    at async del ([stdin]:45616:3)
+
+Z_STATUS 0 null
+
+FILE erasure-grant-shape.test.ts
+✔ every unknown grant shape remains pending without rewriting its retained evidence (28.531638ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.637451
+Z_VOLUME {"runs":65,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE erasure-request-full.test.ts
+  ok    the address is known to both stores
+
+(a) The first store has no room: the next one sends the link
+  ok    the link is sent
+  ok    to the address, naming both stores
+  ok    taken from the second store's share, nothing more from the first
+
+(b) Asked for every store, no store has room: the same answer as an unknown address
+  ok    nothing is sent
+  ok    the known address is told what an unknown one is: 'sent', no day
+  ok    and that page gives the privacy contact
+
+(c) Asked from one store that has no room: the page says so honestly, the same for every address
+  ok    nothing is sent
+  ok    the answer is that it is full, not an error
+  ok    with the first whole day the store's window has ended by
+  ok    the page says it cannot be emailed now
+  ok    and when
+  ok    and does not say to try again in a moment
+  ok    the contact it gives is the one the Privacy Policy publishes
+  ok    a day that cannot be read is left out, the rest is said
+  ok    an address the store does not know gets exactly the same answer
+
+The day shown is never one the store is still full on
+  ok    its window ends at 23:30 UTC
+  ok    it is shown as the day after it ends, the first whole day it is open
+  ok    a window ending at 00:00 UTC keeps its own day
+
+Buyers keep their reserved half
+  ok    a buyer's course link from a full store is still sent
+  ok    and the deletion links never went past a visitor's share of either store
+
+21 checks, all passing.
+Z_VOLUME {"runs":188,"mocks":2,"over":false}
+a deletion link asked for every store was not emailed: full (stores 66e963f00b824961895bf779ee778b78,e5db5a59e83c44229e1dd1254c597c7d)
+
+Z_STATUS 0 null
+
+FILE erasure-store-read-evidence.test.ts
+
+transport error
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+missing reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+undefined reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+null reply
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+wrong scalar
+  ok    the preview refuses an unconfirmed store instead of showing an empty scope
+  ok    unreadable store is still to do, never counted as deleted
+  ok    the grant still names the same store
+  ok    the person's contact still exists, proving deletion was not done
+  ok    the public confirmation offers another press and never claims done
+  ok    both preview and confirmation used the real store lookup
+
+A confirmed store can finish the same deletion
+  ok    the same link can be read after recovery
+  ok    real erasure finishes once its store can be read
+  ok    the contact really is removed
+  ok    the grant goes only after confirmed erasure
+  ok    the consumed link cannot delete again
+
+35 checks, all passing.
+Z_VOLUME {"runs":169,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE review-request-erasure-evidence.test.ts
+✔ empty recipient evidence retains the erased buyer's review request for retry (39.186273ms)
+✔ short recipient evidence retains the erased buyer's review request for retry (6.544124ms)
+✔ missing suppression recipient evidence retains the erased buyer's review request for retry (5.089869ms)
+✔ extra recipient evidence retains the erased buyer's review request for retry (4.772801ms)
+✔ null opt-out recipient evidence retains the erased buyer's review request for retry (5.702113ms)
+✔ string opt-out recipient evidence retains the erased buyer's review request for retry (7.354957ms)
+✔ negative opt-out recipient evidence retains the erased buyer's review request for retry (7.247685ms)
+✔ null suppression recipient evidence retains the erased buyer's review request for retry (9.447444ms)
+✔ string suppression recipient evidence retains the erased buyer's review request for retry (4.598908ms)
+✔ object suppression recipient evidence retains the erased buyer's review request for retry (4.325556ms)
+✔ false suppression recipient evidence retains the erased buyer's review request for retry (4.221249ms)
+✔ invalid contact recipient evidence retains the erased buyer's review request for retry (4.130512ms)
+✔ object contact recipient evidence retains the erased buyer's review request for retry (4.192025ms)
+✔ primitive contact recipient evidence retains the erased buyer's review request for retry (5.095117ms)
+✔ array contact recipient evidence retains the erased buyer's review request for retry (6.805839ms)
+✔ wrong opt-out field recipient evidence retains the erased buyer's review request for retry (6.949715ms)
+✔ sparse recipient evidence retains the erased buyer's review request for retry (4.78521ms)
+✔ transport failure recipient evidence retains the erased buyer's review request for retry (3.79777ms)
+✔ complete evidence still sends a permitted buyer one review request (23.63501ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 166.530608
+Z_VOLUME {"runs":2009,"mocks":38,"over":false}
+
+Z_STATUS 0 null
+
+FILE product-update-erasure-evidence.test.ts
+✔ empty recipient evidence keeps an erased buyer pending without email or allowance use (32.053592ms)
+✔ short recipient evidence keeps an erased buyer pending without email or allowance use (6.003408ms)
+✔ missing suppression recipient evidence keeps an erased buyer pending without email or allowance use (7.11824ms)
+✔ extra recipient evidence keeps an erased buyer pending without email or allowance use (4.97097ms)
+✔ null opt-out recipient evidence keeps an erased buyer pending without email or allowance use (5.066535ms)
+✔ string opt-out recipient evidence keeps an erased buyer pending without email or allowance use (4.5003ms)
+✔ negative opt-out recipient evidence keeps an erased buyer pending without email or allowance use (4.567802ms)
+✔ null suppression recipient evidence keeps an erased buyer pending without email or allowance use (4.620501ms)
+✔ string suppression recipient evidence keeps an erased buyer pending without email or allowance use (6.854121ms)
+✔ object suppression recipient evidence keeps an erased buyer pending without email or allowance use (6.001184ms)
+✔ false suppression recipient evidence keeps an erased buyer pending without email or allowance use (4.159136ms)
+✔ invalid contact recipient evidence keeps an erased buyer pending without email or allowance use (3.7579ms)
+✔ object contact recipient evidence keeps an erased buyer pending without email or allowance use (3.999344ms)
+✔ primitive contact recipient evidence keeps an erased buyer pending without email or allowance use (3.858862ms)
+✔ array contact recipient evidence keeps an erased buyer pending without email or allowance use (4.200988ms)
+✔ wrong opt-out field recipient evidence keeps an erased buyer pending without email or allowance use (4.405306ms)
+✔ sparse recipient evidence keeps an erased buyer pending without email or allowance use (5.522262ms)
+✔ complete evidence still sends a permitted buyer exactly once (22.321038ms)
+✔ missing envelope retains the real pending queue for a confirmed retry (6.577634ms)
+✔ null list retains the real pending queue for a confirmed retry (5.433508ms)
+✔ missing list retains the real pending queue for a confirmed retry (5.613059ms)
+✔ scalar list retains the real pending queue for a confirmed retry (8.177118ms)
+✔ empty unfinished list retains the real pending queue for a confirmed retry (4.947514ms)
+✔ extra envelope retains the real pending queue for a confirmed retry (5.035618ms)
+✔ extra address retains the real pending queue for a confirmed retry (5.324543ms)
+✔ non-string address retains the real pending queue for a confirmed retry (6.21035ms)
+✔ invalid address retains the real pending queue for a confirmed retry (6.894082ms)
+✔ sparse list retains the real pending queue for a confirmed retry (5.674376ms)
+✔ throwing queue read retains the real pending queue for a confirmed retry (5.252796ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 208.164457
+Z_VOLUME {"runs":3371,"mocks":70,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (38.004956ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (206.808977ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (36.361265ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.873036ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.142995ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.119981ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.555448ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (75.072536ms)
+✔ every store figure taken in the code is a kind a line prices (44.498846ms)
+✔ every email sent names a meter, and each file only the meters it may use (68.946252ms)
+✔ the units a figure is taken in cost at least what they stand for (8.093884ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.921229ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.173002ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.287684ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.137528ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.088664ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.290789ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.134723ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.729851ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.07965ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.312149ms)
+✔ Path push fits its reserved studio requests (0.078118ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.055473ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.127362ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.187192ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (33.185382ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 540.682365
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (113.555363ms)
+✔ each family is bounded one way at least, and what it says can be checked (31.970238ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (1.932336ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (0.879547ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.435438ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.410365ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.174213ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 170.323345
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3308-gr5dP9

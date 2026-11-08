@@ -1,0 +1,81 @@
+
+FILE z-3308-batch-receipt.proof.ts
+Z_BATCH_RECEIPT {"mode":"zero control","batches":1,"result":0,"errorName":null,"remainingRecords":0,"productCommands":6,"jsonPipelineBytes":22266}
+✖ batch acknowledgment nested: never falsely completes an uncertain deletion (41.892537ms)
+✖ batch acknowledgment oversized: never falsely completes an uncertain deletion (20.477136ms)
+✖ batch acknowledgment throw: never falsely completes an uncertain deletion (15.803622ms)
+✔ batch acknowledgment zero control: never falsely completes an uncertain deletion (11.286354ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 1
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 95.741119
+
+✖ failing tests:
+
+test at [stdin]:10438:96
+✖ batch acknowledgment nested: never falsely completes an uncertain deletion (41.892537ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - 'synthetic'
+
+      at TestContext.<anonymous> ([stdin]:10471:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'synthetic',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:10438:96
+✖ batch acknowledgment oversized: never falsely completes an uncertain deletion (20.477136ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - 'synthetic'
+
+      at TestContext.<anonymous> ([stdin]:10471:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'synthetic',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:10438:96
+✖ batch acknowledgment throw: never falsely completes an uncertain deletion (15.803622ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - 'synthetic'
+
+      at TestContext.<anonymous> ([stdin]:10471:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'synthetic',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":7042,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3308-lWogZO

@@ -1,0 +1,16 @@
+
+FILE z-3296-erasure-read-race.proof.ts
+Z_INHERITED_READ_RACE {"returnedToken":true,"grantBytes":0,"notes":[],"ttl":-2,"retainedAfterSecondErasure":false,"commands":["SMEMBERS","ZRANGEBYSCORE","SET","ZADD","ZREMRANGEBYSCORE","EXPIRE","EVAL","SMEMBERS","ZRANGEBYSCORE","EVAL"],"jsonPipelineBytes":2547}
+✔ inherited MEDIUM: an in-flight erasure must not delete the new index while leaving the new address grant (5.917568ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 19.454563
+Z_VOLUME {"runs":24,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3308-wWRs4s

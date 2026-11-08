@@ -1,0 +1,57 @@
+
+FILE erasure-forget-atomic.test.ts
+
+a writer's note landing during the erasure: its record is never left without a note
+  ok    the writer did land during the erasure
+  ok    the record that was there before is deleted
+  ok    the late record is still noted, or already gone
+  ok    a second erasure finds the late record and deletes it
+
+the healthy erasure: every noted record and the notes, and the same count
+  ok    three records, both notes
+  ok    answers the records deleted, each once (index and notes not counted)
+  ok    every noted record is gone
+  ok    both notes are gone
+  ok    a member that is not an nl: key is never deleted
+  ok    no stats id: 0, Redis not asked
+
+as Redis counts: a missing note is not a key, and a key of another type is refused before any delete
+  ok    one record noted in the scored note only: 1
+  ok    a note whose record already expired: the note goes, 0 records
+  ok    nothing noted: 0
+  FAIL  an index of another type: Redis refuses, the step fails
+        expected "Error"
+        got      "resolved"
+  FAIL  and nothing was deleted: the notes, the index and the record kept
+        expected [true,true,true]
+        got      [false,false,false]
+  ok    2,500 noted records: all deleted, counted once each
+
+a reply not in its exact shape: the step fails, never 'nothing to delete'
+  ok    answered nothing: UnknownReplyError
+  ok    answered null: UnknownReplyError
+  ok    answered "OK": UnknownReplyError
+  ok    answered 0: UnknownReplyError
+  ok    answered 2: UnknownReplyError
+  ok    answered {}: UnknownReplyError
+  ok    answered []: UnknownReplyError
+  ok    answered [1]: UnknownReplyError
+  ok    answered [1,1,0]: UnknownReplyError
+  ok    answered ["1","0"]: UnknownReplyError
+  ok    answered [-1,0]: UnknownReplyError
+  ok    answered [1.5,0]: UnknownReplyError
+  ok    answered [null,0]: UnknownReplyError
+  ok    answered [null,0]: UnknownReplyError
+  ok    answered [1,3]: UnknownReplyError
+  ok    answered [0,1]: UnknownReplyError
+  ok    answered [1,-1]: UnknownReplyError
+  ok    answered {"0":1,"1":0}: UnknownReplyError
+  ok    no reply for the step: UnknownReplyError
+  ok    one reply too many: UnknownReplyError
+  ok    a pipeline that throws: the step fails
+
+37 checks, 2 failing.
+Z_VOLUME {"runs":12750,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3308-dfACc8

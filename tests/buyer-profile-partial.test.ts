@@ -10,11 +10,21 @@
  * imported, no sequences, no calls) names no part either; each failed read
  * names its own part and only it, and the rest of the page is still there;
  * the studio page shows the sentence that names them, as a status.
+ *
+ * The team's notes about the buyer too (Claude 2's report on #3159): a notes
+ * reply that is not exactly a hash of notes as addPersonNote writes them was
+ * read as "no notes", so the page said "No notes yet." about a buyer who has
+ * some. Only the exact reply for a hash with nothing in it (an empty list) is
+ * "no notes"; anything else names the notes as unread, and the page shows
+ * that instead of the notes box.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as profiles from "@/lib/buyer-profile";
-import { buyerProfile } from "@/lib/buyer-profile";
+import { addPersonNote, buyerProfile, readPersonNotes, removePersonNote } from "@/lib/buyer-profile";
+import { personKey } from "@/lib/person-key";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { ROOM } from "./data-room";
 import { importedKey } from "@/lib/imported-purchases";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -175,6 +185,65 @@ async function main(): Promise<void> {
   callsDown = false;
   is("each named once", unreadOf(many), ["imported", "calls", "sequences"]);
 
+  part("The team's notes about them");
+  const person = personKey(STATS, EMAIL);
+  const notesKey = `nl:person:${STATS}:n:${person}`;
+  const NOTE_ID = "0a1b2c3d";
+  const written = JSON.stringify({ at: NOW - 10, by: "owner@example.com", text: "Asked about the advanced course." });
+  await seed();
+  is("no notes kept: an empty hash is no notes, read exactly", [await readPersonNotes(STATS, person), unreadOf(await buyerProfile(store, EMAIL))], [[], []]);
+  await redis.pipeline([["HSET", notesKey, NOTE_ID, written]]);
+  const withNote = await buyerProfile(store, EMAIL);
+  is("a note kept is read, and nothing is named", [withNote.notes.map((n) => [n.id, n.at, n.by, n.text]), unreadOf(withNote)], [[[NOTE_ID, NOW - 10, "owner@example.com", "Asked about the advanced course."]], []]);
+
+  /** Answers the notes' read with `reply` as the whole pipeline's answer; every other read as it is. */
+  async function notesAnswer<T>(reply: unknown, run: () => Promise<T>): Promise<T> {
+    const original = redis.pipeline;
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.some((c) => c[0] === "HGETALL" && c[1] === notesKey) ? reply : original.call(redis, commands)) as typeof redis.pipeline;
+    try {
+      return await run();
+    } finally {
+      redis.pipeline = original;
+    }
+  }
+  const at = NOW - 10;
+  const malformed: [string, unknown][] = [
+    ["no reply at all", []],
+    ["a nil, which HGETALL never answers", [null]],
+    ["a text instead of a hash", ["notes"]],
+    ["a number instead of a hash", [3]],
+    ["an odd count: a field without its value", [[NOTE_ID]]],
+    ["a value that is not text", [[NOTE_ID, 5]]],
+    ["a field that is not a note's id", [["note-1", written]]],
+    ["a value that is not JSON", [[NOTE_ID, "{"]]],
+    ["a value that is JSON but not a record", [[NOTE_ID, "[1]"]]],
+    ["a note with no words", [[NOTE_ID, JSON.stringify({ at, by: "owner@example.com", text: "  " })]]],
+    ["a note whose words are not text", [[NOTE_ID, JSON.stringify({ at, by: "owner@example.com", text: 7 })]]],
+    ["a note with no time", [[NOTE_ID, JSON.stringify({ by: "owner@example.com", text: "Hi" })]]],
+    ["a note whose time is not a whole number of seconds", [[NOTE_ID, JSON.stringify({ at: "soon", by: "owner@example.com", text: "Hi" })]]],
+    ["a note whose writer is not text", [[NOTE_ID, JSON.stringify({ at, by: 9, text: "Hi" })]]],
+    ["a good note beside a broken one", [[NOTE_ID, written, "0a1b2c3e", "{"]]],
+  ];
+  for (const [what, reply] of malformed) {
+    const read = await notesAnswer(reply, () => readPersonNotes(STATS, person).then(() => "read", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error))));
+    is(`${what}: reading the notes says it could not`, read, "unknown");
+    const profile = await notesAnswer(reply, () => buyerProfile(store, EMAIL));
+    is(`${what}: the page names the notes, shows none as if there were none, and keeps the rest`, [unreadOf(profile), profile.notes, profile.sequences], [["notes"], [], ["Welcome"]]);
+  }
+  const notesDown = await failing([["HGETALL", "nl:person:"]], () => buyerProfile(store, EMAIL));
+  is("Redis not reached for the notes: they are named, the rest is there", [unreadOf(notesDown), notesDown.notes, notesDown.sequences], [["notes"], [], ["Welcome"]]);
+  const notesAndCalls = await failing([["HGETALL", "nl:person:"], ["HGETALL", "nl:imp:buy:"]], () => buyerProfile(store, EMAIL));
+  is("named last, in the page's order", unreadOf(notesAndCalls), ["imported", "notes"]);
+
+  part("Adding or removing a note when the notes cannot be read");
+  const added = await notesAnswer([["notes"]], () => addPersonNote(STATS, person, "owner@example.com", "Prefers email.", ROOM, (NOW + 5) * 1000).then(() => "read", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error))));
+  is("adding: the note is written, and the notes as they are after are said not read, never a short list", added, "unknown");
+  const kept = await readPersonNotes(STATS, person);
+  is("the note added is kept beside the one before", kept.map((n) => n.text), ["Prefers email.", "Asked about the advanced course."]);
+  const removed = await notesAnswer([["notes"]], () => removePersonNote(STATS, person, NOTE_ID, ROOM).then(() => "read", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error))));
+  is("removing: said not read, and nothing is taken away", [removed, (await readPersonNotes(STATS, person)).length], ["unknown", 2]);
+
   part("What the page says");
   const words = (profiles as unknown as { profileUnreadWords?: (parts: string[]) => string }).profileUnreadWords;
   is("a sentence exists for the parts", typeof words, "function");
@@ -190,9 +259,24 @@ async function main(): Promise<void> {
       words(["imported", "paypal", "sequences"]),
       "Some parts of this page could not be loaded just now, so they are missing below: purchases brought from another platform, given, bought for others or paid with PayPal; the amounts of their PayPal sales; and the sequences they were started on. What they paid may be more than the totals show. Nothing was changed. Open this page again in a moment.",
     );
+    is(
+      "the notes",
+      words(["notes"]),
+      "Some parts of this page could not be loaded just now, so they are missing below: your team's notes about them. Nothing was changed. Open this page again in a moment.",
+    );
   }
   const page = readFileSync("app/studio/people/page.tsx", "utf8");
   is("the studio page shows the sentence as a status", /profile\.unread\.length[\s\S]{0,200}role="status"[\s\S]{0,200}profileUnreadWords\(profile\.unread\)/.test(page), true);
+  const notesSection = page.slice(page.indexOf('aria-labelledby="notes-title"'), page.indexOf("</section>", page.indexOf('aria-labelledby="notes-title"')));
+  is(
+    "notes not read: the notes box (and its \"No notes yet.\") is not drawn; a status says they could not be loaded",
+    /profile\.unread\.includes\("notes"\)\s*\?\s*\(?\s*<p[^>]*role="status"[^>]*>[^<]*could not be loaded just now[^<]*<\/p>\s*\)?\s*:\s*profile\.person\s*\?\s*<PersonNotes/.test(notesSection),
+    true,
+  );
+  const route = readFileSync("app/api/store/person/route.ts", "utf8");
+  is("the notes route answers 503, not \"did not save\", when the notes could not be read", /error instanceof UnknownReplyError\)\s*return Response\.json\(\{ ok: false, error: "unavailable" \}, \{ status: 503 \}\)/.test(route), true);
+  const box = readFileSync("components/person-notes.tsx", "utf8");
+  is("and the notes box says so, without saying it did not save", /answer\.error === "unavailable"[\s\S]{0,120}toast\("Your notes could not be loaded just now\. Open this page again in a moment to see whether that saved\."\)/.test(box), true);
 
   done();
 }

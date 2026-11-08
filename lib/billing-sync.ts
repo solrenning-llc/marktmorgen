@@ -235,7 +235,13 @@ async function syncStores(deadline: number, seen: Set<string>, counts: SyncCount
   let cursor = place ? place[1] : "0";
   let resume = place?.[2] ?? "";
   for (let step = 0; step < MAX_SCAN_STEPS; step += 1) {
-    if (Date.now() > deadline) break;
+    if (Date.now() > deadline) {
+      // No time left before this batch was read: the place saved inside it
+      // is kept whole, so a round step 1 used up does not send the next one
+      // back to the start of the batch (Codex H2's focal return on #3216).
+      if (resume) cursor = `${cursor}|${resume}`;
+      break;
+    }
     const { stores, next } = await storesAfter(cursor);
     // Every store whose plan has ended is in the line the daily job for
     // such stores walks (lib/plan-closing.ts). It is put there the moment

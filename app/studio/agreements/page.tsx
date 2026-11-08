@@ -8,7 +8,7 @@ import { AgreementsStudio } from "@/components/agreements-studio";
 import { can } from "@/lib/team-roles";
 import { formatMoney } from "@/lib/money";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { listAgreements } from "@/lib/agreement-store";
 import { agreementLink } from "@/lib/agreements";
@@ -38,7 +38,7 @@ export default async function StudioAgreementsPage({ searchParams }: Params) {
   const { view } = found;
   const { store } = view;
   const now = new Date().getTime();
-  const [rows, used, requests] = await Promise.all([listAgreements(store), allowanceUsed(store, "email", now), listRequests(store, now)]);
+  const [rows, used, requests] = await Promise.all([listAgreements(store), allowanceUsedExact(store, "email", now), listRequests(store, now)]);
   const payChoices = (requests ?? [])
     .filter((r) => requestStatus(r, now) === "open")
     .slice(0, 50)

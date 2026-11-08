@@ -271,6 +271,27 @@ async function main(): Promise<void> {
   model = { status: 529 };
   const held = (await poolOf(store.statsId!, window.id)).spent;
   is("the model fails: sent without it, and nothing billed is kept", [await remindFromConsent(store, failed, later), emails.at(-1)!.text.includes("Written by AI"), (await poolOf(store.statsId!, window.id)).spent - held], ["sent", false, 0]);
+  part("An unread count of the store's emails is not room: refused before the model, nothing sent");
+  model = { line: "Printable lists for every week of the planner." };
+  for (const [label, reply] of [["a lost reply", "lost"], ["a missing reply", []], ["a word", ["many"]], ["a negative count", ["-1"]]] as [string, unknown[] | "lost"][]) {
+    const unread = sessionId();
+    await keep(unread, `unread${unread.slice(-2)}@example.com`);
+    left(unread, { metadata: { store: "ovenshop", product: grocery } });
+    const original = redis.pipeline;
+    redis.pipeline = async (commands) => {
+      if (!(commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:allow:email:"))) return original(commands);
+      if (reply === "lost") throw new Error("synthetic lost reply");
+      return [...reply];
+    };
+    const [mailsBefore, askedBefore] = [emails.length, asked.length];
+    let outcome: unknown;
+    try {
+      outcome = await remindFromConsent(store, unread, later);
+    } finally {
+      redis.pipeline = original;
+    }
+    is(`${label}: not sent, and no model asked`, [outcome, emails.length - mailsBefore, asked.length - askedBefore], ["failed", 0, 0]);
+  }
   const spent = sessionId();
   await keep(spent, "hal@example.com");
   left(spent, { metadata: { store: "ovenshop", product: grocery } });

@@ -22,7 +22,7 @@ import type { MeetProvider } from "@/lib/call-setup";
 import { accessFor, testKey, NotConnected } from "@/lib/meet-connect";
 import { eventId, googleCreate, googleDelete, googleMove, zoomCreate, zoomDelete, zoomMove } from "@/lib/meet-providers";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 
 export class TestMeetingUnavailable extends Error {
   constructor() { super("The test meeting could not be changed just now. Try again in a moment."); }
@@ -35,30 +35,45 @@ export const TEST_MEETING_MINUTES = 30;
 export const TEST_MEETING_TITLE = "Marktmorgen test meeting";
 
 /**
- * The record as it was written, or null only for Redis's own "no such key" (CX-123 rule 24). Any other reply is
- * unknown and throws: read as "none", makeTest would make a second real meeting over the first one's record (the
- * first left on the creator's account out of the studio's reach), and removeTest would delete nothing.
+ * A test meeting as kept: null when the slot answered null (none there).
+ * Any other reply, or a record without its id, its https link or its times,
+ * is unknown (CX-123 rule 24) and throws, so nothing is offered, made, moved
+ * or deleted as if there were none.
  */
 function parse(raw: unknown): TestMeeting | null {
   if (raw === null) return null;
-  let v: Partial<TestMeeting> | null = null;
+  if (typeof raw !== "string") throw unread("a test meeting that is not text");
+  let v: unknown;
   try {
-    if (typeof raw === "string") v = JSON.parse(raw) as Partial<TestMeeting>;
+    v = JSON.parse(raw);
   } catch {
-    v = null;
+    throw unread("a test meeting that is not a record");
   }
-  const time = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
-  if (!v || typeof v !== "object" || typeof v.id !== "string" || !v.id || typeof v.link !== "string" || !/^https:\/\//.test(v.link) || !time(v.start) || !time(v.end) || !time(v.madeAt)) {
-    throw new UnknownReplyError("a test meeting");
+  if (!v || typeof v !== "object" || Array.isArray(v)) throw unread("a test meeting that is not a record");
+  const { id, link, start, end, madeAt } = v as Record<string, unknown>;
+  const time = (n: unknown) => typeof n === "number" && Number.isFinite(n);
+  if (typeof id !== "string" || !id || typeof link !== "string" || !/^https:\/\//.test(link) || !time(start) || !time(end) || !time(madeAt)) {
+    throw unread("a test meeting record without its id, link or times");
   }
-  return { id: v.id, link: v.link, start: v.start, end: v.end, madeAt: v.madeAt };
+  return { id, link, start: start as number, end: end as number, madeAt: madeAt as number };
 }
 
-/** The test meeting each of these accounts has, where it has one. Throws UnknownReplyError on any other reply. */
+/** Logged once where it is found; the caller says "could not be read or changed just now". */
+function unread(what: string): TestMeetingUnavailable {
+  console.error(`Redis answered ${what}`);
+  return new TestMeetingUnavailable();
+}
+
+/**
+ * The test meeting each of these accounts has, where it has one. Throws
+ * TestMeetingUnavailable when any reply is not in its exact shape: the Video
+ * calls page then says it could not read the test meeting, and the route
+ * answers "try again in a moment".
+ */
 export async function readTests(statsId: string | null, providers: MeetProvider[]): Promise<Partial<Record<MeetProvider, TestMeeting>>> {
   if (!statsId || !providers.length || !isRedisConfigured()) return {};
   const replies = repliesFor(await redisPipeline(providers.map((p) => ["GET", testKey(statsId, p)])), providers.length);
-  if (!replies) throw new UnknownReplyError("the test meetings");
+  if (!replies) throw unread("the test meetings with a reply missing or extra");
   const found: Partial<Record<MeetProvider, TestMeeting>> = {};
   providers.forEach((p, i) => {
     const test = parse(replies[i]);
@@ -129,7 +144,6 @@ export async function removeTest(statsId: string, provider: MeetProvider): Promi
   const access = await accessFor(statsId, provider);
   if (provider === "zoom") await zoomDelete(access.token, had.id);
   else await googleDelete(access.token, had.id);
-  // Read as written: a lost reply is said as not done; asking again deletes the same meeting (a 404 there is done).
-  if (countOf(repliesFor(await redisPipeline([["DEL", testKey(statsId, provider)]]), 1)?.[0]) === null) throw new UnknownReplyError("forgetting the test meeting");
+  await redisPipeline([["DEL", testKey(statsId, provider)]]);
   return true;
 }

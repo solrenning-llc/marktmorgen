@@ -511,6 +511,25 @@ export class MemoryRedis {
           this.until.set(heldKey, this.now() + Number(keep) * 1000);
           return 1;
         }
+        // lib/order-admission.ts MOVE_HELD_ORDERS: the orders held for an unknown window moved into its count in
+        // one step, nothing written unless both keys read as whole counts.
+        if (key.startsWith("-- marktmorgen:orders-held-move:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, pending, count, rawKeep] = args;
+          const whole = (raw: string) => raw.length <= 15 && (raw === "0" || /^-?[1-9]\d*$/.test(raw)) ? Number(raw) : null;
+          const raw = this.run(["GET", pending]);
+          if (raw === null) return 0;
+          const n = whole(String(raw));
+          if (n === null || n < 0) return -1;
+          const have = this.run(["GET", count]);
+          if (have !== null && whole(String(have)) === null) return -1;
+          const keep = Number(rawKeep);
+          if (rawKeep.trim() === "" || !Number.isFinite(keep) || keep < 1) return -1;
+          this.run(["DEL", pending]);
+          if (n === 0) return 0;
+          this.run(["INCRBY", count, n]);
+          this.run(["EXPIRE", count, keep]);
+          return n;
+        }
         if (key.startsWith("-- marktmorgen:order-admission-settle:v2\n") && args[0] === "2" && args.length === 6) {
           const [, openKey, heldKey, field, rawN, rawBytes] = args;
           this.live(openKey);

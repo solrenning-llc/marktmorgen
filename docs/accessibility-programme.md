@@ -153,6 +153,22 @@ Muted words on store pages (dates, notes, hints, "Unsaved" and similar) are smal
 - **The equivalent we offer:** this is not a keyboard trap (2.1.2). One Shift+Tab from the player's first control reaches Close, which is labeled "Close", is at least 44 × 44 px and is always visible at the top of the window. Close is also the first thing focused when the window opens.
 - **Not checked:** a real screen reader with each provider's real player.
 
+## Store front lines and the narrowest glyphs (7 November 2026)
+
+WCAG 2.2 1.4.8 (AAA) asks that a block of text be no wider than 80 characters or glyphs. On a store's product page (`app/[handle]/p/[product]/page.tsx`), its reviews page and a call's booking page, `app/globals.css` (`.st-measure`) caps paragraphs, definitions, quotes, captions, the lines of the description's lists and of what an option includes, the FAQ's questions, and the words of a block's benefits, fit lists, steps, contents and bonuses at `34ch`. Each is capped in its own font size, so a detail smaller than its title is held as well. Cards, rows and buttons (a review, "More from", a bundle's row, a call's length) are not capped as boxes, so they keep their width; their words are. `tests/product-page-accessibility.test.ts` holds the cap.
+
+- **Measured** in Chromium at 56ch, the cap before: the product page's real sentences reached at most 78 characters a line. Words made only of narrow letters (i, l, t, f, j, r, s) reached 126 a line on the store front in the same font (Geist). That count is a property of the font, not of the page.
+  - **At 34ch, by arithmetic, not a new browser run:** a line holds the cap divided by its glyphs' width in `ch`, and `ch` follows each capped element's own font size. So the size does not change the count: narrow-letter words reach about 77 (126 × 34 ÷ 56) and real sentences about 47 (78 × 34 ÷ 56).
+  - A question can be 200 characters (`MAX_QUESTION`), an item 200 (`MAX_ITEM`) and its detail 300 (`MAX_ITEM_DETAIL`); before, none of them was capped.
+- **The case:** glyphs narrower than the cap allows for, 34ch ÷ 80 = 0.425ch each. Measured in Geist: an apostrophe is 0.268ch, a comma or period 0.303ch, "!" 0.321ch and "i" 0.368ch. A text of single letters and spaces ("i i i") averages 0.37ch. The spaces from U+2000 to U+200A are narrower still, and a combining mark takes no room of its own.
+- **Why no width holds it:** a line holds the cap divided by the width of its glyphs. For any cap, a run of glyphs narrower than a 1/80 share of it goes past 80.
+  - Holding 80 apostrophes would need a cap of 21ch. A real sentence would then keep about 29 characters a line (78 × 21 ÷ 56).
+  - Glyphs that take almost no room need a cap near zero.
+  - So a CSS width that holds every glyph would cut ordinary sentences into short lines, and for the narrowest glyphs no width works. 34ch is the widest whole value that holds narrow-letter words with room. At 35ch the count would be about 79: no room left.
+  - A script that measures each paragraph and narrows it to its own glyphs is not demonstrated impossible. It is not built: the page is drawn on the server and must work without script.
+- **The equivalent we offer:** the cap is in `ch`, so a line is the narrower of the cap and the window. Narrowing the window, or zooming in, narrows every line in the same proportion (WCAG technique C20). Reader views and the visitor's own style sheet also work, because the words are live text with no fixed width. The creator's words are never edited to fit.
+- **Not checked:** the product page at 34ch in a browser, other store fonts as actually served, Firefox and WebKit, real devices, people.
+
 ## Resource-page interface captures (6 November 2026)
 
 Encanto 9 adds dated captures to `/platform/store-page` and

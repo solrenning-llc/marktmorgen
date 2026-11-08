@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useHydrated } from "@/components/use-hydrated";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
+import { StudioEmptyState } from "@/components/empty-state";
 import { toast } from "@/components/toast";
 import {
   type Collection,
@@ -103,9 +104,10 @@ export function CollectionsEditor({
       </p>
 
       {products.length === 0 ? (
-        <p className="mt-4 text-sm text-ink-soft">Publish a product and you can start a collection.</p>
+        <StudioEmptyState title="No products to group yet" body="Publish a product and you can start a collection." className="mt-4" />
       ) : (
         <>
+          {rows.length > 0 ? (
           <ul className="mt-5 space-y-4">
             {rows.map((row, index) => {
               const free = products.filter((p) => !row.products.includes(p.id));
@@ -202,9 +204,12 @@ export function CollectionsEditor({
               );
             })}
           </ul>
+          ) : (
+            <StudioEmptyState title="No collections yet" body="A collection groups products under one name and gets a page of its own." action={unavailable ? undefined : { href: "#add-collection", label: "Add the first collection" }} className="mt-5" />
+          )}
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {rows.length < MAX_COLLECTIONS ? (
-              <button type="button" disabled={unavailable} className="btn btn-secondary btn-sm" onClick={() => setRows((all) => [...all, { id: "", title: "", blurb: "", products: [] }])}>
+              <button type="button" id="add-collection" disabled={unavailable} className="btn btn-secondary btn-sm" onClick={() => setRows((all) => [...all, { id: "", title: "", blurb: "", products: [] }])}>
                 <Icon name="plus" size={15} />
                 {`Add a collection (${rows.length} of ${MAX_COLLECTIONS})`}
               </button>

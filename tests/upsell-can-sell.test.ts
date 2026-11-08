@@ -47,7 +47,7 @@ const NOW = Math.floor(Date.now() / 1000);
 /** Every request to Stripe, and the charges among them. */
 let stripeCalls = 0;
 const charges: URLSearchParams[] = [];
-let sessions: Record<string, Record<string, unknown>> = {};
+const sessions: Record<string, Record<string, unknown>> = {};
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));

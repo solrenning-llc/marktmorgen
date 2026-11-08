@@ -273,7 +273,7 @@ async function writeFlows(store: Store, listId: string, flows: Flow[], expected:
   const bytes = dataBytes([json], 1 + flows.length);
   // The room only grows before the write and only shrinks once the write is confirmed: a write refused or not known
   // never leaves it below what is kept (Claude 5 on #1927).
-  const before = expected === null ? 0 : dataBytes([expected], 1 + listedCount(expected));
+  const before = expected === null ? 0 : dataBytes([expected], 1 + keptFlowCount(expected));
   // What it grows by is added to the room as it is now, never set: a room already counting a longer change stays so.
   if (bytes > before) await needData(store, [{ slot: "wf:defs", bytes: bytes - before }]);
   let replies: unknown;
@@ -295,7 +295,7 @@ async function writeFlows(store: Store, listId: string, flows: Flow[], expected:
 }
 
 /** How many workflows a kept list holds, for its room; one that cannot be read counts none. */
-function listedCount(raw: string): number {
+function keptFlowCount(raw: string): number {
   try {
     const value: unknown = JSON.parse(raw);
     return Array.isArray(value) ? value.length : 0;

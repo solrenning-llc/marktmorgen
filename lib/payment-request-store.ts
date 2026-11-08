@@ -38,6 +38,9 @@ import { takeData } from "@/lib/store-data";
 import { sendEmail } from "@/lib/email";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { speechFor } from "@/lib/buyer-words";
+// Kept apart from the lock and reply helpers other work imports above, so the two never collide by name.
+import * as exactReply from "@/lib/redis-reply";
+import * as fencedLock from "@/lib/redis-lock";
 import {
   ID_PATTERN,
   KEEP_DAYS,
@@ -405,26 +408,64 @@ export async function settleStoreList(sid: string, now = Date.now()): Promise<vo
   if ((await openCount(sid, now).catch(() => 1)) === 0) await redisPipeline([["SREM", STORES, sid]]).catch(() => undefined);
 }
 
+/** How many times an erasure reads the person's set again, for a request made while it ran. */
+const FORGET_ROUNDS = 3;
+
 /**
  * Deletes every request a store keeps for one person (lib/person-erasure.ts):
  * an open one is withdrawn by being deleted, so its link stops working and
  * no reminder goes. What they paid stays on the creator's Stripe account.
  * Answers how many were deleted.
+ *
+ * Exact (rule 24): the person's set is the only way to find their requests,
+ * so it is read exactly, every member must be a request id, and every one is
+ * erased however many there are. A reply of another shape throws
+ * UnknownReplyError before anything is deleted (lib/person-erasure.ts then
+ * says the erasure is not finished, and pressing again retries). Each request
+ * goes under its write lock, the lock every change holds while it reads the
+ * record and writes it back (changeRequest), so a change in progress finishes
+ * first and cannot write the record back after it is gone; its record is
+ * deleted first, and only then does its id leave the store's lists, the
+ * reminders and the person's set, every count checked. So an id leaves the
+ * set only with its record, and a retry still finds whatever is left. Only an
+ * exact empty set is "nothing to erase".
  */
 export async function forgetRequestsPerson(sid: string, email: string): Promise<number> {
   if (!isRedisConfigured() || !sid) return 0;
   const person = personSet(sid, email);
-  const [members] = await redisPipeline([["SMEMBERS", person]]);
-  const ids = (Array.isArray(members) ? members.map(String) : []).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
-  if (!ids.length) {
-    await redisPipeline([["DEL", person]]);
-    return 0;
+  let erased = 0;
+  for (let round = 0; round < FORGET_ROUNDS; round += 1) {
+    const listed = exactReply.repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
+    const members = listed ? exactReply.stringList(listed[0]) : null;
+    if (!members || new Set(members).size !== members.length || !members.every((id) => ID_PATTERN.test(id))) {
+      throw new exactReply.UnknownReplyError("listing a person's payment requests");
+    }
+    if (!members.length) return erased;
+    // Sorted, so two erasures of the same person take the locks in the same order.
+    for (const id of [...members].sort()) {
+      await forgetPersonRequest(sid, person, id);
+      erased += 1;
+    }
   }
-  await redisPipeline([
-    ...ids.flatMap((id) => [["DEL", recordKey(id)], ["ZREM", storeKey(sid), id], ["ZREM", openKey(sid), id], ["ZREM", DUE, `${sid}|${id}`]]),
-    ["DEL", person],
-  ]);
-  return ids.length;
+  // Requests kept being made for them while this ran: not finished, and pressing again goes on.
+  throw new Error("a person's payment requests kept changing during their erasure");
+}
+
+/** One of a person's requests: its record under its write lock, then its id out of every list, each count checked. */
+async function forgetPersonRequest(sid: string, person: string, id: string): Promise<void> {
+  const held = await fencedLock.takeLock(writeKey(id), 10, 5_000);
+  try {
+    // Only while the lock is still this erasure's: one held up past it deletes nothing and throws, and the id stays.
+    if (!(await fencedLock.deleteIfHeldOnly(held, [recordKey(id)]))) throw new fencedLock.LockBusyError("a payment request's lock was lost before its erasure");
+  } finally {
+    await fencedLock.releaseLock(held);
+  }
+  const commands = [["ZREM", storeKey(sid), id], ["ZREM", openKey(sid), id], ["ZREM", DUE, `${sid}|${id}`], ["SREM", person, id]];
+  const replies = exactReply.repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies?.every((reply) => {
+    const n = exactReply.countOf(reply);
+    return n !== null && n <= 1;
+  })) throw new exactReply.UnknownReplyError("deleting a person's payment request");
 }
 
 /**

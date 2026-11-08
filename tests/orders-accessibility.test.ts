@@ -15,7 +15,13 @@
  *     booked call, and each agreement waiting to be signed, was a paragraph in
  *     bold, so the list could not be walked heading by heading; each purchase
  *     is now a level-2 heading under the page's h1, and each call and each
- *     agreement a level-3 heading under "Booked calls" and "Waiting on you".
+ *     agreement a level-3 heading under "Booked calls" and "Waiting on you";
+ *   - WCAG 2.4.9 (Link Purpose, Link Only, AAA): with several booked calls,
+ *     each call's "Join the call", "Add it to your calendar" and "Move it to
+ *     another time" said the same words as every other call's, so a list of
+ *     the page's links could not tell them apart; each now names its call by
+ *     its product, and by its time too when the buyer booked that product
+ *     more than once.
  *
  * Synthetic records and a stand-in Stripe only: nothing real is charged, sent or read.
  */
@@ -193,6 +199,83 @@ test("2.4.10: each purchase is a section heading under the page's h1, and each b
   const move = lonelyLinks(html).find((l) => l.text === words.moveCall);
   assert.ok(move, "the call can be moved, so its link is drawn");
   assert.ok(tall(move.classes), `"${words.moveCall}" is under 44 px high (${move.classes.join(" ")})`);
+});
+
+/** Each link's accessible name as a screen reader computes it (accname 1.2, the parts this page uses): aria-labelledby, then aria-label, then its words. */
+function linkNames(html: string): { name: string; text: string }[] {
+  // Drops markup one character at a time (no single-pass regex), then decodes the five entities React writes.
+  const words = (text: string) => {
+    let out = "";
+    let inTag = false;
+    for (const ch of text) {
+      if (ch === "<") inTag = true;
+      else if (ch === ">") inTag = false;
+      else if (!inTag) out += ch;
+    }
+    return out;
+  };
+  const decode = (text: string) =>
+    words(text).replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#x27;", "'").replaceAll("&amp;", "&").replace(/\s+/g, " ").trim();
+  const byId = (id: string) => {
+    const open = new RegExp(`<([a-z0-9]+)\\b[^>]*\\bid="${id}"[^>]*>`).exec(html);
+    assert.ok(open, `aria-labelledby names "${id}", which is on the page`);
+    const end = html.indexOf(`</${open[1]}>`, open.index);
+    return decode(html.slice(open.index + open[0].length, end));
+  };
+  return [...html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].map((m) => {
+    const text = decode(m[2]);
+    const labelledBy = /\baria-labelledby="([^"]+)"/.exec(m[1]);
+    const label = /\baria-label="([^"]+)"/.exec(m[1]);
+    const name = labelledBy ? labelledBy[1].split(/\s+/).map(byId).join(" ") : label ? decode(label[1]) : text;
+    return { name, text };
+  });
+}
+
+test("2.4.9: with several booked calls, every link on the page says by itself which call it is for", async () => {
+  const store = await shop();
+  const weekly = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
+  const products: Record<string, string> = {};
+  for (const title of ["Coaching call", "Portfolio review"]) {
+    const made = await addProduct(OWNER, title, "", "50", null);
+    assert.ok(made.ok);
+    const setup = readSetup({ kind: "weekly", minutes: 30, tz: "UTC", weekly, noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "https://example.test/room", video: false, meet: null, seats: 1, sessions: [] });
+    assert.ok(setup && typeof setup === "object");
+    await setProductCall(OWNER, made.product.id, setup as never);
+    products[title] = made.product.id;
+  }
+  // Two calls of the same product and one of another: the product alone tells the third apart, not the first two.
+  const booked = [
+    { title: "Coaching call", start: (NOW + 3 * 86_400) * 1000 },
+    { title: "Coaching call", start: (NOW + 5 * 86_400) * 1000 },
+    { title: "Portfolio review", start: (NOW + 4 * 86_400) * 1000 },
+  ];
+  checkouts = booked.map((call, i) =>
+    paid(20 + i, 30 + i, { kind: "call", product: products[call.title], title: call.title, start: String(call.start), end: String(call.start + 1_800_000), tz: "UTC" }),
+  );
+  const html = await opened(store);
+  const words = ordersWords("en");
+  assert.ok(html.includes(words.bookedCalls(3)), "the three calls are listed");
+  const links = linkNames(html);
+  // Every link's name is its own: none says the same as another (WCAG 2.4.9), and each starts with the words it shows
+  // (2.5.3: its Understanding document asks the visible label to start the name, for speech input and link lists).
+  const names = links.map((l) => l.name);
+  assert.deepEqual(names.filter((name, i) => names.indexOf(name) !== i), [], `links that say the same: ${names.join(" | ")}`);
+  for (const link of links) assert.ok(link.name.startsWith(link.text), `"${link.name}" starts with the words it shows, "${link.text}"`);
+  // Each call's three links name its product: join, add to the calendar, move.
+  const section = html.slice(html.indexOf('<section aria-labelledby="calls-title"'), html.indexOf("</section>", html.indexOf('aria-labelledby="calls-title"')));
+  const cards = [...section.matchAll(/<li\b[\s\S]*?<\/li>/g)].map((m) => m[0]);
+  assert.equal(cards.length, 3, "three call cards");
+  for (const [i, card] of cards.entries()) {
+    const title = /<h3[^>]*>([^<]*)<\/h3>/.exec(card)![1];
+    const own = linkNames(card);
+    assert.equal(own.length, 3, `call ${i}: join, calendar and move`);
+    for (const link of own) assert.ok(link.name.includes(title), `call ${i}: "${link.name}" names "${title}"`);
+  }
+  for (const text of ["Join the call", words.addToCalendar, words.moveCall]) {
+    const named = links.filter((l) => l.text.startsWith(text));
+    assert.equal(named.length, 3, `"${text}" once per call`);
+    assert.deepEqual(named.map((l) => booked.find((call) => l.name.includes(call.title))?.title), ["Coaching call", "Portfolio review", "Coaching call"], `"${text}" names each call's product, soonest first`);
+  }
 });
 
 /** Every heading drawn, in order, as "h<level>:<words>". */

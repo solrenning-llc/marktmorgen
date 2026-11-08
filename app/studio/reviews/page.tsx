@@ -22,6 +22,7 @@ import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
 import { Stars } from "@/components/review-stars";
 import { imageUrl } from "@/lib/product-image";
+import { StudioEmptyState } from "@/components/empty-state";
 
 export const metadata: Metadata = {
   title: "Reviews — Marktmorgen",
@@ -145,22 +146,20 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
                 <p className="mt-2 text-ink-soft">Reload to check your reviews. An unavailable list does not mean there are no reviews or that every review has been seen.</p>
               </div>
             ) : rows.length === 0 ? (
-              <div className="card mt-5 p-6 sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">{current.total > 0 ? "No reviews on this page" : queue ? "Nothing new" : "No reviews yet"}</p>
-                <p className="mt-2 text-ink-soft">
-                  {current.total > 0
+              <StudioEmptyState
+                level={3}
+                className="card mt-5 p-6 sm:p-8"
+                title={current.total > 0 ? "No reviews on this page" : queue ? "Nothing new" : "No reviews yet"}
+                body={
+                  current.total > 0
                     ? "Choose an earlier page to see the reviews in this list."
                     : queue
                     ? "Every review has been seen. New ones, and reviews their buyers change, come back here."
-                    : "When a buyer reviews something, it appears here and on the product's page at the same moment."}
-                </p>
-                {/* Only when the store has no review at all, on either tab, and only for a role that can switch the requests on. */}
-                {current.total === 0 && numbers.size === 0 && can(view.role, "settings") ? (
-                  <a href="#asking-for-reviews" className="mt-3 inline-flex min-h-11 items-center font-semibold text-ink underline underline-offset-4">
-                    Ask buyers for a review
-                  </a>
-                ) : null}
-              </div>
+                    : "When a buyer reviews something, it appears here and on the product's page at the same moment."
+                }
+                // Only when the store has no review at all, on either tab, and only for a role that can switch the requests on.
+                action={current.total === 0 && numbers.size === 0 && can(view.role, "settings") ? { href: "#asking-for-reviews", label: "Ask buyers for a review" } : undefined}
+              />
             ) : (
               <AiOn value={ai}>
                 <ul className="mt-5 space-y-3">
@@ -204,6 +203,8 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
             <div className="card p-5 sm:p-6">
               <p className="font-semibold text-ink">By product</p>
               {reviewed.length === 0 ? (
+                // Not the shared empty state (Codex Q on #2841): the totals' reader cannot tell "none" from "not read",
+                // so this says only that none can be shown here, never that there are none.
                 <p className="mt-2 text-sm text-ink-soft">No product review totals are available in this view.</p>
               ) : (
                 <ul className="mt-3 space-y-3">

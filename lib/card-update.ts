@@ -124,6 +124,15 @@ export async function cardView(store: Store, grant: CardGrant): Promise<CardView
   }
 }
 
+/** The presses after SET ... NX and INCR: a whole number from one up, or null when the reply is not that. */
+function pressCount(replies: unknown): number | null {
+  const both = repliesFor(replies, 2);
+  const set = both?.[0];
+  if (!both || (set !== "OK" && set !== null)) return null;
+  const count = countOf(both[1]);
+  return count !== null && count >= 1 ? count : null;
+}
+
 export type OpenCard = { ok: true; url: string } | { ok: false; reason: "expired" | "used" | "ended" | "error" };
 
 /** The button: a Stripe page in setup mode that saves a card for this membership. */
@@ -131,15 +140,22 @@ export async function openCardUpdate(store: Store, token: string, origin: string
   const grant = await cardGrant(store, token);
   if (!grant) return { ok: false, reason: "expired" };
   const key = await opensKey(token);
-  // Only a whole count from 1 up is a count (CX-123 rule 24; Claude 5, sweep APP2 finding 2): a missing reply,
-  // nil or a word is not "under the limit", so the press is refused and no Stripe page is made.
-  const replies = repliesFor(await redisPipeline([
+  // Counted before Stripe is asked, in its exact shape: a press that cannot
+  // be counted is not a first press (CX-123 rule 24). Only a whole count from 1 up is a count
+  // (Claude 5, sweep APP2 finding 2): a missing reply, nil or a word is not "under the limit",
+  // so the press is refused and no Stripe page is made.
+  const presses = await redisPipeline([
     ["SET", key, "0", "EX", CARD_LINK_SECONDS, "NX"],
     ["INCR", key],
-  ]), 2);
-  const count = replies && (replies[0] === "OK" || replies[0] === null) ? countOf(replies[1]) : null;
-  if (count === null || count < 1) return { ok: false, reason: "error" };
-  if (count > MAX_OPENS) return { ok: false, reason: "used" };
+  ]).then(
+    (replies) => pressCount(replies),
+    (error: unknown) => {
+      console.error("counting a card link's presses failed", store.handle, error);
+      return null;
+    },
+  );
+  if (presses === null) return { ok: false, reason: "error" };
+  if (presses > MAX_OPENS) return { ok: false, reason: "used" };
   try {
     const sub = await subFor(store, grant.a, grant.c, grant.s);
     if (!sub) return { ok: false, reason: "error" };

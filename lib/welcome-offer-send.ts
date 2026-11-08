@@ -10,7 +10,8 @@
  *
  *   nl:wo:start:<statsId>:<hash>   when a person's offer began, in seconds
  *   nl:wo:due                      reminders to send: score = when, member = what, with the address;
- *                                  a person's is taken out when they are erased (forgetWelcomePerson)
+ *                                  a person's is taken out when they are erased (forgetWelcomePerson);
+ *                                  one put back after a failed send keeps its score and counts its tries ("a")
  *   nl:wo:r:<statsId>:<hash>       that person's reminder is set, once: "due:<hour>:<claim>", the hour
  *                                  its score in nl:wo:due, so an erasure finds it without walking the queue
  *   nl:wo:n:<statsId>              how many people have been offered it, for the studio
@@ -32,6 +33,7 @@ import { type Claim, readClaimFull } from "@/lib/free";
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { endsAt, remindAt, welcomeOn } from "@/lib/welcome-offer";
+import { REMINDER_RETRIES, retriesOf } from "@/lib/reminder-retry";
 import { welcomeWords } from "@/lib/buyer-words/welcome";
 
 const KEEP_AFTER_SECONDS = 400 * 86_400;
@@ -105,18 +107,57 @@ function moment(seconds: number, language: unknown): string {
   });
 }
 
+type DueReminder = { s?: string; i?: string; h?: string; e?: string; t?: string; a?: unknown };
+
+/**
+ * Puts a reminder whose send failed back in the queue (lib/reminder-retry.ts),
+ * a few times at the most, at the score it had: the hour its person's mark
+ * keeps, so an erasure still finds it there (forgetWelcomePerson, dueAt), and
+ * the next run tries it again. Every rule is read again before that try (the
+ * offer still on, the person still on the list), and the email keeps its
+ * name (nimbus-wo:), so it is never a second one. Whether it went back.
+ */
+async function again(v: DueReminder, score: string): Promise<boolean> {
+  const tries = retriesOf(v.a);
+  if (tries >= REMINDER_RETRIES) return false;
+  try {
+    const [added] = await redisPipeline([["ZADD", DUE_KEY, score, JSON.stringify({ ...v, a: tries + 1 })]]);
+    // 1 put back; 0 one just like it already waits. Anything else is unknown: not counted as put back.
+    if (added === 1 || added === 0) return true;
+    console.error("putting a welcome offer reminder back answered in no known shape");
+  } catch (error) {
+    console.error("putting a welcome offer reminder back failed", error);
+  }
+  return false;
+}
+
 /** The reminders now due, a few at a time, from the five-minute job. */
-export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ sent: number; dropped: number }> {
-  const counts = { sent: 0, dropped: 0 };
+export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ sent: number; dropped: number; retried: number }> {
+  const counts = { sent: 0, dropped: 0, retried: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "0", String(nowSeconds), "LIMIT", "0", "25"]]);
-  for (const member of Array.isArray(due) ? (due as unknown[]).map(String) : []) {
+  // With each one's score, the hour it is put back at after a failed send. Read only in its exact shape
+  // (CX-123 rule 24): members and scores (seconds) in pairs, or nothing; anything else is unknown and sends nothing.
+  const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "0", String(nowSeconds), "WITHSCORES", "LIMIT", "0", "25"]]), 1)?.[0]);
+  if (!due || due.length % 2 !== 0 || due.length > 50) throw new UnknownReplyError("the read of the welcome reminders now due");
+  for (let at = 0; at < due.length; at += 2) {
+    if (!/^\d{1,12}(\.\d{1,17})?$/.test(due[at + 1])) throw new UnknownReplyError("the hour of a welcome reminder now due");
+  }
+  for (let at = 0; at < due.length; at += 2) {
+    const member = due[at];
+    const score = due[at + 1];
     if (Date.now() >= deadline) break;
-    // Taken off first: a reminder is tried once, never twice.
+    // Taken off first, so two runs never send the same one; put back only after a failed send (again).
     const [removed] = await redisPipeline([["ZREM", DUE_KEY, member]]);
     if (!Number(removed)) continue;
+    let parsed: unknown = null;
     try {
-      const v = JSON.parse(member) as { s?: string; i?: string; h?: string; e?: string; t?: string };
+      parsed = JSON.parse(member);
+    } catch {
+      // A member of no known shape is dropped below.
+    }
+    const v: DueReminder = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as DueReminder) : {};
+    let failed = false;
+    try {
       const store = v.s ? await storeForId(v.s) : null;
       if (!store || store.statsId !== v.i || !v.e || !v.t || !welcomeOn(store) || !store.listId || !store.welcomeOffer.remind || !store.welcomeOffer.address) {
         counts.dropped += 1;
@@ -159,11 +200,14 @@ export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.f
         idempotencyKey: `nimbus-wo:${store.statsId}:${v.h}`,
       });
       if (ok) counts.sent += 1;
-      else counts.dropped += 1;
+      else failed = true;
     } catch (error) {
       console.error("sending a welcome offer reminder failed", error);
-      counts.dropped += 1;
+      failed = true;
     }
+    if (!failed) continue;
+    if (await again(v, score)) counts.retried += 1;
+    else counts.dropped += 1;
   }
   return counts;
 }

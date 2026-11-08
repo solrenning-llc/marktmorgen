@@ -51,21 +51,30 @@ const DOORS_KEY = "nl:tasks:doors";
 export const DOOR_SECONDS = 24 * 60 * 60;
 const WHO = /^[0-9a-f]{16,64}$/;
 
-function parse<T>(raw: unknown): T | null {
-  if (typeof raw !== "string" || !raw) return null;
+/** A JSON object as kept, or null when the text does not read as one. */
+function storedObject(raw: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(raw) as T;
+    const value: unknown = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
   } catch {
     return null;
   }
 }
 
+/**
+ * A lesson's assignment, or null when it has none: only an explicit nil is none. A reply of another shape, or a
+ * record not as saveTask wrote it (a prompt, and its three switches as true or false), throws UnknownReplyError
+ * (CX-123 rule 24; Claude 4's audit), never "no assignment".
+ */
 export async function readTaskFor(courseId: string, lessonId: string): Promise<Task | null> {
   if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) return null;
-  const [raw] = await redisPipeline([["GET", taskKey(courseId, lessonId)]]);
-  const value = parse<Record<string, unknown>>(raw);
-  if (!value || typeof value.prompt !== "string" || !value.prompt) return null;
-  return { ...(parseTaskSetup(value) as Task), prompt: value.prompt };
+  const raw = repliesFor(await redisPipeline([["GET", taskKey(courseId, lessonId)]]), 1)?.[0];
+  if (raw === null) return null;
+  const value = typeof raw === "string" ? storedObject(raw) : null;
+  const exact =
+    !!value && typeof value.prompt === "string" && value.prompt !== "" && [value.review, value.gate, value.file].every((on) => typeof on === "boolean");
+  if (!value || !exact) throw new UnknownReplyError("a lesson's assignment");
+  return { ...(parseTaskSetup(value) as Task), prompt: value.prompt as string };
 }
 
 /**
@@ -167,14 +176,8 @@ function isHandedFile(value: unknown): value is HandedFile {
 
 /** A student's record as handIn and review write it, or null for anything else. */
 function storedSubmission(raw: string): Submission | null {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const v = value as Record<string, unknown>;
+  const v = storedObject(raw);
+  if (!v) return null;
   const exact =
     typeof v.text === "string" &&
     (v.file === null || isHandedFile(v.file)) &&
@@ -183,7 +186,7 @@ function storedSubmission(raw: string): Submission | null {
     typeof v.feedback === "string" &&
     wholeFrom(v.reviewedAt, 0) &&
     wholeFrom(v.tries, 1);
-  return exact ? (value as Submission) : null;
+  return exact ? (v as Submission) : null;
 }
 
 /**
@@ -200,12 +203,26 @@ export async function submissionOf(courseId: string, lessonId: string, who: stri
   return found;
 }
 
-/** Several students' work at once, in the order asked, null where there is none. */
-export async function submissionsOf(courseId: string, rows: { lessonId: string; who: string }[]): Promise<(Submission | null)[]> {
+/** A student's record that is there but does not read as handIn wrote it: kept, and said as not read. */
+export type UnreadSubmission = { unread: true };
+
+export function isUnreadSubmission(value: Submission | UnreadSubmission | null | undefined): value is UnreadSubmission {
+  return !!value && "unread" in value && value.unread === true;
+}
+
+/**
+ * Several students' work at once, in the order asked, null where there is none (an explicit nil). A reply cut short
+ * or of another shape throws UnknownReplyError (CX-123 rule 24); a record that is there but does not read is
+ * answered `{ unread: true }`, never null, so it does not drop out of the person's copy of their data
+ * (lib/person-copy.ts) nor out of the studio's list of work, which say it could not be read.
+ */
+export async function submissionsOf(courseId: string, rows: { lessonId: string; who: string }[]): Promise<(Submission | UnreadSubmission | null)[]> {
   const asked = rows.filter((r) => WHO.test(r.who) && ITEM_ID_PATTERN.test(r.lessonId));
   if (!isRedisConfigured() || !asked.length) return rows.map(() => null);
-  const raw = await redisPipeline(asked.map((r) => ["GET", subKey(courseId, r.lessonId, r.who)]));
-  const found = new Map(asked.map((r, i) => [`${r.lessonId}|${r.who}`, parse<Submission>(raw[i])]));
+  const raws = repliesFor(await redisPipeline(asked.map((r) => ["GET", subKey(courseId, r.lessonId, r.who)])), asked.length);
+  if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("several students' work on assignments");
+  const read = (raw: unknown): Submission | UnreadSubmission | null => (raw === null ? null : (storedSubmission(raw as string) ?? { unread: true }));
+  const found = new Map(asked.map((r, i) => [`${r.lessonId}|${r.who}`, read(raws[i])]));
   return rows.map((r) => found.get(`${r.lessonId}|${r.who}`) ?? null);
 }
 
@@ -328,6 +345,11 @@ export async function handIn(input: {
   now?: number;
   /** The store whose data room the work takes from (DataRoomError when it does not fit). */
   data: DataStore;
+  /**
+   * Called just before the work is written. A failure before it kept nothing; from it on, the work (and the file in
+   * it) may be kept even when the call fails, its answer lost or a step after it failing (CX-123 rule 24).
+   */
+  writing?: () => void;
 }): Promise<HandIn> {
   const { courseId, lessonId, who, task } = input;
   const at = input.now ?? Math.floor(Date.now() / 1000);
@@ -346,6 +368,7 @@ export async function handIn(input: {
   // Its room first: what it weighs over what it replaces, its two places in the lists the first time, its file's entry.
   const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (input.file ? ENTRY_BYTES : 0);
   if (grown > 0) await needData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
+  input.writing?.();
   await redisPipeline([
     ["SET", subKey(courseId, lessonId, who), JSON.stringify(kept)],
     ...(input.file ? [["HSET", filesKey(courseId, lessonId), input.file.path, input.file.bytes]] : []),
@@ -569,14 +592,9 @@ export async function dropCourseTasks(course: CourseTasks, room: string | null, 
  * size that does not read gives back no room (which only refuses sooner).
  */
 function fileOfRecord(raw: string): { path: string; bytes: number } | null | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const file = (value as { file?: unknown }).file;
+  const value = storedObject(raw);
+  if (!value) return undefined;
+  const file = value.file;
   if (file === null) return null;
   if (!file || typeof file !== "object" || Array.isArray(file)) return undefined;
   const { path, bytes } = file as { path?: unknown; bytes?: unknown };

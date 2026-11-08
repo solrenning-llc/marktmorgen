@@ -1,4 +1,5 @@
 import { MemoryRedis } from "@/lib/redis-memory";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Member, CommunityConfig } from "@/lib/community";
 import type { CommunityEvent } from "@/lib/community-events";
 import type { Store } from "@/lib/store";
@@ -37,7 +38,13 @@ export const askingAgainWontTell = () => false;
 export const mayAttend = async () => true;
 export const readEvent = async () => event;
 export const readEventExact = readEvent;
-export const rsvpList = async () => members.map(m => ({ key: m.k }));
+/** The next reading of who is coming answers in an unknown shape, as lib/community-events.ts then throws. */
+export let rsvpUnknown = false;
+export const setRsvpUnknown = (on: boolean) => { rsvpUnknown = on; };
+export const rsvpList = async () => {
+  if (rsvpUnknown) { rsvpUnknown = false; throw new UnknownReplyError("who is coming to an event"); }
+  return members.map(m => ({ key: m.k }));
+};
 export const rsvpNumbers = async () => ({ going: 2 });
 export const stillGoing = async () => new Set(members.map(m => m.k));
 export const EVENT_QUEUE = "nl:cm:evq";
@@ -61,5 +68,5 @@ export const orderWrite = async () => {};
 export const alertCreator = async () => false;
 
 export function reset(): void {
-  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null;
+  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; rsvpUnknown = false;
 }

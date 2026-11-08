@@ -82,6 +82,7 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
   const listStore = found ? await storeOf(query) : null;
   const name = listStore ? listStore.mail?.fromName || listStore.name : "";
   const a = wordsFor(listStore);
+  const notSaved = param(query, "done") === "0";
 
   return (
     <main id="content" lang={localeOf(listStore)} className="min-h-screen bg-paper px-4 py-20 text-ink">
@@ -108,6 +109,8 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
           <>
             <h1 className="t-h3">{a.listAsk(name)}</h1>
             <p className="mt-3 text-ink-soft">{a.forEmail(found.email)}</p>
+            {/* done=0 on a link still found and not left: the last press was not saved (its read or write was unknown), so the button is offered again. */}
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?t=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.unsubscribeButton}</button>

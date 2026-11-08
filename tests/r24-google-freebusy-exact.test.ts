@@ -81,6 +81,21 @@ async function main() {
   is("a calendar entry that is not an object", await read({ primary: "x" }), "throws bad");
   is("the second calendar unreadable fails the whole reading", await read({ primary: { busy: [] }, "team@group.calendar.google.com": { busy: "x" } }, ["primary", "team@group.calendar.google.com"]), "throws bad");
 
+  // Codex U on #3310 (review 5820175332): Date.parse accepts more than Google's RFC 3339 date-time, so a stretch was
+  // moved or invented instead of refused. Each of these must fail the whole reading.
+  part("Only an RFC 3339 date-time with a zone is a stretch's time; anything else throws");
+  is("bare numbers as text ('1', '2')", await read({ primary: { busy: [{ start: "1", end: "2" }] } }), "throws bad");
+  is("date-only values", await read({ primary: { busy: [{ start: "2026-11-09", end: "2026-11-10" }] } }), "throws bad");
+  is("locale-formatted text", await read({ primary: { busy: [{ start: "Nov 9, 2026 14:00", end: "Nov 9, 2026 15:00" }] } }), "throws bad");
+  is("a date-time without a zone", await read({ primary: { busy: [{ start: "2026-11-09T14:00:00", end: "2026-11-09T15:00:00" }] } }), "throws bad");
+  is("a day that does not exist (30 February)", await read({ primary: { busy: [{ start: "2026-02-30T14:00:00Z", end: "2026-02-30T15:00:00Z" }] } }), "throws bad");
+  is("an hour out of range", await read({ primary: { busy: [{ start: "2026-11-09T24:00:00Z", end: "2026-11-09T25:00:00Z" }] } }), "throws bad");
+  is("an offset out of range", await read({ primary: { busy: [{ start: "2026-11-09T14:00:00+24:00", end: "2026-11-09T15:00:00+24:00" }] } }), "throws bad");
+  part("Controls: valid RFC 3339 forms keep their exact instants");
+  is("an explicit offset", await read({ primary: { busy: [{ start: "2026-11-09T11:00:00-03:00", end: "2026-11-09T12:00:00-03:00" }] } }), [[Date.parse(S), Date.parse(E)]]);
+  is("fractional seconds", await read({ primary: { busy: [{ start: "2026-11-09T14:00:00.250Z", end: "2026-11-09T15:00:00.5Z" }] } }), [[Date.parse(S) + 250, Date.parse(E) + 500]]);
+  is("29 February in a leap year", await read({ primary: { busy: [{ start: "2028-02-29T14:00:00Z", end: "2028-02-29T15:00:00Z" }] } }), [[Date.parse("2028-02-29T14:00:00Z"), Date.parse("2028-02-29T15:00:00Z")]]);
+
   is("no request left the process", outbound, 0);
   done();
 }

@@ -38,7 +38,8 @@ import { isFree } from "@/lib/store-field-rules";
 import { keptMembershipBytes, membershipNumbersPaid } from "@/lib/membership-numbers";
 import { broadcastSizes, listBroadcasts } from "@/lib/broadcasts";
 import { broadcastMoney, flowMoney, keptMailRevenueBytes, readMailRevenuePaid } from "@/lib/mail-revenue";
-import { flowStats, flowsBytes, readFlows } from "@/lib/flows";
+import { flowsBytes, readFlows } from "@/lib/flows";
+import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
@@ -404,7 +405,9 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
           },
         ).catch(() => null)
       : Promise.resolve(null),
-    flowStats(flows).catch(() => new Map()),
+    // Read by the studio's own strict reader, one rule for what a tally may be (Claude 4 on #3176). A reading that
+    // failed or answered in another shape is unknown: each sequence says null, never 0 (CX-123 rule 24).
+    readFlowStatsStrict(flows).catch(() => null),
   ]);
   if (said.refused) return said.refused;
   // Settled at what was read: the copy at the bytes it was read at, or the sales and the copy made of them. What a
@@ -433,9 +436,9 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
       };
     }),
     sequences: flows.map((f) => {
-      const c = flowCounts.get(f.id);
+      const c = flowCounts?.get(f.id) ?? null;
       const money = flowMoney(revenue, f.id);
-      return { name: f.name, trigger: f.trigger, started: c?.started ?? 0, emails_sent: c?.sent ?? 0, reached_the_end: c?.reached ?? 0, sales: money?.sales ?? null, revenue: money?.cents ?? null, sales_in_another_currency: money ? money.elsewhere ?? 0 : null };
+      return { name: f.name, trigger: f.trigger, started: c ? c.started : null, emails_sent: c ? c.sent : null, reached_the_end: c ? c.reached : null, counts_unavailable: c === null, sales: money?.sales ?? null, revenue: money?.cents ?? null, sales_in_another_currency: money ? money.elsewhere ?? 0 : null };
     }),
   };
 }
@@ -592,6 +595,8 @@ export async function readLessonTool(store: Store, id: string, lessonId: string,
   if (!listing || !course || !found) return null;
   // Read exactly: only what Redis says is not there is no text, quiz or task; another answer throws, never "" or none (CX-123 rule 24).
   const [text, quiz, task] = await Promise.all([readBodyExact(course.id, lessonId), readQuizForExact(course.id, lessonId), readTaskForExact(course.id, lessonId)]);
+  // readBodyExact answers null for a reply it cannot read: unknown, never a lesson with no text.
+  if (text === null) throw new UnknownReplyError("a lesson's text");
   return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz, task };
 }
 

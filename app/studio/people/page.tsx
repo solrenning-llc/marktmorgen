@@ -20,7 +20,7 @@ import { type PersonTask, taskAssignees } from "@/lib/person-tasks";
 import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
 import type { CrmField } from "@/lib/crm-rules";
-import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken } from "@/lib/buyer-profile";
+import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken, profileUnreadWords } from "@/lib/buyer-profile";
 import { channelName } from "@/lib/channel-names";
 import { formatMoney } from "@/lib/money";
 import { listSales } from "@/lib/store-checkout";
@@ -323,6 +323,11 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
       ) : !store.stripeAccountId ? (
         <p className="notice notice-info mt-6">Connect your Stripe account, and what they paid is shown here.</p>
       ) : null}
+      {profile.unread.length ? (
+        <p className="notice notice-warn mt-6" role="status">
+          {profileUnreadWords(profile.unread)}
+        </p>
+      ) : null}
 
       <dl className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {tiles.map((t) => (
@@ -342,7 +347,13 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
       <section aria-labelledby="orders-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="orders-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">What they bought and paid</h2>
         {!bought ? (
-          <p className="mt-2 text-sm text-ink-soft">Nothing bought from this store under this address.</p>
+          <p className="mt-2 text-sm text-ink-soft">
+            {profile.stripeError
+              ? "Their purchases could not be loaded just now. See the note above."
+              : profile.unread.includes("imported")
+              ? "No Stripe purchase from this store under this address. Purchases brought from another platform, given, bought for others or paid with PayPal could not be loaded just now."
+              : "Nothing bought from this store under this address."}
+          </p>
         ) : (
           <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="orders-title">
             <table className="w-full text-left text-sm">

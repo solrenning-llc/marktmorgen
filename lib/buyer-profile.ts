@@ -49,7 +49,7 @@ import { type Store, saleHandles } from "@/lib/store";
 import { listingFinder } from "@/lib/catalog";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { type Contact, leadsKey, parseContact } from "@/lib/contacts";
-import { readFlows, flowsStartedFor } from "@/lib/flows";
+import { type Flow, readFlows, flowsStartedFor } from "@/lib/flows";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
@@ -254,6 +254,30 @@ export type ProfileMembership = {
 
 export type ProfileCourse = { title: string; done: number; lessons: number; since: number; lastSeen: number };
 
+/**
+ * A part of the page read apart from Stripe, which may fail on its own
+ * (rule 24): purchases handed over without a Stripe payment, the amount of a
+ * PayPal sale, the calls coming up, the sequences they were started on. A part
+ * that could not be read is named, never shown as "none".
+ */
+export type ProfilePart = "imported" | "paypal" | "calls" | "sequences";
+const PROFILE_PARTS: ProfilePart[] = ["imported", "paypal", "calls", "sequences"];
+const PART_WORDS: Record<ProfilePart, string> = {
+  imported: "purchases brought from another platform, given, bought for others or paid with PayPal",
+  paypal: "the amounts of their PayPal sales",
+  calls: "their calls coming up",
+  sequences: "the sequences they were started on",
+};
+
+/** What the page says when some of its parts could not be read; "" when all were. */
+export function profileUnreadWords(parts: readonly ProfilePart[]): string {
+  const named = PROFILE_PARTS.filter((p) => parts.includes(p)).map((p) => PART_WORDS[p]);
+  if (!named.length) return "";
+  const list = named.length === 1 ? named[0] : `${named.slice(0, -1).join("; ")}; and ${named[named.length - 1]}`;
+  const money = parts.includes("imported") || parts.includes("paypal") ? " What they paid may be more than the totals show." : "";
+  return `Some parts of this page could not be loaded just now, so they are missing below: ${list}.${money} Nothing was changed. Open this page again in a moment.`;
+}
+
 export type BuyerProfile = {
   email: string;
   /** The name Stripe or an import has for them; "" when none. */
@@ -290,6 +314,8 @@ export type BuyerProfile = {
   partial: boolean;
   /** Stripe could not be read: the payments are not on the page. */
   stripeError: boolean;
+  /** The other parts that could not be read just now, in the page's order: missing, not empty. */
+  unread: ProfilePart[];
 };
 
 type Row = Record<string, unknown>;
@@ -346,6 +372,7 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   const charges = new Map<string, Charge>();
   let partial = false;
   let stripeError = false;
+  const unread = new Set<ProfilePart>();
   let name = "";
 
   type Bought = { at: number; source: string; first: string; recorded: boolean };
@@ -525,11 +552,23 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   // Handed over without a payment here: brought from another platform, a
   // gift, a place someone bought for several, or a sale paid with PayPal.
   if (store.pastBuyers && store.statsId) {
-    for (const given of await importedFor(store, email).catch(() => [])) {
+    const handed = await importedFor(store, email).catch((error) => {
+      console.error("reading a buyer's imported purchases failed", error);
+      unread.add("imported");
+      return [];
+    });
+    for (const given of handed) {
       const listing = await find(given.productId);
       productIds.push(given.productId, ...(given.items ?? []));
       // A sale paid with PayPal is a sale (lib/paypal-sales.ts): its amount, its channel, counted in what they paid.
-      const paypal = given.job.startsWith("paypal:") ? await readPaid(given.job.slice(7)).catch(() => null) : null;
+      // When its record cannot be read, the purchase is still listed, without an amount, and the page says so.
+      const paypal = given.job.startsWith("paypal:")
+        ? await readPaid(given.job.slice(7)).catch((error) => {
+            console.error("reading a buyer's PayPal sale failed", error);
+            unread.add("paypal");
+            return null;
+          })
+        : null;
       if (paypal && paypal.store === store.statsId) {
         const channel = saleChannel(paypal.meta ?? {});
         const recorded = Boolean(paypal.meta && "channel" in paypal.meta);
@@ -593,12 +632,28 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   // The list, the sequences, the courses, the calls and the notes, side by side.
   const [contactRaw, flows, calls, notes] = await Promise.all([
     store.listId && isRedisConfigured() ? redisPipeline([["HGET", leadsKey(store.listId), email]]).then(([raw]) => raw) : Promise.resolve(null),
-    store.listId ? readFlows(store.listId).catch(() => []) : Promise.resolve([]),
-    callsFor(store, email).catch(() => [] as BookedCall[]),
+    store.listId
+      ? readFlows(store.listId).catch((error): Flow[] => {
+          console.error("reading a buyer's sequences failed", error);
+          unread.add("sequences");
+          return [];
+        })
+      : Promise.resolve([] as Flow[]),
+    callsFor(store, email).catch((error): BookedCall[] => {
+      console.error("reading a buyer's calls failed", error);
+      unread.add("calls");
+      return [];
+    }),
     store.statsId ? readPersonNotes(store.statsId, person) : Promise.resolve([]),
   ]);
   const contact = parseContact(contactRaw);
-  const started = new Set(await flowsStartedFor(flows, email).catch(() => [] as string[]));
+  const started = new Set(
+    await flowsStartedFor(flows, email).catch((error): string[] => {
+      console.error("reading which sequences a buyer was started on failed", error);
+      unread.add("sequences");
+      return [];
+    }),
+  );
 
   const courses: ProfileCourse[] = [];
   const seen = new Set<string>();
@@ -641,6 +696,7 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
     notes,
     partial,
     stripeError,
+    unread: PROFILE_PARTS.filter((p) => unread.has(p)),
   };
 }
 

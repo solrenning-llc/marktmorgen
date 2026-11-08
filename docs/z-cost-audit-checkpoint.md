@@ -1,3 +1,35 @@
+# Authoritative receipt — 8 November 2026, 12:41 Fortaleza
+
+SAME docs/z-cost-audit-checkpoint.md / codex/z-cost-audit-checkpoint. FIRST COMPLETE remote586772/blob43ed592692c431b407a9d4f4e3b9fa686bd1ac10/commitcc91aa9d9d281862a2c80cf6ab64bcc77a705741, last1156. ENTIRE586772 prior text retained verbatim below. Prior run ENDED, no active duplication inferred from recency. This run ENDED after documentary readbacks; no test/backgroundwatcher/subagent/automationtools or changes. Project/continuity remains ongoing.
+
+## NEW AUTHORITATIVE HOLD — MAIN VERMELHO3219 OPEN
+PRIMARY directed GET3219 confirms OPEN,created_at=updated_at2026-11-08T14:40:50Z=11h40min50Fortaleza,closed_atnull. Fullbody read: Product checks push CANCELLED14:40:12Z/run42489996885/head2c36c6be1585d1c7140db333082799b9f27b8fc2; main of body snapshot960b01981cbbfe806b44f86ba6d0b6de6ac8fe4a.
+This SUPERSEDES previous1156 observed no-new-MV state; do NOT use old C4-3100/closed3217 to allow PRpush/merge. It is NEW3219, not reopened3217 or resurrected3050. AGENTS MV(a)39 reread: only causal mainrepair PR may push while open; no incorporation, local/reviews remain allowed. No ZActions/logquery/cancellationcause/timeout/regressiondiagnosis/retry/cancel/manualissueclose/queue/merge/PRpush. C6queue3091 and V3218ninegreens are THEIRreports, not Zgrant or currentmaincertificate.
+
+## Own returns: FIVE SAME, none actionable in recut
+Timelines2741FULL20/2819FULL8/3204FULL4 read once thisrun: newcreatedORupdated after14:37UTC ALL[]. No ownR2C1disposition/corrective or requestedfreeZnominal in complete newchannel delta. Do not inventory entireopenPRs or repeat CI by clock. Five own:
+1.2741 officialab5818b75c73ae66fffa1365677e46e0a2c3c400/WIP1f51287585afcc0ea47ace6873985c543aa2ef69 R2counter;
+2.2819 official3fdcbe1c3bbcdeb47149ef9d959f8fc8dd5d43ac R2callbacks;
+3.reminder27bb340aefaadf544e91ae5c3737d92b9497c7a2 R2attribution;
+4.askModele274993fe90f426eeaa0ab6f45bdf9dcc77a5e04 R2retention;
+5.summaryread proof codex/z-review-summary-read-bound@3e45aa57e31e93c8e169e19cd5757ab8485a4a15 pending R2execution/C1classification/sourceownership.
+NO SIXTH. Proof remains MEDIUM PROPOSAL only; simulated363s/1815s pauses/deployedlifetime unverified, decodedJSONnotwireUSD/storage4KiBpremise, actualmodelsdebitedbeforeeachdispatch. Historical10assert6PASS4RED/144linked/typeslintscanner from1154 NOT rerun, no freshGREEN or acceptedclassification. Its fullsources/initialfixture and types failures/rawSHA256logs/limits in previousreceipt preserved. No patch/PRsource changed. All heads/REDs/WIPs/310PASS0551history/LOW40d9/RED962149 immutable.
+NEVER repeat consumed2484verify127130387972/2615verify127143841589/mac127144213372 or other oldledgerjobs. No dependency/mainintegration/headchase/sharedfixcopy.
+
+## Native RO main / norms
+Fetch main499837dcae9f0fcdd0200c843202ef5c30e6bc92 completed exit0; didnotmove ownHEAD.
+recoverya51275f54bca536d68188e5eb872dd0d73eb0a17 and summaryproof1f33fff165b4ea345f8cde822c826a543bba30f2 BOTH CLEAN checked.
+TENnorm/inbox/queue/ALLreservationdocuments compared with frozen2c36: NINE BYTE-ID; ONLY docs/codex-queue.md b2909→3cd284298e4fefe2e10c1e27c634348b73abbda3 changed. Native diff27431chars read FULL in2parts. 753IR1 insertedGroupAafter568GD2/before571VS1 plus fullIR8units/reuseKB22WG15DE1FR1/MRlessfavourable/noMoR/noapplicationfee/phase2BLOCKEDuntilownerreview. No Ztax/product/pricing/provider/account/research permission or hold disposition inferred. Other AV/MQ/PV/CX/ownership unchanged by byteidentity. No reservations/product edit.
+
+## Channel preservation / exact stopping receipt
+CurrentFULL5997613/ref0385400129ddbf7548de5d38ebb690e01c6a5831/blob590ab9baf51e88b428e09779304ae4740da3fb34 fetched. Prior remote blob244c7ce790fc391c8cfebce5ee813f024cb637db/FULL5953285 retrieved too: entireprefix EXACT; delta44328 read COMPLETE, additional15500–28000 recut covered initial output truncation. No new ownreview/classification or free nominal. S/countOpen/S3215/G1933+C3LOCAL/P3218+V/CXC22529/J3195/H23216/N3078/M/U/T/C2C3C4C6 claims preserved, no duplicate review or absorption.
+Final CXZ-20261108-1240-C1-1 delivered channelcommit8bb8e2bc3100b1cba602e4b50a88a3fb674abd2d/blob6a93fd2eb04d077a0d747c2763fb19712bf1914c/FULL6001879; immutableBYTE-IDreadback EXACT. Preflight refunchanged038540; nonforceexpectedheadlease succeeded, no conflict/retry/prefixloss. Exactstop durable in that channel commit. Only documentary channel/CP, no productPR/refauthor push.
+
+This run: ZERO newcode/test/proof/REDGREEN/review/reservation/ownunit/CIqueryretrycancel/officialPRpromotion/fila/merge/subagent/provider/price/visiblelimit/commission/flag/gate/account/payment/term/key/contact/PII. C1coord/C4executor/SERIALmedium0agents/TODOS29quotaRESETUNKNOWN/noobjective>=500/no broadAPIopeninventory/Actionsrounds/unsupportedendpoint/credentialprobe.
+Next causal: legitimate resolution3219 plus ownR2C1dispositions/correctivepublished/sourceownership or requestedreallyfreefocal. MV/coordination holds are TRANSIENT; projectnotcomplete/continuityunchanged, no automation creation/update/disable, no backgroundwatcher. No idle green replay, sixthunit or thirdopinion. All priorhistory/evidence below preserved.
+
+---
+
 # Authoritative proof receipt — 8 November 2026, 11:56 Fortaleza
 
 SAME docs/z-cost-audit-checkpoint.md / codex/z-cost-audit-checkpoint. FIRST COMPLETE remote573306/blob2ebf53c24b3ffcf93a2b85948383add1d83a4d01 (commit2f9e332e96fa6528a1ab655c05dcbdf15bd8b155/top1038). ENTIRE573306 prior text retained verbatim below. Prior run ENDED, no active duplication inferred from recency. This run ENDED after durable proof/channel/CP readbacks; zero subagents/background watcher/automation tools or changes. Project and existing continuity remain ongoing.

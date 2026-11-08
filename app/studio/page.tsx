@@ -3422,7 +3422,7 @@ export default async function StudioPage({
                           <label htmlFor="receipt-batch-to" className="block text-sm font-semibold text-ink">Last day</label>
                           <input id="receipt-batch-to" name="to" type="date" required defaultValue={receiptDays.to} aria-describedby="receipt-batch-help" className="field mt-1 min-h-11 min-w-0 max-w-full py-2" />
                         </div>
-                        <button type="submit" className="btn btn-secondary min-h-11">Download the receipts (ZIP)</button>
+                        <button type="submit" className="btn btn-secondary inline-flex min-h-11 items-center">Download the receipts (ZIP)</button>
                       </div>
                     </form>
                   </>

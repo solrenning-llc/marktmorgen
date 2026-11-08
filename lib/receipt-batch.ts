@@ -1,6 +1,6 @@
 /**
  * A store's receipts for some days of one month, in one ZIP (601 [KB22],
- * unit U3): for the creator's books or their accountant.
+ * unit U3): for the creator's own books.
  *
  * Counted, then made. The store's complete checkouts in the days asked are
  * listed from its own Stripe account, at most RECEIPT_LIST_PAGES pages, with

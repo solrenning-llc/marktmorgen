@@ -266,6 +266,17 @@ async function main() {
     is(`a search page with ${label}: the hold is not done`, result?.done === true, false);
   }
 
+  // Claude 4's money review of #3108 (LEVE 1): a row of the search that cannot be read at all is not "of another
+  // store"; skipping it as such would answer done with that member never held.
+  part("A search row that is not an object is never skipped as another store's");
+  for (const [label, row] of [["null", null], ["a string", "sub_SearchString01"], ["a number", 7]] as const) {
+    const { store, folder } = await setup();
+    await redis.pipeline([["HDEL", workKey(folder), `f:${MEMBER}`, `m:${MEMBER}`]]);
+    found = [member, row as unknown as Record<string, unknown>];
+    const result = await holdCharges(store, ENDED_AT, Date.now() + 10_000).catch(() => null);
+    is(`a search row that is ${label}: the hold is not done`, result?.done === true, false);
+  }
+
   part("A subscription the store's search found that is not of the handle searched is never held");
   {
     const { store, folder } = await setup();

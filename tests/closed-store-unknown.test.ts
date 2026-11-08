@@ -16,7 +16,7 @@
  */
 import { createHash } from "node:crypto";
 import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
-import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { putMember } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { hostId } from "@/lib/host-claims";
@@ -31,6 +31,7 @@ const unreadable = new Set<string>();
 // The same for the list of stores an address serves on a team (lib/team.ts memberStores reads it first).
 const unreadableSets = new Set<string>();
 const teamIndexKey = (email: string) => "nl:team:of:" + createHash("sha256").update("nimbus-team-of:" + email).digest("hex").slice(0, 40);
+let unreadableParts: string[] = [];
 // The move back a walk (ZADD XX) answered with nothing Redis would say: not known to have moved.
 let unconfirmedMoves = false;
 const realPipeline = redis.pipeline;
@@ -38,6 +39,8 @@ redis.pipeline = async (commands: (string | number)[][]) => {
   if (unconfirmedMoves && commands.length === 1 && commands[0][0] === "ZADD" && commands[0][2] === "XX") return [null];
   if (commands.some((c) => c[0] === "GET" && unreadable.has(String(c[1])))) throw new Error("Redis request timed out (test)");
   if (commands.some((c) => c[0] === "SMEMBERS" && unreadableSets.has(String(c[1])))) throw new Error("Redis request timed out (test)");
+  // A read of what the store is made of (its team, its email sequences) that times out.
+  if (commands.some((c) => c[0] === "GET" && unreadableParts.some((prefix) => String(c[1]).startsWith(prefix)))) throw new Error("Redis request timed out (test)");
   return realPipeline(commands);
 };
 
@@ -133,6 +136,27 @@ async function main(): Promise<void> {
     }
   })();
   is("control: the same run with the move confirmed is done", confirmed.done, true);
+
+  // C6's inherited LOW (review 6712088601, point 2): what a store is made of read as nothing when the read failed,
+  // so it was prepared without those ids, taken out of line, and their keys were never erased.
+  for (const [what, prefix] of [["its team", "nl:team:"], ["its email sequences", "nl:mail:flows:"]] as const) {
+    part(`A closing store whose ${what.slice(4)} cannot be read waits; it is never prepared without them`);
+    redis.clear();
+    const owner = `parts-${prefix.length}@example.com`;
+    await makeStore(owner, `parts${prefix.length}`);
+    await ensureListId(owner);
+    const TP = Date.now();
+    await markDue(owner, TP - 1000);
+    unreadableParts = [prefix];
+    const blind = await eraseClosed(Date.now() + 30_000, async () => {}, TP);
+    unreadableParts = [];
+    const score = redis.run(["ZSCORE", DUE_KEY, owner]);
+    is(`${what} unread: the store is not prepared`, [blind.stores, redis.run(["HEXISTS", BATCH_KEY, owner])], [0, 0]);
+    is(`${what} unread: its record is still there`, (await storeForEmail(owner)) !== null, true);
+    is(`${what} unread: still in line, moved back a walk`, score !== null && Number(score) >= TP + WALK_GAP_MS, true);
+    const seen = await eraseClosed(Date.now() + 30_000, async () => {}, TP + WALK_GAP_MS + 1);
+    is(`control: once ${what} reads, it is prepared and out of line`, [seen.stores, redis.run(["ZSCORE", DUE_KEY, owner])], [1, null]);
+  }
 
   done();
 }

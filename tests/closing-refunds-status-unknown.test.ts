@@ -2,9 +2,14 @@
  * Rule 24 on Codex G's residual finding on #3120 (review 5816959051): an invoice-payment row whose status is missing,
  * null, not a string or a value Stripe does not document (e.g. "processing") proves nothing about whether this invoice
  * was paid. Its member is counted failed and tried again, never settled as owed nothing, and a later reply that reads
- * "paid" on the same intent still reaches the member and refunds once. Only "paid" decides paid; only the known non-paid
- * values ("open", "canceled", and the "failed" the existing controls already read as not paid) decide not paid. A
- * readable paid intent of this invoice is still found whatever the row order.
+ * "paid" on the same intent still reaches the member and refunds once. Only "paid" decides paid; only the documented
+ * non-paid values ("open", "canceled") decide not paid. A readable paid intent of this invoice is still found whatever
+ * the row order.
+ *
+ * Codex G's focal return on #3120 (review 5816998291): "failed" is not one of the InvoicePayment status values Stripe
+ * documents (open, paid, canceled: https://docs.stripe.com/api/invoice-payment/object, read 08/11/2026), so it is unknown
+ * like any other out-of-schema value: a complete list with a readable intent and status "failed" fails (failed=1, none=0,
+ * nothing POSTed), leaves no r on the durable row, and a later "paid" on the same intent refunds once.
  */
 import { giveBackUnused } from "@/lib/closing-refunds";
 import { paidKey, workKey } from "@/lib/closing-holds";
@@ -63,6 +68,8 @@ async function main() {
     ["processing", "processing"],
     ["number", 7],
     ["uppercase", "PAID"],
+    // Codex G's focal return (review 5816998291): outside the documented InvoicePayment status enum, so not proof of none.
+    ["failed", "failed"],
   ];
   for (const [label, status] of unknown) {
     listed = [row(label, status)];
@@ -89,8 +96,9 @@ async function main() {
     is(`${order}: the readable paid intent is refunded once`, typeof got === "object" ? [got.failed, got.done.map((x) => x.sub), posts] : got, [0, [SUB], 1]);
   }
 
-  // Controls: a complete list whose rows all carry a known non-paid status still settles none.
-  for (const status of ["open", "canceled", "failed"]) {
+  // Controls: a complete list whose rows all carry a documented non-paid status still settles none. ("failed" is not
+  // documented and is checked above as unknown, Codex G's focal return on #3120.)
+  for (const status of ["open", "canceled"]) {
     listed = [row(status, status)];
     const { store } = await seed(status);
     is(`control: a complete list with only "${status}" settles none`, counts(await giveBackUnused(store, DAY, { final: true })), [0, 1, 0]);

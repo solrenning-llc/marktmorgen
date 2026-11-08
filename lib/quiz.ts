@@ -31,6 +31,7 @@ import { reserveQuizSubmission } from "@/lib/quiz-usage";
 import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rules";
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { SET_AND_VALUES_TAKE } from "@/lib/redis-take";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
@@ -594,11 +595,34 @@ export async function markPassed(courseId: string, who: string, lessonId: string
   if (Number(added) === 1) await noteData(room, [{ slot: TRIES_SLOT(courseId), bytes: dataBytes([lessonId], 1) }]);
 }
 
-/** The lessons whose quizzes this student has passed, and the assignments they have done. */
+/** The student's passes read in their exact shape (CX-123 rule 24), or null when the reply is unknown. */
+async function passedExactly(courseId: string, who: string): Promise<Set<string> | null> {
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", passedKey(courseId, who)]]), 1);
+  const members = replies ? stringList(replies[0]) : null;
+  return members ? new Set(members) : null;
+}
+
+/**
+ * The lessons whose quizzes this student has passed, and the assignments they have done, read exactly: a reply in
+ * an unknown shape throws UnknownReplyError. This is what a copy of a person's data reads (lib/person-copy.ts), so
+ * a pass that could not be read makes the copy fail as not done, never a complete copy with the pass left out
+ * (Codex D2 on #2875).
+ */
 export async function passedQuizzes(courseId: string, who: string): Promise<Set<string>> {
   if (!isRedisConfigured()) return new Set();
-  const [raw] = await redisPipeline([["SMEMBERS", passedKey(courseId, who)]]);
-  return new Set(Array.isArray(raw) ? (raw as string[]) : []);
+  const passed = await passedExactly(courseId, who);
+  if (!passed) throw new UnknownReplyError("a student's passed quizzes");
+  return passed;
+}
+
+/**
+ * The same passes for a gate that decides what a student may open. A reply in an unknown shape reads as nothing
+ * passed: later lessons stay shut until it reads, never opened on a reply that was not read. Never use this for
+ * anything that reports what was passed, such as a data copy; that reads passedQuizzes.
+ */
+export async function passedForGate(courseId: string, who: string): Promise<Set<string>> {
+  if (!isRedisConfigured()) return new Set();
+  return (await passedExactly(courseId, who)) ?? new Set();
 }
 
 /** Several students at once, for the studio's list. */
@@ -611,15 +635,25 @@ export async function passedFor(courseId: string, who: string[]): Promise<Set<st
 /**
  * Gives a student their tries back on every quiz of a course. What they
  * already passed stays passed: this is for someone stuck, not a penalty.
+ * Their passes, or the tries and results it would delete, answered in an
+ * unknown shape throw UnknownReplyError before anything is deleted (sweep
+ * A5 finding 6): an unknown read is never "nothing passed".
  */
 export async function resetTries(course: Course, who: string, room: DataStore): Promise<void> {
-  const passed = await passedQuizzes(course.id, who);
+  const passed = isRedisConfigured() ? await passedExactly(course.id, who) : new Set<string>();
+  if (!passed) throw new UnknownReplyError("a student's passed quizzes");
   const lessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz && !passed.has(lesson.id));
   if (lessons.length === 0) return;
-  // Each read and deleted in one step (GETDEL), so what the tries weighed comes
-  // back to the store's data room once, even beside a deletion of the student.
-  const held = await redisPipeline(lessons.flatMap(({ lesson }) => [["GETDEL", resultKey(course.id, lesson.id, who)], ["GETDEL", triesKey(course.id, lesson.id, who)]]));
-  const freed = held.reduce((sum: number, raw) => sum + kept(typeof raw === "number" ? String(raw) : raw), 0);
+  // Read exactly first (Codex D2 on #2875): each GET answers a string or null, and anything else is not evidence of
+  // what would be deleted, so nothing is deleted on it.
+  const keys = lessons.flatMap(({ lesson }) => [resultKey(course.id, lesson.id, who), triesKey(course.id, lesson.id, who)]);
+  const seen = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  if (!seen || seen.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a student's quiz tries");
+  // Then each is read and deleted in one step (GETDEL), so what the tries weighed comes back to the store's data room
+  // once, by what this step itself removed, even beside a deletion of the student. A GETDEL answered in another shape
+  // gives nothing back: the room stays counted, never short.
+  const held = repliesFor(await redisPipeline(keys.map((key) => ["GETDEL", key])), keys.length);
+  const freed = held ? held.reduce((sum: number, raw) => sum + (typeof raw === "string" ? kept(raw) : typeof raw === "number" ? kept(String(raw)) : 0), 0) : 0;
   if (freed) await giveData(room, [{ slot: TRIES_SLOT(course.id), bytes: freed }]);
 }
 

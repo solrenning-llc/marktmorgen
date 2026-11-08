@@ -332,6 +332,23 @@ export async function readConfig(id: string): Promise<CommunityConfig | null> {
   return parseConfig(raw);
 }
 
+/**
+ * The settings, read before anything is written over them: null only when
+ * the GET answered exactly nil, so there is no setup yet. A lost reply, one
+ * in another shape or a value that does not parse throws, and the caller
+ * writes nothing; a fresh setup over the creator's spaces and access would
+ * lock every paying member out.
+ */
+export async function readConfigExact(id: string): Promise<CommunityConfig | null> {
+  if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community setup");
+  if (replies[0] === null) return null;
+  const config = parseConfig(replies[0]);
+  if (!config) throw new UnknownReplyError("a community setup");
+  return config;
+}
+
 export async function saveConfig(id: string, config: CommunityConfig): Promise<void> {
   await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]);
 }
@@ -398,11 +415,27 @@ export function memberKey(email: string): string {
 export async function lastSeenIn(id: string, emails: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!emails.length || !isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HMGET", membersKey(id), ...emails.map(memberKey)]]);
-  const rows = Array.isArray(raw) ? raw : [];
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...emails.map(memberKey)]]), 1);
+  const rows = replies && repliesFor(replies[0], emails.length);
+  if (!rows) throw new UnknownReplyError("community member activity");
   emails.forEach((email, i) => {
-    const member = parseMember(rows[i]);
-    out.set(email, member && !member.removed ? member.seen || member.at || 0 : 0);
+    const raw = rows[i];
+    if (raw === null) { out.set(email, 0); return; }
+    if (typeof raw !== "string") throw new UnknownReplyError("community member activity record");
+    let member: Partial<Member>;
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not a member");
+      member = value as Partial<Member>;
+    } catch {
+      throw new UnknownReplyError("community member activity record");
+    }
+    if (member.k !== memberKey(email) || member.e !== normaliseEmail(email) || typeof member.removed !== "boolean" ||
+        typeof member.seen !== "number" || !Number.isSafeInteger(member.seen) || member.seen < 0 ||
+        typeof member.at !== "number" || !Number.isSafeInteger(member.at) || member.at < 0) {
+      throw new UnknownReplyError("community member activity fields");
+    }
+    out.set(email, member.removed ? 0 : member.seen || member.at);
   });
   return out;
 }

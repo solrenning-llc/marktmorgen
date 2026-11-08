@@ -207,8 +207,11 @@ async function lasts(key: string, keep: number): Promise<boolean> {
  * A reply not exactly what was asked for is never taken for done or for not
  * done: the field is read back with HGET, and if it does not hold the paid
  * value, the same write is sent once more and read back again; the lifetime
- * is read back with PTTL the same way. Only what is still not confirmed
- * throws, and lib/calls.ts logs it.
+ * is read back with PTTL the same way. Every host of a group booking is tried,
+ * each on its own, before anything throws: a host that fails never leaves the
+ * others as holds that lapse. Only what is still not confirmed throws, once,
+ * after the last host, and lib/calls.ts logs it. Sent again, it is the same
+ * write under the same claim id, so a host already confirmed stays as it is.
  */
 export async function confirmClaim(ids: string[], claim: string, start: number, end: number, ref: string): Promise<void> {
   if (!ids.length || !isClaimId(claim) || !isRedisConfigured()) return;
@@ -217,6 +220,8 @@ export async function confirmClaim(ids: string[], claim: string, start: number, 
   const commands = ids.flatMap((id) => [["HSET", claimsKey(id), claim, value], ["PTTL", claimsKey(id)]]);
   const replies = await exactly(commands);
   const short: string[] = [];
+  // What is still not confirmed, host by host; thrown only once every host has been tried.
+  const failed: string[] = [];
   for (const [i, id] of ids.entries()) {
     const key = claimsKey(id);
     const written = replies !== null && countOf(replies[i * 2]) !== null;
@@ -224,7 +229,10 @@ export async function confirmClaim(ids: string[], claim: string, start: number, 
       console.error("a paid booking's host claim was not answered as asked; reading it back");
       if (!(await holds(key, claim, value))) {
         await exactly([["HSET", key, claim, value]]);
-        if (!(await holds(key, claim, value))) throw new UnknownReplyError("a paid booking's host claim");
+        if (!(await holds(key, claim, value))) {
+          failed.push("a paid booking's host claim");
+          continue;
+        }
       }
     }
     // The PTTL read with the write counts only when the write was answered; otherwise it is read again.
@@ -232,21 +240,24 @@ export async function confirmClaim(ids: string[], claim: string, start: number, 
     if (ttl === null) {
       const again = await exactly([["PTTL", key]]);
       ttl = again ? ttlOf(again[0]) : null;
-      if (ttl === null) throw new UnknownReplyError("a paid booking's host claims' lifetime");
+      if (ttl === null) {
+        failed.push("a paid booking's host claims' lifetime");
+        continue;
+      }
     }
     // Never shortened: a later booking on the same list may need it longer.
     if (ttl < keep) short.push(id);
   }
-  if (!short.length) return;
-  const set = await exactly(short.map((id) => ["PEXPIRE", claimsKey(id), keep]));
+  const set = short.length ? await exactly(short.map((id) => ["PEXPIRE", claimsKey(id), keep])) : [];
   for (const [i, id] of short.entries()) {
     if (set !== null && set[i] === 1) continue;
     const key = claimsKey(id);
     console.error("a paid booking's host claim's lifetime was not answered as set; reading it back");
     if (await lasts(key, keep)) continue;
     await exactly([["PEXPIRE", key, keep]]);
-    if (!(await lasts(key, keep))) throw new UnknownReplyError("a paid booking's host claims' lifetime");
+    if (!(await lasts(key, keep))) failed.push("a paid booking's host claims' lifetime");
   }
+  if (failed.length) throw new UnknownReplyError(failed[0]);
 }
 
 /** Lets a claim go on every host it was taken for: a hold given back, or a booking refunded in full. */

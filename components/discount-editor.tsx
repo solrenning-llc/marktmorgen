@@ -10,7 +10,7 @@ import {
   codeRules,
   minimumProblem,
   offLabel,
-} from "@/lib/discount";
+} from "@/lib/discount-rules";
 import { type Currency, fieldPrefix } from "@/lib/money";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";

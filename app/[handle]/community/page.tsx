@@ -57,7 +57,8 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const notice = notices[word] ?? null;
 
   if (viewer.state !== "in") {
-    const products = (await accessProducts(store, viewer.config)).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
+    // A store switched off after a report (lib/takedown.ts) sells nothing: no product is offered as the way in; members still sign in.
+    const products = store.suspended ? [] : (await accessProducts(store, viewer.config)).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
     return (
       <div lang={lang} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
         <CommunityBar store={store} config={viewer.config} tab={null} signedIn={false} />

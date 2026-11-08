@@ -96,7 +96,8 @@ export default async function CommunityEventPage({ params, searchParams }: Param
   const full = event.cap > 0 && going >= event.cap;
   const room = way && isVideoRoom(way) ? way : null;
   const doorsOpenAt = clockAt(door.opensAt, event.tz, locale);
-  const forProducts = allowed ? [] : (await readListings(store, event.only.filter((p) => viewer.config.access.includes(p)))).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
+  // A store switched off after a report (lib/takedown.ts) offers nothing to buy: the event says its product is no longer offered here.
+  const forProducts = allowed || store.suspended ? [] : (await readListings(store, event.only.filter((p) => viewer.config.access.includes(p)))).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
   const labelId = "event-title";
 
   return (

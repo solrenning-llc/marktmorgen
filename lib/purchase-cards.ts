@@ -256,7 +256,12 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
           ? pre.ordersLine(on(Date.parse(`${purchase.preorder.day}T00:00:00Z`) / 1000))
           : pre.receiptLater
         : null,
-    ended: purchase.ended ? { note: words.endedNote, renew: { href: renewPath(store, { id: purchase.productId }), label: words.renew } } : null,
+    // A store switched off after a report (lib/takedown.ts) sells nothing: the membership is said to be over, with no Renew.
+    ended: purchase.ended
+      ? store.suspended
+        ? { note: words.endedClosedNote, renew: null }
+        : { note: words.endedNote, renew: { href: renewPath(store, { id: purchase.productId }), label: words.renew } }
+      : null,
     course: purchase.courseProduct ? { href: `/@${handle}/course/${purchase.courseProduct}`, label: words.openTitle(purchase.title) } : null,
     package:
       typeof purchase.packageLeft === "number"
@@ -287,7 +292,8 @@ export function cardOf(store: Store, purchase: Purchase, token: string, extras: 
       ...purchase.added.flatMap((added) => keyOf(`${purchase.reference}|${added.key}`, added.title)),
     ],
     review:
-      !purchase.ended && reviewableIn
+      // Not while the store is switched off after a report: its review page is closed then (app/[handle]/review).
+      !purchase.ended && reviewableIn && !store.suspended
         ? {
             href: `/@${handle}/review?${new URLSearchParams({ token, ref: purchase.reference })}`,
             label: purchase.added.length || purchase.items ? words.reviewAll : words.reviewTitle(purchase.title),

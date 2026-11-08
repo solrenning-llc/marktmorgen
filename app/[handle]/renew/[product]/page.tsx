@@ -80,7 +80,8 @@ export default async function RenewPage({ params, searchParams }: Params) {
   // "price" in the address says nothing by itself: only the product does.
   const said = status === "price" ? undefined : notices[status];
   // Where the prices offered today are: the product's own page, while buyers can see it.
-  const pricesLink = priceGone && product && !product.hidden ? product : null;
+  // Never to a store switched off after a report (lib/takedown.ts), which sells nothing: nor the link to the product below.
+  const pricesLink = priceGone && product && !product.hidden && !store.suspended ? product : null;
 
   return (
     <div
@@ -166,7 +167,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
             </p>
           ) : null}
 
-          {product && !priceGone ? (
+          {product && !priceGone && !store.suspended ? (
             <p className="mt-4 text-center text-sm">
               <Link href={productPath(store, product)} className="st-footer-link font-semibold">
                 {m.see(product.title)}

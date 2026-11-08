@@ -294,7 +294,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
               ) : (
                 <p className="st-muted text-sm">{w.noPayments(store.name)}</p>
               )}
-              {preview ? (
+              {/* A free lesson leads to buying the course: not offered while the store is switched off after a report (lib/takedown.ts). */}
+              {preview && !store.suspended ? (
                 <p className="text-sm">
                   <Link href={`${base}/${preview.lesson.id}`} className="font-semibold underline underline-offset-2" style={{ color: "var(--st-text)" }}>
                     {w.tryFree(preview.lesson.title)}

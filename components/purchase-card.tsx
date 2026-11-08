@@ -32,7 +32,7 @@ export type PurchaseCardModel = {
   title: string;
   meta: string;
   preorderLine: string | null;
-  ended: { note: string; renew: CardLink } | null;
+  ended: { note: string; renew: CardLink | null } | null;
   course: CardLink | null;
   package: CardLink | { text: string } | null;
   podcast: CardLink | null;
@@ -82,9 +82,11 @@ export function PurchaseCard({ card, language, titleRef }: { card: PurchaseCardM
         {card.ended ? (
           <>
             <p className="st-muted text-sm">{card.ended.note}</p>
-            <Link href={card.ended.renew.href} className="btn st-btn btn-block">
-              {card.ended.renew.label}
-            </Link>
+            {card.ended.renew ? (
+              <Link href={card.ended.renew.href} className="btn st-btn btn-block">
+                {card.ended.renew.label}
+              </Link>
+            ) : null}
           </>
         ) : null}
         {card.course ? (

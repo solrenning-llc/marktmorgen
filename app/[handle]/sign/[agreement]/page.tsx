@@ -65,7 +65,9 @@ export default async function AgreementPage({ params, searchParams }: Params) {
   const earlier = [...agreement.versions].reverse().find((m) => m.n < latest.n && m.signature);
   const reportUrl = `/report?url=${encodeURIComponent(`${SITE_URL}/@${store.handle}`)}`;
   const pay = status === "signed" && agreement.payRequest ? await requestOf(store, agreement.payRequest).catch(() => null) : null;
-  const payOpen = pay && requestStatus(pay, now) === "open";
+  // A store switched off after a report (lib/takedown.ts) takes no payment and has nothing new signed: the signed record stays.
+  const payOpen = pay && requestStatus(pay, now) === "open" && !store.suspended;
+  const signable = status === "open" && !store.suspended;
 
   const heading = status === "signed" ? w.signedTitle : status === "withdrawn" ? w.withdrawnTitle : status === "expired" ? w.expiredTitle : w.pageTitle(agreement.kind);
 
@@ -120,7 +122,13 @@ export default async function AgreementPage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
-          {status === "open" ? (
+          {status === "open" && !signable ? (
+            <div className="st-note mt-8" role="status">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.notices.closed.title}</p>
+              <p className="mt-1 text-sm">{w.notices.closed.body}</p>
+            </div>
+          ) : null}
+          {signable ? (
             <form action="/api/store/agreement-sign" method="post" target="_top" className="mt-8">
               <h2 className="text-lg font-semibold">{w.signHeading}</h2>
               <p className="st-muted mt-2 text-sm">{w.before(store.name)}</p>

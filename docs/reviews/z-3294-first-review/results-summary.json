@@ -1,0 +1,156 @@
+{
+  "initial-red.log": [
+    {
+      "file": "r24-stream-due-exact.test.ts",
+      "custom": null,
+      "tests": 17,
+      "pass": 3,
+      "fail": 14,
+      "volume": {
+        "runs": 77,
+        "mocks": 7,
+        "over": false
+      }
+    },
+    {
+      "file": "z-3294-queue.proof.ts",
+      "custom": null,
+      "tests": 10,
+      "pass": 0,
+      "fail": 10,
+      "volume": {
+        "runs": 291,
+        "mocks": 4,
+        "over": false
+      }
+    }
+  ],
+  "own-red.log": [
+    {
+      "file": "z-3294-queue.proof.ts",
+      "custom": null,
+      "tests": 10,
+      "pass": 1,
+      "fail": 9,
+      "volume": {
+        "runs": 291,
+        "mocks": 4,
+        "over": false
+      }
+    }
+  ],
+  "head.log": [
+    {
+      "file": "r24-stream-due-exact.test.ts",
+      "custom": null,
+      "tests": 17,
+      "pass": 17,
+      "fail": 0,
+      "volume": {
+        "runs": 89,
+        "mocks": 7,
+        "over": false
+      }
+    },
+    {
+      "file": "z-3294-queue.proof.ts",
+      "custom": null,
+      "tests": 10,
+      "pass": 2,
+      "fail": 8,
+      "volume": {
+        "runs": 249,
+        "mocks": 2,
+        "over": false
+      }
+    },
+    {
+      "file": "stream.test.ts",
+      "custom": "148 checks, all passing.",
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "volume": {
+        "runs": 390,
+        "mocks": 82,
+        "over": false
+      }
+    },
+    {
+      "file": "stream-captions-read-exact.test.ts",
+      "custom": null,
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "volume": {
+        "runs": 3,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "stream-hook-counter-admission.test.ts",
+      "custom": null,
+      "tests": null,
+      "pass": null,
+      "fail": null,
+      "volume": {
+        "runs": 2416,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "plan-cost-registry.test.ts",
+      "custom": null,
+      "tests": 26,
+      "pass": 26,
+      "fail": 0,
+      "volume": {
+        "runs": 0,
+        "mocks": 0,
+        "over": false
+      }
+    },
+    {
+      "file": "store-data-registry.test.ts",
+      "custom": null,
+      "tests": 7,
+      "pass": 7,
+      "fail": 0,
+      "volume": {
+        "runs": 0,
+        "mocks": 0,
+        "over": false
+      }
+    }
+  ],
+  "final-own-old.log": [
+    {
+      "file": "z-3294-queue.proof.ts",
+      "custom": null,
+      "tests": 10,
+      "pass": 2,
+      "fail": 8,
+      "volume": {
+        "runs": 291,
+        "mocks": 4,
+        "over": false
+      }
+    }
+  ],
+  "final-own-head.log": [
+    {
+      "file": "z-3294-queue.proof.ts",
+      "custom": null,
+      "tests": 10,
+      "pass": 9,
+      "fail": 1,
+      "volume": {
+        "runs": 257,
+        "mocks": 3,
+        "over": false
+      }
+    }
+  ]
+}

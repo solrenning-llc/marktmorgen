@@ -1,0 +1,44 @@
+import {test} from "node:test";
+import assert from "node:assert/strict";
+import {claimUpload,lookAt,playerFor,sweep} from "@/lib/stream";
+import {ABANDONED_AFTER_MS} from "@/lib/stream-rules";
+import {store as redis} from "../../../tests/redis-stub";
+type Batch=(string|number)[][];
+const folder="0".repeat(32),lesson="abcdefghij12",due="nl:stream:due",now=Date.UTC(2026,10,8,12);
+const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,"0")}`;
+const key=(n:number)=>`nl:stream:v:${id(n)}`;
+const path=(n:number)=>`stream/${folder}/${lesson}/${id(n)}`;
+process.env.BUNNY_STREAM_LIBRARY_ID="123456";
+process.env.BUNNY_STREAM_API_KEY="synthetic-api-key-0000000000";
+process.env.BUNNY_STREAM_TOKEN_KEY="synthetic-token-key-000000000";
+let status=200;const http:string[]=[];
+globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{http.push(`${init?.method??"GET"} ${String(input)}`);return new Response("{}",{status});}) as typeof fetch;
+async function seed(n:number,state="upload",old=true){await redis.pipeline([["SET",key(n),JSON.stringify({id:id(n),path:path(n),name:"Synthetic.mp4",type:"video/mp4",bytes:1000,state,at:now-(old?ABANDONED_AFTER_MS+600000:60000),seconds:0,width:0,height:0})],["ZADD",due,now-1,id(n)]]);}
+async function wrapped(f:(batch:Batch,original:(b:Batch)=>Promise<unknown[]>)=>Promise<unknown[]>,run:()=>Promise<void>){const original=redis.pipeline.bind(redis);redis.pipeline=b=>f(b,original);try{await run();}finally{redis.pipeline=original;}}
+for(const [label,make] of [["hole",()=>Array(1)],["inherited nil",()=>Object.setPrototypeOf(Array(1),Object.assign(Object.create(Array.prototype),{0:null}))],["getter",()=>Object.defineProperty([0],"0",{get(){throw Error("getter ran");}})],["frozen unknown",()=>Object.freeze([undefined])]] as [string,()=>unknown][])
+ test(`lookAt refuses ${label} without unqueueing or provider call`,async()=>{redis.clear();http.length=0;await seed(1);await wrapped(async(b,o)=>b[0][0]==="GET"&&b[0][1]===key(1)?make() as unknown[]:o(b),async()=>{await assert.rejects(lookAt(id(1),now),{name:"UnknownReplyError"});});assert.equal(Number((await redis.pipeline([["ZSCORE",due,id(1)]]))[0]),now-1);assert.equal(http.length,0);});
+test("forty unread records requeue exactly five minutes, next healthy video gets next run",async()=>{
+ redis.clear();http.length=0;for(let n=1;n<=41;n++)await seed(n);let reads=0;const batches:Batch[]=[];
+ await wrapped(async(b,o)=>{batches.push(b);if(b.length===1&&b[0][0]==="GET"&&b[0][1]!==key(41)){reads++;return [undefined];}return o(b);},async()=>{await sweep(Date.now()+5000,now);});
+ const [score,untouched]=await redis.pipeline([["ZSCORE",due,id(1)],["GET",key(41)]]);
+ console.log("Z_PAGE",JSON.stringify({reads,score,unknownProvider:http.length,jsonPipelineBytes:batches.reduce((n,b)=>n+Buffer.byteLength(JSON.stringify(b)),0),commands:batches.flat().length}));
+ assert.equal(reads,40);assert.equal(Number(score),now+300000);assert.equal(typeof untouched,"string");assert.equal(http.length,0);
+ await sweep(Date.now()+5000,now);assert.equal((await redis.pipeline([["GET",key(41)]]))[0],null);assert.equal(http.length,1);assert.ok(http[0].startsWith("DELETE "));
+});
+for(const providerStatus of [200,503])test(`claim real commit but unknown receipt refuses at provider ${providerStatus}`,async()=>{
+ redis.clear();http.length=0;status=providerStatus;await seed(2,"upload",false);let committed=0;
+ await wrapped(async(b,o)=>{const r=await o(b);if(b.length===2&&b[0][0]==="SET"&&b[0][1]===key(2)){committed++;return [null,r[1]];}return r;},async()=>{await assert.rejects(claimUpload(path(2),folder,lesson,now),{name:"UnknownReplyError"});});
+ assert.equal(committed,1);assert.equal(JSON.parse(String((await redis.pipeline([["GET",key(2)]]))[0])).state,"working");assert.equal(http.length,1);status=200;
+});
+test("player keeps prior working record when refresh GET is unread",async()=>{
+ redis.clear();http.length=0;await seed(3,"working",false);let gets=0;
+ await wrapped(async(b,o)=>{if(b.length===1&&b[0][0]==="GET"&&b[0][1]===key(3)&&++gets===2)return [{}];return o(b);},async()=>{const p=await playerFor(path(3),now);assert.equal(p?.state,"working");assert.equal(p?.src,null);});
+ assert.equal(gets,2);assert.equal(http.length,0);assert.equal(Number((await redis.pipeline([["ZSCORE",due,id(3)]]))[0]),now-1);
+});
+test("generic Redis transport failure still propagates without deleting",async()=>{redis.clear();http.length=0;await seed(4);await wrapped(async(b,o)=>{if(b[0][0]==="GET"&&b[0][1]===key(4))throw Error("synthetic transport");return o(b);},async()=>{await assert.rejects(sweep(Date.now()+5000,now),/synthetic transport/);});assert.equal(Number((await redis.pipeline([["ZSCORE",due,id(4)]]))[0]),now-1);assert.equal(http.length,0);});
+test("LOW regression: unconfirmed no-op rescheduling must not starve forty-first video",async()=>{
+ redis.clear();http.length=0;for(let n=1;n<=41;n++)await seed(n);let reads=0,refused=0;
+ await wrapped(async(b,o)=>{if(b.length===1&&b[0][0]==="GET"&&b[0][1]!==key(41)){reads++;return [undefined];}if(b.length===1&&b[0][0]==="ZADD"&&b[0][1]===due){refused++;return [null];}return o(b);},async()=>{await sweep(Date.now()+5000,now);await sweep(Date.now()+5000,now+300000);});
+ const [score,healthy]=await redis.pipeline([["ZSCORE",due,id(1)],["GET",key(41)]]);console.log("Z_LOW",JSON.stringify({reads,refused,score,healthyKept:typeof healthy==="string",http:http.length}));
+ assert.equal(healthy,null,"a readable abandoned video must not stay forever behind unread records when reschedule ACK is unknown");
+});

@@ -1,0 +1,187 @@
+
+FILE z-3294-queue.proof.ts
+Z_PAGE {"reads":40,"score":null,"unknownProvider":0,"jsonPipelineBytes":5095,"commands":82}
+Z_LOW {"reads":40,"refused":0,"score":null,"healthyKept":false,"http":2}
+✖ lookAt refuses hole without unqueueing or provider call (6.822206ms)
+✖ lookAt refuses inherited nil without unqueueing or provider call (0.391441ms)
+✖ lookAt refuses getter without unqueueing or provider call (1.389387ms)
+✖ lookAt refuses frozen unknown without unqueueing or provider call (0.568628ms)
+✖ forty unread records requeue exactly five minutes, next healthy video gets next run (14.503309ms)
+✖ claim real commit but unknown receipt refuses at provider 200 (4.668806ms)
+✖ claim real commit but unknown receipt refuses at provider 503 (2.43132ms)
+✖ player keeps prior working record when refresh GET is unread (0.74217ms)
+✔ generic Redis transport failure still propagates without deleting (6.511197ms)
+✔ LOW regression: unconfirmed no-op rescheduling must not starve forty-first video (4.034038ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 2
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 48.832421
+
+✖ failing tests:
+
+test at [stdin]:5182:29
+✖ lookAt refuses hole without unqueueing or provider call (6.822206ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5187:7
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5186:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5182:29
+✖ lookAt refuses inherited nil without unqueueing or provider call (0.391441ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5187:7
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5186:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5182:29
+✖ lookAt refuses getter without unqueueing or provider call (1.389387ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    Comparison {
+  +   name: 'Error'
+  -   name: 'UnknownReplyError'
+    }
+
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5187:7
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5186:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: getter ran
+        at Array.get ([stdin]:5180:9)
+        at Array Iterator.next (<anonymous>)
+        at lookAt ([stdin]:5025:10)
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async [stdin]:5187:7
+        at async wrapped ([stdin]:5174:5)
+        at async TestContext.<anonymous> ([stdin]:5186:5)
+        at async Test.run (node:internal/test_runner/test:1409:7),
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5182:29
+✖ lookAt refuses frozen unknown without unqueueing or provider call (0.568628ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5187:7
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5186:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5192:27
+✖ forty unread records requeue exactly five minutes, next healthy video gets next run (14.503309ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 0
+  - 1794139500000
+
+      at TestContext.<anonymous> ([stdin]:5211:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1794139500000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5219:68
+✖ claim real commit but unknown receipt refuses at provider 200 (4.668806ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5233:5
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5225:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5219:68
+✖ claim real commit but unknown receipt refuses at provider 503 (2.43132ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5233:5
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5225:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5240:27
+✖ player keeps prior working record when refresh GET is unread (0.74217ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 0
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5255:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":291,"mocks":4,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3294-TtWWCH

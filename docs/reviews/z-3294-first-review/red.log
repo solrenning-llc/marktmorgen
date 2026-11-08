@@ -1,0 +1,496 @@
+
+FILE r24-stream-due-exact.test.ts
+✖ lookAt keeps an abandoned upload queued when its record reads as no pipeline slot (5.490424ms)
+✖ lookAt keeps an abandoned upload queued when its record reads as an extra pipeline slot (0.401897ms)
+✖ lookAt keeps an abandoned upload queued when its record reads as a number (0.401336ms)
+✖ lookAt keeps an abandoned upload queued when its record reads as a list (0.734329ms)
+✖ lookAt keeps an abandoned upload queued when its record reads as an object (0.302828ms)
+✖ lookAt keeps an abandoned upload queued when its record reads as an undefined slot (0.464872ms)
+✖ lookAt keeps an abandoned upload queued when its record reads as text that is not JSON (0.520997ms)
+✖ lookAt keeps an abandoned upload queued when its record reads as JSON that is not a record (0.342077ms)
+✖ lookAt keeps an abandoned upload queued when its record reads as a pipeline that is not a list (0.431953ms)
+✖ sweep goes on past a record that does not read, keeps it queued for later and deletes the next abandoned upload (12.663978ms)
+✔ an exact nil still takes the id out of the due queue (control) (0.712346ms)
+✔ a readable abandoned upload is still deleted at the service and forgotten (control) (0.571373ms)
+✖ claimUpload refuses when the claimed record's write answers nil (0.82112ms)
+✖ claimUpload refuses when the claimed record's write answers a number (0.49632ms)
+✖ claimUpload refuses when the claimed record's write answers no slot (0.647949ms)
+✖ claimUpload refuses when the claimed record's write answers a pipeline that is not a list (0.545554ms)
+✔ claimUpload still writes a claimed video as working (control) (2.3573ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 3
+ℹ fail 14
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.357655
+
+✖ failing tests:
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as no pipeline slot (5.490424ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as an extra pipeline slot (0.401897ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as a number (0.401336ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as a list (0.734329ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as an object (0.302828ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as an undefined slot (0.464872ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as text that is not JSON (0.520997ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as JSON that is not a record (0.342077ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5171:32
+✖ lookAt keeps an abandoned upload queued when its record reads as a pipeline that is not a list (0.431953ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5176:7
+      at async withRecordReply ([stdin]:5153:5)
+      at async TestContext.<anonymous> ([stdin]:5175:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5184:30
+✖ sweep goes on past a record that does not read, keeps it queued for later and deletes the next abandoned upload (12.663978ms)
+  AssertionError [ERR_ASSERTION]: the unread one stays queued
+
+  false !== true
+
+      at TestContext.<anonymous> ([stdin]:5192:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5248:32
+✖ claimUpload refuses when the claimed record's write answers nil (0.82112ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5253:7
+      at async withClaimWriteReply ([stdin]:5236:5)
+      at async TestContext.<anonymous> ([stdin]:5252:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5248:32
+✖ claimUpload refuses when the claimed record's write answers a number (0.49632ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5253:7
+      at async withClaimWriteReply ([stdin]:5236:5)
+      at async TestContext.<anonymous> ([stdin]:5252:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5248:32
+✖ claimUpload refuses when the claimed record's write answers no slot (0.647949ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5253:7
+      at async withClaimWriteReply ([stdin]:5236:5)
+      at async TestContext.<anonymous> ([stdin]:5252:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5248:32
+✖ claimUpload refuses when the claimed record's write answers a pipeline that is not a list (0.545554ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5253:7
+      at async withClaimWriteReply ([stdin]:5236:5)
+      at async TestContext.<anonymous> ([stdin]:5252:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":77,"mocks":7,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3294-queue.proof.ts
+Z_PAGE {"reads":40,"score":null,"unknownProvider":0,"jsonPipelineBytes":5095,"commands":82}
+Z_LOW {"reads":40,"refused":0,"score":null,"healthyKept":false,"http":2}
+✖ lookAt refuses hole without unqueueing or provider call (5.439947ms)
+✖ lookAt refuses inherited nil without unqueueing or provider call (0.367695ms)
+✖ lookAt refuses getter without unqueueing or provider call (1.263819ms)
+✖ lookAt refuses frozen unknown without unqueueing or provider call (0.425683ms)
+✖ forty unread records requeue exactly five minutes, next healthy video gets next run (9.363583ms)
+✖ claim real commit but unknown receipt refuses at provider 200 (3.273625ms)
+✖ claim real commit but unknown receipt refuses at provider 503 (1.445884ms)
+✖ player keeps prior working record when refresh GET is unread (0.627247ms)
+✖ generic Redis transport failure still propagates without deleting (0.606997ms)
+✖ LOW conditional: unconfirmed no-op rescheduling can starve forty-first video (2.143067ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 0
+ℹ fail 10
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31.090429
+
+✖ failing tests:
+
+test at [stdin]:5182:29
+✖ lookAt refuses hole without unqueueing or provider call (5.439947ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5187:7
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5186:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5182:29
+✖ lookAt refuses inherited nil without unqueueing or provider call (0.367695ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5187:7
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5186:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5182:29
+✖ lookAt refuses getter without unqueueing or provider call (1.263819ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    Comparison {
+  +   name: 'Error'
+  -   name: 'UnknownReplyError'
+    }
+
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5187:7
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5186:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: getter ran
+        at Array.get ([stdin]:5180:9)
+        at Array Iterator.next (<anonymous>)
+        at lookAt ([stdin]:5025:10)
+        at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+        at async waitForActual (node:assert:646:5)
+        at async strict.rejects (node:assert:769:25)
+        at async [stdin]:5187:7
+        at async wrapped ([stdin]:5174:5)
+        at async TestContext.<anonymous> ([stdin]:5186:5)
+        at async Test.run (node:internal/test_runner/test:1409:7),
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5182:29
+✖ lookAt refuses frozen unknown without unqueueing or provider call (0.425683ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5187:7
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5186:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5192:27
+✖ forty unread records requeue exactly five minutes, next healthy video gets next run (9.363583ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - 1794139500000
+
+      at TestContext.<anonymous> ([stdin]:5211:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 1794139500000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5219:68
+✖ claim real commit but unknown receipt refuses at provider 200 (3.273625ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5233:5
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5225:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5219:68
+✖ claim real commit but unknown receipt refuses at provider 503 (1.445884ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (UnknownReplyError).
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async [stdin]:5233:5
+      at async wrapped ([stdin]:5174:5)
+      at async TestContext.<anonymous> ([stdin]:5225:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [Object],
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at [stdin]:5240:27
+✖ player keeps prior working record when refresh GET is unread (0.627247ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + null
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5255:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5257:27
+✖ generic Redis transport failure still propagates without deleting (0.606997ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1794139199999'
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5267:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1794139199999',
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5270:27
+✖ LOW conditional: unconfirmed no-op rescheduling can starve forty-first video (2.143067ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  40 !== 80
+
+      at TestContext.<anonymous> ([stdin]:5291:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 40,
+    expected: 80,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":291,"mocks":4,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3294-yubf0k

@@ -1,0 +1,552 @@
+
+FILE r24-stream-due-exact.test.ts
+✔ lookAt keeps an abandoned upload queued when its record reads as no pipeline slot (5.602852ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as an extra pipeline slot (0.297259ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as a number (0.419824ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as a list (0.268455ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as an object (0.18547ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as an undefined slot (0.209937ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as text that is not JSON (0.204478ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as JSON that is not a record (0.243148ms)
+✔ lookAt keeps an abandoned upload queued when its record reads as a pipeline that is not a list (0.272872ms)
+✔ sweep goes on past a record that does not read, keeps it queued for later and deletes the next abandoned upload (10.624508ms)
+✔ an exact nil still takes the id out of the due queue (control) (0.228715ms)
+✔ a readable abandoned upload is still deleted at the service and forgotten (control) (0.574117ms)
+✔ claimUpload refuses when the claimed record's write answers nil (1.033221ms)
+✔ claimUpload refuses when the claimed record's write answers a number (0.49688ms)
+✔ claimUpload refuses when the claimed record's write answers no slot (0.551423ms)
+✔ claimUpload refuses when the claimed record's write answers a pipeline that is not a list (0.41028ms)
+✔ claimUpload still writes a claimed video as working (control) (0.468668ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 31.432536
+Z_VOLUME {"runs":89,"mocks":7,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3294-queue.proof.ts
+Z_PAGE {"reads":40,"score":"1794139500000","unknownProvider":0,"jsonPipelineBytes":5655,"commands":82}
+Z_LOW {"reads":80,"refused":80,"score":"1794139199999","healthyKept":true,"http":0}
+✖ lookAt refuses hole without unqueueing or provider call (6.103108ms)
+✖ lookAt refuses inherited nil without unqueueing or provider call (0.785496ms)
+✖ lookAt refuses getter without unqueueing or provider call (0.392953ms)
+✖ lookAt refuses frozen unknown without unqueueing or provider call (0.464602ms)
+✖ forty unread records requeue exactly five minutes, next healthy video gets next run (10.84452ms)
+✔ claim real commit but unknown receipt refuses at provider 200 (4.516141ms)
+✔ claim real commit but unknown receipt refuses at provider 503 (0.475578ms)
+✖ player keeps prior working record when refresh GET is unread (0.550662ms)
+✖ generic Redis transport failure still propagates without deleting (0.656722ms)
+✖ LOW regression: unconfirmed no-op rescheduling must not starve forty-first video (2.228015ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 2
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 32.81268
+
+✖ failing tests:
+
+test at [stdin]:5224:29
+✖ lookAt refuses hole without unqueueing or provider call (6.103108ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1794139199999'
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5231:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1794139199999',
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5224:29
+✖ lookAt refuses inherited nil without unqueueing or provider call (0.785496ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1794139199999'
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5231:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1794139199999',
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5224:29
+✖ lookAt refuses getter without unqueueing or provider call (0.392953ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1794139199999'
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5231:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1794139199999',
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5224:29
+✖ lookAt refuses frozen unknown without unqueueing or provider call (0.464602ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1794139199999'
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5231:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1794139199999',
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5234:27
+✖ forty unread records requeue exactly five minutes, next healthy video gets next run (10.84452ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1794139500000'
+  - 1794139500000
+
+      at TestContext.<anonymous> ([stdin]:5253:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1794139500000',
+    expected: 1794139500000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5282:27
+✖ player keeps prior working record when refresh GET is unread (0.550662ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1794139199999'
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5297:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1794139199999',
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5299:27
+✖ generic Redis transport failure still propagates without deleting (0.656722ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + '1794139199999'
+  - 1794139199999
+
+      at TestContext.<anonymous> ([stdin]:5309:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '1794139199999',
+    expected: 1794139199999,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5312:27
+✖ LOW regression: unconfirmed no-op rescheduling must not starve forty-first video (2.228015ms)
+  AssertionError [ERR_ASSERTION]: a readable abandoned video must not stay forever behind unread records when reschedule ACK is unknown
+  + actual - expected
+
+  + '{"id":"00000000-0000-4000-8000-000000000041","path":"stream/00000000000000000000000000000000/abcdefghij12/00000000-0000-4000-8000-000000000041","name":"Synthetic.mp4","type":"video/mp4","bytes":1000,"state":"upload","at":1793965800000,"seconds":0,"width":0,"height":0}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:5333:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"id":"00000000-0000-4000-8000-000000000041","path":"stream/00000000000000000000000000000000/abcdefghij12/00000000-0000-4000-8000-000000000041","name":"Synthetic.mp4","type":"video/mp4","bytes":1000,"state":"upload","at":1793965800000,"seconds":0,"width":0,"height":0}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":249,"mocks":2,"over":false}
+
+Z_STATUS 1 null
+
+FILE stream.test.ts
+
+The path a lesson keeps for such a video
+  ok    it reads back as the folder, the lesson and the id it was made from
+  ok    a file in the file store is not one
+  ok    nor is a path with a folder inside it
+  ok    nor one that climbs out
+  ok    nor one whose id is not an id
+  ok    the store it belongs to is read from it, for the month's delivery
+
+What the service's own numbers mean
+  ok    made, with no file yet
+  ok    the file arrived
+  ok    being turned into its sizes, none done
+  ok    one size done, the rest still coming: it can be played
+  ok    finished
+  ok    could not be read
+  ok    the upload failed
+
+What one viewing is counted as
+  ok    ten minutes at 1080p
+  ok    a 4K file is counted at the tallest size kept, not at its own
+  ok    a small one at its own size
+  ok    never more than the file as it was uploaded
+  ok    a video whose length is not known yet is counted as the whole file
+
+The shape the player takes
+  ok    a video filmed wide
+  ok    one filmed upright and stored turned a quarter
+  ok    one the service has not measured yet
+
+Nothing runs until the service is set up
+  ok    it is off
+  ok    no door is opened
+  ok    the service was not asked anything
+  ok    nor with a library and no token key: a library without one plays to anybody
+  ok    with them it is on
+
+The studio asks for a door
+  ok    it is given one
+  ok    for a video made in the store's own collection
+  ok    named after the store and the lesson, not the creator
+  ok    good for a day
+  ok    signed the way the service's own page says: library, key, the second it ends, the video
+  ok    and the path to tell the lesson is that store's, that lesson's
+  ok    written down as an upload still to come
+  ok    a second video of the store goes in the same collection
+
+The lesson is told its video
+  ok    not a video whose door was opened for another store
+  ok    not for another lesson
+  ok    not a path nothing is known about
+  ok    not a file in the file store
+  ok    the one that was opened for it, yes: the file is there and no size is ready
+  ok    what it is called and how big come from what was written down, not from the browser
+
+An unconfirmed peek claim never asks the video provider
+  ok    unconfirmed claim [] keeps preparation without provider request or retry
+  ok    unconfirmed claim ["OK","extra"] keeps preparation without provider request or retry
+  ok    unconfirmed claim [null] keeps preparation without provider request or retry
+  ok    unconfirmed claim [false] keeps preparation without provider request or retry
+  ok    unconfirmed claim [0] keeps preparation without provider request or retry
+  ok    unconfirmed claim [1] keeps preparation without provider request or retry
+  ok    unconfirmed claim [true] keeps preparation without provider request or retry
+  ok    unconfirmed claim ["ok"] keeps preparation without provider request or retry
+  ok    unconfirmed claim [{}] keeps preparation without provider request or retry
+  ok    unconfirmed claim "OK" keeps preparation without provider request or retry
+  ok    unconfirmed claim null keeps preparation without provider request or retry
+
+A student opens the lesson while it is being prepared
+  ok    there is nothing to play yet, and the page says so
+  ok    a second student seconds later does not ask the service again
+
+The service says a size is ready
+  ok    an announcement signed with another key is not believed
+  ok    nor one whose body was changed after it was signed
+  ok    nor one that names another way of signing
+  ok    the video is still being prepared, as far as anybody is told
+  ok    the service's own is taken
+  ok    and the video is ready: there is a size to play
+  ok    its length and shape are not known yet, and nobody pretends they are
+  ok    an announcement about a video that is not ours is let go
+  ok    and one from another library
+
+A video that plays before the service has finished with it
+  ok    it plays meanwhile, in the usual shape
+  ok    and a viewing is counted as the whole file, at the tallest size, not at a shape that is only a guess
+  ok    a student seconds later does not ask the service again
+  ok    the next one, once the service has measured it, sees it in its own shape: filmed upright, it is upright
+  ok    its length is written down, and it is still being asked about: the larger sizes are coming
+  ok    a student's page no longer asks: what it needed, it has
+  ok    the five-minute job does, and the video goes on playing
+  ok    when the service says it has finished, what it weighs is the whole of it
+  ok    and it is not asked about again
+
+The player a student is shown
+  ok    it is the service's own, for that video
+  ok    good for a few hours
+  ok    with a token made the way the service's own page says: token key, video, the second it ends
+  ok    it does not start by itself, and goes on from where the student stopped
+  ok    the studio is told it is ready
+  ok    a store page may frame that player
+  ok    the studio, which shows no lesson, may not
+  ok    and the studio may send a video's pieces to the service
+
+How much a store keeps there is the service's own count
+  ok    every size of every video
+  ok    a store with nothing there keeps nothing
+  ok    invalid collection reference is unknown, not empty
+  ok    and a count that cannot be read is said to be unknown, not zero
+
+A door nothing came through
+  ok    is left alone for two days: an upload cut off may still go on
+  ok    then what was made for it is taken away at the service
+  ok    and here, whatever the service had made of it: no lesson has it
+  ok    the video a lesson has is not touched
+
+The service is busy, or not there
+  ok    a lesson told its video while the service cannot be reached still has it
+  ok    the five-minute job asks, learns nothing, and changes nothing
+  ok    when the service is back and says the file could not be read, the video has failed
+  ok    what could not be made into a video is not kept there, or paid for
+  ok    a student is told it could not be prepared, and shown nothing
+
+A file the service never finishes
+  ok    is waited for, for a week
+  ok    and then given up on, so the creator is told to upload it again
+
+A file far larger than the studio lets through
+  ok    is not kept, whatever the service made of it
+
+A video that plays, and what the service says of it afterward
+  ok    Lesson six.mp4: told to the lesson with one size made, it plays
+  ok    a later size that could not be made does not take away a video that plays
+  ok    and it is left alone from then on
+  ok    Lesson seven.mp4: told to the lesson with one size made, it plays
+  ok    the service not answering changes nothing about it
+  ok    one that is no longer at the service is said to have failed, not shown as a player with nothing in it
+  ok    Lesson eight.mp4: told to the lesson with one size made, it plays
+  ok    one that grows past what may be kept, as its larger sizes are made, is not kept either
+  ok    Lesson nine.mp4: told to the lesson with one size made, it plays
+  ok    one the service never says it has finished is asked about for a week, and then left as it is: playing
+
+Captions a creator uploads
+  ok    a subtitle file is taken, and the video has captions in that language
+  ok    what the service was sent is WebVTT made here, not the file as it came
+  ok    a second language sits beside the first, in the order the names are read in
+  ok    a second file in a language takes the place of the first
+  ok    the studio is told which videos have captions, and only those
+  ok    a file that is not captions is refused, and nothing is sent
+  ok    so is one over the size a captions file may be
+  ok    and a language that is not on the list
+  ok    a video that could not be made has none
+  ok    nor has a path nothing is known about
+  ok    with the service not there, the language is not listed: the player would not offer it
+  ok    and one that cannot be taken away there stays listed here
+  ok    a video holds captions in 12 languages and no more
+  ok    though one of those it has can still be replaced
+  ok    taken away, a language is gone from the service and from the list
+
+A creator removes the video
+  ok    a file in the file store is not this file's to delete
+  ok    the video is taken away
+  ok    at the service
+  ok    and here
+  ok    with the list of its captions
+  ok    a student who still has the page is shown nothing
+  ok    removed while the service cannot be reached, it is gone here at once
+  ok    and still there
+  ok    until the five-minute job tries again, so nothing is kept, and paid for, because of one bad minute
+
+Deletion failures retain durable cleanup intent
+  ok    an abandoned upload is detached locally
+  ok    both failed deletions remain queued
+  ok    both still exist at the provider
+  ok    a repeated outage retains both cleanup entries
+  ok    the job deletes both after provider recovery
+  ok    neither remains stored
+  ok    confirmed deletion clears the queue
+
+Unconfirmed cleanup persistence cannot discard a video
+  ok    unconfirmed queue persistence refuses cleanup
+  ok    the video remains discoverable locally
+  ok    no provider deletion was attempted
+
+A new upload needs confirmed tracking before receiving its signature
+  ok    missing tracking acknowledgement never publishes an upload signature
+  ok    the empty provider video is removed
+
+A new manual caption is bound to its funded owner before provider work
+  ok    the owner wrapper still adds captions on an unmarked period
+  ok    a new manual caption needs financial approval
+  ok    a foreign video's folder is refused
+  ok    no provider request or caption replacement
+  ok    the existing caption can still be removed
+  ok    the existing language is gone after provider cleanup
+
+The announcements' address does not exist without the key they are signed with
+  ok    not found
+
+148 checks, all passing.
+Z_VOLUME {"runs":390,"mocks":82,"over":false}
+
+Z_STATUS 0 null
+
+FILE stream-captions-read-exact.test.ts
+✔ streamCaptions refuses missing pipeline slot instead of reporting no captions (1.723813ms)
+✔ streamCaptions refuses extra pipeline slot instead of reporting no captions (0.207964ms)
+✔ streamCaptions refuses non-list hash instead of reporting no captions (0.27766ms)
+✔ streamCaptions refuses odd hash fields instead of reporting no captions (0.211058ms)
+✔ streamCaptions refuses non-string hash value instead of reporting no captions (0.152791ms)
+✔ streamCaptions refuses unknown stored language instead of reporting no captions (0.259612ms)
+✔ streamCaptions still distinguishes a confirmed empty hash from a known caption (4.167845ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16.621444
+Z_VOLUME {"runs":3,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE stream-hook-counter-admission.test.ts
+PASS unknown missing stops before video and caption helpers
+PASS unknown empty stops before video and caption helpers
+PASS unknown partial stops before video and caption helpers
+PASS unknown extra stops before video and caption helpers
+PASS unknown numeric text stops before video and caption helpers
+PASS unknown null stops before video and caption helpers
+PASS unknown zero stops before video and caption helpers
+PASS unknown negative stops before video and caption helpers
+PASS unknown fraction stops before video and caption helpers
+PASS unknown unknown SET stops before video and caption helpers
+PASS counter timeout refuses without retry or readback
+PASS 600 confirmed calls keep the existing minute ceiling, hashed key and TTL
+PASS confirmed null SET acknowledgement is a valid existing key
+PASS committed lost acknowledgement consumes the increment
+PASS unconfigured service remains404 before counters
+PASS actual HMAC verification still rejects a bad signature before helpers
+PASS signed malformed JSON remains400 before helpers
+PASS body ceiling still refuses before helpers
+PASS ignored video leaves captions untouched
+PASS provider-helper failure retains retryable500
+20 passed; 0 failed
+Z_VOLUME {"runs":2416,"mocks":0,"over":false}
+acting on a video announcement failed Error: Synthetic video lookup failure
+    at heard ([stdin]:4910:35)
+    at POST ([stdin]:5026:26)
+    at async [stdin]:5134:34
+    at async check ([stdin]:5043:5)
+    at async main ([stdin]:5131:3)
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (42.686374ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (92.714155ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (31.648011ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.245953ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.276026ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.130096ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.559294ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (87.353509ms)
+✔ every store figure taken in the code is a kind a line prices (45.284616ms)
+✔ every email sent names a meter, and each file only the meters it may use (67.612306ms)
+✔ the units a figure is taken in cost at least what they stand for (9.18804ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (1.86554ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.158538ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.307734ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.131298ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.129045ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.338209ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.142424ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.84969ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.078028ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.238572ms)
+✔ Path push fits its reserved studio requests (0.07955ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.053841ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.160342ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.171478ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (33.337557ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 441.943565
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (58.340674ms)
+✔ each family is bounded one way at least, and what it says can be checked (34.621884ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.554477ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.099066ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.354675ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.136898ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.165389ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 110.772325
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3294-TDdHq7

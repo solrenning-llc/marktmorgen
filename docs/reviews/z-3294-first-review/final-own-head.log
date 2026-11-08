@@ -1,0 +1,48 @@
+
+FILE z-3294-queue.proof.ts
+Z_PAGE {"reads":40,"score":"1794139500000","unknownProvider":0,"jsonPipelineBytes":5655,"commands":82}
+Z_LOW {"reads":80,"refused":80,"score":"1794139199999","healthyKept":true,"http":0}
+✔ lookAt refuses hole without unqueueing or provider call (5.831002ms)
+✔ lookAt refuses inherited nil without unqueueing or provider call (0.420042ms)
+✔ lookAt refuses getter without unqueueing or provider call (0.37816ms)
+✔ lookAt refuses frozen unknown without unqueueing or provider call (0.306382ms)
+✔ forty unread records requeue exactly five minutes, next healthy video gets next run (16.133879ms)
+✔ claim real commit but unknown receipt refuses at provider 200 (2.820959ms)
+✔ claim real commit but unknown receipt refuses at provider 503 (0.482286ms)
+✔ player keeps prior working record when refresh GET is unread (0.658922ms)
+✔ generic Redis transport failure still propagates without deleting (0.508416ms)
+✖ LOW regression: unconfirmed no-op rescheduling must not starve forty-first video (4.21601ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 40.271622
+
+✖ failing tests:
+
+test at [stdin]:5312:27
+✖ LOW regression: unconfirmed no-op rescheduling must not starve forty-first video (4.21601ms)
+  AssertionError [ERR_ASSERTION]: a readable abandoned video must not stay forever behind unread records when reschedule ACK is unknown
+  + actual - expected
+
+  + '{"id":"00000000-0000-4000-8000-000000000041","path":"stream/00000000000000000000000000000000/abcdefghij12/00000000-0000-4000-8000-000000000041","name":"Synthetic.mp4","type":"video/mp4","bytes":1000,"state":"upload","at":1793965800000,"seconds":0,"width":0,"height":0}'
+  - null
+
+      at TestContext.<anonymous> ([stdin]:5333:25)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '{"id":"00000000-0000-4000-8000-000000000041","path":"stream/00000000000000000000000000000000/abcdefghij12/00000000-0000-4000-8000-000000000041","name":"Synthetic.mp4","type":"video/mp4","bytes":1000,"state":"upload","at":1793965800000,"seconds":0,"width":0,"height":0}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":257,"mocks":3,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3294-d8n3ub

@@ -304,38 +304,47 @@ export async function settleFromReturn(store: Store, request: PaymentRequest, se
 const PAYMENT_INTENT = /^pi_[A-Za-z0-9]{8,255}$/;
 /** Pages of refunds (100 each) one studio reading asks Stripe for, at most. */
 const REFUND_PAGES = 3;
+/** Every status Stripe gives a refund (the same list as lib/refunds.ts): any other is a row in another shape. */
+const REFUND_STATUSES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+/** A refund still under way: not yet given back, but it may be, so its payment is not checked. */
+const REFUND_UNDER_WAY = new Set(["pending", "requires_action"]);
 
 /**
  * The account's succeeded refunds since `since`, summed per payment, and
  * whether every one was read (rule 24): a list still marked has_more after
- * the last page read, a page or a row in another shape, or the same refund
- * twice leaves `complete` false. What was read is still counted, once each:
- * it is a floor of what was refunded, never the total. Throws when Stripe
- * cannot be read.
+ * the last page read, a page or a row in another shape (a status Stripe does
+ * not list, an empty payment id), or the same refund twice leaves `complete`
+ * false. What was read is still counted, once each: it is a floor of what
+ * was refunded, never the total. `underWay` names the payments with a refund
+ * still pending or waiting on an action: not counted, and not checked.
+ * Throws when Stripe cannot be read.
  */
-async function readRefunds(account: string, since: number): Promise<{ back: Map<string, number>; complete: boolean }> {
+async function readRefunds(account: string, since: number): Promise<{ back: Map<string, number>; complete: boolean; underWay: Set<string> }> {
   const back = new Map<string, number>();
+  const underWay = new Set<string>();
   const seen = new Set<string>();
   let complete = true;
   let after = "";
   for (let page = 0; ; page += 1) {
-    if (page === REFUND_PAGES) return { back, complete: false };
+    if (page === REFUND_PAGES) return { back, complete: false, underWay };
     const listed = await onAccount("GET", account, `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
-    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { back, complete: false };
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { back, complete: false, underWay };
     for (const item of listed.data as unknown[]) {
       const row = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
       const id = row && typeof row.id === "string" && row.id ? row.id : "";
       const intent = row?.payment_intent;
-      if (!row || !id || seen.has(id) || (intent !== null && typeof intent !== "string") || typeof row.status !== "string" || !Number.isSafeInteger(row.amount) || (row.amount as number) < 0) {
+      if (!row || !id || seen.has(id) || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) < 0) {
         complete = false;
         continue;
       }
       seen.add(id);
-      if (typeof intent === "string" && intent && row.status === "succeeded") back.set(intent, (back.get(intent) ?? 0) + (row.amount as number));
+      if (typeof intent !== "string") continue;
+      if (row.status === "succeeded") back.set(intent, (back.get(intent) ?? 0) + (row.amount as number));
+      else if (REFUND_UNDER_WAY.has(row.status)) underWay.add(intent);
     }
-    if (!listed.has_more) return { back, complete };
+    if (!listed.has_more) return { back, complete, underWay };
     const last = (listed.data as unknown[]).at(-1) as Record<string, unknown> | null | undefined;
-    if (!last || typeof last !== "object" || typeof last.id !== "string" || !last.id) return { back, complete: false };
+    if (!last || typeof last !== "object" || typeof last.id !== "string" || !last.id) return { back, complete: false, underWay };
     after = last.id;
   }
 }
@@ -359,7 +368,7 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
   const paid = requests.filter((r) => onStripe(r) && PAYMENT_INTENT.test(r.payment));
   if (!paid.length || !store.stripeAccountId) return requests.map((r) => shown(r, false));
   const since = Math.floor(Math.min(...paid.map((r) => r.paidAt)) / 1000) - 60;
-  let read: { back: Map<string, number>; complete: boolean };
+  let read: { back: Map<string, number>; complete: boolean; underWay: Set<string> };
   try {
     read = await readRefunds(store.stripeAccountId, since);
   } catch (error) {
@@ -382,7 +391,8 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
       else unsaved.add(r.id);
     }
   }
-  return requests.map((r) => shown(changed.get(r.id) ?? r, read.complete && !unsaved.has(r.id)));
+  // A refund still under way may yet give the money back: not checked until it ends.
+  return requests.map((r) => shown(changed.get(r.id) ?? r, read.complete && !unsaved.has(r.id) && !read.underWay.has(r.payment)));
 }
 
 /** Why a request could not be marked as paid outside Stripe. */

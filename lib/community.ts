@@ -565,9 +565,13 @@ export async function setMail(id: string, member: Member, mail: boolean): Promis
   return (await patchMember(id, member.k, () => ({ mail }))) ?? member;
 }
 
-/** Keeps the unsubscribe token a member's emails carry. */
-export async function setMemberToken(id: string, member: Member, token: string): Promise<void> {
-  await patchMember(id, member.k, () => ({ t: token }));
+/**
+ * Keeps the unsubscribe token a member's emails carry, unless their record holds one already (made by another send
+ * at the same time), and answers the record as kept: its `t` is the token whose stop link works. Null when the record
+ * did not read, or is gone.
+ */
+export async function setMemberToken(id: string, member: Member, token: string): Promise<Member | null> {
+  return patchMember(id, member.k, (current) => ({ t: current.t || token }));
 }
 
 /** The creator mutes or unmutes, removes or lets back. */

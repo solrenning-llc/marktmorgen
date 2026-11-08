@@ -25,6 +25,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -37,7 +38,7 @@ import {
   mailableMembers,
   readConfig,
   readMember,
-  readMembers,
+  readMembersExact,
   setMail,
   setMemberToken,
 } from "@/lib/community";
@@ -148,8 +149,12 @@ export async function tokenFor(store: Store, communityId: string, member: Member
   const token = randomBytes(20).toString("hex");
   // Kept for good, once a member: counted in the store's room (lib/order-data.ts).
   await orderWrite(store, [["SET", unsubKey(token), `${communityId}|${member.k}|${store.handle}`]]);
-  await setMemberToken(communityId, member, token);
-  return token;
+  // The stop link is the token the member's record keeps (rules 24 and 30): one another send kept first is that one,
+  // and a record that did not read keeps none, so no email goes out with a stop link that leads nowhere; the batch
+  // waits instead, and the next run reads the member again.
+  const kept = await setMemberToken(communityId, member, token);
+  if (!kept || !COMMUNITY_UNSUB.test(kept.t)) throw new UnknownReplyError("a member's stop link");
+  return kept.t;
 }
 
 /** Runs `each` over `items`, a few at a time. */
@@ -217,6 +222,7 @@ export async function advanceAnnouncement(
       return job;
     }
     job = { ...job, status: "sending", note: "" };
+    const community = job.community;
 
     while (job.done < job.total && Date.now() < deadline) {
       // Checked batches (lib/mail.ts): each member is asked of Stripe before sending.
@@ -225,11 +231,28 @@ export async function advanceAnnouncement(
         job = { ...job, status: "waiting", note: "We couldn't read the remaining recipients. The send is still pending." };
         break;
       }
-      const found = await readMembers(job.community, keys);
-      const candidates = keys.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
-      // Asked batch by batch, so a member who lapsed since it started is left out.
-      const letIn = await inTurns(candidates, 5, (m) => holdsTicket(store, config, m.e));
-      const recipients = candidates.filter((_, i) => letIn[i]);
+      // Who is in this batch, read exactly (rules 24 and 30): a member is left out only when read as gone (nil), taken
+      // out, no longer asking for these emails, or known to be let in no more (asked batch by batch, so a member who
+      // lapsed since it started is left out). A member who did not read, a ticket Stripe could not be asked about, or
+      // a stop link not kept leaves the batch not done and the cursor where it was, before anything is reserved, so
+      // the next run sends to them once, under the same batch key.
+      const read = await (async () => {
+        const found = await readMembersExact(community, keys);
+        const candidates = keys.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
+        const letIn = await inTurns(candidates, 5, (m) => holdsTicket(store, config, m.e, { strict: true }));
+        const recipients = candidates.filter((_, i) => letIn[i]);
+        const tokens: string[] = [];
+        for (const member of recipients) tokens.push(await tokenFor(store, community, member));
+        return { recipients, tokens };
+      })().catch((error: unknown) => {
+        console.error("an announcement could not read who is in a batch", error);
+        return null;
+      });
+      if (!read) {
+        job = { ...job, status: "waiting", note: "We couldn't read who is in the next batch just now. The send is still pending." };
+        break;
+      }
+      const { recipients, tokens } = read;
       if (recipients.length) {
         const reserved = await reserve(store, recipients.length);
         if (reserved !== "ok") {
@@ -246,8 +269,8 @@ export async function advanceAnnouncement(
           break;
         }
         const messages: BatchMessage[] = [];
-        for (const member of recipients) {
-          const token = await tokenFor(store, job.community, member);
+        for (const [i, member] of recipients.entries()) {
+          const token = tokens[i];
           const fromName = store.mail?.fromName || store.name;
           const r = render(store, job.subject, job.body, null, {
             page: `${SITE_URL}/unsubscribe?c=${token}`,

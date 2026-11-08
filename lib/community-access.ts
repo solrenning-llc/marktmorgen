@@ -226,10 +226,16 @@ async function broughtOver(store: Store, email: string, ids: Set<string>): Promi
  * Stripe is asked at most once every five minutes per address (once a minute
  * while the answer is no); a change to the settings asks again at once.
  */
-export async function holdsTicket(store: Store, config: CommunityConfig, email: string): Promise<boolean> {
+export async function holdsTicket(store: Store, config: CommunityConfig, email: string, options: { strict?: boolean } = {}): Promise<boolean> {
   const id = store.community?.id;
-  if (!id || !isRedisConfigured()) return false;
-  return ticketFor(store, config.access, email, okKey(id, email), config.v);
+  if (!id) return false;
+  // `strict`, for deciding who an email goes to (lib/community-mail.ts, lib/community-event-mail.ts): an answer that
+  // could not be had throws instead of being a no, so nobody is left out of a batch counted as sent (rules 24 and 30).
+  if (!isRedisConfigured()) {
+    if (options.strict) throw new Error("the database is not set up");
+    return false;
+  }
+  return ticketFor(store, config.access, email, okKey(id, email), config.v, options.strict === true);
 }
 
 /**
@@ -240,9 +246,14 @@ export async function holdsTicket(store: Store, config: CommunityConfig, email: 
  * (one while it is no), so a membership that lapses loses the event with the
  * community.
  */
-export async function holdsAnyOf(store: Store, ids: string[], email: string, cacheKey: string, version: string): Promise<boolean> {
-  if (!store.community?.id || !isRedisConfigured()) return false;
-  return ticketFor(store, ids, email, cacheKey, version);
+export async function holdsAnyOf(store: Store, ids: string[], email: string, cacheKey: string, version: string, options: { strict?: boolean } = {}): Promise<boolean> {
+  if (!store.community?.id) return false;
+  // `strict` as holdsTicket's: an answer that could not be had throws, never a no.
+  if (!isRedisConfigured()) {
+    if (options.strict) throw new Error("the database is not set up");
+    return false;
+  }
+  return ticketFor(store, ids, email, cacheKey, version, options.strict === true);
 }
 
 /**

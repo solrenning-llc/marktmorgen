@@ -504,22 +504,40 @@ export async function advanceEventJob(
         break;
       }
       const [found, going]: [Map<string, Member>, Set<string>] = read;
-      let recipients: Member[] = keys
+      const coming: Member[] = keys
         .map((k) => found.get(k))
         .filter((m): m is Member => Boolean(m && !m.removed && (going.has(m.k) || kind === "cancelled")))
         .filter((m) => !reminder || m.mail);
-      if (reminder && recipients.length) {
-        // Asked batch by batch, so a member who lapsed since it started is left out.
-        const letIn: boolean[] = await inTurns(recipients, 5, async (m: Member) =>
-          (await holdsTicket(store, config, m.e)) && (await mayAttend(store, config, event, { owner: false, email: m.e })),
-        );
-        recipients = recipients.filter((_, i) => letIn[i]);
+      // A reminder asks each of them of the creator's Stripe account, batch by batch, so a member who lapsed since it
+      // started is left out, and gives each the stop link their record keeps. Both strictly (rules 24 and 30): a ticket
+      // or an event's door that could not be asked about, or a stop link not kept, is not a no; it leaves the batch
+      // not done and the cursor where it was, exactly as a members read that does not come back (above).
+      const checked = !reminder
+        ? { recipients: coming, tokens: [] as string[] }
+        : await (async () => {
+            const letIn: boolean[] = await inTurns(coming, 5, async (m: Member) =>
+              (await holdsTicket(store, config, m.e, { strict: true })) &&
+              (await mayAttend(store, config, event, { owner: false, email: m.e }, { strict: true })),
+            );
+            const recipients = coming.filter((_, i) => letIn[i]);
+            const tokens: string[] = [];
+            for (const member of recipients) tokens.push(await tokenFor(store, community, member));
+            return { recipients, tokens };
+          })().catch((error: unknown) => {
+            console.error("an event reminder could not ask who is let in, or keep a stop link, in a batch", error);
+            return null;
+          });
+      if (!checked) {
+        if (!stillUseful(job.kind, event.start, Date.now())) return await finish("sent", "No longer due.");
+        job = { ...job, note: MEMBERS_NOTE };
+        break;
       }
+      const { recipients, tokens } = checked;
       if (recipients.length) {
         const messages: BatchMessage[] = [];
-        for (const member of recipients) {
+        for (const [i, member] of recipients.entries()) {
           if (reminder) {
-            const token = await tokenFor(store, job.community, member);
+            const token = tokens[i];
             const r = render(store, words.subject, words.body, null, {
               page: `${SITE_URL}/unsubscribe?c=${token}`,
               oneClick: `${SITE_URL}/api/mail/unsubscribe?c=${token}`,

@@ -155,16 +155,46 @@ export async function queueAnnouncement(store: Store, config: CommunityConfig, p
  * (lib/community-event-mail.ts): both are the community's emails they asked for.
  */
 export async function tokenFor(store: Store, communityId: string, member: Member): Promise<string> {
-  if (member.t) return member.t;
-  const token = randomBytes(20).toString("hex");
-  // Kept for good, once a member: counted in the store's room (lib/order-data.ts).
-  await orderWrite(store, [["SET", unsubKey(token), `${communityId}|${member.k}|${store.handle}`]]);
-  // The stop link is the token the member's record keeps (rules 24 and 30): one another send kept first is that one,
-  // and a record that did not read keeps none, so no email goes out with a stop link that leads nowhere; the batch
-  // waits instead, and the next run reads the member again.
-  const kept = await setMemberToken(communityId, member, token);
-  if (!kept || !COMMUNITY_UNSUB.test(kept.t)) throw new UnknownReplyError("a member's stop link");
-  return kept.t;
+  // The token is made canonical on the member's record first: ours, or one
+  // another send kept first, which is the link already in an email and is
+  // never replaced (Codex G on #3123). Only that token ever gets a link
+  // record, so no record is written for a token that is not the member's, and
+  // the member's erasure, which deletes the record of member.t, finds every
+  // one (Codex G, review 5815472405).
+  const kept = member.t || (await setMemberToken(communityId, member, randomBytes(20).toString("hex")));
+  if (!kept) throw new Error("a community member with no record has no stop link");
+  // A token not in a stop link's exact shape is not one any email may carry (rules 24 and 30): the batch waits.
+  if (!COMMUNITY_UNSUB.test(kept)) throw new UnknownReplyError("a member's stop link");
+  await keepStopLink(store, communityId, member.k, kept);
+  return kept;
+}
+
+/**
+ * Makes sure the member's canonical token has its link record, and only
+ * while the member still holds it. A record already there is read, not
+ * written again; a missing one (a send that stopped between keeping the
+ * token and writing its record) is written once, with SET NX. Then the
+ * member is read again: an erasure that ran in between (and so may have
+ * deleted the record before it was written) leaves no member holding the
+ * token, and the record just written is deleted with its reply confirmed,
+ * before anything is returned. Every reply is read in its exact shape
+ * (CX-123 rule 24): one not known throws, so the send stays pending and no
+ * email carries the link.
+ */
+async function keepStopLink(store: Store, communityId: string, key: string, token: string): Promise<void> {
+  const value = `${communityId}|${key}|${store.handle}`;
+  const read = repliesFor(await redisPipeline([["GET", unsubKey(token)]]), 1);
+  if (!read || (read[0] !== null && read[0] !== value)) throw new UnknownReplyError("a community stop link");
+  if (read[0] === value) return;
+  // Kept for good, once a member: counted in the store's room at what it adds (lib/order-data.ts).
+  const [set] = await orderWrite(store, [["SET", unsubKey(token), value, "NX"]]);
+  if (set !== "OK" && set !== null) throw new UnknownReplyError("a community stop link");
+  if ((await readMember(communityId, key))?.t === token) return;
+  // The member is gone (or holds another token): this token is no one's link,
+  // and its record goes before the call refuses.
+  const gone = repliesFor(await redisPipeline([["DEL", unsubKey(token)]]), 1)?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("a community stop link of a member who is gone");
+  throw new Error("a community member with no record has no stop link");
 }
 
 /**
@@ -179,7 +209,10 @@ export const MEMBER_TRIES = 6;
 
 export type SortedBatch =
   | { wait: false; recipients: Member[]; tokens: string[]; skipped: number }
-  | { wait: true; tries: Record<string, number> };
+  | { wait: true; tries: Record<string, number>; unkept: boolean };
+
+/** What a send says while it waits only on stop links not yet kept on their members (CX-123 rule 24). */
+export const UNKEPT_LINK_NOTE = "We couldn't save every recipient's unsubscribe link. The send is still pending.";
 
 /**
  * Who in a checked batch is emailed, member by member (rules 24 and 30, review of #3140, M2): each of `candidates`
@@ -188,7 +221,8 @@ export type SortedBatch =
  * disconnected) is passed over now; one whose answer may yet come (a timeout, Stripe or Redis failing) makes the
  * batch wait, and is passed over only once that has happened MEMBER_TRIES runs in a row (`tries`, kept on the send,
  * by member key, for the batch under way only). A member passed over is counted in `skipped`, never sent to. A
- * batch that waits sends nobody, and its cursor stays where it was, so the next run asks again under the same key.
+ * batch that waits sends nobody, and its cursor stays where it was, so the next run asks again under the same key;
+ * `unkept` says it waits only on stop links not kept (UNKEPT_LINK_NOTE), never on a member not yet asked.
  */
 export async function sortBatch(
   store: Store,
@@ -197,7 +231,7 @@ export async function sortBatch(
   letIn: (member: Member) => Promise<boolean>,
   tries: Record<string, number> | undefined,
 ): Promise<SortedBatch> {
-  type Answer = { member: Member; state: "in" | "out" | "never" | "unknown"; token?: string };
+  type Answer = { member: Member; state: "in" | "out" | "never" | "unknown"; token?: string; link?: boolean };
   const answers: Answer[] = await inTurns(candidates, 5, async (member): Promise<Answer> => {
     try {
       return { member, state: (await letIn(member)) ? "in" : "out" };
@@ -214,10 +248,12 @@ export async function sortBatch(
     } catch (error) {
       console.error("a community send could not keep a member's stop link", error);
       answer.state = "unknown";
+      answer.link = true;
     }
   }
   const next: Record<string, number> = {};
   let waiting = false;
+  let unkept = true;
   for (const answer of answers) {
     if (answer.state !== "unknown") continue;
     const before = tries?.[answer.member.k];
@@ -226,9 +262,10 @@ export async function sortBatch(
     else {
       next[answer.member.k] = count;
       waiting = true;
+      if (!answer.link) unkept = false;
     }
   }
-  if (waiting) return { wait: true, tries: next };
+  if (waiting) return { wait: true, tries: next, unkept };
   const sent = answers.filter((a) => a.state === "in");
   return {
     wait: false,
@@ -342,7 +379,8 @@ export async function advanceAnnouncement(
         return null;
       });
       if (!read || read.wait) {
-        job = { ...job, status: "waiting", note: "We couldn't read who is in the next batch just now. The send is still pending.", ...(read ? { tries: read.tries } : {}) };
+        const note = read?.unkept ? UNKEPT_LINK_NOTE : "We couldn't read who is in the next batch just now. The send is still pending.";
+        job = { ...job, status: "waiting", note, ...(read ? { tries: read.tries } : {}) };
         break;
       }
       const { recipients, tokens, skipped } = read;
@@ -413,20 +451,33 @@ export async function advanceAnnouncements(load: (handle: string) => Promise<Sto
   return touched;
 }
 
-/** Who a stop link belongs to, without acting on it. */
+/**
+ * Who a stop link belongs to, without acting on it. Null only when Redis
+ * said there is no such link or member; a read in any other shape throws
+ * UnknownReplyError (CX-123 rule 24), so a link that exists is never called
+ * unknown, and the stop door and page say they could not do it just now.
+ */
 export async function readCommunityUnsub(
   token: string,
 ): Promise<{ community: string; handle: string; member: Member } | null> {
   if (!COMMUNITY_UNSUB.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", unsubKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", unsubKey(token)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community stop link");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a community stop link");
   const [community, key, handle] = raw.split("|");
   if (!community || !key || !handle) return null;
   const member = await readMember(community, key);
   return member && member.t === token ? { community, handle, member } : null;
 }
 
-/** Stops a member's announcement emails. Safe to press twice. */
+/**
+ * Stops a member's announcement emails. Safe to press twice. True only once
+ * the stop is written (or was already); throws when a read or the write was
+ * answered in another shape, so the door never says "Unsubscribed." for a
+ * stop that was not kept.
+ */
 export async function stopAnnouncements(token: string): Promise<boolean> {
   const found = await readCommunityUnsub(token);
   if (!found) return false;

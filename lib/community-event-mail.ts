@@ -65,7 +65,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
 import { type CommunityConfig, type Member, readConfigExact, readMembersExact } from "@/lib/community";
 import { holdsTicket } from "@/lib/community-access";
-import { type SortedBatch, skippedNote, sortBatch } from "@/lib/community-mail";
+import { type SortedBatch, UNKEPT_LINK_NOTE, skippedNote, sortBatch } from "@/lib/community-mail";
 import { alertCreator } from "@/lib/phone-alerts";
 import { JOIN_EARLY_MINUTES } from "@/lib/community-text";
 import { communityWords } from "@/lib/buyer-words/community";
@@ -724,7 +724,7 @@ export async function advanceEventJob(
           });
       if (!checked || checked.wait) {
         if (!stillUseful(job.kind, event.start, Date.now())) return await finish("sent", "No longer due.");
-        job = { ...job, note: MEMBERS_NOTE, ...(checked ? { tries: checked.tries } : {}) };
+        job = { ...job, note: checked?.unkept ? UNKEPT_LINK_NOTE : MEMBERS_NOTE, ...(checked ? { tries: checked.tries } : {}) };
         break;
       }
       const { recipients, tokens, skipped }: { recipients: Member[]; tokens: string[]; skipped: number } = checked;

@@ -7,7 +7,14 @@
  * as its sitemap does. Switched back on, each comes back as it was. The ways
  * a person already has (taking an address off a waitlist, moving a paid
  * booking) stay open. Through the real pages and routes, on a synthetic store.
+ *
+ * Its affiliate page (app/[handle]/affiliates/page.tsx) closes what is for a
+ * visitor (the program's terms, applying, joining after an order) and keeps
+ * an affiliate's own page and the emailed link that signs one back in; the
+ * store's layout (app/[handle]/layout.tsx) puts nothing of the store in the
+ * head (manifest, name, icons, colour), as for an address with no store.
  */
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { renderToReadableStream } from "react-dom/server";
 import BookPage, { generateMetadata as bookMeta } from "@/app/[handle]/book/[product]/page";
@@ -17,13 +24,17 @@ import LeftPage, { generateMetadata as leftMeta } from "@/app/[handle]/left/page
 import ReviewsPage, { generateMetadata as reviewsMeta } from "@/app/[handle]/p/[product]/reviews/page";
 import ReviewPage, { generateMetadata as reviewMeta } from "@/app/[handle]/review/page";
 import WaitlistPage, { generateMetadata as waitlistMeta } from "@/app/[handle]/waitlist/page";
+import AffiliatesPage, { generateMetadata as affiliatesMeta } from "@/app/[handle]/affiliates/page";
+import { generateMetadata as layoutMeta, generateViewport as layoutViewport } from "@/app/[handle]/layout";
+import { NO_AFFILIATES } from "@/lib/affiliate-setting";
+import { affiliateCookieName, openAffiliateLink } from "@/lib/affiliates";
 import { GET as manifest } from "@/app/[handle]/manifest.webmanifest/route";
 import { GET as robots } from "@/app/[handle]/store-robots/route";
 import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { readSetup, type CallSetup } from "@/lib/call-setup";
 import { waitlistTokenKey } from "@/lib/waitlist-tokens";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setProductCall, setStripeAccount, setSubscription } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, noteTakedown, setAffiliateSetting, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { answering } from "./security/next-headers";
@@ -100,6 +111,27 @@ async function main(): Promise<void> {
   const weekly = { kind: "weekly", minutes: 30, tz: "America/New_York", weekly: [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []], noticeHours: 1, horizonDays: 14, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] };
   await setProductCall(owner, call.product.id, readSetup(weekly) as CallSetup);
   const handle = "@glazeworks";
+  // An affiliate the store already has, signed in on this browser (lib/affiliates.ts): one still waiting on the
+  // creator's answer, whose page the in-memory Redis can draw (an approved one's reads the kept book with HSTRLEN).
+  await setAffiliateSetting(owner, { ...NO_AFFILIATES, enabled: true, rates: {} });
+  const statsId = (await storeForEmail(owner))!.statsId!;
+  const sha = (value: string) => createHash("sha256").update(value).digest("hex");
+  const emailed = async (email: string, token: string) => {
+    await redis.pipeline([["SET", `nl:aff:link:${sha(`nimbus-aff-link:${token}`).slice(0, 40)}`, JSON.stringify({ s: statsId, e: email, n: "" }), "EX", 600]]);
+    return token;
+  };
+  const opened = await openAffiliateLink((await storeForEmail(owner))!, await emailed("partner@example.test", "a".repeat(64)));
+  if (!opened.ok || opened.affiliate.status !== "pending") throw new Error("the affiliate fixture was not created");
+  const session = `${affiliateCookieName("glazeworks")}=${opened.session}`;
+  const affiliates = async (query: Query, cookie = "") => {
+    answering(new NextRequest(`https://marktmorgen.com/${handle}/affiliates${Object.keys(query).length ? `?${new URLSearchParams(query)}` : ""}`, { headers: { "x-forwarded-for": "203.0.113.7", ...(cookie ? { cookie } : {}) } }));
+    return answer(() => AffiliatesPage({ params: Promise.resolve({ handle }), searchParams: Promise.resolve(query) }));
+  };
+  const head = async () => {
+    answering(new NextRequest(`https://marktmorgen.com/${handle}`));
+    const props = { params: Promise.resolve({ handle }) } as unknown as Parameters<typeof layoutMeta>[0];
+    return JSON.stringify([await layoutMeta(props), await layoutViewport(props)]);
+  };
   const titles = ["Glaze Workshop Replay", "Free Glaze Guide", "Studio Call With Ana"];
 
   const ask = (path: string, query: Query) => answering(new NextRequest(`https://marktmorgen.com/${handle}${path}${Object.keys(query).length ? `?${new URLSearchParams(query)}` : ""}`));
@@ -134,12 +166,26 @@ async function main(): Promise<void> {
   }
   is("the store's app manifest is not given, kept by no cache", await file(manifest, "/manifest.webmanifest"), [404, "no-store"]);
   is("nor the rules for crawlers on its own domain", await file(robots, "/store-robots"), [404, "no-store"]);
+  const visitor = await affiliates({});
+  is("the affiliate page says the store is not available to a visitor, as the store's page does", suspendedPage(visitor), true);
+  is("and shows none of the program's terms or its form to apply", [(await html(visitor)).includes("Earn by sharing"), (await html(visitor)).includes("<form")], [false, false]);
+  is("nor after an application was sent", suspendedPage(await affiliates({ status: "sent" })), true);
+  is("nor the offer to a buyer to join after an order", suspendedPage(await affiliates({ order: "cs_test_of1order00000" })), true);
+  is("nor an emailed link for an address the store has no affiliate under, which would make an application", suspendedPage(await affiliates({ token: await emailed("newcomer@example.test", "b".repeat(64)) })), true);
+  answering(new NextRequest(`https://marktmorgen.com/${handle}/affiliates`));
+  is("the affiliate page's title does not name the store", String((await affiliatesMeta({ params: Promise.resolve({ handle }) })).title ?? "").includes("Glaze Works"), false);
+  const inHead = await head();
+  is("the store's layout puts nothing of the store in the head: no manifest, name, icons or colour", [inHead.includes("manifest"), inHead.includes("Glaze Works"), inHead.includes("icon"), inHead.includes("themeColor")], [false, false, false, false]);
 
   part("What a person already has stays open");
   const waitlist = pages.find((p) => p.path === "/waitlist")!;
   is("the waitlist's page still offers to take an address off the list", suspendedPage(await open(waitlist, { leave: "x".repeat(24) })), false);
   is("and says it was taken off", suspendedPage(await open(waitlist, { status: "left", product: paid.product.id })), false);
   is("the booking page still lets a paid booking be moved, the buyer's own", suspendedPage(await open(pages[0], { move: "cs_test_of1move000000" })), false);
+  const own = await affiliates({}, session);
+  is("an affiliate the store already has keeps their own page", [suspendedPage(own), (await html(own)).includes("partner@example.test")], [false, true]);
+  const back = await affiliates({ token: await emailed("partner@example.test", "c".repeat(64)) });
+  is("and the emailed link that signs them back in", [suspendedPage(back), (await html(back)).includes("Continue as partner@example.test")], [false, true]);
   // What stays open names nothing a product's id in the address asks for: anyone who saw an old link has the id.
   const left = await open(waitlist, { status: "left", product: paid.product.id });
   const leftDrawn = await html(left);
@@ -177,6 +223,9 @@ async function main(): Promise<void> {
   is("as does moving a booking", await tracks((await open(pages[0], { move: "cs_test_of1move000000" }) as { node: unknown }).node), true);
   is("the manifest is given again", (await file(manifest, "/manifest.webmanifest"))[0], 200);
   is("and the rules for crawlers", (await file(robots, "/store-robots"))[0], 200);
+  is("the affiliate page shows the program to a visitor again", (await html(await affiliates({}))).includes("Earn by sharing Glaze Works"), true);
+  const again = await head();
+  is("the store's layout names the store in the head again, with its manifest", [again.includes("/@glazeworks/manifest.webmanifest"), again.includes("Glaze Works")], [true, true]);
 
   done();
 }

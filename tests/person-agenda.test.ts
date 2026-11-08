@@ -147,7 +147,7 @@ async function main() {
   is("a store with one person's tasks counts nothing beyond its page; 1,000 people count at most AGENDA_UNITS", [agendaReadUnits(1), agendaReadUnits(3), agendaReadUnits(1_000), AGENDA_UNITS], [0, 1, 2, 5]);
   await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio") - 3)]]);
   const tooMany = await countUnits(realStore, 5);
-  is("asking more than are left says how many this needs, how many were left by the figure's own count, and when they come back (round 7, M2)", [tooMany.ok, !tooMany.ok && /^This needs 5 of your studio requests, and only 3 are left\. This opens again (with your next billing month, )?on [A-Z][a-z]+ \d+ \(UTC\)\.$/.test(tooMany.message)], [false, true]);
+  is("asking more than are left says how many this needs, how many were left by the figure's own count, and when they come back (round 7, M2)", [tooMany.ok, !tooMany.ok && /^This needs 5 of your studio requests, and only 3 are left\. This opens again (with your next billing month, )?on [A-Z][a-z]+ \d+(, \d{4})? \(UTC\)\.$/.test(tooMany.message)], [false, true]);
   await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio"))]]);
   const none = await countUnits(realStore, 250);
   is("none left, said as such (round 7, L3)", !none.ok && none.message.startsWith("This needs 250 of your studio requests, and none are left. This opens again"), true);
@@ -240,7 +240,7 @@ async function main() {
   is("the agenda says what a person's page lets you do: mark done or remove, not change", page.includes("Open a person to mark one done or remove it.") && !page.includes("mark one done or change it"), true);
   // A task may be about a list subscriber, not only a buyer (C3-112 (2), light).
   is("its count is of tasks across the people in the store, not only its buyers", page.includes("open ${open === 1 ? \"task\" : \"tasks\"} across the people in your store. Open a person") && !page.includes("across your buyers"), true);
-  is("when the tasks or Stripe cannot be read, it says so", page.includes("tasks could not be read just now. Nothing was changed.") && page.includes("Stripe could not be read just now, so who each task is about is not shown."), true);
+  is("when the tasks or the sales records cannot be read, it says so, never blaming Stripe for the store's own records (Claude 5 on #2270)", page.includes("tasks could not be read just now. Nothing was changed.") && page.includes("Your sales records could not be read just now, so who each task is about is not shown."), true);
   is("only the shown rows' people are looked up, on any of the days", readFileSync("lib/person-agenda-read.ts", "utf8").includes("const persons = new Set(agenda.rows.map((row) => row.person));"), true);
   is("the groups made for each day the creator's may be", readFileSync("lib/person-agenda-read.ts", "utf8").includes("agendaForDays(all, daysAround(today))") && page.includes("<TasksAgendaList rows={data.rows} days={data.days} serverDay={today}"), true);
 

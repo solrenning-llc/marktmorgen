@@ -38,6 +38,7 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
@@ -195,6 +196,28 @@ export async function teamTwoStepBlocks(store: Store, email: string, role: Role,
 }
 
 /**
+ * The team's members, read exactly (rule 24), for what must never take an
+ * unknown answer for "nobody on the team" (lib/visit.ts: a teammate's visit
+ * is not a buyer's). No record is no team; a reply in another shape, or text
+ * that is not a team record as saveTeam writes it, throws UnknownReplyError.
+ */
+export async function readTeamMembers(sid: string): Promise<Member[]> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline([["GET", teamKey(sid)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's team");
+  const raw = replies[0];
+  if (raw === null) return [];
+  let stored: unknown = null;
+  try {
+    stored = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    stored = null;
+  }
+  if (!stored || typeof stored !== "object" || !Array.isArray((stored as { members?: unknown }).members)) throw new UnknownReplyError("a store's team");
+  return parseTeam(raw).members;
+}
+
+/**
  * What a member held at the team's door does next (teamTwoStepBlocks):
  * "passkey", log in again with the passkey they have; "app", log in again
  * with the emailed link and the app's code; "set_up", add a passkey or turn
@@ -348,11 +371,13 @@ export async function inviteMember(
     if (team.members.length + team.invites.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const counter = `nl:rl:team-invite:${store.sid}`;
-    const [, sent] = await redisPipeline([
+    const replies = repliesFor(await redisPipeline([
       ["SET", counter, "0", "EX", 24 * 60 * 60, "NX"],
       ["INCR", counter],
-    ]);
-    if (Number(sent) > INVITES_PER_DAY) return { ok: false, reason: "limited" };
+    ]), 2);
+    // A count in any other shape is unknown (CX-123 rule 24): no invitation is emailed on it.
+    const sent = countOf(replies?.[1]);
+    if (sent === null || sent > INVITES_PER_DAY) return { ok: false, reason: "limited" };
 
     const token = randomBytes(32).toString("hex");
     const invite: Invite = {

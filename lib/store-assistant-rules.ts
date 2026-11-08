@@ -51,7 +51,8 @@ import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, PROVIDER_CHARGES_BPS, UPSTASH
 import { assessCustomerWorstCase, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
 import { captureCustomerTaxInput, customerTaxCeiling, type CustomerTaxInput } from "@/lib/customer-tax-review";
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
-import { CONFUSABLE_LATIN_SOURCES } from "@/lib/confusables-latin";
+import { CONFUSABLE_LATIN_SOURCES, LOOKALIKES_BEFORE_GATE_RANGE } from "@/lib/confusables-latin";
+import { PAGE_GOES_ON } from "@/lib/answers-rules";
 import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_CORRECT_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf } from "@/lib/receiving-costs";
 
 /** The largest store record (lib/store.ts, MAX_STORE_BYTES), read once a message; held equal in tests/store-assistant.test.ts. */
@@ -225,18 +226,79 @@ export const HANDOFF_WORDS =
  * before it (\p{L}+) is the German or Dutch compound ("Frühlingsrabatt").
  * Singular and plural share one term, so the store's "Discounts" allows "a
  * discount"; another form ("discounted") is its own term.
+ *
+ * Words that only share letters with a deal word are left out (review of
+ * #2084): "promote" and the Portuguese and Spanish "promover" ("promovemos",
+ * "promoveu"), not "promo", "promoção" or "promocional"; the Dutch
+ * "afkorting" (abbreviation), "verkorting" and "inkorting" (shortening), not
+ * "zomerkorting" or "kortingscode"; a verb to guarantee that only says how
+ * access works and the French "remise" as handing over (GUARANTEE_WORDS,
+ * REMISE_AS_DISCOUNT).
  */
+/**
+ * The guarantee stem shared by Spanish, Portuguese, French, German and
+ * Italian, every form, as in English: a noun ("garantía", "Garantie"), a
+ * participle ("garantizado", "garanti") and a verb that promises
+ * ("Garantizamos que vas a duplicar tus ventas", "Garantimos resultados",
+ * "Nous garantissons des résultats", "Wir garantieren Ergebnisse",
+ * "Garantiamo risultati"). Only the phrases that say how access works pass:
+ * the word followed by access ("garantizar el acceso", "garantir o acesso",
+ * "garantit l'accès", "garantire l'accesso", "garantieren den Zugang") or
+ * after it ("den Zugang zu garantieren"); "l'" may be joined, as the
+ * deal-word check reads a split word joined. The access, with at most one
+ * complement of access (ACCESS_COMPLEMENT: "de por vida", "al curso", "zum
+ * Kurs"), must end the clause (CLAUSE_END): a conjunction or a comma and
+ * another object ("el acceso y resultados", "el acceso, resultados y
+ * éxito", "l'accès et des résultats") is a promise and is refused (C3-109,
+ * C3-111). In doubt it is refused; a store that wrote the
+ * same word allows it, as with any term (C3-107).
+ */
+const ACCESS_COMPLEMENT =
+  "(?: (?:de por vida|al curso|a los cursos|al contenido|ao curso|aos cursos|ao conte[uú]do|vital[ií]cio|para sempre|au cours|aux cours|au contenu|[aà] vie|zum kurs|zu den kursen|zum inhalt|al corso|ai corsi|al contenuto|a vita|tot de cursus(?:sen)?|tot de inhoud))?";
+/** The end of a clause: a full stop, a semicolon, an exclamation or question mark, or the end of the text; never a comma, which may start a list (C3-111). */
+const CLAUSE_END = "(?:\\s*[.;!?]|\\s*$)";
+const GUARANTEE_WORDS =
+  `(?:(?<!zugang (?:zu )?)garant\\p{L}*|garant\\p{L}*(?!${CLAUSE_END}))(?! (?:el |o |l'?|den )?(?:acceso|acesso|acc[eè]s|accesso|zugang)${ACCESS_COMPLEMENT}${CLAUSE_END})`;
+/** The Dutch verb ("Wij garanderen resultaten"), read the same way for access ("garanderen de toegang tot de cursus.", "de toegang te garanderen."). */
+const GUARANTEE_WORDS_NL =
+  `(?:(?<!toegang (?:te )?)garande\\p{L}*|garande\\p{L}*(?!${CLAUSE_END}))(?! (?:de |het )?toegang${ACCESS_COMPLEMENT}${CLAUSE_END})`;
+/**
+ * The French "remise" is a discount ("la remise exclusive", "une remise de
+ * 20 %", "la remise de la boutique", "la remise du prix", "la remise des
+ * droits"), but for the phrases of handing over, which pass: "remise en
+ * main(s) propre(s)", "remise en forme", "date de remise", and "remise"
+ * followed by "du", "de la", "de l'", "des" or "de", an optional possessive
+ * and a thing that is handed over (a certificate, a diploma, a key, an order,
+ * a file...). A determiner alone is not enough (C3-107; Codex H on #2220).
+ */
+const HANDED_OVER =
+  "(?:certificats?|dipl[oô]mes?|attestations?|cl[eé]s?|clefs?|colis|commandes?|livrables?|documents?|badges?|fichiers?|travaux|copies?|devoirs?)";
+/**
+ * "remise" as a discount, unless a handing over follows. The elision before
+ * the thing handed over is the written one (an apostrophe, straight or curly,
+ * then at most a space): "de lcertificat" or "de l certificat" is not one
+ * (Codex H2 on #2220). The joined reading (joinedText) takes the apostrophe
+ * out of "de l'attestation", so there, and only there, "de l" may be followed
+ * at once by the thing handed over; the folded reading, which keeps the
+ * apostrophe, still finds the malformed forms.
+ */
+const remiseAsDiscount = (elision: string) =>
+  "(?<!dates? de )remises?(?! (?:en mains? propres?|en forme|(?:du |de la |" + elision + "|des |de )(?:(?:votre|vos|ton|ta|tes|son|sa|ses|leur|leurs|notre|nos) )?" +
+  HANDED_OVER +
+  ")(?!\\p{L}))";
+const REMISE_AS_DISCOUNT = remiseAsDiscount("de l['’](?: )?");
+const REMISE_AS_DISCOUNT_JOINED = remiseAsDiscount("de l(?:['’](?: )?)?");
 const DEAL_TERMS = [
   // English
-  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|uv\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
+  "discounts?", "discounted", "coupons?", "promo(?!(?:t(?:e|es|ed|er|ers|ing)|u?v\\p{L}*)(?!\\p{L}))\\p{L}*", "promo[- ]?codes?", "vouchers?", "codes?",
   "per[- ]?cent off", "on sale", "sale prices?", "free shipping", "limited[- ]time", "only \\d+ left", "hurry", "selling fast", "last chance",
   "ends (?:today|tonight|soon)", "act now", "today only", "exclusive offers?", "guarant\\p{L}*", "best[- ]?sell(?:ing|ers?)", "testimonials?",
   "five[- ]stars?", "5[- ]stars?",
   // Spanish
   "descuentos?", "cup[oó]n(?:es)?", "c[oó]digos? promociona(?:l|les|is)", "rebaj\\p{L}*", "env[ií]o gratis", "ofertas? limitadas?", "[uú]ltima oportunidad",
-  "date prisa", "s[oó]lo hoy", "garant\\p{L}*", "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
+  "date prisa", "s[oó]lo hoy", GUARANTEE_WORDS, "testimonios?", "cinco estrellas", "m[aá]s vendid[oa]s?",
   // French
-  "r[ée]ductions?", "remises?", "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
+  "r[ée]ductions?", REMISE_AS_DISCOUNT, "codes? promo", "offres? limit[ée]es?", "derni[eè]re chance", "d[ée]p[eê]chez[- ]vous", "aujourd['’]hui seulement",
   "livraison gratuite", "soldes", "t[ée]moignages?", "cinq [ée]toiles", "meilleures? ventes?",
   // German
   "rabatt\\p{L}*", "\\p{L}+rabatt\\p{L}*", "gutschein\\p{L}*", "\\p{L}+gutschein\\p{L}*", "kostenlos\\p{L}* versand", "\\p{L}*(?:gratis|kostenlos)versand\\p{L}*",
@@ -246,8 +308,8 @@ const DEAL_TERMS = [
   "scont[oi]", "scontat[aeio]", "spedizione gratuita", "codic[ei] promozional[ei]", "offert[ae] limitat[ae]", "ultima occasione", "affrettati", "solo oggi",
   "garanz\\p{L}*", "saldi", "testimonianz[ae]", "cinque stelle", "pi[uù] vendut[oi]",
   // Dutch
-  "korting\\p{L}*", "\\p{L}+korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
-  "gegarandeerd\\p{L}*", "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
+  "korting\\p{L}*", "\\p{L}+(?<!(?<!\\p{L})(?:af|ver|in))korting\\p{L}*", "gratis verzending", "tijdelijke aanbieding(?:en)?", "laatste kans", "wees er snel bij", "alleen vandaag",
+  "gegarandeerd\\p{L}*", GUARANTEE_WORDS_NL, "\\p{L}*uitverkoop\\p{L}*", "vijf sterren",
   // Portuguese
   "descontos?", "cup(?:om|ons)", "cup(?:[aã]o|[oõ]es)", "ofertas? limitadas?", "[uú]ltima oportunidade", "s[oó] hoje", "frete gr[aá]tis", "depoimentos?",
   "testemunhos?", "cinco estrelas", "mais vendid[oa]s?",
@@ -284,10 +346,13 @@ function anchorOf(term: string): string {
  * a term with no anchor is always checked, so the shortcut can only cost
  * time, never let a deal word pass).
  */
-type DealTerm = { find: RegExp; open: boolean; compound: boolean; anchor: string | RegExp };
+type DealTerm = { find: RegExp; open: boolean; compound: boolean; anchor: string | RegExp; joinedFind?: RegExp };
+const termFind = (term: string) => new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu");
 const DEAL_TERM_RULES: DealTerm[] = [
   ...DEAL_TERMS.map((term) => ({
-    find: new RegExp(`${WORD_EDGE_BEFORE}(?:${termSource(term)})${WORD_EDGE_AFTER}`, "gu"),
+    find: termFind(term),
+    // Read in the joined readings, where an elision's apostrophe is gone (REMISE_AS_DISCOUNT_JOINED).
+    ...(term === REMISE_AS_DISCOUNT ? { joinedFind: termFind(REMISE_AS_DISCOUNT_JOINED) } : {}),
     open: /\\p\{L\}[*+]/.test(term),
     compound: term.startsWith("\\p{L}") || COMPOUND_STEMS.has(term),
     anchor: anchorOf(term).length >= 2 ? anchorOf(term) : /[^]/,
@@ -299,6 +364,139 @@ export const DEAL_WORDS = new RegExp(
   `${WORD_EDGE_BEFORE}(?:${DEAL_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}|${DEAL_SIGNS.join("|")}`,
   "iu",
 );
+
+/**
+ * Words of terms a page may set a condition on — a refund, a return, money
+ * back, a guarantee, a warranty, a deadline, a trial, cancelling, a price's
+ * conditions — in English and every language a store speaks, written as
+ * they read folded (foldedText: lowercase, without accents). Only used while
+ * the facts say the page was cut short (PAGE_GOES_ON): the part left out may
+ * hold the condition, so a reply that speaks of these is never shown then
+ * (Revisor 1's light on #2177, Claude 1's decision of 05/11/2026). Broad on
+ * purpose: refusing an honest reply there costs a line pointing to the
+ * creator, showing half a promise costs the buyer.
+ */
+const TERMS_TERMS = [
+  // English
+  "refund\\p{L}*", "reimburs\\p{L}*", "money[- ]?back", "returns?", "returned", "returning", "returnable", "guarant\\p{L}*", "warrant(?:y|ies|ed)",
+  "deadlines?", "trials?", "expir\\p{L}*", "cancel\\p{L}*", "discount\\p{L}*", "coupons?", "introductory", "intro price",
+  "price (?:goes up|rises|increases|changes)",
+  // Spanish
+  "reembols\\p{L}*", "devoluci\\p{L}*", "devolv\\p{L}*", "devuelv\\p{L}*", "plazos?", "fecha limite", "periodo de prueba", "prueba gratis", "prueba gratuita",
+  "descuent\\p{L}*", "cupon\\p{L}*", "caduc\\p{L}*",
+  // French
+  "rembours\\p{L}*", "retour\\p{L}*", "delais?", "date limite", "essai\\p{L}*", "reductions?", "remises?", "annul\\p{L}*",
+  // German
+  "\\p{L}*erstatt\\p{L}*", "\\p{L}*ruckgab\\p{L}*", "geld[- ]?zuruck\\p{L}*", "\\p{L}*garantie\\p{L}*", "gewahrleist\\p{L}*", "\\p{L}*frist\\p{L}*",
+  "probe(?:zeit|monat|abo|phase)\\p{L}*", "test(?:phase|zeitraum|version)\\p{L}*", "(?:kostenlos|gratis) testen", "\\p{L}*rabatt\\p{L}*", "umtausch\\p{L}*",
+  "widerruf\\p{L}*", "\\p{L}*kundig(?:en|ung)\\p{L}*",
+  // Italian
+  "rimbors\\p{L}*", "restitu\\p{L}*", "res[oi]", "garanz\\p{L}*", "scadenz\\p{L}*", "periodo di prova", "prova gratuita", "scont[oi]", "scontat\\p{L}*",
+  "recesso", "disdett\\p{L}*", "annull\\p{L}*",
+  // Dutch
+  "terugbetal\\p{L}*", "\\p{L}*geld[- ]?terug\\p{L}*", "terugstur\\p{L}*", "gegarandeerd\\p{L}*", "termijn\\p{L}*", "proefperiode\\p{L}*",
+  "gratis (?:proberen|uitproberen)", "\\p{L}*korting\\p{L}*", "herroep\\p{L}*", "opzeg\\p{L}*",
+  // Portuguese
+  "devolu\\p{L}*", "prazos?", "data limite", "teste gratis", "periodo de (?:teste|avaliacao|garantia)", "descont\\p{L}*", "cup(?:om|ons)", "cup(?:ao|oes)",
+  "arrependimento",
+  // Paraphrases of money back, of no risk, of a window and of "if you don't like it" (Revisor 1's light after 49f9a252)
+  "pay(?:s|ing)? (?:you |me |them |him |her )?back", "paid (?:you |me |them )?back", "(?:every|each) (?:single )?(?:cent|penny|dollar)s?",
+  "risk[- ]?free", "no risk", "windows?", "(?:do not|don't|dont|does not|doesn't|didn't|did not) (?:like|love|enjoy) it", "not (?:happy|satisfied|pleased)", "unhappy", "dissatisf\\p{L}*",
+  "dinheiro de volta", "dinero de vuelta", "recuper\\p{L}*(?: \\p{L}+){0,2} (?:dinero|dinheiro|plata)", "sin riesgos?", "sem riscos?", "senza risch(?:i|io)", "sans risques?",
+  "risikofrei\\p{L}*", "ohne risiko", "zonder risico", "no (?:me |te |le |les |nos |os )?gust(?:a|e|o|ara)", "insatisf\\p{L}*", "nao (?:gost\\p{L}*|ficar satisfeit\\p{L}*|estiver satisfeit\\p{L}*)",
+  "ne (?:me |te |vous |lui |leur )?pla(?:it|ira|ise) pas", "pas satisfait\\p{L}*", "gefall\\p{L}* (?:\\p{L}+ ){0,2}nicht", "nicht (?:gefall\\p{L}*|zufrieden)", "unzufrieden\\p{L}*",
+  "non (?:mi |ti |vi |le |gli )?piac\\p{L}*", "non soddisfatt\\p{L}*", "insoddisfatt\\p{L}*", "(?:bevalt|bevallen) (?:\\p{L}+ ){0,2}niet", "niet (?:tevreden|bevalt|bevallen)", "ontevreden",
+].filter((term, i, all) => all.indexOf(term) === i);
+const TERMS_WORDS = new RegExp(`${WORD_EDGE_BEFORE}(?:${TERMS_TERMS.map(termSource).join("|")})${WORD_EDGE_AFTER}`, "u");
+/**
+ * Numbers written as words, folded, in the seven store languages: every
+ * word from one to nineteen, every ten, a hundred and a thousand, and the
+ * pieces a language glues into one word ("dieci" in "diciassette", "vent" in
+ * "ventotto", "veinti" in "veintidos"). NUMBER_WORD joins them as a language
+ * does ("twenty-one", "treinta y un", "vingt et un", "einundzwanzig",
+ * "eenentwintig", "vinte e um", "duecento"), so no number is left out for
+ * being missing from a list (Codex D2's MEDIUM on #2177: "thirteen days").
+ * The articles ("a", "un", "une", "una", "ein", "eine", "een", "um", "uma")
+ * count only inside such a number, never alone, so "a week of dinners" is no
+ * deadline.
+ */
+const NUMBER_PIECES = [
+  // English
+  "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+  "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fourty", "fifty", "sixty", "seventy", "eighty", "ninety",
+  "hundreds?", "thousands?",
+  // Spanish
+  "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince",
+  "dieci", "veinte", "veinti", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa",
+  "cien", "cientos?", "quinientos", "setecientos", "novecientos", "mil",
+  // French
+  "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze", "treize", "quatorze", "quinze", "seize",
+  "vingts?", "trente", "quarante", "cinquante", "soixante", "septante", "octante", "huitante", "nonante", "cents?", "milles?",
+  // German
+  "eins", "zwei", "zwo", "drei", "vier", "funf", "sechs", "sieben", "acht", "neun", "zehn", "elf", "zwolf", "sechzehn", "siebzehn",
+  "zwanzig", "drei(?:ss|\u00df)ig", "vierzig", "funfzig", "sechzig", "siebzig", "achtzig", "neunzig", "hundert", "tausend",
+  // Italian
+  "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove", "dieci", "undici", "dodici", "tredici", "quattordici", "quindici",
+  "sedici", "diciassette", "diciotto", "diciannove", "venti", "vent", "trenta", "trent", "quaranta", "quarant", "cinquanta", "cinquant",
+  "sessanta", "sessant", "settanta", "settant", "ottanta", "ottant", "novanta", "novant", "cento", "mille", "mila",
+  // Dutch
+  "twee", "drie", "vijf", "zes", "zeven", "negen", "tien", "twaalf", "dertien", "veertien", "vijftien", "zestien", "zeventien",
+  "achttien", "negentien", "twintig", "dertig", "veertig", "vijftig", "zestig", "zeventig", "tachtig", "negentig", "honderd", "duizend",
+  // Portuguese
+  "dois", "duas", "quatro", "sete", "oito", "dez", "onze", "doze", "treze", "catorze", "dezesseis", "dezasseis", "dezessete", "dezassete",
+  "dezoito", "dezenove", "dezanove", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta", "oitenta", "noventa",
+  "cem", "cento", "duzentos", "duzentas", "trezentos", "trezentas", "quinhentos", "quinhentas",
+].filter((word, i, all) => all.indexOf(word) === i);
+/** The articles that are also the number one: a number only joined to another piece ("treinta y un", "einundzwanzig"). */
+const NUMBER_ARTICLES = ["un", "une", "una", "ein", "eine", "een", "um", "uma"];
+/** The words a language puts between the pieces of one number. */
+const NUMBER_JOINS = ["and", "y", "et", "und", "en", "e"];
+const PIECE = `(?:${NUMBER_PIECES.join("|")})`;
+const ANY_PIECE = `(?:${[...NUMBER_PIECES, ...NUMBER_ARTICLES].join("|")})`;
+/**
+ * Between two pieces of one number: nothing, a join word, or spaces and
+ * hyphens with an optional join word between more of them. A run of spaces
+ * is always followed by a letter, so it is read one way only and a long text
+ * of pieces cannot make the match slow.
+ */
+const JOIN = `(?:${BETWEEN}(?:(?:${NUMBER_JOINS.join("|")})${BETWEEN})?|(?:${NUMBER_JOINS.join("|")}))?`;
+/**
+ * A number in words: pieces joined, starting with a piece that is a number
+ * alone or with an article joined to one. At most ten pieces in all, more
+ * than any number below a million takes ("quatre cent quatre-vingt-dix-neuf"
+ * is six), so a long run of number words is read in time that grows only
+ * with its length (Revisor 1, 06h00: unbounded, "vingt et un " repeated took
+ * two seconds at 24,000 signs).
+ */
+const NUMBER_WORD = `(?:${PIECE}|(?:${NUMBER_ARTICLES.join("|")})${JOIN}${PIECE})(?:${JOIN}${ANY_PIECE}){0,9}`;
+/** Words that are a period of time by themselves (Revisor 1's note of 05h29: "within a fortnight"). */
+const PERIOD_WORDS = ["fortnights?", "quincenas?", "quinzaines?", "quindicin[ae]", "quinzenas?", "veertiendaags\\p{L}*"];
+/** Units of time, folded, with their plurals and the German and Dutch compound forms ("30-tagige", "30-daagse"). */
+const TIME_UNITS = [
+  "days?", "weeks?", "months?", "years?", "hours?",
+  "dias?", "semanas?", "mes(?:es)?", "anos?", "horas?",
+  "jours?", "semaines?", "mois", "ans?", "annees?", "heures?",
+  "tag(?:e|en|ig\\p{L}*)?", "wochen?", "wochig\\p{L}*", "monat(?:e|en|ig\\p{L}*)?", "jahr(?:e|en|ig\\p{L}*)?", "stunden?",
+  "giorn[oi]", "settiman[ae]", "mes[ei]", "ann[oi]", "or[ae]",
+  "dag(?:en|s|se)?", "daagse", "weken", "maand(?:en|s)?", "jaar", "jaren", "uur", "uren",
+];
+/** A period of time: a number in digits or words, then a unit of time, however it is joined ("30 days", "30-day", "30 Tage", "thirty-day", "30days"). */
+const DURATION = new RegExp(
+  `${WORD_EDGE_BEFORE}(?:(?:\\d+(?:[.,]\\d+)?|${NUMBER_WORD})(?:${BETWEEN})?(?:${TIME_UNITS.map(termSource).join("|")})|${PERIOD_WORDS.join("|")})${WORD_EDGE_AFTER}`,
+  "u",
+);
+/**
+ * Whether a text speaks of terms in any language a store speaks: a word or
+ * paraphrase of TERMS_TERMS, or any period of time (DURATION), which holds
+ * whatever words a paraphrase uses ("30 days to get every cent back"). Read
+ * folded, with look-alike letters as Latin and with visible hyphens joined,
+ * so a mark, an invisible character, another script's look-alike or
+ * "Rück-erstattung" cannot hide one.
+ */
+export function speaksOfTerms(text: string): boolean {
+  const folded = foldedText(text);
+  return [folded, hyphenJoined(folded), foldedText(text, "l"), foldedText(text, "i")].some((reading) => TERMS_WORDS.test(reading) || DURATION.test(reading));
+}
 
 const NUMBERS = /\d+(?:[.,]\d+)*/g;
 /** A number as digits, and without decimals that are all zeros: "$27.00" and "$27" are the same price. */
@@ -358,7 +556,22 @@ function lookalike(sign: string, stroke: "l" | "i"): string {
 const SPECIAL_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/u;
 /** A line break that ends a sentence ("Pro.\nMost") or comes before a capital ("Pro\nMonthly"): read as a space, never joined. */
 const SENTENCE_BREAK = /(?:[.!?:;][\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])|[\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])[\t ]*(?=[\p{Lu}\p{Lt}]))/gu;
-const MAY_LOOK_ALIKE = /[\u00B5\u0250-\u1FFF\u2070-\uFFFF\u{10000}-\u{10FFFF}]/u;
+/**
+ * The signs that may be or become a look-alike: the micro sign (NFKC makes it
+ * Greek mu), every look-alike of the table before U+0180, listed by the
+ * generator (lib/confusables-latin.ts), and every sign from U+0180 on except
+ * general punctuation. Made from the table, never typed: before Claude 5's
+ * review of #2579 it began at U+0250 with eight letters by hand, and 51 of the
+ * table's own letters below it ("Ra\u0180att") were never read.
+ * Marked pure so a page that never folds text (the buyer's chat reads only two
+ * constants of these rules) leaves the table out of its bundle
+ * (tests/client-bundles.mjs, KEPT_OUT).
+ */
+export const MAY_LOOK_ALIKE = /* @__PURE__ */ gateOf(LOOKALIKES_BEFORE_GATE_RANGE);
+/** The gate from the table's look-alikes before U+0180 (MAY_LOOK_ALIKE). */
+function gateOf(before: readonly number[]): RegExp {
+  return new RegExp(`[\\u00B5${before.map((code) => `\\u{${code.toString(16)}}`).join("")}\\u0180-\\u1FFF\\u2070-\\uFFFF\\u{10000}-\\u{10FFFF}]`, "u");
+}
 /**
  * Text folded to the one form it is matched in, never shown: compatibility
  * forms as their plain letter and digit (fullwidth, mathematical bold, a
@@ -435,7 +648,7 @@ class Readings {
     if (value === undefined) this.made.set(name, (value = make()));
     return value;
   }
-  /** Only a text with a sign that may be or become a look-alike (from the micro sign on, past Latin-1 and Latin Extended) is folded again. */
+  /** Only a text with a sign that may be or become a look-alike (MAY_LOOK_ALIKE) is folded again. */
   private get lookalikes() { return MAY_LOOK_ALIKE.test(this.text); }
   private get splits() { return SPECIAL_SPACES.test(this.text) || /[\n\r\v\f\u0085\u2028\u2029]/u.test(this.text); }
   get plain() { return this.once("plain", () => plainText(this.text)); }
@@ -459,12 +672,12 @@ class Readings {
 const STROKES = ["l", "i"] as const;
 /** How often a term is found in each reading: a compound stem with its visible hyphens joined. */
 const visibleCount = (term: DealTerm, r: Readings) => countIn(term.find, term.compound ? r.plainH : r.plain);
-const foundCount = (term: DealTerm, r: Readings) => Math.max(countIn(term.find, term.compound ? r.foldedH : r.folded), countIn(term.find, r.joined));
+const foundCount = (term: DealTerm, r: Readings) => Math.max(countIn(term.find, term.compound ? r.foldedH : r.folded), countIn(term.joinedFind ?? term.find, r.joined));
 const lookalikeCount = (term: DealTerm, r: Readings) =>
-  Math.max(...STROKES.map((s) => Math.max(countIn(term.find, term.compound ? r.skeletonH(s) : r.skeleton(s)), countIn(term.find, r.skeletonJoined(s)))));
+  Math.max(...STROKES.map((s) => Math.max(countIn(term.find, term.compound ? r.skeletonH(s) : r.skeleton(s)), countIn(term.joinedFind ?? term.find, r.skeletonJoined(s)))));
 /** The words a term matched in the folded readings, each as one form. */
 function wordsOf(term: DealTerm, r: Readings): Set<string> {
-  return new Set([...((term.compound ? r.foldedH : r.folded).match(term.find) ?? []), ...(r.joined.match(term.find) ?? [])].map(oneSpace));
+  return new Set([...((term.compound ? r.foldedH : r.folded).match(term.find) ?? []), ...(r.joined.match(term.joinedFind ?? term.find) ?? [])].map(oneSpace));
 }
 
 /** Whether the deal words of a reply are held to the facts: "held", "refused", or "hidden" (found only once a split, a mark or a look-alike is undone). */
@@ -560,6 +773,8 @@ export function heldToFacts(raw: string, facts: string): boolean {
   const store = new Readings(facts);
   const folded = reply.folded;
   if (!folded.trim() || LINK.test(folded)) return false;
+  // A page cut short may have left out the condition of a promise it tells: then no reply speaks of terms at all.
+  if (facts.includes(PAGE_GOES_ON) && speaksOfTerms(raw)) return false;
   const factsFolded = store.folded;
   const factEmails = new Set(emailsIn(factsFolded));
   for (const email of emailsIn(folded)) {

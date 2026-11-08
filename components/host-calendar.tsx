@@ -7,6 +7,8 @@ import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { HostCalendarView, HostSource, SyncState } from "@/lib/host-calendar";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { ProviderAccessNotice } from "@/components/meeting-connections";
+import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -44,6 +46,8 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
   const [view, setView] = useState(first);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The last disconnect was done here, but Google did not confirm it took our access back. */
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [url, setUrl] = useState("");
   const [read, setRead] = useState<string[]>(first.read);
   const [write, setWrite] = useState(first.write);
@@ -51,18 +55,20 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
   async function send(action: string, extra: Record<string, unknown>, done: string) {
     setBusy(action);
     setError(null);
+    setUnconfirmed(false);
     try {
       const response = await fetch("/api/store/host-calendar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, tz, ...extra }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; view?: HostCalendarView };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; view?: HostCalendarView; providerAccessRemoved?: boolean };
       if (data.ok && data.view) {
         setView(data.view);
         setRead(data.view.read);
         setWrite(data.view.write);
         toast(done);
+        if (action === "disconnect" && data.providerAccessRemoved === false) setUnconfirmed(true);
         if (action === "ics-add") setUrl("");
         return;
       }
@@ -105,7 +111,7 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
             {view.sync.lastSuccess ? `Last successful sync: ${when(view.sync.lastSuccess)}.` : "Last successful sync: never."}{" "}
             {view.source === "none"
               ? "Pick a calendar below so meetings you have elsewhere are never booked over."
-              : "Read again at most every 15 minutes while someone is looking at a booking page. If the last good reading is more than 45 minutes old, or your calendar cannot be read, your times are hidden until it can be, and the other hosts' times stay open."}
+              : `Read again at most every ${HOST_SYNC_MINUTES} minutes while someone is looking at a booking page. If the last good reading is more than ${HOST_STALE_MINUTES} minutes old, or your calendar cannot be read, your times are hidden until it can be, and the other hosts' times stay open.`}
           </p>
           {view.sync.message ? (
             <p className={`notice mt-3 ${view.sync.blocked ? "notice-warn" : ""}`} role="status">
@@ -268,6 +274,7 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
           )}
         </section>
 
+        <ProviderAccessNotice provider={unconfirmed ? "google" : null} />
         {error ? (
           <p className="notice notice-error" role="alert">
             {error}

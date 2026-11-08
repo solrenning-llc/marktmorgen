@@ -20,6 +20,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DELAYED_METHODS } from "@/lib/instant-pay";
 import { CURRENCIES, type Currency } from "@/lib/money";
 import type { Store } from "@/lib/store";
+import { STRIPE_LIST_VERSION, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 /** How each method is named in the studio, and the one thing worth knowing about it. */
 const METHODS: Record<string, { name: string; note?: string; group: WayGroup }> = {
@@ -246,6 +247,8 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
 const RUNNING = ["active", "trialing", "past_due"] as const;
 /** Pages of a hundred read for each status before giving up on knowing. */
 const RUNNING_PAGES = 10;
+/** A subscription's own id: a row with another id is not readable, never one of this store's nor another's. */
+const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{6,128}$/;
 
 /**
  * How many memberships and payment plans of this store are still running on
@@ -258,30 +261,47 @@ export async function runningSubscriptions(store: Store): Promise<number | null>
   if (!account) return 0;
   const handles = saleHandles(store);
   let count = 0;
+  // A row not readable (lib/stripe-list.ts) may be one of this store's: the count is then "at least", never "none".
+  let unreadable = 0;
   try {
     for (const status of RUNNING) {
       let after = "";
       let done = false;
       for (let page = 0; page < RUNNING_PAGES; page += 1) {
-        const listed = await onAccount(
-          "GET",
-          account,
-          `/subscriptions?status=${status}&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+        const read = readStripePage(
+          await onAccount(
+            "GET",
+            account,
+            `/subscriptions?status=${status}&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+            undefined,
+            STRIPE_LIST_VERSION,
+          ),
+          // Whose it is is read from metadata.store: absent is a readable "not this store's"; any store that is not
+          // text is not readable (Codex CX1 on #2759), so the count is never "none" on it.
+          (row) => {
+            const meta = ownField(row, "metadata");
+            if (!plainObject(meta)) return false;
+            const soldBy = ownField(meta, "store");
+            return soldBy === undefined || typeof soldBy === "string";
+          },
+          SUBSCRIPTION_ID,
         );
-        const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-        for (const row of rows) {
-          const meta = (row.metadata ?? {}) as Record<string, string>;
-          if (handles.has(meta.store ?? "")) count += 1;
+        unreadable += read.unreadable;
+        for (const row of read.rows) {
+          const soldBy = ownField(ownField(row, "metadata") as Record<string, unknown>, "store");
+          if (typeof soldBy === "string" && handles.has(soldBy)) count += 1;
         }
-        const last = rows[rows.length - 1];
-        if (listed.has_more !== true || !last || typeof last.id !== "string") {
+        if (!read.hasMore) {
           done = true;
           break;
         }
-        after = last.id;
+        // More pages, and no readable last row to read them from: not read whole.
+        if (!read.lastId) break;
+        after = read.lastId;
       }
       if (!done) return count > 0 ? count : null;
     }
+    if (unreadable) return count > 0 ? count : null;
     return count;
   } catch (error) {
     console.error("counting running memberships failed", error);

@@ -158,7 +158,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
               {asked ? (
                 <p className="notice notice-warn mt-6" role="status">
                   {lookupFailed
-                    ? lookupLedger.said.message || "Stripe could not be read just now. Nothing was changed. Try again in a moment."
+                    ? lookupLedger.said.message || "Your sales records could not be read just now. Nothing was changed. Try again in a moment."
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
                       : who
@@ -226,7 +226,7 @@ async function TasksAgenda({ store, included }: { store: Store; included: Includ
           ? `${open} open ${open === 1 ? "task" : "tasks"} across the people in your store. Open a person to mark one done or remove it.`
           : "No open tasks. Add one on a person's page, under Tasks."}
       </p>
-      {!found && open ? <p className="notice notice-warn mt-4">{data.ledgerMessage ? `${data.ledgerMessage} Who each task is about is not shown until then.` : "Stripe could not be read just now, so who each task is about is not shown. Try again in a moment."}</p> : null}
+      {!found && open ? <p className="notice notice-warn mt-4">{data.ledgerMessage ? `${data.ledgerMessage} Who each task is about is not shown until then.` : "Your sales records could not be read just now, so who each task is about is not shown. Try again in a moment."}</p> : null}
       <TasksAgendaList rows={data.rows} days={data.days} serverDay={today} found={found} />
     </section>
   );

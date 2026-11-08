@@ -1,4 +1,5 @@
 import { PATH_GROWTH_READ_UNITS } from "@/lib/path-growth-facts";
+import { API_SALES_READ } from "./plan-cost-registry";
 import { bundleItemUnits, collectionUnits } from "@/lib/page-read-rules";
 import { MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { MAX_BUMPS } from "@/lib/product-extras";
@@ -15,7 +16,7 @@ import { AGENDA_UNITS, MAX_TASK_RECORD_BYTES, agendaReadUnits } from "@/lib/pers
 import { IncludedBytes, PAGE_INCLUDED_BYTES, STUDIO_UNIT_SENT_BYTES, sentUnits } from "@/lib/sent-bytes";
 import { BUYER_LEDGER_UNITS, IMPORTED_BUYER_BYTES, LEDGER_BYTES_PER_UNIT, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
 import { PAYPAL_LEDGER, PAYPAL_LEDGER_BYTES } from "./plan-cost-registry";
-import { ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
+import { LOCKED_UNTIL_STAR_COMMANDS, ROUND_TRIP_SECONDS, TAKE_COMMANDS, apiReadCost } from "./plan-cost-registry";
 import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
@@ -25,7 +26,7 @@ import {
   EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
 } from "@/lib/api-read-rules";
 import { DELIVERY_MAX_BYTES, LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
-import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+import { BOOK_STRIPE_PAGES, STUDIO_UNIT_BYTES, STUDIO_UNIT_COMMANDS, bulkUnits } from "@/lib/affiliates";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import { PATH_REMINDER_UNITS } from "@/lib/path-reminder-rules";
 /**
@@ -58,12 +59,12 @@ import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/l
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
-import { affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
+import { LIBRARY_WAITING_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
-import { affiliateLoadRead, affiliatePageRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
+import { affiliateLoadRead, affiliatePageRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { CERTIFICATE_PDF_UNITS } from "@/lib/certificate-pdf";
-import { ALLOWANCE_KINDS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { SETUP_EXTRA_REQUESTS, SETUP_VISITS, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
@@ -90,10 +91,10 @@ function scopesInCode(): Map<string, string[]> {
   const add = (scope: string, file: string) => found.set(scope, [...(found.get(scope) ?? []), file]);
   for (const file of code) {
     const text = read(file);
-    // withinServiceWhy is withinService that also says why it refused (lib/metered-limits.ts): the same count.
-    for (const m of text.matchAll(/\bwithin(EssentialLimit|Limit|Month|Store|Service)(?:Why)?\(([^,]+),/g)) {
+    // withinServiceWhy and essentialLimitState expose refusal reasons for the same counters.
+    for (const m of text.matchAll(/\b(?:within(EssentialLimit|Limit|Month|Store|Service)(?:Why)?|essentialLimitState)\(([^,]+),/g)) {
       const literals = [...m[2].matchAll(/"([^"]+)"/g)].map((l) => l[1]);
-      if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1]])); }
+      if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1] ?? "EssentialLimit"])); }
       else add(`<dynamic:${m[2].trim()}>`, file);
     }
     for (const m of text.matchAll(/\bcountUse\(([^,]+),/g)) add(`countUse:${m[1].trim().slice(0, 60)}`, file);
@@ -231,6 +232,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   assert.ok(STUDIO_PAGE_UNITS * UNIT_COST.studio >= request("heavy", 80, 400_000));
   // A contact added or a product given is API_WRITE_UNITS requests: more than a write of sixty commands.
   assert.ok(API_WRITE_UNITS * UNIT_COST.api >= request("write", 60, 20_000));
+  // A page of sales read through the API is API_SALES_UNITS requests: more than its wait on Stripe, its reads and its answer cost (lib/api-sales.ts).
+  // With room: at least 5% more than that worst page.
+  assert.ok(API_SALES_UNITS * UNIT_COST.api >= 1.05 * API_SALES_READ, `${API_SALES_UNITS} x ${UNIT_COST.api} < 1.05 x ${API_SALES_READ}`);
   // A booked call is CALL_ORDER_UNITS orders: its confirmation to buyer and host and its two reminders are four emails.
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
@@ -281,6 +285,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
       assert.ok(sitemapUnits(size) * laterPageCost() >= sitemapRead(size), `store map ${JSON.stringify(size)}: ${sitemapUnits(size)} x ${laterPageCost()} < ${sitemapRead(size)}`);
     }
   }
+  // A store's card in the buyer's library pays for what it reads of what waits there, at its largest (Codex J, #1969), and no more than that needs.
+  assert.ok(LIBRARY_WAITING_UNITS * laterPageCost() >= libraryWaitingRead(), `library card: ${LIBRARY_WAITING_UNITS} x ${laterPageCost()} < ${libraryWaitingRead()}`);
+  // And the card's own wait on Redis, held by a test rather than only a comment (Claude 5 on #1969).
+  assert.ok(LIBRARY_WAITING_UNITS * laterPageCost() >= libraryWaitingRead() + libraryCardWait(), `library card with its wait: ${LIBRARY_WAITING_UNITS} x ${laterPageCost()} < ${libraryWaitingRead()} + ${libraryCardWait()}`);
+  assert.ok((LIBRARY_WAITING_UNITS - 1) * laterPageCost() < libraryWaitingRead(), `library card: ${LIBRARY_WAITING_UNITS} units, one more than needed`);
   const typicalBook = { fields: 50 + 50 + 1_000 + 40 + 20, rows: 5, listings: 20, stripePages: 23 };
   const typicalLoad = { sliceBytes: 12_000, listings: 3, codes: null };
   console.log(`an affiliate program's book worked out: ${affiliatePageUnits(typicalBook)} requests for 50 affiliates and 1,000 sales ($${affiliatePageRead(typicalBook).toFixed(6)}), at most once a day; each other load ${affiliateLoadUnits(typicalLoad)} ($${affiliateLoadRead(typicalLoad).toFixed(6)}), ${affiliateLoadUnits({ ...typicalLoad, codes: 5 })} with codes; at $${laterPageCost().toFixed(6)} a request`);
@@ -378,6 +387,20 @@ test("what the buyers' copy and the imported buyers weigh is counted a studio re
  assert.ok(ledgerReadBytes({ imported: 0, paypalSales: 3_000, paypalRefunds: 500 }) >= PAYPAL_LEDGER_BYTES, "every PayPal record read is counted");
 });
 
+test("an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits)", () => {
+ // Each more studio request covers STUDIO_UNIT_COMMANDS commands, or STUDIO_UNIT_BYTES bytes, at a light request's shape.
+ assert.ok(request("light", STUDIO_UNIT_COMMANDS, 0) <= UNIT_COST.studio, `${request("light", STUDIO_UNIT_COMMANDS, 0)} > ${UNIT_COST.studio}`);
+ assert.ok(request("light", 0, STUDIO_UNIT_BYTES) <= UNIT_COST.studio, `${request("light", 0, STUDIO_UNIT_BYTES)} > ${UNIT_COST.studio}`);
+ // Accepting a partnership by its emailed link pays the same units from the store's public requests (lib/affiliates.ts
+ // paidPeople, app/api/store/affiliates/open/route.ts), each priced as a later page: each covers as much.
+ assert.ok(request("light", STUDIO_UNIT_COMMANDS, 0) <= laterPageCost(), `${request("light", STUDIO_UNIT_COMMANDS, 0)} > ${laterPageCost()}`);
+ assert.ok(request("light", 0, STUDIO_UNIT_BYTES) <= laterPageCost(), `${request("light", 0, STUDIO_UNIT_BYTES)} > ${laterPageCost()}`);
+ // The shares add up: any mix of commands and bytes is inside what bulkUnits takes for it.
+ for (const [commands, bytes] of [[1, 0], [400, 0], [0, 24_000_000], [325, 641_246], [1_107, 45_760_958], [17, 999_999]] as const) {
+  assert.ok(request("light", commands, bytes) <= UNIT_COST.studio * bulkUnits(commands, bytes), `${commands} commands, ${bytes} bytes`);
+ }
+});
+
 test("a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads)", () => {
  assert.equal(SCHEDULED_READS.id, "scheduled-reads");
  assert.ok(SCHEDULED_READS.each <= UNIT_COST.studio * BUYER_LEDGER_UNITS, `${SCHEDULED_READS.each} > ${BUYER_LEDGER_UNITS} x ${UNIT_COST.studio}`);
@@ -397,7 +420,7 @@ test("the tasks agenda at its most fits the studio requests it counts", () => {
 
 test("the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2))", () => {
  // UNIT_COST.studio prices one request moving PAGE_INCLUDED_BYTES, no more.
- assert.equal(request("studio", 20 + TAKE_COMMANDS, PAGE_INCLUDED_BYTES), UNIT_COST.studio);
+ assert.equal(request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, PAGE_INCLUDED_BYTES), UNIT_COST.studio);
  assert.ok(LEDGER_BYTES_PER_UNIT === STUDIO_UNIT_SENT_BYTES && request("light", 2, STUDIO_UNIT_SENT_BYTES) <= UNIT_COST.studio, "a studio request counted past the included bytes covers its megabyte");
  // The page at its worst: a task's person looked up (?who=) and not there, so the agenda is drawn below; every part
  // that reads or sends by size at the most it moved without a request of its own before: the lookup's copy of the

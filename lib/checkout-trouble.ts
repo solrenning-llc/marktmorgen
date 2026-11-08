@@ -25,6 +25,7 @@
 import { type Store } from "@/lib/store";
 import { StripeError } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -56,8 +57,10 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
     ["EXPIRE", key(store.statsId), KEEP_SECONDS],
   ]);
   if (!isRefusal(error) || !isSenderConfigured()) return "counted";
-  const [claimed] = await redisPipeline([["SET", mailKey(store.statsId, day), "1", "NX", "EX", 2 * 86_400]]);
-  if (claimed === null) return "counted";
+  // The day's email is ours only on an exact claim (lib/claim-mark.ts), and a failed send lets go of our own
+  // mark only: one that ran out and was taken by another run stays.
+  const mark = claimValue(now);
+  if ((await claimMark(mailKey(store.statsId, day), 2 * 86_400, mark)) !== "ours") return "counted";
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,
@@ -78,15 +81,14 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
     ].join("\n"),
   }).catch(() => false);
   // Not sent: the day's claim is let go, so the next refusal tries again.
-  if (!sent) await redisPipeline([["DEL", mailKey(store.statsId, day)]]).catch(() => undefined);
+  if (!sent) await releaseMark(mailKey(store.statsId, day), mark);
   return sent ? "emailed" : "counted";
 }
 
 /** The refusals of the last 7 days and the last one kept, for the studio. */
 export async function readTrouble(statsId: string | null, now = Date.now()): Promise<Trouble> {
   if (!statsId || !isRedisConfigured()) return { week: 0, last: null };
-  const [raw] = await redisPipeline([["HGETALL", key(statsId)]]);
-  return troubleFrom(raw, now);
+  return readWeek(statsId, now);
 }
 
 /**
@@ -97,32 +99,40 @@ export async function readTrouble(statsId: string | null, now = Date.now()): Pro
 export async function readTroubleStrict(statsId: string | null, now = Date.now()): Promise<Trouble | null> {
   if (!statsId || !isRedisConfigured()) return null;
   try {
-    const reply: unknown = await redisPipeline([["HGETALL", key(statsId)]]);
-    if (!Array.isArray(reply) || reply.length !== 1) return null;
-    const [raw] = reply as unknown[];
-    if (raw !== null && !Array.isArray(raw)) return null;
-    return troubleFrom(raw, now);
+    return await readWeek(statsId, now);
   } catch {
     return null;
   }
 }
 
-function troubleFrom(raw: unknown, now: number): Trouble {
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-  const since = new Date(now - 6 * 86_400_000).toISOString().slice(0, 10);
+/** One fixed read: old day fields cannot enlarge the database transfer. The
+ * writer renews the whole hash's TTL, so that TTL is not a per-field bound.
+ * This bounds the reader only; it does not fund that historical storage.
+ */
+async function readWeek(statsId: string, now: number): Promise<Trouble> {
+  const days = Array.from({ length: 7 }, (_, back) => new Date(now - back * 86_400_000).toISOString().slice(0, 10));
+  const reply: unknown = await redisPipeline([["HMGET", key(statsId), ...days, "last"]]);
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0]) || reply[0].length !== 8) throw new Error("Checkout refusals unavailable");
+  const values: unknown[] = reply[0];
   let week = 0;
   let last: Trouble["last"] = null;
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    if (flat[i] === "last") {
-      try {
-        const value = JSON.parse(flat[i + 1]) as Record<string, unknown>;
-        if (typeof value.at === "number" && typeof value.message === "string") {
-          last = { at: value.at, code: typeof value.code === "string" ? value.code : "", message: value.message };
-        }
-      } catch {}
-    } else if (/^\d{4}-\d{2}-\d{2}$/.test(flat[i]) && flat[i] >= since) {
-      week += Number(flat[i + 1]) || 0;
-    }
+  for (let i = 0; i < 7; i += 1) {
+    const raw = values[i];
+    if (raw === null) continue;
+    if (typeof raw !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(raw)) throw new Error("Checkout refusals unavailable");
+    const count = Number(raw);
+    if (!Number.isSafeInteger(count) || !Number.isSafeInteger(week + count)) throw new Error("Checkout refusals unavailable");
+    week += count;
+  }
+  const rawLast = values[7];
+  if (rawLast !== null) {
+    if (typeof rawLast !== "string") throw new Error("Checkout refusals unavailable");
+    const value: unknown = JSON.parse(rawLast);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Checkout refusals unavailable");
+    const entry = value as Record<string, unknown>;
+    if (!Number.isSafeInteger(entry.at) || (entry.at as number) < 0 || typeof entry.code !== "string" || entry.code.length > 60 ||
+        typeof entry.message !== "string" || entry.message.length > MESSAGE_LENGTH) throw new Error("Checkout refusals unavailable");
+    last = { at: entry.at as number, code: entry.code, message: entry.message };
   }
   return { week, last: last && last.at >= now - 7 * 86_400_000 ? last : null };
 }

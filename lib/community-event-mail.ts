@@ -103,14 +103,31 @@ const HOUR = 3_600_000;
 /** How many due entries one run takes on. The rest wait five minutes. */
 const QUEUE_BATCH = 200;
 
+const KINDS: readonly string[] = ["24", "1", "moved", "cancelled"] satisfies EventMailKind[];
+const STATUSES: readonly string[] = ["sending", "sent", "failed"] satisfies EventMailJob["status"][];
+const COUNTS = ["start", "was", "wasMinutes", "total", "done", "sent", "failures"] as const;
+
+/**
+ * A send's record, only when every field is there in the shape save() writes; anything else is null. Its id alone,
+ * or a status or count this code never writes, is a partial record, not a send (Codex P on #2954): a reminder is
+ * never dropped as made on it, and a send half done is never taken out of line or written over on it.
+ */
 function parseJob(raw: unknown): EventMailJob | null {
   if (typeof raw !== "string") return null;
+  let value: unknown;
   try {
-    const value = JSON.parse(raw) as EventMailJob;
-    return JOB_ID.test(value.id) ? value : null;
+    value = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const job = value as Record<string, unknown>;
+  if (typeof job.id !== "string" || !JOB_ID.test(job.id)) return null;
+  if (typeof job.community !== "string" || typeof job.handle !== "string" || typeof job.event !== "string" || typeof job.note !== "string") return null;
+  if (typeof job.kind !== "string" || !KINDS.includes(job.kind)) return null;
+  if (typeof job.status !== "string" || !STATUSES.includes(job.status)) return null;
+  if (!COUNTS.every((name) => typeof job[name] === "number" && Number.isFinite(job[name]))) return null;
+  return value as EventMailJob;
 }
 
 async function save(job: EventMailJob): Promise<void> {
@@ -134,8 +151,11 @@ export async function cancelNoticeSending(community: string, event: string): Pro
 export async function readEventJob(id: string): Promise<EventMailJob | null> {
   if (!JOB_ID.test(id) || !isRedisConfigured()) return null;
   const raw = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1)?.[0];
-  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("an event email's send");
-  return parseJob(raw);
+  if (raw === null) return null;
+  // Text that is not a whole send (cut, or partial: Codex P on #2954) is unknown, never "not there".
+  const job = typeof raw === "string" ? parseJob(raw) : null;
+  if (!job || job.id !== id) throw new UnknownReplyError("an event email's send");
+  return job;
 }
 
 /**
@@ -168,8 +188,9 @@ async function madeOrTakeOver(id: string, mark: string): Promise<"made" | "ours"
   if (!held || !held.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("an event email's once-only mark and its send");
   const [was, raw] = held as (string | null)[];
   if (raw !== null) {
-    // "Made" only when the text read back is this very send (Codex P on #2954): cut text, an id this code never
-    // writes or another send's record is unknown, so the reminder stays due and the mark is not taken over on it.
+    // "Made" only when the text read back is this very send, whole (Codex P on #2954): cut text, a partial record,
+    // an id this code never writes or another send's record is unknown, so the reminder stays due and the mark is
+    // not taken over on it.
     const send = parseJob(raw);
     if (!send || send.id !== id) throw new UnknownReplyError("an event email's send under its once-only mark");
     if (send.status === "sending") {

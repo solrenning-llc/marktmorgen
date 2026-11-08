@@ -49,15 +49,6 @@ const lockKey = (folder: string) => `nl:closing:refund:${folder}`;
 const LOCK_SECONDS = 120;
 type Row = Record<string, unknown>;
 const objectOf = (value: unknown): Row | null => (value && typeof value === "object" && !Array.isArray(value) ? (value as Row) : null);
-/**
- * Whether Stripe's reply is the object asked for, by its own id (rule 30, as on #3097): another's, one with no id, or
- * no object at all decides nothing. Null-safe, so a reply of no object is a refusal, never a throw of its own.
- */
-const isOwnReply = (reply: unknown, id: string): boolean => {
-  const row = objectOf(reply);
-  return row !== null && Object.hasOwn(row, "id") && row.id === id;
-};
-const idOf = (value: unknown): string => (typeof value === "string" ? value : typeof objectOf(value)?.id === "string" ? String(objectOf(value)!.id) : "");
 
 export type UnusedRow = { sub: string; paid: PaidPeriod; unused: number };
 /**
@@ -152,34 +143,45 @@ export type Settled = {
 };
 
 /**
+/**
+ * Rule 30 (Claude 6's money review of #3097): a Stripe reply decides only when it is the object asked for. Null-safe,
+ * so a 200 whose JSON body is null, a string or a number is not the object asked for either.
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
+/** The id a field names, whether Stripe sent it as an id or expanded it as an object; undefined when it names none. */
+const idOf = (value: unknown): unknown => (value !== null && typeof value === "object" ? (value as { id?: unknown }).id : value);
+
+/**
  * The payment intent an invoice was paid by, whichever way this account's API version names it; "" only when this
  * invoice's own whole list of payments holds none paid. A reply for another invoice, a list that is not one, a row of
  * another invoice, a list that is not whole, or a paid row whose payment does not read as a payment intent (missing,
- * null, off-pattern, or of another type: Codex G on #3120) is unknown and throws, so the member is tried again, never
- * refunded on another payment and never settled as owed nothing.
+ * null, off-pattern, or of another type: Codex G on #3120, Claude 6 on #3097) is unknown and throws, so the member is
+ * counted failed and tried again, never refunded on another payment and never settled as owed nothing.
  */
 async function intentOf(account: string, invoice: string, count: () => void): Promise<string> {
   count();
   const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
   if (!isOwnReply(read, invoice)) throw new Error("Stripe answered for another invoice");
-  const direct = typeof read.payment_intent === "string" ? read.payment_intent : (read.payment_intent as { id?: unknown } | null)?.id;
+  const direct = idOf(read.payment_intent);
   if (typeof direct === "string" && INTENT_ID.test(direct)) return direct;
   count();
   const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
   const rows = objectOf(listed)?.data;
   if (!Array.isArray(rows)) throw new Error("an invoice's payments did not come as a list");
   // A paid row is a payment made, whatever it reads as: one that does not name a readable intent proves no absence.
+  // A readable paid intent of this invoice is still found whatever the row order.
   let unread = false;
   for (const item of rows) {
     const row = objectOf(item);
     if (!row || idOf(row.invoice) !== invoice) throw new Error("a payment listed is not this invoice's");
     if (row.status !== "paid") continue;
-    const pi = (row.payment as { payment_intent?: unknown } | null)?.payment_intent;
-    const id = typeof pi === "string" ? pi : (pi as { id?: unknown } | null)?.id;
+    const id = idOf(objectOf(row.payment)?.payment_intent);
     if (typeof id === "string" && INTENT_ID.test(id)) return id;
     unread = true;
   }
   if (unread) throw new Error("an invoice's paid payment did not read as a payment intent");
+  // "None" only from a whole list: one that says, exactly, that there is no more.
   if (objectOf(listed)?.has_more !== false) throw new Error("an invoice's payments could not be read whole");
   return "";
 }
@@ -317,12 +319,21 @@ export async function giveBackUnused(
         }
         count();
         const pi = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge.balance_transaction`);
-        // Read exactly (rules 24 and 30): another payment's reply, one with no id, or a charge whose dispute or refunds
-        // do not read decides nothing; the member is tried again, never settled as disputed, refunded or owed nothing.
+        // Read exactly (rules 24 and 30): only this payment's own reply, and its own charge, decide "disputed", what was
+        // refunded and the fee. Another payment's reply, one with no id, a charge not expanded or naming another payment,
+        // or a charge whose dispute, amount or refunds do not read decides nothing; the member is counted failed and tried
+        // again, never settled as disputed, refunded or owed nothing from someone else's charge.
         if (!isOwnReply(pi, intent)) throw new Error("Stripe answered for another payment");
         const charge = objectOf(pi.latest_charge);
-        if (!charge || typeof charge.disputed !== "boolean" || !Number.isSafeInteger(charge.amount_refunded) || (charge.amount_refunded as number) < 0) {
-          throw new Error("this payment's charge did not read");
+        if (!charge) throw new Error("this payment's charge could not be read");
+        if (Object.hasOwn(charge, "payment_intent") && idOf(charge.payment_intent) !== intent) throw new Error("Stripe answered with another payment's charge");
+        if (typeof charge.disputed !== "boolean") throw new Error("this payment's charge did not read");
+        if (!Number.isSafeInteger(charge.amount) || (charge.amount as number) <= 0) throw new Error("what this payment's charge took could not be read");
+        // What was already given back is read exactly (Codex G's second money review of #3097): an amount_refunded that is
+        // not a whole, non-negative number, or more given back than the charge took (Codex G's focal on #3097), would read
+        // as 0 or as a reading of this charge and give it back again.
+        if (!Number.isSafeInteger(charge.amount_refunded) || (charge.amount_refunded as number) < 0 || (charge.amount_refunded as number) > (charge.amount as number)) {
+          throw new Error("what this payment's charge gave back could not be read");
         }
         if (charge.disputed) {
           await settle("disputed");

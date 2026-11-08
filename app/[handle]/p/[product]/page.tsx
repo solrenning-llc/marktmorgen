@@ -146,6 +146,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
   const found = await load(handle, id);
   if (!found) return { title: "Not found — Marktmorgen" };
+  // Nothing of a store switched off after a report (lib/takedown.ts) is named in the tab or a shared link.
+  if (found.store.suspended) return { title: "Not found — Marktmorgen", robots: { index: false, follow: true } };
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
   const description =

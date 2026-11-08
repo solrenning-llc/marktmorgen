@@ -10,6 +10,8 @@ import { storeFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
+import { StudioEmptyState } from "@/components/empty-state";
+import { productSegment } from "@/lib/product-slug";
 import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
@@ -252,11 +254,13 @@ export default async function StudioCoursePage({
 
           <h3 className="mt-7 font-semibold text-ink">{`Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
           {certificates.list.length === 0 ? (
-            <p className="mt-3 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">
-              {course.certificate
-                ? "Nobody has finished yet. When a student does and asks for their certificate, it is listed here."
-                : "Switch certificates on and each student who finishes is listed here with theirs."}
-            </p>
+            <StudioEmptyState
+              level={3}
+              compact
+              className="mt-3"
+              title={course.certificate ? "No certificates yet" : "Certificates are off"}
+              body={course.certificate ? "Nobody has finished yet. When a student does and asks for their certificate, it is listed here." : "Switch certificates on above and each student who finishes is listed here with theirs."}
+            />
           ) : (
             <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Certificates issued, one row each">
               <table className="w-full text-left text-sm">
@@ -319,7 +323,14 @@ export default async function StudioCoursePage({
             </div>
           </div>
           {students.length === 0 ? (
-            <p className="mt-5 rounded-[var(--r-md)] bg-sand p-5 text-sm text-ink-soft">Nobody has opened it yet.</p>
+            <StudioEmptyState
+              level={3}
+              compact
+              className="mt-5"
+              title="No students yet"
+              body="Each buyer who opens the course is listed here, with the lessons they marked done."
+              action={selling ? { href: `/@${store.handle}/p/${productSegment(product)}`, label: "Open the sale page to share it" } : undefined}
+            />
           ) : (
             <div className="mt-5 overflow-x-auto" tabIndex={0} role="region" aria-label="Students, one row each">
               <table className="w-full text-left text-sm">

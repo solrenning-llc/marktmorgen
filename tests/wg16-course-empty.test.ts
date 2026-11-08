@@ -8,7 +8,8 @@
  *     the section's h2, the sentence says who will be listed, and the one
  *     action is the course's sale page, to share it, drawn only while the
  *     store can sell the course (otherwise the link would lead to a page that
- *     sells nothing, so no action is drawn and the sentence says why);
+ *     sells nothing, so no action is drawn); the sentence is the same either
+ *     way, since a free course is never "sold" and still has students;
  *   - "Completions": no certificate issued. Its two true sentences are kept
  *     (certificates on: nobody finished yet; off: switch them on above), with
  *     no action, since the switch sits just above in the same section;
@@ -36,8 +37,8 @@ is(
   true,
 );
 is(
-  "its sentence says who is listed, and why nobody can be while the course is not on sale",
-  course.includes('body={selling ? "Each buyer who opens the course is listed here, with the lessons they marked done." : "Each buyer who opens the course is listed here. It is not on sale yet, so nobody can buy it."}'),
+  "its sentence says who is listed, the same whether or not the course is on sale (a free course is never sold, yet students open it)",
+  course.includes('body="Each buyer who opens the course is listed here, with the lessons they marked done."'),
   true,
 );
 is(
@@ -84,7 +85,7 @@ const students = renderToStaticMarkup(
   }),
 );
 is("a heading, one sentence and one real link to the sale page, at least 44 px tall (.btn is 48 px)", /^<div class="mt-5" data-empty-state=""><h3 class="text-base font-semibold text-ink">No students yet<\/h3><p class="mt-1 text-sm text-ink-soft">Each buyer who opens the course is listed here, with the lessons they marked done\.<\/p><a class="btn btn-secondary mt-4" href="\/@harbor\/p\/first-course-c1">Open the sale page to share it<\/a><\/div>$/.test(students), true);
-const notOnSale = renderToStaticMarkup(createElement(StudioEmptyState, { level: 3, compact: true, title: "No students yet", body: "Each buyer who opens the course is listed here. It is not on sale yet, so nobody can buy it." }));
+const notOnSale = renderToStaticMarkup(createElement(StudioEmptyState, { level: 3, compact: true, title: "No students yet", body: "Each buyer who opens the course is listed here, with the lessons they marked done." }));
 is("not on sale: no link, no button", /<a |<button/.test(notOnSale), false);
 
 done();

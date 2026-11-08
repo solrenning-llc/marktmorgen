@@ -1,0 +1,77 @@
+
+FILE z-ask-model-rejected-hold.proof.ts
+Z_REJECTED_HOLD {"observed":{"dispatched":3,"company":"300","store":"300"},"outcomes":[null,null,null,null],"predispatch":[{"company":"100","store":"100","bytes":112},{"company":"200","store":"200","bytes":112},{"company":"300","store":"300","bytes":112}],"commands":4}
+✔ control: the existing postToModel contract classifies HTTP429 as billed false (7.687228ms)
+✖ PROPOSED C4 contract: confirmed non-billed rejection releases this store's hold before retry (9.711639ms)
+✔ control: lost response is unknown and keeps its maximum (1.436476ms)
+✔ control: successful response retains the separately reviewed maximum (1.666031ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 3
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.841217
+
+✖ failing tests:
+
+test at [stdin]:11216:30
+✖ PROPOSED C4 contract: confirmed non-billed rejection releases this store's hold before retry (9.711639ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    {
+  +   company: '300',
+  +   dispatched: 3,
+  +   store: '300'
+  -   company: '0',
+  -   dispatched: 4,
+  -   store: '0'
+    }
+
+      at TestContext.<anonymous> ([stdin]:11233:27)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":6,"mocks":6,"over":false}
+the model refused 429 synthetic rejection
+the writing model refused 429 synthetic rejection
+the writing model refused 429 synthetic rejection
+the writing model refused 429 synthetic rejection
+
+Z_STATUS 1 null
+
+FILE ai-spend-provider.test.ts
+✔ real provider path blocks an unfunded ledger before fetch (7.781035ms)
+✔ failed paid requests and retries retain separate reservations (12.859909ms)
+✔ network failure keeps its ceiling reserved (1.782858ms)
+✔ invalid requests consume no money and make no provider call (0.88514ms)
+✔ successful requests also retain the reviewed maximum (2.718671ms)
+✔ unfunded setup and ended accounts never spend a paid allocation (3.367312ms)
+✔ the provider cannot exceed the shared job call envelope even with spare money (6.41814ms)
+✔ marked paid AI work needs its contract cohort before spending or contacting the model (1.898457ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 51.898927
+Z_VOLUME {"runs":12,"mocks":7,"over":false}
+the writing model refused 503 busy
+the writing model refused 503 busy
+the writing model refused 503 busy
+AI request refused before provider call output
+AI request refused before provider call model
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3169-VkZk5U

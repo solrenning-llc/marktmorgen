@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { campaignResultsFrom, type CampaignResults } from "@/lib/campaign-results";
 import type { AdSpend } from "@/lib/ad-spend-rules";
 import type { StatsData } from "@/lib/stats";
+import { cameFrom } from "@/lib/came-from";
 import { checkAdText } from "@/lib/ad-creative-check";
 import { weeklyAdReport, WEEKLY_AD_COLUMNS, WEEKLY_AD_MAX_ROWS } from "@/lib/ad-weekly-report";
 import { britishCopyHits } from "./us-english-source";
@@ -122,6 +123,21 @@ for (const word of ["@", "example.com", "Ana Buyer", "buyer", "15551234567", "<b
 }
 is("a tag that may hold a person's address or number is shown as a neutral label", people.rows.filter((r) => r.campaign.startsWith("Campaign tag not shown")).length, 3);
 is("the rows carry only the figures, nothing more", Object.keys(people.rows[0]).sort(), ["afterTakenBack", "campaign", "costPerSale", "gross", "payback", "sales", "spend", "takenBack"]);
+
+part("Every campaign tag the store keeps is shown by its name");
+// The tag as the store keeps it from a checkout page's utm_campaign: cut at the store's own cap, not a number typed here.
+const keptTag = cameFrom(`https://shop.test/p?utm_campaign=${encodeURIComponent("Spring-Launch-Early-Access-Email-List-2026-Week-Two")}`, "shop.test").campaign;
+const tagRow = (campaign: string) => ({ campaign, paymentChannels: [], adChannels: [], visits: 1, paidRecords: 0, gross: 0, ads: 0, grossLessAds: 0 });
+const tagReport = (campaign: string) => weeklyAdReport({ results: { ...measured, rows: [tagRow(campaign)] }, currency: "usd" });
+is("the store cuts a long campaign tag to its cap", keptTag, "spring-launch-early-access-email-list-20");
+for (const tag of ["black-friday-early-access-email-2026", keptTag]) {
+  const r = tagReport(tag);
+  is(`a ${tag.length}-character tag the store keeps keeps its name`, r.rows[0].campaign, tag);
+  is(`a ${tag.length}-character tag is in the table and the text`, [r.html.includes(`>${tag}<`), r.text.includes(tag)], [true, true]);
+}
+is("a tag longer than the store keeps is still not shown", tagReport(`${keptTag}x`).rows[0].campaign.startsWith("Campaign tag not shown"), true);
+const phoneAtCap = cameFrom("https://shop.test/p?utm_campaign=spring-launch-call-15551234567-early-access", "shop.test").campaign;
+is("a tag at the cap with a long run of digits is still not shown", [phoneAtCap.length, tagReport(phoneAtCap).rows[0].campaign.startsWith("Campaign tag not shown")], [keptTag.length, true]);
 
 part("A long week stays readable");
 const many: CampaignResults = { ...big, rows: Array.from({ length: WEEKLY_AD_MAX_ROWS + 5 }, (_, i) => ({ ...big.rows[0], campaign: `c${i}`, ads: 1000 - i })) };

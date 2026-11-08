@@ -37,9 +37,14 @@ const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{6,64}$/;
 
 /**
  * Every subscription of one status, a page at a time from where the last run left the list, at most MAX_PAGES a run.
- * `each` says whether a subscription was handled (sent, or nothing due); the next run reads again from before the
- * first that was not (its email did not go), from after the last page read when the cap stopped this run, or from
- * the top when the list ended. `more`: the cap stopped this run.
+ * `each` says whether a subscription was handled (sent, or nothing due). Where the next run reads from:
+ *   - the list ended this run: the top, so a subscription not handled is read again there, with every newer one;
+ *   - the cap stopped this run: from before the first not handled (its email did not go), or after the last page
+ *     read when every one was. Not before the first not handled when that is where this run started: nothing moved,
+ *     so a subscription whose email fails every time would hold the cursor for good, and every subscription after it
+ *     would never be read (Claude 2 and Codex S on #3215). The walk then goes on from the last page read, and that
+ *     one is read again when the list comes round.
+ * `more`: the cap stopped this run.
  */
 async function walkList(
   status: "trialing" | "active" | "past_due",
@@ -49,6 +54,7 @@ async function walkList(
   // Unreadable or absent: from the top, as every run read before this cursor existed. Never a send twice: each
   // reminder is held by its own mark.
   let after = typeof saved === "string" && SUBSCRIPTION_ID.test(saved) ? saved : "";
+  const start = after;
   let stopAt: string | null = null;
   let seen = 0;
   let more = true;
@@ -70,7 +76,8 @@ async function walkList(
     after = last.id;
   }
   if (more) console.error(`billing reminders: more ${status} subscriptions than one run reads; the next run goes on from where this one stopped`);
-  const next = stopAt ?? after;
+  if (more && stopAt === start) console.error(`billing reminders: a ${status} subscription at the start of this run was not handled again; the walk goes on and reads it when the list comes round`);
+  const next = !more ? "" : stopAt === null || stopAt === start ? after : stopAt;
   await redisPipeline([next ? ["SET", afterKey(status), next, "EX", AFTER_SECONDS] : ["DEL", afterKey(status)]]);
   return { seen, more };
 }

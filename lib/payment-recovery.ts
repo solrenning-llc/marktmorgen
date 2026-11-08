@@ -413,6 +413,9 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
   const now = Date.now();
   const [saved] = await redisPipeline([["GET", cardCursorKey(account)]]);
   let after = typeof saved === "string" && SUB_PATTERN.test(saved) ? saved : "";
+  const start = after;
+  // The list was read to its end this run: the next run reads it from the top (below).
+  let ended = false;
   // `from`: where a reading starts to list that member again, the membership listed just before it (rule 24, R24
   // crons item 6): the cursor is moved only past the members handled, never past one read and not yet told.
   const due: { sub: RunningSub; card: Card; customer: string; email: string; payAt: number; from: string }[] = [];
@@ -454,6 +457,7 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
     const last = rows[rows.length - 1];
     if (listed.has_more !== true || !last || typeof last.id !== "string") {
       after = "";
+      ended = true;
       break;
     }
     after = last.id;
@@ -543,7 +547,13 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
       console.error("writing about a card that stops working failed", store.handle, error);
     }
   }
-  await moveCursor(stopAt ?? after);
+  // Where the next run reads from. The list ended: the top, so a member not handled is read again there, with every
+  // newer one. Otherwise from before the first member not handled, but not when that is where this run started:
+  // nothing moved, so a member whose notice fails every time would hold the store's cursor for good, and every member
+  // after it would never be read (Claude 2 and Codex S on #3215); the walk then goes on from the last page read, and
+  // that member is read again when the list comes round.
+  if (!ended && stopAt === start) console.error("card notices: a member at the start of this run was not handled again; the walk goes on and reads it when the list comes round", store.handle);
+  await moveCursor(ended ? "" : stopAt === null || stopAt === start ? after : stopAt);
   return { sent, complete: stopAt === null };
 }
 

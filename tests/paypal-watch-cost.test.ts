@@ -11,6 +11,7 @@
 import { claimHandle, ensureStatsId, setSubscription, setPayPalSeller, storeForEmail } from "@/lib/store";
 import * as sales from "@/lib/paypal-sales";
 import { sweepPayPal } from "@/lib/paypal-delivery";
+import { sweepCheckouts } from "@/lib/checkout-sweep";
 import * as registry from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -119,6 +120,44 @@ async function main(): Promise<void> {
   const none = await recorded(() => sweepPayPal(without, far));
   // Only the two lists are counted: the hand-over list of #2909 has its own line (PAYPAL_HAND_OVER_RETRY).
   is("no command on the two lists", none.filter((c) => c[1] === pendingKey(statsId) || c[1] === watchKey(statsId)).length, 0);
+
+  // Codex T on #3064: Redis's SCAN may hand back the same key on more than one page, so the job's walk through the
+  // stores (lib/checkout-sweep.ts, sweepCheckouts) must sweep each store at most once a run for the registry's
+  // per-store-run figure to hold.
+  part("one run of the job sweeps a store once, even when SCAN hands its key back on two pages");
+  await setPayPalSeller("owner@example.com", SELLER);
+  process.env.STRIPE_SECRET_KEY = "sk_test_synthetic_only";
+  const ownerKeys = redis.keys().filter((k) => k.startsWith("nl:store:owner:"));
+  is("one store record", ownerKeys.length, 1);
+  async function jobRun(repeat: boolean): Promise<{ pages: number; stores: number; reads: number }> {
+    await redis.pipeline([["DEL", "nl:sweep:cursor"]]);
+    const pipeline = redis.pipeline.bind(redis);
+    let pages = 0;
+    const sent: Commands = [];
+    redis.pipeline = (async (commands: Commands) => {
+      sent.push(...commands);
+      const answer = await pipeline(commands);
+      if (commands[0]?.[0] === "SCAN" && commands[0].includes("nl:store:owner:*")) {
+        pages += 1;
+        if (pages > 2) throw new Error("two pages at the most in this run");
+        return [[repeat && pages === 1 ? "1" : "0", ownerKeys]];
+      }
+      return answer;
+    }) as typeof redis.pipeline;
+    try {
+      const counts = await sweepCheckouts(Date.now() + 10_000);
+      return { pages, stores: counts.stores, reads: ranges(sent, statsId).length };
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  }
+  const single = await jobRun(false);
+  is("control, key on one page: one page, one store swept", [single.pages, single.stores], [1, 1]);
+  is("control: the registry's two reads", single.reads, declared?.rangeReadsPerStoreRun);
+  const twice = await jobRun(true);
+  is("repeated key: both pages are read", twice.pages, 2);
+  is("repeated key: the store is swept once", twice.stores, 1);
+  is("repeated key: still the registry's two reads", twice.reads, declared?.rangeReadsPerStoreRun);
 
   done();
 }

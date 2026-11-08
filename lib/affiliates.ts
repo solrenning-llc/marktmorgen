@@ -105,7 +105,7 @@ import {
 import { type Card, productIds, readCardsFor } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
-import { affiliateForCodes, codeOwners } from "@/lib/affiliate-codes";
+import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
@@ -2481,8 +2481,9 @@ export async function noteSession(
   let how: Credit = "click";
   if (!AFFILIATE_ID_PATTERN.test(aff)) {
     // Then the code the buyer typed, which is the only trace a sale made on a
-    // podcast or from a stage leaves at all (lib/affiliate-codes.ts).
-    const given = owners ?? (await codeOwners(store));
+    // podcast or from a stage leaves at all (lib/affiliate-codes.ts). Read only
+    // for a sale that carries a code: a sale with none never waits on that read.
+    const given = promoCodesOn(session).length ? (owners ?? (await codeOwners(store))) : new Map<string, string>();
     let found = affiliateForCodes(session, given);
     how = "code";
     // And last, the buyer themselves: somebody who was credited to an

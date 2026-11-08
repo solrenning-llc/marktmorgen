@@ -31,7 +31,7 @@
  */
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
@@ -324,15 +324,30 @@ async function forget(request: PaymentRequest): Promise<void> {
 
 /**
  * Holds the request while a checkout is opened for it, so two presses at
- * once never open two payments side by side. True when held.
+ * once never open two payments side by side. What the press keeps to let
+ * go of it, or null when it is not held (rule 24): held only on Redis's
+ * exact "OK" to SET NX under this press's own token (lib/redis-lock.ts
+ * takeLock); taken by another press, or a reply cut short or of another
+ * shape, is not held, so the caller answers "busy" and opens nothing. No
+ * waiting: a second press is answered at once.
  */
-export async function holdForCheckout(id: string): Promise<boolean> {
-  const [held] = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 60]]);
-  return held !== null;
+export async function holdForCheckout(id: string): Promise<Held | null> {
+  try {
+    return await takeLock(lockKey(id), 60, 0);
+  } catch (error) {
+    if (error instanceof LockBusyError) return null;
+    throw error;
+  }
 }
 
-export async function letGo(id: string): Promise<void> {
-  await redisPipeline([["DEL", lockKey(id)]]).catch(() => undefined);
+/**
+ * Lets go of the hold, only if it is still this press's own (one script,
+ * lib/redis-lock.ts releaseLock): a press that ran past the lock's 60
+ * seconds never deletes the lock the next press took since. Never throws;
+ * a release that cannot run leaves the lock to run out at its expiry.
+ */
+export async function letGo(held: Held): Promise<void> {
+  await releaseLock(held).catch(() => undefined);
 }
 
 /** A checkout as Stripe returns it, with what is read here. */

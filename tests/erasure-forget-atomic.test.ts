@@ -158,6 +158,26 @@ async function main(): Promise<void> {
   is("two batches, then the rest in the checked step", batched, 2);
   is("2,500 records and one noted during the batches: all deleted, each counted once", [many, await exists("nl:test:fa:many-0"), await exists("nl:test:fa:many-2499"), await exists("nl:test:fa:during-batches"), await exists(notesKey)], [2501, false, false, false, false]);
 
+  part("an index turned to another type during the batches: refused before any delete");
+  for (let i = 0; i < 1100; i += 275) {
+    await real(Array.from({ length: 275 }, (_, j) => ["SET", `nl:test:fa:typed-${i + j}`, "{}"]));
+    await real(Array.from({ length: 275 }, (_, j) => noteForErasure(STATS, PERSON, `nl:test:fa:typed-${i + j}`, Date.now() + i + j)).flat());
+  }
+  let typed = false;
+  redis.pipeline = async (commands: Command[]) => {
+    const replies = await real(commands);
+    if (!typed && isRead(commands)) {
+      typed = true;
+      await real([["SET", indexKey, "not a set"]]);
+    }
+    return replies;
+  };
+  const typedAnswer = await rejects(() => forgetNoted(STATS, PERSON));
+  restore();
+  is("the batch is refused: the step fails as not finished", typedAnswer, "UnknownReplyError");
+  is("and nothing was deleted: the records and the notes kept", [await exists("nl:test:fa:typed-0"), await exists("nl:test:fa:typed-999"), await exists(notesKey)], [true, true, true]);
+  await real([["DEL", indexKey, notesKey], ...Array.from({ length: 1100 }, (_, i) => ["DEL", `nl:test:fa:typed-${i}`])]);
+
   part("a reply not in its exact shape: the step fails, never 'nothing to delete'");
   const BAD: unknown[] = [undefined, null, "OK", "Changed", 0, 2, {}, [], [1], [1, 1, 0], ["1", "0"], [-1, 0], [1.5, 0], [Number.NaN, 0], [null, 0], [1, 3], [0, 1], [1, 0], [1, 2], [5, 1], [1, -1], { 0: 1, 1: 0 }];
   for (const bad of BAD) {

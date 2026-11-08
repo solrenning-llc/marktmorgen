@@ -1128,16 +1128,21 @@ export class MemoryRedis {
             return gone;
           };
           if (!Number.isSafeInteger(count) || count < 2 || named.length !== count) throw new Error("MemoryRedis: unsupported EVAL");
-          const raw = members(index, "set");
-          const scored = members(notes, "zset");
           if (key.startsWith("-- marktmorgen:forget-noted-part:v1\n")) {
             if (count < 3 || argv.length) throw new Error("MemoryRedis: unsupported EVAL");
             const records = named.slice(2);
+            // As a real redis-server runs it: the DEL first, then SREM and ZREM, each refusing a key of another type
+            // (WRONGTYPE) after the records are gone; a set or sorted set left empty is no longer a key.
             const gone = remove(records);
-            if (raw.length) this.run(["SREM", index, ...records]);
-            if (scored.length) this.run(["ZREM", notes, ...records]);
+            for (const [one, kind, verb] of [[index, "set", "SREM"], [notes, "zset", "ZREM"]] as const) {
+              if (!members(one, kind).length) continue;
+              this.run([verb, one, ...records]);
+              if (!filled(one)) this.run(["DEL", one]);
+            }
             return gone;
           }
+          const raw = members(index, "set");
+          const scored = members(notes, "zset");
           const read = Number(argv[0]);
           if (!Number.isSafeInteger(read) || raw.length !== read || scored.length !== argv.length - 1 - read) return "changed";
           if (!argv.slice(1, read + 1).every((one) => raw.includes(one)) || !argv.slice(read + 1).every((one) => scored.includes(one))) return "changed";

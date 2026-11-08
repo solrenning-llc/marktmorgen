@@ -55,9 +55,12 @@ async function main(): Promise<void> {
   const { agreement, version } = created;
   const w = agreementWords(store.language);
 
-  const page = async () => {
+  const drawnWith = async (query: Record<string, string>) => {
     answering(new NextRequest(`${BASE}/@${HANDLE}/sign/${agreement.id}`));
-    const drawn = await html(await SignPage({ params: Promise.resolve({ handle: `@${HANDLE}`, agreement: agreement.id }), searchParams: Promise.resolve({}) } as never));
+    return html(await SignPage({ params: Promise.resolve({ handle: `@${HANDLE}`, agreement: agreement.id }), searchParams: Promise.resolve(query) } as never));
+  };
+  const page = async () => {
+    const drawn = await drawnWith({});
     return {
       text: drawn.includes("Repair the kiln in November."),
       form: drawn.includes('action="/api/store/agreement-sign"'),
@@ -81,6 +84,9 @@ async function main(): Promise<void> {
   is("the text stays, with no form: it can't be signed now", await page(), { text: true, form: false, closed: true, record: false, pay: false });
   const refused = await sign();
   is("the form's route signs nothing and says so", refused.headers.get("location"), `${BASE}/@${HANDLE}/sign/${agreement.id}?notice=closed`);
+  // Where the route sends the form: "This can't be signed now" said once, so a screen reader hears it once (Claude 4 on #3203).
+  const sentBack = await drawnWith({ notice: "closed" });
+  is("sent back from the form, it is said once", sentBack.split(escaped(w.notices.closed.title)).length - 1, 1);
 
   part("Switched back on");
   await noteTakedown(OWNER, null, false);

@@ -153,6 +153,36 @@ async function main(): Promise<void> {
   const attached = await setProductCourse(OWNER, courseId, { id: course.id, lessons: 2 });
   if (!attached.ok) throw new Error(`no course: ${attached.reason}`);
 
+  // A course that opens a module a month after joining, its free preview inside that module (Claude 4 on #3203).
+  const kilnMade = await addProduct(OWNER, "Kiln course", "", "59", null);
+  if (!kilnMade.ok) throw new Error("no drip course product");
+  const kilnId = kilnMade.product.id;
+  const kiln = {
+    id: "d".repeat(32),
+    certificate: false,
+    startsAt: null,
+    modules: [
+      {
+        id: "module000011",
+        title: "Firing",
+        dripDays: 0,
+        lessons: [{ id: "kiln00000001", title: "First firing", preview: false, video: null, files: [], link: null, hasBody: false, quiz: null }],
+      },
+      {
+        id: "module000012",
+        title: "Later firings",
+        dripDays: 30,
+        lessons: [
+          { id: "kiln00000002", title: "Kiln preview", preview: true, video: null, files: [], link: null, hasBody: false, quiz: null },
+          { id: "kiln00000003", title: "Kiln paid", preview: false, video: null, files: [], link: null, hasBody: false, quiz: null },
+        ],
+      },
+    ],
+  } as unknown as Course;
+  await saveCourse(kiln, ROOM, true);
+  const kilnAttached = await setProductCourse(OWNER, kilnId, { id: kiln.id, lessons: 3 });
+  if (!kilnAttached.ok) throw new Error(`no drip course: ${kilnAttached.reason}`);
+
   // A membership with one price option, for the moving-in, come-back and leave pages.
   const clubMade = await addProduct(OWNER, "Studio club", "", "20", { interval: "month", trialDays: 0, payments: 0 });
   if (!clubMade.ok) throw new Error("no membership product");
@@ -175,7 +205,7 @@ async function main(): Promise<void> {
   const session = await openSession(STUDENT);
   const started = Math.floor(Date.now() / 1000) - DAY;
   await redis.pipeline([
-    ["SET", `nl:learn:paid:${storeKey(store)}:${emailKey(STUDENT)}`, JSON.stringify({ p: { [courseId]: started }, x: [], r: [] }), "EX", 600],
+    ["SET", `nl:learn:paid:${storeKey(store)}:${emailKey(STUDENT)}`, JSON.stringify({ p: { [courseId]: started, [kilnId]: started }, x: [], r: [] }), "EX", 600],
     ["SET", `nl:cm:${communityId}:ok:${emailKey(STUDENT)}`, JSON.stringify({ v: config.v, ok: true }), "EX", 600],
   ]);
 
@@ -197,6 +227,12 @@ async function main(): Promise<void> {
     asked(`/@${HANDLE}/course/${courseId}/${lessonId}`, who);
     return html(() => LessonPage({ params: Promise.resolve({ handle: `@${HANDLE}`, product: courseId, lesson: lessonId }), searchParams: Promise.resolve({}) }));
   };
+
+  const kilnLesson = (who: "visitor" | "student", lessonId: string) => {
+    asked(`/@${HANDLE}/course/${kilnId}/${lessonId}`, who);
+    return html(() => LessonPage({ params: Promise.resolve({ handle: `@${HANDLE}`, product: kilnId, lesson: lessonId }), searchParams: Promise.resolve({}) }));
+  };
+  const shownOr = (drawn: string) => (drawn.startsWith("redirect") ? drawn : "shown");
 
   // The member's manage link (lib/membership-manage.ts, as the emailed one is kept).
   const token = "c".repeat(64);
@@ -271,6 +307,8 @@ async function main(): Promise<void> {
     const waiting = await waitingFor(store, BUYER);
     const endedCard = card(ended);
     const courseCard = card(reviewable);
+    const kilnFirst = await kilnLesson("student", "kiln00000001");
+    const kilnPreview = await kilnLesson("student", "kiln00000002");
     return {
       gate: {
         products: shownGate.includes(productLink) && shownGate.includes("Glaze course") && shownGate.includes("Studio club"),
@@ -287,6 +325,13 @@ async function main(): Promise<void> {
         buyerSignIn: visitorFront.includes('action="/api/store/course/link"'),
         studentFront: studentFront.startsWith("redirect") ? studentFront : "shown",
         studentLesson: (await lesson("student", "lesson000002")).startsWith("redirect") ? "redirect" : "shown",
+      },
+      drip: {
+        // The first lesson's way on (the done-and-next form, or the Next button) leads to the preview in the module still shut.
+        nextIsPreview: kilnFirst.includes('name="next" value="kiln00000002"') || kilnFirst.includes(`href="/@${HANDLE}/course/${kilnId}/kiln00000002"`),
+        studentPreview: shownOr(kilnPreview),
+        studentShut: shownOr(await kilnLesson("student", "kiln00000003")),
+        visitorPreview: shownOr(await kilnLesson("visitor", "kiln00000002")),
       },
       manage: {
         cancel: shownManage.includes('action="/api/store/manage/cancel"') || shownManage.includes("/manage/leave?"),
@@ -317,6 +362,7 @@ async function main(): Promise<void> {
   is("the community's door lists the products that open it, with the way in for members", on.gate, { products: true, memberSignIn: true });
   is("an event kept for a course lists it to a member without it", on.event, { products: true, gone: false, page: true });
   is("the course's door offers its free lesson, which opens to a visitor; its student is in", on.course, { freeLesson: true, previewToVisitor: "shown", buyerSignIn: true, studentFront: "shown", studentLesson: "shown" });
+  is("a drip course: the student's way on leads to the free preview in the shut module, which opens; the rest of it waits; a visitor sees the preview", on.drip, { nextIsPreview: true, studentPreview: "shown", studentShut: `redirect /@${HANDLE}/course/${kilnId}`, visitorPreview: "shown" });
   is("the member's page: cancel and the card", on.manage, { cancel: true, card: true });
   is("asked why: a way to write to the store, and the way out", on.leave, { contact: true, cancel: true });
   is("the moving-in page with a gone price: a link to today's prices", on.move, { prices: true });
@@ -331,6 +377,8 @@ async function main(): Promise<void> {
   is("the course's door: no free lesson offered; the way in for buyers kept", [off.course.freeLesson, off.course.buyerSignIn], [false, true]);
   is("the free lesson is not opened to a visitor", off.course.previewToVisitor, `redirect /@${HANDLE}/course/${courseId}`);
   is("the student keeps the course and its lessons", [off.course.studentFront, off.course.studentLesson], ["shown", "shown"]);
+  is("a drip course: the student still reads the free preview the way on leads to; the rest still waits", [off.drip.nextIsPreview, off.drip.studentPreview, off.drip.studentShut], [true, "shown", `redirect /@${HANDLE}/course/${kilnId}`]);
+  is("a drip course: a visitor, who is not a student, gets no preview", off.drip.visitorPreview, `redirect /@${HANDLE}/course/${kilnId}`);
   is("the member's page keeps cancel and the card", off.manage, { cancel: true, card: true });
   is("asked why: no way to write to the store; the way out kept", off.leave, { contact: false, cancel: true });
   is("the moving-in page: no link to prices", off.move, { prices: false });

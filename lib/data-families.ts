@@ -52,7 +52,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
-  "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
+  "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
@@ -250,6 +250,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:data:": E,
   "nl:dc:addr:": E, "nl:dc:due": I, "nl:dc:lock": C, "nl:dc:mem:": E, "nl:dc:ok:": E, "nl:dc:prod:": E, "nl:dc:srv:": E, "nl:dc:state:": X(1),
   "nl:depth:": E,
+  // Discount codes waiting for their start (511 [CK3], lib/discount-schedule.ts): go with the store; the due list loses its members.
+  "nl:dsched:": E, "nl:dsched:due": I, "nl:dsched:lock:": E,
   "nl:dir:listed": I, "nl:dir:page": Cr(1),
   "nl:domain:": T("prepare"),
   "nl:dun:": E, "nl:dun:card:": E, "nl:dun:cards:": E, "nl:dun:count:": E, "nl:dun:cursor": C, "nl:dun:report:": E,

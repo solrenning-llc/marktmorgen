@@ -1435,7 +1435,9 @@ export const KEY_NAME_BYTES = 128;
  * (lib/closed-store-data.ts, prepareStore): for its owner and each of its
  * team as a host, fifty pages of their claims and their deletes, and the
  * stores they serve; and a hundred for its ids, team, keys for the API,
- * webhooks, email platform, phones, address, record and line in the walk.
+ * webhooks, email platform, phones, address, record and line in the walk,
+ * with the one read of whether it is still due (eraseClosed, dueForErasure:
+ * its closing day and the closing job's record, two commands).
  */
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100;
 

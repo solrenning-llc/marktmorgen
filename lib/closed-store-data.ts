@@ -51,10 +51,13 @@
  * payments (tests/plan-cost-registry.ts, closure), and the renewals it stops
  * with the orders that sold them (ORDER_COST).
  */
+import { createHash } from "node:crypto";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
-import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
+import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
+import { standingOf } from "@/lib/plan-standing";
 import { idsIn } from "@/lib/data-recount";
 import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
@@ -168,9 +171,69 @@ export async function markDue(ref: string, now = Date.now()): Promise<void> {
   await redisPipeline([["ZADD", DUE_KEY, "NX", now, ref]]);
 }
 
-/** Takes a store out of line: its plan was started again before its walk began. */
+/**
+ * Takes a store out of line: its plan was started again before its walk began.
+ *
+ * Its failure is safe, and nothing retries it (lib/plan-closing.ts, closeOne, swallows it): before a store is prepared
+ * the walk reads again whether it is still due (dueForErasure), and a store whose plan runs again leaves the line there
+ * with nothing of it touched. That re-check is what keeps a live store, not this call: the way back from Stripe takes a
+ * store that re-subscribed out of the line of ended plans at once (lib/store.ts, setSubscription), so the closing job
+ * may never look at it again and never call this at all.
+ */
 export async function unmarkDue(ref: string): Promise<void> {
   await redisPipeline([["ZREM", DUE_KEY, ref]]);
+}
+
+/**
+ * The closing job's record of a store (lib/plan-closing.ts, stateKey), spelled as it spells it: this file cannot import
+ * plan-closing.ts, which imports it. tests/closing-journey.ts drives the real closing job into the real walk, and a
+ * store it closed is erased only when the two read the same key.
+ */
+const closingStateKey = (ref: string) => `nl:plan:closing:${createHash("sha256").update(ref).digest("hex").slice(0, 40)}`;
+
+/**
+ * Whether a store whose record is still there is due for erasure now, read exactly (rule 30), just before it is
+ * prepared, the walk's first destructive step: "due" when the closing job closed it for the plan ending it has now,
+ * "live" when it is not (its plan runs again, or its new ending is not closed yet), "hold" when it cannot be said.
+ *
+ *   - Its closing day began (FINAL_INDEX: seen through, whatever its plan says since, lib/plan-closing.ts closeOne):
+ *     due when the closing job's record says what it kept was removed for that day's ending. A plan that reads
+ *     running there contradicts the closing day (a plan paid then is refused and returned, lib/closing-plan-guard.ts):
+ *     held, never erased and never taken out of line, since the closing job does not put a store whose record says it
+ *     is in line back in it.
+ *   - No closing day: due when its plan ended (lib/plan-standing.ts, standingOf, as closeOne reads it), its ending
+ *     closes the store (closesStore) and the record says it was removed for that same ending. Otherwise live: a plan
+ *     that runs again, or a new ending whose closing is not done, whose store the closing job puts back in line when
+ *     it is (its record for a new ending has no `due`, so it marks it again).
+ *
+ * A read that does not answer, or answers what is not a score or a record, throws UnknownReplyError: the run stops,
+ * the store stays in line and nothing of it is touched. Until then the walk asked nothing: a store that re-subscribed
+ * and stayed in line (unmarkDue failed, or was never called) was prepared, closed and erased though its plan ran.
+ */
+async function dueForErasure(store: Store, now: number): Promise<"due" | "live" | "hold"> {
+  const ref = storeRef(store);
+  const replies = repliesFor(await redisPipeline([["ZSCORE", FINAL_INDEX, ref], ["GET", closingStateKey(ref)]]), 2);
+  if (!replies) throw new UnknownReplyError("a closing store's closing day and record (ZSCORE, GET)");
+  const [score, raw] = replies;
+  if (score !== null && !((typeof score === "string" || typeof score === "number") && String(score).trim() !== "" && Number.isFinite(Number(score)))) {
+    throw new UnknownReplyError("a closing store's closing day (ZSCORE)");
+  }
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a closing store's record of its closing (GET)");
+  let record: Record<string, unknown> = {};
+  if (raw !== null) {
+    const value = json(raw);
+    if (!value || Array.isArray(value)) throw new UnknownReplyError("a closing store's record of its closing (GET)");
+    record = value;
+  }
+  const removedFor = (endedAt: number) => record.of === endedAt && typeof record.removed === "number" && Number.isFinite(record.removed);
+  const standing = standingOf(store, now / 1000);
+  if (score !== null) {
+    if (standing === "paid" || standing === "trial") return "hold";
+    return removedFor(Number(score)) ? "due" : "hold";
+  }
+  const endedAt = Date.parse(store.planEndedAt);
+  if (standing !== "ended" || !Number.isFinite(endedAt)) return "live";
+  return closesStore(endedAt) && removedFor(endedAt) ? "due" : "live";
 }
 
 /**
@@ -591,6 +654,15 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       if (Date.now() > deadline) break;
       const store = await storeForEmail(ref).catch(() => null);
       if (store) {
+        // Still due, read again just before the first destructive step (dueForErasure): a store whose plan runs again
+        // leaves the line untouched, one that cannot be said stays in it untouched. Once prepared, its record is
+        // closed and no plan can reach it any more (lib/closing-plan-guard.ts).
+        const due = await dueForErasure(store, now);
+        if (due === "hold") continue;
+        if (due === "live") {
+          await redisPipeline([["ZREM", DUE_KEY, ref]]);
+          continue;
+        }
         const entry = await prepareStore(store, now);
         await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]);
         report.stores += 1;

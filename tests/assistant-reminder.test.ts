@@ -28,7 +28,7 @@ import { join } from "node:path";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setAssistReminder, setAssistantPlan, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
-import { takeAllowance } from "@/lib/store-allowance";
+import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { remindAbandoned, stopReminders } from "@/lib/checkout-recovery";
 import { FEATURE_PAGES } from "@/lib/feature-pages";
 import { HELP_SECTIONS } from "@/lib/help-content";
@@ -73,12 +73,15 @@ const asked: Sent[] = [];
 const sessions: Record<string, Record<string, unknown>> = {};
 let paidList: Record<string, unknown>[] = [];
 let model: { line: string; usage?: unknown } | { status: number } = { line: "" };
+/** The email service saying no for a moment: it did not take the email. */
+let mailDown = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
+    if (mailDown) return new Response("not taken", { status: 400 });
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string; headers?: Record<string, string> };
     emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text, headers: body.headers });
     return answer({ id: `email_${emails.length}` });
@@ -258,6 +261,40 @@ async function main(): Promise<void> {
   const [gone] = await redis.pipeline([["EXISTS", `nl:assist:remind:${erased}`]]);
   is("gone, and nothing sent", [Number(gone), await remindFromConsent(store, erased, later), emails.length - count], [0, "skip", 0]);
 
+  part("A send that failed for a passing reason is tried again: once only, and the model is asked once");
+  const retried = sessionId();
+  await keep(retried, "jo@example.com");
+  left(retried, { metadata: { store: "ovenshop", product: grocery } });
+  model = { line: "Printable lists for every week of the planner." };
+  const queueOf = async () => {
+    const [flat] = await redis.pipeline([["ZRANGEBYSCORE", "nl:assist:remindq", "-inf", "+inf", "WITHSCORES"]]);
+    const list = (flat as string[]) ?? [];
+    const out: { member: unknown[]; score: number }[] = [];
+    for (let i = 0; i + 1 < list.length; i += 2) out.push({ member: JSON.parse(list[i]) as unknown[], score: Number(list[i + 1]) });
+    return out.filter((e) => e.member[2] === retried);
+  };
+  const toJo = () => emails.filter((m) => m.to === "jo@example.com");
+  const modelBefore = asked.length;
+  const realClock = Date.now;
+  mailDown = true;
+  Date.now = () => later;
+  const down = await sendAssistReminders(storeForEmailHandle, later + 20_000);
+  Date.now = realClock;
+  mailDown = false;
+  const waiting = await queueOf();
+  is("the email service failed: nothing sent", [toJo().length, down.sent], [0, 0]);
+  is("back in the queue for the same checkout, tried once, five minutes later", [waiting.length, waiting[0]?.member[4], waiting[0] ? waiting[0].score - Math.floor(later / 1000) : null], [1, 1, 300]);
+  is("the model was asked once, for the try that failed", asked.length - modelBefore, 1);
+  Date.now = () => later + 301_000;
+  const up = await sendAssistReminders(storeForEmailHandle, later + 321_000);
+  Date.now = realClock;
+  is("sent the next time, once", [up.sent, toJo().length], [1, 1]);
+  is("the try again is the fixed reminder: no second model call, no AI line", [asked.length - modelBefore, toJo()[0]?.text.includes("Written by AI")], [1, false]);
+  Date.now = () => later + 1_000_000;
+  await sendAssistReminders(storeForEmailHandle, later + 1_020_000);
+  Date.now = realClock;
+  is("and never again, the queue empty of it", [toJo().length, (await queueOf()).length, await remindFromConsent(store, retried, later + 1_000_000)], [1, 0, "skip"]);
+
   part("The fixed reminder when the AI's line cannot be used");
   const pressure = sessionId();
   await keep(pressure, "fay@example.com");
@@ -285,7 +322,8 @@ async function main(): Promise<void> {
   await keep(roomless, "ivy@example.com");
   left(roomless, { metadata: { store: "ovenshop", product: planner } });
   const sentBefore = emails.length;
-  await takeAllowance(store, "email", 75 - (emails.length - 0), later);
+  // What is left of the window, counted as the store counts it: a send the email service did not take still used its room.
+  await takeAllowance(store, "email", 75 - (await allowanceUsed(store, "email", later)), later);
   is("no email room: not sent", [await remindFromConsent(store, roomless, later), emails.length - sentBefore], ["failed", 0]);
   await setRecovery(OWNER, { enabled: false, address: "", asks: true });
   store = (await storeForEmail(OWNER))!;

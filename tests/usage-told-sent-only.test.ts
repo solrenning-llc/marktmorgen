@@ -19,6 +19,10 @@
  * not told it has no address, and it stays off the told list, so its owner is
  * written to on the next run, once the read works.
  *
+ * So is kept text that is neither an address nor "#<store id>" (an account's
+ * other store): "", whitespace, "not-an-owner". It is not a delivered notice
+ * and not "no address on file": support is not told, nothing is recorded.
+ *
  * Synthetic only: the Redis stub and the SES mail fixture, no real IO.
  */
 import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
@@ -43,13 +47,17 @@ const fixture = installSesMailFixture({
 fixture.configure();
 const delivered = (): string[] => fixture.sent.flatMap((m) => m.to);
 
-/** Makes the owners' read (the GETs of nl:store:folder-owner:*) fail, or answer off-shape. */
-let ownerRead: "ok" | "throw" | "off-shape" = "ok";
+/** Makes the owners' read (the GETs of nl:store:folder-owner:*) fail, answer off-shape, or answer this text. */
+let ownerRead: "ok" | "throw" | "off-shape" | { text: string } = "ok";
 const realPipeline = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
   const ownersOnly = list.length > 0 && list.every((c) => c[0] === "GET" && String(c[1]).startsWith("nl:store:folder-owner:"));
   if (ownersOnly && ownerRead === "throw") return Promise.reject(new Error("synthetic: Redis request failed with status 503"));
   if (ownersOnly && ownerRead === "off-shape") return Promise.resolve(list.map(() => 42));
+  if (ownersOnly && typeof ownerRead === "object") {
+    const text = ownerRead.text;
+    return Promise.resolve(list.map(() => text));
+  }
   return realPipeline(list);
 }) as typeof redis.pipeline;
 
@@ -162,6 +170,48 @@ async function main(): Promise<void> {
     is("next run, owner read back: the owner gets the notice", [u2.told, u2.emails], [1, ["owner@example.com"]]);
     is("now the store is in the told list", (await toldList()).includes(folder("g")), true);
   }
+
+  // Codex Z's conditional residual (second review on be6355cd4, focal on 94d8b9b29): kept text that is neither an
+  // address nor "#<store id>" is not evidence that the store has no owner (rule 24). It is unknown, like a failed
+  // read: no notice is given, support is not told the store has no address, and nothing goes on the told list.
+  for (const text of ["", " ", "\t\n", "not-an-owner", "#", "#not-a-store-id"]) {
+    part(`the owner's key reads back as ${JSON.stringify(text)}: unknown, nobody is told, nothing recorded`);
+    redis.clear();
+    fixture.reset();
+    refused.clear();
+    await overAllowance(folder("h"), "owner@example.com");
+    ownerRead = { text };
+    const t1 = await run();
+    ownerRead = "ok";
+    is("first run: the part is unknown and nobody is written to (not support)", [t1.status, t1.told, t1.emails], [503, undefined, []]);
+    is("the store is not in the told list", (await toldList()).includes(folder("h")), false);
+    const t2 = await run();
+    is("next run, owner read back: the owner gets the notice", [t2.told, t2.emails], [1, ["owner@example.com"]]);
+    is("now the store is in the told list", (await toldList()).includes(folder("h")), true);
+  }
+
+  part("the owner's key holds such text: every run is unknown, support is never told, nothing recorded");
+  redis.clear();
+  fixture.reset();
+  refused.clear();
+  await overAllowance(folder("i"), null);
+  await redis.pipeline([["SET", `nl:store:folder-owner:${folder("i")}`, "not-an-owner"]]);
+  const k1 = await run();
+  const k2 = await run();
+  is("both runs are unknown and write to nobody", [k1.status, k1.emails, k2.status, k2.emails], [503, [], 503, []]);
+  is("the store is not in the told list", (await toldList()).includes(folder("i")), false);
+
+  part("control: an account's other store (key \"#<store id>\") is still ownerless, and support is told once");
+  redis.clear();
+  fixture.reset();
+  refused.clear();
+  await overAllowance(folder("j"), null);
+  await redis.pipeline([["SET", `nl:store:folder-owner:${folder("j")}`, `#${"0123456789abcdef".repeat(2)}`]]);
+  const s1 = await run();
+  is("support is told about it", [s1.status, s1.emails], [200, [SUPPORT_EMAIL]]);
+  is("and the store is in the told list", (await toldList()).includes(folder("j")), true);
+  const s2 = await run();
+  is("support is not told again", s2.emails, []);
 
   fixture.restore();
   done();

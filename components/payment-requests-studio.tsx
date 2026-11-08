@@ -352,9 +352,16 @@ export function PaymentRequestsStudio({
         <h2 id="requests-heading" className="text-lg font-semibold tracking-[-0.02em] text-ink">{`Requests (${rows.length.toLocaleString("en-US")} of ${limits.kept.toLocaleString("en-US")} kept)`}</h2>
         {rows.length === 0 ? <p className="mt-3 text-ink-soft">No requests yet.</p> : null}
         {rows.some((r) => !r.refundsChecked) ? (
-          <p role="status" className="notice mt-3">
-            Refunds on Stripe could not all be checked just now, so a request marked &quot;Paid, refunds not checked&quot; may have been refunded, in part or in full. Reload this page to check again, or look the payment up in your Stripe dashboard.
-          </p>
+          // A reload is promised only where reading again may change the answer (lib/payment-requests.ts, refundsRetry).
+          rows.some((r) => !r.refundsChecked && r.refundsRetry) ? (
+            <p role="status" className="notice mt-3">
+              Refunds on Stripe could not all be checked just now, so a request marked &quot;Paid, refunds not checked&quot; may have been refunded, in part or in full. Reload this page to check again, or look the payment up in your Stripe dashboard.
+            </p>
+          ) : (
+            <p role="status" className="notice mt-3">
+              Refunds on Stripe could not all be checked here, so a request marked &quot;Paid, refunds not checked&quot; may have been refunded, in part or in full. Look the payment up in your Stripe dashboard to see its refunds.
+            </p>
+          )
         ) : null}
         <ul className="mt-4 space-y-3">
           {rows.map((r) => {

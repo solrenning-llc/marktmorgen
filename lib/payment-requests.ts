@@ -358,13 +358,19 @@ async function readRefunds(account: string, since: number): Promise<{ back: Map<
  * Each request comes back with `refundsChecked`: false for one paid on
  * Stripe whose refunds were not all read (more than the pages read, a reply
  * in another shape, Stripe not answering, no Stripe account or no payment
- * to look up), so the studio never shows it as surely not refunded. What
- * was read is still written, only ever upward: a refund read is a refund.
+ * to look up, or a whole list giving back less than the record holds), so
+ * the studio never shows it as surely not refunded. `refundsRetry` says
+ * whether reading again may change that. What was read is still written,
+ * only ever upward: a refund read is a refund.
  */
 export async function refreshRefunds(store: Store, requests: PaymentRequest[], now = Date.now()): Promise<CheckedRequest[]> {
   // Only a request paid through its checkout has refunds on Stripe; one refunded in full has nothing more to learn.
   const onStripe = (r: PaymentRequest) => r.state === "paid" && !r.outside;
-  const shown = (r: PaymentRequest, read: boolean): CheckedRequest => ({ ...r, refundsChecked: !onStripe(r) || (read && PAYMENT_INTENT.test(r.payment)) });
+  const shown = (r: PaymentRequest, read: boolean, retry = false): CheckedRequest => {
+    const refundsChecked = !onStripe(r) || (read && PAYMENT_INTENT.test(r.payment));
+    // Without a payment to look up or a Stripe account, every reading is the same: no reload is promised.
+    return { ...r, refundsChecked, refundsRetry: !refundsChecked && retry && PAYMENT_INTENT.test(r.payment) && !!store.stripeAccountId };
+  };
   const paid = requests.filter((r) => onStripe(r) && PAYMENT_INTENT.test(r.payment));
   if (!paid.length || !store.stripeAccountId) return requests.map((r) => shown(r, false));
   const since = Math.floor(Math.min(...paid.map((r) => r.paidAt)) / 1000) - 60;
@@ -373,7 +379,7 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
     read = await readRefunds(store.stripeAccountId, since);
   } catch (error) {
     console.error("reading a store's refunds for payment requests failed", error);
-    return requests.map((r) => shown(r, false));
+    return requests.map((r) => shown(r, false, true));
   }
   if (!read.complete) console.error("a store's refunds for payment requests were not all read; shown as not checked", { pages: REFUND_PAGES });
   const changed = new Map<string, PaymentRequest>();
@@ -391,8 +397,16 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
       else unsaved.add(r.id);
     }
   }
-  // A refund still under way may yet give the money back: not checked until it ends.
-  return requests.map((r) => shown(changed.get(r.id) ?? r, read.complete && !unsaved.has(r.id) && !read.underWay.has(r.payment)));
+  return requests.map((r) => {
+    const latest = changed.get(r.id) ?? r;
+    // Stripe's whole list gives back less than the record holds (a refund since failed): what is shown is not what
+    // Stripe says, so not checked, and a reload reads the same list. Nothing is lowered here.
+    const short = read.complete && (read.back.get(latest.payment) ?? 0) < latest.refunded;
+    // A refund still under way may yet give the money back, and a write that failed may not fail again: not checked,
+    // and reading again may change that. A list not read in full reads the same next time.
+    const passing = unsaved.has(r.id) || read.underWay.has(r.payment);
+    return shown(latest, read.complete && !short && !passing, read.complete && !short && passing);
+  });
 }
 
 /** Why a request could not be marked as paid outside Stripe. */

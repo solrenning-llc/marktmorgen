@@ -96,7 +96,15 @@ export type PaymentRequest = {
  * for its payment was read (lib/payment-requests.ts, refreshRefunds). False
  * means refunds are not known, never that there were none.
  */
-export type CheckedRequest = PaymentRequest & { refundsChecked: boolean };
+export type CheckedRequest = PaymentRequest & {
+  refundsChecked: boolean;
+  /**
+   * Not checked, and reading again may change that (Stripe not answering, a refund still under way, a write that
+   * failed); false where a reload reads the same thing (more refunds than the pages read, a reply in another shape,
+   * a list short of the record, no Stripe account or no payment to look up), so the studio promises no reload.
+   */
+  refundsRetry: boolean;
+};
 
 /** How a request was paid outside Stripe. */
 export type OutsideMethod = "cash" | "transfer" | "other";

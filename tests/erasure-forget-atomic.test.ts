@@ -178,6 +178,23 @@ async function main(): Promise<void> {
   is("and nothing was deleted: the records and the notes kept", [await exists("nl:test:fa:typed-0"), await exists("nl:test:fa:typed-999"), await exists(notesKey)], [true, true, true]);
   await real([["DEL", indexKey, notesKey], ...Array.from({ length: 1100 }, (_, i) => ["DEL", `nl:test:fa:typed-${i}`])]);
 
+  // Codex Z on #3308 (review 5820151427): notes refilled by an overlapping writer after every batch, whose records
+  // have already expired (each batch deletes 0), must stop at FORGET_BATCHES batches, never one more.
+  part("notes refilled after every batch: at most 100 batches, then the step fails as not finished");
+  const refill = Array.from({ length: FORGET_KEYS + 1 }, (_, i) => `nl:test:fa:refill-${i}`);
+  let parts = 0;
+  redis.pipeline = async (commands: Command[]) => {
+    if (isRead(commands)) return [[], refill];
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:forget-noted-part:v2\n"))) {
+      parts += 1;
+      return [0];
+    }
+    return real(commands);
+  };
+  const refilled = await rejects(() => forgetNoted(STATS, PERSON));
+  restore();
+  is("the step fails as not finished, after exactly 100 batches", [refilled, parts], ["UnknownReplyError", 100]);
+
   part("a reply not in its exact shape: the step fails, never 'nothing to delete'");
   const BAD: unknown[] = [undefined, null, "OK", "Changed", 0, 2, {}, [], [1], [1, 1, 0], ["1", "0"], [-1, 0], [1.5, 0], [Number.NaN, 0], [null, 0], [1, 3], [0, 1], [1, 0], [1, 2], [5, 1], [1, -1], { 0: 1, 1: 0 }];
   for (const bad of BAD) {

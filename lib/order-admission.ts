@@ -124,6 +124,43 @@ const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${mon
 const openKey = (folder: string) => `nl:orders:open:${folder}`;
 const heldKey = (folder: string) => `nl:orders:open:${folder}:b`;
 const hourOf = (now: number) => Math.floor(now / 3_600_000);
+/** Orders paid while their paying store's billing window was unknown, by its folder, until the window is known (rule 30). */
+const pendingKey = (folder: string) => `nl:orders:pending:${folder}`;
+/** As long as a window's count is kept (lib/orders.ts, KEEP_SECONDS). */
+const COUNT_KEEP_SECONDS = 400 * 86_400;
+
+/**
+ * Holds one paid order of a paying store whose billing window is unknown
+ * (lib/orders.ts, countOrder): never counted in the calendar month, which the
+ * admission below never reads for it, but kept to be counted in the window
+ * once it is known (countHeldOrders). Throws when it cannot be written.
+ */
+export async function holdUncountedOrder(folder: string): Promise<void> {
+  await redisPipeline([["INCR", pendingKey(folder)], ["EXPIRE", pendingKey(folder), COUNT_KEEP_SECONDS]]);
+}
+
+/**
+ * Counts in a known window the orders held while it was unknown, and answers
+ * how many. Throws when they cannot be read, are not a count, or cannot be
+ * counted (then they are held again): nothing may be admitted on a count that
+ * may be short of them.
+ */
+export async function countHeldOrders(folder: string, window: string): Promise<number> {
+  const [raw] = await redisPipeline([["GETDEL", pendingKey(folder)]]);
+  if (raw === null) return 0;
+  const n = typeof raw === "string" && /^\d{1,9}$/.test(raw) ? Number(raw) : typeof raw === "number" ? raw : NaN;
+  // Only INCR writes it, so anything else is not a count: this reading is refused.
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error("the orders held for an unknown window could not be read");
+  if (n === 0) return 0;
+  try {
+    await redisPipeline([["INCRBY", countKey(folder, window), n], ["EXPIRE", countKey(folder, window), COUNT_KEEP_SECONDS]]);
+  } catch (error) {
+    // Held again, to be counted by the next reading, never lost.
+    await redisPipeline([["INCRBY", pendingKey(folder), n], ["EXPIRE", pendingKey(folder), COUNT_KEEP_SECONDS]]).catch(() => undefined);
+    throw error;
+  }
+  return n;
+}
 
 /** What a checkout carries so its order can give its hour back: the hour, as metadata. */
 export const ADMITTED_FIELD = "mm_admit";
@@ -205,6 +242,8 @@ export async function admitOrders(store: Store, n = 1, now = Date.now(), items =
     const folder = await storeFolder(storeRef(store));
     const room = dataKey(store);
     if (!room) return { ok: false, reason: "unavailable" };
+    // Orders paid while this window was unknown are in it before it is read (rule 30).
+    await countHeldOrders(folder, window.id);
     const hour = hourOf(now);
     const evidence=confirmationEvidence(store,window,hour,folder,n,items,now);
     const reply: unknown = await redisPipeline([

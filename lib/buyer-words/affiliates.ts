@@ -61,7 +61,7 @@ const en = {
       body: "This store decided on this address before. Write to the store if you think that should change.",
     },
     signedout: { title: "You are signed out on this browser", body: "To see your affiliate page again, ask for a new link below." },
-    "signedout-unknown": { title: "Your session may still be open on our side", body: "This browser is signed out, but we could not close your session on our side just now. If you think someone else may have it, write to the store." },
+    "signedout-unknown": { title: "Your session may still be open on our side", body: "This browser is signed out, but we could not close your session on our side just now. It closes by itself within 30 days." },
   } as Record<string, { title: string; body: string }>,
 
   // ---- Applying -----------------------------------------------------------------
@@ -393,7 +393,7 @@ const es: AffiliatesWords = {
       body: "Esta tienda ya tomó una decisión sobre esta dirección. Escribe a la tienda si crees que debería cambiar.",
     },
     signedout: { title: "Has cerrado sesión en este navegador", body: "Para volver a ver tu página de afiliado, pide un enlace nuevo abajo." },
-    "signedout-unknown": { title: "Puede que tu sesión siga abierta de nuestro lado", body: "Este navegador ha cerrado sesión, pero no pudimos cerrar tu sesión de nuestro lado ahora mismo. Si crees que otra persona puede tenerla, escribe a la tienda." },
+    "signedout-unknown": { title: "Puede que tu sesión siga abierta de nuestro lado", body: "Este navegador ha cerrado sesión, pero no pudimos cerrar tu sesión de nuestro lado ahora mismo. Se cierra sola en un plazo de 30 días." },
   },
 
   whereShare: "Dónde lo compartirías",
@@ -682,7 +682,7 @@ const fr: AffiliatesWords = {
       body: "Cette boutique a déjà pris une décision sur cette adresse. Écrivez à la boutique si vous pensez que cela devrait changer.",
     },
     signedout: { title: "Vous êtes déconnecté sur ce navigateur", body: "Pour revoir votre page d'affilié, demandez un nouveau lien ci-dessous." },
-    "signedout-unknown": { title: "Votre session est peut-être encore ouverte de notre côté", body: "Ce navigateur est déconnecté, mais nous n'avons pas pu fermer votre session de notre côté pour l'instant. Si vous pensez que quelqu'un d'autre peut l'avoir, écrivez à la boutique." },
+    "signedout-unknown": { title: "Votre session est peut-être encore ouverte de notre côté", body: "Ce navigateur est déconnecté, mais nous n'avons pas pu fermer votre session de notre côté pour l'instant. Elle se ferme d'elle-même sous 30 jours." },
   },
 
   whereShare: "Où vous le partageriez",
@@ -971,7 +971,7 @@ const de: AffiliatesWords = {
       body: "Dieser Shop hat über diese Adresse bereits entschieden. Schreiben Sie dem Shop, wenn Sie meinen, dass sich das ändern sollte.",
     },
     signedout: { title: "Sie sind in diesem Browser abgemeldet", body: "Um Ihre Affiliate-Seite wieder zu sehen, fordern Sie unten einen neuen Link an." },
-    "signedout-unknown": { title: "Ihre Sitzung ist auf unserer Seite möglicherweise noch offen", body: "Dieser Browser ist abgemeldet, aber wir konnten Ihre Sitzung auf unserer Seite gerade nicht beenden. Wenn Sie meinen, dass jemand anderes sie haben könnte, schreiben Sie dem Shop." },
+    "signedout-unknown": { title: "Ihre Sitzung ist auf unserer Seite möglicherweise noch offen", body: "Dieser Browser ist abgemeldet, aber wir konnten Ihre Sitzung auf unserer Seite gerade nicht beenden. Sie endet von selbst innerhalb von 30 Tagen." },
   },
 
   whereShare: "Wo Sie es teilen würden",
@@ -1268,7 +1268,7 @@ const it: AffiliatesWords = {
       body: "Questo negozio ha già deciso su questo indirizzo. Scrivi al negozio se pensi che debba cambiare.",
     },
     signedout: { title: "Sei disconnesso su questo browser", body: "Per rivedere la tua pagina di affiliato, chiedi un nuovo link qui sotto." },
-    "signedout-unknown": { title: "La tua sessione potrebbe essere ancora aperta da parte nostra", body: "Questo browser è disconnesso, ma non siamo riusciti a chiudere la tua sessione da parte nostra in questo momento. Se pensi che qualcun altro possa averla, scrivi al negozio." },
+    "signedout-unknown": { title: "La tua sessione potrebbe essere ancora aperta da parte nostra", body: "Questo browser è disconnesso, ma non siamo riusciti a chiudere la tua sessione da parte nostra in questo momento. Si chiude da sola entro 30 giorni." },
   },
 
   whereShare: "Dove lo condivideresti",
@@ -1559,7 +1559,7 @@ const nl: AffiliatesWords = {
       body: "Deze winkel heeft eerder over dit adres beslist. Schrijf de winkel als je vindt dat dat moet veranderen.",
     },
     signedout: { title: "Je bent uitgelogd in deze browser", body: "Vraag hieronder een nieuwe link aan om je affiliatepagina weer te zien." },
-    "signedout-unknown": { title: "Je sessie staat aan onze kant mogelijk nog open", body: "Deze browser is uitgelogd, maar we konden je sessie aan onze kant nu niet sluiten. Schrijf de winkel als je denkt dat iemand anders hem kan hebben." },
+    "signedout-unknown": { title: "Je sessie staat aan onze kant mogelijk nog open", body: "Deze browser is uitgelogd, maar we konden je sessie aan onze kant nu niet sluiten. Hij sluit vanzelf binnen 30 dagen." },
   },
 
   whereShare: "Waar je het zou delen",
@@ -1855,7 +1855,7 @@ const pt: AffiliatesWords = {
       body: "Esta loja já decidiu sobre este endereço. Escreva à loja se achar que isso deve mudar.",
     },
     signedout: { title: "Terminou a sessão neste navegador", body: "Para voltar a ver a sua página de afiliado, peça uma nova ligação abaixo." },
-    "signedout-unknown": { title: "A sua sessão pode ainda estar aberta do nosso lado", body: "Este navegador terminou a sessão, mas não conseguimos fechar a sua sessão do nosso lado neste momento. Se achar que outra pessoa a pode ter, escreva à loja." },
+    "signedout-unknown": { title: "A sua sessão pode ainda estar aberta do nosso lado", body: "Este navegador terminou a sessão, mas não conseguimos fechar a sua sessão do nosso lado neste momento. Fecha-se sozinha no prazo de 30 dias." },
   },
 
   whereShare: "Onde o partilharia",

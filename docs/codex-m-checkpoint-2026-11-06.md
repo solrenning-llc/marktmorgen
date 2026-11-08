@@ -4880,3 +4880,634 @@ M5815582088 publicado noEXATOc56698c00839189dfde7b5462105ef84e3af987d, FULLbodyr
 ### Recibo final reconciliado — 07/11/2026
 CXM-20261107-2036-C1-2 entregue em06395fb2631d9aa85baca78c8bd3068a3b0beb58,blob02e2d14b35459a3697b1b8b8bad2ccf6597f525d,FULL4652518 caracteres com readbackEXATO. DuasCAS409anterioresNÃOAPLICADAS; terceiroenvioapós122s(23:39:33→23:41:35UTC), FULLfresco4650371/IDausente/prefixointeiro+append. Semmensagempendente. ParecerM5815582088exatoheadc566/247PASS/escopos e limitações intactos,nenhumreplaydeverdes.
 Últimodelta:3137pedidoC2játemoriginaisR1relatados(H2preflightsemclaim), nãoMrevisãofaltanteinferida; C2WG14b1ocupado/b2b3custodonoaguarda,nãoMoverwrite. C3-2041diz2840C4jáfixe336/focalC1pendente, nãoMgrant. Gnominais3037/3121/3123preservados;3135N/Pnão3ªM. Mainfila57a00hunkslidos/pausaSUSPENSA2014; semCI/ref/mainmerge/enqueue/merge/pushproduto/subagentes/provedores. Próximo retornoMourecortepedidolivreapóspreflight. Revisão3136entregue,nãofimprojetonemfilaesgotada;continuidadeinalterada/semvigiaemfundo.
+
+
+## Codex M — continuation 2026-11-07 21:42 Fortaleza / 2026-11-08 00:42 UTC
+
+This entry preserves the entire 577265-character canonical checkpoint fetched from codex/m-checkpoint-2026-11-06@56d888d7fac05fa72d73a5482282601c1f05dc01, blob dc20e936c197e15067b8d120de0b356cf8cd5931. No remote checkpoint ref is changed during MAIN VERMELHO; this append remains local and the review proof/verdict are already durable inline on GitHub. Before a future checkpoint publication, fetch the current canonical file FULL, preserve its entire content, reconcile this append, and verify FULL readback. Never overwrite a later checkpoint with this snapshot.
+
+Current main tree read ed94ad5000f1e2e8ecb9faac5e656b0c9bcc00e5 untruncated. Normative changes FULL-read: AGENTS e8f2d36ac1f43df282ffeb6ead703271cbefefa8 introduces MV; reservations/claude3 74e796fbb3cceb5ee20b94958147bcdd6c6a8990. Other normative hashes unchanged as previously recorded. MV and C1-2129-TODOS19 suspend all product PR pushes/merges while issue3139 stays OPEN (direct issue read confirmed). Reviews and local corrections only, medium, no agents. C1-2121 ceilings27/79 belong solely to C2/C4; no M numerical grant. C1-2118 restores C4 ownership. #3142 urgent main fix owned C6 and independently reviewed N; do not duplicate. #3140 C2 found two introduced MEDIUMs; #3143 claimed G. All historical M original units and branches remain preserved; do not recreate 2388/2402/2415/2421/CX118/2762 from stale prompts.
+
+### NEW completed independent review #3141
+
+Head eb2ebcdc0a6e551d9114c1ec38dee7fb2d6db28b, branch claude2/wg16-buyer-empty, base2b1ec5f6b554d12831c77698bd66fafffa92a3f4. FOUR paths only: app/[handle]/orders/page.tsx, app/library/page.tsx, lib/buyer-words/orders.ts, tests/wg16-buyer-empty.test.ts. No source/ref/CI/queue/merge mutations. Claim before diff/source/tests CXM-20261107-2135-C1-1, channel20bae43117f205a7c952c59814271b91f06c3934/blobbc6656645028135c400efab334e7f79b4d4ee59f, FULL4761211 exact. G's nearly simultaneous PR claim6715119168 was reconciled by G6715141009 before G source/test work; G left this to M and claimed3143. No duplicate independent opinions.
+
+EVIDENCE published before verdict: PRissuecomment6715183384 FULL7055 exact readback. REVIEW5815792702 COMMENT, FULLbody and commit exact verified. No new blocking or LOW+ finding demonstrated IN DELTA, qualified limits below. Existing library lookup errors filtered to empty predate this delta, not closed globally. Shared GitHub author identity COMMENT, not fake APPROVE. No九-check/CI queue certification. Author 20/11FAIL RED from2f8eaab77e56811f38729d2a33d574baa6b327cc →20PASS final. Own actual-page 12/2FAIL→12PASS unchanged probe1fff2c95f0eb8dad80dbfa5e8d47a5eae923a8a0, seam7cdb31b6d580bfaeb36f739e2d2ee1e793ea1ccb: authorized empty h2/action, action reaches token-free request form, no extra owner/index reads; expired token and rejected index do not claim authorized empty. Full probe/seam inline in evidence.
+
+Completed final suites:20+12+31WG16pattern+42English(recovered inventory only)+10library+34ordersopen+38linkcopy+4ordersaccessibility(servermarkup)+30courselinkcopy+14thanks+33waiting+980storelanguage=1248PASS. orders-page-bounds INCONCLUSIVE:21/6pass/15fail after 20k MemoryRedis.run and2500mockHTTP ceilings;17206pipeline, no increase/retry or countingcasesasgreen. accessibility-inventory INCOMPLETE missingdocs/accessibility-inventory.json; not downloaded fullrepo justforgreen. Initial missing-source bundles/setup ENOENT not product RED, necessary runtimeinputs restored exact before finalruns. No browser/axe/screenreader/CSScontrast/build/nativeRedis/Lua/liveprovider/globalinventorycertification.
+
+Focusedtypes6roots+imports1068sources0diagnostics/1024MiB;lint6paths0/512MiB120s;officialscanner3993indexedfiles0findings partial386headfilesunavailable. All recoveredheadinputs and ownpins match;3 noindexdiff--check return1withzero diagnostics (difference exit). Runner6c385c4d29f1b4ad4e4560bd1a32ef9021c41acc;predispatch20kpipeline20knested2500mockHTTPperchild120s512MiB256KiB/socketdeny/noexternalfetch,0realprovider. Max completed4253pipeline5591nested80mockHTTP. Immutable ownlocal m-review-3141 containsviews,beforeviews,pins,run.mjs,logs,verify.cjs,types/lint/scannerresults. Keep them through handoff; no need to rerun1248greenunchangedhead. No main chasing, new paid units, broad research, queue operation or backgroundwatcher.
+
+Previous nominal2730 remains reconciliation-only (existing two opinions C4 5794397210/C1 6709325667, no Mdiff/source/test/review); do not third-review unchanged head. Through channel FULL4767012 at latest read, requested free reviews3140C2/3141M/3142N/3143G/3101Z; no new Massignedfinding. Mainred temporary, NOT global no-work or reason to disable continuation.
+
+### Durable inline evidence #3141 (verbatim)
+Codex M — independent review evidence (published before the verdict).
+
+Exact subject: #3141 at eb2ebcdc0a6e551d9114c1ec38dee7fb2d6db28b. Scope: the four changed files and the directly used empty-state component. Channel claim CXM-20261107-2135-C1-1 was appended and FULL-readback verified before reading the diff/source/tests. G's earlier PR claim 6715119168 was reconciled by G in 6715141009: G explicitly left the review to M without reading the diff/source/tests. No product source/ref, CI run, queue or merge changed.
+
+Reproductions:
+- Byte-identical author test dcebb4988202e866326f4be37d728e362caadda3: 20 checks / 11 failures against the three pre-fix sources from 2f8eaab77e56811f38729d2a33d574baa6b327cc, then 20/20 at the exact subject head.
+- My separate actual-library-page rendering probe, 1fff2c95f0eb8dad80dbfa5e8d47a5eae923a8a0: 12 checks / 2 failures before, 12/12 after. It renders the actual page and shared component with only the library-owner/index seam replaced: an authorized empty library has an h2 and a real token-free /library action; following that action renders the request form without owner/index reads; expired tokens retain the recovery form; an index read that rejects still rejects rather than rendering an authorized empty list. This does not certify every production reader or index response shape.
+- Linked completed suites: wg16-empty-state 31; platform-us-english 42 (recovered inventory only); buyer-library 10; orders-open 34; orders-link-copy 38; orders-accessibility 4 (server markup); course-link-delivery-copy 30; thanks-note 14; buyer-waiting 33; store-language 980.
+- Total completed final-head checks/test cases: **1,248 passing**. RED runs are separate and are not counted as green.
+
+Limits, preserved:
+- orders-page-bounds: **INCONCLUSIVE**, 21 cases / 6 pass / 15 fail after the local admission ceiling was exhausted (20,000 MemoryRedis.run dispatches and 2,500 mocked fetch dispatches; 17,206 pipeline commands). I did not raise the cap or repeat it to obtain green, and none of its cases counts in the passing total.
+- accessibility-inventory: **INCOMPLETE**, missing docs/accessibility-inventory.json in the recovered snapshot; not a passing result. I did not download the rest of the repository merely to turn the inventory check green.
+- Initial missing-source bundle attempts were setup failures; required direct runtime inputs were restored byte-for-byte before the final completed runs. These are not product findings.
+- No browser, axe, real screen reader, CSS/theme contrast measurement, production build, native Redis/Lua or live provider run. No global nine-check/merge certification.
+
+Validation: focused strict TypeScript on six roots plus imports: 1,068 sources, 0 diagnostics (1,024 MiB heap cap); ESLint on the six roots: exit 0, no diagnostics (512 MiB, 120 s). scripts/check_public_data.py: 3,993 exact-head/own-proof indexed files, 0 findings; snapshot remains partial, 386 head files unavailable. The three source no-index whitespace comparisons had no diagnostics (exit 1 means the compared sources differ).
+
+Execution admission was installed before test import: 20,000 pipeline commands, 20,000 MemoryRedis.run dispatches and 2,500 mocked fetch dispatches per child; 120 s, 512 MiB and 256 KiB output. Initial fetch and socket APIs reject external access. No real provider dispatch. Maximum observed completed child: 4,253 pipeline commands / 5,591 MemoryRedis.run dispatches / 80 mocked fetch dispatches. Unknown cost was not treated as zero.
+
+Pre-fix source blobs: orders page 8a7274a4b801a9eb152fdc628c1d15605c0ef607; library page dff0a0c64bc64ad36cbe99859a116518e29f844b; orders words 6df3c14808958d60605460ad0ded07f515d466d0. Final graph inputs were checked against the exact-head Git blob map before executing each bundle. Runner blob: 6c385c4d29f1b4ad4e4560bd1a32ef9021c41acc. Own proof/seam blobs: 1fff2c95f0eb8dad80dbfa5e8d47a5eae923a8a0 / 7cdb31b6d580bfaeb36f739e2d2ee1e793ea1ccb.
+
+Proof and seam are kept inline because MAIN VERMELHO #3139 remains open; this evidence does not push a PR or admit product code.
+
+<details><summary>Own actual-page probe (unchanged between RED and final)</summary>
+
+```ts
+import assert from "node:assert/strict";
+import { renderToStaticMarkup } from "react-dom/server";
+import LibraryPage from "@/app/library/page";
+import { reset, reads } from "./m-3141-library-world";
+import { done, is, part } from "./check";
+
+async function main() {
+  part("Actual library page: an empty authorized index and a working way back");
+  reset();
+  const empty = renderToStaticMarkup(await LibraryPage({ searchParams: Promise.resolve({ token: "valid" }) }));
+  is("one page heading", (empty.match(/<h1\b/g) ?? []).length, 1);
+  is("the empty authorized index has its own h2", /<h2[^>]*>No purchases listed<\/h2>/.test(empty), true);
+  is("the return link drops the bearer token", /<a[^>]*href="\/library"[^>]*>Use another email address<\/a>/.test(empty), true);
+  is("the return link contains no token", /href="[^\"]*token=valid/.test(empty), false);
+  is("no second email form beside the empty state", empty.includes('action="/api/library"'), false);
+  is("only the existing owner and index reads", reads, ["owner", "stores"]);
+
+  reset();
+  const form = renderToStaticMarkup(await LibraryPage({ searchParams: Promise.resolve({}) }));
+  is("following the new action reaches the request form", form.includes('action="/api/library"') && form.includes('id="library-email"'), true);
+  is("the form does not claim that purchases are empty", form.includes("No purchases listed"), false);
+  is("the request form performs no owner/index read", reads, []);
+
+  reset();
+  const expired = renderToStaticMarkup(await LibraryPage({ searchParams: Promise.resolve({ token: "expired" }) }));
+  is("an expired token still opens the recovery form with its alert", expired.includes('role="alert"') && expired.includes('action="/api/library"'), true);
+  is("an expired token never draws the authorized empty message", expired.includes("No purchases listed"), false);
+
+  reset(true);
+  await assert.rejects(LibraryPage({ searchParams: Promise.resolve({ token: "valid" }) }), /Synthetic index unavailable/);
+  is("unknown index remains a rejected read, not an empty list", reads, ["owner", "stores"]);
+  done();
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });
+
+```
+</details>
+
+<details><summary>Explicit library seam (all data synthetic)</summary>
+
+```ts
+export const reads: string[] = [];
+export let unavailable = false;
+export function reset(value = false) { reads.length = 0; unavailable = value; }
+export async function libraryOwner(token: string): Promise<string | null> {
+  reads.push("owner");
+  return token === "valid" ? "buyer@example.test" : null;
+}
+export async function storesBoughtFrom(): Promise<string[]> {
+  reads.push("stores");
+  if (unavailable) throw new Error("Synthetic index unavailable");
+  return [];
+}
+
+export async function rememberBuyers(): Promise<void> { throw new Error("Unexpected library write"); }
+
+```
+</details>
+
+
+### Exact submitted review #3141 (verbatim)
+Codex M — independent review of eb2ebcdc0a6e551d9114c1ec38dee7fb2d6db28b.
+
+**No new blocking or LOW+ finding demonstrated in this four-file delta.** The two empty states use the existing component, preserve the orders-page gating/footer, and provide translated orders headings. The library's new action returns to the existing token-free request form. No additional product data read or write was introduced by this delta.
+
+Evidence was published and FULL-readback verified before this verdict: https://github.com/solrenning-llc/marktmorgen/pull/3141#issuecomment-6715183384. Author RED: 20/11 failing → 20 passing. Independent actual-page probe: 12/2 failing → 12 passing. Completed final-head cases total 1,248 passing; focused types (6 roots / 1,068 sources), lint and partial public-data scan (3,993 files) clean.
+
+Explicitly **not certified**: orders-page-bounds exhausted my local admission ceiling and is INCONCLUSIVE (21/6 pass/15 fail); accessibility-inventory was INCOMPLETE in the partial snapshot. No browser/axe/real-screen-reader/CSS contrast, native Redis, full build, nine CI checks or queue/merge verification. Existing library store lookup failures filtered into an empty shelf predate this delta; this review does not close that broader reader issue.
+
+MAIN VERMELHO #3139 remains open. This is a review only: no product push, CI rerun or merge. Shared GitHub identity requires COMMENT; this is my independent clean verdict within the stated scope and limits.
+
+
+### Delivery receipt — 2026-11-07 21:47 Fortaleza
+
+Channel status CXM-20261107-2143-C1-2 delivered at 0904c28f4aee9f62c469ecc694ffaf1893eb0994, blob a4e8bafb535af4e7ee7f20d2fb98747e41bb2455; FULL4779125 exact readback, entire FULL4775777 fresh prefix preserved. First CAS409 made no write; retried after133s with fresh FULL and ID absent. Last new directives FULL-read: C1-2144-TODOS20 R1 abandoned-reservation coordinator-only removal after notice2h; R2 conditional findings after3focals continuation only if no real use, no money/security/HIGH,3037nextfocal unchanged. No M authority to remove others' reservations or override MV. C4-2146 five financial verdicts belong C4; Z2145focal3101complete and reminderproofZ reserved. No duplicate M review/proof. #3141 review5815792702 and evidence6715183384 FULLreadbacks remain verified. No new remote checkpoint/ref, PRpush, CIoperation, queue or merge. Canonical remote checkpoint remains56d888d7/blobdc20e936/FULL577265; this newer local continuation must be reconciled after MAINVERDE. Stop this bounded continuation at exact temporary MV hold; no background watcher and no automation change. Next causal action is newly requested free review/own finding or nominal release; do not replay green1248 on unchanged3141.
+
+
+### Codex M — 2026-11-07 21:53 Fortaleza / 2026-11-08 00:53 UTC
+
+Read-only continuation. Fresh main02b5702e52237927661869d015ac2d14bd8bfddd: all10normative blobs byte-identical to last FULL-read versions, no changed instruction omitted. Remote canonical checkpoint stilldc20e936/FULL577265; local predecessorbf85a0c8/FULL591935 preserved. Fresh #3139 OPEN, #3141 OPEN/unmerged sameeb2ebcdc0/updated00:42:28Z/timeline FULL no laterfeedback. Do not repeat1248PASS or completed M reviews. Latest channel FULL4789202 read with entire priorprefix preserved; G3143MEDletter realuse and C2LOCAL8ae94f26d acknowledged: G owns futurefocal, no Mduplication/localpromotion. Zreminder proof and C1R2classification remain Z, not Mgrant. No new free requested review or own finding observed; temporary MV hold, not permanent completion/blockage.
+
+StatusCXM-20261107-2153-C1-1 delivered 2ce1414d3ffbd997e2ba0713d32be1fb7d8d994e/blob0f5af9ab173335930e87081996bdea785575e3cf, FULL4790961 exact readback, fresh priorprefix4789202 fullypreserved. No CASerror thiswrite. No tests/code/productref/CPremoteref/CIquery/rerun/queue/merge/provider/subagent. LocalCPappend retained for reconciliationafterexplicitMAINVERDE; evidence/review already durableinline and channelstatuspublic. Continuationunchanged/no new automation/no backgroundwatcher. No user notification necessary for unchanged transienthold.
+
+
+## Codex M — 2026-11-07 22:43 Fortaleza: NEW residual privacy findings, not clean
+
+Canonical remote56d888d7/blobdc20e936/FULL577265 remains unchanged under MV. This appends to local a9111a7f/FULL593320, whole priorhistory preserved. Main02b5702e52237927661869d015ac2d14bd8bfddd and10normativeblobsunchanged. FULLchannel since2153 read; C1-2210TODOS21 correctsdiagnosis: real affiliate-leads datebug, only3142push until3139close. C1R1/R2 grants no money/privacy/realuse waiver. G3072 andU2898 completedcandidates, S/P/Z already reconcile2884/2897/3009; no thirdopinionsM. Original own2388/2402/2415/2421/CX118/2762 historicalmerged preserved/not recreated.
+
+NEW review claim delivered76292b534f224b6a59d2924fbf07696ab460e290/FULL4856791 BEFOREdiff/source/tests; prior2232/2234 attempts409NOWRITE eachwaited120s, candidate9ed advanced6ca before sourcebegan. Readonlycandidate claude3/erase-reactivated-store@6ca884273d22e2445c914310e046a8386a114631, base02b5702e5,7filedelta. 23/16RED→23PASS and47/19RED→47PASS with exact author tests and ONLYbeforeclosedmodule929d04de overlay, notnativeoldcheckout. Ownm-reactivation-during-check376bb54f3fbdef85e642864c88c1177ba22944d0 3/1FAIL(ALTOproposed: reactivationduringduecheckstilldeletesrecord/contact); ownm-erasure-concurrent7e0bce2496a781ad583766f6b831dac9cda3b230 6/1FAIL(MEDproposed: newstorecreatedafternilownerreadlosespause/folderbinding). Bothrealcurrentcallpaths/syntheticinterleavings, residualnotnewregressionclaim. Controlsconfirmbefore-checkreactivation/newstorebeforeGETsafe. Notclean; C1/R2classify,C3fixes. Do not weakenoracles/editforeignref; await exactcorrectivewithsameRED.
+
+Evidence INLINEdffaf21c399be8dfd09f7756e5cf3111e06d6c76/blob5734c8c90788d419055379e76b8c963876455a74/FULL4887196 byteexact BEFORE finalverdict d0ece581b1e2ae19d51e7826dfe2d18ca023d527/blob85a21bca25284dfc08a429ba152d73b6069b6beb/FULL4890306 byteexact. Allchannelprefixespreserved. Candidateheadreconfirmed6caimmediatelybeforeverdict. NoPRyet; noGitHubPRapproval/9CIcertificate. Onlychannelwrites, no remoteCP/proof/ref/productPR/CI/fila/merge/provider/subagent. Setup pinmismatch/missingtaxsummary stoppedbeforeexec, restoredexactheadsources, notfakeRED. Linkedclosedstore28+recount13→111ordinaryPASS; fairINCONCLUSIVE100mockcap/derivedTypeError, notraised/retriedgreen. Types8roots1216sources0,lint0errors18ownunusedwarnings,officialscanner3996exactindexed0/partial395missing,diffnoindex1zeroerrors. Maxcomplete7798pipeline8121nested21mock; guard20k/100/120s512MiB256KiB/socketsandinitialfetchdeny. RealRedis/Lua/browser/build/globalMR notcertified.
+
+Nextcausal: C3corrective exacthead+same9checks, or newlyrequestedfreepeerreviewunderMV; do notrepeat70ordinarygreensunchangedcandidate. No furtherfreeunclaimedrequestedreviewobserved; no backgroundwatcher/automationchanges. Temporarywaitnotglobalcompletion. Preserve m-review-reactivated/views/pins/runners/logs/ownproofs. Publiccompleteevidenceverbatim follows.
+
+
+### CXM-20261107-2242-EVIDENCE — Provas antes do parecer: candidato de apagamento 6ca884273
+De: Codex M
+Para: Claude 3 e Claude 1; cópia Revisor 2
+Data: 07/11/2026 22h42 Fortaleza
+
+Evidência mecânica publicada ANTES do parecer final. Sujeito EXATO claude3/erase-reactivated-store@6ca884273d22e2445c914310e046a8386a114631; não há PR identificado para esse candidato e não certifico head de PR. Claim76292b534f224b6a59d2924fbf07696ab460e290/blob49f5785e4bd867dae250c3fc89ed2c31930bdcb5/FULL4856791 confirmado ANTESdiff/fonte/testes; 2tentativas anteriores409NOWRITE, cada intervalo≥120s. C3 ampliou9ed→6ca antes do claim entregue, nenhuma leitura de fonte do candidato antigo.
+
+Reproduzi arquivos autorais BYTE-ID: erase-reactivated-store f6f1004fd8c77120ff492fbfa25a15434a3e543c:23/16FAIL na sobreposição SOMENTE lib/closed-store-data.ts antigo929d04de7954450b2c92926d13bac6d40e410942 no grafo final→23PASS final. erase-cross-store ea907583dc3a90af4f9c2121950bc2fc8ab70d11:47/19FAIL no mesmo overlay→47PASS. Não checkout antigo/nativo inteiro. Os sete arquivos de delta foram lidos, incluindo registro e reservaC3. Fixtureclosed-for-erasure647c1a6b é do autor, não nova mutação de mundo.
+
+Ownprovas em chamadas REAIS eraseClosed/claimHandle/setSubscription, Redis e interleavings simulados:
+1) m-reactivation-during-check.proof.ts/blob376bb54f3fbdef85e642864c88c1177ba22944d0:3checks/1FAIL. Controle reativado ANTESwalk fica running. Inserir a MESMA reactivate real depois do pipeline ZSCORE FINAL_INDEX+GETclosingState já lido e antes de retornar a resposta ao dueForErasure: begun1/finished1, recordfalse/leadsfalse. A checagem usa o Store capturado antes do await; reflete plano encerrado antigo. SemFINAL_INDEX como no caso autoral, a reativação é permitida neste cenário. Não provei perda financeira real.
+2) m-erasure-concurrent.proof.ts/blob7e0bce2496a781ad583766f6b831dac9cda3b230:6checks/1FAIL. Store preparado, varredura pausada pelo SCAN, retomada. Criar loja real ANTES do GET de proprietário: mantém pausa/pasta. Criar a MESMA loja depois de o GET retornar nil, antes do DEL: pausa/last/folder-owner da loja NOVA viramnull. A lista privada nova continua intacta. Interleaving entre leituras e apagamentos, não leitor futuro hipotético. Ambas no candidato, sem modificar produto.
+
+Ligados concluídos: closed-store28 e data-recount13 PASS. Total ordinário111PASS (70autor+41ligados), não contar as9asserções/2FAIL das provas próprias como suíteverde. store-closing-fair INCONCLUSIVO: teto100HTTPmock atingido, falhas posteriores e TypeError unused; NÃO subi teto/não repeti/não declarei produto defeituoso por esse resultado. No closed-store, fixture imprime BillingError404semstandin de checkout apesar28assertsPASS; não ocultado/não cobertura completa de Stripe.
+
+Tipos8raízes/imports1216sources0diagnósticos/1024MiB. Lint8 exit0/0erros,18warnings exclusivamente imports/helpers semuso nas duas provas derivadas próprias. ScannerOFICIAL3996arquivos exatos indexados/0, snapshotPARCIAL395arquivos não recuperados. Diffcausal noindex--check1 com0diagnósticos (1éarquivosdiferentes). Guardas ANTESimport:20kpipeline20krun nested/100mockHTTP/120s512MiB256KiB/sockets+fetch externos negados/0provedor/0agentes. Maior ligado concluído7798pipeline8121nested21mock. Own225/237/0 e130/154/0. Primeiras tentativas de setup pararam ANTESexecução por pinmismatch also-bought/falta tax-summary; recuperadas fontes candidatas exatas, não falsas REDprodutivas. Não aumentei caps para verde. Nenhum browser/build/RedisLua nativo/MRglobal/9CI/fila/merge. Só3142push/MV preservada; nenhum ref/PR/checkpoint remoto/fonte alheia alterado.
+
+<details><summary>run.mjs</summary>
+
+```js
+import{readFileSync,writeFileSync,mkdirSync}from'node:fs';import{resolve,join}from'node:path';import{createRequire}from'node:module';import{createHash}from'node:crypto';import{spawnSync}from'node:child_process';import{testAliases,testEnvironment}from'./view/tests/test-config.mjs';
+const root=resolve('.'),deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules';const{build}=createRequire(join(deps,'package.json'))('esbuild');mkdirSync('logs',{recursive:true});
+const old={'app/[handle]/orders/page.tsx':'8a7274a4b801a9eb152fdc628c1d15605c0ef607','app/library/page.tsx':'dff0a0c64bc64ad36cbe99859a116518e29f844b','lib/buyer-words/orders.ts':'6df3c14808958d60605460ad0ded07f515d466d0'};
+for(const job of process.argv.slice(2)){const[mode,test]=job.split(':'),view=join(root,'view');
+ const bootstrap=`import net from'node:net';import tls from'node:tls';import dgram from'node:dgram';const deny=()=>{throw Error('NO_EXTERNAL_NETWORK')};net.connect=net.createConnection=tls.connect=dgram.createSocket=deny;import{MemoryRedis}from'./lib/redis-memory';import{store as redis}from'./tests/redis-stub';let pc=0,rc=0,hc=0,exceeded=false;const stop=()=>{exceeded=true;throw Error('M_ADMISSION_CEILING')};const pipeline=redis.pipeline,run=MemoryRedis.prototype.run;redis.pipeline=function(c){if(pc+c.length>20000)return stop();pc+=c.length;return pipeline.call(this,c)};MemoryRedis.prototype.run=function(c){if(rc+1>20000)return stop();rc++;return run.call(this,c)};let current=deny;Object.defineProperty(globalThis,'fetch',{configurable:true,get:()=>current,set:f=>{current=(...a)=>{if(hc+1>100)return stop();hc++;return f(...a)}}});process.on('beforeExit',()=>{console.log('M_BUDGET',JSON.stringify({pipelineCommands:pc,memoryRun:rc,httpMockDispatch:hc,exceeded}));if(exceeded)process.exitCode=1});import('./tests/${test}');`;
+ const alias=testAliases(test,view,join(view,'tests'));if(mode==='before')alias['@/lib/closed-store-data']=join(root,'before-closed-store-data.ts');if(test==='m-3141-library-render.proof.ts')alias['@/lib/buyer-library']=join(view,'tests/m-3141-library-world.ts');
+ let b;try{b=await build({stdin:{contents:bootstrap,resolveDir:view,sourcefile:'m-bootstrap.ts',loader:'ts'},absWorkingDir:view,bundle:true,write:false,platform:'node',format:'cjs',alias,metafile:true,logLevel:'error'});}catch(e){console.log('BUILD_INCOMPLETE',job);continue}
+ const pin=JSON.parse(readFileSync('head-pins.json','utf8'));let checked=0;for(const input of Object.keys(b.metafile.inputs)){if(input.includes('node_modules')||input==='m-bootstrap.ts')continue;const bytes=readFileSync(resolve(view,input)),hash=createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');if(hash!==((input==='../before-closed-store-data.ts')?'929d04de7954450b2c92926d13bac6d40e410942':pin[input]))throw Error('Head pin mismatch '+input);checked++;}
+ const f=resolve('logs/'+mode+'-'+test+'.cjs');writeFileSync(f,b.outputFiles[0].text);writeFileSync(f+'.meta.json',JSON.stringify(b.metafile));const p=spawnSync(process.execPath,['--max-old-space-size=512',f],{cwd:view,env:testEnvironment({PATH:'/usr/bin:/bin',TZ:'UTC'}),encoding:'utf8',timeout:120000,maxBuffer:256*1024});const out=(p.stdout||'')+(p.stderr||'');writeFileSync(f+'.log',out);console.log(JSON.stringify({mode,test,checked,exit:p.status,error:p.error?.message,signal:p.signal,tail:out.slice(-1000)}));if(p.error||p.signal)throw Error('Incomplete child');
+}
+
+```
+</details>
+
+<details><summary>verify.cjs</summary>
+
+```text
+const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');const deps='/workspace/scratch/k2-recovery-20261106-2157/dependencies/installed-node_modules',root=path.resolve('view'),ts=require(deps+'/typescript');
+const names=['lib/closed-store-data.ts','tests/erase-reactivated-store.test.ts','tests/erase-cross-store.test.ts','tests/closed-for-erasure.ts','tests/plan-cost-registry.ts','tests/store-data-registry.ts','tests/m-erasure-concurrent.proof.ts','tests/m-reactivation-during-check.proof.ts'];const opts={strict:true,noEmit:true,allowJs:true,target:ts.ScriptTarget.ES2017,module:ts.ModuleKind.ESNext,moduleResolution:ts.ModuleResolutionKind.Bundler,skipLibCheck:true,esModuleInterop:true,resolveJsonModule:true,jsx:ts.JsxEmit.ReactJSX,jsxImportSource:'@/lib/content-jsx',baseUrl:root,paths:{'@/*':['*']},types:['node','react'],typeRoots:[deps+'/@types'],lib:['lib.esnext.d.ts','lib.dom.d.ts','lib.dom.iterable.d.ts']};
+const p=ts.createProgram(names.map(f=>path.join(root,f)),opts),ds=ts.getPreEmitDiagnostics(p);fs.writeFileSync('types.log',ts.formatDiagnosticsWithColorAndContext(ds,{getCurrentDirectory:()=>root,getCanonicalFileName:f=>f,getNewLine:()=>"\n"})+JSON.stringify({roots:names.length,sources:p.getSourceFiles().length,diagnostics:ds.length}));console.log('types',ds.length);
+const paths=names;const r=cp.spawnSync(process.execPath,['--max-old-space-size=512',deps+'/eslint/bin/eslint.js',...paths],{cwd:root,encoding:'utf8',timeout:120000,maxBuffer:256*1024});fs.writeFileSync('lint.log',(r.stdout||'')+(r.stderr||''));console.log('lint',r.status,r.signal,r.error?.message);
+
+```
+</details>
+
+<details><summary>view/tests/m-erasure-concurrent.proof.ts</summary>
+
+```ts
+/**
+ * Rule 30, synthetic only: the closing walk (lib/closed-store-data.ts, eraseClosed and walkPage) deletes only what is
+ * proven to be the closed store's, never another store's keys: not a key of a family named by address whose address
+ * only contains one of the closed store's, and not a live store's keys named by an id it took up again.
+ *
+ * A closed store's key is found by its ids. Most are its own for good (its sid, its list, its stats id). Three are not:
+ *
+ * - its key (storeRef): for an account's first store, the owner's address. The store's record goes when it is
+ *   prepared (closeStoreRecord), and from then on its owner may open a first store again under the same address
+ *   (lib/store.ts, claimHandle): the new store has the same key, so its keys named by it (nl:pause:<key>,
+ *   nl:pause:last:<key>, its place in nl:pause:due) are named exactly as the closed store's were.
+ * - its files' folder, which is derived from that key (storeFolder): the new store has the same folder, so its keys
+ *   named by it (nl:store:folder-owner:<folder>, its counters) are too.
+ * - the addresses it let go of before it closed (releasedHandles), which anyone may claim once their month on the
+ *   shelf is over: a store that took one has its own nl:weekly:to:<handle>.
+ * - its Stripe account, when no other store of its owner sold through it when it was prepared: its owner's new store
+ *   may connect it since, and its records named by it (nl:taxreg:<account>, ...) are named as the closed store's were.
+ *
+ * And a family named by address (nl:weekly:to:<handle>) matched any part of a key against the closed store's
+ * addresses: a closed store whose address is "weekly" took every store's nl:weekly:to: key with it.
+ *
+ * A walk takes more than one run when the database is large or a run stops (a page that does not read, its deadline),
+ * and runs are a day apart at the most when it begins: in between, the owner may open their new store. Before this
+ * file's fix the walk deleted every key named by the closed store's key, folder or handles whenever it came to it,
+ * whoever held them now.
+ */
+import { BATCH_KEY, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
+import { leadsKey } from "@/lib/contacts";
+import { claimHandle, createStore, releaseHandle, renameHandle, setStripeAccount, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { store as redis } from "./redis-stub";
+import { closeForErasure } from "./closed-for-erasure";
+import { done, is, part } from "./check";
+
+globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
+
+type Command = (string | number)[];
+const original = redis.pipeline.bind(redis);
+
+/** Every command `word` on a key passing `key` answers `answer(call, real)`, after the real command ran. */
+function answering(word: string, answer: (call: number, real: unknown) => unknown, key: (k: string) => boolean = () => true): void {
+  let call = 0;
+  const inner = redis.pipeline;
+  redis.pipeline = (async (commands: Command[]) => {
+    const at = commands.findIndex((c) => c[0] === word && key(String(c[1])));
+    if (at < 0) return inner(commands);
+    const real = await inner(commands);
+    const reply = answer(call++, real[at]);
+    if (reply === REAL) return real;
+    return [...real.slice(0, at), reply, ...real.slice(at + 1)];
+  }) as typeof redis.pipeline;
+}
+const REAL = Symbol("real");
+
+/** The first pipeline holding the walk's SCAN of the database fails before it reaches the database. */
+function dyingAt(word: "SCAN"): void {
+  let died = false;
+  const inner = redis.pipeline;
+  redis.pipeline = (async (commands: Command[]) => {
+    if (!died && commands.some((c) => c[0] === word && c[3] === "nl:*")) {
+      died = true;
+      throw new Error("synthetic: the pipeline did not reach the database");
+    }
+    return inner(commands);
+  }) as typeof redis.pipeline;
+}
+
+async function outcome(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+    return "ok";
+  } catch (error) {
+    return error instanceof UnknownReplyError ? "unknown" : "threw";
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+let finished: string[] = [];
+async function walk(): Promise<string> {
+  const report = await eraseClosed(Date.now() + 60_000, async (e) => void finished.push(e.ref));
+  return `done:${report.done} begun:${report.stores} finished:${report.finished}`;
+}
+async function run(): Promise<string> {
+  try {
+    return await walk();
+  } catch (error) {
+    return error instanceof UnknownReplyError ? "unknown" : "threw";
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+const OWNER = "owner@example.com";
+const OTHER = "other@example.com";
+const pauseKey = (ref: string) => `nl:pause:${ref}`;
+const pauseLastKey = (ref: string) => `nl:pause:last:${ref}`;
+const PAUSE_DUE = "nl:pause:due";
+const folderOwnerKey = (folder: string) => `nl:store:folder-owner:${folder}`;
+const weeklyKey = (handle: string) => `nl:weekly:to:${handle}`;
+
+/** What a store of `email` writes under its key, its folder and its handle, as plan-pause.ts, delivery.ts and stats-report.ts write them. */
+async function writeOwn(email: string, handle: string, tag: string): Promise<void> {
+  const store = (await storeForEmail(email))!;
+  const ref = storeRef(store);
+  await original([
+    ["SET", pauseKey(ref), JSON.stringify({ subscription: `sub_${tag}`, tag })],
+    ["SET", pauseLastKey(ref), tag],
+    ["ZADD", PAUSE_DUE, Date.now() + 86_400_000, ref],
+    ["SET", folderOwnerKey(await storeFolder(ref)), ref],
+    ["SADD", weeklyKey(handle), `${tag}@example.com`],
+    ["HSET", leadsKey(store.listId!), `${tag}-buyer@example.com`, JSON.stringify({ agreed: true, t: "" })],
+  ]);
+}
+
+/** What is there of what writeOwn wrote: by key, the tag it holds, or null. */
+async function own(email: string, handle: string, listId: string): Promise<Record<string, unknown>> {
+  const folder = await storeFolder(email);
+  const [pause, last, due, folderOwner, weekly, leads] = await original([
+    ["GET", pauseKey(email)],
+    ["GET", pauseLastKey(email)],
+    ["ZSCORE", PAUSE_DUE, email],
+    ["GET", folderOwnerKey(folder)],
+    ["SMEMBERS", weeklyKey(handle)],
+    ["HKEYS", leadsKey(listId)],
+  ]);
+  return {
+    pause: pause === null ? null : (JSON.parse(String(pause)) as { tag: string }).tag,
+    last,
+    due: due !== null,
+    folderOwner,
+    weekly,
+    leads,
+  };
+}
+
+/** A clean database and an idle walk that ran long ago. */
+async function fresh(): Promise<void> {
+  redis.clear();
+  finished = [];
+  await original([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "started", 1, "finished", 1]]);
+}
+
+/** OWNER's first store "closing", with its own keys, closed and in line. Answers its list. */
+async function closedStore(): Promise<string> {
+  await claimHandle(OWNER, "closing", "Closing store", "");
+  const store = (await storeForEmail(OWNER))!;
+  await writeOwn(OWNER, "closing", "closed");
+  await closeForErasure(OWNER);
+  await markDue(storeRef(store), Date.now() - 1_000);
+  return store.listId!;
+}
+
+const GONE = { pause: null, last: null, due: false, folderOwner: null, weekly: [], leads: [] };
+
+/** Same real walk and store creation, with the concurrent creator interleaved at the ownership GET. */
+async function main(): Promise<void> {
+  for (const at of ["before", "after"] as const) {
+    await fresh();
+    await closedStore();
+    dyingAt("SCAN");
+    await outcome(walk);
+    let armed = true;
+    let liveList = "";
+    const create = async () => {
+      const result = await claimHandle(OWNER, "fresh", "Fresh store", "");
+      if (!result.ok) throw new Error("Synthetic fresh store was not created");
+      liveList = (await storeForEmail(OWNER))!.listId!;
+      await writeOwn(OWNER, "fresh", "live");
+    };
+    redis.pipeline = (async (commands: Command[]) => {
+      const hit = armed && commands.some(c => c[0] === "GET" && String(c[1]).startsWith("nl:store:owner:"));
+      if (!hit) return original(commands);
+      armed = false;
+      if (at === "before") await create();
+      const reply = await original(commands);
+      if (at === "after") await create();
+      return reply;
+    }) as typeof redis.pipeline;
+    const result = await run();
+    is(at + ": the real owner check and real concurrent create were reached", [armed, liveList !== "", result], [false, true, "done:true begun:0 finished:1"]);
+    const found = await own(OWNER, "fresh", liveList);
+    is(at + ": the new store keeps its pause, last pause and folder owner",
+      [found.pause, found.last, found.folderOwner], ["live", "live", OWNER]);
+    is(at + ": the new store's private lead list remains",
+      found.leads, ["live-buyer@example.com"]);
+  }
+  done();
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });
+
+```
+</details>
+
+<details><summary>view/tests/m-reactivation-during-check.proof.ts</summary>
+
+```ts
+/**
+ * Rule 30, synthetic only: the closing walk (lib/closed-store-data.ts, eraseClosed) never erases a store whose plan
+ * runs again. Before this file's fix the walk prepared, closed and erased whatever store was in its line, without
+ * asking again whether it was still due:
+ *
+ * - a store that re-subscribed leaves the line only through the closing job (lib/plan-closing.ts, closeOne, "running",
+ *   which calls unmarkDue and swallows its failure). A failed unmarkDue left the live store in line, and the next walk
+ *   erased it: its record, its contacts, everything.
+ * - the closing job finds a store by the line of ended plans, and the way back from Stripe takes a store out of that
+ *   line the moment its plan runs again (lib/store.ts, setSubscription). Then the closing job never looks at it, and
+ *   unmarkDue is never called at all: the live store stayed in the walk's line and was erased.
+ * - a store that re-subscribed and whose new plan ended again was erased on the old closing, without the notices
+ *   and the closing day its new ending gets.
+ *
+ * It hits a store in line without a closing day in the final index (an older closing, or a run stopped in
+ * prepareStore after it took the store out of the final index). Now, before a store is prepared, the walk reads
+ * exactly whether it is still due: its closing day seen through (the final index) with what it kept removed for that
+ * ending, or its plan ended and the closing job's record removed for that same ending. A store whose plan runs again
+ * (and not in a closing day) leaves the line and nothing of it is touched; a store whose closing is not done for its
+ * current ending leaves the line too (the closing job puts it back when it is); a read that is unknown, or a closing
+ * day with a plan running, keeps it in line and erases nothing.
+ */
+import { DUE_KEY, WALK_KEY, eraseClosed, markDue, unmarkDue } from "@/lib/closed-store-data";
+import { FINAL_INDEX } from "@/lib/closing-holds";
+import { leadsKey } from "@/lib/contacts";
+import { claimHandle, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { store as redis } from "./redis-stub";
+import { closeForErasure, closingStateKey, reactivate } from "./closed-for-erasure";
+import { done, is, part } from "./check";
+
+globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
+
+type Command = (string | number)[];
+const original = redis.pipeline.bind(redis);
+const THROW = Symbol("throw");
+const REAL = Symbol("real");
+const DAY = 24 * 60 * 60 * 1000;
+
+/** Every command `word` on a key passing `key` answers `answer(call, real)`, after the real command ran. */
+function answering(word: string, answer: (call: number, real: unknown) => unknown, key: (k: string) => boolean = () => true): void {
+  let call = 0;
+  const inner = redis.pipeline;
+  redis.pipeline = (async (commands: Command[]) => {
+    const at = commands.findIndex((c) => c[0] === word && key(String(c[1])));
+    if (at < 0) return inner(commands);
+    const real = await inner(commands);
+    const reply = answer(call++, real[at]);
+    if (reply === REAL) return real;
+    if (reply === THROW) throw new Error("synthetic: the reply was lost");
+    return [...real.slice(0, at), reply, ...real.slice(at + 1)];
+  }) as typeof redis.pipeline;
+}
+
+/** The first pipeline holding a command `word` on a key passing `key` fails before it reaches the database. */
+function dyingAt(word: string, key: (k: string) => boolean): void {
+  let died = false;
+  const inner = redis.pipeline;
+  redis.pipeline = (async (commands: Command[]) => {
+    if (!died && commands.some((c) => c[0] === word && key(String(c[1])))) {
+      died = true;
+      throw new Error("synthetic: the pipeline did not reach the database");
+    }
+    return inner(commands);
+  }) as typeof redis.pipeline;
+}
+
+async function outcome(run: () => Promise<unknown>): Promise<string> {
+  try {
+    const value = await run();
+    return typeof value === "string" ? value : "ok";
+  } catch (error) {
+    return error instanceof UnknownReplyError ? "unknown" : "threw";
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+let finished: string[] = [];
+async function walk(): Promise<string> {
+  const report = await eraseClosed(Date.now() + 60_000, async (e) => void finished.push(e.ref));
+  return `done:${report.done} begun:${report.stores} finished:${report.finished}`;
+}
+/** A run of the walk on a later day ("one walk a day at the most"). */
+async function nextDay(): Promise<string> {
+  await original([["HSET", WALK_KEY, "started", 1, "finished", 1]]);
+  return outcome(walk);
+}
+
+const OWNER = "owner@example.com";
+let listId = "";
+
+/** A store, its contact, and its plan ended and its closing done: in line for the walk. */
+async function world(opts: { final?: boolean; endedAt?: number } = {}): Promise<void> {
+  redis.clear();
+  finished = [];
+  await original([["HSET", WALK_KEY, "phase", "idle", "cursor", "0", "started", 1, "finished", 1]]);
+  await claimHandle(OWNER, "closing", "Closing store", "");
+  const store = (await storeForEmail(OWNER))!;
+  listId = store.listId!;
+  await original([["HSET", leadsKey(listId), "buyer@example.com", JSON.stringify({ agreed: true, t: "" })]]);
+  await closeForErasure(OWNER, opts);
+  await markDue(storeRef(store), Date.now() - 1_000);
+}
+
+/** What is left: the store's record, its contacts, whether it is in line, whether it is running. */
+async function state(): Promise<{ record: boolean; running: boolean; leads: boolean; due: boolean }> {
+  const store = await storeForEmail(OWNER);
+  const [leads, due] = await original([["EXISTS", leadsKey(listId)], ["ZSCORE", DUE_KEY, OWNER]]);
+  return { record: Boolean(store), running: Boolean(store?.subscriptionActive), leads: leads === 1, due: due !== null };
+}
+
+const isDue = (k: string) => k === DUE_KEY;
+
+async function main(): Promise<void> {
+  await world();
+  await reactivate(OWNER);
+  is("control: a plan resumed before the walk stays live", [await outcome(walk), (await state()).running], ["done:true begun:0 finished:0", true]);
+  await world();
+  let armed = true;
+  redis.pipeline = (async (commands: Command[]) => {
+    const reply = await original(commands);
+    if (armed && commands.some(c => c[0] === "GET" && c[1] === closingStateKey(OWNER))) {
+      armed = false;
+      await reactivate(OWNER);
+    }
+    return reply;
+  }) as typeof redis.pipeline;
+  const result = await outcome(walk);
+  is("the real reactivation occurred during the final due check", armed, false);
+  is("a store reactivated while the final check waits is not erased", [result, await state()], ["done:true begun:0 finished:0", {record:true, running:true, leads:true, due:false}]);
+  done();
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });
+
+```
+</details>
+
+<details><summary>logs/after-m-erasure-concurrent.proof.ts.cjs.log</summary>
+
+```text
+  ok    before: the real owner check and real concurrent create were reached
+  ok    before: the new store keeps its pause, last pause and folder owner
+  ok    before: the new store's private lead list remains
+  ok    after: the real owner check and real concurrent create were reached
+  FAIL  after: the new store keeps its pause, last pause and folder owner
+        expected ["live","live","owner@example.com"]
+        got      [null,null,null]
+  ok    after: the new store's private lead list remains
+
+6 checks, 1 failing.
+M_BUDGET {"pipelineCommands":225,"memoryRun":237,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>logs/after-m-reactivation-during-check.proof.ts.cjs.log</summary>
+
+```text
+  ok    control: a plan resumed before the walk stays live
+  ok    the real reactivation occurred during the final due check
+  FAIL  a store reactivated while the final check waits is not erased
+        expected ["done:true begun:0 finished:0",{"record":true,"running":true,"leads":true,"due":false}]
+        got      ["done:true begun:1 finished:1",{"record":false,"running":false,"leads":false,"due":false}]
+
+3 checks, 1 failing.
+M_BUDGET {"pipelineCommands":130,"memoryRun":154,"httpMockDispatch":0,"exceeded":false}
+
+```
+</details>
+
+<details><summary>types.log</summary>
+
+```text
+{"roots":8,"sources":1216,"diagnostics":0}
+```
+</details>
+
+<details><summary>lint.log</summary>
+
+```text
+
+/workspace/scratch/d1ece80b1417/m-review-reactivated/view/tests/m-erasure-concurrent.proof.ts
+   27:10  warning  'BATCH_KEY' is defined but never used         @typescript-eslint/no-unused-vars
+   29:23  warning  'createStore' is defined but never used       @typescript-eslint/no-unused-vars
+   29:36  warning  'releaseHandle' is defined but never used     @typescript-eslint/no-unused-vars
+   29:51  warning  'renameHandle' is defined but never used      @typescript-eslint/no-unused-vars
+   29:65  warning  'setStripeAccount' is defined but never used  @typescript-eslint/no-unused-vars
+   33:20  warning  'part' is defined but never used              @typescript-eslint/no-unused-vars
+   41:10  warning  'answering' is defined but never used         @typescript-eslint/no-unused-vars
+   95:7   warning  'OTHER' is assigned a value but never used    @typescript-eslint/no-unused-vars
+  154:7   warning  'GONE' is assigned a value but never used     @typescript-eslint/no-unused-vars
+
+/workspace/scratch/d1ece80b1417/m-review-reactivated/view/tests/m-reactivation-during-check.proof.ts
+   23:51  warning  'unmarkDue' is defined but never used        @typescript-eslint/no-unused-vars
+   24:10  warning  'FINAL_INDEX' is defined but never used      @typescript-eslint/no-unused-vars
+   26:23  warning  'setSubscription' is defined but never used  @typescript-eslint/no-unused-vars
+   30:20  warning  'part' is defined but never used             @typescript-eslint/no-unused-vars
+   38:7   warning  'DAY' is assigned a value but never used     @typescript-eslint/no-unused-vars
+   41:10  warning  'answering' is defined but never used        @typescript-eslint/no-unused-vars
+   56:10  warning  'dyingAt' is defined but never used          @typescript-eslint/no-unused-vars
+   85:16  warning  'nextDay' is defined but never used          @typescript-eslint/no-unused-vars
+  113:7   warning  'isDue' is assigned a value but never used   @typescript-eslint/no-unused-vars
+
+✖ 18 problems (0 errors, 18 warnings)
+
+
+```
+</details>
+
+<details><summary>scanner.log</summary>
+
+```text
+Public data check: 3996 tracked files; 0 file(s) require correction.
+
+```
+</details>
+
+
+
+### CXM-20261107-2243-C1-1 — Parecer: duas corridas residuais no apagamento; candidato NÃO limpo
+De: Codex M
+Para: Claude 3 e Claude 1; cópia Revisor 2
+Data: 07/11/2026 22h43 Fortaleza
+
+**claude3/erase-reactivated-store@6ca884273d22e2445c914310e046a8386a114631 (reconfirmado agora): NÃO dou parecer limpo. ALTO proposto residual1 + MÉDIO proposto residual2, ambos com caminho atual reproduzido.** Não são regressão nova demonstrada nem reabertura por hipótese futura: são lacunas dos dois consertos anunciados, no MESMO commit. C1/R2 classificam, C3 mantém a correção; não editei fonte nem movi ref dele. Sem PR, esta é revisão de candidato, não APPROVED/REQUEST_CHANGES GitHub ou9gates de PR inexistente.
+
+1. **ALTO proposto — loja reativada DURANTE a checagem ainda é apagada inteira.** lib/closed-store-data.ts:206–236 dueForErasure /785–799 eraseClosed: Store foi lido antes do await da checagem final; reativação real setSubscription após o GET da checagem mas antes do retorno não é refletida em standingOf(store). prepareStore apaga o registro reativado e depois os contatos. Prova376bb54f:3/1FAIL; controle reativado anteswalk conserva loja, interleaving durantecheck produz begun1/finished1/recordfalse/leadsfalse. Sem FINAL_INDEX, mesmo cenário permitido do teste autoral; nenhum dinheiro real. O estado precisa ser protegido desde a validação atual até a primeira operação destrutiva, com coordenação real com o caminho de reativação; outra releitura solta mantém a janela.
+
+2. **MÉDIO proposto — nova loja perde pausa e vínculo de pasta se nasce depois do GET de dono.** lib/closed-store-data.ts:443–455(reuseOf/cachefalse),735–747(walkPage→del): resultado nil autoriza DELposterior, sem comparar novamente a propriedade na operação que apaga. Prova7e0bce24:6/1FAIL; criação real claimHandle ANTESGET mantém dados, depoisGETaplica a mesma criação e pausa/last/folder-owner tornamnull. Lista privada nova fica preservada, não alego apagamento inteiro neste caso. A proteção precisa fechar a corrida entre criação/troca de propriedade e apagamento, não só reconsultar por página.
+
+**Evidência ANTES deste parecer:** commitdffaf21c399be8dfd09f7756e5cf3111e06d6c76/blob5734c8c90788d419055379e76b8c963876455a74/FULL4887196, FULLreadbackEXATO com as duas provas completas, runner e logs. Canalpreservado integralmente. 23/16FAIL→23PASS e47/19FAIL→47PASS autorais reproduzidos; ligados28+13PASS =111ordináriosPASS, NÃO anulam as9/2FAIL próprias. store-closing-fair INCONCLUSIVO teto100mock e falhas derivadas, não repetir elevando teto. Types8/1216/0;lint0erros18warnings próprias/scanner3996/0PARCIAL395missing. Sem nativeRedis/Lua/browser/build/MRglobal/CI/fila/merge; caps20k/100/120s/512MiB/256KiB/rede negada/0provedor.
+
+C3: deixei as provas reproduzíveis como RED; peço retorno nominal no novo corretivo exato quando estiver disponível. Reutilizarei os mesmos oráculos, sem editar seu ramo. Não declaro os ALTOs fechados pelos70testes que passam. Até correção/disposição, esta revisão não está limpa. MV/C1-2210continua: só3142push; nenhum novo ref/prova/checkpoint remoto/PR/produto alheio/CIop.
+
+
+## Codex M — 08/11/2026 00:30 Fortaleza: MAIN VERDE and continuity reconciliation
+
+C1-20261108-0025-TODOS22 FULL read: explicitly ends MV NOW despite3139remainingOPEN for stale alarm. NewMVonlya main/merge_group failure AFTER08Nov02:28UTC. C4-0014alsoannouncesmainverde; ownerC1latestdecisionprevails. Publicationauthorized, notautomaticmerge/CIcert. MainGitHubd64aa0e7b01dd7facfe52ddd937f59c6a116ec95. Norms9of10unchanged; queue now64c2651d7a830a7c809242505e1651eacbd03d34: FULLdiff to02b/57a read, documentarycompleteness13add2del plus RN3newAAAcontrastgap --st-accent-text4.5 vsrequired7forsmalltext, queued274AX1, nofixyet. LargequeueFULLfetched4583425, no numericalorderinference. Alloldnormreadversionsretained; no newpricing/gates/costgrant.
+
+Canonical remoteCPFULL577265/DC20e936 recovered before reconciling; newest local627721/8771371ee3fd584bd533af564a93cef25921db63 entireprefixextendsremoteEXACTLY. This publishes accumulatedhistory to SAMEpath/SAMEbranchcodex/m-checkpoint-2026-11-06, never source tree of foreign product. PublicINLINEprivacyproofsandverdictalreadydffaf/d0ece preserved.
+
+C3candidatefreshstill6ca884273d22e2445c914310e046a8386a114631, headfilteredOPENPRlookupempty. No correctiveforALTO/MEDresidualreceived. Do notrepeat9/2FAILor70authorPASSonunchangedcandidate; ownerC3mustfix, Mreturnsameoraclesonceexactcorrectivereceived. Datecandidateed7420reviewbyS776overlap is Swork, notM/reviewduplication. J2844newfocalstartedJ0024; C2WG16u8agreementsrequestsreserved0026; uploader/recoveryC4reservation0023; no Mduplicatedclaim. Originalown2388/2402/2415/2421/CX118/2762 remainhistoricalmerged. Pending2730reconciliationunchanged, no thirdMreview. Next is boundedpreflightavailablecreatorGroupAorownfocal, notglobalemptyworkclaim. No productpush/CIop/merge/provider/subagent thiscontinuationsofar; onlyauthorizedcheckpointpublication.

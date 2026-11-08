@@ -15,7 +15,10 @@
  * answers null and applyMemberDiscount changes nothing ("stripe"), which the
  * route already says as "Your Stripe account could not be read just now".
  * Healthy controls: a whole list decides as before, and a confirmed empty list
- * is still "nobody".
+ * is still "nobody". The read is bounded by one budget of Stripe pages for the
+ * whole find (the base's worst: the customers' page and one a customer at the
+ * most customers read), counted here call by call, so a larger bound or a
+ * smaller page fails; past it the answer is unknown, as any cut list is.
  */
 import { claimHandle, setStripeAccount, storeForEmail } from "@/lib/store";
 import { applyMemberDiscount, memberSubs } from "@/lib/member-discount";
@@ -24,6 +27,9 @@ import { done, is, part } from "./check";
 process.env.STRIPE_SECRET_KEY = "sk_test_member_lists_cut_short";
 
 const posted: string[] = [];
+/** Every list page asked of Stripe (customers and memberships), and the page size each membership page asked. */
+let gets = 0;
+const sizes = new Set<string>();
 /** Answers for /customers, and for /subscriptions by the `starting_after` asked (the first page under ""). */
 let customersPage: unknown = { object: "list", data: [], has_more: false };
 let subscriptionPages: Record<string, unknown> = {};
@@ -40,8 +46,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   const path = url.pathname.replace(/^\/v1/, "");
-  if (path === "/customers") return answer(customersPage);
+  if (path === "/customers") {
+    gets += 1;
+    return answer(customersPage);
+  }
   if (path === "/subscriptions") {
+    gets += 1;
+    sizes.add(url.searchParams.get("limit") ?? "");
     const page = subscriptionPages[url.searchParams.get("starting_after") ?? ""];
     return page === undefined ? answer({ error: { message: "no such page" } }, 404) : answer(page);
   }
@@ -94,6 +105,35 @@ async function main(): Promise<void> {
       after = rows[rows.length - 1].id;
     }
     is("more memberships than the bound of pages: Stripe could not be read, nothing is changed", [await memberSubs(store, "member@example.com"), await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), posted.length], [null, { ok: false, reason: "stripe" }, 0]);
+
+    part("Member discount: one find waits on no more Stripe pages than the base's worst (21)");
+    const twenty = { object: "list", data: Array.from({ length: 20 }, (_, i) => ({ id: `cus_crowd${String(i).padStart(4, "0")}` })), has_more: false };
+    customersPage = twenty;
+    subscriptionPages = { "": { object: "list", data: [membership("sub_one0000001", { status: "canceled" })], has_more: false } };
+    gets = 0;
+    sizes.clear();
+    is("twenty customers of one page each: read whole", await memberSubs(store, "member@example.com"), []);
+    is("in exactly 21 pages", gets, 21);
+    is("memberships are read 100 to a page", [...sizes], ["100"]);
+    // Twenty customers of five pages each: 101 pages at five a customer, so past the budget the answer is unknown.
+    subscriptionPages = {};
+    let chain = "";
+    for (let page = 0; page < 5; page += 1) {
+      const rows = Array.from({ length: 100 }, (_, i) => membership(`sub_c${String(page).padStart(2, "0")}x${String(i).padStart(4, "0")}`, { status: "canceled" }));
+      subscriptionPages[chain] = { object: "list", data: rows, has_more: page < 4 };
+      chain = rows[rows.length - 1].id;
+    }
+    posted.length = 0;
+    gets = 0;
+    is("twenty customers of five pages each: Stripe could not be read whole", await memberSubs(store, "member@example.com"), null);
+    is("and the find stopped within 21 pages", gets <= 21, true);
+    gets = 0;
+    is("apply changes nothing on it", [await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), posted.length], [{ ok: false, reason: "stripe" }, 0]);
+    is("and its read stopped within 21 pages as well", gets <= 21, true);
+    customersPage = { object: "list", data: [{ id: "cus_member0001" }], has_more: false };
+    gets = 0;
+    is("one customer of five pages: within the budget, read whole", await memberSubs(store, "member@example.com"), []);
+    is("in 6 pages", gets, 6);
 
     for (const [name, page] of [
       ["no list at all", { object: "list" }],

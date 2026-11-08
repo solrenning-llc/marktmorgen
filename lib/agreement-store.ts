@@ -312,11 +312,37 @@ export async function readVersionExact(a: Pick<Agreement, "id" | "versions">, n:
   }
 }
 
-/** Writes the record back as it now is, for the rest of the days it is kept. Versions are never written here. */
-export async function saveAgreement(a: Agreement, now = Date.now()): Promise<void> {
-  // Read exactly (CX-123 rule 24, Claude 3 on #2723): a save not answered with OK is not a save.
-  const saved = repliesFor(await redisPipeline([["SET", recordKey(a.id), JSON.stringify(a), "EX", keepSeconds(a, now)]]), 1);
-  if (!saved || saved[0] !== "OK") throw new UnknownReplyError("saving an agreement");
+/**
+ * The record written back only while the agreement's lock still holds this writer's token, with its expiry, in one
+ * step (Codex M on #3151): a signature or a new version held up past its lock (a slow network, a paused function)
+ * cannot land a stale copy after the lock ran out, in particular after a person's erasure took the lock and deleted
+ * the agreement. Modeled step for step in lib/redis-memory.ts.
+ */
+export const AGREEMENT_SAVE = `-- marktmorgen:agreement-save:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+return 1`;
+
+/** The agreement's lock was no longer this writer's when it wrote: nothing was written. */
+export class AgreementLockLostError extends Error {
+  constructor() {
+    super("the agreement's lock ran out before the write: nothing written");
+    this.name = "AgreementLockLostError";
+  }
+}
+
+/**
+ * Writes the record back as it now is, for the rest of the days it is kept, only while `held` (the agreement's lock)
+ * is still this writer's. Versions are never written here. Read exactly (CX-123 rule 24, Claude 3 on #2723): 1 is
+ * written; 0 is the lock lost, nothing written (AgreementLockLostError); anything else is unknown (UnknownReplyError).
+ */
+export async function saveAgreement(a: Agreement, held: Held, now = Date.now()): Promise<void> {
+  const saved = repliesFor(
+    await redisPipeline([["EVAL", AGREEMENT_SAVE, 2, held.key, recordKey(a.id), held.token, JSON.stringify(a), keepSeconds(a, now)]]),
+    1,
+  );
+  if (saved?.[0] === 0) throw new AgreementLockLostError();
+  if (!saved || saved[0] !== 1) throw new UnknownReplyError("saving an agreement");
 }
 
 /** The agreement's lock, taken at once or not at all: null when somebody else holds it. */
@@ -339,12 +365,12 @@ const letGo = (held: Held) => releaseLock(held);
  */
 export async function changeAgreement(store: Pick<Store, "sid">, id: string, change: (current: Agreement) => Agreement | null, now = Date.now()): Promise<Agreement | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
-  return withLock(lockKey(id), 10, 5_000, async () => {
+  return withLock(lockKey(id), 10, 5_000, async (held) => {
     const current = await agreementOf(store, id);
     if (!current) return null;
     const next = change(current);
     if (!next) return current;
-    await saveAgreement(next, now);
+    await saveAgreement(next, held, now);
     return next;
   });
 }
@@ -383,7 +409,7 @@ export async function reviseAgreement(store: Store, id: string, draft: Agreement
       failed: "",
     };
     try {
-      await saveAgreement(next, now);
+      await saveAgreement(next, held, now);
     } catch (error) {
       // The save's answer may be lost while the save landed (Codex CX1 on #2723): the record is read back exactly
       // first. Naming this version, the change went through; known not to name it, the text is let go (only while it
@@ -431,7 +457,7 @@ export async function signAgreement(store: Store, id: string, input: SignInput, 
     const signature: Signature = { name, at: now, ipHash: signerIpCode(a.id, input.ip), consent: words.consent, consentVersion: CONSENT_VERSION, sha256: version.sha256 };
     const next: Agreement = { ...a, versions: a.versions.map((m) => (m.n === latest.n ? { ...m, signature } : m)), closedAt: now };
     try {
-      await saveAgreement(next, now);
+      await saveAgreement(next, held, now);
     } catch (error) {
       // The write may have landed and only its reply been lost (Revisor 1 on #2723): read the record back exactly,
       // and only this very signature on this version counts as signed, so the copies still go out once.
@@ -520,7 +546,7 @@ export async function withdrawAgreement(store: Store, id: string, now = Date.now
     const status = statusOf(a, now);
     if (status !== "open" && status !== "expired") return "not_open";
     const done: Agreement = { ...a, state: "withdrawn", closedAt: now };
-    await saveAgreement(done, now);
+    await saveAgreement(done, held, now);
     return done;
   } finally {
     await letGo(held);

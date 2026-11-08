@@ -629,8 +629,10 @@ const plainRecord = (value: unknown): value is Record<string, unknown> =>
  * Whether a subscription carries its one plan line in its exact shape
  * (CX-123 rule 24): `items.data` a list of exactly one line whose price has a
  * whole positive `unit_amount` and a `recurring.interval` of month or year,
- * agreeing with the price's name when it has one. Anything else says nothing
- * about which plan is paid for, never the lowest plan at $0.
+ * agreeing with the price's name when it has one. A quantity, currency or
+ * interval_count Stripe sends that is not 1, "usd" and 1 is off every plan's
+ * design (ensurePrice and checkout make them so) and is unknown too. Anything
+ * else says nothing about which plan is paid for, never the lowest plan at $0.
  */
 function hasExactPlanLine(subscription: Record<string, unknown>): boolean {
   const items = ownDataField(subscription, "items");
@@ -639,14 +641,18 @@ function hasExactPlanLine(subscription: Record<string, unknown>): boolean {
   if (!Array.isArray(data) || data.length !== 1) return false;
   const line = ownDataField(data, "0");
   if (!plainRecord(line)) return false;
+  // Absent stays as before (older fixtures and replies); present must be the design's.
+  if (Object.hasOwn(line, "quantity") && ownDataField(line, "quantity") !== 1) return false;
   const price = ownDataField(line, "price");
   if (!plainRecord(price)) return false;
+  if (Object.hasOwn(price, "currency") && ownDataField(price, "currency") !== "usd") return false;
   const amount = ownDataField(price, "unit_amount");
   if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) return false;
   const recurring = ownDataField(price, "recurring");
   if (!plainRecord(recurring)) return false;
   const interval = ownDataField(recurring, "interval");
   if (interval !== "month" && interval !== "year") return false;
+  if (Object.hasOwn(recurring, "interval_count") && ownDataField(recurring, "interval_count") !== 1) return false;
   const named = planFromLookupKey(ownDataField(price, "lookup_key"));
   return !named || named.cycle === interval;
 }

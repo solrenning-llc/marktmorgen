@@ -147,7 +147,7 @@ async function main() {
   is("a store with one person's tasks counts nothing beyond its page; 1,000 people count at most AGENDA_UNITS", [agendaReadUnits(1), agendaReadUnits(3), agendaReadUnits(1_000), AGENDA_UNITS], [0, 1, 2, 5]);
   await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio") - 3)]]);
   const tooMany = await countUnits(realStore, 5);
-  is("asking more than are left says how many this needs, how many were left by the figure's own count, and when they come back (round 7, M2)", [tooMany.ok, !tooMany.ok && /^This needs 5 of your studio requests, and only 3 are left\. This opens again (with your next billing month, )?on [A-Z][a-z]+ \d+ \(UTC\)\.$/.test(tooMany.message)], [false, true]);
+  is("asking more than are left says how many this needs, how many were left by the figure's own count, and when they come back (round 7, M2)", [tooMany.ok, !tooMany.ok && /^This needs 5 of your studio requests, and only 3 are left\. This opens again (with your next billing month, )?on [A-Z][a-z]+ \d+(, \d{4})? \(UTC\)\.$/.test(tooMany.message)], [false, true]);
   await redisPipeline([["SET", studioCount()!, String(allowanceFor(realStore, "studio"))]]);
   const none = await countUnits(realStore, 250);
   is("none left, said as such (round 7, L3)", !none.ok && none.message.startsWith("This needs 250 of your studio requests, and none are left. This opens again"), true);

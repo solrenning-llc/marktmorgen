@@ -1,0 +1,788 @@
+
+===== /tmp/p2954-whole-green.log =====
+{"file":"p-review-2954-partial-job-return.test.ts","old":false,"exit":0}
+
+Healthy aged orphan control
+  ok    healthy recovery sends once
+
+Matching id does not prove a readable send
+  ok    partial {"id":"af4ed6c1bd825d6af384a422"} keeps due without sending
+  ok    the underlying job really is absent
+  ok    the held mark is untouched
+  ok    healthy retry recovers the retained reminder once
+  ok    partial {"id":"af4ed6c1bd825d6af384a422","status":12} keeps due without sending
+  ok    the underlying job really is absent
+  ok    the held mark is untouched
+  ok    healthy retry recovers the retained reminder once
+
+9 checks, all passing.
+MemoryRedis dispatches: 102 mock HTTP: 0
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6114:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6144:9)
+    at async runEventQueue ([stdin]:6406:21)
+    at async main ([stdin]:6522:7)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6114:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6144:9)
+    at async runEventQueue ([stdin]:6406:21)
+    at async main ([stdin]:6522:7)
+{"file":"p-review-2954-orphan-return.test.ts","old":false,"exit":0}
+
+Young versus orphaned mark
+  ok    young mark sends nothing and keeps the reminder due
+  ok    after the window the reminder is sent once
+  ok    another sweep does not send twice
+
+Two sweeps see the same orphan
+  ok    both saw the orphan before either compare-delete
+  ok    only one send survives concurrent takeover
+
+Unreadable send evidence cannot mean made
+  ok    unreadable {cut keeps due without sending
+  ok    the underlying job really is absent
+  ok    healthy retry creates the retained reminder once
+  ok    unreadable {"id":"invalid"} keeps due without sending
+  ok    the underlying job really is absent
+  ok    healthy retry creates the retained reminder once
+
+11 checks, all passing.
+MemoryRedis dispatches: 147 mock HTTP: 0
+a live event reminder failed SendNotMadeYetError: an event email's once-only mark is there but its send is not, yet
+    at madeOrTakeOver ([stdin]:6122:61)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6144:9)
+    at async runEventQueue ([stdin]:6406:21)
+    at async main ([stdin]:6510:3)
+a live event reminder failed SendNotMadeYetError: an event email's once-only mark is there but its send is not, yet
+    at madeOrTakeOver ([stdin]:6127:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6144:9)
+    at async runEventQueue ([stdin]:6406:21)
+    at async Promise.all (index 1)
+    at async main ([stdin]:6538:5)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6114:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6144:9)
+    at async runEventQueue ([stdin]:6406:21)
+    at async main ([stdin]:6553:7)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6114:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6144:9)
+    at async runEventQueue ([stdin]:6406:21)
+    at async main ([stdin]:6553:7)
+{"file":"nx-community-mail.test.ts","old":false,"exit":0}
+
+announcement: the send's lock
+  ok    undefined while another run holds it: nothing sent
+  ok    undefined while another run holds it: its lock is left to it
+  ok    undefined while another run holds it: the job is untouched
+  ok    no reply while another run holds it: nothing sent
+  ok    no reply while another run holds it: its lock is left to it
+  ok    no reply while another run holds it: the job is untouched
+  ok    text while another run holds it: nothing sent
+  ok    text while another run holds it: its lock is left to it
+  ok    text while another run holds it: the job is untouched
+  ok    a number while another run holds it: nothing sent
+  ok    a number while another run holds it: its lock is left to it
+  ok    a number while another run holds it: the job is untouched
+  ok    a lock taken whose reply was lost: read back as ours, the send goes once
+  ok    a lock taken whose reply was lost: let go after
+  ok    a lock answered and read back in no known shape: nothing sent this run
+  ok    healthy: the send goes once and the lock is let go
+  ok    held by another run (nil): nothing sent, its lock kept
+
+event: the send's lock
+  ok    undefined while another run holds it: nothing sent
+  ok    undefined while another run holds it: its lock is left to it
+  ok    undefined while another run holds it: the job is untouched
+  ok    no reply while another run holds it: nothing sent
+  ok    no reply while another run holds it: its lock is left to it
+  ok    no reply while another run holds it: the job is untouched
+  ok    text while another run holds it: nothing sent
+  ok    text while another run holds it: its lock is left to it
+  ok    text while another run holds it: the job is untouched
+  ok    a number while another run holds it: nothing sent
+  ok    a number while another run holds it: its lock is left to it
+  ok    a number while another run holds it: the job is untouched
+  ok    a lock taken whose reply was lost: read back as ours, the send goes once
+  ok    a lock taken whose reply was lost: let go after
+  ok    a lock answered and read back in no known shape: nothing sent this run
+  ok    healthy: the send goes once and the lock is let go
+  ok    held by another run (nil): nothing sent, its lock kept
+
+event: the once-only mark of a move or cancellation
+  ok    healthy: the notice is made once
+  ok    healthy: asked again it is taken, nothing made again
+  ok    undefined on a mark already made: the send under way is not started again
+  ok    no reply on a mark already made: the send under way is not started again
+  ok    text on a mark already made: the send under way is not started again
+  ok    a mark written whose reply was lost: read back as ours, the notice is made
+  ok    a mark answered and read back in no known shape: no notice made on it
+  ok    ...and the mark is not left behind as ours, so asking again makes it
+
+event: a reminder due whose mark is unknown stays in line
+  ok    unknown: no reminder made or sent, and it is still due
+  ok    the next run makes it and sends it, once
+
+event: a mark left with no send made does not drop the reminder
+  ok    claim and release unknown: nothing made or sent, still due
+  ok    the next run finds the mark but no send: the reminder stays due, never dropped as made
+  ok    once the mark is old enough to belong to no run still going, it is taken over and the reminder sent once
+  ok    a fresh mark with no send (a run still making it): still due, nothing sent, the mark left to it
+
+event: a failure after the mark is ours keeps the reminder
+  ok    the send's record not written: nothing sent, still due
+  ok    the next run makes it and sends it, once
+
+event: who is coming unknown keeps the reminder
+  ok    unknown readers: nothing made, no mark taken, still due
+  ok    the next run makes it and sends it to both, once
+
+event: a taken mark whose send reads back as something else keeps the reminder
+  ok    cut text: nothing made or sent, still due, the mark untouched
+  ok    cut text: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    an id this code never writes: nothing made or sent, still due, the mark untouched
+  ok    an id this code never writes: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    another send's record: nothing made or sent, still due, the mark untouched
+  ok    another send's record: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    a JSON list: nothing made or sent, still due, the mark untouched
+  ok    a JSON list: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    only this send's id: nothing made or sent, still due, the mark untouched
+  ok    only this send's id: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    this send's id with a status this code never writes: nothing made or sent, still due, the mark untouched
+  ok    this send's id with a status this code never writes: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    this send written down as sent, cut short: nothing made or sent, still due, the mark untouched
+  ok    this send written down as sent, cut short: read again with no send there, the aged mark is taken over and the reminder sent once
+
+announcement: the send's record unknown under the lock
+  ok    unknown record: nothing sent, still in line, the lock let go
+  ok    the next run sends it, once
+
+event: the send's record unknown under the lock
+  ok    unknown record: nothing sent, still in line, the lock let go
+  ok    the next run sends it, once
+
+event: the send's record read back partial under the lock
+  ok    its id alone: nothing sent, still in line, the record as it was, the lock let go
+  ok    its id alone: the next run sends the rest only, once
+  ok    its id with a status this code never writes: nothing sent, still in line, the record as it was, the lock let go
+  ok    its id with a status this code never writes: the next run sends the rest only, once
+  ok    its id, still sending, nothing else: nothing sent, still in line, the record as it was, the lock let go
+  ok    its id, still sending, nothing else: the next run sends the rest only, once
+  ok    half sent, a count missing: nothing sent, still in line, the record as it was, the lock let go
+  ok    half sent, a count missing: the next run sends the rest only, once
+
+78 checks, all passing.
+MemoryRedis dispatches: 691 mock HTTP: 0
+a live event reminder failed UnknownReplyError: Redis answered an event email's once-only mark in an unknown shape
+    at startJob ([stdin]:6296:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6763:15)
+a live event reminder failed UnknownReplyError: Redis answered an event email's once-only mark in an unknown shape
+    at startJob ([stdin]:6296:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6783:16)
+a live event reminder failed SendNotMadeYetError: an event email's once-only mark is there but its send is not, yet
+    at madeOrTakeOver ([stdin]:6269:61)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6786:16)
+a live event reminder failed SendNotMadeYetError: an event email's once-only mark is there but its send is not, yet
+    at madeOrTakeOver ([stdin]:6269:61)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6800:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send in an unknown shape
+    at startJob ([stdin]:6335:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6813:17)
+a live event reminder failed UnknownReplyError: Redis answered who is coming to an event in an unknown shape
+    at rsvpList ([stdin]:2197:15)
+    at startJob ([stdin]:6286:26)
+    at runEventQueue ([stdin]:6556:28)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main ([stdin]:6822:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6261:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6844:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6261:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6844:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6261:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6844:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6261:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6844:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6261:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6844:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6261:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6844:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6261:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6291:9)
+    at async runEventQueue ([stdin]:6556:22)
+    at async main ([stdin]:6844:17)
+{"file":"community-mail-read-evidence.test.ts","old":false,"exit":0}
+
+announcement: unconfirmed reader evidence must preserve progress and retry position
+  ok    missing envelope: no completion or invented progress
+  ok    missing envelope: the list and pending queue survive
+  ok    missing envelope: visible retry note without claiming delivery
+  ok    missing envelope: one bounded recipient read only
+  ok    missing envelope: a confirmed reread resumes the same complete batch
+  ok    extra envelope: no completion or invented progress
+  ok    extra envelope: the list and pending queue survive
+  ok    extra envelope: visible retry note without claiming delivery
+  ok    extra envelope: one bounded recipient read only
+  ok    extra envelope: a confirmed reread resumes the same complete batch
+  ok    null list: no completion or invented progress
+  ok    null list: the list and pending queue survive
+  ok    null list: visible retry note without claiming delivery
+  ok    null list: one bounded recipient read only
+  ok    null list: a confirmed reread resumes the same complete batch
+  ok    empty list with readers still due: no completion or invented progress
+  ok    empty list with readers still due: the list and pending queue survive
+  ok    empty list with readers still due: visible retry note without claiming delivery
+  ok    empty list with readers still due: one bounded recipient read only
+  ok    empty list with readers still due: a confirmed reread resumes the same complete batch
+  ok    truncated list: no completion or invented progress
+  ok    truncated list: the list and pending queue survive
+  ok    truncated list: visible retry note without claiming delivery
+  ok    truncated list: one bounded recipient read only
+  ok    truncated list: a confirmed reread resumes the same complete batch
+  ok    oversized list: no completion or invented progress
+  ok    oversized list: the list and pending queue survive
+  ok    oversized list: visible retry note without claiming delivery
+  ok    oversized list: one bounded recipient read only
+  ok    oversized list: a confirmed reread resumes the same complete batch
+  ok    duplicate readers: no completion or invented progress
+  ok    duplicate readers: the list and pending queue survive
+  ok    duplicate readers: visible retry note without claiming delivery
+  ok    duplicate readers: one bounded recipient read only
+  ok    duplicate readers: a confirmed reread resumes the same complete batch
+  ok    non-string reader: no completion or invented progress
+  ok    non-string reader: the list and pending queue survive
+  ok    non-string reader: visible retry note without claiming delivery
+  ok    non-string reader: one bounded recipient read only
+  ok    non-string reader: a confirmed reread resumes the same complete batch
+  ok    invalid member key: no completion or invented progress
+  ok    invalid member key: the list and pending queue survive
+  ok    invalid member key: visible retry note without claiming delivery
+  ok    invalid member key: one bounded recipient read only
+  ok    invalid member key: a confirmed reread resumes the same complete batch
+  ok    sparse list: no completion or invented progress
+  ok    sparse list: the list and pending queue survive
+  ok    sparse list: visible retry note without claiming delivery
+  ok    sparse list: one bounded recipient read only
+  ok    sparse list: a confirmed reread resumes the same complete batch
+  ok    transport exception: no completion or invented progress
+  ok    transport exception: the list and pending queue survive
+  ok    transport exception: visible retry note without claiming delivery
+  ok    transport exception: one bounded recipient read only
+  ok    transport exception: a confirmed reread resumes the same complete batch
+
+announcement: an unread later batch must keep the confirmed earlier batch
+  ok    later unread batch preserves confirmed progress only
+  ok    later unread batch preserves the complete original list
+  ok    retry resumes at the later batch and never resends the first
+  ok    confirmed readers who were removed are skipped without being emailed
+  ok    confirmed final short batch preserves earlier progress
+
+event: unconfirmed reader evidence must preserve progress and retry position
+  ok    missing envelope: no completion or invented progress
+  ok    missing envelope: the list and pending queue survive
+  ok    missing envelope: visible retry note without claiming delivery
+  ok    missing envelope: one bounded recipient read only
+  ok    missing envelope: a confirmed reread resumes the same complete batch
+  ok    extra envelope: no completion or invented progress
+  ok    extra envelope: the list and pending queue survive
+  ok    extra envelope: visible retry note without claiming delivery
+  ok    extra envelope: one bounded recipient read only
+  ok    extra envelope: a confirmed reread resumes the same complete batch
+  ok    null list: no completion or invented progress
+  ok    null list: the list and pending queue survive
+  ok    null list: visible retry note without claiming delivery
+  ok    null list: one bounded recipient read only
+  ok    null list: a confirmed reread resumes the same complete batch
+  ok    empty list with readers still due: no completion or invented progress
+  ok    empty list with readers still due: the list and pending queue survive
+  ok    empty list with readers still due: visible retry note without claiming delivery
+  ok    empty list with readers still due: one bounded recipient read only
+  ok    empty list with readers still due: a confirmed reread resumes the same complete batch
+  ok    truncated list: no completion or invented progress
+  ok    truncated list: the list and pending queue survive
+  ok    truncated list: visible retry note without claiming delivery
+  ok    truncated list: one bounded recipient read only
+  ok    truncated list: a confirmed reread resumes the same complete batch
+  ok    oversized list: no completion or invented progress
+  ok    oversized list: the list and pending queue survive
+  ok    oversized list: visible retry note without claiming delivery
+  ok    oversized list: one bounded recipient read only
+  ok    oversized list: a confirmed reread resumes the same complete batch
+  ok    duplicate readers: no completion or invented progress
+  ok    duplicate readers: the list and pending queue survive
+  ok    duplicate readers: visible retry note without claiming delivery
+  ok    duplicate readers: one bounded recipient read only
+  ok    duplicate readers: a confirmed reread resumes the same complete batch
+  ok    non-string reader: no completion or invented progress
+  ok    non-string reader: the list and pending queue survive
+  ok    non-string reader: visible retry note without claiming delivery
+  ok    non-string reader: one bounded recipient read only
+  ok    non-string reader: a confirmed reread resumes the same complete batch
+  ok    invalid member key: no completion or invented progress
+  ok    invalid member key: the list and pending queue survive
+  ok    invalid member key: visible retry note without claiming delivery
+  ok    invalid member key: one bounded recipient read only
+  ok    invalid member key: a confirmed reread resumes the same complete batch
+  ok    sparse list: no completion or invented progress
+  ok    sparse list: the list and pending queue survive
+  ok    sparse list: visible retry note without claiming delivery
+  ok    sparse list: one bounded recipient read only
+  ok    sparse list: a confirmed reread resumes the same complete batch
+  ok    transport exception: no completion or invented progress
+  ok    transport exception: the list and pending queue survive
+  ok    transport exception: visible retry note without claiming delivery
+  ok    transport exception: one bounded recipient read only
+  ok    transport exception: a confirmed reread resumes the same complete batch
+
+event: an unread later batch must keep the confirmed earlier batch
+  ok    later unread batch preserves confirmed progress only
+  ok    later unread batch preserves the complete original list
+  ok    retry resumes at the later batch and never resends the first
+  ok    confirmed readers who were removed are skipped without being emailed
+  ok    confirmed final short batch preserves earlier progress
+
+120 checks, all passing.
+MemoryRedis dispatches: 578 mock HTTP: 0
+{"file":"claim-mark.test.ts","old":false,"exit":0}
+
+Taken and let go by the same run
+  ok    taken
+  ok    taken again by another: not ours
+  ok    let go by its own run
+
+A mark that ran out and was taken by another run is not ours to let go
+  ok    the second run takes it
+  ok    the first run failing later leaves the second run's mark alone
+
+5 checks, all passing.
+MemoryRedis dispatches: 12 mock HTTP: 0
+
+
+===== /tmp/p2954-whole-red.log =====
+{"file":"p-review-2954-partial-job-return.test.ts","old":true,"exit":1}
+
+Healthy aged orphan control
+  ok    healthy recovery sends once
+
+Matching id does not prove a readable send
+  FAIL  partial {"id":"5f4e33003b3ec911233f4713"} keeps due without sending
+        expected [0,1]
+        got      [0,0]
+  ok    the underlying job really is absent
+  ok    the held mark is untouched
+  FAIL  healthy retry recovers the retained reminder once
+        expected [1,0]
+        got      [0,0]
+  FAIL  partial {"id":"5f4e33003b3ec911233f4713","status":12} keeps due without sending
+        expected [0,1]
+        got      [0,0]
+  ok    the underlying job really is absent
+  ok    the held mark is untouched
+  FAIL  healthy retry recovers the retained reminder once
+        expected [1,0]
+        got      [0,0]
+
+9 checks, 4 failing.
+MemoryRedis dispatches: 56 mock HTTP: 0
+{"file":"nx-community-mail.test.ts","old":true,"exit":1}
+
+announcement: the send's lock
+  ok    undefined while another run holds it: nothing sent
+  ok    undefined while another run holds it: its lock is left to it
+  ok    undefined while another run holds it: the job is untouched
+  ok    no reply while another run holds it: nothing sent
+  ok    no reply while another run holds it: its lock is left to it
+  ok    no reply while another run holds it: the job is untouched
+  ok    text while another run holds it: nothing sent
+  ok    text while another run holds it: its lock is left to it
+  ok    text while another run holds it: the job is untouched
+  ok    a number while another run holds it: nothing sent
+  ok    a number while another run holds it: its lock is left to it
+  ok    a number while another run holds it: the job is untouched
+  ok    a lock taken whose reply was lost: read back as ours, the send goes once
+  ok    a lock taken whose reply was lost: let go after
+  ok    a lock answered and read back in no known shape: nothing sent this run
+  ok    healthy: the send goes once and the lock is let go
+  ok    held by another run (nil): nothing sent, its lock kept
+
+event: the send's lock
+  ok    undefined while another run holds it: nothing sent
+  ok    undefined while another run holds it: its lock is left to it
+  ok    undefined while another run holds it: the job is untouched
+  ok    no reply while another run holds it: nothing sent
+  ok    no reply while another run holds it: its lock is left to it
+  ok    no reply while another run holds it: the job is untouched
+  ok    text while another run holds it: nothing sent
+  ok    text while another run holds it: its lock is left to it
+  ok    text while another run holds it: the job is untouched
+  ok    a number while another run holds it: nothing sent
+  ok    a number while another run holds it: its lock is left to it
+  ok    a number while another run holds it: the job is untouched
+  ok    a lock taken whose reply was lost: read back as ours, the send goes once
+  ok    a lock taken whose reply was lost: let go after
+  ok    a lock answered and read back in no known shape: nothing sent this run
+  ok    healthy: the send goes once and the lock is let go
+  ok    held by another run (nil): nothing sent, its lock kept
+
+event: the once-only mark of a move or cancellation
+  ok    healthy: the notice is made once
+  ok    healthy: asked again it is taken, nothing made again
+  ok    undefined on a mark already made: the send under way is not started again
+  ok    no reply on a mark already made: the send under way is not started again
+  ok    text on a mark already made: the send under way is not started again
+  ok    a mark written whose reply was lost: read back as ours, the notice is made
+  ok    a mark answered and read back in no known shape: no notice made on it
+  ok    ...and the mark is not left behind as ours, so asking again makes it
+
+event: a reminder due whose mark is unknown stays in line
+  ok    unknown: no reminder made or sent, and it is still due
+  ok    the next run makes it and sends it, once
+
+event: a mark left with no send made does not drop the reminder
+  ok    claim and release unknown: nothing made or sent, still due
+  ok    the next run finds the mark but no send: the reminder stays due, never dropped as made
+  ok    once the mark is old enough to belong to no run still going, it is taken over and the reminder sent once
+  ok    a fresh mark with no send (a run still making it): still due, nothing sent, the mark left to it
+
+event: a failure after the mark is ours keeps the reminder
+  ok    the send's record not written: nothing sent, still due
+  ok    the next run makes it and sends it, once
+
+event: who is coming unknown keeps the reminder
+  ok    unknown readers: nothing made, no mark taken, still due
+  ok    the next run makes it and sends it to both, once
+
+event: a taken mark whose send reads back as something else keeps the reminder
+  ok    cut text: nothing made or sent, still due, the mark untouched
+  ok    cut text: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    an id this code never writes: nothing made or sent, still due, the mark untouched
+  ok    an id this code never writes: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    another send's record: nothing made or sent, still due, the mark untouched
+  ok    another send's record: read again with no send there, the aged mark is taken over and the reminder sent once
+  ok    a JSON list: nothing made or sent, still due, the mark untouched
+  ok    a JSON list: read again with no send there, the aged mark is taken over and the reminder sent once
+  FAIL  only this send's id: nothing made or sent, still due, the mark untouched
+        expected [0,0,1,"1794107744873.000000001"]
+        got      [0,0,0,"1794107744873.000000001"]
+  FAIL  only this send's id: read again with no send there, the aged mark is taken over and the reminder sent once
+        expected [1,1,0]
+        got      [0,0,0]
+  FAIL  this send's id with a status this code never writes: nothing made or sent, still due, the mark untouched
+        expected [0,0,1,"1794107744873.000000001"]
+        got      [0,0,0,"1794107744873.000000001"]
+  FAIL  this send's id with a status this code never writes: read again with no send there, the aged mark is taken over and the reminder sent once
+        expected [1,1,0]
+        got      [0,0,0]
+  FAIL  this send written down as sent, cut short: nothing made or sent, still due, the mark untouched
+        expected [0,0,1,"1794107744873.000000001"]
+        got      [0,0,0,"1794107744873.000000001"]
+  FAIL  this send written down as sent, cut short: read again with no send there, the aged mark is taken over and the reminder sent once
+        expected [1,1,0]
+        got      [0,0,0]
+
+announcement: the send's record unknown under the lock
+  ok    unknown record: nothing sent, still in line, the lock let go
+  ok    the next run sends it, once
+
+event: the send's record unknown under the lock
+  ok    unknown record: nothing sent, still in line, the lock let go
+  ok    the next run sends it, once
+
+event: the send's record read back partial under the lock
+  FAIL  its id alone: nothing sent, still in line, the record as it was, the lock let go
+        expected [true,0,1,"{\"id\":\"eeeeeeeeeeeeeeeeeeeeeeee\",\"community\":\"dddddddddddddddddddddddddddddddd\",\"handle\":\"synthetic\",\"post\":\"ffffffffffff\",\"subject\":\"Synthetic announcement\",\"body\":\"Synthetic body\",\"event\":\"cccccccccccc\",\"kind\":\"cancelled\",\"start\":1794195344813,\"was\":0,\"wasMinutes\":0,\"total\":2,\"done\":1,\"sent\":1,\"status\":\"sending\",\"note\":\"\",\"failures\":0}",null]
+        got      [false,0,0,"{\"id\":\"eeeeeeeeeeeeeeeeeeeeeeee\",\"community\":\"dddddddddddddddddddddddddddddddd\",\"handle\":\"synthetic\",\"post\":\"ffffffffffff\",\"subject\":\"Synthetic announcement\",\"body\":\"Synthetic body\",\"event\":\"cccccccccccc\",\"kind\":\"cancelled\",\"start\":1794195344813,\"was\":0,\"wasMinutes\":0,\"total\":2,\"done\":1,\"sent\":1,\"status\":\"sending\",\"note\":\"\",\"failures\":0}",null]
+  ok    its id alone: the next run sends the rest only, once
+  FAIL  its id with a status this code never writes: nothing sent, still in line, the record as it was, the lock let go
+        expected [true,0,1,"{\"id\":\"eeeeeeeeeeeeeeeeeeeeeeee\",\"community\":\"dddddddddddddddddddddddddddddddd\",\"handle\":\"synthetic\",\"post\":\"ffffffffffff\",\"subject\":\"Synthetic announcement\",\"body\":\"Synthetic body\",\"event\":\"cccccccccccc\",\"kind\":\"cancelled\",\"start\":1794195344813,\"was\":0,\"wasMinutes\":0,\"total\":2,\"done\":1,\"sent\":1,\"status\":\"sending\",\"note\":\"\",\"failures\":0}",null]
+        got      [false,0,0,"{\"id\":\"eeeeeeeeeeeeeeeeeeeeeeee\",\"community\":\"dddddddddddddddddddddddddddddddd\",\"handle\":\"synthetic\",\"post\":\"ffffffffffff\",\"subject\":\"Synthetic announcement\",\"body\":\"Synthetic body\",\"event\":\"cccccccccccc\",\"kind\":\"cancelled\",\"start\":1794195344813,\"was\":0,\"wasMinutes\":0,\"total\":2,\"done\":1,\"sent\":1,\"status\":\"sending\",\"note\":\"\",\"failures\":0}",null]
+  ok    its id with a status this code never writes: the next run sends the rest only, once
+  FAIL  its id, still sending, nothing else: nothing sent, still in line, the record as it was, the lock let go
+        expected [true,0,1,"{\"id\":\"eeeeeeeeeeeeeeeeeeeeeeee\",\"community\":\"dddddddddddddddddddddddddddddddd\",\"handle\":\"synthetic\",\"post\":\"ffffffffffff\",\"subject\":\"Synthetic announcement\",\"body\":\"Synthetic body\",\"event\":\"cccccccccccc\",\"kind\":\"cancelled\",\"start\":1794195344813,\"was\":0,\"wasMinutes\":0,\"total\":2,\"done\":1,\"sent\":1,\"status\":\"sending\",\"note\":\"\",\"failures\":0}",null]
+        got      [false,0,0,"{\"id\":\"eeeeeeeeeeeeeeeeeeeeeeee\",\"status\":\"failed\",\"note\":\"The event is not there anymore.\"}",null]
+  FAIL  its id, still sending, nothing else: the next run sends the rest only, once
+        expected ["sent",1]
+        got      ["failed",0]
+  FAIL  half sent, a count missing: nothing sent, still in line, the record as it was, the lock let go
+        expected [true,0,1,"{\"id\":\"eeeeeeeeeeeeeeeeeeeeeeee\",\"community\":\"dddddddddddddddddddddddddddddddd\",\"handle\":\"synthetic\",\"post\":\"ffffffffffff\",\"subject\":\"Synthetic announcement\",\"body\":\"Synthetic body\",\"event\":\"cccccccccccc\",\"kind\":\"cancelled\",\"start\":1794195344813,\"was\":0,\"wasMinutes\":0,\"total\":2,\"done\":1,\"sent\":1,\"status\":\"sending\",\"note\":\"\",\"failures\":0}",null]
+        got      [false,1,0,"{\"id\":\"eeeeeeeeeeeeeeeeeeeeeeee\",\"community\":\"dddddddddddddddddddddddddddddddd\",\"handle\":\"synthetic\",\"post\":\"ffffffffffff\",\"subject\":\"Synthetic announcement\",\"body\":\"Synthetic body\",\"event\":\"cccccccccccc\",\"kind\":\"cancelled\",\"start\":1794195344813,\"was\":0,\"wasMinutes\":0,\"total\":2,\"done\":2,\"sent\":2,\"status\":\"sent\",\"note\":\"\",\"failures\":0}",null]
+  ok    half sent, a count missing: the next run sends the rest only, once
+
+78 checks, 11 failing.
+MemoryRedis dispatches: 624 mock HTTP: 0
+a live event reminder failed UnknownReplyError: Redis answered an event email's once-only mark in an unknown shape
+    at startJob ([stdin]:6286:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6749:15)
+a live event reminder failed UnknownReplyError: Redis answered an event email's once-only mark in an unknown shape
+    at startJob ([stdin]:6286:11)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6769:16)
+a live event reminder failed SendNotMadeYetError: an event email's once-only mark is there but its send is not, yet
+    at madeOrTakeOver ([stdin]:6259:61)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6281:9)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6772:16)
+a live event reminder failed SendNotMadeYetError: an event email's once-only mark is there but its send is not, yet
+    at madeOrTakeOver ([stdin]:6259:61)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6281:9)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6786:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send in an unknown shape
+    at startJob ([stdin]:6325:56)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6799:17)
+a live event reminder failed UnknownReplyError: Redis answered who is coming to an event in an unknown shape
+    at rsvpList ([stdin]:2197:15)
+    at startJob ([stdin]:6276:26)
+    at runEventQueue ([stdin]:6546:28)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main ([stdin]:6808:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6251:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6281:9)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6830:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6251:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6281:9)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6830:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6251:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6281:9)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6830:17)
+a live event reminder failed UnknownReplyError: Redis answered an event email's send under its once-only mark in an unknown shape
+    at madeOrTakeOver ([stdin]:6251:41)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async startJob ([stdin]:6281:9)
+    at async runEventQueue ([stdin]:6546:22)
+    at async main ([stdin]:6830:17)
+
+
+===== /tmp/p2954-linked.log =====
+{"file":"plan-cost-registry.test.ts","old":false,"exit":0}
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (136.539493ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (147.308303ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (57.296212ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.602837ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.17612ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.132262ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.52516ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (103.067174ms)
+✔ every store figure taken in the code is a kind a line prices (61.953075ms)
+✔ every email sent names a meter, and each file only the meters it may use (102.804161ms)
+✔ the units a figure is taken in cost at least what they stand for (13.581499ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (3.963014ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.45961ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.645573ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.201556ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.107752ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.491603ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.470384ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.159843ms)
+✔ Path push fits its reserved studio requests (0.074672ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.087271ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.077193ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.107798ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (51.726371ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 721.398751
+MemoryRedis dispatches: 0 mock HTTP: 0
+✘ [ERROR] Could not resolve "./tests/community-rsvp.test.ts"
+
+    <stdin>:8:7:
+      8 │ import("./tests/community-rsvp.test.ts");
+        ╵        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752
+  let error = new Error(text);
+              ^
+
+Error: Build failed with 1 error:
+<stdin>:8:7: ERROR: Could not resolve "./tests/community-rsvp.test.ts"
+    at failureErrorWithLog (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1752:15)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1211:25
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1163:52
+    at buildResponseToResult (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1209:7)
+    at /workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:1236:16
+    at responseCallbacks.<computed> (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:886:9)
+    at handleIncomingPacket (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:941:12)
+    at Socket.readFromStdout (/workspace/scratch/77662bfb9bc5/marktmorgen/node_modules/esbuild/lib/main.js:864:7)
+    at Socket.emit (node:events:514:28)
+    at addChunk (node:internal/streams/readable:569:12) {
+  errors: [Getter/Setter],
+  warnings: [Getter/Setter]
+}
+
+Node.js v24.22.1
+
+
+===== /tmp/p2954-rsvp.log =====
+{"file":"rsvp-list-exact.test.ts","old":false,"exit":0}
+✔ healthy: everyone coming, in the order they said so (5.402915ms)
+✔ confirmed absence: an event nobody answered is an empty list (0.466094ms)
+✔ healthy: a second page is read and joined (0.592515ms)
+✔ no reply on the first page throws, never "nobody coming" (0.456931ms)
+✔ no reply on a second page throws, never only the first page (0.478676ms)
+✔ undefined on the first page throws, never "nobody coming" (0.35163ms)
+✔ undefined on a second page throws, never only the first page (0.451087ms)
+✔ text on the first page throws, never "nobody coming" (0.198819ms)
+✔ text on a second page throws, never only the first page (0.377927ms)
+✔ a cursor alone on the first page throws, never "nobody coming" (0.591945ms)
+✔ a cursor alone on a second page throws, never only the first page (0.400926ms)
+✔ a page that is not a list on the first page throws, never "nobody coming" (0.418272ms)
+✔ a page that is not a list on a second page throws, never only the first page (0.183567ms)
+✔ a page with an odd count on the first page throws, never "nobody coming" (0.333643ms)
+✔ a page with an odd count on a second page throws, never only the first page (0.163473ms)
+✔ a number for a member on the first page throws, never "nobody coming" (0.119223ms)
+✔ a number for a member on a second page throws, never only the first page (0.160917ms)
+✔ a cursor that is not a cursor on the first page throws, never "nobody coming" (0.102718ms)
+✔ a cursor that is not a cursor on a second page throws, never only the first page (0.099226ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 29.959987
+MemoryRedis dispatches: 37 mock HTTP: 0
+
+
+===== /tmp/p2954-english.log =====
+{"file":"platform-us-english.test.ts","old":false,"exit":0}
+
+American English guard distinguishes prose from compatibility identifiers
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    displayed British sample is rejected
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    legacy technical syntax is preserved
+  ok    existing non-English buyer copy is outside this policy
+  ok    mixed buyer dictionaries retain other languages
+  ok    separate foreign buyer declarations remain unchanged
+  ok    American prose passes
+  ok    single-word test title is also checked
+  ok    test output titles are also platform-maintained text
+  ok    test data can exercise a forbidden sample
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    each requested British form is rejected
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+  ok    American counterpart passes
+
+All current app, component, library and test-diagnostic sources
+  ok    real source inventory is scanned
+  ok    platform prose and diagnostic titles use American spelling
+
+42 checks, all passing.
+MemoryRedis dispatches: 0 mock HTTP: 0
+
+
+===== /tmp/p2954-types-confirmed.log =====
+
+
+===== /tmp/p2954-lint-confirmed.log =====
+
+
+===== /tmp/p2954-scanner.log =====
+Public data check: 4256 tracked files; 0 file(s) require correction.
+
+Focused tsc exit=0; ESLint exit=0 (captured by terminal execution).

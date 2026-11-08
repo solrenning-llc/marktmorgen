@@ -1,3 +1,31 @@
+# Codex Z — canonical continuation 08 November 2026, 20:09 Fortaleza
+
+r17 still ACTIVE, SERIAL Medium ZEROagents. COMPLETE prior686092-character checkpoint6fddd8e5619aa8b4d361471c6729a1434fbacd43/blob634a10b9463294f3c23cc7f236131b4831b3ebc6 is retained BELOW verbatim. Five authored units/heads/REDs/WIPs/holds/retries/caps unchanged. No CIquery/retry/cancel/fila/merge or productpush/mainintegration/automation by Z.
+
+## #3305 FIRST completed — technical changes requested
+
+Subjectcc412a1c3d2f858f1711d0e566924d0b259d4e2d/base787c8748ab9124fb861235c59e8e6b221c101bdc; formal5820102172 BODY+commit EXACT. Claim6728342493/ROOTRES0f951093b562eec677c563d81476af08a640f4a8/blob4abe316100d8116bfa77fe982d8e6fb6179101b1/FULL6815096 exactBEFOREproof. **M1 NEW MEDIUM lib/community-files.ts166:** existing consumed picture actualtakeCommunityUpload removesdoor; newrequestsamevalidpath/failednoteBEFOREdispatch:both500/no token;OLD1PASSkeepsfileunlisted/sweep0→HEAD1FAILcatchrelistssweep1actualsyntheticBlobdel/filegone/place2→1.11→14nested0HTTP/245→361JSONattemptbytes(2failednotecommandsnotdispatched). POST+actualdoor/count/sweep+syntheticBlob; no fullpostcreation/browser/liveBlob. Folderpathfreshnessinherited,newcatchZADDcausalregression. Recoveryneedsrequest/generationdeletionownership,NOblindqueue.
+
+**M2 INHERITED LATENT MEDIUM lib/form-opportunity.ts33-35:** helperreadunknown→needData(settrue)smallerretrydraft→EVALexistingactualsame829Brecord. Used1040(976deal+64field)→OLD0/HEAD544(slot480),undercount496. OLD1FAIL→HEAD1FAIL.11→10nested0HTTP/6507→3644JSONB. Ordinarypublicroutehealthyreadreturnsbeforehelper/errorreturns502; latenthelpercontract, two-requestconcurrencyreachSOURCEINFERENCE/notHTTPe2e. SharedneedData(settrue)classalreadyM3031/C23304,C1classification/ownershippending; noZsharedpatch/sixth.
+
+Author55OLD30FAIL→55PASS;author29OLD16FAIL→29PASSonEXACT787cbase(bodyhistorical22NOTborrowed). Linked9roots324PASS,current408PASS+2MEDFAIL13roots overlap. Max1473nested48mock/no cap;types7roots862sources0/lint0/scanner4674-0/diff0.454matchinglock/0requiredmissingBEFOREtests Next16.4.5. RawALLlogsreversible/sourcesactualdataretained.
+
+Evidence owncodex/z-3305-first-review@15baab14b6a9f6545e7590cebcfd15198f51982b/tree d2dbd2f46f06290bf98ba06c07d2b0ff8c22733a EXACTnative180de2ad0b46ede475f077ae821af360e4458de0;24artifacts. Reportee70653ed86c58cef452043da67973d36162cdce/FULL9016 EXACTreadbackBEFOREtechnicalCOMMENT. SharedAppauthorlimitationknown,noinvalidREQUEST_CHANGESidentitybypass. Noauthorproduct/refmodified. AwaitC6fix+nominalrequest; preservebothproofbytesandOLD/currentfails.
+
+## #3308 FIRST requested nominal privacy follow-up — metadata/claim ONLY
+
+C6#3308exact03c28f1f91a9cf9a852ebfc7d20722e5d3df0c76/base787c8748. BodyFULLread/timelineEMPTY. Claimid6728457630, exactreadback STILL PENDING. Need ROOTRES/readback BEFOREsource/proof; NO3308source/diff/worktree/deps/tests yet. AuthoratomicerasureactivelyconfirmedC61958 thenPR3308, noabsorption. Frozenowninheritedoraclein z-3296-atomic-focal/z-3296-erasure-read-race.proof.ts, preserve it. ReproduceauthorRED37samegraphONLYOLDERASUREINDEXoverlay/currentmodel, count6standinartifactsnotnativeRedisbugs; thenhead55/scopedlinked/probes. BEFOREeachchild20kALLnestedRedis/100HTTPmock/120s512MiB256KiB/types120s1024,networkDENYbeforegraph/SERIALMediumZEROagents;capINCONCLUSIVE/noraise/reset/partition/retry/borrowedgrant. Evidencebeforeverdict,authorrefRO,not6th.
+
+## Current coordination
+
+Own2741FULL20/2819FULL8 freshlyread23:08UTC: NOcreatedORupdatedafter21:30UTC. Thus ownreturns/grantsstillpending, noheadchange/CIinfer. #3260/3283PARTIAL grants200stillabsent. #3292SECOND5820032202alreadydone/279PASS+C2LOWs preserved, #3296atomicfocal5820064819closesNEWMED/inheritederasurefollowup3308nowactive; allreciptsbelow.
+
+Mainnativefetch3818completed0→787c8748; AGENTS9ee3c48d6 FULLONEHUNKchangeMV(a)read after initialwholefiletooloutputtruncated(notclaimedFULLreread). Exactcommitgreenmerge_groupmaycoverabsent/canceledpush, CodeQLstillrunsmain; noMCgatecert. CLAUDE/inbox/queue/root+ALLreservations BYTE-IDa36/44f4. No productmainintegration/chase.
+
+ROOTlatest 9a509a83d864ca7175216a983bf87f239a8d8ad1/blob167fbf7056238b76f299f3c63613e251f046c42e/FULL6832876 prefixFULLexactdeltaALLread. C4-2001onlybackupconfirmed,C1decidesunauthorizedextraPRs,notZtakeover; C2FIRST3303clean2LOW/3304clean3LOW, C2FIRST3301TWOnewMED/3302C6ownreviewinheritsbaseissues; C6correcting3300existingMED/closingbudgetnew, C63308metadataabove. CXC22617focalDONE/MEDpreexistingopen/2861stillotherfocal; Sclaims2908nominal, doNOTduplicate. C63263b161focalbelongsP/C4. #2839C1CODEX45condition2964lastOPEN+five/foreignrefbanstillHOLD. No sixunits/duplicateclaimedreviews/newgrants/CIroundpolls. Continueauthorizedrequested3308afterclaim+ROOTexact.
+
+---
+
 # Codex Z — canonical continuation, 08 November 2026, 19:59 Fortaleza
 
 This newest section prevails; COMPLETE prior679466-character checkpoint6683d45567dda8e80f048108bcce6711d7cb9a1e/blobf2fd024c543494f694b95705373862faa7ab8217 is retained BELOW without truncation. r17 execution ACTIVE, serial Medium ZEROagents. Five own authored units/heads/REDs/WIPs/holds and ALL consumed retries/caps/grant requests remain exactly as below. No CI query/retry/cancel/queue/merge, product push/main integration/automation change by Z.

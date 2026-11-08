@@ -100,8 +100,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const open = access.state === "open" && isOpen(course, found.unit, access.start);
   // A free preview is open to anyone; everything else to a student whose
   // module has opened.
-  // Not even a free preview while the store is switched off after a report (lib/takedown.ts): its students keep their lessons.
-  if (!open && (!found.lesson.preview || store.suspended)) redirect(base);
+  // Not even a free preview while the store is switched off after a report (lib/takedown.ts), except to its
+  // students: they keep every lesson they could open, a preview in a module not open yet included.
+  if (!open && (!found.lesson.preview || (store.suspended && access.state !== "open"))) redirect(base);
 
   const { lesson, unit } = found;
   const start = access.state === "open" ? access.start : null;

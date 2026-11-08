@@ -122,7 +122,8 @@ export default async function AgreementPage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
-          {status === "open" && !signable ? (
+          {/* Sent back from the form with "closed", the notice above already says it: said once. */}
+          {status === "open" && !signable && query.notice !== "closed" ? (
             <div className="st-note mt-8" role="status">
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.notices.closed.title}</p>
               <p className="mt-1 text-sm">{w.notices.closed.body}</p>

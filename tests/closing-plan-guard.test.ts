@@ -15,6 +15,7 @@
  *     another store's expired with it;
  *   - a store whose records are gone that is no longer recognized.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { store as redis } from "./redis-stub";
@@ -394,7 +395,123 @@ async function main() {
       const outcome = await refusePlanIfClosing({ store: (await storeForEmail(lost.email))!, handle: "handofflost", subscriptionId: lost.id, customerId: lost.customer });
       is("a missing queue acknowledgement never reports an active plan as returned", [outcome, world.subs.get(lost.id)?.status, refundsOf(lost.pi).length], ["returning", "active", 0]);
     } finally { redis.pipeline = pipeline; }
+
+    const unread = await closingStore("handoffcs", day);
+    const unreadStore = (await storeForEmail(unread.email))!;
+    world.sessions.push({ id: "cs_test_handoffcsopen1", status: "open", mode: "subscription", customer: unread.customer, metadata: { store: "handoffcs" } });
+    // Its closing day entered and its renewals not stopped yet (lib/plan-closing.ts, stateKey): the step that expires its checkouts runs.
+    await redisPipeline([["SET", `nl:plan:closing:${createHash("sha256").update(storeRef(unreadStore)).digest("hex").slice(0, 40)}`, JSON.stringify({ of: day - 30 * DAY, day })]]);
+    const seen = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (url.pathname === "/v1/checkout/sessions" && (init?.method ?? "GET") === "GET") return Response.json({ object: "list", data: "garbled", has_more: false });
+      return seen(input, init);
+    };
+    const quietClose = console.error;
+    console.error = () => {};
+    let unreadClose: Awaited<ReturnType<typeof closeOne>>;
+    try { unreadClose = await closeOne(storeRef(unreadStore), day + 60_000, noFiles, Number.POSITIVE_INFINITY); } finally { globalThis.fetch = seen; console.error = quietClose; }
+    is("open plan checkouts that cannot be read hold the closing day, to be tried again", [unreadClose.state, world.expired.includes("cs_test_handoffcsopen1")], ["held", false]);
+    await closeOne(storeRef(unreadStore), day + 120_000, noFiles, Number.POSITIVE_INFINITY);
+    is("the next run reads them and expires the store's open plan checkout", world.expired.includes("cs_test_handoffcsopen1"), true);
   } finally { globalThis.fetch = originalFetch; world.refundErrors = 0; }
+
+  part("Each Stripe list is read in its exact shape: an answer in another shape is never taken as none");
+  {
+    const listFetch = globalThis.fetch;
+    let garble: ((path: string, url: URL, page: Record<string, unknown>) => unknown) | null = null;
+    let refundPosts = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/v1/refunds" && method === "POST") refundPosts += 1;
+      const response = await listFetch(input, init);
+      if (!garble || method !== "GET" || url.hostname !== "api.stripe.com") return response;
+      const page = (await response.json()) as Record<string, unknown>;
+      const changed = garble(url.pathname.replace(/^\/v1/, ""), url, page);
+      return Response.json(changed === undefined ? page : changed, { status: response.status });
+    }) as typeof fetch;
+    const quietList = console.error;
+    console.error = () => {};
+    try {
+      const shapes: [string, unknown][] = [
+        ["no list at all", {}],
+        ["data that is not a list", { object: "list", data: "none", has_more: false }],
+        ["has_more that is not true or false", { object: "list", data: [], has_more: "false" }],
+        ["more pages and no row to read them from", { object: "list", data: [], has_more: true }],
+        ["a row that cannot be read", { object: "list", data: [{ id: 42, status: "paid" }], has_more: false }],
+      ];
+      const invoiceStores: Awaited<ReturnType<typeof closingStore>>[] = [];
+      for (const [index, [what, shape]] of shapes.entries()) {
+        const one = await closingStore(`inv${"abcde"[index]}`, day);
+        invoiceStores.push(one);
+        const before = refundPosts;
+        garble = (path, url) => (path === "/invoices" && url.searchParams.get("subscription") === one.id ? shape : undefined);
+        const outcome = await refusePlanIfClosing({ store: (await storeForEmail(one.email))!, handle: one.email.split("@")[0], subscriptionId: one.id, customerId: one.customer });
+        garble = null;
+        is(`invoices answered with ${what}: kept in line, nothing settled, nobody told`, [outcome, world.subs.get(one.id)?.status, refundPosts - before, Boolean((await undo(one.id))?.done), sent.filter((m) => m.to === one.email).length], ["returning", "canceled", 0, false, 0]);
+      }
+      await retryPlanUndos(Number.POSITIVE_INFINITY);
+      is("once the invoices read in full, each payment is refunded once and each creator told once", await Promise.all(invoiceStores.map(async (one) => [refundsOf(one.pi).map((row) => row.amount), sent.filter((m) => m.to === one.email).length, Boolean((await undo(one.id))?.done)])), invoiceStores.map(() => [[6_900], 1, true]));
+
+      const paged = await closingStore("invpaged", day);
+      garble = (path, url, page) => {
+        if (path !== "/invoices" || url.searchParams.get("subscription") !== paged.id) return undefined;
+        if (url.searchParams.get("starting_after") === "in_invpagedvoid1") return page;
+        return { object: "list", data: [{ id: "in_invpagedvoid1", subscription: paged.id, status: "void", amount_paid: 0, created: S(day) + 900 }], has_more: true };
+      };
+      const pagedOutcome = await refusePlanIfClosing({ store: (await storeForEmail(paged.email))!, handle: "invpaged", subscriptionId: paged.id, customerId: paged.customer });
+      garble = null;
+      is("a payment on the invoices' second page is found and refunded", [pagedOutcome, refundsOf(paged.pi).map((row) => row.amount), sent.filter((m) => m.to === paged.email).length], ["returned", [6_900], 1]);
+
+      const refundShapes = shapes.slice(0, 4);
+      const refundStores: Awaited<ReturnType<typeof closingStore>>[] = [];
+      for (const [index, [what, shape]] of refundShapes.entries()) {
+        const one = await closingStore(`ref${"abcd"[index]}`, day);
+        refundStores.push(one);
+        const before = refundPosts;
+        garble = (path, url) => (path === "/refunds" && url.searchParams.get("charge") === `ch_${one.pi.slice(3)}` ? shape : undefined);
+        const outcome = await refusePlanIfClosing({ store: (await storeForEmail(one.email))!, handle: one.email.split("@")[0], subscriptionId: one.id, customerId: one.customer });
+        garble = null;
+        is(`refunds of a charge answered with ${what}: no refund is made on it, kept in line`, [outcome, refundPosts - before, refundsOf(one.pi).length, Boolean((await undo(one.id))?.done), sent.filter((m) => m.to === one.email).length], ["returning", 0, 0, false, 0]);
+      }
+      await retryPlanUndos(Number.POSITIVE_INFINITY);
+      is("once the refunds read in full, each payment is refunded once", await Promise.all(refundStores.map(async (one) => [refundsOf(one.pi).map((row) => row.amount), sent.filter((m) => m.to === one.email).length, Boolean((await undo(one.id))?.done)])), refundStores.map(() => [[6_900], 1, true]));
+
+      const twice = await closingStore("refpaged", day);
+      world.refunds.push({ id: "re_refpagedok01", object: "refund", charge: `ch_${twice.pi.slice(3)}`, payment_intent: twice.pi, amount: 6_900, status: "succeeded", currency: "usd", key: "" });
+      garble = (path, url, page) => {
+        if (path !== "/refunds" || url.searchParams.get("charge") !== `ch_${twice.pi.slice(3)}`) return undefined;
+        if (url.searchParams.get("starting_after") === "re_refpagedno01") return page;
+        return { object: "list", data: [{ id: "re_refpagedno01", object: "refund", amount: 6_900, status: "failed", currency: "usd" }], has_more: true };
+      };
+      const beforeTwice = refundPosts;
+      const twiceOutcome = await refusePlanIfClosing({ store: (await storeForEmail(twice.email))!, handle: "refpaged", subscriptionId: twice.id, customerId: twice.customer });
+      garble = null;
+      is("a refund that went through, on the refunds' second page, is found: no second refund is asked for", [twiceOutcome, refundPosts - beforeTwice, refundsOf(twice.pi).length], ["returned", 0, 1]);
+
+      const shop = (await storeForEmail(rosa.email))!;
+      for (const [what, shape] of [...shapes.slice(0, 4), ["a row that cannot be read", { object: "list", data: [{ id: "cs_test_rosaunread001", mode: 7 }], has_more: false }] as [string, unknown], ["more pages than are read", { object: "list", data: [{ id: "cs_test_rosamorepage1", status: "open", mode: "payment", metadata: {} }], has_more: true }] as [string, unknown]]) {
+        garble = (path) => (path === "/checkout/sessions" ? shape : undefined);
+        const read = await expirePlanCheckouts(shop, [rosa.customer]).then(() => "finished", () => "refused");
+        garble = null;
+        is(`open checkouts answered with ${what}: the step is refused, to be tried again`, read, "refused");
+      }
+      world.sessions.push({ id: "cs_test_rosapaged0001", status: "open", mode: "subscription", customer: rosa.customer, metadata: { store: "rosa" } });
+      garble = (path, url, page) => {
+        if (path !== "/checkout/sessions") return undefined;
+        if (url.searchParams.get("starting_after") === "cs_test_rosapagedother") return page;
+        return { object: "list", data: [{ id: "cs_test_rosapagedother", status: "open", mode: "payment", customer: rosa.customer, metadata: { store: "rosa" } }], has_more: true };
+      };
+      const pagedExpired = await expirePlanCheckouts(shop, [rosa.customer]);
+      garble = null;
+      is("an open plan checkout on the second page is expired", [pagedExpired, world.expired.at(-1)], [1, "cs_test_rosapaged0001"]);
+    } finally {
+      globalThis.fetch = listFetch;
+      console.error = quietList;
+      garble = null;
+    }
+  }
 
   part("Where it is wired");
   const closing = readFileSync(join(process.cwd(), "lib/plan-closing.ts"), "utf8");

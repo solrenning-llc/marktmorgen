@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "rye", "Rye Bakery", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPayoutBatch1", true);
+  await setStripeAccount(OWNER, "acct_1TestPayBatch", true);
   await setAffiliateSetting(OWNER, { ...NO_AFFILIATES, enabled: true, percent: 30 });
   const store = (await storeForEmail(OWNER))!;
   who.store = store;

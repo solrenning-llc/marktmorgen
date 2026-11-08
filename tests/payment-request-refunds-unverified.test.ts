@@ -67,7 +67,7 @@ async function paidStore(owner: string, handle: string): Promise<Store> {
   return (await storeForEmail(owner))!;
 }
 
-type Shown = PaymentRequest & { refundsChecked?: boolean };
+type Shown = PaymentRequest & { refundsChecked?: boolean; refundsRetry?: boolean };
 
 async function main(): Promise<void> {
   redis.clear();
@@ -135,10 +135,29 @@ async function main(): Promise<void> {
   r = await reading([{ status: 500, body: { error: { message: "Stripe is having trouble" } } }]);
   is("Stripe answers 500: not checked, nothing changed", [r.shown.state, r.shown.refunded, r.shown.refundsChecked, r.kept.state], ["paid", 0, false, "paid"]);
 
+  part("A reload is promised only where reading again can change the answer (Claude 3's LOW A, Claude 6's LOW 2)");
+  r = await reading([{ status: 500, body: {} }]);
+  is("Stripe not answering: not checked, and reading again may help", [r.shown.refundsChecked, r.shown.refundsRetry], [false, true]);
+  r = await reading([list([{ id: "re_pending_retry", object: "refund", payment_intent: INTENT, status: "pending", amount: PAID }], false)]);
+  is("a refund of ours still pending: not checked, and reading again once it ends may help", [r.shown.refundsChecked, r.shown.refundsRetry], [false, true]);
+  r = await reading([list(hundred(0), true), list(hundred(100), true), list(hundred(200), true)]);
+  is("more refunds on the account than the pages read: not checked, and a reload reads the same pages, so none is promised", [r.shown.refundsChecked, r.shown.refundsRetry], [false, false]);
+  r = await reading([list([{ id: "re_odd_retry", object: "refund", payment_intent: INTENT, status: "some_new_status", amount: PAID }], false)]);
+  is("a refund in a status Stripe does not list: not checked, and no reload promised", [r.shown.refundsChecked, r.shown.refundsRetry], [false, false]);
+  r = await reading([list([other(1)], false)]);
+  is("control: a checked request has nothing to retry", [r.shown.refundsChecked, r.shown.refundsRetry], [true, false]);
+
   part("The same refund twice is counted once, and the reading is not checked");
   r = await reading([list([ours("re_twice", 30_000)], true), list([ours("re_twice", 30_000)], true), list([ours("re_twice", 30_000)], false)]);
   is("30,000 of 48,000 once, never 90,000 and never refunded in full", [r.shown.state, r.shown.refunded, r.kept.state, r.kept.refunded], ["paid", 30_000, "paid", 30_000]);
   is("and a list that repeats itself is not checked", r.shown.refundsChecked, false);
+
+  part("A whole list that gives back less than the record holds is not checked (Claude 3's LOW B)");
+  r = await reading([list([ours("re_twice", 30_000)], false)]);
+  is("control: Stripe's whole list says 30,000, the record says 30,000: checked", [r.shown.state, r.shown.refunded, r.shown.refundsChecked], ["paid", 30_000, true]);
+  r = await reading([list([{ ...ours("re_twice", 30_000), status: "failed" }], false)]);
+  is("Stripe's whole list now says the 30,000 refund failed, the record says 30,000: never a checked \"$300 refunded\", and nothing lowered", [r.shown.state, r.shown.refunded, r.shown.refundsChecked, r.kept.refunded], ["paid", 30_000, false, 30_000]);
+  is("and a reload reads the same list, so none is promised", r.shown.refundsRetry, false);
 
   part("What was read is still true");
   redis.clear();
@@ -171,9 +190,9 @@ async function main(): Promise<void> {
   is("an open request: checked (nothing paid to refund)", [one.state, one.refundsChecked, refundReads], ["open", true, 0]);
   const noIntent: PaymentRequest = { ...outside, id: "c".repeat(32), outside: undefined, payment: "" };
   one = ((await refreshRefunds(store2, [noIntent], now)) as Shown[])[0];
-  is("paid on Stripe with no payment to look its refunds up by: not checked", [one.state, one.refundsChecked], ["paid", false]);
+  is("paid on Stripe with no payment to look its refunds up by: not checked, no reload promised", [one.state, one.refundsChecked, one.refundsRetry], ["paid", false, false]);
   const noAccount = ((await refreshRefunds({ ...store2, stripeAccountId: "" } as Store, [{ ...(await second()), state: "paid", refunded: 0, id: "d".repeat(32) }], now)) as Shown[])[0];
-  is("a store with no Stripe account to read: not checked", [noAccount.state, noAccount.refundsChecked], ["paid", false]);
+  is("a store with no Stripe account to read: not checked, no reload promised", [noAccount.state, noAccount.refundsChecked, noAccount.refundsRetry], ["paid", false, false]);
 
   part("The studio says so, in words");
   const base = await second();
@@ -204,7 +223,10 @@ async function main(): Promise<void> {
   const unchecked = draw([row({ refundsChecked: false, refunded: 10_000 })]);
   is("an unchecked request is never shown as plainly paid", [unchecked.includes(">Paid, refunds not checked<"), unchecked.includes(">Paid<")], [true, false]);
   is("what was read is said as a floor, never as the total", [unchecked.includes("at least $100 refunded"), /(?<!at least )\$100 refunded/.test(unchecked)], [true, false]);
-  is("one notice above the list says why and what to do", /role="status"[^>]*>Refunds on Stripe could not all be checked just now/.test(unchecked), true);
+  is("one notice above the list says why and what to do", /role="status"[^>]*>Refunds on Stripe could not all be checked/.test(unchecked), true);
+  is("where reading again cannot help, the notice sends the creator to Stripe and promises no reload", [unchecked.includes("Reload this page"), unchecked.includes("Stripe dashboard")], [false, true]);
+  const retry = draw([row({ refundsChecked: false, refundsRetry: true, refunded: 10_000 })]);
+  is("where reading again may help, the notice says to reload, and still names the dashboard", [retry.includes("Reload this page to check again"), retry.includes("Stripe dashboard")], [true, true]);
   const checked = draw([row({ refundsChecked: true, refunded: 10_000 })]);
   is("a checked request: Paid, the refund as Stripe says, no notice", [checked.includes(">Paid<"), checked.includes("$100 refunded"), checked.includes("at least"), checked.includes("could not all be checked")], [true, true, false, false]);
 

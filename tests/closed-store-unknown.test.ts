@@ -34,6 +34,8 @@ const teamIndexKey = (email: string) => "nl:team:of:" + createHash("sha256").upd
 let unreadableParts: string[] = [];
 // The write of the walk's entry for a store (HSET BATCH_KEY) that fails, as a lost connection would.
 let batchWriteFails = false;
+// The same write answered with something HSET never says (here [null]): not known to have been written.
+let batchWriteUnconfirmed = false;
 // The move back a walk (ZADD XX) answered with nothing Redis would say: not known to have moved.
 let unconfirmedMoves = false;
 const realPipeline = redis.pipeline;
@@ -42,6 +44,7 @@ redis.pipeline = async (commands: (string | number)[][]) => {
   if (commands.some((c) => c[0] === "GET" && unreadable.has(String(c[1])))) throw new Error("Redis request timed out (test)");
   if (commands.some((c) => c[0] === "SMEMBERS" && unreadableSets.has(String(c[1])))) throw new Error("Redis request timed out (test)");
   if (batchWriteFails && commands.some((c) => c[0] === "HSET" && c[1] === BATCH_KEY)) throw new Error("Redis request timed out (test)");
+  if (batchWriteUnconfirmed && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) return [null];
   // A read of what the store is made of (its team, its email sequences) that times out.
   if (commands.some((c) => c[0] === "GET" && unreadableParts.some((prefix) => String(c[1]).startsWith(prefix)))) throw new Error("Redis request timed out (test)");
   return realPipeline(commands);
@@ -182,6 +185,29 @@ async function main(): Promise<void> {
   is("the run did not crash on it (the store waits a walk instead)", threw, false);
   const again = await eraseClosed(Date.now() + 30_000, async () => {}, TW + WALK_GAP_MS + 1);
   is("control: once the write works, it is prepared and out of line, its record closed", [again.stores, redis.run(["ZSCORE", DUE_KEY, W]), (await storeForEmail(W)) === null], [1, null, true]);
+
+
+  // Codex T on #3181 (C6's inherited conditional LOW): the walk entry's HSET answered in another shape was taken as
+  // written, so the record was closed and the store left the line with no entry naming its keys.
+  part("A store's walk entry whose write Redis does not confirm leaves its record, so the walk can try again");
+  redis.clear();
+  const U = "batch-unconfirmed@example.com";
+  await makeStore(U, "batchunconfirmed");
+  const TBU = Date.now();
+  await markDue(U, TBU - 1000);
+  batchWriteUnconfirmed = true;
+  let threwU = false;
+  try {
+    await eraseClosed(Date.now() + 30_000, async () => {}, TBU);
+  } catch {
+    threwU = true;
+  }
+  batchWriteUnconfirmed = false;
+  is("its record is still there", (await storeForEmail(U)) !== null, true);
+  is("it is still in line", redis.run(["ZSCORE", DUE_KEY, U]) !== null, true);
+  is("the run did not crash on it (the store waits a walk instead)", threwU, false);
+  const againU = await eraseClosed(Date.now() + 30_000, async () => {}, TBU + WALK_GAP_MS + 1);
+  is("control: once the write is confirmed, it is prepared and out of line, its record closed", [againU.stores, redis.run(["ZSCORE", DUE_KEY, U]), (await storeForEmail(U)) === null], [1, null, true]);
 
   done();
 }

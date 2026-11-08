@@ -1,0 +1,269 @@
+
+### old
+  ok    set-up: the buyer is in the server with the product's role
+
+A store read that fails is unknown, never "gone"
+  FAIL  the check is put off, not counted as a store that is gone
+        expected [0,1]
+        got      [1,0]
+  ok    the person is kept, roles and all
+  FAIL  and is back in line for the next run
+        expected true
+        got      false
+
+Canceled later: the next run takes the paid role back
+  FAIL  the run reaches the person and ends their access
+        expected 1
+        got      0
+  FAIL  the role given for the purchase is taken back in Discord
+        expected ["DELETE /guilds/100000000000000011/members/300000000000000011/roles/200000000000000011"]
+        got      []
+
+6 checks, 4 failing.
+S_VOLUME {"runs":69,"mocks":2}
+S_STATUS 1 null undefined LOG /tmp/s3114-YdjoSa
+
+CHILD_EXIT 1
+
+
+### final
+  ok    set-up: the buyer is in the server with the product's role
+
+A store read that fails is unknown, never "gone"
+  ok    the check is put off, not counted as a store that is gone
+  ok    the person is kept, roles and all
+  ok    and is back in line for the next run
+
+Canceled later: the next run takes the paid role back
+  ok    the run reaches the person and ends their access
+  ok    the role given for the purchase is taken back in Discord
+
+6 checks, all passing.
+S_VOLUME {"runs":84,"mocks":5}
+S_STATUS 0 null undefined LOG /tmp/s3114-WVfWRh
+checking a Discord member failed Error: Redis request failed with status 503
+    at store.pipeline ([stdin]:48487:11)
+    at redisPipeline ([stdin]:2196:41)
+    at storeForId ([stdin]:12036:23)
+    at checkMember ([stdin]:48322:24)
+    at sweepDiscord ([stdin]:48392:20)
+    at async main ([stdin]:48516:17)
+
+CHILD_EXIT 0
+
+
+### discord
+
+The rules
+  ok    roles are ids, once each, three at most
+  ok    only roles the bot can give: below its own, not everyone's, not an app's
+  ok    what to add and what to take
+  ok    the roles of what is held
+
+Discord's page asks each side only for what it needs
+  ok    the creator adds a bot that manages roles, invites and removes people, and nothing else
+  ok    the buyer lets it see who they are and put them in a server
+
+Joining
+  ok    somebody who holds nothing is not let in
+  ok    and Discord is not asked to
+  ok    a member is put in the server with the product's roles
+  ok    and kept, with what was given
+  ok    a second Discord account for the same address takes the roles over
+
+Checking again
+  ok    not due before its time
+  ok    due after it
+  ok    still a member: kept
+  ok    a role the product gives since is added
+  ok    Stripe cannot be asked: nothing is taken
+  ok    the membership ended: every role given is taken back
+  ok    they stay in the server, and are forgotten
+
+Taken out of the server when the creator asks for it
+  ok    Discord refusing the removal: kept to try again, never forgotten while still in the server
+  ok    and back in line for the next check
+  ok    at the next check: only the removal is tried, then it is forgotten
+  ok    a lasting refusal: 3 tries kept, then forgotten
+
+A funded optional bot-install start refuses before provider consent
+  ok    the owner stays at the studio instead of Discord consent
+  ok    no provider request or extra integration allowance
+
+A previously issued funded install trip is rechecked on return
+  ok    unapproved marked return stays at the studio before token exchange
+  ok    no provider call, server replacement or extra integration allowance
+  ok    the same trip remains single-use
+  ok    declining consent remains available without funding
+  ok    invalid codes keep their existing refusal before financial admission
+  ok    all refused and declined returns retain the original server and make no provider request
+
+Funded new role work refuses while role removal and disconnect remain available
+  ok    new provider role and nonempty assignment fail closed
+  ok    neither new operation asks Discord
+  ok    removing product roles remains available without provider lookup
+  ok    disconnect still reaches the existing provider cleanup
+
+A trip to Discord's page
+  ok    is read once
+
+35 checks, all passing.
+S_VOLUME {"runs":423,"mocks":40}
+S_STATUS 0 null undefined LOG /tmp/s3114-l9zJ4K
+checking a Discord member's purchases failed StripeError: Stripe request failed (500 unknown): down
+    at onAccount ([stdin]:5761:11)
+    at async paidForAny ([stdin]:53704:27)
+    at async ticketFor ([stdin]:53773:120)
+    at async heldProducts ([stdin]:53899:9)
+    at async checkMember ([stdin]:53951:12)
+    at async main ([stdin]:54708:52) {
+  status: 500,
+  code: 'unknown',
+  stripeMessage: 'down'
+}
+
+CHILD_EXIT 0
+
+
+### words
+
+What the code does
+  ok    the next check is CHECK_HOURS after the last
+  ok    run by a job every half hour
+  ok    Stripe not answering: kept, and checked again later
+  ok    six hours
+  ok    Discord refusing a role: kept, and tried again at the next check
+  ok    only a refund in full takes access away
+
+What the pages say
+  ok    the studio: at the next check, about every CHECK_HOURS, nothing while Stripe cannot be reached
+  ok    the feature page and the help center: about every six hours
+  ok    the buyers' words, in every language: at the next check, a refund in full, no time
+  ok    no Discord sentence says a refund that is not in full takes roles away
+  ok    the studio's list of people: about every CHECK_HOURS
+  ok    components/discord-studio.tsx: no "within" a time for roles, and no flat "every six hours" for the checks
+  ok    app/studio/discord/page.tsx: no "within" a time for roles, and no flat "every six hours" for the checks
+  ok    lib/feature-pages.ts: no "within" a time for roles, and no flat "every six hours" for the checks
+  ok    lib/help-content.ts: no "within" a time for roles, and no flat "every six hours" for the checks
+  ok    lib/discord-rules.ts: no "within" a time for roles, and no flat "every six hours" for the checks
+
+16 checks, all passing.
+S_VOLUME {"runs":0,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3114-HLHStL
+
+CHILD_EXIT 0
+
+
+### faq
+
+The studio's own words
+  ok    the studio tool, its connect button, its roles heading, its save, and who joined
+  ok    the buyer's own button
+  ok    who joined: their name on Discord, the address, the roles and the day joined, and gone once access ended
+  ok    nothing taken while Stripe or Discord cannot be reached, as the studio says
+  ok    joining needs a paid order or an orders link
+  ok    the tool only with Discord's keys and for those who may change settings, and the page too
+  ok    connecting needs a server you may manage, as the studio says
+  ok    the routes wait on no plan: a paid window is reserved only for a funded period
+  ok    the limits the page writes by hand, and the check interval the studio says
+
+The answers
+  ok    four questions
+  ok    the limits and the check from the code
+  ok    connect: the studio's own words, in order, who sees it, and when it is not there
+  ok    try before paying: the shared answer, who can, and no buyer joining while plans are off sale
+  ok    how many: no figure, the studio's own list
+  ok    one space between sentences, never two
+  ok    no number of servers, members or sales, no percent, no result promised
+
+On the Discord page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+
+18 checks, all passing.
+S_VOLUME {"runs":0,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3114-cSSPZt
+
+CHILD_EXIT 0
+
+
+### copy
+
+The no-purchase notice points to existing order evidence without claiming email delivery
+  ok    en: renders the complete evidence-bound instruction
+  ok    en: keeps the no-purchase title
+  ok    en: keeps the address-specific explanation
+  ok    es: renders the complete evidence-bound instruction
+  ok    es: keeps the no-purchase title
+  ok    es: keeps the address-specific explanation
+  ok    fr: renders the complete evidence-bound instruction
+  ok    fr: keeps the no-purchase title
+  ok    fr: keeps the address-specific explanation
+  ok    de: renders the complete evidence-bound instruction
+  ok    de: keeps the no-purchase title
+  ok    de: keeps the address-specific explanation
+  ok    it: renders the complete evidence-bound instruction
+  ok    it: keeps the no-purchase title
+  ok    it: keeps the address-specific explanation
+  ok    nl: renders the complete evidence-bound instruction
+  ok    nl: keeps the no-purchase title
+  ok    nl: keeps the address-specific explanation
+  ok    pt: renders the complete evidence-bound instruction
+  ok    pt: keeps the no-purchase title
+  ok    pt: keeps the address-specific explanation
+  ok    the real callback page selects the localized notice from the callback status
+  ok    the real callback page performs no email delivery-status read
+
+23 checks, all passing.
+S_VOLUME {"runs":0,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3114-gBxLIo
+
+CHILD_EXIT 0
+
+
+### licence
+
+The studio's own words
+  ok    the editor's button, choice, sources, save and list
+  ok    the save button, and the warning that a list sells out until keys are uploaded
+  ok    the editor is not drawn on a call, a course, a bundle or something shipped
+  ok    the studio counts keys given and revoked
+  ok    which products take keys: paid, once, not a call, a course or a bundle
+  ok    a bundle hands out its products' keys, on the thank-you page
+  ok    the buyer sees the key on the thank-you page, in the confirmation email and in their list of purchases
+  ok    the keys given are listed with the email and the order
+  ok    your software's check answers valid, revoked or unknown
+
+The answers
+  ok    four questions
+  ok    start: the editor's own words, in order
+  ok    start: what takes no keys of its own, as the rule has it
+  ok    try before paying: the one shared answer, in license keys' words
+  ok    does it work: none given while plans are off sale, no figure, the studio's own counts and search
+  ok    one space between sentences, never two
+  ok    no number of keys or sales, no percent, no result promised
+
+On the license keys page
+  ok    first in the page's own Questions block
+  ok    no question asked twice
+
+18 checks, all passing.
+S_VOLUME {"runs":0,"mocks":0}
+S_STATUS 0 null undefined LOG /tmp/s3114-P7cNky
+
+CHILD_EXIT 0
+
+
+### types
+
+EXIT 0
+
+
+### lint
+
+EXIT 0
+
+SCANNER
+Public data check: 4326 tracked files; 0 file(s) require correction.
+SCANNER_EXIT0
+DIFFCHECK0

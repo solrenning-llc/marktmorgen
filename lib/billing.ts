@@ -44,6 +44,7 @@ import {
 import { feeWords } from "@/lib/fee-words";
 import { type BillingPeriod, isPeriod } from "@/lib/allowance-window";
 import { costsPaused } from "@/lib/plan-standing";
+import { StripeListUnreadable, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 /** Internal billing calls must keep their route-issued cash grant bound to the
  * published offer. This does not create or release a funding reservation. */
@@ -1943,22 +1944,45 @@ export async function refundsOnIntent(paymentIntent: string): Promise<{ returned
   }
 }
 
-/** Whether a line with this mark was added to this customer since `sinceSeconds`, billed yet or not. */
+/** An invoice line's id, as Stripe gives it. */
+const INVOICE_LINE_ID = /^ii_[A-Za-z0-9]{1,250}$/;
+
+/** A line is readable with its metadata a plain object whose mark, if any, is text. */
+function invoiceLineReadable(row: Record<string, unknown>): boolean {
+  const metadata = ownField(row, "metadata");
+  if (!plainObject(metadata)) return false;
+  const mark = ownField(metadata, "mark");
+  return mark === undefined || typeof mark === "string";
+}
+
+/**
+ * Whether a line with this mark was added to this customer since `sinceSeconds`, billed yet or not.
+ *
+ * A "no" adds the line again (lib/usage-billing.ts carryOut), so it is said only from a list read in its exact shape
+ * (lib/stripe-list.ts; CX-123 rule 24) to its end, with every line readable. A list in another shape, a line that
+ * cannot be read, or more pages than are read throws StripeListUnreadable, and nothing is added on it.
+ */
 export async function findInvoiceLine(customerId: string, mark: string, sinceSeconds: number): Promise<boolean> {
   if (!CUSTOMER_PATTERN.test(customerId)) return false;
   let after = "";
+  let unreadable = 0;
   // A customer has a handful of these a month at most; three pages is far more than any has.
   for (let page = 0; page < 3; page += 1) {
     const query = new URLSearchParams({ customer: customerId, limit: "100", "created[gte]": String(Math.max(0, Math.floor(sinceSeconds))) });
     if (after) query.set("starting_after", after);
-    const listed = await onPlatform("GET", `/invoiceitems?${query}`);
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    if (rows.some((row) => (row.metadata as Record<string, string> | null | undefined)?.mark === mark)) return true;
-    const lastId = rows[rows.length - 1]?.id;
-    if (listed.has_more !== true || typeof lastId !== "string") return false;
-    after = lastId;
+    const listed: unknown = await onPlatform("GET", `/invoiceitems?${query}`);
+    if (plainObject(listed) && hasOwnField(listed, "object") && ownField(listed, "object") !== "list") throw new StripeListUnreadable("invoice lines: not a list");
+    const read = readStripePage(listed, invoiceLineReadable, INVOICE_LINE_ID);
+    if (read.rows.some((row) => ownField(ownField(row, "metadata") as Record<string, unknown>, "mark") === mark)) return true;
+    unreadable += read.unreadable;
+    if (!read.hasMore) {
+      if (unreadable) throw new StripeListUnreadable("invoice lines: a line not readable");
+      return false;
+    }
+    if (!read.lastId) throw new StripeListUnreadable("invoice lines: more to come after a line not readable");
+    after = read.lastId;
   }
-  return false;
+  throw new StripeListUnreadable("invoice lines: more pages than are read");
 }
 
 /**

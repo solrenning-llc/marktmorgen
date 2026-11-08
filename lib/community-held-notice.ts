@@ -3,7 +3,10 @@
  * wait for their approval (added 6 November 2026).
  *
  * Read once a day by the courses job (app/api/cron/courses), for the stores
- * whose community held something lately (storesWithHeld). For each one: the
+ * whose community held something lately (storesWithHeld), in their turn: the
+ * store that waited its turn longest first, and each store answered for goes
+ * to the back of the line (passHeldTurn), so a run that stops for time reaches
+ * every store within a bounded number of days (review of #3033). For each one: the
  * queue is counted (heldQueue, after the sweep that refuses what waited
  * HELD_DAYS), and only when something waits, the day's mark is claimed and
  * one plain email goes to the creator with the counts and the way to the
@@ -21,9 +24,9 @@ import { NIMBUS_FROM, sendEmail as realSendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { standingOf } from "@/lib/plan-standing";
 import { type Store, storeForId } from "@/lib/store";
-import { HELD_DAYS, heldNoticeKey, heldQueue, storesWithHeld } from "@/lib/community-approval";
+import { HELD_DAYS, heldNoticeKey, heldQueue, passHeldTurn, storesWithHeld } from "@/lib/community-approval";
 
-/** The most stores one run reads; the list is the latest first, so the stores held from lately go first. */
+/** The most stores one run reads, in their turn: the store that waited its turn longest first. */
 export const NOTICE_STORES_PER_RUN = 500;
 /** How long the day's mark is kept: the day, and the next for a run that starts late. */
 const MARK_SECONDS = 2 * 86_400;
@@ -58,20 +61,22 @@ export function heldNoticeEmail(store: Pick<Store, "name" | "sid">, posts: numbe
   };
 }
 
-/** One store: counts its queue and, when something waits, tells its creator once today. */
-export async function noticeHeld(store: Store, now: number, sendEmail: typeof realSendEmail = realSendEmail): Promise<HeldNoticeOutcome> {
+/** One store's answer, and whether it was known: an unknown one is never the store's turn done (rule 24). */
+type Visit = { outcome: HeldNoticeOutcome; known: boolean };
+
+async function visit(store: Store, now: number, sendEmail: typeof realSendEmail): Promise<Visit> {
   const id = store.community?.id;
-  if (!id) return "skipped";
+  if (!id) return { outcome: "skipped", known: true };
   const standing = standingOf(store, now / 1000);
-  if (standing !== "paid" && standing !== "trial") return "skipped";
+  if (standing !== "paid" && standing !== "trial") return { outcome: "skipped", known: true };
   // Counted first: an unreadable queue sends nothing and takes no mark, so the next run tries again.
   const waiting = await heldQueue(id, Math.floor(now / 1000)).catch(() => null);
-  if (waiting === null) return "skipped";
-  if (!waiting.length) return "none";
+  if (waiting === null) return { outcome: "skipped", known: false };
+  if (!waiting.length) return { outcome: "none", known: true };
   const posts = waiting.filter((held) => held.kind === "post").length;
   const claimed = await claimMark(heldNoticeKey(id, new Date(now).toISOString().slice(0, 10)), MARK_SECONDS);
-  if (claimed === "taken") return "seen";
-  if (claimed !== "ours") return "skipped";
+  if (claimed === "taken") return { outcome: "seen", known: true };
+  if (claimed !== "ours") return { outcome: "skipped", known: false };
   const { subject, text } = heldNoticeEmail(store, posts, waiting.length - posts);
   const sent = await sendEmail({ meter: { by: "store", store, kind: "email" },
     from: NIMBUS_FROM,
@@ -79,14 +84,21 @@ export async function noticeHeld(store: Store, now: number, sendEmail: typeof re
     subject,
     text,
   }).catch(() => false);
-  return sent ? "sent" : "failed";
+  return { outcome: sent ? "sent" : "failed", known: true };
+}
+
+/** One store: counts its queue and, when something waits, tells its creator once today. */
+export async function noticeHeld(store: Store, now: number, sendEmail: typeof realSendEmail = realSendEmail): Promise<HeldNoticeOutcome> {
+  return (await visit(store, now, sendEmail)).outcome;
 }
 
 /**
- * The daily pass: every store on the list, until `until` (milliseconds, on the
- * clock `now` is read on; a test's `now` is measured from the run's start). The
- * store is read by its id; one that is gone is passed over. An unreadable list
- * sends nothing this run.
+ * The daily pass: the stores on the list in their turn, until `until`
+ * (milliseconds, on the clock `now` is read on; a test's `now` is measured from
+ * the run's start). The store is read by its id; one that is gone is passed
+ * over. Each store answered for goes to the back of the line; one whose answer
+ * was unknown (its read, its queue or its mark) keeps its place, so it goes
+ * first next time. An unreadable list sends nothing this run.
  */
 export async function noticeHeldStores(input: {
   until: number;
@@ -105,12 +117,11 @@ export async function noticeHeldStores(input: {
   if (!sids) return out;
   for (const sid of sids) {
     if (late()) break;
-    const store = await load(sid).catch(() => null);
-    if (!store || store.sid !== sid) {
-      out.skipped += 1;
-      continue;
-    }
-    out[await noticeHeld(store, now, input.sendEmail)] += 1;
+    // A read that failed is unknown (undefined); a store that is gone (null) or not this one is passed over.
+    const store = await load(sid).catch(() => undefined);
+    const seen: Visit = !store || store.sid !== sid ? { outcome: "skipped", known: store !== undefined } : await visit(store, now, input.sendEmail ?? realSendEmail);
+    out[seen.outcome] += 1;
+    if (seen.known) await passHeldTurn(sid, Math.floor(now / 1000));
   }
   return out;
 }

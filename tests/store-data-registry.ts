@@ -446,6 +446,10 @@ export const FAMILIES: Record<string, Family> = {
     "Stores whose community held a post or comment for approval lately, for the creator's daily notice (543 [CM2] unit 2)",
     "One sorted set for every store, a member a store id with the time of its last hold; a store is let go a day after nothing it held can still wait (HELD_DAYS), so it is never larger than the number of stores.",
   ),
+  "nl:cm:ap:turns@lib/community-approval.ts": company(
+    "The order the creator's daily notice reads those stores in, so every one gets its turn (543 [CM2] unit 2, review of #3033)",
+    "One sorted set for every store, a member a store id with its place in line (when it joined or had its last turn); a store leaves it when it comes up after leaving nl:cm:ap:stores, so it is never larger than the number of stores.",
+  ),
   "nl:cm:@lib/community-chat.ts": {
     what: "The live room: its messages, their counter, each speaker's cooldown",
     parts: [capped(MAX_CHAT_KEPT * (MAX_CHAT_TEXT * 3 + 512), "MAX_CHAT_KEPT messages, the oldest let go.", src("lib/community-chat-rules.ts", "MAX_CHAT_KEPT", "MAX_CHAT_TEXT")), per("buyer", 1, KEY, "A speaker's cooldown, minutes.")],

@@ -128,7 +128,8 @@ async function main(): Promise<void> {
   is("an unknown claim on the day's mark: no email", [outbox.length, unknownClaim.sent], [0, 0]);
   const retried = await run(t1 + 180);
   is("a later run, answered, sends the one email", [outbox.length, retried.sent], [1, 1]);
-  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "ZREVRANGE") ? ([{}] as never) : realPipeline(commands));
+  // The list is read in its turn order (review of #3033): the line's read is the one made unreadable.
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "ZRANGEBYSCORE" && c[1] === "nl:cm:ap:turns") ? ([{}] as never) : realPipeline(commands));
   let listThrew = false;
   try {
     await storesWithHeld(t1 + 200);
@@ -138,6 +139,16 @@ async function main(): Promise<void> {
   const unknownList = await run(t1 + DAY + 60);
   redis.pipeline = realPipeline;
   is("an unreadable list throws, and the day's run sends nothing", [listThrew, unknownList.sent, outbox.length], [true, 0, 1]);
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "ZSCORE" && c[1] === "nl:cm:ap:stores") ? ([{}] as never) : realPipeline(commands));
+  let listedThrew = false;
+  try {
+    await storesWithHeld(t1 + DAY + 100);
+  } catch {
+    listedThrew = true;
+  }
+  const unknownListed = await run(t1 + DAY + 120);
+  redis.pipeline = realPipeline;
+  is("whether a store in line is still listed, unknown: it throws, and the run sends nothing", [listedThrew, unknownListed.sent, outbox.length], [true, 0, 1]);
 
   part("Only a store on a plan, with this community, that still exists");
   redis.clear();
@@ -249,7 +260,22 @@ async function main(): Promise<void> {
   }
   is("a hold that lands while the run lets the store go keeps it listed", await storesWithHeld(tLate + 60), [turn[0].sid]);
   is("and its creator is told on the next run", await shortRun(tLate + 120), "creator0@example.test");
-  is("once nothing it held can wait, it is let go", await storesWithHeld(tLate + (HELD_DAYS + 2) * DAY), []);
+  const tGone = tLate + (HELD_DAYS + 2) * DAY;
+  // Rule 24 on the way out: the second look at the list unknown, the store is put back in line and the read throws.
+  redis.pipeline = async (commands) => {
+    const replies = await realPipe(commands);
+    return commands.some((c) => c[0] === "ZREM" && c.includes(turn[0].sid)) ? ([replies[0], {}] as never) : replies;
+  };
+  let goneThrew = false;
+  try {
+    await storesWithHeld(tGone);
+  } catch {
+    goneThrew = true;
+  }
+  redis.pipeline = realPipe;
+  is("let go on an unknown second look: it throws and the store stays in line", [goneThrew, (await redis.run(["ZSCORE", "nl:cm:ap:turns", turn[0].sid])) !== null], [true, true]);
+  is("once nothing it held can wait, it is let go", await storesWithHeld(tGone), []);
+  is("and it has left the line", await redis.run(["ZSCORE", "nl:cm:ap:turns", turn[0].sid]), null);
 
   part("Wired into the daily job, and its email registered");
   const cron = read("app/api/cron/courses/route.ts");

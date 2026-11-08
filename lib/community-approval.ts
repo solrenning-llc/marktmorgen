@@ -39,7 +39,12 @@
  * And one list for the company (unit 2): nl:cm:ap:stores, the stores whose
  * community held something lately, by the time of the last hold, so the
  * daily notice reads only those. A store leaves it by itself a day after
- * nothing it held could still wait (storesWithHeld).
+ * nothing it held could still wait (storesWithHeld). Beside it, the line the
+ * notice reads them in, nl:cm:ap:turns (review of #3033): a store joins at
+ * the back with its first hold, keeps its place on later ones, and goes to
+ * the back once a run answered for it (passHeldTurn), so a run that stops for
+ * time never takes the same stores every day; it leaves the line when it
+ * leaves the list.
  *
  * Bounded: at most MAX_HELD waiting in a community and MAX_MINE items and
  * notes per member; a hold past either is refused, and nothing of it stays.
@@ -134,6 +139,8 @@ const picturesKey = (id: string) => `${base(id)}:ap:f`;
 export const heldNoticeKey = (id: string, day: string) => `${base(id)}:ap:t:${day}`;
 /** The company's list of stores whose community held something lately: store id -> last hold, in seconds. */
 const HELD_STORES = "nl:cm:ap:stores";
+/** The line the daily notice reads the listed stores in: store id -> its place, the smallest first (the time it joined, or of its last turn). */
+const HELD_TURNS = "nl:cm:ap:turns";
 /** A store's id as lib/store.ts makes it (STORE_ID_PATTERN); a room without one lists nothing. */
 const STORE_SID = /^[0-9a-f]{32}$/;
 
@@ -350,8 +357,12 @@ async function hold(id: string, held: Held, room: DataStore, now: number): Promi
     ["ZCARD", mineKey(id, held.a)],
     ["EXPIRE", mineKey(id, held.a), KEEP_SECONDS],
   ];
-  // Unit 2: the store goes on the list the daily notice reads, by the time of this hold.
-  if (typeof room.sid === "string" && STORE_SID.test(room.sid)) placing.push(["ZADD", HELD_STORES, now, room.sid]);
+  // Unit 2: the store goes on the list the daily notice reads, by the time of this hold, and joins the back of
+  // its line unless already in it (NX: a later hold keeps the store's place). The list is written first, so a
+  // run that lets the store go and then looks again finds this hold (storesWithHeld).
+  if (typeof room.sid === "string" && STORE_SID.test(room.sid)) {
+    placing.push(["ZADD", HELD_STORES, now, room.sid], ["ZADD", HELD_TURNS, "NX", now, room.sid]);
+  }
   const replies = repliesFor(await redisPipeline(placing), placing.length);
   const counts = replies?.slice(picture ? 1 : 0).map(countOf);
   if (!replies || !counts || counts.some((n) => n === null) || counts[1] !== 1 || counts[3] !== 1 || (picture && countOf(replies[0]) === null)) {
@@ -515,23 +526,67 @@ export async function sweepHeld(id: string, now = nowSeconds(), limit = SWEEP_BA
   return swept;
 }
 
+/** A ZSCORE reply: no score, or a whole number of seconds; anything else is unknown. */
+const scoreOf = (reply: unknown): "none" | "listed" | null =>
+  reply === null ? "none" : typeof reply === "string" && /^\d{1,15}$/.test(reply) ? "listed" : null;
+
 /**
- * The stores whose community held something lately, the latest first, at most
- * `limit` (543 [CM2] unit 2). A store whose last hold is more than a day past
- * HELD_DAYS has nothing that can still wait, so it is let go here first; an
- * unknown reply is thrown, so a run never reads the list as empty.
+ * The stores whose community held something lately, in their turn (543 [CM2]
+ * unit 2; review of #3033): the store that has waited its turn longest first,
+ * at most `limit`. A store whose last hold is more than a day past HELD_DAYS
+ * has nothing that can still wait, so it is let go from the list here first,
+ * and from the line when it comes up in it. An unknown reply is thrown, so a
+ * run never reads the list as empty.
  */
 export async function storesWithHeld(now = nowSeconds(), limit = 500): Promise<string[]> {
   const replies = repliesFor(
     await redisPipeline([
       ["ZREMRANGEBYSCORE", HELD_STORES, "-inf", now - (HELD_DAYS + 1) * DAY],
-      ["ZREVRANGE", HELD_STORES, 0, Math.max(0, limit - 1)],
+      ["ZRANGEBYSCORE", HELD_TURNS, "-inf", "+inf", "LIMIT", 0, Math.max(1, limit)],
     ]),
     2,
   );
-  const sids = replies && countOf(replies[0]) !== null ? stringList(replies[1]) : null;
-  if (!sids || sids.some((sid) => !STORE_SID.test(sid))) throw new UnknownReplyError("the stores with held community items");
-  return sids;
+  const line = replies && countOf(replies[0]) !== null ? stringList(replies[1]) : null;
+  if (!line || line.some((sid) => !STORE_SID.test(sid))) throw new UnknownReplyError("the stores with held community items");
+  if (!line.length) return [];
+  const listed = repliesFor(await redisPipeline(line.map((sid) => ["ZSCORE", HELD_STORES, sid])), line.length)?.map(scoreOf);
+  if (!listed || listed.some((state) => state === null)) throw new UnknownReplyError("the stores with held community items");
+  const gone = line.filter((_, at) => listed[at] === "none");
+  if (gone.length) await leaveLine(gone, now);
+  return line.filter((_, at) => listed[at] === "listed");
+}
+
+/**
+ * Takes stores let go from the list out of the line, then looks at the list
+ * again: a hold that landed meanwhile wrote the list before the line, so it is
+ * found here and its store is put back. An unknown answer puts them all back,
+ * so a store is never dropped on one (it comes up again on the next run).
+ */
+async function leaveLine(gone: string[], now: number): Promise<void> {
+  const replies = repliesFor(
+    await redisPipeline([["ZREM", HELD_TURNS, ...gone], ...gone.map((sid) => ["ZSCORE", HELD_STORES, sid])]),
+    gone.length + 1,
+  );
+  const again = replies && countOf(replies[0]) !== null ? replies.slice(1).map(scoreOf) : null;
+  const known = again !== null && again.every((state) => state !== null);
+  const back = known ? gone.filter((_, at) => again[at] === "listed") : gone;
+  if (back.length) {
+    const put = repliesFor(await redisPipeline([["ZADD", HELD_TURNS, "NX", ...back.flatMap((sid) => [now, sid])]]), 1);
+    if (!put || countOf(put[0]) === null) throw new UnknownReplyError("putting a store back in the held notice line");
+  }
+  if (!known) throw new UnknownReplyError("the stores let go from the held notice line");
+}
+
+/**
+ * The daily notice answered for this store (told, already told, nothing
+ * waiting, refused, or nothing to tell it): it goes to the back of the line.
+ * False when the answer is unknown; the store then keeps its place, and so
+ * goes first again on the next run, which is never a turn lost.
+ */
+export async function passHeldTurn(sid: string, now = nowSeconds()): Promise<boolean> {
+  if (!STORE_SID.test(sid)) return false;
+  const replies = repliesFor(await redisPipeline([["ZADD", HELD_TURNS, now, sid]]).catch(() => null), 1);
+  return replies !== null && countOf(replies[0]) !== null;
 }
 
 /**

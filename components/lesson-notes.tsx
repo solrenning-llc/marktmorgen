@@ -155,9 +155,9 @@ export function LessonNotes({
         </p>
         <p className="sr-only" aria-live="polite">{heard}</p>
         <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button type="submit" className="btn st-btn min-h-[44px]" disabled={busy} aria-disabled={busy}>{w.save}</button>
+          <button type="submit" className="btn st-btn min-h-[44px] items-center" disabled={busy} aria-disabled={busy}>{w.save}</button>
           {undo !== null ? (
-            <button type="button" className="btn st-btn-ghost min-h-[44px]" onClick={putBack} disabled={busy} aria-disabled={busy}>{w.undo}</button>
+            <button type="button" className="btn st-btn-ghost min-h-[44px] items-center" onClick={putBack} disabled={busy} aria-disabled={busy}>{w.undo}</button>
           ) : null}
           <p role="status" className="text-sm">{said}</p>
         </div>

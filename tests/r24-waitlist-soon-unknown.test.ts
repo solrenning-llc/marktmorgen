@@ -12,6 +12,10 @@
  *   - joining a waitlist then sends nothing and never says the list is closed
  *     (its route answers "error");
  *   - the studio's view of a waitlist is not drawn from an unread set;
+ *   - a coming-soon change or a launch the studio saved is answered as saved
+ *     when only the view read after it is unknown: `ok: true` with
+ *     `viewsUnread`, never a 500 and never a view drawn from the unread set,
+ *     and the panel says the change was saved and the numbers were not read;
  *   - the booking page books and sells nothing on an unknown state and says
  *     the times could not be read, with no `.catch(() => false)` left on any
  *     caller.
@@ -24,20 +28,27 @@ import { execFileSync } from "node:child_process";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { isSoon, joinWaitlist, setSoon, soonProducts, waitlistViews } from "@/lib/waitlist";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { POST as waitlistRoute } from "@/app/api/store/waitlist/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
-/** One command's reply replaced; `lost` answers the whole pipeline with no reply at all. */
-let inject: { command: string; reply: unknown; lost?: unknown } | null = null;
+/**
+ * One command's reply replaced; `lost` answers the whole pipeline with no
+ * reply at all; `key`, when given, limits it to that command on that key.
+ */
+let inject: { command: string; reply: unknown; lost?: unknown; key?: string } | null = null;
 let hits = 0;
+const hit = (c: Command) => c[0] === inject!.command && (inject!.key === undefined || c[1] === inject!.key);
 redis.pipeline = (async (batch: Command[]) => {
-  if (inject && batch.some((c) => c[0] === inject!.command)) {
+  if (inject && batch.some(hit)) {
     hits += 1;
     if ("lost" in inject) return inject.lost;
     const answers = await real(batch);
-    return batch.map((c, i) => (c[0] === inject!.command ? inject!.reply : answers[i]));
+    return batch.map((c, i) => (hit(c) ? inject!.reply : answers[i]));
   }
   return real(batch);
 }) as typeof redis.pipeline;
@@ -154,6 +165,40 @@ async function main(): Promise<void> {
     is(`${label}: the view is unknown, never "not coming soon"`, await outcome(() => waitlistViews(store, [product.id])), "unknown");
   }
   inject = null;
+
+  part("The studio's switch: a saved change is answered as saved when only its view is unread");
+  const session = await openSession(owner);
+  const post = async (body: Record<string, unknown>) => {
+    const response = await waitlistRoute(new NextRequest("https://marktmorgen.com/api/store/waitlist", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ id: product.id, ...body }) }));
+    return { status: response.status, body: (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; view?: unknown; viewsUnread?: boolean } };
+  };
+  const soonSet = `nl:wl:${store.statsId}:soon`;
+  await setSoon(store, product.id, false);
+  const healthy = await post({ action: "soon", on: true });
+  is("control: a healthy read answers the view, not 'unread'", [healthy.status, healthy.body.ok, (healthy.body.view as { soon?: boolean } | undefined)?.soon, healthy.body.viewsUnread ?? false], [200, true, true, false]);
+  await setSoon(store, product.id, false);
+  for (const [label, reply] of ODD_MEMBERS.slice(0, 3)) {
+    inject = { command: "SMEMBERS", reply, key: soonSet };
+    hits = 0;
+    const marked = await post({ action: "soon", on: true });
+    inject = null;
+    is(`marking coming soon, then ${label}: the view was read`, hits > 0, true);
+    is(`marking coming soon, then ${label}: answered saved, with the view unread`, [marked.status, marked.body.ok, marked.body.viewsUnread, marked.body.error ?? null], [200, true, true, null]);
+    is(`marking coming soon, then ${label}: no view drawn from the unread set`, marked.body.view ?? null, null);
+    is(`marking coming soon, then ${label}: the change was saved`, await isSoon(store, product.id), true);
+    await setSoon(store, product.id, false);
+  }
+  await setSoon(store, product.id, true);
+  inject = { command: "SMEMBERS", reply: null, key: soonSet, lost: [] };
+  const launched = await post({ action: "launch", note: "It is out.", address: "1 Main St, Springfield, IL 62701" });
+  inject = null;
+  is("launching, then a lost read: answered saved, with the view unread", [launched.status, launched.body.ok, launched.body.viewsUnread, launched.body.error ?? null], [200, true, true, null]);
+  is("launching, then a lost read: no view drawn from the unread set", launched.body.view ?? null, null);
+  const after = (await waitlistViews(store, [product.id]))[product.id];
+  is("launching, then a lost read: it went on sale and its launch was kept", [await isSoon(store, product.id), Boolean(after?.launch)], [false, true]);
+  const panel = readFileSync("components/waitlist-panel.tsx", "utf8");
+  is("the panel reads the unread answer", panel.includes("answer.viewsUnread"), true);
+  is("the panel tells it as saved, in a status line, not as an error", /saved && !error \? \(\s*<p className="[^"]*" role="status">/.test(panel), true);
 
   part("The booking page: unknown books and sells nothing and says so");
   const page = readFileSync("app/[handle]/book/[product]/page.tsx", "utf8");

@@ -23,6 +23,7 @@ import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
 import { type TaskSetup, parseTaskSetup } from "@/lib/assignment-rules";
 import { randomLetters } from "@/lib/random-letters";
 import { UnknownReply, exactReplies } from "@/lib/redis-exact";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export const MAX_MODULES = 30;
 export const MAX_LESSONS = 200;
@@ -605,6 +606,19 @@ export async function readBody(courseId: string, lessonId: string): Promise<stri
   if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return "";
   const [raw] = await redisPipeline([["GET", bodyKey(courseId, lessonId)]]);
   return typeof raw === "string" ? raw : "";
+}
+
+/**
+ * One lesson's text, read only in its exact shape (CX-123 rule 24): the text, or "" when Redis answers there is none
+ * (nil). Any other answer, a lesson id that cannot be one or no Redis throws UnknownReplyError, never "this lesson has
+ * no text". readBody stays as it is for the callers that show a page.
+ */
+export async function readBodyExact(courseId: string, lessonId: string): Promise<string> {
+  const what = "a lesson's text";
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) throw new UnknownReplyError(what);
+  const reply = repliesFor(await redisPipeline([["GET", bodyKey(courseId, lessonId)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError(what);
+  return reply[0] ?? "";
 }
 
 /** Many lessons' text at once, a hundred to a command: for a store's whole export (lib/store-export.ts). */

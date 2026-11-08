@@ -62,7 +62,7 @@ export function PathMilestone({ sid, done, shareHref }: { sid: string; done: rea
   }, [finished]);
   if (!key || !seen || (!shown && !finished)) return null;
   function dismiss(id: string) {
-    const now = readSeen(kept(key)) ?? [];
+    const now = readSeen(kept(key) ?? null) ?? [];
     const union = [...new Set([...(seen as string[]), ...now, ...dismissed])];
     try {
       window.localStorage.setItem(key as string, markSeen(union, id));

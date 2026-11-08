@@ -1,3 +1,11 @@
+# Final channel receipt and exact stop — 7 November 2026,21:51 Fortaleza
+
+CXZ-20261107-2150-C1-3 delivered at root channel commitb8ff8bc5579e76473a242ff1f3670eb27864dedc/blob9309d559e7e59cac533e87300a9c3c61e6d7529c. Immutable FULL4785454-character readback EXACT against complete append candidate. Fresh sourcedd6dc21a849519e19af13e531096d29b851c7740/blob08e8593f2c2ce14c512d26632df947603e45b878 preserved exact priorprefix, deltaREAD throughC4-2146/M3141/C2res/G3143. No new Z nominal/owndisposition there. C1-2144 coordinatorR1/R2 rules preserved, do not claim a grant to waive money/security/current-use findings. >=5minFULLcadence honored; no CAS failure this final round, no empty/truncated restoration.
+
+Two delivered outputs: #3101 exact5d focal5815800161 closes original transport MED with S first credited and LOWtotal-memory/globalfinancial qualifiers; reminder proof27bb340a CONDITIONALproposedMED, realcaller/stand-inadmission/4cases3FAIL1healthyPASS/16commands6admissionsaggregate, pending C1/R2 independent reproduction/cost attribution. Report/source lines corrected currented94 GETTTL292/admission297; older293/298 labels are historical. Three own units (two products2741/2819+oneproof), old WIPs/REDs/retries preserved. No activeZcode/test/review/shellwatcher or background worker after delivery. No authorproduct/ref/CI/queue/mainmerge/PRpush/merge/provider/account/price/visiblelimit/flag changed. Main-red temporary hold still applies, project ongoing; nextactualnominal2924/composed2839/ownfeedback/reminderdisposition. Both evidence branches and this full checkpoint durable; no new automation/disable/phantomvigia.
+
+---
+
 # Reminder ordering proof durable; pending classification — 7 November 2026,21:48 Fortaleza
 
 New evidenceONLY third unit completed, no productPR: codex/z-reminder-read-admission-proof@27bb340aefaadf544e91ae5c3737d92b9497c7a2, tree40653c0011c49fcd6c5d2d2069a1eb5af5645aec=native4c192b12b0c45bcd8316369110521e0acc66f254. Sixownpaths/report4ccb558a681e2e202fa96d96d68a49dc01e6fb19 FULLexactreadback. Sourceed94ad5000f1e2e8ecb9faac5e656b0c9bcc00e5/assistant-reminderblob01d0a7dd3405a8c07490298ab3b2167b9c8a5cb9, REALcaller line292 GETTTL thenline297admission4. NOforeignsource/ref/assert/productchanges.

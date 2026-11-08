@@ -36,6 +36,7 @@ import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { claimMark } from "@/lib/claim-mark";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
@@ -484,10 +485,15 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
       if (status === PAID && got?.item) {
-        const [fresh] = await redisPipeline([["SET", itemKey(got.item), batch, "NX", "EX", 400 * 86_400]]);
-        if (fresh !== null) {
+        // Written into the book only on this run's own mark (CX-123 rule 24): "OK", or a lost reply read back as ours.
+        // Taken by another run, it is in the book already. Unknown, nothing is written and the affiliate stays on
+        // their way, to be read again, so a payout is never written twice.
+        const mark = await claimMark(itemKey(got.item), 400 * 86_400);
+        if (mark === "ours") {
           await addPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference: `PayPal ${got.item}` });
           out.paid += 1;
+        } else if (mark === "unknown") {
+          still.push(line);
         }
       } else if (NOT_PAID.has(status)) {
         out.released += 1;

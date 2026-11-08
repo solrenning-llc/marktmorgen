@@ -14,7 +14,8 @@
  *   - every other shape of the reply, and every value that is not a JSON
  *     object with a numeric `e` and `until`, is unknown: busyTimes throws
  *     UnknownReplyError, the booking page says it cannot read the times,
- *     holdAndCheckout, checkCallChange and moveBooking answer "error",
+ *     holdAndCheckout, checkCallChange and moveBooking (on its reading of
+ *     the taken times) answer "error",
  *     slotsForMove answers null and releaseOwnHold refuses, and nothing is
  *     HDEL'd or opened at Stripe;
  *   - a hold read whole and genuinely run out is still tidied.
@@ -219,14 +220,13 @@ async function main(): Promise<void> {
   const moved = await move();
   restore();
   is("moveBooking, unknown on the diary read: error", moved, { ok: false, reason: "error" });
-  // Healthy for the check, unknown only on the read of the entries the move replaces: refused before anything is written.
+  // Healthy for the check, unknown only on the read of the entries the move replaces. That read comes after the move is
+  // written (lib/calls.ts on main since #3240, held by tests/calls-lock-shape.test.ts): it is tidying only, so the move
+  // is done and nothing is deleted on the reply it could not read.
   patch(() => null, undefined, [2]);
   const movedLate = await move();
   restore();
-  is("moveBooking, unknown on the entries it replaces: error", movedLate, { ok: false, reason: "error" });
-  is("…no move is written and the booking stays where it was", [(await real([["GET", `nl:call:moved:${first.session}`]]))[0], (await busyTimes(store)).map((b) => b.start)], [null, [at]]);
-  const fine = await move();
-  is("healthy again: the booking moves", fine.ok ? [fine.start, fine.moves] : fine, [later, 1]);
+  is("moveBooking, unknown on the entries it replaces, read after the move is written: the move is done", movedLate.ok ? [movedLate.start, movedLate.moves] : movedLate, [later, 1]);
   is("…and the diary holds it at the new time only", (await busyTimes(store)).map((b) => [b.start, b.session]), [[later, first.session]]);
 
   part("A hold read whole and genuinely run out is still tidied");

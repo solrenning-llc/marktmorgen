@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioEmptyState } from "@/components/empty-state";
 import { useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { whenWords } from "@/lib/community-text";
@@ -113,7 +114,7 @@ export function CourseCommentsStudio({
       {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
 
       {comments.length === 0 ? (
-        <p className="mt-6 text-sm text-ink-soft">No comments yet. The newest ones will show here, with a way to answer each.</p>
+        <StudioEmptyState title="No comments yet" body="The newest ones will show here, with a way to answer each." className="mt-6" />
       ) : (
         <ol className="mt-6 space-y-4">
           {comments.map((c) => (

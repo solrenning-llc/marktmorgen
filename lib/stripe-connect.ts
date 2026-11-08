@@ -315,16 +315,24 @@ function unknownShape(what: string): never {
 
 /**
  * The card_payments status, read exactly: the account, configuration.merchant,
- * its capabilities and card_payments are objects and the status a non-empty
- * string. A 200 that says less (the include ignored, a change of shape, a body
+ * its capabilities and card_payments are objects and the status one of
+ * CARD_STATUSES. A 200 that says less (the include ignored, a change of shape, a body
  * that is not JSON) is unknown, never "card payments off" (CX-123 rule 24).
  */
+// The statuses read as known. Stripe's v2 capability statuses are active, pending, restricted and unsupported;
+// "inactive" is kept as an "off" answer the earlier code and tests already took as Stripe's. Anything else (another
+// value, another letter case, blank) is unknown and throws, so nothing is written on it (Codex Z on #3311): a value
+// Stripe adds later reads as "not checked" until it is added here, never as "card payments off".
+const CARD_STATUSES = new Set(["active", "inactive", "pending", "restricted", "unsupported"]);
+// The statuses of a requirements deadline: currently_due, eventually_due and past_due.
+const DEADLINE_STATUSES = new Set(["currently_due", "eventually_due", "past_due"]);
+
 function cardPaymentsStatus(account: unknown): string {
   const configuration = objectOf(objectOf(account)?.configuration);
   const merchant = objectOf(configuration?.merchant);
   const cardPayments = objectOf(objectOf(merchant?.capabilities)?.card_payments);
   const status = cardPayments?.status;
-  if (typeof status !== "string" || !status) unknownShape("an account's card payments");
+  if (typeof status !== "string" || !CARD_STATUSES.has(status)) unknownShape("an account's card payments");
   return status;
 }
 
@@ -342,7 +350,7 @@ function deadlineStatus(account: unknown): string | null {
   const summary = objectOf(requirements.summary) ?? unknownShape("an account's requirements summary");
   if (summary.minimum_deadline === undefined || summary.minimum_deadline === null) return null;
   const status = objectOf(summary.minimum_deadline)?.status;
-  if (typeof status !== "string" || !status) unknownShape("an account's requirements deadline");
+  if (typeof status !== "string" || !DEADLINE_STATUSES.has(status)) unknownShape("an account's requirements deadline");
   return status;
 }
 

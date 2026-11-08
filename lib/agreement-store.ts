@@ -195,11 +195,17 @@ export async function createAgreement(store: Store, draft: AgreementDraft, now =
   }
 }
 
-/** One agreement by its id, or null. */
+/**
+ * One agreement by its id, or null. Read exactly (CX-123 rule 24): null only when the record is confirmed absent
+ * (GET null) or its text does not read; any other reply throws UnknownReplyError, so a withdraw or a delete is never
+ * told "gone" while the record may still be there.
+ */
 export async function readAgreement(id: string): Promise<Agreement | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(id)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("reading an agreement");
+  const raw = reply[0];
+  if (raw === null) return null;
   try {
     return parseAgreement(JSON.parse(raw));
   } catch {

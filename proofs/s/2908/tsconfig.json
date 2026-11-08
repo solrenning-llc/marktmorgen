@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../lib/buyer-profile.ts",
+    "../../../app/studio/people/page.tsx",
+    "../../../tests/f-buyer-profile-paypal-unknown.test.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "--max-old-space-size=512",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings=0",
+    "lib/buyer-profile.ts",
+    "app/studio/people/page.tsx",
+    "tests/f-buyer-profile-paypal-unknown.test.ts",
+    "proofs/s/2908/run.mjs",
+    "proofs/s/2908/checks.mjs"
+  ],
+  "status": 0,
+  "signal": null,
+  "stdout": "",
+  "stderr": "",
+  "error": null
+}

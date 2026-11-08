@@ -1,0 +1,11 @@
+{
+  "file": "tests/buyer-profile.test.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "57351cfc425d242c59127162d5ee74ee039694c2",
+  "stdout": "\nWhat they paid\n  ok    the address, as one\n  ok    the name Stripe has\n  ok    this store's sales and payments only, newest first\n  ok    paid in dollars, each payment once\n  ok    and given back\n  ok    euros kept apart\n  ok    purchases and later payments\n\nWhere they came from\n  ok    first and latest purchase\n  ok    a channel is known for some of their sales\n  ok    the course sale's channel and campaign\n  ok    where they found the store, from the earliest sale that says, not the older one that does not\n  ok    the latest purchase that says: direct, which is not the same as not recorded\n\nMembership, course, list\n  ok    the membership, paying\n  ok    the course, two of four lessons\n  ok    on the list, agreed, with its labels\n  ok    Stripe was read in full\n\nNotes\n  ok    the key is the same whatever the capitals, and is not the address\n  ok    empty words are not a note\n  ok    a note, with who wrote it and its line breaks kept\n  ok    at most MAX_PERSON_NOTES, the newest kept\n  ok    one taken away\n  ok    no key holds the address\n  ok    a deleted store's notes all go\n\nOpening a buyer's page\n  ok    an address is read as one; anything else is not\n  ok    a search's token opens it on its own store\n  ok    and on no other\n  ok    a made-up token opens nothing\n  ok    a sale of this store opens its buyer\n  ok    another store's sale opens nobody\n  ok    something that is not a sale's reference is not looked up\n\nWhen Stripe cannot be read\n  ok    the page says so, and the rest is still there\n\n31 checks, all passing.\nS_VOLUME {\"runs\":243,\"attempts\":7,\"forwarded\":7}\n",
+  "stderr": "reading a buyer's payments failed StripeError: Stripe request failed (500 unknown): down\n    at onAccount ([stdin]:9421:11)\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async buyerProfile ([stdin]:55925:24)\n    at async main ([stdin]:56499:16) {\n  status: 500,\n  code: 'unknown',\n  stripeMessage: 'down'\n}\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

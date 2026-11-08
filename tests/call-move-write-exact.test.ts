@@ -9,10 +9,11 @@
  * time, so the reminder job dropped the reminders for the real time for good, a second move started from the wrong
  * time and count (MAX_MOVES), and a booking lead could be approved by the old end (lib/affiliate-leads.ts).
  *
- * Now the move is written only on an exact "OK"; anything else throws UnknownReplyError, so moveBooking refuses
- * ("error") before the diary, the reminders and the emails. planReminders, planCheck and markBookingsChanged read their
- * ZADD (0 or 1), SET ("OK"), INCRBY (one or more) and EXPIRE (0 or 1) replies exactly too and throw otherwise; their
- * callers already log the throw and go on, so the healthy path is unchanged.
+ * Now the move is written on an exact "OK"; any other reply is read back once, and only the key holding exactly this
+ * move counts as written; anything else throws UnknownReplyError, so moveBooking refuses ("error") before the diary,
+ * the reminders and the emails. planReminders, planCheck and markBookingsChanged read their ZADD (0 or 1), SET ("OK"),
+ * INCRBY (one or more) and EXPIRE (0 or 1) replies exactly too and throw otherwise; their callers already log the throw
+ * and go on, so the healthy path is unchanged.
  *
  * Controls: a healthy move is written, the diary and readMoves agree, the reminders are planned at the new time and
  * the emails go out; planning the same reminders twice (ZADD 0) is fine.
@@ -54,9 +55,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 /**
  * While set, the reply put in place of the real one for a command: `moved` for the SET of a booking's move (which is
  * then not run at all, so the move is really not written), `zadd` for a ZADD to the reminder queue, `changed` for the
- * SET, INCRBY or EXPIRE of a store's calendar mark (named by its command).
+ * SET, INCRBY or EXPIRE of a store's calendar mark (named by its command). `landed` answers the move's SET in another
+ * shape after running it (the move is written), and `get` answers the GET that reads a move back.
  */
-const swap: { moved?: { value: unknown }; zadd?: { value: unknown }; changed?: { command: string; value: unknown } } = {};
+const swap: {
+  moved?: { value: unknown };
+  landed?: { value: unknown };
+  get?: { value: unknown };
+  zadd?: { value: unknown };
+  changed?: { command: string; value: unknown };
+} = {};
 const run = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const skipped = commands.map((c) => swap.moved !== undefined && c[0] === "SET" && String(c[1]).startsWith("nl:call:moved:"));
@@ -67,6 +75,8 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
     if (skipped[i]) return swap.moved?.value;
     const reply = real[k++];
     const key = String(c[1] ?? "");
+    if (swap.landed && c[0] === "SET" && key.startsWith("nl:call:moved:")) return swap.landed.value;
+    if (swap.get && c[0] === "GET" && key.startsWith("nl:call:moved:")) return swap.get.value;
     if (c[0] === "ZADD" && key === REMINDER_QUEUE && swap.zadd) return swap.zadd.value;
     if (swap.changed && c[0] === swap.changed.command && key.startsWith("nl:cal:chg:")) return swap.changed.value;
     return reply;
@@ -74,6 +84,8 @@ redis.pipeline = (async (commands: (string | number)[][]) => {
 }) as typeof redis.pipeline;
 function unswap(): void {
   delete swap.moved;
+  delete swap.landed;
+  delete swap.get;
   delete swap.zadd;
   delete swap.changed;
 }
@@ -197,6 +209,29 @@ async function main(): Promise<void> {
     is(`SET as ${what}: no move is read, and none was kept`, [(await readMoves([session])).size, (await run([["EXISTS", movedKey(session)]]))[0]], [0, 0]);
     is(`SET as ${what}: the reminders are not touched`, await queued(session), queueBefore);
   }
+
+  part("A move that landed though its SET was answered in another shape is read back, and is done");
+  const L = days[shapes.length + 1];
+  const landed = await sellSession(w, L);
+  await run([["DEL", lockOf(w)]]);
+  sent = mails;
+  swap.landed = { value: undefined };
+  const readBack = await move(landed, L, L + 2 * HOUR);
+  unswap();
+  is("the move is reported as done, as readMoves gives it", [readBack.ok ? readBack.start : readBack, (await readMoves([landed])).get(landed)?.s], [L + 2 * HOUR, L + 2 * HOUR]);
+  is("the diary has the new time, and the emails go out", [(JSON.parse(String((await run([["HGET", diaryOf(w), landed]]))[0])) as { s: number }).s, mails > sent], [L + 2 * HOUR, true]);
+
+  const G = days[shapes.length + 2];
+  const unread = await sellSession(w, G);
+  const [unreadBefore] = await run([["HGET", diaryOf(w), unread]]);
+  await run([["DEL", lockOf(w)]]);
+  sent = mails;
+  swap.landed = { value: undefined };
+  swap.get = { value: ["x"] };
+  const unreadMove = await move(unread, G, G + 2 * HOUR);
+  unswap();
+  is("a SET and its read-back both in another shape: the move is refused", unreadMove, { ok: false, reason: "error" });
+  is("…with no email, and the diary as it was", [mails - sent, (await run([["HGET", diaryOf(w), unread]]))[0]], [0, unreadBefore]);
 
   part("Reminders: ZADD read exactly");
   const S = "cs_test_movewritereminders0001";

@@ -1,6 +1,6 @@
 import { personKey } from "@/lib/person-key";
 import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, MAX_TASK_TEXT, tasksDue } from "@/lib/person-tasks";
-import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
+import { IncludedBytes } from "@/lib/sent-bytes";
 import { buyerLedger } from "@/lib/segments";
 import type { Store } from "@/lib/store";
 
@@ -29,17 +29,21 @@ export const AGENDA_TASKS_BYTES = MAX_STORE_TASKS * MAX_TASK_RECORD_BYTES;
  * in what React reads to take it over (two and a half times, at the most).
  */
 export const AGENDA_ROW_SENT_BYTES = Math.ceil(2.5 * (MAX_TASK_RECORD_BYTES + 2 * 254 + 200));
+/** Bytes of the tasks read that one studio request covers. */
+export const AGENDA_UNIT_BYTES = 1_000_000;
 /**
  * Studio requests the agenda counts before it reads every task, beyond the
  * buyers page's own (round 5, M1): by how many people have tasks
  * (`peopleWithTasks`, one HLEN), each at the most a person's tasks can
- * weigh, none within PAGE_INCLUDED_BYTES, then one a megabyte. What it sends
- * on is counted after, by its measured size (lib/sent-bytes.ts), and the
- * buyers by what their reading weighs (lib/segments.ts).
+ * weigh, none within what is left of the page's included bytes (`included`,
+ * one for the whole page, lib/sent-bytes.ts IncludedBytes; C3-112 (2)), then
+ * one a megabyte. What it sends on is counted after, by its measured size
+ * (lib/sent-bytes.ts), and the buyers by what their reading weighs
+ * (lib/segments.ts), from the same included bytes.
  */
-export function agendaReadUnits(peopleWithTasks: number): number {
+export function agendaReadUnits(peopleWithTasks: number, included: IncludedBytes = new IncludedBytes()): number {
   const bytes = Math.min(Math.max(0, peopleWithTasks) * MAX_PERSON_TASKS * MAX_TASK_RECORD_BYTES, AGENDA_TASKS_BYTES);
-  return bytes <= PAGE_INCLUDED_BYTES ? 0 : Math.ceil(bytes / 1_000_000);
+  return included.take(bytes, AGENDA_UNIT_BYTES).units;
 }
 
 /** The most the agenda's reading and sending count together (every task, every row): held against AGENDA_READ. */
@@ -69,16 +73,16 @@ export function addressesOf(statsId: string, persons: ReadonlySet<string>, email
  * reading of buyers was cut short. `count` is asked before Stripe is read
  * again (buyerLedger), so a page counts that reading only when it happens.
  */
-export async function personAddresses(store: Store, persons: ReadonlySet<string>, count?: (units: number) => Promise<boolean>): Promise<{ addresses: Map<string, string>; partial: boolean }> {
+export async function personAddresses(store: Store, persons: ReadonlySet<string>, count?: (units: number) => Promise<boolean>, included?: IncludedBytes): Promise<{ addresses: Map<string, string>; partial: boolean }> {
   if (!store.statsId || !persons.size) return { addresses: new Map(), partial: false };
-  const ledger = await buyerLedger(store, count);
+  const ledger = await buyerLedger(store, count, included);
   return { addresses: addressesOf(store.statsId, persons, ledger.buyers.keys()), partial: ledger.partial };
 }
 
 /** The address of one person among the store's buyers, for their page opened from the agenda. */
-export async function addressForPerson(store: Store, person: string, count?: (units: number) => Promise<boolean>): Promise<string | null> {
+export async function addressForPerson(store: Store, person: string, count?: (units: number) => Promise<boolean>, included?: IncludedBytes): Promise<string | null> {
   if (!PERSON_KEY.test(person)) return null;
-  const { addresses } = await personAddresses(store, new Set([person]), count);
+  const { addresses } = await personAddresses(store, new Set([person]), count, included);
   return addresses.get(person) ?? null;
 }
 

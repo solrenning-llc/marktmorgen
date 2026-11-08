@@ -523,6 +523,8 @@ function EventForm({
     space: spaces[0]?.id ?? "",
   }));
   const set = (change: Partial<Payload>) => setDraft((d) => ({ ...d, ...change }));
+  // Google Meet or Zoom choices drawn under "Where": a connected one, or the saved choice of this event.
+  const meetChoices = (["google", "zoom"] as const).filter((p) => meetings.some((m) => m.provider === p) || (draft.where === "meet" && draft.meet === p));
   const id = (name: string) => `ev-${event?.id ?? "new"}-${name}`;
   const locked = Boolean(event?.started);
   const zoneOptions = zoneList.includes(draft.tz) ? zoneList : [draft.tz, ...zoneList];
@@ -603,9 +605,7 @@ function EventForm({
           while connected stays on screen after a disconnect, so the creator
           sees why it no longer works rather than a silent switch.
         */}
-        {(["google", "zoom"] as const)
-          .filter((p) => meetings.some((m) => m.provider === p) || (draft.where === "meet" && draft.meet === p))
-          .map((p) => {
+        {meetChoices.map((p) => {
             const account = meetings.find((m) => m.provider === p) ?? null;
             return (
               <label key={p} className="mt-1 flex min-h-[44px] cursor-pointer items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 hover:bg-white">
@@ -625,7 +625,8 @@ function EventForm({
               </label>
             );
           })}
-        {meetUnread ? (
+        {/* Only when no Google or Zoom choice is drawn above: a saved one already says it could not be checked. */}
+        {meetUnread && meetChoices.length === 0 ? (
           <p className="mt-1 text-sm text-ink-soft" role="status">
             Your Google Calendar and Zoom connections could not be checked just now, so they are not offered here. Reload this page in a moment.
           </p>

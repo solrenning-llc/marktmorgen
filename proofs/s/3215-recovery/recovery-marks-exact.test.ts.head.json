@@ -1,0 +1,11 @@
+{
+  "file": "tests/recovery-marks-exact.test.ts",
+  "mode": "head",
+  "parent": "fd22ec690a88e348fc37653b9396a1def4f56e18",
+  "head": "d055c89729b8a9d6dda210e905ffc9342c0591d4",
+  "stdout": "✔ control: healthy marks send once, then the sent mark skips (56.820487ms)\n✔ control: the assistant's own mark, a stop and a taken claim each skip (1.949642ms)\n✔ the Store assistant's mark of any other shape is unknown, never 'not checked' (7.318101ms)\n✔ the sent, stop and once-a-week marks of any other shape are unknown, never 'not stopped' (17.901382ms)\n✔ a cut-short or overlong marks pipeline is unknown (2.137284ms)\n✔ the list contact of another shape is unknown, never 'still on the list' (5.281462ms)\n✔ with no contact list, the fourth read (a one-key EXISTS) of any other shape is unknown (Codex Z on #2929) (6.082577ms)\n✔ control: with no contact list, healthy marks send once (2.899234ms)\n✔ an unknown stop link write leaves no stop link behind, with the address in it (Claude 5's LOW on #2951) (5.938209ms)\n✔ control: a stop link written whole stays for the reminder it is sent in (3.061934ms)\n✔ a claim reply other than OK or nothing is unknown: nothing is sent (11.092334ms)\n✔ an unknown once-a-week claim gives back the sent claim taken here; the once mark whose reply was lost stays (0.813518ms)\n✔ an unknown sent claim gives back the once-a-week claim it took, so another checkout of the buyer still gets one (2.361633ms)\n✔ the erasure check of any other shape is unknown, never 'not erased' (2.682106ms)\nℹ tests 14\nℹ suites 0\nℹ pass 14\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 133.977364\nS_VOLUME {\"runs\":1206,\"attempts\":34,\"forwarded\":34}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

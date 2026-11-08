@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3215-recovered-billing.proof.ts",
+  "mode": "head",
+  "parent": "fd22ec690a88e348fc37653b9396a1def4f56e18",
+  "head": "d055c89729b8a9d6dda210e905ffc9342c0591d4",
+  "stdout": "  ok    healthy neighbors notified once\nNEW_S_CURSOR [\"sub_SFirst1108\"]\n  FAIL  new creator notified despite permanent refusal\n        expected 1\n        got      0\n  ok    refused creator notified once after recovery\n  ok    new creator eventually notified once\n  ok    healthy notices never duplicated\n\n5 checks, 1 failing.\nS_VOLUME {\"runs\":65,\"attempts\":22,\"forwarded\":22}\n",
+  "stderr": "email rejected 422\ntelling a creator their payment failed did not work Error: the email was not sent\n    at [stdin]:11909:22\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async walkList ([stdin]:11812:12)\n    at async sendFailedPlanNotices ([stdin]:11898:18)\n    at async main ([stdin]:11996:3)\nemail rejected 422\ntelling a creator their payment failed did not work Error: the email was not sent\n    at [stdin]:11909:22\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async walkList ([stdin]:11812:12)\n    at async sendFailedPlanNotices ([stdin]:11898:18)\n    at async main ([stdin]:11999:31)\nemail rejected 422\ntelling a creator their payment failed did not work Error: the email was not sent\n    at [stdin]:11909:22\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async walkList ([stdin]:11812:12)\n    at async sendFailedPlanNotices ([stdin]:11898:18)\n    at async main ([stdin]:11999:31)\nemail rejected 422\ntelling a creator their payment failed did not work Error: the email was not sent\n    at [stdin]:11909:22\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async walkList ([stdin]:11812:12)\n    at async sendFailedPlanNotices ([stdin]:11898:18)\n    at async main ([stdin]:11999:31)\n",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

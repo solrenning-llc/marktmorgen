@@ -1,0 +1,16 @@
+{
+  "args": [
+    "timeout",
+    "120s",
+    "node",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings",
+    "0",
+    "tests/s-3215-recovered-billing.proof.ts",
+    "tests/s-3215-recovered-card.proof.ts",
+    "proofs/s/3215-recovery/run.mjs"
+  ],
+  "status": 0,
+  "stdout": "",
+  "stderr": ""
+}

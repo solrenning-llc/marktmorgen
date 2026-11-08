@@ -1,0 +1,5 @@
+{
+  "command": "timeout 120s npm ci --ignore-scripts --no-audit --no-fund",
+  "stdout_stderr": "npm warn Unknown env config \"http-proxy\". This will stop working in the next major version of npm.\n\nadded 454 packages in 11s\n",
+  "status": 0
+}

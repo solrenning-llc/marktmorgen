@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3215-recovered-card.proof.ts",
+  "mode": "head",
+  "parent": "fd22ec690a88e348fc37653b9396a1def4f56e18",
+  "head": "d055c89729b8a9d6dda210e905ffc9342c0591d4",
+  "stdout": "  ok    healthy existing card notice sent\nNEW_S_CURSOR [\"sub_srecoverRun0000\"]\n  FAIL  new lapsing member notified despite permanent refusal\n        expected 1\n        got      0\n  ok    refused member notified once after recovery\n  ok    new lapsing member eventually notified once\n  ok    healthy existing notice never duplicated\n\n5 checks, 1 failing.\nS_VOLUME {\"runs\":224,\"attempts\":22,\"forwarded\":22}\n",
+  "stderr": "email rejected 422\nemail rejected 422\nemail rejected 422\na store's failed renewals were not finished in 3 runs in a row: read again on the next walk round srecover\nemail rejected 422\nemail rejected 422\n",
+  "status": 1,
+  "signal": null,
+  "error": null
+}

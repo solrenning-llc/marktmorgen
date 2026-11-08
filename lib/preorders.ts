@@ -249,18 +249,27 @@ function readSession(store: Store, session: Session): { id: string; productId: s
   return { id, productId: meta.product, email, at: typeof session.created === "number" ? session.created : now(), pi: typeof pi === "string" && INTENT_ID.test(pi) ? pi : "", ship: meta.ship === "yes" };
 }
 
-/** Writes a paid pre-order down, once. Returns it as it is kept. */
+/**
+ * Writes a paid pre-order down, once. Returns it as it is kept. Every reply is read exactly (CX-123 rule 24; Claude 5
+ * on #2963): HSETNX and EXPIRE answer 0 or 1, HGET the entry as kept, each SET "OK". Anything else throws
+ * UnknownReplyError, never "recorded": a receipt for an entry that does not exist, or a "skip" on sale, would leave
+ * the paid pre-order never handed over. confirmPreorderOnce then lets its mark go and the webhook is retried; HSETNX
+ * keeps the first entry, so the retry records it once.
+ */
 async function recordPreorder(store: Store, read: NonNullable<ReturnType<typeof readSession>>): Promise<Preorder> {
   const sid = store.statsId as string;
   const entry: Preorder = { to: read.email, at: read.at, pi: read.pi, ship: read.ship };
-  const [, kept] = await redisPipeline([
+  const commands: (string | number)[][] = [
     ["HSETNX", entriesKey(sid, read.productId), read.id, JSON.stringify(entry)],
     ["HGET", entriesKey(sid, read.productId), read.id],
     keep(sid, read.productId),
     ...(read.pi ? [["SET", piKey(read.pi), `${sid}|${read.productId}|${read.id}`, "EX", KEPT_SECONDS]] : []),
     ["SET", anyKey(sid), "1"],
-  ]);
-  return parsePreorder(kept) ?? entry;
+  ];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const kept = replies && oneWrite(replies[0]) && oneWrite(replies[2]) && replies.slice(3).every((r) => r === "OK") ? parsePreorder(replies[1]) : null;
+  if (!kept) throw new UnknownReplyError("a paid pre-order's record");
+  return kept;
 }
 
 /** What hands a pre-order over needs from the pages around it, passed in so this file imports none of them. */
@@ -296,14 +305,26 @@ export async function handOverPreorder(store: Store, product: Listing, sessionId
   try {
     const entry = await readPreorder(store, product.id, sessionId);
     if (!entry || entry.revoked) return "skip";
-    if (entry.given) return "already";
+    if (entry.given) {
+      // Given by an earlier run: the way in is asked for again under the SAME idempotency key, which the senders
+      // keep (Amazon's once-only mark, Resend's key and receipt), so an email already sent is not sent or billed
+      // again, and one that run never reached (it stopped between the mark and the email) still goes out.
+      await sendOut(store, product, entry.to, deps, `nimbus-preorder-out:${sessionId}`);
+      return "already";
+    }
     // Whether it ships goes with the grant, which outlives the entry (Claude 1's H on #2827; lib/preorder-rules.ts).
     await grantImported(sid, preorderJob(sessionId, entry.ship), [{ email: entry.to, productId: product.id, items: null }], entry.at, store.sid);
     if (!store.pastBuyers) await setPastBuyers(storeRef(store));
     if (product.course) await deps.recordStart(entry.to, product.id, now());
-    await redisPipeline([["HSET", entriesKey(sid, product.id), sessionId, JSON.stringify({ ...entry, given: now() } satisfies Preorder)], keep(sid, product.id)]);
-
+    // The way in is emailed once the grant stands and BEFORE the "given" mark is written (Codex P on #3077): a mark
+    // that Redis applied but whose answer was lost (the transport threw) would otherwise leave the pre-order given and
+    // never emailed, since a retry stops at "given". Its idempotency key makes a retry's email the same one.
     await sendOut(store, product, entry.to, deps, `nimbus-preorder-out:${sessionId}`);
+    // The "given" mark read exactly (rule 30 of Claude 5's finding on #2963): HSET and EXPIRE of one field answer 0 or
+    // 1. On anything else the grant and the email above stand; it throws, never "given": the caller retries, and the
+    // retry finds it given or marks it.
+    const marked = repliesFor(await redisPipeline([["HSET", entriesKey(sid, product.id), sessionId, JSON.stringify({ ...entry, given: now() } satisfies Preorder)], keep(sid, product.id)]), 2);
+    if (!marked || !oneWrite(marked[0]) || !oneWrite(marked[1])) throw new UnknownReplyError("a pre-order's given mark");
     return "given";
   } finally {
     // Let go only while it still holds this run's value (releaseMark never throws).

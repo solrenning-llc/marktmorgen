@@ -141,6 +141,9 @@ export async function noteFirstSale(store: Store, paid: Checkout[], plansOnSale 
   return true;
 }
 
+/** A checkout's payment status: every value Stripe documents (the same list as lib/api-sales.ts). */
+const PAYMENT_STATUSES = ["paid", "unpaid", "no_payment_required"];
+
 /** Pages of a hundred earlier checkouts walked for a sale before an unknown answer is given; the next pass asks again. */
 const SOLD_BEFORE_PAGES = 5;
 
@@ -155,9 +158,10 @@ const SOLD_BEFORE_PAGES = 5;
  * Read exactly (CX-123 rule 24, rule 30): "never" notes today as the first
  * sale for good and emails the creator that the store just made it, so only a
  * whole list that ends (an array of checkouts and has_more false) with no sale
- * in it says so. A reply of another shape, a row that is not a checkout, a sale
- * without its date, or a list that goes on with no id to walk on, on a repeated
- * id or past SOLD_BEFORE_PAGES is unknown (null): nothing is noted or sent.
+ * in it says so. A reply of another shape, a row that is not a checkout, a row
+ * whose metadata or, for this store, payment status or amount cannot be read, a
+ * sale without its date, or a list that goes on with no id to walk on, on a
+ * repeated id or past SOLD_BEFORE_PAGES is unknown (null): nothing is noted or sent.
  */
 async function soldBefore(store: Store, at: number): Promise<number | null> {
   const handles = saleHandles(store);
@@ -177,7 +181,19 @@ async function soldBefore(store: Store, at: number): Promise<number | null> {
       for (const row of data as unknown[]) {
         if (!row || typeof row !== "object" || Array.isArray(row)) return null;
         const checkout = row as Checkout & { payment_status?: unknown };
-        if (checkout.payment_status !== "paid" || !isSale(checkout) || !handles.has(checkout.metadata?.store ?? "")) continue;
+        // Which rows are sales is read exactly too (Claude 4 on #3281): metadata that is not an object cannot say whose
+        // the row is, and a row of this store whose payment status or, paid and not a tip, amount cannot be read may be
+        // its only earlier sale. Each is unknown; only a row that is exactly not a paid sale of this store is skipped.
+        const meta: unknown = checkout.metadata;
+        if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+        const { store: owner, kind } = meta as { store?: unknown; kind?: unknown };
+        if (owner !== undefined && typeof owner !== "string") return null;
+        if (!owner || !handles.has(owner)) continue;
+        if (typeof checkout.payment_status !== "string" || !PAYMENT_STATUSES.includes(checkout.payment_status)) return null;
+        if (checkout.payment_status !== "paid") continue;
+        if (kind !== undefined && typeof kind !== "string") return null;
+        if (kind !== "tip" && (!Number.isSafeInteger(checkout.amount_total) || (checkout.amount_total as number) < 0)) return null;
+        if (!isSale(checkout)) continue;
         if (typeof checkout.created !== "number" || !Number.isSafeInteger(checkout.created) || checkout.created <= 0) return null;
         sold.push(checkout.created);
       }

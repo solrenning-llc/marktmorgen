@@ -26,7 +26,18 @@ const measured = campaignResultsFrom(data, "d7", spends)!;
 const takenBack = { launch: { count: 1, cents: 3000 }, organic: { count: 0, cents: 0 }, quiet: { count: 0, cents: 0 } };
 const full = weeklyAdReport({ results: measured, currency: "usd", takenBack, payback: { launch: "not_yet", quiet: "not_yet" } });
 
-const cellText = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+// Text of a cell for comparison only: tags are taken out until none is left, then entities are decoded in one pass,
+// so no decoded "&lt;" can turn into a tag and no "&amp;" is decoded twice (CodeQL js/incomplete-multi-character-sanitization
+// and js/double-escaping on #3195).
+const ENTITIES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'" };
+const cellText = (html: string) => {
+  let text = html;
+  for (let before = ""; before !== text; ) {
+    before = text;
+    text = text.replace(/<[^<>]*>/g, "");
+  }
+  return text.replace(/&(?:amp|lt|gt|quot|#39);/g, (entity) => ENTITIES[entity]).trim();
+};
 const bodyRows = (html: string) => [...(html.split("<tbody>")[1] ?? "").split("</tbody>")[0].matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((m) => [...m[1].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/g)].map((c) => cellText(c[1])));
 const headers = (html: string) => [...(html.split("<thead>")[1] ?? "").split("</thead>")[0].matchAll(/<th[^>]*>([\s\S]*?)<\/th>/g)].map((c) => cellText(c[1]));
 

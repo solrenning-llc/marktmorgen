@@ -3,14 +3,33 @@
  * (CX-123 rule 24), like weeklyOff in lib/stats-report.ts: 0 means asking, 1
  * means off, and a reply in any other shape means "off" (the buyer is not asked
  * on a question we cannot tell the creator wanted) and is said in the log.
- * Synthetic data only.
+ * Synthetic data only, and no request ever leaves the process: fetch, sockets
+ * and TLS are refused and recorded, so a regression that reaches Stripe fails
+ * here instead of calling the real API (Claude 6 on #3115).
  */
 import { strict as assert } from "node:assert";
-import { test } from "node:test";
+import net from "node:net";
+import tls from "node:tls";
+import { after, test } from "node:test";
 import { heardOff, recordHeard, setHeardOff } from "@/lib/heard";
 import { store as redis } from "./redis-stub";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_heard_off_exact_only";
+
+const outbound: string[] = [];
+globalThis.fetch = (async (input: string | URL | Request) => {
+  outbound.push(`fetch ${input instanceof Request ? input.url : String(input)}`);
+  throw new TypeError("heard-off-exact: the network is closed to this test");
+}) as typeof fetch;
+net.Socket.prototype.connect = function (...args: unknown[]) {
+  outbound.push(`socket ${JSON.stringify(args[0])}`);
+  throw new Error("heard-off-exact: sockets are closed to this test");
+} as typeof net.Socket.prototype.connect;
+(tls as { connect: unknown }).connect = (...args: unknown[]) => {
+  outbound.push(`tls ${JSON.stringify(args[0])}`);
+  throw new Error("heard-off-exact: TLS is closed to this test");
+};
+after(() => assert.deepEqual(outbound, [], "no request left the process"));
 
 const MALFORMED: [string, unknown[]][] = [
   ["no reply at all", []],
@@ -50,6 +69,7 @@ for (const [label, reply] of MALFORMED) {
 test("recordHeard counts nothing on an unknown reply", async () => {
   const store = { handle: "harbor", stripeAccountId: "acct_1TestHeardOff01", statsId: "synthetic-stats", currency: "usd" } as unknown as Parameters<typeof recordHeard>[0];
   const { value } = await logged(() => withReply(["QUEUED"], () => recordHeard(store, "cs_test_heardoff00001", "friend")));
+  assert.deepEqual(outbound, [], "Stripe is never asked when the mark cannot be read");
   assert.equal(value, "off");
 });
 

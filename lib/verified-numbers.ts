@@ -28,6 +28,7 @@ import { readTitles } from "@/lib/catalog";
 import { type Store, storesAfter } from "@/lib/store";
 import type { StatsData } from "@/lib/stats";
 import { paidFiguresComplete } from "@/lib/paid-coverage";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export type VerifiedWindow = { visitors: number; views: number; checkouts: number; sales: number | null; cents: number | null };
 
@@ -131,7 +132,9 @@ export async function refreshVerified(store: Store, now = Date.now()): Promise<V
   if (!data) return null;
   const titles = await readTitles(store).catch(() => new Map<string, string>());
   const record = verifiedFrom(data, titles, now);
-  await redisPipeline([["SET", key(store.statsId), JSON.stringify(record), "EX", KEEP_SECONDS]]);
+  // Kept only when Redis said OK: another reply leaves the record unknown, never counted as kept (CX-123 rule 24).
+  const kept = repliesFor(await redisPipeline([["SET", key(store.statsId), JSON.stringify(record), "EX", KEEP_SECONDS]]), 1);
+  if (kept?.[0] !== "OK") throw new UnknownReplyError("keeping the shared numbers");
   return record;
 }
 
@@ -146,7 +149,11 @@ export function usesVerified(store: Store, nowSeconds = Math.floor(Date.now() / 
 export async function sendVerified(deadline: number): Promise<{ stores: number }> {
   const counts = { stores: 0 };
   if (!isRedisConfigured()) return counts;
-  const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
+  // Where the last pass stopped: a string, or null before the first pass. Any other reply is unknown and the
+  // pass stops here, so the kept position is not overwritten by one counted from the start (CX-123 rule 24).
+  const read = repliesFor(await redisPipeline([["GET", CURSOR_KEY]]), 1);
+  const saved = read?.[0];
+  if (!read || (saved !== null && typeof saved !== "string")) throw new UnknownReplyError("where the shared numbers' last pass stopped");
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;

@@ -1,0 +1,20 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "plugins": []
+  },
+  "include": [
+    "../../../tests/s-3215-decomp-dunning-1.proof.ts",
+    "../../../tests/s-3215-decomp-dunning-2.proof.ts",
+    "../../../tests/s-3215-decomp-dunning-3.proof.ts",
+    "../../../tests/s-3215-decomp-dunning-4.proof.ts",
+    "../../../tests/s-3215-decomp-dunning-6.proof.ts",
+    "../../../tests/s-3215-decomp-billing-1.proof.ts",
+    "../../../tests/s-3215-decomp-billing-2.proof.ts",
+    "../../../tests/s-3215-decomp-billing-3.proof.ts"
+  ],
+  "exclude": [
+    "../../../node_modules"
+  ]
+}

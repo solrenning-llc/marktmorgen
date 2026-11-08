@@ -1,0 +1,386 @@
+{
+  "subject": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+  "reservation": "81d29342f7b89ff363298884177615f827669809",
+  "policy": "C4-1725 decomposition; all original oracles retained; no ceiling increase",
+  "sources": [
+    {
+      "path": "tests/dunning-cursor-after-send.test.ts",
+      "gitBlob": "d1153bfe900d56fd5213e750ca927d71a1c24893",
+      "sha256": "45263ff79ef161281a2c182006b9f22ba60813be4ccef30cc6182128c72e129b",
+      "originalSource": "/**\n * The cursors of the daily dunning job move only past what was really handled (rule 24, R24 inventory, crons item 6).\n *\n *   - Card notices (lib/payment-recovery.ts, noticeCards): the store's card cursor used to be written before any\n *     notice went out, so a member read this run but not told (the run's time ran out, or whether a card update\n *     waits could not be read) was left behind the cursor until the whole list came round again, days later and\n *     often after the card had failed. The cursor now stops before the first member not handled.\n *   - The store walk (recoverFailedPayments): a store whose sweep threw, or that had more to do when the run\n *     stopped, used to count as done. The walk now starts the next run at it, for a few runs at most, so a store\n *     that keeps failing never holds every other store back.\n *\n * Never twice: a member already told is never told again however often a page is read again.\n * Synthetic stores, Stripe and Resend stand-ins only.\n */\nimport { recoverFailedPayments } from \"@/lib/payment-recovery\";\nimport { addProduct, claimHandle, ensureListId, ensureStatsId, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail, storesAfter } from \"@/lib/store\";\nimport { store as redis } from \"./redis-stub\";\nimport { done, is, part } from \"./check\";\nimport { paidPeriod } from \"./billing-period-fixture\";\n\nconst realNow = Date.now;\nlet shift = 0;\nDate.now = () => realNow() + shift;\n\nconst mails: { to: string[] | string; subject: string }[] = [];\n/** Running and past-due memberships, by connected account. */\nconst active = new Map<string, Record<string, unknown>[]>();\nconst pastDue = new Map<string, Record<string, unknown>[]>();\n/** Accounts whose past-due page comes back in a shape that is not a list. */\nconst broken = new Set<string>();\n/** Accounts whose past-due page takes the rest of the run. */\nconst slow = new Set<string>();\n/** The run's time runs out as the next email is sent. */\nlet outOfTimeOnSend = false;\n/** Memberships told to keep the card that pays (before a first failed-payment email). */\nconst kept: string[] = [];\n\nglobalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {\n  const url = new URL(String(input));\n  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });\n  if (url.hostname === \"api.resend.com\") {\n    mails.push(JSON.parse(String(init?.body)));\n    if (outOfTimeOnSend) {\n      outOfTimeOnSend = false;\n      shift += 60_000;\n    }\n    return answer({ id: `email_${mails.length}` });\n  }\n  const path = url.pathname.replace(/^\\/v1/, \"\");\n  const method = init?.method ?? \"GET\";\n  const account = String((init?.headers as Record<string, string> | undefined)?.[\"Stripe-Account\"] ?? \"\");\n  if (path === \"/subscriptions\" && method === \"GET\") {\n    const status = url.searchParams.get(\"status\");\n    if (status === \"past_due\" && broken.has(account)) return answer({ object: \"list\", data: \"not a list\", has_more: false });\n    if (status === \"past_due\" && slow.has(account)) shift += 60_000;\n    const all = (status === \"past_due\" ? pastDue : status === \"active\" ? active : new Map<string, Record<string, unknown>[]>()).get(account) ?? [];\n    const after = url.searchParams.get(\"starting_after\");\n    const from = after ? all.findIndex((s) => s.id === after) + 1 : 0;\n    const limit = Number(url.searchParams.get(\"limit\")) || 10;\n    return answer({ object: \"list\", data: all.slice(from, from + limit), has_more: from + limit < all.length });\n  }\n  if (/^\\/subscriptions\\/sub_\\w+$/.test(path) && method === \"POST\") {\n    kept.push(path.split(\"/\").pop() as string);\n    return answer({ id: path.split(\"/\").pop() });\n  }\n  return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);\n}) as typeof fetch;\n\n/** Runs `run` with the reply to the first pipeline whose first command is `name` on a key starting `prefix` replaced, after it ran. */\nasync function withReply(name: string, prefix: string, reply: (real: unknown) => unknown, run: () => Promise<unknown>): Promise<void> {\n  const real = redis.pipeline.bind(redis);\n  let used = false;\n  redis.pipeline = (async (commands: (string | number)[][]) => {\n    const answer = await real(commands);\n    if (!used && commands[0]?.[0] === name && String(commands[0]?.[1] ?? \"\").startsWith(prefix)) {\n      used = true;\n      return reply(answer);\n    }\n    return answer;\n  }) as typeof redis.pipeline;\n  try {\n    await run();\n  } finally {\n    redis.pipeline = real;\n  }\n}\n\nconst told = (to: string) => mails.filter((m) => (Array.isArray(m.to) ? m.to : [m.to]).includes(to)).length;\nconst run = () => recoverFailedPayments(Date.now() + 20_000);\n\n/** A store selling one monthly membership, with its own connected account. */\nasync function makeStore(owner: string, handle: string, account: string, cardNotice: boolean): Promise<string> {\n  const made = await claimHandle(owner, handle, `Store ${handle}`, \"\");\n  if (!made.ok) throw new Error(`no store ${handle}`);\n  await ensureStatsId(owner);\n  await ensureListId(owner);\n  await setStripeAccount(owner, account, true);\n  await setSubscription(owner, { customerId: `cus_${handle}Own01`, subscriptionId: `sub_${handle}Own01`, active: true, tier: \"pro\", period: paidPeriod(Date.now(), { behind: 1, ahead: 30 }) });\n  const club = await addProduct(owner, \"The Inner Circle\", \"\", \"29\", { interval: \"month\", trialDays: 0, payments: 0 });\n  if (!club.ok) throw new Error(\"no product\");\n  await setProductLink(owner, club.product.id, \"https://example.com/club\");\n  await setDunning(owner, { reminders: 1, cardNotice });\n  await storeForEmail(owner);\n  return club.product.id;\n}\n\n/** `n` running memberships of `handle`, every card good, but those at `expiring`, whose card stops before the payment. */\nfunction running(handle: string, product: string, n: number, expiring: number[]): Record<string, unknown>[] {\n  const payAt = Math.floor(Date.now() / 1000) + 5 * 86_400;\n  const payDay = new Date(payAt * 1000);\n  const lastMonth = new Date(Date.UTC(payDay.getUTCFullYear(), payDay.getUTCMonth() - 1, 1));\n  return Array.from({ length: n }, (_, i) => {\n    const id = String(i).padStart(4, \"0\");\n    const lapses = expiring.includes(i);\n    return {\n      id: `sub_${handle}Run${id}`,\n      status: \"active\",\n      metadata: { store: handle, product },\n      customer: { id: `cus_${handle}Run${id}`, email: `${handle}-${id}@example.com`, invoice_settings: { default_payment_method: null } },\n      items: { data: [{ current_period_end: payAt }] },\n      default_payment_method: {\n        id: `pm_${handle}Card${id}`,\n        type: \"card\",\n        card: { brand: \"visa\", last4: \"4242\", exp_month: lapses ? lastMonth.getUTCMonth() + 1 : 12, exp_year: lapses ? lastMonth.getUTCFullYear() : 2099 },\n      },\n    };\n  });\n}\n\n/** `n` past-due memberships of `handle`, each with an open invoice to pay. */\nfunction behind(handle: string, product: string, n: number): Record<string, unknown>[] {\n  return Array.from({ length: n }, (_, i) => {\n    const id = String(i).padStart(4, \"0\");\n    return {\n      id: `sub_${handle}Due${id}`, status: \"past_due\", metadata: { store: handle, product },\n      customer: { id: `cus_${handle}Due${id}`, email: `${handle}-due-${id}@example.com` },\n      latest_invoice: { id: `in_${handle}Due${id}`, status: \"open\", amount_due: 2900, currency: \"usd\", hosted_invoice_url: `https://invoice.stripe.com/i/${handle}${id}`, next_payment_attempt: 0 },\n    };\n  });\n}\n\nfunction reset(): void {\n  redis.clear();\n  mails.length = 0;\n  kept.length = 0;\n  active.clear();\n  pastDue.clear();\n  broken.clear();\n  slow.clear();\n  outOfTimeOnSend = false;\n}\n\nasync function main(): Promise<void> {\n  process.env.STRIPE_SECRET_KEY = \"sk_test_recovery_only_a_stand_in\";\n  process.env.RESEND_API_KEY = \"re_test_recovery_only_a_stand_in\";\n\n  part(\"Card notices: the run's time runs out after the first notice of a store with 600 running memberships\");\n  reset();\n  {\n    const product = await makeStore(\"cards-time@example.com\", \"cardtime\", \"acct_1TestCardTime01\", true);\n    active.set(\"acct_1TestCardTime01\", running(\"cardtime\", product, 600, [10, 20]));\n    outOfTimeOnSend = true;\n    await run();\n    is(\"this run: the first member told, the second not reached\", [told(\"cardtime-0010@example.com\"), told(\"cardtime-0020@example.com\")], [1, 0]);\n    await run();\n    is(\"the next run: the member not reached is told, from where the notices stopped\", told(\"cardtime-0020@example.com\"), 1);\n    await run();\n    await run();\n    is(\"never twice, for either\", [told(\"cardtime-0010@example.com\"), told(\"cardtime-0020@example.com\")], [1, 1]);\n  }\n\n  part(\"Card notices: whether a card update waits cannot be read for one member\");\n  reset();\n  {\n    const product = await makeStore(\"cards-open@example.com\", \"cardopen\", \"acct_1TestCardOpen01\", true);\n    active.set(\"acct_1TestCardOpen01\", running(\"cardopen\", product, 600, [10]));\n    await withReply(\"GET\", \"nl:card:open:\", () => [123], run);\n    is(\"unknown: no notice on a guess this run\", told(\"cardopen-0010@example.com\"), 0);\n    await run();\n    is(\"the next run reads it again and tells the member\", told(\"cardopen-0010@example.com\"), 1);\n    await run();\n    is(\"and never twice\", told(\"cardopen-0010@example.com\"), 1);\n  }\n\n  part(\"Card notices: a healthy store whose list ends in one run (control)\");\n  reset();\n  {\n    const product = await makeStore(\"cards-ok@example.com\", \"cardok\", \"acct_1TestCardOkay01\", true);\n    active.set(\"acct_1TestCardOkay01\", running(\"cardok\", product, 30, [3, 7]));\n    await run();\n    await run();\n    is(\"each member with a card that stops told once\", [told(\"cardok-0003@example.com\"), told(\"cardok-0007@example.com\"), told(\"cardok-0004@example.com\")], [1, 1, 0]);\n  }\n\n  /** Three stores, in the order the walk reads them. */\n  async function threeStores(): Promise<{ handle: string; account: string; product: string }[]> {\n    const made: { handle: string; account: string; product: string }[] = [];\n    for (const [handle, account] of [[\"walka\", \"acct_1TestWalkA0001\"], [\"walkb\", \"acct_1TestWalkB0001\"], [\"walkc\", \"acct_1TestWalkC0001\"]]) {\n      made.push({ handle, account, product: await makeStore(`${handle}@example.com`, handle, account, false) });\n    }\n    const order = (await storesAfter(\"0\")).stores.map((s) => s.handle);\n    return made.filter((s) => order.includes(s.handle)).sort((a, b) => order.indexOf(a.handle) - order.indexOf(b.handle));\n  }\n\n  part(\"The store walk: a store whose sweep threw is not done\");\n  reset();\n  {\n    const [first, second, third] = await threeStores();\n    for (const s of [first, second, third]) pastDue.set(s.account, behind(s.handle, s.product, 1));\n    broken.add(first.account);\n    slow.add(second.account);\n    await run();\n    is(\"this run: the first store's page unreadable, the second ran out of time, the third not reached\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [0, 0, 0]);\n    broken.clear();\n    slow.clear();\n    await run();\n    is(\"the next run starts at the store that failed: every member behind is written to\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1, 1]);\n    await run();\n    is(\"and never twice\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1, 1]);\n  }\n\n  part(\"The store walk: a store with more behind than one run writes to is not done\");\n  reset();\n  {\n    const [first, second, third] = await threeStores();\n    pastDue.set(first.account, behind(first.handle, first.product, 150));\n    pastDue.set(second.account, behind(second.handle, second.product, 1));\n    pastDue.set(third.account, behind(third.handle, third.product, 1));\n    slow.add(second.account);\n    const before = kept.length;\n    await run();\n    is(\"this run: a hundred of the first store's looked after\", new Set(kept.slice(before)).size, 100);\n    slow.clear();\n    await run();\n    is(\"the next run starts at it: the other fifty\", new Set(kept.slice(before).filter((id) => id.startsWith(`sub_${first.handle}`))).size, 150);\n  }\n\n  part(\"The store walk: a store that keeps failing never holds the others back for good (control)\");\n  reset();\n  {\n    const [first, second, third] = await threeStores();\n    for (const s of [first, second, third]) pastDue.set(s.account, behind(s.handle, s.product, 1));\n    broken.add(first.account);\n    await run();\n    is(\"a store held for the next run does not stop the stores after it in this one\", [told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1]);\n  }\n  reset();\n  {\n    const [first, second, third] = await threeStores();\n    for (const s of [first, second, third]) pastDue.set(s.account, behind(s.handle, s.product, 1));\n    // The first never readable, and the second taking all that is left of every run: each is started at for at most\n    // three runs in a row, then the walk goes on.\n    broken.add(first.account);\n    slow.add(second.account);\n    for (let i = 0; i < 6; i += 1) await run();\n    is(\"within six runs the store after them is written to\", told(`${third.handle}-due-0000@example.com`), 1);\n    is(\"the failing store still sends nothing\", told(`${first.handle}-due-0000@example.com`), 0);\n  }\n\n  done();\n}\n\nvoid main();\n",
+      "oracles": [
+        {
+          "line": 164,
+          "text": "is(\"this run: the first member told, the second not reached\", [told(\"cardtime-0010@example.com\"), told(\"cardtime-0020@example.com\")], [1, 0])",
+          "sha256": "8a997526e35c2e645c3c3137032c54eb8c3f12e8f928d9c7a7ff7f0595105373"
+        },
+        {
+          "line": 166,
+          "text": "is(\"the next run: the member not reached is told, from where the notices stopped\", told(\"cardtime-0020@example.com\"), 1)",
+          "sha256": "d3b2f77c104d1ed0895cc9d12ec54a77618d381eb87d09645e2117c2db3e7f5b"
+        },
+        {
+          "line": 169,
+          "text": "is(\"never twice, for either\", [told(\"cardtime-0010@example.com\"), told(\"cardtime-0020@example.com\")], [1, 1])",
+          "sha256": "a445f1f29e3398dab4c5bf1cfe07b4d7cfa3f2a024e0fabeb77ca54a360092ad"
+        },
+        {
+          "line": 178,
+          "text": "is(\"unknown: no notice on a guess this run\", told(\"cardopen-0010@example.com\"), 0)",
+          "sha256": "27ec224c7f09f56255a2e585ab30a45f6bfa71af2aa1e9997bd694f26bc79265"
+        },
+        {
+          "line": 180,
+          "text": "is(\"the next run reads it again and tells the member\", told(\"cardopen-0010@example.com\"), 1)",
+          "sha256": "f5a77f2c688e88f79375d14ea287d653753bda78ef0d8a5d2e0d16165e6595a3"
+        },
+        {
+          "line": 182,
+          "text": "is(\"and never twice\", told(\"cardopen-0010@example.com\"), 1)",
+          "sha256": "104a9bc7d75d9e1ff5de888fa1d749df73d7e8cab2d9c802af8e2b2397821cd0"
+        },
+        {
+          "line": 192,
+          "text": "is(\"each member with a card that stops told once\", [told(\"cardok-0003@example.com\"), told(\"cardok-0007@example.com\"), told(\"cardok-0004@example.com\")], [1, 1, 0])",
+          "sha256": "402eb0d0ccb16c751146dd18d3ba8388e4ccab0332a892ba50ae8fc1fc0cd206"
+        },
+        {
+          "line": 213,
+          "text": "is(\"this run: the first store's page unreadable, the second ran out of time, the third not reached\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [0, 0, 0])",
+          "sha256": "e95243a2bdac924eae35e20a4384630c2c7ec2fa971a692ebe008bb21766eecb"
+        },
+        {
+          "line": 217,
+          "text": "is(\"the next run starts at the store that failed: every member behind is written to\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1, 1])",
+          "sha256": "4d2350fb9ef6e8147c9252e67771d50b399b4c2e0f74c3ff208c25c077ddb5a9"
+        },
+        {
+          "line": 219,
+          "text": "is(\"and never twice\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1, 1])",
+          "sha256": "027b450689f1d4e4a598601c22e76224a1e1cba3e106df747eb8eceb532e7833"
+        },
+        {
+          "line": 232,
+          "text": "is(\"this run: a hundred of the first store's looked after\", new Set(kept.slice(before)).size, 100)",
+          "sha256": "38862e8f03fe6a0f17b2707b98537aa4c7669cb1bcea69c5480e5cca803c0234"
+        },
+        {
+          "line": 235,
+          "text": "is(\"the next run starts at it: the other fifty\", new Set(kept.slice(before).filter((id) => id.startsWith(`sub_${first.handle}`))).size, 150)",
+          "sha256": "b74b609da450e5e99f1301a16ef597e78f5b4868bb4f9471749089641bff0ea8"
+        },
+        {
+          "line": 245,
+          "text": "is(\"a store held for the next run does not stop the stores after it in this one\", [told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1])",
+          "sha256": "abf8e6addaecb3bf7e3f12c9d0d2d33e647425d68e623a35068836c0cd205985"
+        },
+        {
+          "line": 256,
+          "text": "is(\"within six runs the store after them is written to\", told(`${third.handle}-due-0000@example.com`), 1)",
+          "sha256": "a6f5369f9306d751065a7d097840b229f1be41051254ea55f3e24552dda6496f"
+        },
+        {
+          "line": 257,
+          "text": "is(\"the failing store still sends nothing\", told(`${first.handle}-due-0000@example.com`), 0)",
+          "sha256": "cfed525b360242ee19928d457163b3c3f1e17cf41609de165f3e6678ebb13761"
+        }
+      ],
+      "parts": [
+        {
+          "index": 0,
+          "title": "Card notices: the run's time runs out after the first notice of a store with 600 running memberships",
+          "oracles": [
+            {
+              "line": 164,
+              "text": "is(\"this run: the first member told, the second not reached\", [told(\"cardtime-0010@example.com\"), told(\"cardtime-0020@example.com\")], [1, 0])",
+              "sha256": "8a997526e35c2e645c3c3137032c54eb8c3f12e8f928d9c7a7ff7f0595105373"
+            },
+            {
+              "line": 166,
+              "text": "is(\"the next run: the member not reached is told, from where the notices stopped\", told(\"cardtime-0020@example.com\"), 1)",
+              "sha256": "d3b2f77c104d1ed0895cc9d12ec54a77618d381eb87d09645e2117c2db3e7f5b"
+            },
+            {
+              "line": 169,
+              "text": "is(\"never twice, for either\", [told(\"cardtime-0010@example.com\"), told(\"cardtime-0020@example.com\")], [1, 1])",
+              "sha256": "a445f1f29e3398dab4c5bf1cfe07b4d7cfa3f2a024e0fabeb77ca54a360092ad"
+            }
+          ],
+          "status": "scheduled",
+          "file": "tests/s-3215-decomp-dunning-1.proof.ts",
+          "sha256": "e454a0a6b5c246db4b7e934901d088f6ac4fc5d14b7990c6e96ea177c0991dd6"
+        },
+        {
+          "index": 1,
+          "title": "Card notices: whether a card update waits cannot be read for one member",
+          "oracles": [
+            {
+              "line": 178,
+              "text": "is(\"unknown: no notice on a guess this run\", told(\"cardopen-0010@example.com\"), 0)",
+              "sha256": "27ec224c7f09f56255a2e585ab30a45f6bfa71af2aa1e9997bd694f26bc79265"
+            },
+            {
+              "line": 180,
+              "text": "is(\"the next run reads it again and tells the member\", told(\"cardopen-0010@example.com\"), 1)",
+              "sha256": "f5a77f2c688e88f79375d14ea287d653753bda78ef0d8a5d2e0d16165e6595a3"
+            },
+            {
+              "line": 182,
+              "text": "is(\"and never twice\", told(\"cardopen-0010@example.com\"), 1)",
+              "sha256": "104a9bc7d75d9e1ff5de888fa1d749df73d7e8cab2d9c802af8e2b2397821cd0"
+            }
+          ],
+          "status": "scheduled",
+          "file": "tests/s-3215-decomp-dunning-2.proof.ts",
+          "sha256": "188fdd011881e06406b49b71d2aef519bb1ba6b875b396d0292609963b7aae7c"
+        },
+        {
+          "index": 2,
+          "title": "Card notices: a healthy store whose list ends in one run (control)",
+          "oracles": [
+            {
+              "line": 192,
+              "text": "is(\"each member with a card that stops told once\", [told(\"cardok-0003@example.com\"), told(\"cardok-0007@example.com\"), told(\"cardok-0004@example.com\")], [1, 1, 0])",
+              "sha256": "402eb0d0ccb16c751146dd18d3ba8388e4ccab0332a892ba50ae8fc1fc0cd206"
+            }
+          ],
+          "status": "scheduled",
+          "file": "tests/s-3215-decomp-dunning-3.proof.ts",
+          "sha256": "9d7aa552125abba27d428c9c56f5cc8d99b087b8d36acabb73b8b15414a5321e"
+        },
+        {
+          "index": 3,
+          "title": "The store walk: a store whose sweep threw is not done",
+          "oracles": [
+            {
+              "line": 213,
+              "text": "is(\"this run: the first store's page unreadable, the second ran out of time, the third not reached\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [0, 0, 0])",
+              "sha256": "e95243a2bdac924eae35e20a4384630c2c7ec2fa971a692ebe008bb21766eecb"
+            },
+            {
+              "line": 217,
+              "text": "is(\"the next run starts at the store that failed: every member behind is written to\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1, 1])",
+              "sha256": "4d2350fb9ef6e8147c9252e67771d50b399b4c2e0f74c3ff208c25c077ddb5a9"
+            },
+            {
+              "line": 219,
+              "text": "is(\"and never twice\", [told(`${first.handle}-due-0000@example.com`), told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1, 1])",
+              "sha256": "027b450689f1d4e4a598601c22e76224a1e1cba3e106df747eb8eceb532e7833"
+            }
+          ],
+          "status": "scheduled",
+          "file": "tests/s-3215-decomp-dunning-4.proof.ts",
+          "sha256": "cccdee965d6774b9dd1f7cbe5cbdf30aaab930d40cb0d054c40c7258555626f8"
+        },
+        {
+          "index": 4,
+          "title": "The store walk: a store with more behind than one run writes to is not done",
+          "oracles": [
+            {
+              "line": 232,
+              "text": "is(\"this run: a hundred of the first store's looked after\", new Set(kept.slice(before)).size, 100)",
+              "sha256": "38862e8f03fe6a0f17b2707b98537aa4c7669cb1bcea69c5480e5cca803c0234"
+            },
+            {
+              "line": 235,
+              "text": "is(\"the next run starts at it: the other fifty\", new Set(kept.slice(before).filter((id) => id.startsWith(`sub_${first.handle}`))).size, 150)",
+              "sha256": "b74b609da450e5e99f1301a16ef597e78f5b4868bb4f9471749089641bff0ea8"
+            }
+          ],
+          "status": "not-dispatched-original-ceiling"
+        },
+        {
+          "index": 5,
+          "title": "The store walk: a store that keeps failing never holds the others back for good (control)",
+          "oracles": [
+            {
+              "line": 245,
+              "text": "is(\"a store held for the next run does not stop the stores after it in this one\", [told(`${second.handle}-due-0000@example.com`), told(`${third.handle}-due-0000@example.com`)], [1, 1])",
+              "sha256": "abf8e6addaecb3bf7e3f12c9d0d2d33e647425d68e623a35068836c0cd205985"
+            },
+            {
+              "line": 256,
+              "text": "is(\"within six runs the store after them is written to\", told(`${third.handle}-due-0000@example.com`), 1)",
+              "sha256": "a6f5369f9306d751065a7d097840b229f1be41051254ea55f3e24552dda6496f"
+            },
+            {
+              "line": 257,
+              "text": "is(\"the failing store still sends nothing\", told(`${first.handle}-due-0000@example.com`), 0)",
+              "sha256": "cfed525b360242ee19928d457163b3c3f1e17cf41609de165f3e6678ebb13761"
+            }
+          ],
+          "status": "scheduled",
+          "file": "tests/s-3215-decomp-dunning-6.proof.ts",
+          "sha256": "eb9d929bfa35001a7cc64a5dd00ebdb54cac2f7b7c8f731022803e44f605335c"
+        }
+      ]
+    },
+    {
+      "path": "tests/billing-reminder-marks.test.ts",
+      "gitBlob": "855e07a941d0825c24dea4976983f88e85499bd6",
+      "sha256": "bfca18b9ebf8d138d66ffd6ef9ef21f58c4bc2d555f314c4fb53784fedf1bec2",
+      "originalSource": "/**\n * A creator's billing reminders (lib/billing-reminders.ts) are never lost to a mark that could not be let go, or to\n * a list longer than one run reads (rule 24, R24 inventory, crons item 6).\n *\n *   - An email that could not be sent lets its mark go, so the next run tries again. Letting go used to be one DEL\n *     whose failure was swallowed: the mark then stayed 60 or 90 days and the reminder was never tried again, with\n *     nothing said. The DEL is now tried twice, and a mark still held is counted (`unreleased`) and logged.\n *   - Each list was read for at most 50 pages from the top, in silence: a subscription past them was never reached.\n *     A run that stops at the cap now says so (`more`) and the next run goes on from there.\n *\n * Never twice: a reminder already sent is never sent again. Synthetic Stripe and Resend stand-ins only.\n */\nimport { sendFailedPlanNotices, sendReminders } from \"@/lib/billing-reminders\";\nimport { store as redis } from \"./redis-stub\";\nimport { done, is, part } from \"./check\";\n\nprocess.env.STRIPE_SECRET_KEY = \"sk_test_failed_plan_only\";\nprocess.env.RESEND_API_KEY = \"re_test_failed_plan_only\";\n\nconst NOW = 1_791_700_000;\nconst DAY = 86_400;\nconst emails: string[] = [];\nlet emailWorks = true;\nconst lists: Record<string, Record<string, unknown>[]> = { trialing: [], active: [], past_due: [] };\n\nglobalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {\n  const url = new URL(String(input));\n  const method = init?.method ?? \"GET\";\n  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });\n  if (url.hostname === \"api.stripe.com\") {\n    if (method === \"GET\" && url.pathname === \"/v1/subscriptions\") {\n      const all = lists[url.searchParams.get(\"status\") ?? \"\"] ?? [];\n      const after = url.searchParams.get(\"starting_after\");\n      const from = after ? all.findIndex((s) => s.id === after) + 1 : 0;\n      const limit = Number(url.searchParams.get(\"limit\")) || 10;\n      return answer({ object: \"list\", data: all.slice(from, from + limit), has_more: from + limit < all.length });\n    }\n    if (method === \"POST\" && url.pathname.startsWith(\"/v1/subscriptions/\")) return answer({ id: url.pathname.split(\"/\").pop() });\n  }\n  if (url.hostname === \"api.resend.com\") {\n    if (!emailWorks) return answer({ message: \"down\" }, 500);\n    const body = JSON.parse(String(init?.body ?? \"{}\"));\n    emails.push(Array.isArray(body.to) ? body.to[0] : body.to);\n    return answer({ id: `re_${emails.length}` });\n  }\n  return answer({ error: { message: `no stand-in for ${method} ${url.pathname}` } }, 404);\n}) as typeof fetch;\n\nconst PRICE = { lookup_key: \"nimbus_labs_creator_month\", unit_amount: 2900, recurring: { interval: \"month\" } };\n\n/** A trial; its charge `daysLeft` days away (a reminder is due from eight days before). */\nfunction trial(id: string, daysLeft: number): Record<string, unknown> {\n  return {\n    id, status: \"trialing\", created: NOW - 6 * DAY, trial_end: NOW + daysLeft * DAY,\n    customer: { email: `${id}@example.com` },\n    items: { data: [{ current_period_start: NOW - 6 * DAY, current_period_end: NOW + daysLeft * DAY, price: PRICE }] },\n  };\n}\n\n/** A renewal that failed, with its invoice open to pay. */\nfunction failing(id: string): Record<string, unknown> {\n  return {\n    id, status: \"past_due\", created: NOW - 90 * DAY, trial_end: NOW - 76 * DAY,\n    customer: { email: `${id}@example.com` },\n    items: { data: [{ current_period_start: NOW - 2 * DAY, current_period_end: NOW + 28 * DAY, price: PRICE }] },\n    latest_invoice: { id: `in_${id.slice(4)}inv`, status: \"open\", amount_due: 2900, hosted_invoice_url: `https://invoice.stripe.com/i/${id}`, next_payment_attempt: NOW + 3 * DAY },\n  };\n}\n\n/** Runs `run` with the first `times` pipelines that DEL a key starting `prefix` failing, as Redis can. */\nasync function delFails<T>(prefix: string, times: number, run: () => Promise<T>): Promise<T> {\n  const real = redis.pipeline.bind(redis);\n  let left = times;\n  redis.pipeline = (async (commands: (string | number)[][]) => {\n    if (left > 0 && commands[0]?.[0] === \"DEL\" && String(commands[0]?.[1] ?? \"\").startsWith(prefix)) {\n      left -= 1;\n      throw new Error(\"Redis did not answer\");\n    }\n    return real(commands);\n  }) as typeof redis.pipeline;\n  try {\n    return await run();\n  } finally {\n    redis.pipeline = real;\n  }\n}\n\nconst sentTo = (address: string) => emails.filter((to) => to === address).length;\n\nasync function main(): Promise<void> {\n  part(\"A trial reminder whose email failed, and whose mark could not be let go at once\");\n  redis.clear();\n  lists.trialing = [trial(\"sub_TrialOnce0001\", 7)];\n  emailWorks = false;\n  const down = await delFails(\"nl:remind:trial:\", 1, () => sendReminders(NOW));\n  is(\"not sent, and said so\", [down.sent, down.failed], [0, 1]);\n  emailWorks = true;\n  await sendReminders(NOW);\n  is(\"the next run sends it: the mark was let go on the second try\", sentTo(\"sub_TrialOnce0001@example.com\"), 1);\n  await sendReminders(NOW);\n  is(\"and never twice\", sentTo(\"sub_TrialOnce0001@example.com\"), 1);\n\n  part(\"A mark that cannot be let go at all is said, never swallowed\");\n  redis.clear();\n  lists.trialing = [trial(\"sub_TrialStuck001\", 7)];\n  emailWorks = false;\n  const stuck = await delFails(\"nl:remind:trial:\", 10, () => sendReminders(NOW));\n  emailWorks = true;\n  is(\"counted as a reminder that will not be tried again by itself\", (stuck as { unreleased?: unknown }).unreleased, 1);\n  redis.clear();\n  lists.trialing = [trial(\"sub_TrialFine0001\", 7)];\n  const fine = await sendReminders(NOW);\n  is(\"a run where every mark was let go or kept counts none (control)\", [fine.sent, (fine as { unreleased?: unknown }).unreleased], [1, 0]);\n\n  part(\"A creator's failed payment whose email failed, and whose mark could not be let go at once\");\n  redis.clear();\n  lists.trialing = [];\n  lists.past_due = [failing(\"sub_FailedOnce001\")];\n  emailWorks = false;\n  const failedDown = await delFails(\"nl:remind:failed:\", 1, () => sendFailedPlanNotices());\n  is(\"not sent, and said so\", [failedDown.sent, failedDown.failed], [0, 1]);\n  emailWorks = true;\n  await sendFailedPlanNotices();\n  is(\"the next run sends it\", sentTo(\"sub_FailedOnce001@example.com\"), 1);\n  await sendFailedPlanNotices();\n  is(\"and never twice\", sentTo(\"sub_FailedOnce001@example.com\"), 1);\n  redis.clear();\n  lists.past_due = [failing(\"sub_FailedStuck01\")];\n  emailWorks = false;\n  const failedStuck = await delFails(\"nl:remind:failed:\", 10, () => sendFailedPlanNotices());\n  emailWorks = true;\n  is(\"a mark that cannot be let go is counted\", (failedStuck as { unreleased?: unknown }).unreleased, 1);\n  lists.past_due = [];\n\n  part(\"More trials than one run reads\");\n  redis.clear();\n  // 5,050 trials, one due: the 5,021st, past the fifty pages of a hundred one run reads.\n  lists.trialing = Array.from({ length: 5_050 }, (_, i) => trial(`sub_TrialMany${String(i).padStart(4, \"0\")}`, i === 5_020 ? 7 : 20));\n  const first = await sendReminders(NOW);\n  is(\"the first run stops at the cap and says there is more\", [first.sent, first.seen, (first as { more?: unknown }).more], [0, 5_000, true]);\n  const second = await sendReminders(NOW);\n  is(\"the next run goes on from there, and reaches it\", [sentTo(\"sub_TrialMany5020@example.com\"), second.seen, (second as { more?: unknown }).more], [1, 50, false]);\n  const third = await sendReminders(NOW);\n  is(\"then starts from the top again, and never sends twice\", [sentTo(\"sub_TrialMany5020@example.com\"), third.seen], [1, 5_000]);\n  lists.trialing = [];\n\n  done();\n}\n\nvoid main();\n",
+      "oracles": [
+        {
+          "line": 96,
+          "text": "is(\"not sent, and said so\", [down.sent, down.failed], [0, 1])",
+          "sha256": "9d33a84019d2693b85dc47d3037d1c1b03d7bfa3552cac9e042430f5f6c92580"
+        },
+        {
+          "line": 99,
+          "text": "is(\"the next run sends it: the mark was let go on the second try\", sentTo(\"sub_TrialOnce0001@example.com\"), 1)",
+          "sha256": "5a85731b4a9535207761587674f4b0b3465e96cbd766a8485ffb2c14d1e162a1"
+        },
+        {
+          "line": 101,
+          "text": "is(\"and never twice\", sentTo(\"sub_TrialOnce0001@example.com\"), 1)",
+          "sha256": "3a6ae9594702263ac396922d4777fa3f48bbd29dfc5c6548eed87932b9baed32"
+        },
+        {
+          "line": 109,
+          "text": "is(\"counted as a reminder that will not be tried again by itself\", (stuck as { unreleased?: unknown }).unreleased, 1)",
+          "sha256": "4eea0e9574393688454ab158a72d670f7ce813879da84c11c8d8adc29536fddc"
+        },
+        {
+          "line": 113,
+          "text": "is(\"a run where every mark was let go or kept counts none (control)\", [fine.sent, (fine as { unreleased?: unknown }).unreleased], [1, 0])",
+          "sha256": "29e0f44020fc3e27eefbef22c65fa31ad7f3ada0fe937cbb2ab63372af20ecbf"
+        },
+        {
+          "line": 121,
+          "text": "is(\"not sent, and said so\", [failedDown.sent, failedDown.failed], [0, 1])",
+          "sha256": "11b152ded0d0078a10e6d9e22bb55618c7aec3941bed440fd973297020e63a73"
+        },
+        {
+          "line": 124,
+          "text": "is(\"the next run sends it\", sentTo(\"sub_FailedOnce001@example.com\"), 1)",
+          "sha256": "29d33b6735e86ffffef83bbf651504198b7baf7e30197062bc9909a1f6ecc251"
+        },
+        {
+          "line": 126,
+          "text": "is(\"and never twice\", sentTo(\"sub_FailedOnce001@example.com\"), 1)",
+          "sha256": "b6ae9cfe619dcf6a51f30b288d81d11f823b624bc9fdee1cb0cff7d4526dbe31"
+        },
+        {
+          "line": 132,
+          "text": "is(\"a mark that cannot be let go is counted\", (failedStuck as { unreleased?: unknown }).unreleased, 1)",
+          "sha256": "35909c13c53454615570eca4411a49578c9589295f7ed06850631ee769cf639c"
+        },
+        {
+          "line": 140,
+          "text": "is(\"the first run stops at the cap and says there is more\", [first.sent, first.seen, (first as { more?: unknown }).more], [0, 5_000, true])",
+          "sha256": "075704e626a1eb9e767de4a8a664f1d69cbd8ae6d26ea0a0e5bb8acf493ffb48"
+        },
+        {
+          "line": 142,
+          "text": "is(\"the next run goes on from there, and reaches it\", [sentTo(\"sub_TrialMany5020@example.com\"), second.seen, (second as { more?: unknown }).more], [1, 50, false])",
+          "sha256": "2e79279fef2f01d13db6f2aa6d178dc09a6f60de9765786de001e32eceb1cbe7"
+        },
+        {
+          "line": 144,
+          "text": "is(\"then starts from the top again, and never sends twice\", [sentTo(\"sub_TrialMany5020@example.com\"), third.seen], [1, 5_000])",
+          "sha256": "159d29546718ee6c49a0c1b3f82ecfd91562a6ef8c6e7f9d6d23defe6def5132"
+        }
+      ],
+      "parts": [
+        {
+          "index": 0,
+          "title": "A trial reminder whose email failed, and whose mark could not be let go at once",
+          "oracles": [
+            {
+              "line": 96,
+              "text": "is(\"not sent, and said so\", [down.sent, down.failed], [0, 1])",
+              "sha256": "9d33a84019d2693b85dc47d3037d1c1b03d7bfa3552cac9e042430f5f6c92580"
+            },
+            {
+              "line": 99,
+              "text": "is(\"the next run sends it: the mark was let go on the second try\", sentTo(\"sub_TrialOnce0001@example.com\"), 1)",
+              "sha256": "5a85731b4a9535207761587674f4b0b3465e96cbd766a8485ffb2c14d1e162a1"
+            },
+            {
+              "line": 101,
+              "text": "is(\"and never twice\", sentTo(\"sub_TrialOnce0001@example.com\"), 1)",
+              "sha256": "3a6ae9594702263ac396922d4777fa3f48bbd29dfc5c6548eed87932b9baed32"
+            }
+          ],
+          "status": "scheduled",
+          "file": "tests/s-3215-decomp-billing-1.proof.ts",
+          "sha256": "296a4aec443472e49845e0e50e423706ae1b67203c448f074d3ba57c51cf5575"
+        },
+        {
+          "index": 1,
+          "title": "A mark that cannot be let go at all is said, never swallowed",
+          "oracles": [
+            {
+              "line": 109,
+              "text": "is(\"counted as a reminder that will not be tried again by itself\", (stuck as { unreleased?: unknown }).unreleased, 1)",
+              "sha256": "4eea0e9574393688454ab158a72d670f7ce813879da84c11c8d8adc29536fddc"
+            },
+            {
+              "line": 113,
+              "text": "is(\"a run where every mark was let go or kept counts none (control)\", [fine.sent, (fine as { unreleased?: unknown }).unreleased], [1, 0])",
+              "sha256": "29e0f44020fc3e27eefbef22c65fa31ad7f3ada0fe937cbb2ab63372af20ecbf"
+            }
+          ],
+          "status": "scheduled",
+          "file": "tests/s-3215-decomp-billing-2.proof.ts",
+          "sha256": "6582821493daeddd022d02532b0d50561a533a1aa1f9e15eae20c62a51bb2a22"
+        },
+        {
+          "index": 2,
+          "title": "A creator's failed payment whose email failed, and whose mark could not be let go at once",
+          "oracles": [
+            {
+              "line": 121,
+              "text": "is(\"not sent, and said so\", [failedDown.sent, failedDown.failed], [0, 1])",
+              "sha256": "11b152ded0d0078a10e6d9e22bb55618c7aec3941bed440fd973297020e63a73"
+            },
+            {
+              "line": 124,
+              "text": "is(\"the next run sends it\", sentTo(\"sub_FailedOnce001@example.com\"), 1)",
+              "sha256": "29d33b6735e86ffffef83bbf651504198b7baf7e30197062bc9909a1f6ecc251"
+            },
+            {
+              "line": 126,
+              "text": "is(\"and never twice\", sentTo(\"sub_FailedOnce001@example.com\"), 1)",
+              "sha256": "b6ae9cfe619dcf6a51f30b288d81d11f823b624bc9fdee1cb0cff7d4526dbe31"
+            },
+            {
+              "line": 132,
+              "text": "is(\"a mark that cannot be let go is counted\", (failedStuck as { unreleased?: unknown }).unreleased, 1)",
+              "sha256": "35909c13c53454615570eca4411a49578c9589295f7ed06850631ee769cf639c"
+            }
+          ],
+          "status": "scheduled",
+          "file": "tests/s-3215-decomp-billing-3.proof.ts",
+          "sha256": "5db30c91662256741adfee17adc5a85902ca259f1b4dcdf6124c09b802f408f9"
+        },
+        {
+          "index": 3,
+          "title": "More trials than one run reads",
+          "oracles": [
+            {
+              "line": 140,
+              "text": "is(\"the first run stops at the cap and says there is more\", [first.sent, first.seen, (first as { more?: unknown }).more], [0, 5_000, true])",
+              "sha256": "075704e626a1eb9e767de4a8a664f1d69cbd8ae6d26ea0a0e5bb8acf493ffb48"
+            },
+            {
+              "line": 142,
+              "text": "is(\"the next run goes on from there, and reaches it\", [sentTo(\"sub_TrialMany5020@example.com\"), second.seen, (second as { more?: unknown }).more], [1, 50, false])",
+              "sha256": "2e79279fef2f01d13db6f2aa6d178dc09a6f60de9765786de001e32eceb1cbe7"
+            },
+            {
+              "line": 144,
+              "text": "is(\"then starts from the top again, and never sends twice\", [sentTo(\"sub_TrialMany5020@example.com\"), third.seen], [1, 5_000])",
+              "sha256": "159d29546718ee6c49a0c1b3f82ecfd91562a6ef8c6e7f9d6d23defe6def5132"
+            }
+          ],
+          "status": "not-dispatched-original-ceiling"
+        }
+      ]
+    }
+  ],
+  "originalOracles": 27,
+  "scheduledOracles": 22,
+  "notDispatchedOracles": 5
+}

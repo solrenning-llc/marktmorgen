@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "--max-old-space-size=512",
+    "node_modules/eslint/bin/eslint.js",
+    "--max-warnings=0",
+    "tests/s-3215-decomp-dunning-1.proof.ts",
+    "tests/s-3215-decomp-dunning-2.proof.ts",
+    "tests/s-3215-decomp-dunning-3.proof.ts",
+    "tests/s-3215-decomp-dunning-4.proof.ts",
+    "tests/s-3215-decomp-dunning-6.proof.ts",
+    "tests/s-3215-decomp-billing-1.proof.ts",
+    "tests/s-3215-decomp-billing-2.proof.ts",
+    "tests/s-3215-decomp-billing-3.proof.ts",
+    "proofs/s/3215-decomp/run.mjs",
+    "proofs/s/3215-decomp/generate.mjs",
+    "proofs/s/3215-decomp/checks.mjs"
+  ],
+  "status": 1,
+  "signal": null,
+  "stdout": "\n/workspace/scratch/s-3215-decomposition/tests/s-3215-decomp-billing-1.proof.ts\n  13:10  warning  'sendFailedPlanNotices' is defined but never used  @typescript-eslint/no-unused-vars\n  61:10  warning  'failing' is defined but never used                @typescript-eslint/no-unused-vars\n\n/workspace/scratch/s-3215-decomposition/tests/s-3215-decomp-billing-2.proof.ts\n  13:10  warning  'sendFailedPlanNotices' is defined but never used  @typescript-eslint/no-unused-vars\n  61:10  warning  'failing' is defined but never used                @typescript-eslint/no-unused-vars\n  88:7   warning  'sentTo' is assigned a value but never used        @typescript-eslint/no-unused-vars\n\n/workspace/scratch/s-3215-decomposition/tests/s-3215-decomp-billing-3.proof.ts\n  13:33  warning  'sendReminders' is defined but never used  @typescript-eslint/no-unused-vars\n  52:10  warning  'trial' is defined but never used          @typescript-eslint/no-unused-vars\n\n/workspace/scratch/s-3215-decomposition/tests/s-3215-decomp-dunning-1.proof.ts\n   70:16  warning  'withReply' is defined but never used    @typescript-eslint/no-unused-vars\n  131:10  warning  'behind' is defined but never used       @typescript-eslint/no-unused-vars\n  161:18  warning  'threeStores' is defined but never used  @typescript-eslint/no-unused-vars\n\n/workspace/scratch/s-3215-decomposition/tests/s-3215-decomp-dunning-2.proof.ts\n  131:10  warning  'behind' is defined but never used       @typescript-eslint/no-unused-vars\n  161:18  warning  'threeStores' is defined but never used  @typescript-eslint/no-unused-vars\n\n/workspace/scratch/s-3215-decomposition/tests/s-3215-decomp-dunning-3.proof.ts\n   70:16  warning  'withReply' is defined but never used    @typescript-eslint/no-unused-vars\n  131:10  warning  'behind' is defined but never used       @typescript-eslint/no-unused-vars\n  161:18  warning  'threeStores' is defined but never used  @typescript-eslint/no-unused-vars\n\n/workspace/scratch/s-3215-decomposition/tests/s-3215-decomp-dunning-4.proof.ts\n   70:16  warning  'withReply' is defined but never used  @typescript-eslint/no-unused-vars\n  108:10  warning  'running' is defined but never used    @typescript-eslint/no-unused-vars\n\n/workspace/scratch/s-3215-decomposition/tests/s-3215-decomp-dunning-6.proof.ts\n   70:16  warning  'withReply' is defined but never used  @typescript-eslint/no-unused-vars\n  108:10  warning  'running' is defined but never used    @typescript-eslint/no-unused-vars\n\n✖ 19 problems (0 errors, 19 warnings)\n\n",
+  "stderr": "ESLint found too many warnings (maximum: 0).\n",
+  "error": null
+}

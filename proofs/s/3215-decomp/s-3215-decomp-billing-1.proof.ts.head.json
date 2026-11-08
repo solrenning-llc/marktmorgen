@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3215-decomp-billing-1.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+  "stdout": "\nA trial reminder whose email failed, and whose mark could not be let go at once\n  ok    not sent, and said so\n  ok    the next run sends it: the mark was let go on the second try\n  ok    and never twice\n\n3 checks, all passing.\nS_VOLUME {\"runs\":25,\"attempts\":8,\"forwarded\":8}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

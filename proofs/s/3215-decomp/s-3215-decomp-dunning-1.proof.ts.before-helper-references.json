@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3215-decomp-dunning-1.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+  "stdout": "\nCard notices: the run's time runs out after the first notice of a store with 600 running memberships\n  ok    this run: the first member told, the second not reached\n  ok    the next run: the member not reached is told, from where the notices stopped\n  ok    never twice, for either\n\n3 checks, all passing.\nS_VOLUME {\"runs\":128,\"attempts\":22,\"forwarded\":22}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

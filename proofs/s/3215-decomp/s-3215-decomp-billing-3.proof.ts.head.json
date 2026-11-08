@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3215-decomp-billing-3.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+  "stdout": "\nA creator's failed payment whose email failed, and whose mark could not be let go at once\n  ok    not sent, and said so\n  ok    the next run sends it\n  ok    and never twice\n  ok    a mark that cannot be let go is counted\n\n4 checks, all passing.\nS_VOLUME {\"runs\":26,\"attempts\":10,\"forwarded\":10}\n",
+  "stderr": "telling a creator their payment failed did not work Error: the email was not sent\n    at [stdin]:11978:22\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async walkList ([stdin]:11814:12)\n    at async sendFailedPlanNotices ([stdin]:11967:18)\n    at async delFails ([stdin]:12110:12)\n    at async main ([stdin]:12127:22)\ntelling a creator their payment failed did not work Error: the email was not sent\n    at [stdin]:11978:22\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at async walkList ([stdin]:11814:12)\n    at async sendFailedPlanNotices ([stdin]:11967:18)\n    at async delFails ([stdin]:12110:12)\n    at async main ([stdin]:12137:23)\na billing reminder's mark could not be let go: that reminder is not tried again until the mark runs out nl:remind:failed:in_FailedStuck01inv\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3215-decomp-dunning-2.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+  "stdout": "\nCard notices: whether a card update waits cannot be read for one member\n  ok    unknown: no notice on a guess this run\n  ok    the next run reads it again and tells the member\n  ok    and never twice\n\n3 checks, all passing.\nS_VOLUME {\"runs\":107,\"attempts\":15,\"forwarded\":15}\n",
+  "stderr": "",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

@@ -1,0 +1,12 @@
+{
+  "matched": 454,
+  "requiredMissing": [],
+  "mismatch": [],
+  "node": "v24.22.1",
+  "versions": {
+    "next": "16.4.5",
+    "typescript": "5.9.3",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5"
+  }
+}

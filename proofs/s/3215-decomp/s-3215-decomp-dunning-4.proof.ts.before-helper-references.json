@@ -1,0 +1,11 @@
+{
+  "file": "tests/s-3215-decomp-dunning-4.proof.ts",
+  "oldSource": null,
+  "mode": "exact-head",
+  "head": "f78f7e2c1f831b272c9f1dcd7baf23d4e7f5a7c2",
+  "stdout": "\nThe store walk: a store whose sweep threw is not done\n  ok    this run: the first store's page unreadable, the second ran out of time, the third not reached\n  ok    the next run starts at the store that failed: every member behind is written to\n  ok    and never twice\n\n3 checks, all passing.\nS_VOLUME {\"runs\":296,\"attempts\":14,\"forwarded\":14}\n",
+  "stderr": "reading a store's failed renewals failed walka UnknownReplyError: Redis answered a page of past-due memberships in an unknown shape\n    at remindFailed ([stdin]:58089:101)\n    at async sweepStore ([stdin]:58357:18)\n    at async recoverFailedPayments ([stdin]:58385:25)\n    at async main ([stdin]:58547:5)\n",
+  "status": 0,
+  "signal": null,
+  "error": null
+}

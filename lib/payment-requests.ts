@@ -220,7 +220,8 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
   if (!requestsOpen(store) || !store.stripeAccountId) return { ok: false, reason: "closed" };
   const request = await requestOf(store, id);
   if (!request || statusOf(request, now) !== "open") return { ok: false, reason: "gone" };
-  if (!(await holdForCheckout(request.id))) return { ok: false, reason: "busy" };
+  const held = await holdForCheckout(request.id);
+  if (!held) return { ok: false, reason: "busy" };
   try {
     // The checkout opened before, while Stripe keeps it open: the same page again.
     if (SESSION_ID.test(request.session) && now - request.sessionAt < REUSE_SECONDS * 1000) {
@@ -249,7 +250,7 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
     if (error instanceof OrdersPausedError) return { ok: false, reason: error.reason === "paused" ? "paused" : "error" };
     return { ok: false, reason: "error", error };
   } finally {
-    await letGo(request.id);
+    await letGo(held);
   }
 }
 
@@ -405,7 +406,8 @@ export async function markPaidOutside(
 ): Promise<{ ok: true; request: PaymentRequest } | { ok: false; reason: OutsideRefusal }> {
   const request = await requestOf(store, id);
   if (!request || request.state !== "open") return { ok: false, reason: "gone" };
-  if (!(await holdForCheckout(request.id))) return { ok: false, reason: "busy" };
+  const held = await holdForCheckout(request.id);
+  if (!held) return { ok: false, reason: "busy" };
   try {
     if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
       if (!store.stripeAccountId) return { ok: false, reason: "error" };
@@ -440,6 +442,6 @@ export async function markPaidOutside(
     console.error("marking a payment request paid outside Stripe failed", error);
     return { ok: false, reason: "error" };
   } finally {
-    await letGo(request.id);
+    await letGo(held);
   }
 }

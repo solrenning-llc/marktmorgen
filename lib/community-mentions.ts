@@ -65,7 +65,11 @@ export function slug(name: string): string {
 }
 
 /**
- * Takes a handle for this member, giving up the one they had.
+ * Reserves a handle for this member. The one they had is NOT given up here:
+ * their record still carries it until the change is known to be saved, so it
+ * must keep resolving to them, and nobody else may take it, until then. The
+ * caller gives it back once the record no longer carries it (setProfile in
+ * lib/community.ts, rule 30 on Codex G's review 5815632734 of #3123).
  *
  * When the handle is taken, a number goes on the end and climbs until one is
  * free. Returns what they ended up with, or "" when the name gave nothing
@@ -74,24 +78,15 @@ export function slug(name: string): string {
  */
 export async function claimHandle(id: string, who: string, name: string, had: string): Promise<string> {
   const wanted = slug(name);
-  if (!wanted) {
-    if (had) await redisPipeline([["HDEL", handlesKey(id), had]]);
-    return "";
-  }
+  if (!wanted) return "";
   if (wanted === had) return had;
   for (let n = 0; n < 50; n += 1) {
     const tryThis = n === 0 ? wanted : `${wanted.slice(0, MAX_HANDLE - String(n + 1).length)}${n + 1}`;
     const [got] = await redisPipeline([["HSETNX", handlesKey(id), tryThis, who]]);
-    if (Number(got) === 1) {
-      if (had && had !== tryThis) await redisPipeline([["HDEL", handlesKey(id), had]]);
-      return tryThis;
-    }
-    // Already ours: nothing to claim, nothing to release.
+    if (Number(got) === 1) return tryThis;
+    // Already ours: nothing to claim.
     const [owner] = await redisPipeline([["HGET", handlesKey(id), tryThis]]);
-    if (owner === who) {
-      if (had && had !== tryThis) await redisPipeline([["HDEL", handlesKey(id), had]]);
-      return tryThis;
-    }
+    if (owner === who) return tryThis;
   }
   return had;
 }

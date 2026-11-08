@@ -24,8 +24,15 @@ const PROMO_PATTERN = /^promo_[A-Za-z0-9]{6,64}$/;
 /** The statuses of a membership still running, as lib/membership-manage.ts counts them. */
 const LIVE = new Set(["active", "trialing", "past_due", "unpaid", "paused"]);
 const MAX_CUSTOMERS = 20;
-/** Memberships are read 100 to a page, Stripe's largest, and at most this many pages of one customer. */
-const SUB_PAGES = 5;
+/**
+ * The most Stripe pages one find (or one apply) waits on, the customers' page
+ * included: the base's worst, one page of memberships a customer at the most
+ * customers read, so the one studio request the route takes still covers it
+ * (tests/plan-cost-registry.ts prices a Stripe page waited on). Memberships are
+ * read 100 to a page, Stripe's largest, so a customer with more than one page
+ * is followed while the budget lasts; past it the answer is unknown.
+ */
+const STRIPE_PAGES = 1 + MAX_CUSTOMERS;
 
 /** A Stripe list that cannot be read whole: the answer is unknown, never what the rows read so far suggest. */
 class UnreadListError extends Error {}
@@ -92,7 +99,7 @@ export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null 
  * Every running membership of this store held under an address, newest
  * customer first; null when Stripe could not be read whole. A list cut short
  * is not a complete one (r24, PR-F): more than MAX_CUSTOMERS customers under
- * the address, more than SUB_PAGES pages of one customer's memberships, a page
+ * the address, more pages of memberships than STRIPE_PAGES leaves, a page
  * that cannot be read or a customer with no id that can be read make the
  * answer unknown, so a running membership past the part read is never taken
  * for "not a member", and no discount is put on or refused on a guess.
@@ -105,11 +112,14 @@ export async function memberSubs(store: Store, email: string): Promise<MemberSub
     const customers = page(await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MAX_CUSTOMERS}`, undefined, API_VERSION), "customers");
     if (customers.more) throw new UnreadListError(`more than ${MAX_CUSTOMERS} customers under one address`);
     const out: MemberSub[] = [];
+    // One budget for the whole find, the customers' page already spent.
+    let pages = 1;
     for (const customer of customers.rows) {
       if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) throw new UnreadListError("Stripe answered a customer with no id that can be read");
       let after = "";
-      for (let read = 0; ; read += 1) {
-        if (read === SUB_PAGES) throw new UnreadListError(`more than ${SUB_PAGES} pages of one customer's memberships`);
+      for (;;) {
+        if (pages === STRIPE_PAGES) throw new UnreadListError(`more than ${STRIPE_PAGES} Stripe pages for one address's memberships`);
+        pages += 1;
         const query = `customer=${encodeURIComponent(customer.id)}&status=all&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
         const subs = page(await onAccount("GET", account, `/subscriptions?${query}`, undefined, API_VERSION), "memberships");
         for (const sub of subs.rows) {

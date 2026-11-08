@@ -171,7 +171,8 @@ is("a raise of more than the most a day allows is refused, even inside the limit
 const pausing = nextStepFor(base({ salesByDay: { "2026-10-22": 5_000 } })).change as NextStepChange;
 is("a pause lowers spend and is never refused by the limits", attempt(() => next.confirmChange(pausing, { limits: { ...limits, maxDailyCents: 1_000 }, all: [camp()], lastRaisedDay: TODAY })), { ok: true, raisedOn: null });
 let summed = 0;
-for (const day of [5_000, 9_000, 10_000, 11_000, 11_999, 12_000, 13_000]) {
+for (const day of [10_000, 10_500, 11_000, 11_999, 12_000, 13_000, 50_000]) {
+  // From $100, the two budgets as they are; below that the limit is already passed before any raise.
   const r = { ...limits, maxDailyCents: day };
   const cards = attempt(() => next.nextStepsFor([campA, campB].map((c) => base({ campaign: c, all: [campA, campB], limits: r }))));
   if (!Array.isArray(cards)) { summed += 1; continue; }

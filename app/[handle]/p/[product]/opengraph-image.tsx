@@ -71,6 +71,10 @@ export default async function OpengraphImage({ params }: Params) {
     // An address with a broken escape in it names no store: the plain card.
   }
   const store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)).catch(() => null) : null;
+  // A store switched off after a report (lib/takedown.ts) gives no card, as its manifest gives nothing.
+  if (store?.suspended) {
+    return new Response("Not found.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  }
   const found = store ? await readListing(store, productIdFromAddress(store, id) ?? id).catch(() => null) : null;
   // A draft has no picture to share either.
   const product = found && !found.hidden ? found : null;

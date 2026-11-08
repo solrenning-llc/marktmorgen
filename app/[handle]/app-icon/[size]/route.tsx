@@ -33,7 +33,8 @@ export async function GET(
 
   try {
     const store = await storeForHandle(normaliseHandle(decoded));
-    if (!store) return missing();
+    // Nor for a store switched off after a report (lib/takedown.ts), as its manifest.
+    if (!store || store.suspended) return missing();
     // Drawn only at the address with today's fingerprint and nothing else, which
     // may be kept for good; any other is sent there, briefly, before anything
     // is read or drawn.

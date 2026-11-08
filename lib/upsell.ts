@@ -46,7 +46,7 @@
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark, claimValue } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
   type FunnelStep,
@@ -326,13 +326,15 @@ export async function takeUpsell(input: {
   // press's only on Redis's own "OK", or on its own value read back (CX-123
   // rule 24, lib/claim-mark.ts; `claim` makes the value this press's alone).
   // A reply of any other shape is unknown: nothing is admitted, written or
-  // charged, and the buyer is told so and can press again.
-  const claimed = await claimMark(
-    recordKey(session, slot),
-    RECORD_SECONDS,
-    JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now(), claim: claimValue() }),
-  );
-  if (claimed === "unknown") return { kind: "retry" };
+  // charged, and the buyer is told so and can press again. This press's own
+  // claim is let go if it landed (compare and delete), so the next press is
+  // not answered "done" on a yes nobody charges (Claude 6 LOW 1 on #3275).
+  const pending = JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now(), claim: claimValue() });
+  const claimed = await claimMark(recordKey(session, slot), RECORD_SECONDS, pending);
+  if (claimed === "unknown") {
+    await releaseMark(recordKey(session, slot), pending);
+    return { kind: "retry" };
+  }
   if (claimed === "taken") {
     const existing = await readUpsell(session, slot);
     return existing?.state === "failed" ? { kind: "failed" } : existing?.state === "declined" ? { kind: "declined" } : { kind: "done" };

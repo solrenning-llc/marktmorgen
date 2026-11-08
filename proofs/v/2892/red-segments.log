@@ -1,0 +1,325 @@
+✔ control: with every member read, the full list refuses group 21 and the same name keeps its id (15.176524ms)
+✖ a kept member that does not read is unknown: listSegments throws rather than answering fewer groups (1.431039ms)
+✖ a kept member that does not read never lets group 21 be written (5.324676ms)
+✖ the member of the same name that does not read never lets a second group of that name be written (1.896873ms)
+✔ confirmed absence: a list with no saved group answers none (0.343348ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 2
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 33.678176
+
+✖ failing tests:
+
+test at ../../../tmp/v2892-6fFjGk/test.cjs:11384:27
+✖ a kept member that does not read is unknown: listSegments throws rather than answering fewer groups (1.431039ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async withUnreadable (/tmp/v2892-6fFjGk/test.cjs:11368:12)
+      at async TestContext.<anonymous> (/tmp/v2892-6fFjGk/test.cjs:11386:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/v2892-6fFjGk/test.cjs:11388:27
+✖ a kept member that does not read never lets group 21 be written (5.324676ms)
+  AssertionError [ERR_ASSERTION]: got {"ok":true,"segments":[{"id":"e0098ef199ac","name":"Group 0": the list now holds 21 groups (MAX_SEGMENTS 20)
+  + actual - expected
+  
+    {
+  +   ok: true,
+  +   segments: [
+  +     {
+  +       channel: '',
+  +       id: 'e0098ef199ac',
+  +       label: '',
+  +       minSpent: 100,
+  +       name: 'Group 0',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '2b4370c99b3c',
+  +       label: '',
+  +       minSpent: 321,
+  +       name: 'group 1',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '003a1d1906c7',
+  +       label: '',
+  +       minSpent: 110,
+  +       name: 'Group 10',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: 'f140307187f4',
+  +       label: '',
+  +       minSpent: 111,
+  +       name: 'Group 11',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: 'e22742ab3765',
+  +       label: '',
+  +       minSpent: 112,
+  +       name: 'Group 12',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '86dc119e444b',
+  +       label: '',
+  +       minSpent: 113,
+  +       name: 'Group 13',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '219635343c74',
+  +       label: '',
+  +       minSpent: 114,
+  +       name: 'Group 14',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '159218e2ada5',
+  +       label: '',
+  +       minSpent: 115,
+  +       name: 'Group 15',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '1aa0d0aa3c2f',
+  +       label: '',
+  +       minSpent: 116,
+  +       name: 'Group 16',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: 'ad5f2ff560e0',
+  +       label: '',
+  +       minSpent: 117,
+  +       name: 'Group 17',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '57843a903fb0',
+  +       label: '',
+  +       minSpent: 118,
+  +       name: 'Group 18',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: 'bbcce097d2d7',
+  +       label: '',
+  +       minSpent: 119,
+  +       name: 'Group 19',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '7b163c123a40',
+  +       label: '',
+  +       minSpent: 102,
+  +       name: 'Group 2',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '6326765c137c',
+  +       label: '',
+  +       minSpent: 103,
+  +       name: 'Group 3',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '95db0567a68c',
+  +       label: '',
+  +       minSpent: 104,
+  +       name: 'Group 4',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: 'da9b49d2b981',
+  +       label: '',
+  +       minSpent: 106,
+  +       name: 'Group 6',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '9666720cebdd',
+  +       label: '',
+  +       minSpent: 107,
+  +       name: 'Group 7',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '4caa2b8644d2',
+  +       label: '',
+  +       minSpent: 108,
+  +       name: 'Group 8',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '2e4d2fde40d3',
+  +       label: '',
+  +       minSpent: 109,
+  +       name: 'Group 9',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '2376dc270002',
+  +       label: '',
+  +       minSpent: 100,
+  +       name: 'One more',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     }
+  +   ]
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+  
+      at TestContext.<anonymous> (/tmp/v2892-6fFjGk/test.cjs:11391:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at ../../../tmp/v2892-6fFjGk/test.cjs:11394:27
+✖ the member of the same name that does not read never lets a second group of that name be written (1.896873ms)
+  AssertionError [ERR_ASSERTION]: got {"ok":true,"segments":[{"id":"068bd513f4b7","name":"Group 1": 2 groups named "Group 0"
+  + actual - expected
+  
+    {
+  +   ok: true,
+  +   segments: [
+  +     {
+  +       channel: '',
+  +       id: '068bd513f4b7',
+  +       label: '',
+  +       minSpent: 101,
+  +       name: 'Group 1',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     },
+  +     {
+  +       channel: '',
+  +       id: '4d68d16d07de',
+  +       label: '',
+  +       minSpent: 102,
+  +       name: 'Group 2',
+  +       notProductId: '',
+  +       productId: '',
+  +       quietDays: 0,
+  +       who: 'all'
+  +     }
+  +   ]
+  -   ok: false,
+  -   reason: 'unavailable'
+    }
+  
+      at TestContext.<anonymous> (/tmp/v2892-6fFjGk/test.cjs:11397:29)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [Object],
+    expected: [Object],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+V2892_CHILD {"status":1,"signal":null,"error":null}
+V2892_VOLUME {"redis":86,"http":0}
+V2892_VOLUME {"redis":0,"http":0}
+
+V2892_STATUS {"status":1,"signal":null,"error":null}

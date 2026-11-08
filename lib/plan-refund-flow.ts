@@ -28,14 +28,18 @@
  *      read, or an earlier request left a note): the note AND the stop stay,
  *      so no renewal can be charged before it is decided; the daily job ends
  *      the plan if the refund turns up, and takes the stop back only once it
- *      concludes none was made (SETTLE_SECONDS after the last try).
+ *      concludes none was made (SETTLE_SECONDS after the last try, from a
+ *      reply that reads).
  * The plan is ended only on a refund Stripe says succeeded: a pending one
  * (it may still fail and give the money back to the charge) keeps the note
  * and the stop for the daily job. A refund whose answer was lost is found by
  * its metadata (`plan_refund` = the store's id) among the platform's refunds
  * made between the note and SETTLE_SECONDS after its last try. Undecidable
- * for GIVE_UP_DAYS: the stop is taken back and the plan goes on as it was,
- * never ended without a refund that can be seen.
+ * (rule 24: a reply that does not read is never "none"): the note and the
+ * stop stay and the daily job keeps reading it, so the plan is never ended
+ * without a refund that can be seen and the creator is never told "Nothing
+ * was refunded" for a refund nobody could read; after GIVE_UP_DAYS each run
+ * says the still-held case in the log (finding F1, Codex G and Claude 3).
  *
  * One at a time per store (FLOW_LOCK_SECONDS, lib/redis-lock.ts); the daily
  * job skips a store whose lock is held.
@@ -71,7 +75,7 @@ export const flowKeyOf = (sid: string): string => `nl:plan-refund:${sid}:flow`;
 export const FLOW_LOCK_SECONDS = LOCK_SECONDS + 160;
 /** A refund not found this long after its note was not made: Stripe's answer has long come back by then. */
 export const SETTLE_SECONDS = 10 * 60;
-/** A note the daily job could not decide (Stripe unread) for this long is dropped, said in the log. */
+/** A note the daily job could not decide (Stripe unread) for this long is said in the log on every run; it is kept, with its stop. */
 export const GIVE_UP_DAYS = 7;
 /** Pages of the platform's refunds read to find one (newest first, 100 a page, only those since the note). */
 export const MAX_REFUND_PAGES = 3;
@@ -455,7 +459,8 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
 /**
  * The daily job's part (app/api/cron/closing): each note left by a request that did not finish is decided. Its
  * refund found: the plan is ended. Not found SETTLE_SECONDS after the note: none was made, and a stop we set is
- * taken back. Not decidable: tried again tomorrow, for GIVE_UP_DAYS. One failure never stops the rest.
+ * taken back. Not decidable: kept and tried again tomorrow, said in the log after GIVE_UP_DAYS. One failure never
+ * stops the rest.
  */
 export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ ended: number; dropped: number; left: number }> {
   const counts = { ended: 0, dropped: 0, left: 0 };
@@ -511,12 +516,14 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         continue;
       }
       if (found.kind === "unknown" || nowSeconds - note.t < SETTLE_SECONDS) {
-        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
-          counts.left += 1;
-          continue;
+        // Rule 24 (finding F1): an outcome that was not read is never "none", however long it lasts. The note and the
+        // stop stay (no renewal is charged, the plan is never ended without a refund we can see, the studio keeps
+        // saying it is being settled) and the creator is never emailed "Nothing was refunded" for it.
+        if (found.kind === "unknown" && nowSeconds - note.at > GIVE_UP_DAYS * 86_400) {
+          console.error(`plan-refund: the refund asked for store ${sid} is still undecided after ${GIVE_UP_DAYS} days; still held with its stop, read again tomorrow`);
         }
-        // Undecidable for GIVE_UP_DAYS: the plan goes on as it was, never ended without a refund we can see.
-        console.error(`plan-refund: the refund asked for store ${sid} could not be decided in ${GIVE_UP_DAYS} days; its stop is taken back and its note dropped`);
+        counts.left += 1;
+        continue;
       }
       // None was made: our stop goes, the plan goes on as it was.
       if (note.m === 1 && !(await takeBackStop(note.s))) {
@@ -527,8 +534,8 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; its note is dropped`);
       }
       await dropNote(sid);
-      // The creator saw "nothing was refunded" or "we check within a day": the outcome reaches them by email.
-      await mail(store, planRefundNotMadeLetter({ store: store.name || store.handle, undecided: found.kind === "unknown" }), `plan-refund-none:${sid}:${note.at}`);
+      // Read and none was made: the creator saw "nothing was refunded" or "we check every day", so it reaches them by email.
+      await mail(store, planRefundNotMadeLetter({ store: store.name || store.handle }), `plan-refund-none:${sid}:${note.at}`);
       counts.dropped += 1;
     } catch (error) {
       console.error(`plan-refund: the note for store ${sid} is not decided yet; tried again tomorrow`, error);

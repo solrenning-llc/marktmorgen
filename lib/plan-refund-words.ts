@@ -87,15 +87,14 @@ export function planRefundLetter(o: { store: string; cents: number; currency: st
 }
 
 /**
- * When a refund the creator asked for was not made after all (the daily job found none, or could not tell for
- * GIVE_UP_DAYS): nothing was refunded, the stop set for it was taken back, the plan goes on; how to ask again.
+ * When a refund the creator asked for was not made after all (the daily job read Stripe's refunds and found none):
+ * nothing was refunded, the stop set for it was taken back, the plan goes on; how to ask again. Never sent for a
+ * refund whose outcome could not be read (rule 24): that one stays held and is read again every day.
  */
-export function planRefundNotMadeLetter(o: { store: string; undecided: boolean }): { subject: string; text: string } {
+export function planRefundNotMadeLetter(o: { store: string }): { subject: string; text: string } {
   const store = o.store || "your store";
   const lines = [
-    o.undecided
-      ? `We could not confirm the refund you asked for on your Marktmorgen plan for ${store}, so we did not end your plan.`
-      : `The refund you asked for on your Marktmorgen plan for ${store} was not made: our payment provider did not take it.`,
+    `The refund you asked for on your Marktmorgen plan for ${store} was not made: our payment provider did not take it.`,
     "",
     "Nothing was refunded and your plan goes on as before. It renews as usual unless you cancel it in your studio.",
     `To ask again, open your studio and choose "Refund my payment" under "What you pay us", or email ${SUPPORT_ADDRESS}.`,
@@ -121,11 +120,12 @@ export function planRefundPartLetter(o: { store: string }): { subject: string; t
   };
 }
 
-/** Days the daily job keeps checking a refund it cannot decide (lib/plan-refund-flow.ts GIVE_UP_DAYS), said on the page. */
+/** Days after which the daily job logs a refund it still cannot decide (lib/plan-refund-flow.ts GIVE_UP_DAYS); it keeps checking it after them. */
 const CHECK_DAYS = 7;
 export const REFUND_CHECK_DAYS = CHECK_DAYS;
 
-const DECIDED_LATER = `We check it again every day and email you once it is decided, at most ${CHECK_DAYS} days from now: either the refund and the end of your plan, or that nothing was refunded and your plan goes on.`;
+// No deadline is promised: a refund whose outcome cannot be read stays held and is read again every day (rule 24).
+const DECIDED_LATER = "We check it again every day and email you once it is decided: either the refund and the end of your plan, or that nothing was refunded and your plan goes on.";
 
 /**
  * What the review page says about the refund route's answer (app/api/billing/refund) or a refund still being

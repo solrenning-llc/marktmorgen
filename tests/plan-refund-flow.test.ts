@@ -206,8 +206,9 @@ async function main() {
   is("and no letter says nothing was refunded", world.emails.length, 0);
   world.emails = [];
   await finishPlanRefunds(Date.now() + 10_000, NOW + GIVE_UP_DAYS * DAY + 3_600);
-  is("readable again after it: none found, the stop taken back, the note dropped", [await h.note(), h.sub().cancel_at_period_end], [null, false]);
-  is("and only then is the creator told it was not made, the plan renews as usual, how to ask again", world.emails.map((e) => [e.text.includes("was not made"), e.text.includes("It renews as usual unless you cancel it"), e.text.includes("Refund my payment"), e.text.includes("We could not confirm")]), [[true, true, true, false]]);
+  // This refund was made (only ending the plan failed): the old letter would have said "Nothing was refunded" for money given back.
+  is("readable again after it: the refund made is found, the plan ended, the note dropped", [await h.note(), h.sub().status], [null, "canceled"]);
+  is("and the creator is told what was refunded, never that nothing was", world.emails.map((e) => [e.text.includes("We refunded $69"), /Nothing was refunded|was not made|could not confirm/.test(e.text)]), [[true, false]]);
   delete process.env.RESEND_API_KEY;
   await redisPipeline([["HSET", ENDING_KEY, "gone-store-id", JSON.stringify({ s: "sub_gonestore01", at: NOW, m: 1 })]]);
   await finishPlanRefunds(Date.now() + 10_000, NOW + 60);

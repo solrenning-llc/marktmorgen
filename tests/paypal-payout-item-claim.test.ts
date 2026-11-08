@@ -1,14 +1,16 @@
 /**
- * A PayPal payout item is written into the affiliate book only on its own mark (CX-123 rule 24).
+ * A PayPal payout item is written into the affiliate book once, and a line leaves the open batch only when the book
+ * is confirmed to hold it (CX-123 rule 24; Claude 2 on #3272, finding 1).
  *
- * settlePayPal takes nl:pp:item:<item> with SET NX before addPayout. "OK" is this run's mark and nil is a mark made
- * before it; any other answer (no envelope, an empty or odd value, an error) may have landed for nobody or for another
- * run. Such an answer is read back (lib/claim-mark.ts): the key holding this run's own value is ours, another value is
- * somebody else's, and anything else is unknown, so the payout is not written into the book this run and the affiliate
- * stays on their way to be read again. Synthetic store, synthetic PayPal stand-in.
+ * The book write is the once-only record: the payout's id is derived from the PayPal item and written with HSETNX,
+ * read exactly. 1 is written, 0 is in the book already; any other answer, an error or a data room that is full keeps
+ * the affiliate on their way, so the line is never sent to PayPal again and is read again next time. A mark taken by
+ * an earlier run (nl:pp:item:<item>, written before this change) drops a line only when the book holds a payout with
+ * that item's reference. One line that cannot be written never stops the others. Synthetic store, synthetic PayPal
+ * stand-in; every scenario counts the PayPal batches made, which must stay at one for one commission.
  */
 import { connectPayPal, onTheirWay, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
-import { readBook } from "@/lib/affiliates";
+import { readBook, removePayout } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -69,33 +71,75 @@ function shop(): Store {
 
 const pipeline = redis.pipeline.bind(redis);
 const ITEM = "nl:pp:item:ITEMBATCH1ABC0";
+const PAYOUTS = `nl:aff:${STATS}:payouts`;
+const SARA = "aaaaaaaaaaaa";
+const BEN = "bbbbbbbbbbbb";
 
-/** One affiliate owed $30, sent in one batch, reported SUCCESS by PayPal. */
-async function seed(store: Store): Promise<void> {
+/** Affiliates owed $30 each (Sara, and Ben when `two`), sent in one batch, reported SUCCESS by PayPal. */
+async function seed(store: Store, two = false): Promise<void> {
   redis.pipeline = pipeline;
   redis.clear();
   created.length = 0;
   itemStatus = {};
   const at = Math.floor(Date.now() / 1000) - 86_400;
+  const person = (id: string, email: string, code: string) => JSON.stringify({ id, email, code, status: "approved", appliedAt: 1, decidedAt: 2, note: "" });
+  const sale = (ref: string, aff: string) => JSON.stringify({ ref, pi: `pi_${ref}`, aff, at, product: "p1", title: "Guide", base: 10000, total: 10000, currency: "usd", rate: 30, self: false });
   await pipeline([
-    ["HSET", `nl:aff:${STATS}:people`, "aaaaaaaaaaaa", JSON.stringify({ id: "aaaaaaaaaaaa", email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 2, note: "" })],
-    ["HSET", `nl:aff:${STATS}:sales`, "cs_1", JSON.stringify({ ref: "cs_1", pi: "pi_cs_1", aff: "aaaaaaaaaaaa", at, product: "p1", title: "Guide", base: 10000, total: 10000, currency: "usd", rate: 30, self: false })],
+    ["HSET", `nl:aff:${STATS}:people`, SARA, person(SARA, "sara@example.com", "sara")],
+    ["HSET", `nl:aff:${STATS}:sales`, "cs_1", sale("cs_1", SARA)],
   ]);
+  if (two) {
+    await pipeline([
+      ["HSET", `nl:aff:${STATS}:people`, BEN, person(BEN, "ben@example.com", "ben")],
+      ["HSET", `nl:aff:${STATS}:sales`, "cs_2", sale("cs_2", BEN)],
+    ]);
+  }
   if (!(await connectPayPal(store, CLIENT, SECRET)).ok) throw new Error("synthetic PayPal app not kept");
   const sent = await payWithPayPal(store);
   if (!sent.ok) throw new Error(`not sent: ${sent.reason}`);
-  itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
+  itemStatus = two ? { [SARA]: "SUCCESS", [BEN]: "SUCCESS" } : { [SARA]: "SUCCESS" };
 }
 
-const paidCents = async (store: Store) => (await readBook(store)).rows.find((r) => r.affiliate.email === "sara@example.com")?.paid ?? -1;
+const paidOf = async (store: Store, email: string) => (await readBook(store)).rows.find((r) => r.affiliate.email === email)?.paid ?? -1;
+const paidCents = (store: Store) => paidOf(store, "sara@example.com");
+/** The payouts written in the book, by id. */
+const bookIds = async () => {
+  const flat = (await pipeline([["HGETALL", PAYOUTS]]))[0] as string[];
+  return flat.filter((_, i) => i % 2 === 0);
+};
+/** Settled, or "threw" when settlePayPal let an error out. */
+const settle = (store: Store) => settlePayPal(store).catch(() => "threw" as const);
 
-/** The item mark's SET NX answered with `reply`; `land` first writes it for real, as a reply lost after the write. */
-function itemSetAnswers(reply: () => unknown[], land: boolean): void {
+/** Is this one command the book write of a payout for `aff` (HSET before this change, HSETNX after)? */
+function bookWriteFor(commands: (string | number)[][], aff?: string): boolean {
+  if (commands.length !== 1) return false;
+  const [name, key, , value] = commands[0];
+  if ((name !== "HSET" && name !== "HSETNX") || key !== PAYOUTS) return false;
+  if (!aff) return true;
+  try {
+    return (JSON.parse(String(value)) as { aff?: unknown }).aff === aff;
+  } catch {
+    return false;
+  }
+}
+
+/** The book write answered with `reply`; `land` first writes it for real, as a reply lost after the write. */
+function bookWriteAnswers(reply: () => unknown[], land: boolean): void {
   redis.pipeline = async (commands) => {
-    if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === ITEM) {
+    if (bookWriteFor(commands)) {
       if (land) await pipeline(commands);
       return reply();
     }
+    return pipeline(commands);
+  };
+}
+
+/** The store's data room answers full for the payouts slot (lib/store-data.ts TAKE_DATA: [0, used]). */
+function roomFull(): void {
+  redis.pipeline = async (commands) => {
+    // ["EVAL", script, 1, key, room, always, month, "a", slot, bytes]
+    const [name, , , , , always] = commands[0] ?? [];
+    if (commands.length === 1 && name === "EVAL" && always === "0" && commands[0].includes("aff:payouts")) return [[0, 999_999_999]];
     return pipeline(commands);
   };
 }
@@ -108,71 +152,147 @@ async function main(): Promise<void> {
   const shapes: [string, () => unknown[]][] = [
     ["no envelope", () => []],
     ["undefined", () => [undefined]],
+    ["null", () => [null]],
     ["empty text", () => [""]],
     ["another word", () => ["QUEUED"]],
-    ["a number", () => [1]],
-    ["an object", () => [{ result: "OK" }]],
+    ["the number 2", () => [2]],
+    ["an object", () => [{ result: 1 }]],
   ];
 
-  part("An unknown answer, the mark not written: nothing in the book, still on their way");
+  part("Healthy: written into the book once, never sent to PayPal again");
+  await seed(store);
+  is("a clean settle writes the payout once", [await settle(store), await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
+  is("asked again, nothing written twice", [await settle(store), await paidCents(store), (await bookIds()).length], [{ paid: 0, released: 0, waiting: 0 }, 3000, 1]);
+  await payWithPayPal(store);
+  is("the next payday sends nothing more: one PayPal batch", created.length, 1);
+  const [id] = await bookIds();
+  is("the payout's id is one the creator can remove (12 hex)", /^[0-9a-f]{12}$/.test(id ?? ""), true);
+  is("and it is removed", await removePayout(store, id ?? ""), true);
+
+  part("Two settles at once: written once");
+  await seed(store);
+  await Promise.all([settle(store), settle(store)]);
+  is("one payout in the book, $30", [(await bookIds()).length, await paidCents(store)], [1, 3000]);
+
+  part("The book write answered in an unknown shape, not written: kept on their way, never paid twice (probe B)");
   for (const [label, reply] of shapes) {
     await seed(store);
-    itemSetAnswers(reply, false);
-    const out = await settlePayPal(store);
+    bookWriteAnswers(reply, false);
+    const out = await settle(store);
     redis.pipeline = pipeline;
-    is(`${label}: not counted paid, kept waiting`, out, { paid: 0, released: 0, waiting: 1 });
+    is(`${label}: kept waiting, not counted paid`, out, { paid: 0, released: 0, waiting: 1 });
     is(`${label}: the book does not say paid`, await paidCents(store), 0);
     is(`${label}: still on their way`, (await onTheirWay(store)).size, 1);
-    const again = await settlePayPal(store);
-    is(`${label}: read again with a clean answer, paid once`, [again, await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
+    await payWithPayPal(store);
+    is(`${label}: not sent to PayPal again`, created.length, 1);
+    is(`${label}: read again with a clean answer, written once`, [await settle(store), await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
+    await payWithPayPal(store);
+    is(`${label}: one PayPal batch in all`, created.length, 1);
   }
 
-  part("An unknown answer, the mark held by another run: never written twice");
+  part("The book write landed, its reply lost: kept on their way, then found in the book (probe A)");
   for (const [label, reply] of shapes) {
     await seed(store);
-    await pipeline([["SET", ITEM, "BATCH1ABC", "EX", 3600]]);
-    itemSetAnswers(reply, false);
-    const out = await settlePayPal(store);
+    bookWriteAnswers(reply, true);
+    const out = await settle(store);
     redis.pipeline = pipeline;
-    is(`${label}: another run's mark is not ours`, [out.paid, await paidCents(store)], [0, 0]);
+    is(`${label}: kept waiting`, out, { paid: 0, released: 0, waiting: 1 });
+    is(`${label}: read again, found in the book, no longer waiting`, await settle(store), { paid: 0, released: 0, waiting: 0 });
+    is(`${label}: one payout, $30`, [(await bookIds()).length, await paidCents(store)], [1, 3000]);
+    await payWithPayPal(store);
+    is(`${label}: one PayPal batch in all`, created.length, 1);
   }
 
-  part("A reply lost after the write: read back, ours, written once");
-  for (const [label, reply] of shapes) {
-    await seed(store);
-    itemSetAnswers(reply, true);
-    const out = await settlePayPal(store);
-    redis.pipeline = pipeline;
-    is(`${label}: our own mark, paid once`, [out, await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
-    is(`${label}: asked again, nothing written twice`, [(await settlePayPal(store)).paid, await paidCents(store)], [0, 3000]);
-  }
-
-  part("Redis failing on the mark: nothing in the book, kept waiting");
+  part("Redis failing on the book write: kept on their way, the settling does not throw");
   await seed(store);
   redis.pipeline = async (commands) => {
-    if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === ITEM) throw new Error("synthetic Redis outage");
-    if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === ITEM) throw new Error("synthetic Redis outage");
+    if (bookWriteFor(commands)) throw new Error("synthetic Redis outage");
     return pipeline(commands);
   };
-  let outcome: unknown;
-  try {
-    outcome = await settlePayPal(store);
-  } catch {
-    outcome = "threw";
-  }
+  const outage = await settle(store);
   redis.pipeline = pipeline;
+  is("the settling says so", outage, { paid: 0, released: 0, waiting: 1 });
   is("the book does not say paid on an outage", await paidCents(store), 0);
-  is("and the affiliate is still on their way", (await onTheirWay(store)).size, 1);
-  is("the settling says so", outcome, { paid: 0, released: 0, waiting: 1 });
+  await payWithPayPal(store);
+  is("and the affiliate is not sent again", [(await onTheirWay(store)).size, created.length], [1, 1]);
+  is("read again, written once", [await settle(store), await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
 
-  part("Healthy controls");
+  part("The store's data room full: kept on their way over paydays, never sent again (probe C)");
   await seed(store);
-  is("a clean OK writes the payout once", [await settlePayPal(store), await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
-  is("a clean nil (written before) writes nothing", [(await settlePayPal(store)).paid, await paidCents(store)], [0, 3000]);
+  for (const day of [1, 2, 3]) {
+    roomFull();
+    const out = await settle(store);
+    await payWithPayPal(store);
+    redis.pipeline = pipeline;
+    is(`day ${day}: kept waiting, the book does not say paid, one PayPal batch`, [out, await paidCents(store), created.length], [{ paid: 0, released: 0, waiting: 1 }, 0, 1]);
+  }
+  is("room again: written once", [await settle(store), await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
+  await payWithPayPal(store);
+  is("one PayPal batch in all", created.length, 1);
+
+  part("One line that cannot be written does not stop the others");
+  await seed(store, true);
+  redis.pipeline = async (commands) => {
+    if (bookWriteFor(commands, SARA)) throw new Error("synthetic Redis outage");
+    return pipeline(commands);
+  };
+  const mixed = await settle(store);
+  redis.pipeline = pipeline;
+  is("Ben written, Sara kept waiting", [mixed, await paidOf(store, "ben@example.com"), await paidCents(store)], [{ paid: 1, released: 0, waiting: 1 }, 3000, 0]);
+  is("read again, Sara written once, Ben not twice", [await settle(store), await paidCents(store), await paidOf(store, "ben@example.com")], [{ paid: 1, released: 0, waiting: 0 }, 3000, 3000]);
+  await payWithPayPal(store);
+  is("one PayPal batch in all", created.length, 1);
+
+  part("A mark left by an earlier run, with no payout in the book: written once (not dropped)");
   await seed(store);
   await pipeline([["SET", ITEM, "BATCH1ABC", "EX", 3600]]);
-  const before = await settlePayPal(store);
-  is("an item written into the book before: nil, nothing written, no longer waiting", [before, await paidCents(store)], [{ paid: 0, released: 0, waiting: 0 }, 0]);
+  is("written into the book once", [await settle(store), await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
+  await payWithPayPal(store);
+  is("the next payday sends nothing more", created.length, 1);
+
+  part("A mark left by an earlier run, the payout in the book under its own id: nothing written twice");
+  await seed(store);
+  await pipeline([
+    ["SET", ITEM, "BATCH1ABC", "EX", 3600],
+    ["HSET", PAYOUTS, "0123456789ab", JSON.stringify({ id: "0123456789ab", aff: SARA, cents: 3000, currency: "usd", date: "2026-11-01", reference: "PayPal ITEMBATCH1ABC0", at: 1 })],
+  ]);
+  is("found by its reference, no longer waiting", [await settle(store), await paidCents(store), (await bookIds()).length], [{ paid: 0, released: 0, waiting: 0 }, 3000, 1]);
+
+  part("A mark left by an earlier run, read in an unknown shape: kept on their way, nothing written");
+  for (const [label, reply] of shapes.filter(([l]) => l !== "null" && l !== "another word")) {
+    await seed(store);
+    await pipeline([["SET", ITEM, "BATCH1ABC", "EX", 3600]]);
+    redis.pipeline = async (commands) => {
+      if (commands.length === 1 && (commands[0][0] === "GET" || commands[0][0] === "SET") && commands[0][1] === ITEM) return reply();
+      return pipeline(commands);
+    };
+    const out = await settle(store);
+    redis.pipeline = pipeline;
+    is(`${label}: kept waiting, the book does not say paid`, [out, await paidCents(store)], [{ paid: 0, released: 0, waiting: 1 }, 0]);
+  }
+
+  part("A mark read back as any other text: confirmed by the book, so written once");
+  await seed(store);
+  redis.pipeline = async (commands) => {
+    if (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === ITEM) return ["QUEUED"];
+    return pipeline(commands);
+  };
+  const other = await settle(store);
+  redis.pipeline = pipeline;
+  is("not in the book, so written once", [other, await paidCents(store)], [{ paid: 1, released: 0, waiting: 0 }, 3000]);
+
+  part("A mark left by an earlier run, the book's payouts read in an unknown shape: kept on their way");
+  for (const [label, reply] of [...shapes, ["an odd list", () => [["0123456789ab"]]] as [string, () => unknown[]]]) {
+    await seed(store);
+    await pipeline([["SET", ITEM, "BATCH1ABC", "EX", 3600]]);
+    redis.pipeline = async (commands) => {
+      if (commands.length === 1 && commands[0][0] === "HGETALL" && commands[0][1] === PAYOUTS) return reply();
+      return pipeline(commands);
+    };
+    const out = await settle(store);
+    redis.pipeline = pipeline;
+    is(`${label}: kept waiting, the book does not say paid`, [out, await paidCents(store)], [{ paid: 0, released: 0, waiting: 1 }, 0]);
+  }
 
   done();
 }

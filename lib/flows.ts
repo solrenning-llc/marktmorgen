@@ -41,6 +41,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
@@ -493,8 +494,11 @@ export async function flowStats(flows: Flow[]): Promise<Map<string, FlowCounts>>
 export async function flowsStartedFor(flows: Flow[], email: string): Promise<string[]> {
   if (!flows.length) return [];
   const address = normaliseEmail(email);
-  const found = await redisPipeline(flows.map((f) => ["EXISTS", enrolledKey(f.id, address)]));
-  return flows.filter((_, i) => Number(found[i]) === 1).map((f) => f.id);
+  // One count of 0 or 1 per sequence, or unknown (rule 24): a short reply or another value is never "not started".
+  const found = repliesFor(await redisPipeline(flows.map((f) => ["EXISTS", enrolledKey(f.id, address)])), flows.length);
+  const started = found?.map(countOf);
+  if (!started || started.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("the sequences a person was started on");
+  return flows.filter((_, i) => started[i] === 1).map((f) => f.id);
 }
 
 /**

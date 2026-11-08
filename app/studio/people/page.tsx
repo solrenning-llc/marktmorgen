@@ -288,11 +288,13 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
   const bought = profile.orders.length > 0;
+  // Purchases that could not all be read are never said as none bought (rule 24; Claude 6 on #3159).
+  const purchasesUnread = profile.stripeError || profile.unread.includes("imported") || profile.unread.includes("paypal");
   const tiles = [
     { label: "Spent with you", value: money(net), note: profile.refunded ? `${money(profile.paid)} paid, ${money(profile.refunded)} given back` : "after any refund" },
     { label: "Purchases", value: String(profile.purchases), note: profile.renewals ? `and ${profile.renewals} later ${profile.renewals === 1 ? "payment" : "payments"}` : "no later payments" },
-    { label: "First purchase", value: profile.firstAt ? day(profile.firstAt) : "—", note: !profile.channelKnown ? (profile.firstAt ? "channel not recorded" : "nothing bought yet") : profile.firstChannel ? `found you through ${channelName(profile.firstChannel)}` : "came direct, or from somewhere unnamed" },
-    { label: "Latest purchase", value: profile.lastAt ? day(profile.lastAt) : "—", note: !profile.channelKnown ? (profile.lastAt ? "channel not recorded" : "nothing bought yet") : profile.lastChannel ? `came through ${channelName(profile.lastChannel)}` : "came direct, or from somewhere unnamed" },
+    { label: "First purchase", value: profile.firstAt ? day(profile.firstAt) : "—", note: !profile.channelKnown ? (profile.firstAt ? "channel not recorded" : purchasesUnread ? "purchases could not all be loaded" : "nothing bought yet") : profile.firstChannel ? `found you through ${channelName(profile.firstChannel)}` : "came direct, or from somewhere unnamed" },
+    { label: "Latest purchase", value: profile.lastAt ? day(profile.lastAt) : "—", note: !profile.channelKnown ? (profile.lastAt ? "channel not recorded" : purchasesUnread ? "purchases could not all be loaded" : "nothing bought yet") : profile.lastChannel ? `came through ${channelName(profile.lastChannel)}` : "came direct, or from somewhere unnamed" },
   ];
   const contact = profile.contact;
   const listWords = !contact

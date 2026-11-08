@@ -36,7 +36,7 @@
  *   nl:person:find:<token>             JSON { s: store id, e: address }, an hour
  */
 import { personKey } from "@/lib/person-key";
-import { readPaid } from "@/lib/paypal-sales";
+import { readPaidExact } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -577,13 +577,16 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
       productIds.push(given.productId, ...(given.items ?? []));
       // A sale paid with PayPal is a sale (lib/paypal-sales.ts): its amount, its channel, counted in what they paid.
       // When its record cannot be read, the purchase is still listed, without an amount, and the page says so.
-      const paypal = given.job.startsWith("paypal:")
-        ? await readPaid(given.job.slice(7)).catch((error) => {
+      // Read exactly (rule 24): a record in another shape (not JSON, cents not a whole number, another order's) is
+      // unread, never counted as it stands nor taken for no record (Claude 6 on #3159).
+      const read = given.job.startsWith("paypal:")
+        ? await readPaidExact(given.job.slice(7)).catch((error) => {
             console.error("reading a buyer's PayPal sale failed", error);
-            unread.add("paypal");
-            return null;
+            return "unknown" as const;
           })
         : null;
+      if (read === "unknown") unread.add("paypal");
+      const paypal = read === "unknown" ? null : read;
       if (paypal && paypal.store === store.statsId) {
         const channel = saleChannel(paypal.meta ?? {});
         const recorded = Boolean(paypal.meta && "channel" in paypal.meta);

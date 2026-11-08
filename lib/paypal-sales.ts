@@ -462,9 +462,10 @@ export async function readPaid(order: string): Promise<Paid | null> {
 /**
  * A paid order read exactly, for the refund watch (Codex G on #2791; CX-123 rules 24 and 30): null only when Redis
  * answered that there is no record; a reply in another envelope, text that is not JSON, or a record without its own
- * order, email, product, capture and time is "unknown", never "no record".
+ * order, email, product, capture and time is "unknown", never "no record". Also the buyer's page in the studio
+ * (lib/buyer-profile.ts), so a record it cannot stand behind is said as unread, never counted or dropped.
  */
-async function readPaidExact(order: string): Promise<Paid | null | "unknown"> {
+export async function readPaidExact(order: string): Promise<Paid | null | "unknown"> {
   if (!ORDER_ID.test(order)) return null;
   const read = repliesFor(await redisPipeline([["GET", paidKey(order)]]), 1);
   if (!read) return "unknown";

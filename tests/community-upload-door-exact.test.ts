@@ -165,6 +165,56 @@ async function main(): Promise<void> {
       is("a later sweep gives nothing more back", [await sweptADayOn(), await picturesKept(folder)], [0, 0]);
     }
 
+    part("A note that landed and then threw: its place comes back once, whatever order the sweep reads it in");
+    // [label, a failure once, how many the sweep reads a run]: one at a time, or the doubt and its path in one run.
+    const sweeps: [string, (commands: Command[]) => Promise<unknown> | null, number][] = [
+      ["read one at a time", () => null, 1],
+      ["read together", () => null, 300],
+      [
+        "the doubt's removal never sent, then read again",
+        (commands) => {
+          if (commands[0][0] === "ZREM" && String(commands[0][2]).startsWith("?")) return Promise.reject(new Error("the connection failed before the removal was sent"));
+          return null;
+        },
+        300,
+      ],
+      [
+        "the doubt's removal carried out, then no answer",
+        (commands) => {
+          if (commands[0][0] === "ZREM" && String(commands[0][2]).startsWith("?")) return original(commands).then(() => Promise.reject(new Error("the answer was lost")));
+          return null;
+        },
+        300,
+      ],
+    ];
+    for (const [label, failOnce, most] of sweeps) {
+      reset();
+      const kept = await inAPost();
+      const path = freshPath();
+      redis.pipeline = (async (commands: Command[]) => {
+        if (!isNote(commands)) return original(commands);
+        await original(commands);
+        throw new Error("the database did not answer in time");
+      }) as typeof redis.pipeline;
+      const result = await ask(path);
+      is(`${label}: no door`, [result.status, result.door], [500, false]);
+      is(`${label}: the note listed the path, and both places are counted`, [await listed(path), await picturesKept(folder)], [true, 2]);
+      let failed = false;
+      redis.pipeline = (async (commands: Command[]) => {
+        if (!failed) {
+          const answer = failOnce(commands);
+          if (answer) {
+            failed = true;
+            return answer;
+          }
+        }
+        return original(commands);
+      }) as typeof redis.pipeline;
+      for (let run = 0; run < 4; run++) await sweepCommunityUploads(Date.now() + 2 * DAY, most);
+      redis.pipeline = original;
+      is(`${label}: its place came back once; the post's picture and place are kept`, [await picturesKept(folder), files.has(kept), await listed(path)], [1, true, false]);
+    }
+
     part("A path already in a post: a failed request for it again never makes the sweep delete its picture");
     const again: [string, () => typeof redis.pipeline][] = [
       ["the note never sent", throwsBeforeSending],

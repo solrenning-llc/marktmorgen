@@ -4,8 +4,9 @@
  * and gives it back only when the write answered, exactly, that the CRM is
  * full (CX-123 rule 24, audit R24 round 8, item 6). A write answered in
  * another shape may have landed, and a deal that already exists keeps its
- * room even when the read before the write failed: the store's count is
- * never made smaller than what it keeps.
+ * room: a read before the write that fails refuses before the room is
+ * touched (Codex Z on #3305), so the store's count is never made smaller
+ * than what it keeps.
  */
 import { createFormOpportunity } from "@/lib/form-opportunity";
 import { DEFAULT_STAGES, MAX_DEALS, type Deal } from "@/lib/crm-rules";
@@ -109,7 +110,7 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = original;
     }
-    is("the read failed, and nothing new was made", [failed, state !== "created"], [true, true]);
+    is("the read failed, and it is refused before the room is touched", [failed, state], [true, "threw: the database did not answer in time"]);
     is("and its room is still counted", await used(room), taken);
   }
   {
@@ -136,7 +137,7 @@ async function main(): Promise<void> {
       redis.pipeline = original;
     }
     const [still] = await original([["HGET", "nl:crm:deals:" + statsId, id]]);
-    is("the read failed, and nothing new was made", [failed, state !== "created"], [true, true]);
+    is("the read failed, and it is refused before the room is touched", [failed, state], [true, "threw: the database did not answer in time"]);
     is("the deal kept is unchanged", still, kept);
     is("and the larger deal's whole room is still counted", await used(room), before);
   }

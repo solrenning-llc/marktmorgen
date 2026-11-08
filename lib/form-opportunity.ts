@@ -28,9 +28,11 @@ export async function createFormOpportunity(statsId: string, ref: string, draft:
   const id = ref.slice(0, 10);
   const deal = { ...draft, id, formResponseRef: ref };
   // Its room is taken first (DataRoomError when it does not fit), and given back only when the write answered,
-  // exactly, that the CRM is full (CX-123 rule 24): a reply in another shape may have landed, and a deal that already
-  // exists keeps its room even when the read before the write failed. The store never counts less than it keeps.
-  const before = await readFormOpportunity(statsId, ref, stages).catch(() => null);
+  // exactly, that the CRM is full (CX-123 rule 24): a reply in another shape may have landed. The read before it is
+  // never taken as "none": a deal that may already exist, larger than this draft, would have its room set to the
+  // draft's (Codex Z on #3305), so a read that fails refuses before the room is touched. The store never counts less
+  // than it keeps.
+  const before = await readFormOpportunity(statsId, ref, stages);
   if (!before) await needData(room, [{ slot: dealSlot(id), bytes: dealBytes(deal), set: true }]);
   const replies = repliesFor(await redisPipeline([["EVAL", CREATE_FORM_OPPORTUNITY, 1, "nl:crm:deals:" + statsId, id, JSON.stringify(deal), MAX_DEALS]]), 1);
   const pair = replies ? listSlots(replies[0]) : null;

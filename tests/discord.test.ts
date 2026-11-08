@@ -63,6 +63,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       return new Response(null, { status: 204 });
     }
     if (/^\/guilds\/\d+\/members\/\d+\/roles\/\d+$/.test(path)) return new Response(null, { status: 204 });
+    // The bot leaving a server: Discord's own answer, 204. A bare 404 is not "the bot is out" (review of #2994).
+    if (/^\/users\/@me\/guilds\/\d+$/.test(path) && method === "DELETE") return new Response(null, { status: 204 });
     return json({ message: "no stand-in" }, 404);
   }
   // The creator's Stripe account: one membership, bought by Ana.

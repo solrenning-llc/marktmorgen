@@ -21,12 +21,17 @@ let shift = 0;
 Date.now = () => realNow() + shift;
 /** Each read of one subscription takes this long (milliseconds of the synthetic clock). */
 let readTakes = 0;
+/** Reading Stripe's list (step 1) takes this long: enough, in a round, to leave step 2 no time at all. */
+let listTakes = 0;
 const reads: string[] = [];
 const canceledAtStripe = new Set<string>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.origin !== "https://api.stripe.com" || (init?.method ?? "GET") !== "GET") throw new Error("unexpected external operation in synthetic billing sync");
-  if (url.pathname === "/v1/subscriptions") return Response.json({ object: "list", data: [], has_more: false });
+  if (url.pathname === "/v1/subscriptions") {
+    shift += listTakes;
+    return Response.json({ object: "list", data: [], has_more: false });
+  }
   const one = url.pathname.match(/^\/v1\/subscriptions\/(sub_\w+)$/);
   if (one) {
     reads.push(one[1]);
@@ -69,6 +74,37 @@ async function main() {
   is("the others still count as paid up", await Promise.all(["alpha", "bravo", "charlie", "delta"].map(paid)), [true, true, true, true]);
   for (let run = 0; run < 5; run += 1) await syncSubscriptions(Date.now() + 15_000);
   is("the next lap starts again from the start of the walk", new Set(reads.slice(5)).size >= 4, true);
+
+  // Codex H2's focal return on #3216: a round whose step 1 used up the time saved only the batch's cursor, so the
+  // place reached inside the batch by the round before was lost and the next round read the same store again.
+  part("A round that leaves step 2 no time keeps the place the round before reached inside the batch");
+  await setup(["echo"]);
+  readTakes = 20_000;
+  const idleReads: number[] = [];
+  for (let run = 0; run < 5; run += 1) {
+    listTakes = 0;
+    await syncSubscriptions(Date.now() + 15_000);
+    listTakes = 60_000;
+    const before = reads.length;
+    const idle = await syncSubscriptions(Date.now() + 15_000);
+    idleReads.push(reads.length - before);
+    is(`idle round ${run + 1} is not complete and fails nothing`, [idle.complete, idle.failed], [false, 0]);
+  }
+  listTakes = 0;
+  is("the rounds with no time read no store", idleReads, [0, 0, 0, 0, 0]);
+  is("in five useful rounds every store is read, none twice", [new Set(reads).size, reads.length], [5, 5]);
+  is("the store Stripe has canceled no longer counts as paid up", await paid("echo"), false);
+  is("the others still count as paid up", await Promise.all(["alpha", "bravo", "charlie", "delta"].map(paid)), [true, true, true, true]);
+
+  part("Control: a round with no time and no place saved inside a batch keeps the cursor it had");
+  await setup([]);
+  readTakes = 0;
+  listTakes = 60_000;
+  await syncSubscriptions(Date.now() + 15_000);
+  listTakes = 0;
+  is("nothing read while there was no time", reads.length, 0);
+  const after = await syncSubscriptions(Date.now() + 60_000);
+  is("the next round with time reads every store once and completes", [new Set(reads).size, reads.length, after.complete], [5, 5, true]);
 
   done();
 }

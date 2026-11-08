@@ -26,6 +26,12 @@ let detail: unknown = null;
 let failNextAfterList = false;
 let armed = false;
 const calls: string[] = [];
+const id2 = "sub_BillingSeen02";
+/** Moves the clock past the run's deadline the first time a store is asked about on its own. */
+let jumpOnRead = false;
+const realNow = Date.now.bind(Date);
+let shift = 0;
+Date.now = () => realNow() + shift;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.origin !== "https://api.stripe.com" || init?.method !== "GET") throw new Error("unexpected external operation in synthetic billing sync");
@@ -35,7 +41,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (Array.isArray(list)) return Response.json(list[url.searchParams.get("starting_after") ? 1 : 0]);
     return Response.json(list);
   }
+  if (url.pathname.startsWith("/v1/subscriptions/") && jumpOnRead) { jumpOnRead = false; shift = 60_000; }
   if (url.pathname === `/v1/subscriptions/${id}`) return Response.json(detail);
+  if (url.pathname === `/v1/subscriptions/${id2}`) return Response.json(row("canceled", id2));
   throw new Error("unexpected provider path in synthetic billing sync");
 }) as typeof fetch;
 
@@ -144,6 +152,20 @@ async function main() {
     const after = (await storeForEmail(owner))!;
     is("checked once, counted as failed, nothing updated", [result.checked, result.failed, result.updated], [1, 1, 0]);
     is("an unreadable answer changes nothing about the store", after, before);
+  }
+  part("Step 2 stops at the deadline between two stores, not only between batches, and reads the batch again next run");
+  {
+    await setup();
+    await claimHandle("billing-seen-two@example.com", "billing-seen-two", "Synthetic billing seen two", "");
+    await ensureStatsId("billing-seen-two@example.com");
+    await setSubscription("billing-seen-two@example.com", { customerId: "cus_BillingSeen02", subscriptionId: id2, active: true, tier: "creator", cycle: "month", period: paidPeriod() });
+    list = { data: [], has_more: false }; detail = row("canceled");
+    jumpOnRead = true;
+    const result = await syncSubscriptions(Date.now() + 10_000);
+    shift = 0; jumpOnRead = false;
+    is("one store asked about, then the deadline stopped the walk", [result.checked, result.complete], [1, false]);
+    is("only one individual read was sent", calls.filter((path) => path.startsWith("/v1/subscriptions/")).length, 1);
+    is("the walk is saved at the start of the batch it did not finish", await redis.pipeline([["GET", "nl:billing:sync:cursor"]]), ["0"]);
   }
   done();
 }

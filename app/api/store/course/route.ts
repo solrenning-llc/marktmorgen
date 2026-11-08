@@ -1,5 +1,5 @@
 import { originFrom } from "@/lib/request-origin";
-import { addComment, deleteComment, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
+import { addComment, deleteComment, dropComments, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
 import { COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { tellStudent } from "@/lib/lesson-comment-notify";
 import type { NextRequest } from "next/server";
@@ -25,7 +25,7 @@ import {
   findLesson,
   lessonCount,
   lessonsInOrder,
-  readBody,
+  readBodyExact,
   readCourse,
   saveBody,
   saveCourse,
@@ -77,7 +77,10 @@ export async function GET(request: NextRequest) {
   if (request.nextUrl.searchParams.get("quiz") === "1") {
     return Response.json({ ok: true, quiz: await readQuizFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
   }
-  return Response.json({ ok: true, text: await readBody(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
+  // Read exactly: an unknown reply is said as such, never handed to the editor as an empty lesson (rule 24).
+  const lessonText = await readBodyExact(course.id, lessonId).catch(() => null);
+  if (lessonText === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  return Response.json({ ok: true, text: lessonText }, { headers: { "Cache-Control": "no-store" } });
 }
 
 /**
@@ -234,6 +237,11 @@ export async function POST(request: NextRequest) {
 
       if (action === "disable") {
         if (lessonCount(course) > 0) return Response.json({ ok: false, error: "not_empty" }, { status: 400 });
+        try {
+          await dropComments(course.id, [], store);
+        } catch {
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await dropCourse(course, store);

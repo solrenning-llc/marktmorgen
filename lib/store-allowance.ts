@@ -252,7 +252,10 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
     const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
     for (const [i, kind] of kinds.entries()) {
       const raw: unknown = reply[i];
-      if (raw !== null && typeof raw !== "string" && typeof raw !== "number") return null;
+      // Only what INCRBY writes is a count: a confirmed none (null), its decimal text with no sign, space, point,
+      // exponent, base prefix or leading zero, or the same whole number. Number() would read "", " ", "0x0", "0.0"
+      // and "0e4" as 0, an unknown count taken for nothing used (Codex Z on #3169).
+      if (raw !== null && typeof raw !== "number" && !(typeof raw === "string" && /^(0|[1-9][0-9]*)$/.test(raw))) return null;
       const n = raw === null ? 0 : Number(raw);
       if (!Number.isSafeInteger(n) || n < 0) return null;
       out.push({ kind, used: n, figure: allowanceFor(store, kind, now / 1000) });

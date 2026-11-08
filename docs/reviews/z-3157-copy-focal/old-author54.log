@@ -1,0 +1,152 @@
+
+FILE affiliate-leads-read-unknown.test.ts
+
+Controls: the exact empty list, healthy leads, and the budget and the cap reached by healthy leads
+  ok    no leads kept: the exact empty list is none
+  ok    no leads kept: a decision on a lead that is not there is unknown
+  ok    healthy leads read whole
+  ok    one approved ($5 of $10): the new lead is approved
+  ok    two approved reach the $10 budget: the new lead is refused
+  ok    two approved reach the cap of two a day: the new lead is refused
+
+1. An approved lead that does not read never drops out of the budget or the cap
+  ok    budget, the second approved lead with broken JSON: readLeads throws UnknownReplyError
+  ok    budget, broken JSON: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its amount as text: readLeads throws UnknownReplyError
+  ok    budget, its amount as text: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its currency in capitals (a euro lead read as dollars): readLeads throws UnknownReplyError
+  ok    budget, its currency in capitals (a euro lead read as dollars): the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its state of another shape: readLeads throws UnknownReplyError
+  ok    budget, its state of another shape: the approval answers 503 unavailable and the new lead stays open
+  ok    cap, the second approved lead with its time as text: readLeads throws UnknownReplyError
+  ok    cap, its time as text: the approval answers 503 unavailable and the new lead stays open
+
+1b. A HGETALL reply of another shape is never an empty or a partial list
+  ok    leads-object: readLeads throws UnknownReplyError
+  ok    leads-object: the approval answers 503 unavailable
+  ok    leads-queued: readLeads throws UnknownReplyError
+  ok    leads-queued: the approval answers 503 unavailable
+  ok    leads-odd: readLeads throws UnknownReplyError
+  ok    leads-odd: the approval answers 503 unavailable
+  ok    the new lead was never approved on a reply of another shape
+
+2. The person's copy never comes out complete with a lead missing
+  ok    healthy: the person's own lead is copied
+  ok    no leads kept: nothing to copy, exactly
+  ok    leads-object: the copier throws, never an empty copy
+  ok    leads-queued: the copier throws, never an empty copy
+  ok    leads-null: the copier throws, never an empty copy
+  ok    their own lead unreadable: the copier throws, never a copy without it
+
+2b. Another person's unreadable lead never blocks a person's copy (Art. 15); their own still does
+  FAIL  B's lead with an amount as text: A's copy is A's lead, whole
+        expected [{"id":"01e79fb2f7c47eb6973e4554","aff":"aaaaaaaaaaaa","kind":"signup","at":1788350411,"end":0,"ref":"","pi":"","paid":0,"title":"","email":"ana.copy@example.com","cents":500,"currency":"usd","hold":7,"daily":10,"budget":1000,"state":"open","d":0,"why":""}]
+        got      "UnknownReplyError"
+  ok    B's lead with an amount as text: B's own copy throws, never a copy without it
+  ok    B's lead with an amount as text: the program's leads still do not read for a decision
+  FAIL  B's lead with an amount as text: a person with no lead gets an empty copy, exactly
+        expected []
+        got      "UnknownReplyError"
+  FAIL  B's lead with broken JSON: A's copy is A's lead, whole
+        expected [{"id":"01e79fb2f7c47eb6973e4554","aff":"aaaaaaaaaaaa","kind":"signup","at":1788350411,"end":0,"ref":"","pi":"","paid":0,"title":"","email":"ana.copy@example.com","cents":500,"currency":"usd","hold":7,"daily":10,"budget":1000,"state":"open","d":0,"why":""}]
+        got      "UnknownReplyError"
+  ok    B's lead with broken JSON: B's own copy throws, never a copy without it
+  ok    B's lead with broken JSON: the program's leads still do not read for a decision
+  FAIL  B's lead with broken JSON: a person with no lead gets an empty copy, exactly
+        expected []
+        got      "UnknownReplyError"
+  ok    A's own lead with an amount as text: A's copy throws, never a copy without it
+  FAIL  A's own lead with an amount as text: B's copy is B's lead, whole
+        expected [{"id":"9038ed4fc8724dc788ec7ebf","aff":"aaaaaaaaaaaa","kind":"signup","at":1788350412,"end":0,"ref":"","pi":"","paid":0,"title":"","email":"ben.copy@example.com","cents":500,"currency":"usd","hold":7,"daily":10,"budget":1000,"state":"open","d":0,"why":""}]
+        got      "UnknownReplyError"
+  ok    A's own lead with broken JSON: A's copy throws, never a copy without it
+  FAIL  A's own lead with broken JSON: B's copy is B's lead, whole
+        expected [{"id":"9038ed4fc8724dc788ec7ebf","aff":"aaaaaaaaaaaa","kind":"signup","at":1788350412,"end":0,"ref":"","pi":"","paid":0,"title":"","email":"ben.copy@example.com","cents":500,"currency":"usd","hold":7,"daily":10,"budget":1000,"state":"open","d":0,"why":""}]
+        got      "UnknownReplyError"
+  ok    A's own lead with a state of another shape: A's copy throws, never a copy without it
+  FAIL  A's own lead with a state of another shape: B's copy is B's lead, whole
+        expected [{"id":"9038ed4fc8724dc788ec7ebf","aff":"aaaaaaaaaaaa","kind":"signup","at":1788350412,"end":0,"ref":"","pi":"","paid":0,"title":"","email":"ben.copy@example.com","cents":500,"currency":"usd","hold":7,"daily":10,"budget":1000,"state":"open","d":0,"why":""}]
+        got      "UnknownReplyError"
+  ok    the address asked for written in capitals: the same person's lead
+  ok    a lead whose address already came off (deleted person): nothing to copy
+
+3. The sibling readers: deleting a person, and the contact credit
+  ok    no lead for the person: nothing to forget
+  ok    their lead unreadable, the address maybe in it: the deletion throws and is tried again
+  ok    and the record is left as it was
+  ok    a healthy lead: the address comes off
+  ok    an amount of another type: the address comes off, and the amount is written back as kept, never a readable 0
+  ok    so the program's leads still do not read after the deletion
+  ok    an address of another type: the deletion throws and is tried again
+  ok    control: a healthy lead before the checkout credits its affiliate
+  ok    a reversal whose state no longer reads never credits the affiliate
+
+54 checks, 7 failing.
+Z_VOLUME {"runs":306,"mocks":0,"over":false}
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53810:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53809:12)
+    at async POST ([stdin]:67955:21)
+    at async approve ([stdin]:68210:22)
+    at async main ([stdin]:68266:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53810:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53809:12)
+    at async POST ([stdin]:67955:21)
+    at async approve ([stdin]:68210:22)
+    at async main ([stdin]:68266:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53810:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53809:12)
+    at async POST ([stdin]:67955:21)
+    at async approve ([stdin]:68210:22)
+    at async main ([stdin]:68266:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53810:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53809:12)
+    at async POST ([stdin]:67955:21)
+    at async approve ([stdin]:68210:22)
+    at async main ([stdin]:68266:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53810:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53809:12)
+    at async POST ([stdin]:67955:21)
+    at async approve ([stdin]:68210:22)
+    at async main ([stdin]:68266:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53785:47)
+    at async [stdin]:53810:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53809:12)
+    at async POST ([stdin]:67955:21)
+    at async approve ([stdin]:68210:22)
+    at async main ([stdin]:68273:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53785:47)
+    at async [stdin]:53810:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53809:12)
+    at async POST ([stdin]:67955:21)
+    at async approve ([stdin]:68210:22)
+    at async main ([stdin]:68273:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53785:47)
+    at async [stdin]:53810:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53809:12)
+    at async POST ([stdin]:67955:21)
+    at async approve ([stdin]:68210:22)
+    at async main ([stdin]:68273:60)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3157-j2J8uH

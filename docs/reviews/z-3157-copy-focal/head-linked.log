@@ -1,0 +1,454 @@
+
+FILE affiliate-leads-read-unknown.test.ts
+
+Controls: the exact empty list, healthy leads, and the budget and the cap reached by healthy leads
+  ok    no leads kept: the exact empty list is none
+  ok    no leads kept: a decision on a lead that is not there is unknown
+  ok    healthy leads read whole
+  ok    one approved ($5 of $10): the new lead is approved
+  ok    two approved reach the $10 budget: the new lead is refused
+  ok    two approved reach the cap of two a day: the new lead is refused
+
+1. An approved lead that does not read never drops out of the budget or the cap
+  ok    budget, the second approved lead with broken JSON: readLeads throws UnknownReplyError
+  ok    budget, broken JSON: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its amount as text: readLeads throws UnknownReplyError
+  ok    budget, its amount as text: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its currency in capitals (a euro lead read as dollars): readLeads throws UnknownReplyError
+  ok    budget, its currency in capitals (a euro lead read as dollars): the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its state of another shape: readLeads throws UnknownReplyError
+  ok    budget, its state of another shape: the approval answers 503 unavailable and the new lead stays open
+  ok    cap, the second approved lead with its time as text: readLeads throws UnknownReplyError
+  ok    cap, its time as text: the approval answers 503 unavailable and the new lead stays open
+
+1b. A HGETALL reply of another shape is never an empty or a partial list
+  ok    leads-object: readLeads throws UnknownReplyError
+  ok    leads-object: the approval answers 503 unavailable
+  ok    leads-queued: readLeads throws UnknownReplyError
+  ok    leads-queued: the approval answers 503 unavailable
+  ok    leads-odd: readLeads throws UnknownReplyError
+  ok    leads-odd: the approval answers 503 unavailable
+  ok    the new lead was never approved on a reply of another shape
+
+2. The person's copy never comes out complete with a lead missing
+  ok    healthy: the person's own lead is copied
+  ok    no leads kept: nothing to copy, exactly
+  ok    leads-object: the copier throws, never an empty copy
+  ok    leads-queued: the copier throws, never an empty copy
+  ok    leads-null: the copier throws, never an empty copy
+  ok    their own lead unreadable: the copier throws, never a copy without it
+
+2b. Another person's unreadable lead never blocks a person's copy (Art. 15); their own still does
+  ok    B's lead with an amount as text: A's copy is A's lead, whole
+  ok    B's lead with an amount as text: B's own copy throws, never a copy without it
+  ok    B's lead with an amount as text: the program's leads still do not read for a decision
+  ok    B's lead with an amount as text: a person with no lead gets an empty copy, exactly
+  ok    B's lead with broken JSON: A's copy is A's lead, whole
+  ok    B's lead with broken JSON: B's own copy throws, never a copy without it
+  ok    B's lead with broken JSON: the program's leads still do not read for a decision
+  ok    B's lead with broken JSON: a person with no lead gets an empty copy, exactly
+  ok    A's own lead with an amount as text: A's copy throws, never a copy without it
+  ok    A's own lead with an amount as text: B's copy is B's lead, whole
+  ok    A's own lead with broken JSON: A's copy throws, never a copy without it
+  ok    A's own lead with broken JSON: B's copy is B's lead, whole
+  ok    A's own lead with a state of another shape: A's copy throws, never a copy without it
+  ok    A's own lead with a state of another shape: B's copy is B's lead, whole
+  ok    the address asked for written in capitals: the same person's lead
+  ok    a lead whose address already came off (deleted person): nothing to copy
+
+3. The sibling readers: deleting a person, and the contact credit
+  ok    no lead for the person: nothing to forget
+  ok    their lead unreadable, the address maybe in it: the deletion throws and is tried again
+  ok    and the record is left as it was
+  ok    a healthy lead: the address comes off
+  ok    an amount of another type: the address comes off, and the amount is written back as kept, never a readable 0
+  ok    so the program's leads still do not read after the deletion
+  ok    an address of another type: the deletion throws and is tried again
+  ok    control: a healthy lead before the checkout credits its affiliate
+  ok    a reversal whose state no longer reads never credits the affiliate
+
+54 checks, all passing.
+Z_VOLUME {"runs":306,"mocks":0,"over":false}
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53820:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53819:12)
+    at async POST ([stdin]:67969:21)
+    at async approve ([stdin]:68224:22)
+    at async main ([stdin]:68280:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53820:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53819:12)
+    at async POST ([stdin]:67969:21)
+    at async approve ([stdin]:68224:22)
+    at async main ([stdin]:68280:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53820:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53819:12)
+    at async POST ([stdin]:67969:21)
+    at async approve ([stdin]:68224:22)
+    at async main ([stdin]:68280:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53820:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53819:12)
+    at async POST ([stdin]:67969:21)
+    at async approve ([stdin]:68224:22)
+    at async main ([stdin]:68280:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:53789:23)
+    at async [stdin]:53820:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53819:12)
+    at async POST ([stdin]:67969:21)
+    at async approve ([stdin]:68224:22)
+    at async main ([stdin]:68280:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53785:47)
+    at async [stdin]:53820:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53819:12)
+    at async POST ([stdin]:67969:21)
+    at async approve ([stdin]:68224:22)
+    at async main ([stdin]:68287:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53785:47)
+    at async [stdin]:53820:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53819:12)
+    at async POST ([stdin]:67969:21)
+    at async approve ([stdin]:68224:22)
+    at async main ([stdin]:68287:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:53785:47)
+    at async [stdin]:53820:19
+    at async withLock ([stdin]:10117:12)
+    at async decideLeads ([stdin]:53819:12)
+    at async POST ([stdin]:67969:21)
+    at async approve ([stdin]:68224:22)
+    at async main ([stdin]:68287:60)
+
+Z_STATUS 0 null
+
+FILE z-3157-copy-and-envelope.proof.ts
+
+C4 LOW 6716917431: a healthy person's copy survives another person's unreadable lead
+  ok    healthy two-person control: only A is copied
+  ok    text amount: A's own healthy lead remains copyable
+  ok    broken JSON: A's own healthy lead remains copyable
+  ok    own unreadable lead: unknown, never an apparently complete empty copy
+  ok    exact empty healthy control
+
+Exact envelope controls: no missing, extra or non-string reply is treated as empty
+  ok    missing outer reply: read is unknown
+  ok    extra outer reply: read is unknown
+  ok    nil HGETALL: read is unknown
+  ok    numeric HGETALL: read is unknown
+  ok    outer hole: read is unknown
+  ok    non-string field: read is unknown
+Z_DIRECT_READ_VOLUMES [{"commands":1,"requestJsonBytes":67,"replyJsonBytes":315},{"commands":1,"requestJsonBytes":67,"replyJsonBytes":315},{"commands":1,"requestJsonBytes":67,"replyJsonBytes":315},{"commands":1,"requestJsonBytes":67,"replyJsonBytes":54},{"commands":1,"requestJsonBytes":67,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":2},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":7},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":3},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":319}]
+
+11 checks, all passing.
+Z_VOLUME {"runs":14,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE affiliate-leads.test.ts
+
+The terms
+  ok    none until a creator chooses, on every program saved before
+  ok    a choice is kept
+  ok    a hold shorter than a week is not kept
+  ok    out of range is refused, with the reason, not replaced
+  ok    an hour holds a quarter of the day, at least one
+
+How each lead stands
+  ok    inside its hold it earns and waits
+  ok    after it, it needs the creator's approval
+  ok    approved, it is payable
+  ok    reversed, it earns nothing
+  ok    past the daily cap a lead is listed and earns nothing
+  ok    and past the hour's share of it, even under the day's
+  ok    another affiliate's leads use their own day
+  ok    the monthly budget is the whole program's
+  ok    each lead is judged by the budget of its own day
+  ok    a lead reversed frees its place for the next
+  ok    a booking waits for its call, and its hold counts from the call's end
+  ok    a move is read: a call its buyer moved earlier holds from its new end
+  ok    refunded in full, it is reversed whatever it was
+  ok    a partial refund leaves it
+  ok    an affiliate sees the address as its first letter and its domain
+
+A program that pays per sign-up
+  ok    the visit through Ana's link credits Ana
+  ok    not a pending affiliate
+  ok    not her own address, written another way, nor the creator's
+  ok    not a kind the program does not pay
+  ok    not a click past the window
+  ok    asked to join
+  ok    the link carries Ana, and nothing is recorded before it is pressed
+  ok    confirmed, new to the list
+  ok    the route credits only a confirmed address new to the list, counted as a request first
+  ok    credited
+  ok    its write, with the request it takes, stays inside a later page's commands
+  ok    and the store's request was counted
+  ok    kept with the terms of its day and the person's address
+  ok    its id is a fingerprint of the address in this program
+
+One lead per person, never their own
+  ok    the same person, written another way, is not a second lead
+  ok    Ana's own address is refused
+  ok    so is the PayPal address she is paid at
+  ok    and the creator's own
+  ok    an affiliate not approved earns no lead
+  ok    a kind the program does not pay is not recorded
+  ok    still one lead
+
+The book
+  ok    a lead line beside the sales, with its amount
+  ok    earned and owed, but waiting and not payable, and not a sale
+  ok    approving inside the hold is refused
+  ok    past its hold it needs the creator
+  ok    approved, it is payable
+  ok    a reversal needs a reason
+  ok    reversed: nothing owed, and the affiliate sees why
+  ok    undone, it waits for approval again
+  ok    in the spreadsheet as a lead
+  ok    Ana's own page has her lead
+  ok    held with everything else when flagged
+
+A free product, and a booking
+  ok    credited for a free product claimed
+  ok    the free download credits only the first time that address got the product
+  ok    a booking's checkout carries the lead whatever the share, never from a package
+  ok    the booking route carries it only where the store pays per booking
+
+Deleting a person
+  ok    their address comes off the lead
+  ok    the lead stays, as the affiliate's record
+  ok    and the same person joining again is not a new lead
+  ok    the erasure runs it, and says so
+
+What affiliates are told, in every language
+  ok    en: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    es: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    fr: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    de: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    it: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    nl: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    pt: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    no word the owner forbids
+
+68 checks, all passing.
+Z_VOLUME {"runs":241,"mocks":1,"over":false}
+
+Z_STATUS 0 null
+
+FILE person-copy.test.ts
+
+Every module the erasure reaches is said
+  ok    each eraser's module has a line in the copy's plan
+  ok    and so does each module that keeps something on purpose
+  ok    and no line names a module that keeps nothing about people
+  ok    each module the copy reads has its reader
+  ok    each line says what it is, in words
+  ok    nothing is pending: the copy is complete
+  ok    no page gives it out yet (its door is the next unit)
+  ok    a task about them, given to a teammate and done
+
+The copy
+  ok    only reads: nothing in the database changed
+  ok    the conversation is not marked read
+  ok    for this person and store, with the day it was made
+  ok    their place on the list
+  ok    the team's note about them, without who wrote it
+  ok    the deal with them
+  ok    the team's task about them: its words, date, done and when
+  ok    their conversation, both sides, said as you and the store
+  ok    a teammate's address is nowhere in it
+  ok    nor anybody else's
+  ok    what is held only as marks is said in words
+
+Nobody's copy for an address the store does not know
+  ok    empty
+
+20 checks, all passing.
+Z_VOLUME {"runs":152,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE person-copy-world.test.ts
+
+Before the erasure
+  ok    the protected-mail fixture exclusion requires never activated
+  ok    the world has no protected-mail records to omit
+  (copied modules with nothing for them: lib/shipment-mail-outbox.ts, lib/order-confirmation-outbox.ts, lib/agreement-store.ts, lib/affiliate-leads.ts, lib/assistant-reminder.ts, lib/paypal-sales.ts, lib/licence-keys.ts, lib/gifts.ts, lib/group-buy.ts, lib/preorders.ts, lib/call-packages.ts, lib/meet-records.ts, lib/shipments.ts, lib/closing-buyers.ts, lib/closing-holds.ts)
+  ok    every module that keeps something about them is in their copy
+  ok    inactive mail readers created no records
+  ok    the other person's address is not in it
+  ok    the store's owner's is not either
+  ok    what they said in the community's room, and the event they are coming to
+
+After the erasure
+  ok    erased
+  ok    nothing the erasure reaches is left to copy
+
+9 checks, all passing.
+Z_VOLUME {"runs":1079,"mocks":2,"over":false}
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:43933:9)
+    at async requestApi ([stdin]:44102:16)
+    at async del ([stdin]:45281:3)
+
+Z_STATUS 0 null
+
+FILE person-copy-kept.test.ts
+
+Kept on purpose, and still theirs to see
+  ok    all four are copied
+  ok    their key, and only theirs
+  ok    their PayPal order
+  ok    their pre-order, not the other buyer's
+  ok    on the list to be told the store closes, not told yet
+  ok    the other buyer's address is in none of it
+
+6 checks, all passing.
+Z_VOLUME {"runs":85,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE person-erasure.test.ts
+
+A person in every part of a store, deleted
+  ok    the person is in many parts of the store
+  ok    and their seeding changed many keys, so the comparison below means something
+  ok    the store finds them for every-store requests
+  ok    asking sends a link
+  ok    the email carries a link that works
+  ok    asking about an address no store knows sends nothing, and says the same
+  ok    the link names the address and the store
+  ok    the link deletes them
+  ok    it sent no more commands than it took units for (242 of 602)
+  ok    and moved no more bytes (60888 of 396850)
+  ok    the units it takes cover that work
+  ok    the link works once
+  ok    the store's owner is told, not asked
+  (left as allowed: nl:allow:email:…:2026-10-29, nl:allow:studio:…:2026-10-29, nl:allow:transactional:…:2026-10-29, nl:data:…, nl:data:room-test-store, nl:erased:…, nl:health:…, nl:mail:flowstats:f4f3c4902f81bb82, nl:rl:erase-address:…, nl:rl:erase-address:…, nl:rl:erase-ip:…, nl:rl:erase-ip:…, nl:rsum:ver:…:fd9f07e0a0, nl:sender:2026-11, nl:stats:…:ledger, nl:tasks:doors, nl:wf:day:…:2026-11-08, nl:wl:…:fd9f07e0a0:send)
+  ok    everything is as it was before them, but what is allowed to change
+  ok    no key or value names them, by address or by any key made from it
+  ok    only a fingerprint is kept, under the store's list
+  ok    which cannot be read back to the address
+  ok    the other person is untouched
+  ok    the store knows the address was deleted
+  ok    an import leaves them out
+  ok    a purchase without their own yes notes the purchase, not a yes
+  ok    their own yes, given again, puts them back and lifts the fingerprint
+  ok    the studio deletes them
+  ok    what the studio's door keeps: what an import gave them, by a one-way hash; nothing else names them
+  ok    their review stays, without their address (a store may not take reviews down)
+  ok    and everything else is as it was before them
+  ok    the activity log says a person was deleted, never who
+
+What it takes covers what it costs
+  ok    the base units cover the request itself and Discord
+  ok    units cover 550 commands and 310000 bytes
+  ok    units cover 1272 commands and 1709000 bytes
+  ok    units cover 39130 commands and 20115000 bytes
+  ok    the least a deletion takes is what the help says
+
+32 checks, all passing.
+Z_VOLUME {"runs":3342,"mocks":2,"over":false}
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:44104:9)
+    at async requestApi ([stdin]:44273:16)
+    at async del ([stdin]:45452:3)
+deleting a person: their files go with the daily job instead BlobError: Vercel Blob: No blob credentials found. Pass a `token` option, set `BLOB_READ_WRITE_TOKEN`, or use `oidcToken` (or `VERCEL_OIDC_TOKEN`) with `storeId` or `BLOB_STORE_ID`.
+    at resolveBlobAuth ([stdin]:44104:9)
+    at async requestApi ([stdin]:44273:16)
+    at async del ([stdin]:45452:3)
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (47.674947ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (112.467814ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (45.182485ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (2.693721ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.183468ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.14002ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.664095ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (90.40967ms)
+✔ every store figure taken in the code is a kind a line prices (59.574359ms)
+✔ every email sent names a meter, and each file only the meters it may use (104.603321ms)
+✔ the units a figure is taken in cost at least what they stand for (11.025478ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.694643ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.25952ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.581169ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.622314ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.141217ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.475805ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.176722ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (3.049645ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.124412ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (4.659702ms)
+✔ Path push fits its reserved studio requests (0.106314ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.066783ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.155519ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.146503ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (44.507399ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 561.986305
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 121.5 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 288.3 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 704.9 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (149.090533ms)
+✔ each family is bounded one way at least, and what it says can be checked (51.481885ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (6.147013ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (3.055132ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.488301ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (11.459505ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.346668ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 229.001072
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3157-Z152vF

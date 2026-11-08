@@ -1,0 +1,28 @@
+
+FILE z-3157-copy-and-envelope.proof.ts
+
+C4 LOW 6716917431: a healthy person's copy survives another person's unreadable lead
+  ok    healthy two-person control: only A is copied
+  FAIL  text amount: A's own healthy lead remains copyable
+        expected ["bb7d15335789001bc83177a1"]
+        got      "unknown"
+  FAIL  broken JSON: A's own healthy lead remains copyable
+        expected ["bb7d15335789001bc83177a1"]
+        got      "unknown"
+  ok    own unreadable lead: unknown, never an apparently complete empty copy
+  ok    exact empty healthy control
+
+Exact envelope controls: no missing, extra or non-string reply is treated as empty
+  ok    missing outer reply: read is unknown
+  ok    extra outer reply: read is unknown
+  ok    nil HGETALL: read is unknown
+  ok    numeric HGETALL: read is unknown
+  ok    outer hole: read is unknown
+  ok    non-string field: read is unknown
+Z_DIRECT_READ_VOLUMES [{"commands":1,"requestJsonBytes":43,"replyJsonBytes":685},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":689},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":424},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":83},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":4},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":2},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":7},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":3},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":6},{"commands":1,"requestJsonBytes":43,"replyJsonBytes":319}]
+
+11 checks, 2 failing.
+Z_VOLUME {"runs":14,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3157-QQljor

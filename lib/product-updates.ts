@@ -37,6 +37,7 @@ import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
@@ -148,11 +149,23 @@ export function updateReadUnits(store: Pick<Store, "stripeAccountId" | "paypalSe
   return (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
 }
 
-/** When this product's buyers may next be told, in seconds; 0 when they may now. */
+/** The time written by a claim: a whole number of seconds, as SET wrote it. */
+const SECONDS_TEXT = /^(0|[1-9][0-9]*)$/;
+
+/**
+ * When this product's buyers may next be told, in seconds; 0 when they may now.
+ * Only a confirmed absent key means "now" (CX-123 rule 24): any other reply
+ * than the seconds a claim wrote throws UnknownReplyError, so nothing is read
+ * or sent on it.
+ */
 export async function nextUpdateAt(store: Store, productId: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [last] = await redisPipeline([["GET", lastKey(store.statsId, productId)]]);
-  const at = Number(last) || 0;
+  const reply = repliesFor(await redisPipeline([["GET", lastKey(store.statsId, productId)]]), 1);
+  if (!reply) throw new UnknownReplyError("the last product update time");
+  const last = reply[0];
+  if (last === null) return 0;
+  const at = typeof last === "string" && SECONDS_TEXT.test(last) ? Number(last) : NaN;
+  if (!Number.isSafeInteger(at)) throw new UnknownReplyError("the last product update time");
   return at ? at + UPDATE_GAP_SECONDS : 0;
 }
 
@@ -175,9 +188,12 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   }
   const buyers = buyersFrom(rows, saleHandles(store), product.id).slice(0, MAX_UPDATE_RECIPIENTS);
   if (buyers.length === 0) return { ok: false, reason: "none" };
-  // Taken before anything is written, so two presses make one send.
-  const [claimed] = await redisPipeline([["SET", lastKey(store.statsId, product.id), String(nowSeconds), "NX", "EX", UPDATE_GAP_SECONDS]]);
-  if (claimed === null) return { ok: false, reason: "soon", until: (await nextUpdateAt(store, product.id)) || nowSeconds + UPDATE_GAP_SECONDS };
+  // Taken before anything is written, so two presses make one send. "OK" is
+  // ours and null is another press's; any other reply is unknown and throws,
+  // so no job is written on it (rule 24).
+  const claim = repliesFor(await redisPipeline([["SET", lastKey(store.statsId, product.id), String(nowSeconds), "NX", "EX", UPDATE_GAP_SECONDS]]), 1);
+  if (!claim || (claim[0] !== "OK" && claim[0] !== null)) throw new UnknownReplyError("the product update claim");
+  if (claim[0] === null) return { ok: false, reason: "soon", until: (await nextUpdateAt(store, product.id)) || nowSeconds + UPDATE_GAP_SECONDS };
   const job: UpdateJob = {
     id: randomBytes(12).toString("hex"),
     handle: store.handle,
@@ -275,8 +291,10 @@ async function stopLink(store: Store, email: string): Promise<string> {
  * places at once: only one holds the send at a time.
  */
 export async function advanceUpdate(id: string, load: (handle: string) => Promise<Store | null>, deadline: number): Promise<UpdateJob | null> {
-  const [got] = await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]);
-  if (got === null) return null;
+  // Held only on an exact "OK" (rule 24): any other reply leaves the send for
+  // the next run and lets go of nothing, since the lock may not be ours.
+  const got = repliesFor(await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]), 1);
+  if (!got || got[0] !== "OK") return null;
   try {
     // Unknown evidence must not dequeue a real job or overwrite its payload.
     // Keep it for the next automatic read; only a confirmed null is absent.

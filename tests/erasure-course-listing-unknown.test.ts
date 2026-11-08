@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   const tess = normaliseEmail("tess@example.com");
   await seedPerson(world, tess, null);
   const learner = emailKey(tess);
-  // A big store: the course product is past the catalogue's head, so its listing is read from its own record.
+  // A big store: the course product is past the catalog's head, so its listing is read from its own record.
   const catalog = world.store.catalog;
   const big: Store = { ...world.store, catalog: { ...catalog, head: catalog.head.filter((l) => l.id !== world.courseProduct) } };
   listing = `nl:catalog:${catalog.id}:l:${world.courseProduct}`;
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
     [...(await snapshot())].filter(([k, v]) => (k.includes(world.courseId) || world.lessons.some((l) => k.includes(l))) && (k.includes(learner) || v.includes(learner) || k.includes(tess) || v.includes(tess))).length;
 
   part("Setup");
-  is("the catalogue keeps its own records", typeof catalog.id === "string" && catalog.inline === null, true);
+  is("the catalog keeps its own records", typeof catalog.id === "string" && catalog.inline === null, true);
   is("the course product's listing record is there", (await real([["EXISTS", listing]]))[0], 1);
   const plain = await erasureScope(big, tess);
   is("the store has one course, read from its listing record, and the person is in it", plain?.courses.length, 1);

@@ -71,7 +71,7 @@ import { toldOf } from "@/lib/closing-buyers";
 import { paidCheckoutsOf } from "@/lib/person-copy-stripe";
 import { readGift } from "@/lib/gifts";
 import { isGroupJob, readGroup } from "@/lib/group-buy";
-import { packagesKey, readBought } from "@/lib/call-packages";
+import { boughtForCopy, packagesKey } from "@/lib/call-packages";
 import { readShipped } from "@/lib/shipments";
 import { callScope, readRecords } from "@/lib/meet-records";
 import { heldPaymentsOf } from "@/lib/closing-holds";
@@ -410,8 +410,10 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const checkouts = stringList(repliesFor(await redisPipeline([["SMEMBERS", packagesKey(s.statsId)]]), 1)?.[0]);
     if (!checkouts) throw new UnknownReplyError("the store's call packages");
     const out: unknown[] = [];
+    // Each listed package read exactly too: one that cannot be read, or a member that is not a checkout id, fails
+    // the copy, never taken as somebody else's (boughtForCopy). A record that ran out is none.
     for (const checkout of checkouts) {
-      const bought = await readBought(checkout);
+      const bought = await boughtForCopy(checkout);
       // The booking link's token is a key, left out: they have it in the email that sent it.
       if (bought && same(bought.e, s.email)) out.push({ product: bought.p, sessions: bought.total, bought: iso(bought.at), bookBy: iso(bought.until), booked: bought.holds });
     }

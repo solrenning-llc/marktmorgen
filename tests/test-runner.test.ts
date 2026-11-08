@@ -253,7 +253,10 @@ const running = (pid: number) => {
 };
 async function gone(pid: number, ms = 3000, isRunning: (pid: number) => boolean = running): Promise<boolean> {
   const until = Date.now() + ms;
-  while (isRunning(pid) && Date.now() < until) await new Promise(done => setTimeout(done, 10));
+  while (Date.now() < until) {
+    if (!isRunning(pid)) return true;
+    await new Promise(done => setTimeout(done, 10));
+  }
   return !isRunning(pid);
 }
 

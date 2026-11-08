@@ -17,7 +17,7 @@ test("returning from a legacy pause posts explicit classic with pinned version a
   assert.equal(body.get("billing_mode[type]"),"classic");assert.equal(headers.get("Stripe-Version"),VERSION);
   assert.equal(headers.get("Idempotency-Key"),"restart-synthetic-classic");assert.equal(headers.has("Stripe-Account"),false);
   assert.equal(body.get("customer"),"cus_RestartClassic01");assert.equal(body.get("default_payment_method"),"pm_RestartClassic01");assert.equal(body.get("items[0][price]"),price.id);
-  return Response.json({id:"sub_RestartClassic01",status:"active",customer:"cus_RestartClassic01",trial_end:null,metadata:{tier:"creator"},items:{data:[{quantity:1,current_period_start:now-10,current_period_end:now+30*86400,price}]}});
+  return Response.json({id:"sub_RestartClassic01",status:"active",customer:"cus_RestartClassic01",trial_end:null,cancel_at:null,cancel_at_period_end:false,metadata:{tier:"creator"},items:{data:[{quantity:1,current_period_start:now-10,current_period_end:now+30*86400,price}]}});
  };
  try {await restartPlan({store:{handle:"restart-classic"},customerId:"cus_RestartClassic01",paymentMethod:"pm_RestartClassic01",tier:"creator",idempotencyKey:"restart-synthetic-classic"});assert.equal(posts,1);}finally{globalThis.fetch=original;}
 });

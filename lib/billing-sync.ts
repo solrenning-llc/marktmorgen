@@ -109,7 +109,8 @@ export async function refreshPeriod(store: Store): Promise<Store> {
  * wrote down, and never for one with contract funding (its own observation,
  * lib/contract-funding.ts). Answers whether the store now records it unpaid,
  * or null when no store keeps this subscription; throws when it could not be
- * written, so the email waits for the next run.
+ * written, or when the reply does not say which plan it is (CX-123 rule 24:
+ * unknown is never "not unpaid"), so the email waits for the next run.
  */
 export async function recordUnpaidRenewal(subscription: Record<string, unknown>): Promise<boolean | null> {
   const id = typeof subscription.id === "string" ? subscription.id : "";
@@ -118,6 +119,7 @@ export async function recordUnpaidRenewal(subscription: Record<string, unknown>)
   const store = await storeForHandle(handle);
   if (!store || store.subscriptionId !== id) return null;
   const state = stateOf(subscription);
+  if (state.state === "unknown") throw new Error("the subscription's plan is unknown");
   if (state.state !== "active" || !state.renewalUnpaid || hasContractFunding(subscription)) return (store.renewalUnpaidSince ?? 0) > 0;
   await recordState(store, state);
   const after = await storeForHandle(handle);

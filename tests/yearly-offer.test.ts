@@ -31,6 +31,7 @@ function subscription(id: string, interval: "month" | "year", over: Record<strin
   return {
     id,
     status: "active",
+    cancel_at: null,
     cancel_at_period_end: false,
     items: {
       data: [

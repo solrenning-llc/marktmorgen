@@ -496,10 +496,11 @@ export async function prepareStore(store: Store, now = Date.now(), held?: LockHe
       if (cursor === "0") break;
     }
   }
-  // A host's own calendar is the host's, across the stores they serve: it goes with the last of them.
+  // A host's own calendar is the host's, across the stores they serve: it goes with the last of them. A read
+  // that fails is never "no other store" (rule 24): it throws, and the walk tries this store again later.
   for (const email of [store.email, ...team.members.map((m) => m.email)]) {
-    const elsewhere = (await memberStores(email).catch(() => [{ store }])).some((m) => m.store.sid !== store.sid)
-      || (await accountStores(email).catch(() => [store])).some((other) => other.sid !== store.sid);
+    const elsewhere = (await memberStores(email)).some((m) => m.store.sid !== store.sid)
+      || (await accountStores(email)).some((other) => other.sid !== store.sid);
     if (!elsewhere) extra.push(...hostCalendarKeys(hostId(email)));
   }
   await keep();
@@ -1135,12 +1136,30 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       // the walk sees nothing it read changed (takeDue): a store whose plan runs again leaves the line untouched, one
       // that cannot be said stays in it untouched. While the walk holds the lock no plan can start the store again;
       // once prepared, its record is closed and no plan can reach it any more (lib/closing-plan-guard.ts).
-      const taken = await takeDue(ref, now);
+      let taken: Taken;
+      try {
+        taken = await takeDue(ref, now);
+      } catch (error) {
+        // Not read (rule 24): never "no store". It stays in line, moved back a walk so it does not hold the head of
+        // the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves the line.
+        console.error("a closed store's record could not be read; it waits for the next walk", error);
+        await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]);
+        continue;
+      }
       if (taken.due === "hold") continue;
       if (taken.due === "due") {
         let entry: Batched;
         try {
           entry = await prepareStore(taken.store, now, taken.held);
+        } catch (error) {
+          // The walk's lock ran out under it (LockBusyError): the store may run again, so the walk stops there and
+          // changes nothing more of it, its place in line included; the next walk reads it again.
+          if (error instanceof LockBusyError) throw error;
+          // Something it needs could not be read (rule 24), such as whether a host still serves another store: never
+          // taken as "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat).
+          console.error("a closed store could not be prepared; it waits for the next walk", error);
+          await redisPipeline([["ZADD", DUE_KEY, "XX", now + WALK_GAP_MS, ref]]);
+          continue;
         } finally {
           await releaseLock(taken.held);
         }

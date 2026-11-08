@@ -16,7 +16,7 @@
  * Every store, plan and change here is made by the real functions of lib/store.ts; the writes between a read and a
  * delete are made inside the walk's own pipeline, after the read's real reply and before the walk sees it.
  */
-import { BATCH_KEY, DUE_KEY, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
+import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { leadsKey } from "@/lib/contacts";
 import { claimsKey, hostId } from "@/lib/host-claims";
@@ -90,15 +90,22 @@ function answering(word: string, reply: unknown, key: (k: string) => boolean): v
 }
 
 let finished: string[] = [];
-async function run(): Promise<string> {
+async function run(now?: number): Promise<string> {
   try {
-    const report = await eraseClosed(Date.now() + 60_000, async (e) => void finished.push(e.ref));
+    const report = await eraseClosed(Date.now() + 60_000, async (e) => void finished.push(e.ref), now);
     return `done:${report.done} begun:${report.stores} finished:${report.finished}`;
   } catch (error) {
     return error instanceof UnknownReplyError ? "unknown" : "threw";
   } finally {
     redis.pipeline = original;
   }
+}
+/** A run a walk later, when a store moved back a walk (rule 24: a read that does not read) is due again. */
+const aWalkLater = () => run(Date.now() + WALK_GAP_MS + 60_000);
+/** Whether the store's place in line was moved back a walk from `from`. */
+async function movedBack(from: number): Promise<boolean> {
+  const [score] = await original([["ZSCORE", DUE_KEY, OWNER]]);
+  return score !== null && Number(score) >= from + WALK_GAP_MS;
 }
 /** A run of the walk on a later day ("one walk a day at the most"). */
 async function nextDay(): Promise<string> {
@@ -323,17 +330,19 @@ async function main(): Promise<void> {
     is("the next run prepares it again and erases it once", [await run(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
   }
 
-  part("The step that takes the lock answers what does not read: the run stops, nothing touched");
+  part("The step that takes the lock answers what does not read: the store waits a walk, nothing touched");
   {
     for (const [label, reply] of [["a number it never answers", 42], ["nothing", null], ["a list", [1]]] as [string, unknown][]) {
       await fresh();
       const listId = await closedStore();
       const lockKey = (await recordKeyOf(OWNER)).replace("nl:store:owner:", "nl:store:lock:");
       answering("EVAL", reply, isScript("closing-take"));
-      is(`answers ${label}: the run stops, the store untouched and in line`, [await run(), finished, await state(listId)], ["unknown", [], UNTOUCHED]);
+      const at = Date.now();
+      is(`answers ${label}: nothing prepared, the store untouched and in line`, [await run(), finished, await state(listId)], ["done:true begun:0 finished:0", [], UNTOUCHED]);
+      is(`answers ${label}: moved back a walk, so it does not hold the head of the line`, await movedBack(at), true);
       // A step whose answer was lost may have taken the lock: it runs out at its own expiry (CLOSING_LOCK_SECONDS).
       await original([["DEL", lockKey]]);
-      is(`answers ${label}: once its lock is gone, the next run erases it once`, [await run(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
+      is(`answers ${label}: once its lock is gone, the run a walk later erases it once`, [await aWalkLater(), finished, await state(listId)], ["done:true begun:1 finished:1", [OWNER], ERASED]);
     }
   }
 

@@ -38,7 +38,7 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
@@ -193,6 +193,28 @@ export async function teamTwoStepBlocks(store: Store, email: string, role: Role,
   const team = await readTeam(store.sid);
   if (!team.requireTwoStep) return false;
   return (await liveSecondStep(email, session)) === null;
+}
+
+/**
+ * The team's members, read exactly (rule 24), for what must never take an
+ * unknown answer for "nobody on the team" (lib/visit.ts: a teammate's visit
+ * is not a buyer's). No record is no team; a reply in another shape, or text
+ * that is not a team record as saveTeam writes it, throws UnknownReplyError.
+ */
+export async function readTeamMembers(sid: string): Promise<Member[]> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline([["GET", teamKey(sid)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's team");
+  const raw = replies[0];
+  if (raw === null) return [];
+  let stored: unknown = null;
+  try {
+    stored = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    stored = null;
+  }
+  if (!stored || typeof stored !== "object" || !Array.isArray((stored as { members?: unknown }).members)) throw new UnknownReplyError("a store's team");
+  return parseTeam(raw).members;
 }
 
 /**

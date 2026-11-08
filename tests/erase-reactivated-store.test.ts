@@ -20,7 +20,7 @@
  * current ending leaves the line too (the closing job puts it back when it is); a read that is unknown, or a closing
  * day with a plan running, keeps it in line and erases nothing.
  */
-import { DUE_KEY, WALK_KEY, eraseClosed, markDue, unmarkDue } from "@/lib/closed-store-data";
+import { DUE_KEY, WALK_GAP_MS, WALK_KEY, eraseClosed, markDue, unmarkDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { leadsKey } from "@/lib/contacts";
 import { claimHandle, setSubscription, storeForEmail, storeRef } from "@/lib/store";
@@ -77,9 +77,16 @@ async function outcome(run: () => Promise<unknown>): Promise<string> {
 }
 
 let finished: string[] = [];
-async function walk(): Promise<string> {
-  const report = await eraseClosed(Date.now() + 60_000, async (e) => void finished.push(e.ref));
+async function walk(now?: number): Promise<string> {
+  const report = await eraseClosed(Date.now() + 60_000, async (e) => void finished.push(e.ref), now);
   return `done:${report.done} begun:${report.stores} finished:${report.finished}`;
+}
+/** A walk a walk later, when a store moved back a walk (rule 24: a read that does not read) is due again. */
+const aWalkLater = () => walk(Date.now() + WALK_GAP_MS + 60_000);
+/** Whether the store's place in line was moved back a walk from `from`. */
+async function movedBack(from: number): Promise<boolean> {
+  const [score] = await original([["ZSCORE", DUE_KEY, OWNER]]);
+  return score !== null && Number(score) >= from + WALK_GAP_MS;
 }
 /** A run of the walk on a later day ("one walk a day at the most"). */
 async function nextDay(): Promise<string> {
@@ -150,12 +157,13 @@ async function main(): Promise<void> {
 
     await world();
     dyingAt("DEL", (k) => k.startsWith("nl:store:owner:"));
+    const failedAt = Date.now();
     const stopped = await outcome(walk);
-    is("a run stops in prepareStore, before the record is closed: the store still in line with its record", [stopped, (await state()).record, (await state()).due], ["threw", true, true]);
+    is("a run fails in prepareStore, before the record is closed: the store waits a walk, in line with its record", [stopped, (await state()).record, (await state()).due, await movedBack(failedAt)], ["done:true begun:0 finished:0", true, true, true]);
     await reactivate(OWNER);
     dyingAt("ZREM", isDue);
     await outcome(() => unmarkDue(OWNER));
-    is("then it re-subscribes and unmarkDue fails: the next walk does not prepare it again, nothing more erased, out of line", [await outcome(walk), finished, await state()], ["done:true begun:0 finished:0", [], { record: true, running: true, leads: true, due: false }]);
+    is("then it re-subscribes and unmarkDue fails: the walk a walk later does not prepare it again, nothing more erased, out of line", [await outcome(aWalkLater), finished, await state()], ["done:true begun:0 finished:0", [], { record: true, running: true, leads: true, due: false }]);
   }
 
   part("A store that re-subscribed and ended again is not erased on its old closing");
@@ -183,12 +191,16 @@ async function main(): Promise<void> {
     for (const [label, word, reply] of unknowns) {
       await world();
       answering(word, () => reply, (k) => (word === "GET" ? k === closingStateKey(OWNER) : k === FINAL_INDEX));
-      is(`${label}: the run stops, nothing erased, still in line`, [await outcome(walk), finished, await state()], ["unknown", [], { record: true, running: false, leads: true, due: true }]);
-      is(`${label}: the next run, whose replies read, erases it once`, [await outcome(walk), finished], ["done:true begun:1 finished:1", [OWNER]]);
+      const at = Date.now();
+      is(`${label}: nothing prepared, nothing erased, still in line`, [await outcome(walk), finished, await state()], ["done:true begun:0 finished:0", [], { record: true, running: false, leads: true, due: true }]);
+      is(`${label}: moved back a walk, so it does not hold the head of the line`, await movedBack(at), true);
+      is(`${label}: the run a walk later, whose replies read, erases it once`, [await outcome(aWalkLater), finished], ["done:true begun:1 finished:1", [OWNER]]);
     }
     await world();
     answering("ZSCORE", () => THROW, (k) => k === FINAL_INDEX);
-    is("the final index's read fails: the run stops, nothing erased, still in line", [await outcome(walk), finished, await state()], ["threw", [], { record: true, running: false, leads: true, due: true }]);
+    const thrownAt = Date.now();
+    is("the final index's read fails: nothing prepared, nothing erased, still in line", [await outcome(walk), finished, await state()], ["done:true begun:0 finished:0", [], { record: true, running: false, leads: true, due: true }]);
+    is("the final index's read fails: moved back a walk", await movedBack(thrownAt), true);
   }
 
   done();

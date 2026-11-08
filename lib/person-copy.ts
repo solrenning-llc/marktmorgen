@@ -36,7 +36,7 @@ import { listRequests } from "@/lib/payment-request-store";
 import { listAgreements, readVersion } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
-import { submissionsOf } from "@/lib/assignment";
+import { isUnreadSubmission, submissionsOf } from "@/lib/assignment";
 import { certificatesOf } from "@/lib/certificate";
 import { lessonComments } from "@/lib/lesson-comments";
 import { bondRecordOf } from "@/lib/affiliate-bond";
@@ -256,6 +256,11 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       const subs = await submissionsOf(c.courseId, c.lessonIds.map((lessonId) => ({ lessonId, who: s.learner })));
       subs.forEach((sub, i) => {
         if (!sub) return;
+        // A record that is there but does not read is said, never left out of the copy (CX-123 rule 24).
+        if (isUnreadSubmission(sub)) {
+          out.push({ course: c.productId, lesson: c.lessonIds[i], unread: "Work you handed in is kept for this lesson, but its record could not be read for this copy." });
+          return;
+        }
         out.push({ course: c.productId, lesson: c.lessonIds[i], text: sub.text, file: sub.file?.name ?? "", handedIn: iso(sub.at), state: sub.state, tries: sub.tries, feedback: sub.feedback, reviewed: iso(sub.reviewedAt) });
       });
     }

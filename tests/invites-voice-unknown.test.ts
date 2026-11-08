@@ -91,6 +91,32 @@ for (const [label, reply] of [
   });
 }
 
+// A row this code never wrote, beside a whole one (Claude 2 on #3174): unknown, never skipped, so no offer is
+// hidden and offerPartnership's cap is never checked against one row too few.
+const OTHER_ID = "ffffffffffff";
+for (const [label, field, row] of [
+  ["text that is not JSON", OTHER_ID, "not json {"],
+  ["a row with no valid share", OTHER_ID, JSON.stringify({ ...OFFER, id: OTHER_ID, share: { percent: "lots" }, at: 1 })],
+  ["a row with a bad id", OTHER_ID, JSON.stringify({ ...OFFER, id: "nope", at: 1 })],
+  ["a row with no store", OTHER_ID, JSON.stringify({ ...OFFER, id: OTHER_ID, sid: "", at: 1 })],
+  ["a row kept under another offer's id", "eeeeeeeeeeee", JSON.stringify({ ...OFFER, id: OTHER_ID, at: 1 })],
+] as const) {
+  test(`an offer row that is ${label}, beside a whole one, is unknown, never skipped`, async () => {
+    if (!(await waitingFor(ANA)).length) assert.equal((await offerPartnership(ANA, OFFER)).ok, true);
+    const original = redis.pipeline;
+    redis.pipeline = (async (commands: unknown[][]) => {
+      const replies = (await original.call(redis, commands as never)) as unknown[];
+      return commands.map((c, i) => (c[0] === "HGETALL" ? [...(replies[i] as string[]), field, row] : replies[i]));
+    }) as typeof redis.pipeline;
+    try {
+      await assert.rejects(() => waitingFor(ANA), UnknownReplyError);
+    } finally {
+      redis.pipeline = original;
+    }
+    assert.equal((await waitingFor(ANA)).length, 1, "control: the whole row alone is read");
+  });
+}
+
 test("the affiliates page says the offers could not be loaded, never shows them as none", () => {
   const page = readFileSync(join(process.cwd(), "app/studio/affiliates/page.tsx"), "utf8");
   assert.doesNotMatch(page, /waitingFor\([^)]*\)\)?\.catch\(\(\) => \[\]\)/, "a failed read is not an empty list");

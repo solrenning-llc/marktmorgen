@@ -73,7 +73,13 @@ export async function POST(request: NextRequest) {
     const meetRefused = async (input: EventInput, current: { where: string; meet: string | null } | null) => {
       if (input.where !== "meet" || !input.meet) return null;
       if (current && current.where === "meet" && current.meet === input.meet) return null;
-      const usable = await usableProviders(store.statsId).catch((): MeetProvider[] => []);
+      // Connections that could not be read are not "not connected" (CX-123 rule 24): nothing is saved, and the
+      // editor says they could not be checked, without asking to connect again.
+      const usable = await usableProviders(store.statsId).catch((error): MeetProvider[] | null => {
+        console.error("reading the meeting connections for a live event failed", error);
+        return null;
+      });
+      if (!usable) return fail("meet_unknown", 503);
       return usable.includes(input.meet) ? null : fail(`meet_${input.meet}`);
     };
     // What happens with the meeting never holds the event up: a failure is

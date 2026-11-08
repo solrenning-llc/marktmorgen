@@ -53,6 +53,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import * as exactReply from "@/lib/redis-reply";
 import { type Held, LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { type MeetProvider, MEET_NAMES, isMeetProvider } from "@/lib/call-setup";
@@ -136,10 +137,26 @@ function parseConnection(raw: unknown, provider: MeetProvider): Connection | nul
   }
 }
 
+/**
+ * A connection from what GET answered at its key (CX-123 rule 24): null for
+ * a confirmed none (the slot answered null), and for text kept there that is
+ * not a connection (damaged: nothing in it can be used, and connecting again
+ * replaces it). Any other reply (a number, true, a list, an object, nothing)
+ * is unknown and throws, so no screen asks to connect again, no booking is
+ * refused as "not connected", and nothing is disconnected, forgotten or
+ * written over a connection that may be there.
+ */
+function connectionFrom(reply: unknown, provider: MeetProvider): Connection | null {
+  if (reply !== null && typeof reply !== "string") throw new exactReply.UnknownReplyError("a meeting connection");
+  return parseConnection(reply, provider);
+}
+
 async function readConnection(statsId: string, provider: MeetProvider, host = ""): Promise<Connection | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", connKey(statsId, provider, host)]]);
-  return parseConnection(raw, provider);
+  // One reply for the one command, or unknown.
+  const replies = exactReply.repliesFor(await redisPipeline([["GET", connKey(statsId, provider, host)]]), 1);
+  if (!replies) throw new exactReply.UnknownReplyError("a meeting connection");
+  return connectionFrom(replies[0], provider);
 }
 
 /** A team host's own Google Calendar connection, as their studio page shows it, with what it was granted. */
@@ -200,17 +217,25 @@ export async function meetSettingsView(statsId: string | null, sid: OfferedTo, r
 /** At most two connection reads and one bounded problem-list read. */
 async function readMeetingView(statsId: string | null, candidates: MeetProvider[], offered: MeetProvider[]): Promise<MeetView> {
   if (!candidates.length || !statsId || !isRedisConfigured()) return { providers: offered, connected: {}, problems: [] };
-  const replies = await redisPipeline([...candidates.map((p) => ["GET", connKey(statsId, p)]), ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]);
+  // Read exactly (CX-123 rule 24): a reply of another shape throws, so the
+  // studio says it could not check, never that nothing is connected.
+  const replies = exactReply.repliesFor(
+    await redisPipeline([...candidates.map((p) => ["GET", connKey(statsId, p)]), ["LRANGE", logKey(statsId), 0, LOG_SIZE - 1]]),
+    candidates.length + 1,
+  );
+  if (!replies) throw new exactReply.UnknownReplyError("the meeting connections");
   const connected: MeetView["connected"] = {};
   candidates.forEach((p, i) => {
-    const c = parseConnection(replies[i], p);
+    const c = connectionFrom(replies[i], p);
     if (c) connected[p] = viewOf(c);
   });
+  const log = exactReply.stringList(replies[candidates.length]);
+  if (!log) throw new exactReply.UnknownReplyError("the meeting problems");
   const providers = candidates.filter((p) => offered.includes(p) || connected[p]);
   const problems: MeetProblem[] = [];
-  for (const raw of Array.isArray(replies[candidates.length]) ? (replies[candidates.length] as unknown[]) : []) {
+  for (const raw of log) {
     try {
-      const v = JSON.parse(String(raw)) as MeetProblem;
+      const v = JSON.parse(raw) as MeetProblem;
       if (isMeetProvider(v.provider) && typeof v.what === "string" && typeof v.error === "string") problems.push(v);
     } catch {
       // Skipped.

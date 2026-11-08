@@ -43,8 +43,15 @@ export async function POST(request: NextRequest) {
     // In person chosen with no address (lib/call-place.ts): never saved as a call with no link.
     const asked = (guarded.body.call as { place?: unknown } | null | undefined)?.place;
     if (asked !== undefined && asked !== null && !setup.place) return Response.json({ ok: false, error: "place" }, { status: 400 });
-    if (setup.meet && !(await usableProviders(guarded.store.statsId)).includes(setup.meet)) {
-      return Response.json({ ok: false, error: `meet_${setup.meet}` }, { status: 400 });
+    if (setup.meet) {
+      // Connections that could not be read are not "not connected" (CX-123 rule 24): nothing is saved, and the
+      // editor says they could not be checked, without asking to connect again.
+      const usable = await usableProviders(guarded.store.statsId).catch((error) => {
+        console.error("reading the meeting connections for a call failed", error);
+        return null;
+      });
+      if (!usable) return Response.json({ ok: false, error: "meet_unknown" }, { status: 503 });
+      if (!usable.includes(setup.meet)) return Response.json({ ok: false, error: `meet_${setup.meet}` }, { status: 400 });
     }
   }
 

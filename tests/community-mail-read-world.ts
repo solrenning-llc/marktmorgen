@@ -33,6 +33,7 @@ export const readMember = async () => null;
 export const setMail = async () => {};
 export const setMemberToken = async () => {};
 export const holdsTicket = async () => true;
+export const askingAgainWontTell = () => false;
 export const mayAttend = async () => true;
 export const readEvent = async () => event;
 export const readEventExact = readEvent;

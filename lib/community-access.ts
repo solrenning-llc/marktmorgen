@@ -54,7 +54,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type DataStore, DataRoomError } from "@/lib/store-data";
-import { onAccount } from "@/lib/stripe-account";
+import { StripeError, onAccount } from "@/lib/stripe-account";
 // The one Stripe version these lists are read at, so their shape is the one checked here (Revisor 1 on #2464).
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
@@ -103,10 +103,30 @@ type Row = Record<string, unknown>;
 
 /** A list from Stripe that is not one, or that has more than was read: whether the address holds anything is not known. */
 export class UnreadPurchasesError extends Error {
-  constructor(what: string) {
+  /**
+   * True when asking again gives the same answer: Stripe has more than the one page read of this address's
+   * checkouts or payments, or more customers for it than are asked (CUSTOMERS_READ). A reply that is not a list
+   * at all may be a passing fault, and is not.
+   */
+  readonly lasting: boolean;
+  constructor(what: string, lasting = false) {
     super(`the purchases could not be read in full: ${what}`);
     this.name = "UnreadPurchasesError";
+    this.lasting = lasting;
   }
+}
+
+/**
+ * Whether a strict door's "could not be asked" (holdsTicket, holdsAnyOf with `strict`) will be the same however
+ * often it is asked again, so a send waiting on it would wait for good (review of #3140, M2): an address whose
+ * purchases are more than is read (UnreadPurchasesError `lasting`), or a request Stripe refuses as such (400, 403
+ * or 404, or `account_invalid`: the store's Stripe account disconnected, or no longer reachable by us). Anything
+ * else (a timeout, a 429 or 5xx, Redis) may pass, and the caller tries again, a bounded number of times.
+ */
+export function askingAgainWontTell(error: unknown): boolean {
+  if (error instanceof UnreadPurchasesError) return error.lasting;
+  if (error instanceof StripeError) return error.code === "account_invalid" || error.status === 400 || error.status === 403 || error.status === 404;
+  return false;
 }
 
 /**
@@ -202,7 +222,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   }
   // Nothing found, but not everything was read: unknown, never "holds none of them". A door that does not need to
   // know (not strict) lets nobody in on it and keeps no answer; a strict door says it could not be asked.
-  if (!complete) throw new UnreadPurchasesError("more than one page");
+  if (!complete) throw new UnreadPurchasesError("more than one page", true);
   return false;
 }
 

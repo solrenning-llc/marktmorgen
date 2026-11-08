@@ -42,7 +42,7 @@ import {
   setMail,
   setMemberToken,
 } from "@/lib/community";
-import { holdsTicket } from "@/lib/community-access";
+import { askingAgainWontTell, holdsTicket } from "@/lib/community-access";
 import { communityWords } from "@/lib/buyer-words/community";
 
 export const COMMUNITY_UNSUB = /^[0-9a-f]{40}$/;
@@ -67,6 +67,13 @@ export type AnnouncementJob = {
   status: "sending" | "waiting" | "sent" | "failed";
   note: string;
   failures: number;
+  /**
+   * Members passed over unsent because whether they are let in could not be told (sortBatch): never counted in
+   * `sent`. Absent on a send that skipped nobody.
+   */
+  skipped?: number;
+  /** The current batch's members not answered for, by member key, with the tries in a row so far (sortBatch). */
+  tries?: Record<string, number>;
 };
 
 function parse(raw: unknown): AnnouncementJob | null {
@@ -157,6 +164,83 @@ export async function tokenFor(store: Store, communityId: string, member: Member
   return kept.t;
 }
 
+/**
+ * How many runs in a row one member of a batch may go unanswered for (Stripe or Redis failing for them, while it
+ * may pass) before the batch goes on without them, counted as skipped, never as sent (review of #3140, M2). The mail
+ * job runs every five minutes, so six tries is about half an hour: longer than a passing fault of Stripe, the
+ * network or Redis lasts nearly always, and short enough that the members after them still get an announcement the
+ * same hour, and an hour-before reminder before its event (stillUseful, lib/community-event-mail.ts). Only the batch
+ * under way waits meanwhile, so a longer outage passes over at most one batch (CHECKED_BATCH_SIZE) each half hour.
+ */
+export const MEMBER_TRIES = 6;
+
+export type SortedBatch =
+  | { wait: false; recipients: Member[]; tokens: string[]; skipped: number }
+  | { wait: true; tries: Record<string, number> };
+
+/**
+ * Who in a checked batch is emailed, member by member (rules 24 and 30, review of #3140, M2): each of `candidates`
+ * asked `letIn` strictly, and each let in given the stop link their record keeps (tokenFor). A member whose answer
+ * cannot be had and never will (askingAgainWontTell: more of their purchases than is read, the store's Stripe account
+ * disconnected) is passed over now; one whose answer may yet come (a timeout, Stripe or Redis failing) makes the
+ * batch wait, and is passed over only once that has happened MEMBER_TRIES runs in a row (`tries`, kept on the send,
+ * by member key, for the batch under way only). A member passed over is counted in `skipped`, never sent to. A
+ * batch that waits sends nobody, and its cursor stays where it was, so the next run asks again under the same key.
+ */
+export async function sortBatch(
+  store: Store,
+  community: string,
+  candidates: Member[],
+  letIn: (member: Member) => Promise<boolean>,
+  tries: Record<string, number> | undefined,
+): Promise<SortedBatch> {
+  type Answer = { member: Member; state: "in" | "out" | "never" | "unknown"; token?: string };
+  const answers: Answer[] = await inTurns(candidates, 5, async (member): Promise<Answer> => {
+    try {
+      return { member, state: (await letIn(member)) ? "in" : "out" };
+    } catch (error) {
+      if (askingAgainWontTell(error)) return { member, state: "never" };
+      console.error("a community send could not ask whether a member is let in", error);
+      return { member, state: "unknown" };
+    }
+  });
+  for (const answer of answers) {
+    if (answer.state !== "in") continue;
+    try {
+      answer.token = await tokenFor(store, community, answer.member);
+    } catch (error) {
+      console.error("a community send could not keep a member's stop link", error);
+      answer.state = "unknown";
+    }
+  }
+  const next: Record<string, number> = {};
+  let waiting = false;
+  for (const answer of answers) {
+    if (answer.state !== "unknown") continue;
+    const before = tries?.[answer.member.k];
+    const count = (typeof before === "number" && Number.isSafeInteger(before) && before > 0 ? before : 0) + 1;
+    if (count >= MEMBER_TRIES) answer.state = "never";
+    else {
+      next[answer.member.k] = count;
+      waiting = true;
+    }
+  }
+  if (waiting) return { wait: true, tries: next };
+  const sent = answers.filter((a) => a.state === "in");
+  return {
+    wait: false,
+    recipients: sent.map((a) => a.member),
+    tokens: sent.map((a) => a.token as string),
+    skipped: answers.filter((a) => a.state === "never").length,
+  };
+}
+
+/** What a finished send's note says of the members it passed over, or "" when it passed over nobody. */
+export function skippedNote(skipped: number | undefined): string {
+  if (!skipped) return "";
+  return `${skipped} ${skipped === 1 ? "member was" : "members were"} not emailed: we couldn't confirm they still have access.`;
+}
+
 /** Runs `each` over `items`, a few at a time. */
 async function inTurns<T, R>(items: T[], width: number, each: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -233,26 +317,23 @@ export async function advanceAnnouncement(
       }
       // Who is in this batch, read exactly (rules 24 and 30): a member is left out only when read as gone (nil), taken
       // out, no longer asking for these emails, or known to be let in no more (asked batch by batch, so a member who
-      // lapsed since it started is left out). A member who did not read, a ticket Stripe could not be asked about, or
-      // a stop link not kept leaves the batch not done and the cursor where it was, before anything is reserved, so
-      // the next run sends to them once, under the same batch key.
-      const read = await (async () => {
+      // lapsed since it started is left out). Members who did not read leave the batch not done and the cursor where
+      // it was, before anything is reserved, so the next run sends to them once, under the same batch key; a ticket
+      // Stripe could not be asked about, or a stop link not kept, does the same for a bounded number of runs, and a
+      // member whose ticket can never be asked about is passed over, counted, never sent to (sortBatch).
+      const read: SortedBatch | null = await (async (): Promise<SortedBatch> => {
         const found = await readMembersExact(community, keys);
         const candidates = keys.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
-        const letIn = await inTurns(candidates, 5, (m) => holdsTicket(store, config, m.e, { strict: true }));
-        const recipients = candidates.filter((_, i) => letIn[i]);
-        const tokens: string[] = [];
-        for (const member of recipients) tokens.push(await tokenFor(store, community, member));
-        return { recipients, tokens };
+        return sortBatch(store, community, candidates, (m) => holdsTicket(store, config, m.e, { strict: true }), job.tries);
       })().catch((error: unknown) => {
         console.error("an announcement could not read who is in a batch", error);
         return null;
       });
-      if (!read) {
-        job = { ...job, status: "waiting", note: "We couldn't read who is in the next batch just now. The send is still pending." };
+      if (!read || read.wait) {
+        job = { ...job, status: "waiting", note: "We couldn't read who is in the next batch just now. The send is still pending.", ...(read ? { tries: read.tries } : {}) };
         break;
       }
-      const { recipients, tokens } = read;
+      const { recipients, tokens, skipped } = read;
       if (recipients.length) {
         const reserved = await reserve(store, recipients.length);
         if (reserved !== "ok") {
@@ -291,11 +372,12 @@ export async function advanceAnnouncement(
           break;
         }
       }
-      job = { ...job, done: job.done + keys.length, sent: job.sent + recipients.length, failures: 0 };
+      job = { ...job, done: job.done + keys.length, sent: job.sent + recipients.length, failures: 0, tries: undefined };
+      if (skipped) job = { ...job, skipped: (job.skipped ?? 0) + skipped };
       await save(job);
     }
     if (job.status === "sending" && job.done >= job.total) {
-      job = { ...job, status: "sent" };
+      job = { ...job, status: "sent", note: skippedNote(job.skipped) };
       await redisPipeline([["DEL", toKey(id)]]);
     }
     await save(job);

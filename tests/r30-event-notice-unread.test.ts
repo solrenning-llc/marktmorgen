@@ -169,6 +169,30 @@ async function main(): Promise<void> {
   part("Inside the store's own email figure: every email sent was counted against it, and none went without it");
   is("twelve emails, each counted", [mail.sent.length, await allowanceUsed((await storeForEmail(OWNER))!, "email")], [12, 12]);
 
+  part("A waiting notice whose list then reads but is not written down whole stays waiting, and is still sent (Claude 2's focal on #3134)");
+  const loose = await event("Loose night", hour(realNow() + 3 * DAY));
+  unread(true);
+  is("canceled, and its notice waits", await answer(await post({ action: "cancel", event: loose.id })), [200, true, "waiting"]);
+  await runAfter();
+  unread(false);
+  // On the run where the list reads, the push of the people to the send's own list answers nothing and does not land.
+  let dropped = 0;
+  redis.pipeline = (async (commands: Commands) => {
+    const at = commands.findIndex((c) => c[0] === "RPUSH" && /^nl:cm:evmail:[0-9a-f]{24}:to$/.test(String(c[1])));
+    if (at < 0) return original(commands);
+    dropped += 1;
+    const rest = await original(commands.filter((_, i) => i !== at));
+    return [...rest.slice(0, at), null, ...rest.slice(at)];
+  }) as typeof redis.pipeline;
+  await job();
+  redis.pipeline = original;
+  is("the push was tried and did not land", dropped > 0, true);
+  is("nothing is sent on that run", to("Canceled: Loose night"), []);
+  await job();
+  is("the next run writes the list again and emails each of them once", to("Canceled: Loose night"), GOING);
+  await job();
+  is("and never again", to("Canceled: Loose night"), GOING);
+
   part("Only while it is of use: a notice whose list never read before the start is not sent late");
   const late = await event("Late night", hour(realNow() + 3 * DAY));
   unread(true);

@@ -7,7 +7,9 @@
  * after requestOrdersLink answers) and ordersLinkFor, and
  * lib/recovery-address.ts sendLostEmailLink. When the write did not land,
  * the person was sent (or handed) a link that does not open, and for three
- * of them a metered email was spent on it.
+ * of them a metered email was spent on it. lib/recovery-address.ts
+ * startRecoveryAddress emailed a code before writing it, unread: a write
+ * that did not land sent a code that can never be confirmed.
  *
  * Here each is called as its caller calls it, on the in-memory store, with
  * only that SET answered in another shape: the reply missing, the pipeline
@@ -22,7 +24,7 @@
 import { NextRequest } from "next/server";
 import { rememberBuyers, requestLibraryLink } from "@/lib/buyer-library";
 import { ordersLinkFor, requestOrdersLink } from "@/lib/buyer-orders";
-import { keepRecoveryAddress, sendLostEmailLink } from "@/lib/recovery-address";
+import { confirmRecoveryAddress, keepRecoveryAddress, sendLostEmailLink, startRecoveryAddress } from "@/lib/recovery-address";
 import { deliverPayPal } from "@/lib/paypal-sales";
 import { readListings } from "@/lib/catalog";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -275,6 +277,31 @@ async function main(): Promise<void> {
       odd = null;
       is(`${what}: fails closed, neither the link nor the notice is sent`, [answer, mails.length - m], [failed(reply), 0]);
       is(`${what}: the lost-inbox form still answers sent, telling nothing`, page, `${ORIGIN}/signin/lost?status=sent`);
+    }
+  }
+
+  part("startRecoveryAddress: the pending code is written before the code is emailed");
+  {
+    // Claude 6's review of #3283: the code went out first and its SET was never read, so a write that did not land
+    // emailed a code that could never be confirmed ("expired"), and spent the email on it.
+    const ME = "rec.start@example.com";
+    const SESSION = "e".repeat(64);
+    const ask = async (address: string) => {
+      await clearLimits();
+      return outcome(() => startRecoveryAddress(ME, SESSION, address));
+    };
+    const m0 = mails.length;
+    const got = await ask("rec.control@example.org");
+    const code = /Your code: (\d{6})/.exec(mails.at(-1)?.text ?? "")?.[1] ?? "";
+    is("\"OK\": the code is sent to the new address", [got, mails.length - m0, mails.at(-1)?.to], ["sent", 1, "rec.control@example.org"]);
+    is("\"OK\": and that code confirms it", await confirmRecoveryAddress(ME, SESSION, code), { address: "rec.control@example.org" });
+
+    for (const [what, reply] of SHAPES) {
+      const m = mails.length;
+      odd = { prefix: "nl:auth:rec:set:", reply };
+      const answer = await ask(`rec.${what.length}@example.org`);
+      odd = null;
+      is(`${what}: no code is emailed, and the form is told it was not sent`, [answer, mails.length - m], [reply === THROWN ? "threw" : "unsent", 0]);
     }
   }
 

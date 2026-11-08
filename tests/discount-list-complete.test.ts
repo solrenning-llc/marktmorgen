@@ -163,7 +163,7 @@ async function main(): Promise<void> {
 
   part("The API: a code switched off, the codes then not confirmed");
   const API_OWNER = "listcompleteapi@example.com";
-  const API_ACCOUNT = "acct_1ListCompleteApi";
+  const API_ACCOUNT = "acct_1ListDoneApi";
   await claimHandle(API_OWNER, "listcompleteapi", "List Complete API", "Synthetic.");
   await ensureStatsId(API_OWNER);
   await setStripeAccount(API_OWNER, API_ACCOUNT, true);

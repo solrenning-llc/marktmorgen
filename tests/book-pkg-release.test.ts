@@ -145,7 +145,10 @@ async function book(w: World, start: number, fail: Fail) {
       throw new Error("synthetic Redis write failure");
     }
     const out = await base(batch);
-    if (!raced && cmd === "HSET" && key === w.busy) {
+    // The hold's write: a plain HSET of the diary, or the script that writes it only while the call's lock is still
+    // the writer's (claude6/calls-lock-token), whose second key is the diary.
+    const holdWritten = (cmd === "HSET" && key === w.busy) || (cmd === "EVAL" && String(key).startsWith("-- marktmorgen:call-hold-if-locked:v1\n") && batch[0]?.[4] === w.busy);
+    if (!raced && holdWritten) {
       raced = true;
       // Another tab of the same buyer counts the last session first.
       redis.pipeline = base;

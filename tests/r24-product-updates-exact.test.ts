@@ -146,3 +146,40 @@ for (const [name, reply] of unknownReleases) {
   });
 }
 
+// ---- 1.2: no stop link without its confirmed erasure note
+
+const unknownNotes: [string, unknown[] | "throw"][] = [
+  ["throws", "throw"], ["an empty answer", []], ["a short answer", [1, 0]], ["an expiry not set", [1, 0, 0]],
+  ["text", ["1", "0", "1"]], ["a null", [null, 0, 1]], ["an object", [{}, 0, 1]], ["a negative count", [1, -1, 1]],
+  ["a hole", Object.assign(new Array(3), { 0: 1, 2: 1 })],
+];
+for (const [name, reply] of unknownNotes) {
+  test(`1.2 an erasure note that answers ${name}: no stop link record holds the buyer's address`, async () => {
+    const r = await setup();
+    try {
+      await runWith(r, async (cs) => {
+        if (cs.some(isNote)) {
+          if (reply === "throw") throw new Error("synthetic erasure note failed");
+          return reply;
+        }
+        return r.original(cs);
+      });
+      assert.deepEqual(stopRecords(), [], "the record is made only after its note is confirmed");
+      assert.equal(r.batches.length, 0);
+    } finally { r.restore(); }
+  });
+}
+
+test("1.2 control: a sent update's stop link is found and deleted by the buyer's erasure", async () => {
+  const r = await setup();
+  try {
+    const sent = await advanceUpdate(r.job.id, storeForHandle, Date.now() + 20000);
+    assert.deepEqual([sent?.status, sent?.sent], ["sent", 1]);
+    const records = stopRecords();
+    assert.equal(records.length, 1);
+    assert.ok(JSON.parse(String(redis.run(["GET", records[0]]))).e === person);
+    assert.ok((await forgetNoted(r.shop.statsId, person)) >= 1);
+    assert.deepEqual(stopRecords(), [], "the erasure found the record");
+  } finally { r.restore(); }
+});
+

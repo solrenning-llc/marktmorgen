@@ -8,14 +8,18 @@
  *   - confirmed absence (GET null) stays "" and a kept address is read back as it is (healthy controls);
  *   - the two-step status is not said with no recovery address when it could not be read;
  *   - the rescue from the code page never answers "none" on an unreadable address;
- *   - getting in without the second step still tells the sign-in inbox, and still lets the person in, while the
- *     recovery address cannot be read (the notice is not lost to the error);
+ *   - getting in without the second step is refused while the recovery address cannot be read, before the waiting
+ *     login is spent or the day is set, so the owner's recovery address is never left untold of the window in which
+ *     Cancel stops it (MM-SA-19; Claude 6 on #3154); once it reads, the same waiting login gets in and both are told;
+ *   - a passkey is never removed, set to go or kept with only the sign-in inbox told because the recovery address
+ *     could not be read: the change is refused before anything is written or sent (lib/passkeys.ts);
  *   - two-step login is not turned off on its day while the address to tell cannot be read: it waits.
  *
  * Synthetic: the Redis stand-in, with one GET's reply replaced, and a fetch stub for the email provider.
  */
 import { createHash } from "node:crypto";
 import { keepRecoveryAddress, recoveryAddress } from "@/lib/recovery-address";
+import { cancelRemoval, listPasskeys, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
 import { RESET_DAYS, enterLocked, finishSetup, holdSignIn, resetIfDue, sendRescue, startSetup, twoStepOn, twoStepStatus } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { store as redis } from "./redis-stub";
@@ -114,19 +118,46 @@ async function main(): Promise<void> {
     is(`${bad.label}: not none`, await withBadRead(rescueOwner, bad, () => outcome(() => sendRescue(held, "https://example.test"))), "unknown");
   }
 
-  part("Getting in without the second step still tells the sign-in inbox while the address cannot be read");
+  part("Getting in without the second step waits while the address to tell cannot be read");
+  const OPENED = "Your Marktmorgen account was opened without two-step login";
   for (const [i, bad] of BAD.entries()) {
     const email = `locked${i}@example.com`;
-    await withTwoStepOn(email, `locked${i}.backup@example.org`);
+    const backup = `locked${i}.backup@example.org`;
+    await withTwoStepOn(email, backup);
     const held = await holdSignIn(email);
     const from = mails.length;
-    const entered = await withBadRead(email, bad, () => enterLocked(held).catch(() => null));
-    is(`${bad.label}: let in`, entered?.email ?? null, email);
+    is(`${bad.label}: refused as unknown`, await withBadRead(email, bad, () => outcome(() => enterLocked(held))), "unknown");
+    is(`${bad.label}: no day was set and nobody was told`, [(await twoStepStatus(email)).reset, mails.length - from], [0, 0]);
+    const entered = await enterLocked(held);
+    is(`${bad.label}: once it reads, the same waiting login gets in`, entered?.email ?? null, email);
     is(
-      `${bad.label}: the sign-in inbox is told`,
-      mails.slice(from).some((m) => m.to === email && m.subject === "Your Marktmorgen account was opened without two-step login"),
-      true,
+      `${bad.label}: and the sign-in inbox and the recovery address are both told`,
+      [email, backup].map((to) => mails.slice(from).some((m) => m.to === to && m.subject === OPENED)),
+      [true, true],
     );
+  }
+
+  part("A passkey change is refused, not told to the sign-in inbox alone, while the recovery address cannot be read");
+  const passkeyKey = (email: string) => `nl:pk:${sha(`nimbus-passkeys:${email}`).slice(0, 40)}`;
+  const withPasskey = (email: string, id: string) =>
+    redis.pipeline([["SET", passkeyKey(email), JSON.stringify([{ id, publicKey: "pk", counter: 0, transports: [], name: "Work laptop", createdAt: "", lastUsedAt: "", synced: false }])]]);
+  for (const [i, bad] of BAD.entries()) {
+    const email = `pk${i}@example.com`;
+    const backup = `pk${i}.backup@example.org`;
+    await keepRecoveryAddress(email, backup);
+    await withPasskey(email, "k1");
+    const from = mails.length;
+    is(`${bad.label}: removing at once is unknown`, await withBadRead(email, bad, () => outcome(() => removePasskey(email, "k1"))), "unknown");
+    is(`${bad.label}: the passkey is still there and nobody was told`, [(await listPasskeys(email)).length, mails.length - from], [1, 0]);
+    is(`${bad.label}: setting it to go is unknown`, await withBadRead(email, bad, () => outcome(() => scheduleRemovalSaid(email, "k1", SESSION))), "unknown");
+    is(`${bad.label}: nothing set and nobody told`, [await outcome(() => cancelRemoval(email, "k1", undefined)), mails.length - from], ['answered "unknown"', 0]);
+    await scheduleRemovalSaid(email, "k1", SESSION);
+    const set = mails.length;
+    is(`${bad.label}: keeping it is unknown`, await withBadRead(email, bad, () => outcome(() => cancelRemoval(email, "k1", undefined))), "unknown");
+    is(`${bad.label}: still set to go and nobody told`, [mails.length - set], [0]);
+    is(`${bad.label}: once it reads, keeping it tells both`, [await cancelRemoval(email, "k1", undefined), [email, backup].map((to) => mails.slice(set).some((m) => m.to === to && m.subject === "Your passkey stays on your Marktmorgen account"))], ["kept", [true, true]]);
+    const healthy = mails.length;
+    is(`${bad.label}: once it reads, removing it tells both`, [await removePasskey(email, "k1"), [email, backup].map((to) => mails.slice(healthy).some((m) => m.to === to && m.subject === "A passkey was removed from your Marktmorgen account"))], ["removed", [true, true]]);
   }
 
   part("Two-step login is not turned off on its day while the address to tell cannot be read");

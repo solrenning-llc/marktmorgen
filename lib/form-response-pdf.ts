@@ -14,7 +14,7 @@ import { PDFDocument, type PDFFont, type PDFPage, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { PageTagger } from "@/lib/tagged-pdf";
 import { canDraw, loadFonts } from "@/lib/certificate-pdf";
-import { answerText, isScored, type FormDef, type FormResponse } from "@/lib/forms";
+import { answerText, isScored, type Answers, type FormDef, type FormField, type FormResponse } from "@/lib/forms";
 
 const W = 612;
 const H = 792;
@@ -50,12 +50,24 @@ export function wrap(font: Pick<PDFFont, "widthOfTextAtSize">, text: string, siz
 
 export type ResponseSheet = { form: FormDef; response: FormResponse; storeName: string; sentLine: string; lang: string };
 
+function responseAnswerText(field: FormField, given: Answers[string] | undefined): string {
+  const text = answerText(field, given);
+  if (field.type === "choice" || field.type === "choices") {
+    const saved = Array.isArray(given) ? given : typeof given === "string" && given !== "" ? [given] : [];
+    if (saved.some(id => !field.options.some(option => option.id === id))) {
+      const warning = "One or more saved choices are no longer listed in the current form.";
+      return text ? `${text}\n${warning}` : warning;
+    }
+  }
+  return text || "No answer.";
+}
+
 /** The texts the file would draw, in order: what `canDraw` is asked about before anything is made. */
 export function responseTexts(sheet: ResponseSheet): { role: "H1" | "H2" | "P"; text: string }[] {
   const { form, response } = sheet;
   const out: { role: "H1" | "H2" | "P"; text: string }[] = [{ role: "H1", text: form.name }, { role: "P", text: sheet.sentLine }];
   for (const field of form.fields) {
-    out.push({ role: "H2", text: field.label }, { role: "P", text: answerText(field, response.answers[field.id]) || "No answer." });
+    out.push({ role: "H2", text: field.label }, { role: "P", text: responseAnswerText(field, response.answers[field.id]) });
   }
   const outcome = form.outcomes.find((o) => o.id === response.outcome);
   if (outcome) out.push({ role: "H2", text: "Result" }, { role: "P", text: outcome.title });

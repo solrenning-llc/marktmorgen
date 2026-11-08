@@ -319,7 +319,12 @@ async function dropOldestRequests(id: string, to: string, room: DataStore): Prom
   const past = stringList(repliesFor(await redisPipeline([["ZREVRANGE", askedKey(id, to), MAX_REQUESTS - 1, -1]]), 1)?.[0]);
   if (!past) throw new UnknownReplyError(what);
   if (!past.length) return;
-  const pairs = past.filter((pair) => otherIn(pair, to) !== "");
+  // A pair also in their inbox was accepted (inside a follow-up's window, which
+  // put its line back): only that stray line goes, never the conversation they
+  // accepted. Each place read exactly, a score in text or none.
+  const where = repliesFor(await redisPipeline(past.map((pair) => ["ZSCORE", inboxKey(id, to), pair])), past.length);
+  if (!where || where.some((reply) => !scoreOrNone(reply))) throw new UnknownReplyError(what);
+  const pairs = past.filter((pair, i) => where[i] === null && otherIn(pair, to) !== "");
   const commands: (string | number)[][] = pairs.flatMap((pair) => [
     ["DEL", chatKey(id, pair), readKey(id, pair)],
     ["ZREM", inboxKey(id, otherIn(pair, to)), pair],
@@ -437,15 +442,18 @@ export type Thread = {
  */
 export async function thread(id: string, who: string, pair: string): Promise<Thread | null> {
   if (!otherIn(pair, who)) return null;
-  const [raw, asked] = await redisPipeline([
+  const [raw, asked, listed] = await redisPipeline([
     ["LRANGE", chatKey(id, pair), -MESSAGE_PAGE, -1],
     ["ZSCORE", askedKey(id, who), pair],
+    ["ZSCORE", inboxKey(id, who), pair],
   ]);
   const messages = (Array.isArray(raw) ? raw : []).map(parseMessage).filter((m): m is Message => m !== null);
   if (!messages.length) return null;
   const last = messages[messages.length - 1];
   await redisPipeline([["HSET", readKey(id, pair), who, last.at]]).catch(() => {});
-  return { messages, pending: asked !== null && asked !== undefined };
+  // Pending only while it waits and is not in their inbox: one accepted while a
+  // follow-up was on its way can sit in both lists, and it was accepted.
+  return { messages, pending: asked !== null && asked !== undefined && (listed === null || listed === undefined) };
 }
 
 /** Everything a conversation leaves behind, for when a member is removed. */

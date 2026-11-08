@@ -38,6 +38,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
@@ -149,8 +150,12 @@ export function updateReadUnits(store: Pick<Store, "stripeAccountId" | "paypalSe
   return (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales, paypalRefunds: 0 }));
 }
 
-/** The time written by a claim: a whole number of seconds, as SET wrote it. */
-const SECONDS_TEXT = /^(0|[1-9][0-9]*)$/;
+/**
+ * The time written by a claim: a whole number of seconds, then a point and the
+ * nine random digits that make the claim this press's own (claimValue); or the
+ * whole seconds alone, as claims written before that still read.
+ */
+const SECONDS_TEXT = /^(0|[1-9][0-9]*)(?:\.[0-9]{9})?$/;
 
 /**
  * When this product's buyers may next be told, in seconds; 0 when they may now.
@@ -164,7 +169,8 @@ export async function nextUpdateAt(store: Store, productId: string): Promise<num
   if (!reply) throw new UnknownReplyError("the last product update time");
   const last = reply[0];
   if (last === null) return 0;
-  const at = typeof last === "string" && SECONDS_TEXT.test(last) ? Number(last) : NaN;
+  const seconds = typeof last === "string" ? SECONDS_TEXT.exec(last)?.[1] : undefined;
+  const at = seconds === undefined ? NaN : Number(seconds);
   if (!Number.isSafeInteger(at)) throw new UnknownReplyError("the last product update time");
   return at ? at + UPDATE_GAP_SECONDS : 0;
 }
@@ -188,12 +194,19 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
   }
   const buyers = buyersFrom(rows, saleHandles(store), product.id).slice(0, MAX_UPDATE_RECIPIENTS);
   if (buyers.length === 0) return { ok: false, reason: "none" };
-  // Taken before anything is written, so two presses make one send. "OK" is
-  // ours and null is another press's; any other reply is unknown and throws,
-  // so no job is written on it (rule 24).
-  const claim = repliesFor(await redisPipeline([["SET", lastKey(store.statsId, product.id), String(nowSeconds), "NX", "EX", UPDATE_GAP_SECONDS]]), 1);
-  if (!claim || (claim[0] !== "OK" && claim[0] !== null)) throw new UnknownReplyError("the product update claim");
-  if (claim[0] === null) return { ok: false, reason: "soon", until: (await nextUpdateAt(store, product.id)) || nowSeconds + UPDATE_GAP_SECONDS };
+  // Taken before anything is written, so two presses make one send, with a
+  // value only this press writes (lib/claim-mark.ts): a reply in no known shape
+  // is read back, and a claim still unknown writes no job and is let go, only
+  // if it holds this press's value, so a claim that landed never holds the gap
+  // for 7 days with nothing sent (rule 24; Claude 2 on #3235).
+  const claimKey = lastKey(store.statsId, product.id);
+  const mine = claimValue(nowSeconds);
+  const claim = await claimMark(claimKey, UPDATE_GAP_SECONDS, mine);
+  if (claim === "unknown") {
+    await releaseMark(claimKey, mine);
+    throw new UnknownReplyError("the product update claim");
+  }
+  if (claim === "taken") return { ok: false, reason: "soon", until: (await nextUpdateAt(store, product.id)) || nowSeconds + UPDATE_GAP_SECONDS };
   const job: UpdateJob = {
     id: randomBytes(12).toString("hex"),
     handle: store.handle,
@@ -217,8 +230,59 @@ export async function startUpdate(store: Store, product: Listing, rawNote: unkno
     ["SET", latestKey(store.statsId, product.id), job.id, "EX", KEEP_SECONDS],
     ["SADD", QUEUE, job.id],
   );
-  await redisPipeline(commands);
+  const written = await redisPipeline(commands).catch(() => null);
+  if (!jobWritten(written, commands)) {
+    // Some of it may have landed: the job is taken back before the claim is let go, so a retry never sends twice;
+    // while a send of it may be under way, the claim is kept (Claude 2 on #3235, LOW 1).
+    if (await takeBack(job.id)) {
+      await releaseMark(latestKey(store.statsId, product.id), job.id);
+      await releaseMark(claimKey, mine);
+    }
+    throw new UnknownReplyError("the product update job");
+  }
   return { ok: true, job };
+}
+
+/**
+ * The job's pipeline answered exactly as it was written (rule 24): DEL 0 or 1, each RPUSH the list's length so far,
+ * EXPIRE 1, both SETs "OK", SADD 1 (a new random id).
+ */
+function jobWritten(reply: unknown, commands: (string | number)[][]): boolean {
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(reply, commands.length);
+  } catch {
+    return false;
+  }
+  if (!replies) return false;
+  let length = 0;
+  return commands.every((command, i) => {
+    const got = replies[i];
+    switch (command[0]) {
+      case "DEL": return got === 0 || got === 1;
+      case "RPUSH": length += command.length - 2; return got === length;
+      case "EXPIRE": return got === 1;
+      case "SET": return got === "OK";
+      case "SADD": return got === 1;
+      default: return false;
+    }
+  });
+}
+
+/**
+ * Takes back a job whose writes could not be confirmed: under its own send lock, so no send of it is under way, it
+ * leaves the queue and its record and addresses are deleted. True only when each step answered exactly; then nothing
+ * of it can go out. The lock is left to run out (90 s), so a run still holding the id finds no job and sends nothing.
+ */
+async function takeBack(id: string): Promise<boolean> {
+  try {
+    const lock = repliesFor(await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]), 1);
+    if (!lock || lock[0] !== "OK") return false;
+    const gone = repliesFor(await redisPipeline([["SREM", QUEUE, id], ["DEL", jobKey(id), toKey(id)]]), 2);
+    return !!gone && (gone[0] === 0 || gone[0] === 1) && (gone[1] === 0 || gone[1] === 1 || gone[1] === 2);
+  } catch {
+    return false;
+  }
 }
 
 export async function readUpdateJob(id: string): Promise<UpdateJob | null> {

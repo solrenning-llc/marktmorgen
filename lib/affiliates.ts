@@ -74,7 +74,7 @@
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { type Paid, paypalPaymentId, readPayPalRefunds, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
+import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -2364,7 +2364,7 @@ export async function notePartners(
  * the share it had when the buyer paid, and to every partner who shares in
  * the product. Once per order, whichever of the return page and the sweep
  * hands it over first. A refund in full on PayPal takes it back in the book
- * (readBook, through readPayPalRefunds).
+ * (readBook, through readPayPalRefundsWithCoverage).
  */
 export async function creditPayPalSale(store: Store, paid: Paid, title: string): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
@@ -2963,8 +2963,30 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
-      // PayPal's refunds in full, named by the payment as the book names it.
-      for (const r of await readPayPalRefunds(store.statsId, since)) refunds.set(paypalPaymentId(r.capture), (refunds.get(paypalPaymentId(r.capture)) ?? 0) + r.cents);
+      // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
+      // sale, one in another currency than its sale's means nothing in its cents, and one whose cents are not a
+      // whole positive amount, or not its sale's whole amount (a PayPal refund here is in full), would count as a
+      // refund of less: each leaves what is owed unknown (refundsChecked), never a refund of nothing, so no payout
+      // is made on it (rule 24, as #3189 for Stripe). So does a reading that did not cover every refund since the
+      // oldest line (more listed than PAYPAL_REFUNDS_READ, or a listed one whose record is gone): a refund past the
+      // cut is never paid on. A refund is in full, so the same payment listed twice counts once.
+      const paypalSales = new Map<string, { currency: string; total: number }[]>();
+      for (const r of everything) {
+        if (r.pi.startsWith("paypal:")) paypalSales.set(r.pi, [...(paypalSales.get(r.pi) ?? []), { currency: r.currency.toLowerCase(), total: r.total }]);
+      }
+      const paypalSeen = new Set<string>();
+      const paypal = await readPayPalRefundsWithCoverage(store.statsId, since);
+      if (paypal.partial) refundsChecked = false;
+      for (const r of paypal.rows) {
+        const named = typeof r.capture === "string" && r.capture !== "";
+        const sales = named ? paypalSales.get(paypalPaymentId(r.capture)) : undefined;
+        const readable = named && typeof r.currency === "string" && Number.isSafeInteger(r.cents) && r.cents > 0;
+        if (!readable || (sales ?? []).some((sale) => sale.currency !== r.currency.toLowerCase() || sale.total !== r.cents)) refundsChecked = false;
+        else if (!paypalSeen.has(r.capture)) {
+          paypalSeen.add(r.capture);
+          refunds.set(paypalPaymentId(r.capture), (refunds.get(paypalPaymentId(r.capture)) ?? 0) + r.cents);
+        }
+      }
     } catch (error) {
       console.error("reading refunds for the affiliate book failed", error);
       refundsChecked = false;

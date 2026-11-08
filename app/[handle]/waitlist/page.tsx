@@ -46,11 +46,12 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
   const status = read("status");
   if (!token && !leave && !status) redirect(`/@${store.handle}`);
   // Switched off after notices about its content (lib/takedown.ts), as the store's own page;
-  // the way to take an address off the list, and what it says after, stay open.
-  if (store.suspended && !leave && status !== "left") return <StoreResting store={store} suspended />;
+  // the way to take an address off the list, and what it says after (taken off, or still on it), stay open.
+  if (store.suspended && (token || (!leave && status !== "left" && status !== "expired"))) return <StoreResting store={store} suspended />;
 
   const grant = token && WAIT_TOKEN.test(token) ? await readWaitToken(token) : leave && WAIT_TOKEN.test(leave) ? await readWaitToken(leave) : null;
-  const productId = grant?.p ?? read("product");
+  // Switched off, a product is named only by a real link to leave, never by the address (anyone may have its id).
+  const productId = store.suspended ? (grant?.k === "leave" ? grant.p : "") : grant?.p ?? read("product");
   const listed = productId ? await readListing(store, productId) : null;
   // A draft is named only through its own wait-list link; the product in the address alone is not known here (MM-SA-30).
   const product = listed && (!listed.hidden || grant?.p === listed.id) ? listed : null;
@@ -135,7 +136,7 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
         <div className="st-card p-7 sm:p-10">
           {body}
           <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2">
-            {product && !product.hidden ? (
+            {product && !product.hidden && !store.suspended ? (
               <Link href={productPath(store, product)} className="st-footer-link text-sm font-semibold">
                 {said.w.seeStore(product.title)}
               </Link>
@@ -143,7 +144,7 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
             <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
               {said.w.backTo(store.name)}
             </Link>
-            <StoreTracking store={store} presence event={status === "sent" && product ? { type: "lead", productId: product.id, id: leadIdOf(query.e) } : null} />
+            {store.suspended ? null : <StoreTracking store={store} presence event={status === "sent" && product ? { type: "lead", productId: product.id, id: leadIdOf(query.e) } : null} />}
           </div>
         </div>
       </main>

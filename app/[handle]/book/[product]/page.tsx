@@ -335,7 +335,8 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
           <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {w.backTo(store.name)}
           </Link>
-          <StoreTracking store={store} presence />
+          {/* Switched off after a report (lib/takedown.ts): what stays open carries no ad pixels and counts no visit. */}
+          {store.suspended ? null : <StoreTracking store={store} presence />}
         </div>
       </main>
     </div>

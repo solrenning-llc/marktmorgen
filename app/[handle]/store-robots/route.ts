@@ -17,6 +17,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ han
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)).catch(() => null) : null;
   // A store switched off after a report (lib/takedown.ts) answers as its sitemap does: crawlers then
   // reach its pages, which ask not to be indexed, rather than keep addresses they may no longer read.
+  // storeRobots' own "Disallow: /" for a suspended store (lib/store-sitemap.ts) is not reached from here.
   if (store?.suspended) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   if (!store) return new Response("User-agent: *\nDisallow: /\n", { headers: { "Content-Type": "text/plain; charset=utf-8" } });
   return new Response(storeRobots(store), {

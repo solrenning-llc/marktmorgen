@@ -114,8 +114,9 @@ export async function offerPartnership(
 
 /**
  * Every offer waiting for this creator, newest first. A key that is not there
- * is no offers; a reply in any other shape throws UnknownReplyError (rule 24),
- * never read as "none", so an offer is never hidden by a failed read and the
+ * is no offers; a reply in any other shape, or a row that is not one this
+ * code wrote under its own id, throws UnknownReplyError (rule 24), never read
+ * as "none" or skipped, so an offer is never hidden by a failed read and the
  * cap in offerPartnership is never checked against a list that was not read.
  */
 export async function waitingFor(email: string): Promise<PartnerInvite[]> {
@@ -123,8 +124,11 @@ export async function waitingFor(email: string): Promise<PartnerInvite[]> {
   const flat = stringList(repliesFor(await redisPipeline([["HGETALL", inviteKey(email)]]), 1)?.[0]);
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the partnerships offered to a creator");
   return pairs(flat)
-    .map(([, raw]) => parseInvite(raw))
-    .filter((i): i is PartnerInvite => i !== null)
+    .map(([field, raw]) => {
+      const invite = parseInvite(raw);
+      if (!invite || invite.id !== field) throw new UnknownReplyError("a partnership offered to a creator");
+      return invite;
+    })
     .sort((a, b) => b.at - a.at);
 }
 

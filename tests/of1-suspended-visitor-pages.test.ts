@@ -12,7 +12,7 @@
  * visitor (the program's terms, applying, joining after an order) and keeps
  * an affiliate's own page and the emailed link that signs one back in; the
  * store's layout (app/[handle]/layout.tsx) puts nothing of the store in the
- * head (manifest, name, icons, colour), as for an address with no store.
+ * head (manifest, name, icons, theme color), as for an address with no store.
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
@@ -175,7 +175,7 @@ async function main(): Promise<void> {
   answering(new NextRequest(`https://marktmorgen.com/${handle}/affiliates`));
   is("the affiliate page's title does not name the store", String((await affiliatesMeta({ params: Promise.resolve({ handle }) })).title ?? "").includes("Glaze Works"), false);
   const inHead = await head();
-  is("the store's layout puts nothing of the store in the head: no manifest, name, icons or colour", [inHead.includes("manifest"), inHead.includes("Glaze Works"), inHead.includes("icon"), inHead.includes("themeColor")], [false, false, false, false]);
+  is("the store's layout puts nothing of the store in the head: no manifest, name, icons or theme color", [inHead.includes("manifest"), inHead.includes("Glaze Works"), inHead.includes("icon"), inHead.includes("themeColor")], [false, false, false, false]);
 
   part("What a person already has stays open");
   const waitlist = pages.find((p) => p.path === "/waitlist")!;

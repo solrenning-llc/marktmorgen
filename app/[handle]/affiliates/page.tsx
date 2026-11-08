@@ -20,6 +20,7 @@ import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import {
   MAX_NOTE_LENGTH,
   affiliateCookieName,
+  affiliateByEmail,
   affiliateForSession,
   affiliateLink,
   affiliatesOn,
@@ -100,8 +101,14 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   // An affiliate's invitation link (lib/affiliates.ts recruitLink): checked when the application is sent.
   const by = typeof query.by === "string" && AFFILIATE_CODE_PATTERN.test(query.by) && store.affiliates.secondTier > 0 ? query.by : "";
   const order = typeof query.order === "string" && /^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(query.order) ? query.order : "";
-  const linkFor = token ? await linkEmail(store, token) : null;
+  const emailed = token ? await linkEmail(store, token) : null;
+  // A store switched off after notices about its content (lib/takedown.ts) takes no new affiliate: an emailed
+  // link counts only when it signs in one it already has, never when opening it would make an application.
+  const linkFor = emailed && store.suspended && !(await affiliateByEmail(store, emailed)) ? null : emailed;
   const affiliate = await affiliateForSession(store, (await cookies()).get(affiliateCookieName(store.handle))?.value);
+  // Switched off, as the store's own page, for a visitor: the program's terms, applying and joining after an
+  // order close. An affiliate it already has keeps their own page (their link, figures and payouts).
+  if (store.suspended && !affiliate && !linkFor) return <StoreResting store={store} suspended />;
   // Paid for before anything that grows with the store is read (lib/affiliate-page-admission.ts):
   // past the window, the resting page, and nothing more is read.
   // An approved affiliate's figures come from the program's book, worked out for all its affiliates

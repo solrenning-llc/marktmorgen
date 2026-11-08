@@ -31,10 +31,17 @@ const sent: { to: string; subject: string; text: string }[] = [];
 const checkouts: URLSearchParams[] = [];
 /** The email service answering with an error, as it may for a moment: 0 when it takes the email. */
 let mailDown = 0;
+/** Run inside the email service's answer, before it answers: what happens while a send is in flight. */
+let duringSend: (() => Promise<void>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
   if (url.hostname === "api.resend.com") {
+    if (duringSend) {
+      const run = duringSend;
+      duringSend = null;
+      await run();
+    }
     if (mailDown) return new Response("unavailable", { status: mailDown });
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     sent.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
@@ -211,6 +218,23 @@ async function main(): Promise<void> {
   is("erasing the person takes it out of the queue with their marks", [erased >= 2, (await waitingFor("gone@example.com")).length], [true, 0]);
   await sendWelcomeReminders(Date.now() + 10_000, goneAt + 301);
   is("and nothing is sent to them", to("gone@example.com"), 0);
+
+  // Claude 3 on #3214: the person is erased while their reminder's send is in flight, and the send then fails. The
+  // reminder is off the queue during the send, so the erasure finds nothing there and says it erased; the put-back
+  // must not bring the person's address back into the queue after that.
+  const raceAt = await scheduled("race@example.com");
+  let erasedDuring = -1;
+  duringSend = async () => {
+    erasedDuring = await forgetWelcomePerson(store.statsId, "race@example.com");
+  };
+  mailDown = 400;
+  await sendWelcomeReminders(Date.now() + 10_000, raceAt + 1);
+  mailDown = 0;
+  duringSend = null;
+  is("the erasure ran during the send and said it erased", erasedDuring >= 1, true);
+  is("after the erasure answered, no reminder holding their address waits in the queue", (await waitingFor("race@example.com")).length, 0);
+  await sendWelcomeReminders(Date.now() + 10_000, raceAt + 301);
+  is("and nothing is sent to them after", to("race@example.com"), 0);
 
   part("The queue's read, in its exact shape (CX-123 rule 24)");
   const realPipeline = redis.pipeline.bind(redis);

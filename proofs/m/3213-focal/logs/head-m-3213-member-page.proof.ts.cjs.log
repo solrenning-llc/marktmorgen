@@ -1,0 +1,66 @@
+
+Executable envelopes are refused before any getter or Proxy trap
+  ok    outer hole: unknown
+  ok    outer hole: no executable envelope read
+  ok    page hole: unknown
+  ok    page hole: no executable envelope read
+  ok    row hole: unknown
+  ok    row hole: no executable envelope read
+  ok    outer getter: unknown
+  ok    outer getter: no executable envelope read
+  ok    page getter: unknown
+  ok    page getter: no executable envelope read
+  ok    row getter: unknown
+  ok    row getter: no executable envelope read
+  ok    outer Proxy: unknown
+  ok    outer Proxy: no executable envelope read
+  ok    page Proxy: unknown
+  ok    page Proxy: no executable envelope read
+  ok    rows Proxy: unknown
+  ok    rows Proxy: no executable envelope read
+  ok    extra outer slot: unknown
+  ok    extra outer slot: no executable envelope read
+  ok    fractional count: unknown
+  ok    fractional count: no executable envelope read
+  ok    unsafe count: unknown
+  ok    unsafe count: no executable envelope read
+
+A healthy first page cannot hide a malformed second page
+  ok    walk refuses instead of returning its first member
+  ok    reach refuses instead of certifying one
+  ok    queue refuses the incomplete walk
+  ok    no announcement job, recipient list or queue entry is written
+  ok    real studio states that the full member list did not load
+  ok    real studio does not display the first page as a complete roster
+
+POST uses real owner session, persists a real post, and schedules no provider work here
+M_POST_OBSERVATION {"kind":"malformed","status":303,"location":"https://marktmorgen.com/@m3213probe/community/post/2124ba396bb8?n=notemailed","added":1,"saved":true,"jobs":0,"after":0}
+  ok    malformed: redirect returned
+  ok    malformed: exactly one real post saved
+  ok    malformed: no announcement job or after-send scheduled
+  ok    malformed: feedback admits the post was saved and not emailed
+  ok    malformed: feedback never claims nothing changed
+M_POST_OBSERVATION {"kind":"transport","status":303,"location":"https://marktmorgen.com/@m3213probe/community/post/afbfca8093b5?n=notemailed","added":1,"saved":true,"jobs":0,"after":0}
+  ok    transport: redirect returned
+  ok    transport: exactly one real post saved
+  ok    transport: no announcement job or after-send scheduled
+  ok    transport: feedback admits the post was saved and not emailed
+  ok    transport: feedback never claims nothing changed
+M_POST_OBSERVATION {"kind":"healthy","status":303,"location":"https://marktmorgen.com/@m3213probe/community/post/3dba45387722?n=announced","added":1,"saved":true,"jobs":1,"after":1}
+  ok    healthy: one post, one queued job and one deferred send
+
+41 checks, all passing.
+M_ADMISSIONS {"nested":131,"pipeline":113,"mockHTTP":0}
+studio community: the member list could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:105495:80)
+    at async roster (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:117455:22)
+    at async Promise.all (index 1)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:117465:52)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:121429:18)
+studio community: the announcement reach could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:105495:80)
+    at async mailableMembers (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:105508:31)
+    at async announcementReach (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:112480:11)
+    at async Promise.all (index 4)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:117465:52)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-m-3213-member-page.proof.ts.cjs:121429:18)

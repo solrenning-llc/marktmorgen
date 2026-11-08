@@ -1,0 +1,38 @@
+
+Search reads words, not letters
+  ok    accents fold, so café finds cafe
+  ok    case and punctuation go
+  ok    words too common to narrow anything are dropped
+  ok    a single letter carries nothing
+  ok    a very long run is a hash, not a word
+  ok    a query does not repeat itself
+  ok    a query of only common words asks for nothing
+
+A mention names one person, or nobody
+  ok    a name becomes a handle
+  ok    accents fold there too
+  ok    a name too short gives none
+  ok    the creator's cannot be taken
+  ok    the handles in a text, once each
+  ok    at most ten are acted on
+  ok    an email address is not a mention
+  ok    one at the start of a sentence counts
+  ok    one after a bracket counts
+  ok    only a handle that names somebody is marked
+  ok    one that names nobody stays as written
+
+A poll counts once, and can be taken back
+  ok    fewer than two answers is not a poll
+  ok    empty answers are left out
+  ok    twelve is the most it holds
+  ok    one answer means one
+  ok    several means several
+  ok    an answer that is not there is ignored
+  ok    choosing nothing takes the vote back
+  ok    no end date never closes
+  ok    past its end it is closed
+  ok    the closing line reads in days
+  ok    and in the singular
+
+29 checks, all passing.
+M_ADMISSIONS {"nested":0,"pipeline":0,"mockHTTP":0}

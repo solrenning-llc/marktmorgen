@@ -1,0 +1,131 @@
+
+announcement: unconfirmed reader evidence must preserve progress and retry position
+  ok    missing envelope: no completion or invented progress
+  ok    missing envelope: the list and pending queue survive
+  ok    missing envelope: visible retry note without claiming delivery
+  ok    missing envelope: one bounded recipient read only
+  ok    missing envelope: a confirmed reread resumes the same complete batch
+  ok    extra envelope: no completion or invented progress
+  ok    extra envelope: the list and pending queue survive
+  ok    extra envelope: visible retry note without claiming delivery
+  ok    extra envelope: one bounded recipient read only
+  ok    extra envelope: a confirmed reread resumes the same complete batch
+  ok    null list: no completion or invented progress
+  ok    null list: the list and pending queue survive
+  ok    null list: visible retry note without claiming delivery
+  ok    null list: one bounded recipient read only
+  ok    null list: a confirmed reread resumes the same complete batch
+  ok    empty list with readers still due: no completion or invented progress
+  ok    empty list with readers still due: the list and pending queue survive
+  ok    empty list with readers still due: visible retry note without claiming delivery
+  ok    empty list with readers still due: one bounded recipient read only
+  ok    empty list with readers still due: a confirmed reread resumes the same complete batch
+  ok    truncated list: no completion or invented progress
+  ok    truncated list: the list and pending queue survive
+  ok    truncated list: visible retry note without claiming delivery
+  ok    truncated list: one bounded recipient read only
+  ok    truncated list: a confirmed reread resumes the same complete batch
+  ok    oversized list: no completion or invented progress
+  ok    oversized list: the list and pending queue survive
+  ok    oversized list: visible retry note without claiming delivery
+  ok    oversized list: one bounded recipient read only
+  ok    oversized list: a confirmed reread resumes the same complete batch
+  ok    duplicate readers: no completion or invented progress
+  ok    duplicate readers: the list and pending queue survive
+  ok    duplicate readers: visible retry note without claiming delivery
+  ok    duplicate readers: one bounded recipient read only
+  ok    duplicate readers: a confirmed reread resumes the same complete batch
+  ok    non-string reader: no completion or invented progress
+  ok    non-string reader: the list and pending queue survive
+  ok    non-string reader: visible retry note without claiming delivery
+  ok    non-string reader: one bounded recipient read only
+  ok    non-string reader: a confirmed reread resumes the same complete batch
+  ok    invalid member key: no completion or invented progress
+  ok    invalid member key: the list and pending queue survive
+  ok    invalid member key: visible retry note without claiming delivery
+  ok    invalid member key: one bounded recipient read only
+  ok    invalid member key: a confirmed reread resumes the same complete batch
+  ok    sparse list: no completion or invented progress
+  ok    sparse list: the list and pending queue survive
+  ok    sparse list: visible retry note without claiming delivery
+  ok    sparse list: one bounded recipient read only
+  ok    sparse list: a confirmed reread resumes the same complete batch
+  ok    transport exception: no completion or invented progress
+  ok    transport exception: the list and pending queue survive
+  ok    transport exception: visible retry note without claiming delivery
+  ok    transport exception: one bounded recipient read only
+  ok    transport exception: a confirmed reread resumes the same complete batch
+
+announcement: an unread later batch must keep the confirmed earlier batch
+  ok    later unread batch preserves confirmed progress only
+  ok    later unread batch preserves the complete original list
+  ok    retry resumes at the later batch and never resends the first
+  ok    confirmed readers who were removed are skipped without being emailed
+  ok    confirmed final short batch preserves earlier progress
+
+event: unconfirmed reader evidence must preserve progress and retry position
+  ok    missing envelope: no completion or invented progress
+  ok    missing envelope: the list and pending queue survive
+  ok    missing envelope: visible retry note without claiming delivery
+  ok    missing envelope: one bounded recipient read only
+  ok    missing envelope: a confirmed reread resumes the same complete batch
+  ok    extra envelope: no completion or invented progress
+  ok    extra envelope: the list and pending queue survive
+  ok    extra envelope: visible retry note without claiming delivery
+  ok    extra envelope: one bounded recipient read only
+  ok    extra envelope: a confirmed reread resumes the same complete batch
+  ok    null list: no completion or invented progress
+  ok    null list: the list and pending queue survive
+  ok    null list: visible retry note without claiming delivery
+  ok    null list: one bounded recipient read only
+  ok    null list: a confirmed reread resumes the same complete batch
+  ok    empty list with readers still due: no completion or invented progress
+  ok    empty list with readers still due: the list and pending queue survive
+  ok    empty list with readers still due: visible retry note without claiming delivery
+  ok    empty list with readers still due: one bounded recipient read only
+  ok    empty list with readers still due: a confirmed reread resumes the same complete batch
+  ok    truncated list: no completion or invented progress
+  ok    truncated list: the list and pending queue survive
+  ok    truncated list: visible retry note without claiming delivery
+  ok    truncated list: one bounded recipient read only
+  ok    truncated list: a confirmed reread resumes the same complete batch
+  ok    oversized list: no completion or invented progress
+  ok    oversized list: the list and pending queue survive
+  ok    oversized list: visible retry note without claiming delivery
+  ok    oversized list: one bounded recipient read only
+  ok    oversized list: a confirmed reread resumes the same complete batch
+  ok    duplicate readers: no completion or invented progress
+  ok    duplicate readers: the list and pending queue survive
+  ok    duplicate readers: visible retry note without claiming delivery
+  ok    duplicate readers: one bounded recipient read only
+  ok    duplicate readers: a confirmed reread resumes the same complete batch
+  ok    non-string reader: no completion or invented progress
+  ok    non-string reader: the list and pending queue survive
+  ok    non-string reader: visible retry note without claiming delivery
+  ok    non-string reader: one bounded recipient read only
+  ok    non-string reader: a confirmed reread resumes the same complete batch
+  ok    invalid member key: no completion or invented progress
+  ok    invalid member key: the list and pending queue survive
+  ok    invalid member key: visible retry note without claiming delivery
+  ok    invalid member key: one bounded recipient read only
+  ok    invalid member key: a confirmed reread resumes the same complete batch
+  ok    sparse list: no completion or invented progress
+  ok    sparse list: the list and pending queue survive
+  ok    sparse list: visible retry note without claiming delivery
+  ok    sparse list: one bounded recipient read only
+  ok    sparse list: a confirmed reread resumes the same complete batch
+  ok    transport exception: no completion or invented progress
+  ok    transport exception: the list and pending queue survive
+  ok    transport exception: visible retry note without claiming delivery
+  ok    transport exception: one bounded recipient read only
+  ok    transport exception: a confirmed reread resumes the same complete batch
+
+event: an unread later batch must keep the confirmed earlier batch
+  ok    later unread batch preserves confirmed progress only
+  ok    later unread batch preserves the complete original list
+  ok    retry resumes at the later batch and never resends the first
+  ok    confirmed readers who were removed are skipped without being emailed
+  ok    confirmed final short batch preserves earlier progress
+
+120 checks, all passing.
+M_ADMISSIONS {"nested":474,"pipeline":0,"mockHTTP":0}

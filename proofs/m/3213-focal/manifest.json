@@ -1,0 +1,62 @@
+[
+  {
+    "file": "before-m-3213-member-page.proof.ts.cjs.log",
+    "sha256": "656cf47eb93dcb1248a1b762b15f327f644885ae628358a3a4a880e33736392b",
+    "result": [
+      "41 checks, 2 failing."
+    ],
+    "admissions": [
+      "{\"nested\":131,\"pipeline\":113,\"mockHTTP\":0}"
+    ]
+  },
+  {
+    "file": "head-community-mail-read-evidence.test.ts.cjs.log",
+    "sha256": "33dd4cded8d8ab35a41279870164ed5a2ed1a0f88a46a3a7de932896ac485b84",
+    "result": [
+      "120 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":474,\"pipeline\":0,\"mockHTTP\":0}"
+    ]
+  },
+  {
+    "file": "head-community-manage-unknown.test.ts.cjs.log",
+    "sha256": "c663227055a385f56714a7a5ba83904e28c0b86156ae2a0bf9c272951318b603",
+    "result": [
+      "27 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":392,\"pipeline\":356,\"mockHTTP\":0}"
+    ]
+  },
+  {
+    "file": "head-community-member-page-exact.test.ts.cjs.log",
+    "sha256": "da3b540f8a8cf7d8e0c1ff90e71bba5a70389bff9f9e2aa5a13c5d8342a976d6",
+    "result": [
+      "120 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":131,\"pipeline\":119,\"mockHTTP\":0}"
+    ]
+  },
+  {
+    "file": "head-community-words.test.ts.cjs.log",
+    "sha256": "05f11abf4c4ea5c8869361c4ac281f35a9bd1e5a080f8e30646814676260a268",
+    "result": [
+      "29 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":0,\"pipeline\":0,\"mockHTTP\":0}"
+    ]
+  },
+  {
+    "file": "head-m-3213-member-page.proof.ts.cjs.log",
+    "sha256": "082da3afaf0f013a0e8f9a70bcf83add5b48bd53719f31a5536f150374ba0349",
+    "result": [
+      "41 checks, all passing."
+    ],
+    "admissions": [
+      "{\"nested\":131,\"pipeline\":113,\"mockHTTP\":0}"
+    ]
+  }
+]

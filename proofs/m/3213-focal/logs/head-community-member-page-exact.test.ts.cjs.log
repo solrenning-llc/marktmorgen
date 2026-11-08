@@ -1,0 +1,197 @@
+
+Confirmed empty community: no members, the end, a count of 0
+  ok    an empty community reads as empty and ended
+  ok    nobody to email in an empty community
+
+Healthy page: the member, the end of the list, the count
+  ok    healthy: one member, cursor 0, total 1
+  ok    a numeric cursor 0 is the end, as Redis may send it
+  ok    a text cursor of digits is the next page
+  ok    healthy: one member asked for announcements
+
+lib/community.ts memberPage and what walks it: a page in another shape is unknown
+  ok    memberPage, no reply at all: unknown, never an empty or last page
+  ok    mailableMembers, no reply at all: unknown, never fewer members
+  ok    announcementReach, no reply at all: unknown, never a smaller count
+  ok    API members, no reply at all: unknown (the route answers 502), never a last page
+  ok    memberPage, the HSCAN reply alone: unknown, never an empty or last page
+  ok    mailableMembers, the HSCAN reply alone: unknown, never fewer members
+  ok    announcementReach, the HSCAN reply alone: unknown, never a smaller count
+  ok    API members, the HSCAN reply alone: unknown (the route answers 502), never a last page
+  ok    memberPage, a null page: unknown, never an empty or last page
+  ok    mailableMembers, a null page: unknown, never fewer members
+  ok    announcementReach, a null page: unknown, never a smaller count
+  ok    API members, a null page: unknown (the route answers 502), never a last page
+  ok    memberPage, a number for the page: unknown, never an empty or last page
+  ok    mailableMembers, a number for the page: unknown, never fewer members
+  ok    announcementReach, a number for the page: unknown, never a smaller count
+  ok    API members, a number for the page: unknown (the route answers 502), never a last page
+  ok    memberPage, the cursor alone: unknown, never an empty or last page
+  ok    mailableMembers, the cursor alone: unknown, never fewer members
+  ok    announcementReach, the cursor alone: unknown, never a smaller count
+  ok    API members, the cursor alone: unknown (the route answers 502), never a last page
+  ok    memberPage, three parts: unknown, never an empty or last page
+  ok    mailableMembers, three parts: unknown, never fewer members
+  ok    announcementReach, three parts: unknown, never a smaller count
+  ok    API members, three parts: unknown (the route answers 502), never a last page
+  ok    memberPage, rows that are not a list: unknown, never an empty or last page
+  ok    mailableMembers, rows that are not a list: unknown, never fewer members
+  ok    announcementReach, rows that are not a list: unknown, never a smaller count
+  ok    API members, rows that are not a list: unknown (the route answers 502), never a last page
+  ok    memberPage, rows as null: unknown, never an empty or last page
+  ok    mailableMembers, rows as null: unknown, never fewer members
+  ok    announcementReach, rows as null: unknown, never a smaller count
+  ok    API members, rows as null: unknown (the route answers 502), never a last page
+  ok    memberPage, an odd row list: unknown, never an empty or last page
+  ok    mailableMembers, an odd row list: unknown, never fewer members
+  ok    announcementReach, an odd row list: unknown, never a smaller count
+  ok    API members, an odd row list: unknown (the route answers 502), never a last page
+  ok    memberPage, a row that is not text: unknown, never an empty or last page
+  ok    mailableMembers, a row that is not text: unknown, never fewer members
+  ok    announcementReach, a row that is not text: unknown, never a smaller count
+  ok    API members, a row that is not text: unknown (the route answers 502), never a last page
+  ok    memberPage, a field that is not text: unknown, never an empty or last page
+  ok    mailableMembers, a field that is not text: unknown, never fewer members
+  ok    announcementReach, a field that is not text: unknown, never a smaller count
+  ok    API members, a field that is not text: unknown (the route answers 502), never a last page
+  ok    memberPage, a cursor that is not a number: unknown, never an empty or last page
+  ok    mailableMembers, a cursor that is not a number: unknown, never fewer members
+  ok    announcementReach, a cursor that is not a number: unknown, never a smaller count
+  ok    API members, a cursor that is not a number: unknown (the route answers 502), never a last page
+  ok    memberPage, an empty cursor: unknown, never an empty or last page
+  ok    mailableMembers, an empty cursor: unknown, never fewer members
+  ok    announcementReach, an empty cursor: unknown, never a smaller count
+  ok    API members, an empty cursor: unknown (the route answers 502), never a last page
+  ok    memberPage, a cursor that is null: unknown, never an empty or last page
+  ok    mailableMembers, a cursor that is null: unknown, never fewer members
+  ok    announcementReach, a cursor that is null: unknown, never a smaller count
+  ok    API members, a cursor that is null: unknown (the route answers 502), never a last page
+  ok    memberPage, a negative numeric cursor: unknown, never an empty or last page
+  ok    mailableMembers, a negative numeric cursor: unknown, never fewer members
+  ok    announcementReach, a negative numeric cursor: unknown, never a smaller count
+  ok    API members, a negative numeric cursor: unknown (the route answers 502), never a last page
+  ok    memberPage, a count that is text: unknown, never an empty or last page
+  ok    mailableMembers, a count that is text: unknown, never fewer members
+  ok    announcementReach, a count that is text: unknown, never a smaller count
+  ok    API members, a count that is text: unknown (the route answers 502), never a last page
+  ok    memberPage, a count that is null: unknown, never an empty or last page
+  ok    mailableMembers, a count that is null: unknown, never fewer members
+  ok    announcementReach, a count that is null: unknown, never a smaller count
+  ok    API members, a count that is null: unknown (the route answers 502), never a last page
+  ok    memberPage, a count that is negative: unknown, never an empty or last page
+  ok    mailableMembers, a count that is negative: unknown, never fewer members
+  ok    announcementReach, a count that is negative: unknown, never a smaller count
+  ok    API members, a count that is negative: unknown (the route answers 502), never a last page
+
+An announcement send: an unread member list queues nothing
+  ok    queueAnnouncement, no reply at all: unknown
+  ok    queueAnnouncement, no reply at all: no job written, nothing queued
+  ok    queueAnnouncement, the HSCAN reply alone: unknown
+  ok    queueAnnouncement, the HSCAN reply alone: no job written, nothing queued
+  ok    queueAnnouncement, a null page: unknown
+  ok    queueAnnouncement, a null page: no job written, nothing queued
+  ok    queueAnnouncement, a number for the page: unknown
+  ok    queueAnnouncement, a number for the page: no job written, nothing queued
+  ok    queueAnnouncement, the cursor alone: unknown
+  ok    queueAnnouncement, the cursor alone: no job written, nothing queued
+  ok    queueAnnouncement, three parts: unknown
+  ok    queueAnnouncement, three parts: no job written, nothing queued
+  ok    queueAnnouncement, the member read fails in transport: said as the recipients not read
+  ok    queueAnnouncement, the member read fails in transport: no job written, nothing queued
+  ok    queueAnnouncement, a member page in another shape: the same error
+  ok    healthy control: a read list queues the send to the one member who asked
+
+The real studio page: members that did not read are said so, never 'Nobody has come in yet'
+  ok    healthy control: the member is listed, no unknown state
+  ok    studio, a null page: the page is drawn
+  ok    studio, a null page: "Members could not be loaded", in a status region
+  ok    studio, a null page: never "Nobody has come in yet" nor "0 have come in"
+  ok    studio, a null page: the figures that did not read say "Not loaded"
+  ok    studio, rows as null: the page is drawn
+  ok    studio, rows as null: "Members could not be loaded", in a status region
+  ok    studio, rows as null: never "Nobody has come in yet" nor "0 have come in"
+  ok    studio, rows as null: the figures that did not read say "Not loaded"
+  ok    studio, a cursor that is not a number: the page is drawn
+  ok    studio, a cursor that is not a number: "Members could not be loaded", in a status region
+  ok    studio, a cursor that is not a number: never "Nobody has come in yet" nor "0 have come in"
+  ok    studio, a cursor that is not a number: the figures that did not read say "Not loaded"
+  ok    studio, a count that is text: the page is drawn
+  ok    studio, a count that is text: "Members could not be loaded", in a status region
+  ok    studio, a count that is text: never "Nobody has come in yet" nor "0 have come in"
+  ok    studio, a count that is text: the figures that did not read say "Not loaded"
+
+The composer: a count that did not read turns the email box off, with its reason, in every language
+  ok    a sentence for a count that could not be read, in each of the seven languages, each its own
+  ok    the composer takes an unknown count
+  ok    an unknown count disables the email box
+  ok    an unknown count says why
+  ok    the community page keeps an unread count as unknown, never fails the page
+  ok    the page hands the composer that sentence in the store's language
+
+The announcement route: an unread member list says the post went up and the email did not
+  ok    the route tells an unread list apart however the read failed, and only the read
+  ok    its notice is in all seven languages, each its own, said as a warning
+  ok    its notice says the post is up and nothing was emailed
+
+120 checks, all passing.
+M_ADMISSIONS {"nested":131,"pipeline":119,"mockHTTP":0}
+studio community: the member list could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74314:80)
+    at async roster (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89090:21)
+    at async Promise.all (index 1)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89104:52)
+    at async draw (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89378:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89390:20)
+studio community: the announcement reach could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74314:80)
+    at async mailableMembers (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74327:41)
+    at async announcementReach (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:78674:11)
+    at async Promise.all (index 4)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89104:52)
+    at async draw (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89378:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89390:20)
+studio community: the member list could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74314:80)
+    at async roster (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89090:21)
+    at async Promise.all (index 1)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89104:52)
+    at async draw (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89378:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89390:20)
+studio community: the announcement reach could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74314:80)
+    at async mailableMembers (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74327:41)
+    at async announcementReach (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:78674:11)
+    at async Promise.all (index 4)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89104:52)
+    at async draw (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89378:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89390:20)
+studio community: the member list could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74314:80)
+    at async roster (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89090:21)
+    at async Promise.all (index 1)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89104:52)
+    at async draw (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89378:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89390:20)
+studio community: the announcement reach could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74314:80)
+    at async mailableMembers (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74327:41)
+    at async announcementReach (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:78674:11)
+    at async Promise.all (index 4)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89104:52)
+    at async draw (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89378:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89390:20)
+studio community: the member list could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74314:80)
+    at async roster (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89090:21)
+    at async Promise.all (index 1)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89104:52)
+    at async draw (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89378:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89390:20)
+studio community: the announcement reach could not be read UnknownReplyError: Redis answered a page of a community's members in an unknown shape
+    at memberPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74314:80)
+    at async mailableMembers (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:74327:41)
+    at async announcementReach (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:78674:11)
+    at async Promise.all (index 4)
+    at async StudioCommunityPage (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89104:52)
+    at async draw (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89378:20)
+    at async main (/workspace/scratch/d1ece80b1417/m-3213-transport-focal/proofs/m/3213-focal/logs/head-community-member-page-exact.test.ts.cjs:89390:20)

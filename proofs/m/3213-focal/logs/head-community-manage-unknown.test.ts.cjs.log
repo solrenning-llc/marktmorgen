@@ -1,0 +1,54 @@
+
+1. Control: the first switch-on finds no setup (an exact nil) and writes a fresh one
+  ok    ok, General
+  ok    (the creator's setup)
+
+1. Control: switching off and on keeps the setup
+  ok    kept, answered with it
+
+1. The setup's read is unknown (cfg-empty) while switching off
+  ok    refused as unavailable, nothing said done
+  ok    the setup is not overwritten: spaces, access, questions, welcome kept
+  ok    and the switch is not changed either
+
+1. The setup's read is unknown (cfg-queued) while switching off
+  ok    refused as unavailable, nothing said done
+  ok    the setup is not overwritten: spaces, access, questions, welcome kept
+  ok    and the switch is not changed either
+
+1. The setup's read is unknown (cfg-text) while switching off
+  ok    refused as unavailable, nothing said done
+  ok    the setup is not overwritten: spaces, access, questions, welcome kept
+  ok    and the switch is not changed either
+
+1. Exact absence still means new: a setup that is really gone is written fresh
+  ok    (gone)
+  ok    ok, a fresh General
+
+2. Setup for the reports
+  ok    (four reports waiting)
+
+2. Hiding a reported post whose read is unknown (post-empty)
+  ok    refused as unavailable, not said done
+  ok    the post is not hidden
+  ok    its report is still in the queue
+
+2. Hiding a reported post whose read is unknown (post-queued)
+  ok    refused as unavailable, not said done
+  ok    the post is not hidden
+  ok    its report is still in the queue
+
+2. Deleting a reported post whose read is unknown
+  ok    refused, the post is still there, the report kept
+
+2. Hiding a reported comment whose read is unknown
+  ok    refused, the comment is not hidden, the report kept
+
+2. Controls on exact replies
+  ok    hiding the post hides it and clears its report
+  ok    hiding the comment hides it
+  ok    deleting the post deletes it
+  ok    a post that is exactly gone: its report is cleared, ok
+
+27 checks, all passing.
+M_ADMISSIONS {"nested":392,"pipeline":356,"mockHTTP":0}

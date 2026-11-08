@@ -88,27 +88,48 @@ export async function codeOwners(store: Store): Promise<Map<string, string>> {
   return new Map(pairs.filter(([id]) => PROMO_ID_PATTERN.test(id)));
 }
 
+/** A one-field HSET, HEXISTS or HDEL reply, read exactly (CX-123 rule 24): 0 or 1, else UnknownReplyError. */
+function oneOrNone(reply: unknown, what: string): 0 | 1 {
+  const n = countOf(reply);
+  if (n !== 0 && n !== 1) throw new UnknownReplyError(what);
+  return n;
+}
+
 /**
  * Gives a code to an affiliate, replacing whoever had it before. A code
  * belongs to one affiliate at a time: two people sharing one code cannot be
  * told apart by the thing that is supposed to tell them apart.
+ *
+ * The HEXISTS and the HSET are read exactly (CX-123 rule 24; audit R24 round 8, finding 2): a reply that is not a
+ * count of 0 or 1 throws UnknownReplyError, which the route answers as 503 "unavailable". Never true on a reply
+ * nobody understood: a code moved from one affiliate to another and not written keeps crediting the first one's
+ * sales, so the creator must not be told it moved.
  */
 export async function giveCode(store: Store, promoId: string, affiliateId: string): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
   if (!PROMO_ID_PATTERN.test(promoId) || !/^[0-9a-f]{12}$/.test(affiliateId)) return false;
   // A code given for the first time takes room in the store's data room (DataRoomError when it does not fit).
-  const [held] = await redisPipeline([["HEXISTS", promoKey(store.statsId), promoId]]);
-  if (Number(held) !== 1) await needData(store, [{ slot: CODES_SLOT, bytes: dataBytes([promoId, affiliateId], 1) }]);
-  await redisPipeline([["HSET", promoKey(store.statsId), promoId, affiliateId]]);
+  const held = oneOrNone(repliesFor(await redisPipeline([["HEXISTS", promoKey(store.statsId), promoId]]), 1)?.[0], "whether a code is given to an affiliate");
+  if (held !== 1) await needData(store, [{ slot: CODES_SLOT, bytes: dataBytes([promoId, affiliateId], 1) }]);
+  // 1 for a new field, 0 for one replaced: both are written. The room taken above stays taken on a throw (the write
+  // may have run), which errs toward room counted, never toward room missing.
+  oneOrNone(repliesFor(await redisPipeline([["HSET", promoKey(store.statsId), promoId, affiliateId]]), 1)?.[0], "giving an affiliate a code");
   return true;
 }
 
-/** Takes a code back, and gives back its room. Sales already credited through it stay credited. */
+/**
+ * Takes a code back, and gives back its room. Sales already credited through it stay credited. The HGET and HDEL
+ * replies are read exactly (rule 30 of the fix above): a confirmed 0 is "not held" (false), a confirmed 1 gives back
+ * the room of the affiliate id read beside it, and any other shape throws UnknownReplyError rather than "not held".
+ */
 export async function takeCodeBack(store: Store, promoId: string): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured() || !PROMO_ID_PATTERN.test(promoId)) return false;
-  const [held, removed] = await redisPipeline([["HGET", promoKey(store.statsId), promoId], ["HDEL", promoKey(store.statsId), promoId]]);
-  if (Number(removed) === 1 && typeof held === "string") await giveData(store, [{ slot: CODES_SLOT, bytes: dataBytes([promoId, held], 1) }]);
-  return Number(removed) === 1;
+  const replies = repliesFor(await redisPipeline([["HGET", promoKey(store.statsId), promoId], ["HDEL", promoKey(store.statsId), promoId]]), 2);
+  const held = replies?.[0];
+  if (held !== null && typeof held !== "string") throw new UnknownReplyError("the affiliate a code was given to");
+  const removed = oneOrNone(replies?.[1], "taking a code back from an affiliate");
+  if (removed === 1 && typeof held === "string") await giveData(store, [{ slot: CODES_SLOT, bytes: dataBytes([promoId, held], 1) }]);
+  return removed === 1;
 }
 
 /** Where the codes given to affiliates are counted in the store's data room (lib/store-data.ts). */

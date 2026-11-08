@@ -123,6 +123,28 @@ const UNKNOWN: [string, (real: unknown[]) => unknown][] = [
   ["a string that is not a record", () => ["not-json"]],
   ["a record of another path", real => [typeof real[0] === "string" ? real[0].replace("file.pdf", "other.pdf") : real[0]]],
   ["a record with no size", real => [typeof real[0] === "string" ? JSON.stringify({ ...JSON.parse(real[0]), bytes: 0 }) : real[0]]],
+  // Every other field, in a shape the writer (openVaultUpload) never stores.
+  ...([
+    ["a session id that is a number", { uploadId: 42 }],
+    ["a session id that is null", { uploadId: null }],
+    ["no session id", { uploadId: undefined }],
+    ["a session id the provider could not have given", { uploadId: "bad id" }],
+    ["a reservation that is a number", { reservation: 7 }],
+    ["a reservation that is null", { reservation: null }],
+    ["a reservation of another shape", { reservation: "not-a-reservation" }],
+    ["a fractional size", { bytes: 9.5 }],
+    ["a size beyond a safe integer", { bytes: 2 ** 53 }],
+    ["a negative size", { bytes: -10 }],
+    ["a size that is a string", { bytes: "10" }],
+    ["a type that is a number", { type: 1 }],
+    ["no type", { type: undefined }],
+    ["a time that is a string", { at: "now" }],
+    ["no time", { at: undefined }],
+    ["a fractional time", { at: 1.5 }],
+  ] as [string, Record<string, unknown>][]).map(([name, change]): [string, (real: unknown[]) => unknown] => [
+    `a record with ${name}`,
+    real => [typeof real[0] === "string" ? JSON.stringify({ ...JSON.parse(real[0]), ...change }) : real[0]],
+  ]),
 ];
 
 test("a cancellation never reports done, nor frees reserved bytes, on an upload record it could not read", async () => {
@@ -145,6 +167,27 @@ test("a cancellation never reports done, nor frees reserved bytes, on an upload 
   assert.notEqual(outcome, true, "an unread record is never a cancelled upload");
   assert.ok(outcome instanceof UnknownReplyError, "the unknown reply is said as unknown");
   assert.deepEqual(askedOnAbort, [], "nothing was asked of the provider on the unknown record");
+});
+
+test("a session id in a shape never written is not taken for a file sent whole: nothing is deleted and the bytes stay reserved", async () => {
+  const opened = await openReservedVault(input(2), 10, measure(2));
+  if (!opened.ok) throw new Error("open failed");
+  const pathname = opened.upload.pathname;
+  const signed = await signPieces(pathname, [1]);
+  assert.equal(signed?.length, 1);
+  asked.length = 0;
+  const withNumber = (real: unknown[]) => [typeof real[0] === "string" ? JSON.stringify({ ...JSON.parse(real[0]), uploadId: 42 }) : real[0]];
+  recordReads = [withNumber, withNumber];
+  const outcome = await abortReservedVault(pathname).then(r => r, e => e);
+  recordReads = [];
+  assert.ok(outcome instanceof UnknownReplyError, `the cancellation said ${String(outcome)}`);
+  assert.deepEqual(asked, [], "the object address was not sent a DELETE in place of the session's");
+  assert.ok([...sessions.values()].some(s => s.key === pathname), "the multipart session is still the one the ledger tracks");
+  await assert.rejects(openReservedVault(input(2), 10, measure(2)), /storage_(limit|pending)/, "the bytes stay reserved");
+  // Read healthily again, the upload is cancelled at the provider and only then given back.
+  assert.equal(await abortReservedVault(pathname), true);
+  assert.equal([...sessions.values()].some(s => s.key === pathname), false);
+  assert.equal((await openReservedVault(input(2), 10, measure(2))).ok, true);
 });
 
 test("every reader of the upload record refuses each unknown shape and does nothing", async () => {

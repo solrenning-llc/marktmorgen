@@ -318,8 +318,13 @@ export async function readUpdateJob(id: string): Promise<UpdateJob | null> {
 /** The last update sent about this product in the past two months, for the studio to show; null when none. */
 export async function latestUpdate(store: Store, productId: string): Promise<UpdateJob | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [id] = await redisPipeline([["GET", latestKey(store.statsId, productId)]]);
-  return typeof id === "string" ? readUpdateJob(id) : null;
+  // Exactly one reply: null is none, a send's id is read; anything else is unknown (rule 24), never "none".
+  const reply = repliesFor(await redisPipeline([["GET", latestKey(store.statsId, productId)]]), 1);
+  if (!reply) throw new UnknownReplyError("a product's latest update");
+  const id = reply[0];
+  if (id === null) return null;
+  if (typeof id !== "string" || !JOB_ID.test(id)) throw new UnknownReplyError("a product's latest update");
+  return readUpdateJob(id);
 }
 
 async function save(job: UpdateJob): Promise<void> {

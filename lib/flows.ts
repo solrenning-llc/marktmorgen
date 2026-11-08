@@ -41,6 +41,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
@@ -76,6 +77,8 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { usedLinkIn } from "@/lib/mail-clicks";
 import { courseProgress } from "@/lib/learn";
+// Its own line, so the import above stays the same as the one other open work on this file adds.
+import { stringList } from "@/lib/redis-reply";
 
 export { MAX_FLOWS, MAX_STEPS };
 export const MAX_DELAY_HOURS = MAX_FLOW_WAIT_HOURS;
@@ -471,15 +474,26 @@ export type FlowCounts = {
   acted: number;
 };
 
-/** How many have started each sequence, how many of its emails went out, and how many ended it or skipped one. */
+/**
+ * How many have started each sequence, how many of its emails went out, and how many ended it or skipped one.
+ * Read exactly (CX-123 rule 24): each sequence's HGETALL must be an even list of field names, each once, with a
+ * whole number from zero up as each value; anything else, or fewer replies than sequences, throws
+ * UnknownReplyError, never a zero. A sequence with no tallies yet (no hash: an empty list) is a real zero.
+ */
 export async function flowStats(flows: Flow[]): Promise<Map<string, FlowCounts>> {
   const out = new Map<string, FlowCounts>();
   if (!flows.length || !isRedisConfigured()) return out;
-  const rows = await redisPipeline(flows.map((f) => ["HGETALL", statsKey(f.id)]));
+  const rows = repliesFor(await redisPipeline(flows.map((f) => ["HGETALL", statsKey(f.id)])), flows.length);
+  if (!rows) throw new UnknownReplyError("the sequences' tallies");
   flows.forEach((f, i) => {
-    const raw = rows[i];
+    const raw = stringList(rows[i]);
+    if (!raw || raw.length % 2 !== 0) throw new UnknownReplyError("a sequence's tallies");
     const map = new Map<string, number>();
-    if (Array.isArray(raw)) for (let j = 0; j + 1 < raw.length; j += 2) map.set(String(raw[j]), Number(raw[j + 1]) || 0);
+    for (let j = 0; j < raw.length; j += 2) {
+      const value = /^(0|[1-9][0-9]*)$/.test(raw[j + 1]) ? Number(raw[j + 1]) : -1;
+      if (!Number.isSafeInteger(value) || value < 0 || map.has(raw[j])) throw new UnknownReplyError("a sequence's tallies");
+      map.set(raw[j], value);
+    }
     out.set(f.id, { started: map.get("started") ?? 0, sent: map.get("sent") ?? 0, reached: map.get("reached") ?? 0, skipped: map.get("skipped") ?? 0, acted: map.get("acted") ?? 0 });
   });
   return out;

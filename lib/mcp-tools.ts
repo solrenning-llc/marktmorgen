@@ -397,7 +397,8 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
           },
         ).catch(() => null)
       : Promise.resolve(null),
-    flowStats(flows).catch(() => new Map()),
+    // A reading that failed or answered in another shape is unknown: each sequence says null, never 0 (CX-123 rule 24).
+    flowStats(flows).catch(() => null),
   ]);
   if (said.refused) return said.refused;
   // Settled at what was read: the copy at the bytes it was read at, or the sales and the copy made of them. What a
@@ -426,9 +427,9 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
       };
     }),
     sequences: flows.map((f) => {
-      const c = flowCounts.get(f.id);
+      const c = flowCounts?.get(f.id) ?? null;
       const money = flowMoney(revenue, f.id);
-      return { name: f.name, trigger: f.trigger, started: c?.started ?? 0, emails_sent: c?.sent ?? 0, reached_the_end: c?.reached ?? 0, sales: money?.sales ?? null, revenue: money?.cents ?? null, sales_in_another_currency: money ? money.elsewhere ?? 0 : null };
+      return { name: f.name, trigger: f.trigger, started: c ? c.started : null, emails_sent: c ? c.sent : null, reached_the_end: c ? c.reached : null, counts_unavailable: c === null, sales: money?.sales ?? null, revenue: money?.cents ?? null, sales_in_another_currency: money ? money.elsewhere ?? 0 : null };
     }),
   };
 }

@@ -662,6 +662,17 @@ function parsePayout(raw: unknown): Payout | null {
   }
 }
 
+/** Whether a stored payout holds its reference as text ("" included), as addPayout and bookPayPalPayout write it. */
+function writtenReference(raw: unknown): boolean {
+  if (typeof raw !== "string") return false;
+  try {
+    const value = JSON.parse(raw) as { reference?: unknown } | null;
+    return typeof value?.reference === "string";
+  } catch {
+    return false;
+  }
+}
+
 /** A three-letter currency code as Stripe writes it; US dollars when absent. */
 function readCurrencyCode(raw: unknown): string {
   return typeof raw === "string" && /^[a-z]{3}$/.test(raw) ? raw : "usd";
@@ -2181,7 +2192,9 @@ export async function bookedPayouts(store: Store): Promise<BookedPayouts> {
   const out: BookedPayouts = { ids: new Map(), references: new Set() };
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const payout = parsePayout(flat[i + 1]);
-    if (!payout || payout.id !== flat[i]) throw new UnknownReplyError("a payout in the book");
+    // parsePayout shows a missing or non-text reference as "": as proof it is unknown, since it may be the very
+    // "PayPal <item>" being settled (Codex J's M3 on 2921d3bc). A written "" is a payout the creator left blank.
+    if (!payout || payout.id !== flat[i] || !writtenReference(flat[i + 1])) throw new UnknownReplyError("a payout in the book");
     out.ids.set(flat[i], payout.reference);
     if (payout.reference) out.references.add(payout.reference);
   }

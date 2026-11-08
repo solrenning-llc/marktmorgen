@@ -1,0 +1,421 @@
+
+FILE allowance-used-unknown.test.ts
+✔ the exact count is read for decisions and screens (2.291926ms)
+✔ a lost reply is an unknown count, never 0 used (10.450062ms)
+✔ a missing reply is an unknown count, never 0 used (1.174706ms)
+✔ a word is an unknown count, never 0 used (0.603603ms)
+✔ a negative count is an unknown count, never 0 used (1.299971ms)
+✔ a fraction is an unknown count, never 0 used (1.000963ms)
+✔ an object is an unknown count, never 0 used (0.891671ms)
+✔ a list is an unknown count, never 0 used (0.598364ms)
+✔ an empty string is an unknown count, never 0 used (0.47278ms)
+✔ whitespace is an unknown count, never 0 used (0.438482ms)
+✔ hexadecimal zero is an unknown count, never 0 used (0.228593ms)
+✔ a decimal zero is an unknown count, never 0 used (0.237197ms)
+✔ an exponent is an unknown count, never 0 used (0.427938ms)
+✔ a leading plus is an unknown count, never 0 used (0.262658ms)
+✔ a leading zero is an unknown count, never 0 used (0.403387ms)
+✔ a fractional number is an unknown count, never 0 used (0.637605ms)
+✔ control: the text INCRBY writes, and a whole number, are read as the count (0.357553ms)
+✔ a paying store whose billing month is not known has an unknown count, not 0 used (0.316931ms)
+✔ control: a count read whole is the count, and a count never taken is a confirmed 0 (0.45736ms)
+✔ the studio's email line says an unread count is unknown, and never says 0 used (27.429584ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 66.205508
+Z_VOLUME {"runs":35,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3169-count-shape.proof.ts
+{"value":"","strict":null,"exact":null,"commands":2}
+{"value":" ","strict":null,"exact":null,"commands":2}
+{"value":"0x0","strict":null,"exact":null,"commands":2}
+{"value":"0.0","strict":null,"exact":null,"commands":2}
+{"value":"0e4","strict":null,"exact":null,"commands":2}
+✔ noncanonical counter "" is unknown (4.232009ms)
+✔ noncanonical counter " " is unknown (0.584649ms)
+✔ noncanonical counter "0x0" is unknown (0.284744ms)
+✔ noncanonical counter "0.0" is unknown (0.385549ms)
+✔ noncanonical counter "0e4" is unknown (0.441229ms)
+✔ control null returns 0 (0.549533ms)
+✔ control "0" returns 0 (0.164796ms)
+✔ control "25" returns 25 (0.116278ms)
+✔ control 25 returns 25 (0.216633ms)
+✔ control "many" returns null (0.644873ms)
+✔ control "-1" returns null (0.344604ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17.347031
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE z-3169-reminder-count.proof.ts
+  ok    switched off: no box, nothing kept
+  ok    switched on, the add-on not paid for: still no box
+  ok    paid for, but no postal address: no box, and nothing kept (the studio says why)
+  ok    with the address: the box is offered on a product's checkout
+{"label":"a word","reply":["many"],"observed":["failed",0,0],"expected":["failed",0,0],"modelJsonBytes":0,"mailViewJsonBytes":0}
+  ok    unread count boundary: a word
+{"label":"empty string","reply":[""],"observed":["failed",0,0],"expected":["failed",0,0],"modelJsonBytes":0,"mailViewJsonBytes":0}
+  ok    unread count boundary: empty string
+{"label":"whitespace","reply":[" "],"observed":["failed",0,0],"expected":["failed",0,0],"modelJsonBytes":0,"mailViewJsonBytes":0}
+  ok    unread count boundary: whitespace
+{"label":"hex zero","reply":["0x0"],"observed":["failed",0,0],"expected":["failed",0,0],"modelJsonBytes":0,"mailViewJsonBytes":0}
+  ok    unread count boundary: hex zero
+{"label":"canonical zero","reply":["0"],"observed":["sent",1,1],"expected":["sent",1,1],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  ok    unread count boundary: canonical zero
+{"label":"confirmed absent","reply":[null],"observed":["sent",1,1],"expected":["sent",1,1],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  ok    unread count boundary: confirmed absent
+
+10 checks, all passing.
+Z_VOLUME {"runs":280,"mocks":12,"over":false}
+
+Z_STATUS 0 null
+
+FILE assistant-reminder.test.ts
+
+The rules
+  ok    off on a store written before it existed
+  ok    a neutral line from the products passes; a number, a link, an exclamation, a deal or pressure never
+  ok    inside what one chat reply is priced at: products read, answer length, commands
+  ok    its model request at every cap holds no more than a chat message's worst
+  ok    unknown tax evidence does not fabricate tax, room or an approval
+  ok    the add-on's non-tax month and rights stay unchanged
+  ok    a synthetic complete review exercises the unchanged room without opening sales
+
+Off until switched on, paid for and with a postal address
+  ok    switched off: no box, nothing kept
+  ok    switched on, the add-on not paid for: still no box
+  ok    paid for, but no postal address: no box, and nothing kept (the studio says why)
+  ok    with the address: the box is offered on a product's checkout
+
+The yes is kept only as given, word for word
+  ok    an old page's version is not this sentence
+  ok    no address, or one that is not one: nothing kept
+  ok    checked, with an address: kept
+  ok    the address, the exact sentence, its version and when
+  ok    deleted by itself three days after the checkout opened
+  ok    the queue never holds an address
+
+No email without the box
+  ok    a checkout left unpaid with no yes kept: nothing
+  ok    Stripe's opt-in reminder skips a checkout whose buyer checked this box
+
+One email, when it is due
+  ok    the job sends the one that is due
+  ok    to the address typed beside the box, with an honest subject
+  ok    the product's page, today's price, the sentence checked and the day, the stop link and the postal address
+  ok    a mail app can stop it in one press
+  ok    the AI's line, under the label that says so
+  ok    no urgency, scarcity, countdown or discount in it
+  ok    asked of the assistant's model, with its own small answer cap
+  ok    told only the products, never the buyer or a price
+  ok    one reply of the month's pool, settled at what was billed
+
+Never twice, never after paying, never after stop
+  ok    the same checkout again: nothing
+  ok    the checkout was paid: nothing
+  ok    the address paid for it in another checkout since: nothing
+  ok    stop pressed
+  ok    after stop, another product, another checkout: nothing
+  ok    still open: not yet, and once more an hour after it closes
+
+Deleting the person deletes the yes at once
+  ok    the erasure deletes the yes and its note
+  ok    gone, and nothing sent
+
+The fixed reminder when the AI's line cannot be used
+  ok    a line that does not hold: sent without it
+  ok    no AI label, the plain reminder
+  ok    the model fails: sent without it, and nothing billed is kept
+
+An unread count of the store's emails is not room: refused before the model, nothing sent
+  ok    a lost reply: not sent, and no model asked
+  ok    a missing reply: not sent, and no model asked
+  ok    a word: not sent, and no model asked
+  ok    a negative count: not sent, and no model asked
+  ok    the month's replies used: sent without it, and no model asked
+
+Refused before the model when the store's emails are used, or with no postal address
+  ok    no email room: not sent
+  ok    no postal address: no box, and a kept yes is not sent
+
+What the pages say is the code's
+  ok    the feature page and the help describe it
+  ok    the privacy policy says what is kept, sent and for how long
+  ok    the terms say what the creator is responsible for
+  ok    the registry says how it is deleted
+  ok    in US English, with no urgency, scarcity or invented claims
+  ok    every language has every word
+
+52 checks, all passing.
+Z_VOLUME {"runs":478,"mocks":26,"over":false}
+the model refused 529 overloaded
+
+Z_STATUS 0 null
+
+FILE group-buy.test.ts
+
+What can be bought for several
+  ok    a paid download
+  ok    not what cannot be given
+  ok    not a limited quantity
+  ok    not a private podcast
+
+How many people
+  ok    a whole number in range
+  ok    one is an ordinary purchase
+  ok    never clamped, rounded or guessed
+  ok    a payment Stripe can take
+  ok    what the page says is left
+
+Before the checkout
+  ok    a number that is not one
+  ok    written down with its number
+  ok    not open before it is paid
+
+Its checkout
+  ok    the price, that many times, on one line
+  ok    marked
+  ok    named for what it is
+  ok    one payment, nothing added, no offer after, nothing opened for the buyer
+  ok    refused where the charge is built, too
+  ok    an ordinary checkout is still for one
+
+The buyer's own checkout
+  ok    opens nothing for whoever paid
+
+Once paid
+  ok    settled
+  ok    twice is once
+  ok    the receipt: how many, what was paid, the link
+  ok    one email so far
+  ok    open now, with its payment
+
+Asking for a place
+  ok    an address that is not one
+  ok    a link is sent
+  ok    to the address as one, with the way to take it
+  ok    and nothing is taken by typing
+  ok    the month's access emails unread (a lost reply): unavailable, nothing sent
+  ok    the month's access emails unread (a missing reply): unavailable, nothing sent
+  ok    the month's access emails unread (a word): unavailable, nothing sent
+  ok    the month's access emails unread (a negative count): unavailable, nothing sent
+
+Taking it
+  ok    taken, on that address
+  ok    it is theirs
+  ok    a course would be dated from that day
+  ok    opening the link again takes nothing more
+  ok    a link nobody was sent
+  ok    the second place
+  ok    never one more than was paid for
+  ok    and nothing was handed to the third
+  ok    a new address is told so
+  ok    someone with a place is sent the way in again
+
+On the list of purchases
+  ok    a place, not something brought over or a gift
+
+An address that already has it
+  ok    uses no place
+  ok    someone new takes one
+
+A link cannot be used to fill inboxes
+  ok    it stops sending after a generous number a day
+
+A refund
+  ok    a full refund takes every place back
+  ok    from each address
+  ok    and their courses
+  ok    the other purchase's place is untouched
+  ok    and so is what an import gave
+  ok    closed for good
+  ok    read once
+
+At one of several prices
+  ok    it can be bought for several
+  ok    no option named: refused, never guessed
+  ok    the option is kept with it, and named
+  ok    that option's price, times the people
+  ok    named for all of it
+  ok    the receipt names it
+  ok    someone takes a place
+  ok    and opens that option, and no other
+
+Each place is one of the month's orders (18 October 2026)
+  ok    it knows the hour its checkout held room in, and that the room is held
+  ok    a place taken in that day uses what was held, and gives it back as it is counted
+  ok    taken after its day, a place is admitted like a new order: with none left, nothing is handed over and the place stays open
+  ok    with room in the month, the same person takes it
+
+65 checks, all passing.
+Z_VOLUME {"runs":998,"mocks":37,"over":false}
+
+Z_STATUS 0 null
+
+FILE path-plan.test.ts
+
+A plan suggestion follows actual use alone
+  ok    below the threshold
+  ok    at the threshold, with a larger plan to be had
+  ok    no known allowance
+  ok    unknown use
+  ok    negative use
+  ok    unbounded use
+  ok    no plan suggested where none can be had
+  ok    above the limit remains factual
+  ok    an unread count is said to be unknown, never hidden as nothing used
+  ok    an unread count with no known allowance says nothing
+
+10 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-copy.test.ts
+
+Only the account's owner, only into its own stores
+  ok    a teammate is refused
+  ok    a store of anyone else is not a destination
+  ok    nor the store it is in
+
+What is copied, and what is not, is decided by the rules
+  ok    a call, a course, a podcast, options or keys are not copied
+
+The preview writes nothing
+  ok    it fits, names the other store, and counts what it makes
+  ok    it says the file and the pictures stay, and what is never copied
+  ok    and makes nothing there
+
+A copy that does not fit as a whole is refused before anything is written
+  ok    another currency
+  ok    a data room too full
+  ok    the other store's studio requests unread
+  ok    nothing was written there
+
+The copy, step by step
+  ok    it ends, having made each part
+  ok    every product a draft, with the first store's words and prices
+  ok    all thirty, every one a draft
+  ok    the box at checkout offers the copy of the product it offered
+  ok    without the file it delivers or its picture
+  ok    its long description comes across
+  ok    its page: the words, no pictures, the product named mapped, kept back
+  ok    the quiz, its result pointing at the copy, and none of its answers
+  ok    the store's own page: out of the menu, kept back, its form mapped
+  ok    the funnel: off, through the copies
+  ok    the setup: about line, sections and news mapped, the link without its picture, no email profile
+
+Nothing personal and nothing of the first store's comes across
+  ok    no buyer, review, Stripe account or first store id
+  ok    no contact, review or answer kept in the other store
+  ok    the other store's own payment account is untouched
+
+Done twice, or after its progress is lost, it makes nothing twice
+  ok    the same copy again says it is done
+  ok    run from the start again, it finds everything already there
+
+Charged before it writes, and its store commands measured
+  ok    what one studio request of a copy stands for costs no more than a studio request is priced at
+  ok    every step took studio requests of the other store
+  ok    each step's commands are inside what it was charged for
+  ok    a whole copy of this store, thirty products, stays under a hundred studio requests
+store commands per step, measured: 233/56u, 52/7u, 19/5u, 29/5u, 21/5u, 24/6u
+  ok    refused, and nothing made
+  ok    a copy's id from another store is not taken for this one
+
+33 checks, all passing.
+Z_VOLUME {"runs":2805,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3082
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (124.326676ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (147.841329ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (52.083502ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.031108ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.261824ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.148705ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.659298ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (99.69672ms)
+✔ every store figure taken in the code is a kind a line prices (74.908767ms)
+✔ every email sent names a meter, and each file only the meters it may use (106.430612ms)
+✔ the units a figure is taken in cost at least what they stand for (11.201393ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.237362ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.372439ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.352023ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.130125ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.094998ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (1.570751ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.296104ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (1.108933ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.163405ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (3.003911ms)
+✔ Path push fits its reserved studio requests (0.115829ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.065827ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.232784ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.157218ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (48.43303ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 706.620053
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 121.5 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 288.3 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 704.9 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (230.795358ms)
+✔ each family is bounded one way at least, and what it says can be checked (101.992902ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (7.995696ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (1.791235ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.894143ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (11.903022ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.279718ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 370.329228
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3169-kkLdZY

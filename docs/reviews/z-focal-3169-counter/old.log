@@ -1,0 +1,312 @@
+
+FILE allowance-used-unknown.test.ts
+✔ the exact count is read for decisions and screens (2.323713ms)
+✔ a lost reply is an unknown count, never 0 used (7.126521ms)
+✔ a missing reply is an unknown count, never 0 used (0.619172ms)
+✔ a word is an unknown count, never 0 used (0.422458ms)
+✔ a negative count is an unknown count, never 0 used (0.779436ms)
+✔ a fraction is an unknown count, never 0 used (0.561812ms)
+✔ an object is an unknown count, never 0 used (0.98222ms)
+✔ a list is an unknown count, never 0 used (1.009423ms)
+✖ an empty string is an unknown count, never 0 used (1.717391ms)
+✖ whitespace is an unknown count, never 0 used (0.469224ms)
+✖ hexadecimal zero is an unknown count, never 0 used (0.862928ms)
+✖ a decimal zero is an unknown count, never 0 used (0.408988ms)
+✖ an exponent is an unknown count, never 0 used (0.647086ms)
+✖ a leading plus is an unknown count, never 0 used (0.267182ms)
+✖ a leading zero is an unknown count, never 0 used (0.459286ms)
+✔ a fractional number is an unknown count, never 0 used (0.580636ms)
+✔ control: the text INCRBY writes, and a whole number, are read as the count (0.597523ms)
+✔ a paying store whose billing month is not known has an unknown count, not 0 used (0.418127ms)
+✔ control: a count read whole is the count, and a count never taken is a confirmed 0 (0.603901ms)
+✔ the studio's email line says an unread count is unknown, and never says 0 used (24.051824ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 13
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 62.162126
+
+✖ failing tests:
+
+test at [stdin]:5308:29
+✖ an empty string is an unknown count, never 0 used (1.717391ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:5313:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5308:29
+✖ whitespace is an unknown count, never 0 used (0.469224ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:5313:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5308:29
+✖ hexadecimal zero is an unknown count, never 0 used (0.862928ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:5313:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5308:29
+✖ a decimal zero is an unknown count, never 0 used (0.408988ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:5313:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5308:29
+✖ an exponent is an unknown count, never 0 used (0.647086ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:5313:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5308:29
+✖ a leading plus is an unknown count, never 0 used (0.267182ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  3 !== null
+
+      at TestContext.<anonymous> ([stdin]:5313:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 3,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:5308:29
+✖ a leading zero is an unknown count, never 0 used (0.459286ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  3 !== null
+
+      at TestContext.<anonymous> ([stdin]:5313:29)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 3,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":35,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3169-count-shape.proof.ts
+{"value":"","strict":[{"kind":"email","used":0,"figure":75}],"exact":0,"commands":2}
+{"value":" ","strict":[{"kind":"email","used":0,"figure":75}],"exact":0,"commands":2}
+{"value":"0x0","strict":[{"kind":"email","used":0,"figure":75}],"exact":0,"commands":2}
+{"value":"0.0","strict":[{"kind":"email","used":0,"figure":75}],"exact":0,"commands":2}
+{"value":"0e4","strict":[{"kind":"email","used":0,"figure":75}],"exact":0,"commands":2}
+✖ noncanonical counter "" is unknown (4.670995ms)
+✖ noncanonical counter " " is unknown (1.08475ms)
+✖ noncanonical counter "0x0" is unknown (0.520724ms)
+✖ noncanonical counter "0.0" is unknown (0.431462ms)
+✖ noncanonical counter "0e4" is unknown (0.611648ms)
+✔ control null returns 0 (0.492159ms)
+✔ control "0" returns 0 (0.174274ms)
+✔ control "25" returns 25 (0.123315ms)
+✔ control 25 returns 25 (0.170846ms)
+✔ control "many" returns null (0.328032ms)
+✔ control "-1" returns null (0.280008ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 6
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 18.304555
+
+✖ failing tests:
+
+test at [stdin]:4884:29
+✖ noncanonical counter "" is unknown (4.670995ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:4895:33)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:4884:29
+✖ noncanonical counter " " is unknown (1.08475ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:4895:33)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:4884:29
+✖ noncanonical counter "0x0" is unknown (0.520724ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:4895:33)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:4884:29
+✖ noncanonical counter "0.0" is unknown (0.431462ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:4895:33)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:4884:29
+✖ noncanonical counter "0e4" is unknown (0.611648ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  0 !== null
+
+      at TestContext.<anonymous> ([stdin]:4895:33)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3169-reminder-count.proof.ts
+  ok    switched off: no box, nothing kept
+  ok    switched on, the add-on not paid for: still no box
+  ok    paid for, but no postal address: no box, and nothing kept (the studio says why)
+  ok    with the address: the box is offered on a product's checkout
+{"label":"a word","reply":["many"],"observed":["failed",0,0],"expected":["failed",0,0],"modelJsonBytes":0,"mailViewJsonBytes":0}
+  ok    unread count boundary: a word
+{"label":"empty string","reply":[""],"observed":["sent",1,1],"expected":["failed",0,0],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  FAIL  unread count boundary: empty string
+        expected ["failed",0,0]
+        got      ["sent",1,1]
+{"label":"whitespace","reply":[" "],"observed":["sent",1,1],"expected":["failed",0,0],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  FAIL  unread count boundary: whitespace
+        expected ["failed",0,0]
+        got      ["sent",1,1]
+{"label":"hex zero","reply":["0x0"],"observed":["sent",1,1],"expected":["failed",0,0],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  FAIL  unread count boundary: hex zero
+        expected ["failed",0,0]
+        got      ["sent",1,1]
+{"label":"canonical zero","reply":["0"],"observed":["sent",1,1],"expected":["sent",1,1],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  ok    unread count boundary: canonical zero
+{"label":"confirmed absent","reply":[null],"observed":["sent",1,1],"expected":["sent",1,1],"modelJsonBytes":1339,"mailViewJsonBytes":965}
+  ok    unread count boundary: confirmed absent
+
+10 checks, 3 failing.
+Z_VOLUME {"runs":346,"mocks":21,"over":false}
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3169-hkV2RQ

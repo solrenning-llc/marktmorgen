@@ -18,6 +18,7 @@ import { readProduct } from "@/lib/catalog";
 import { createCartCheckout } from "@/lib/cart-checkout";
 import { cartLink, remindAbandoned } from "@/lib/checkout-recovery";
 import { askCartReminder, sendAsked } from "@/lib/checkout-ask";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { cartAskIds, cartAskKey } from "@/lib/checkout-ask-cart";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -27,11 +28,14 @@ const OWNER = "owner@example.com";
 const checkouts: URLSearchParams[] = [];
 const emails: { to: string; subject: string; text: string }[] = [];
 let paidSessions: Record<string, unknown>[] = [];
+/** The email service saying no (a 400): it did not take the email. */
+let mailDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
+    if (mailDown) return new Response("not taken", { status: 400 });
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
     return answer({ id: `email_${emails.length}` });
@@ -120,6 +124,32 @@ async function main(): Promise<void> {
   Date.now = realNow;
   const askedMail = emails.at(-1)!;
   is("then one email about the cart, saying it was asked for", [later.sent, askedMail.to, askedMail.subject, askedMail.text.includes("you asked for it on Harbor Kitchen's store")], [1, "dee@example.com", "Your cart at Harbor Kitchen", true]);
+
+  // Claude 2 on #3214: the email service's answer cannot tell a refusal (a 4xx, an address it will never take, an
+  // uncertain SES answer) from a failure that may pass, and each ask takes the store's email room again. So an ask the
+  // email service was asked for is never put back.
+  part("An asked-for reminder the email service did not take is never tried again");
+  is("kept", await askCartReminder({ store: await load(), items: await both(), email: "eve@example.com", ip: "203.0.113.10" }), "asked");
+  const toEve = () => emails.filter((m) => m.to === "eve@example.com").length;
+  const roomBefore = await allowanceUsed(await load(), "email");
+  is("the store's email room is read", roomBefore > 0, true);
+  const queued = async () => {
+    const [members] = await redis.pipeline([["ZRANGEBYSCORE", "nl:recover:asks", "-inf", "+inf"]]);
+    return ((members as string[]) ?? []).filter((m) => m.includes("eve@example.com")).length;
+  };
+  mailDown = true;
+  Date.now = () => realNow() + 3_700_000;
+  const refused = await sendAsked(async () => load(), Date.now() + 10_000);
+  Date.now = realNow;
+  mailDown = false;
+  is("not sent, and not put back", [refused.sent, refused.retried, toEve(), await queued()], [0, 0, 0, 0]);
+  is("its room taken once, for the one ask", (await allowanceUsed(await load(), "email")) - roomBefore, 1);
+  for (let run = 1; run <= 4; run += 1) {
+    Date.now = () => realNow() + 3_700_000 + run * 1_200_000;
+    await sendAsked(async () => load(), Date.now() + 10_000);
+    Date.now = realNow;
+  }
+  is("no later run sends it or takes more of the store's email room", [toEve(), (await allowanceUsed(await load(), "email")) - roomBefore], [0, 1]);
 
   done();
 }

@@ -68,7 +68,10 @@ test("it is taken off the queue before anything is sent, and put back only after
   assert.match(body, /if \(Number\(taken\) !== 1\) continue;/);
   // A decision (another store, too late, nothing to send) is never put back; a send that failed is, a few times at
   // the most and only inside its six hours (tests/reminders-requeue.test.ts): a reminder hours late is worse than none.
-  assert.match(body, /outcome === "failed" && \(await again\(ask, now\)\)/);
+  // Only a failure before the email service was asked is put back (Claude 2 on #3214): its answer cannot tell a refusal
+  // from a passing failure, and each ask takes the store's email room again, so "failed" (it was asked) is never.
+  assert.match(body, /outcome === "retry" && \(await again\(ask, now\)\)/);
+  assert.ok(!/outcome === "failed" && \(await again/.test(body), "a send the email service was asked for is never put back");
   assert.match(body, /store && store\.statsId === ask\.statsId/, "and only for the store it was asked on");
 });
 

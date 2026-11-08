@@ -22,6 +22,7 @@
  *     creator's own costs, and a tagged sale does not prove the ad caused it.
  */
 import type { CampaignResults } from "@/lib/campaign-results";
+import { CAMPAIGN_TAG_MAX } from "@/lib/came-from";
 import { formatMoney } from "@/lib/money";
 
 /** Refunds and disputes made in the week on the sales of one campaign: how many, and their amount. */
@@ -85,8 +86,8 @@ function dateOf(day: string): string {
   return Number.isFinite(at) && new Date(at).toISOString().slice(0, 10) === day ? DATES.format(at) : "an unknown day";
 }
 
-/** A tag as the numbers count it; anything else, or a long run of digits that could be a phone number, is not shown. */
-const SHOWN_TAG = /^[a-z0-9][a-z0-9._-]{0,29}$/;
+/** A tag as the numbers count it, up to the length the store keeps; anything else, or a long run of digits that could be a phone number, is not shown. */
+const SHOWN_TAG = new RegExp(`^[a-z0-9][a-z0-9._-]{0,${CAMPAIGN_TAG_MAX - 1}}$`);
 const shownTag = (tag: unknown): tag is string => typeof tag === "string" && SHOWN_TAG.test(tag) && !/\d{7,}/.test(tag);
 
 const escape = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");

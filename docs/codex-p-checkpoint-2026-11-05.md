@@ -2284,3 +2284,59 @@ Native directed ls-remote main44f4e252cf787afca1152a703ab82b59a104162e; trackedn
 
 FULLchannel6554399/blob4bf42b0398beab2d4898cb7da2848991482d7f3f P1737+ALL136179chars read in7contiguouscuts. Refresh6555278/delta879FULL C63095,RES6557152exact; resultfresh6565853/blob02d75d8fb27ca77aadf0e1098c7aaacdfeb93825 prefixRESEXACT/ALLdelta8701readthroughC23279focal. C4reports3245NAFILA, notPMERGEDcert; C6current3160focalalreadydeliverednotPexecution. OthernewbudgetsCXC23009+100HTTP/+5000Redis granted ONLYCXC2, notP; S3215decomposition/T3244partial/Z3260request separate. Mainredoldfreeze notrevived. C4backup/idempotency/captions andC2C3C4C6lots/M3031/T2852/S2848/H2/J/N/V/Z/G/U/CXC2reservations preserved. C43289andotherLOWs belongowners; no takeoveror thirdduplicate.
 Nextcausal: P3160nominalrestrictedfreshpreflight/claimRESbeforecode, orauthorreturn3054LOW; older2843stack/3014handoffs/candidates stillpreserved notpromotedforeign. QuotaUNKNOWN/small directedqueries/noActionsloop/CIqueryretrycancel/fila/merge/paidIO/price/limit/commission/flags/accounts/PII/subagents/automationchange. Project ongoing/samecontinuity/no backgroundwatcher. FinalstopafterfreshFULL/CAS/readback.
+
+
+## 2026-11-08 19:46 Fortaleza — #3263 second financial review delivered; SAME two C4 MEDIUMs reproduced
+
+FIRST canonical checkpoint branch codex/p-checkpoint-2026-11-05 at ef3be5b48409696c9b40a3fa117be1f2c5508f9a, blob9e9e1f33ce619c46b95224c2fd83ce63782b9b2f, FULL426515 read and preserved. Prior stop CXP-20261108-1835-C1-1 was DELIVERED at1b0c73bd6b26830920567b07f386376b4fa1a923/blobece884c0125ee78c9f35092faad17bee3aca51c7/FULL6596865, exact full readback; prior twoCAS409 NOWRITE with >=120s fresh-retry discipline, not lost posts.
+
+Channel initial FULL6743805/blob06299093cc78fe6a15eb9fc25e35704610b360ba, priorP1835 read FULL. ALL87 subsequent section headers/153357 chars indexed and searched for directed claims; only directed P/coordination/nominal originals reopened IN FULL (not every peer technical payload). Original C1-TODOS42: C1 assumes not-yet-started money reviews incl3160; P3054 had already been delivered, so do not repeat it. P3160 has no source/test/claim, now SKIP to C1; prior CP pending next step superseded. C1-TODOS43 assumes author fixes3107 residual/2844/3146/3216/3211/2971/3072; no P foreign push grant. CODEX44/45 and CODEX41 read, no P docs/reservations edits.
+
+NEW received but not claimed/executed: V2892 focal at6c3077cdaefaac049ca0e12e836be68691bfd875/evidence6727421932; C2-1901 #3135 newac303f3066ed56e800d37da11a60e45f8382094f after3078 conflict/freedBytes integration. Ancestral P/N opinions do NOT certify those new compositions. 3107 now1a00ef00327beb5f9fdf716606868fd6078a5be9 but complete4-comment discussion has no new author focal request; C1-TODOS43 owns repair, P conditional MEDIUM/R2 qualification remains, no presumed closure/new source/test. C1 new3054 financial focal6727940978 received; P's inherited nonblocking deadline-matcher LOW5819752868 remains independently qualified, not replayed.
+
+#3263 selected from C6-1927 second-money bottleneck. Complete discussion BEFORE claim only C2 first-money6727014675; complete read channel searched for3263 claim, no visible competing claim. P claim6728082715 exact readback before code. RES CXP-20261108-1935-RES DELIVERED0f5552e8d952c13190c65dd647a45bd60903af04/blob01f6b704fb70e769d13bfb0626dd997b718a4ec8/FULL6748740 exact full readback BEFORE diff/source/test. Own scope proofs/p/3263/* +docs/reviews/p-3263.md; foreign product/ref read-only. Own detached worktree /workspace/scratch/452ffd7d3d6c/p3263-review exact7c2735a03ac49dbb407dd51175ae7bdbcbaac786/tree36c7fcd5cc49440e627726c67b89e149648c2176, base88dedad3b5c19202d595c6d049210859680ce4ef. Three changed paths only2libs+author regression. Existing P worktrees preserved, no tracked author file/ref changed.
+
+P FORMAL COMMENT review5820002652 exact-head DELIVERED/FULLbody readbackEXACT. NOT READY, corroborating SAME two MEDIUM findings of C4 review6728128004, NOT two additional findings. C4 review arrived during P work; C4 reports having started before P claim became visible. Preserve attribution, don't ask a third full financial review. No clean P opinion/merge had been issued. Complete C4 body read BEFORE supplemental execution/formal disposition.
+
+Primary causal proof: original19 unchanged assertions, only2production modules overlaid from immutablebase ->19checks/12FAIL; same test final19PASS. Independent13PASS with author setup credited: confirmed nil course/calendar still indexes, first+second cost refusal positive safe units/next healthy lock acquisition, marker accessor no getter/payment, exact image error identity/no deletion/same-path healthy retry. Linked16+13+29+32PASS =122 passing final assertions. Real strict roots851sources0diag, ESLint2libs+original+ownprobe0; officialscanner4639tracked0, ownartifactscan22files0; diffclean. No changed cost/plan registry; linkedsearchceiling verifies pre-I/O charge and concurrent index bounds. The cron32 emits inherited no-Blob-credentials error on deletion path then keeps retry listing; raw log retained, no real external call/provider-success claim.
+
+After C4 samehead finding, independent supplemental RED deliberately retained unfixed: healthy+confirmed-nil controls pass; courseGET pipeline[], eventZCARD pipeline[], eventindex pipeline[7], eventrowGET pipeline[7] ALL produce walked=true/needsWalk=false/correspondingIndexed=false; desired false/true/false. Six assertions/fourFAIL BOTHbase andfinal, 663 nestedcommands perchild/0mocks. Inherited remaining bug on this same completion path, not new regression or mere stored-data-corruption exemption. readCourse/parseCourse loses unknown envelope; eventCount Number(n)||0 andflatIds/readEvents lose unknown count/list/row. Existing readCourseExact can close course side; calendar needs exact evidence path, no blind sharedreader change. Supplemental strict852sources0diag/lint0, ownartifacts34files0. No product repair or RERUN/raise/reset; this was a new concern from received review with new causal probe, not a replay of cap failure. Only owner C6 repairs existing PR, REDdurable before fix then focused return on exactnewhead. Marker validation and thrownimage path correct in observed scope; no claim all malformed Blob semantics fixed.
+
+DURABLE BEFOREformal, both exact full comment readbacks:
+-6728154388: 36-artifact gzip/base64 UTF8JSON151677bytes/SHA2562605210c7843556ca735cdf33d56fa0c60b8058228768cb84f73fb874c926f19;51245bodychars. ALL initial rawlogs/runners/probe/baseoverlays/report/relevant immutable sources included; per-file hashes. Preliminary report explicitly left formal disposition for later.
+-6728176456:12supplemental artifacts/22273JSONbytes/SHA256ff47acc08903e6fc67b37975e0c7972f630a1907073c580b203cde32b8b4d67c;12802bodychars. ALL supplemental rawlogs/source/probe/typesdriver/context/updatedreport included, not recreated logs.
+Earlier proof need not be resent. To reconstruct: base64->gzip->JSON files[path].utf8, perfile SHA256. Absolute base-map paths must point to recovered reviewer files, not mutate author sources. No new proof PR/reservation PR/ref created.
+
+Caps declared BEFORE graph, applied every child:120souter/512MiB/types1024/256KiBoutput/20000NESTED MemoryRedis.run before dispatch/100mockHTTP before callback. Compiler/lint preload external network denial, runtime fetch/net/tls/http/https denied before imports. Max nested3213, mocks0, no cap. Node24.22.1; RO donor dependencies from9360/u-podcast-copy after exactlockSHA256ee4ba5640d542cb07c7ed382f256c816b076026d739bbe30d906870f351e67df equality; runner credited reuseP3054/U. No install/provider/credentials/PII/browser/build/whole-suite/globalfinancial/CI9cert. Source-only consumer review searchpage122/uploadroute200–206. Local generated __pycache__ and reviewer files untracked, not product changes.
+
+Native fresh directed ls-remote exact22 pull refs+main (not broad inventory), run19:45–46; identity only, not PRstate/CI9 certificate:
+```
+a36edbc81a52c6e26c7d79838dc1fb5cc92da527	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+daaf5306187d4aa43c9f47590d429dcb10656519	refs/pull/2843/head
+66dfd8a571a734d6b787b4552b7b53759d239a48	refs/pull/2868/head
+aae8fcf5f8ce7118007f58d371c2b6c722dd2d18	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+b5dd4dc3791ed83c60cdc59bd1a38e95f9420b1d	refs/pull/3014/head
+0cdb49725fbb78d341e648ae4758a5f0ab88f0f4	refs/pull/3034/head
+9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+442a057113c87b8728e1a23711510fa852bd0e6d	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+ac303f3066ed56e800d37da11a60e45f8382094f	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+7c2735a03ac49dbb407dd51175ae7bdbcbaac786	refs/pull/3263/head
+```
+Main advanced44f4→a36edbc81a52c6e26c7d79838dc1fb5cc92da527; no integration/retest newunion falsely claimed. 2514offPR candidate8a0701f04afe42e5282ec69f0c2e7557c7955a1d is last confirmed19:31, not rechecked by pullref query. 2843/2922/3014/2868 offPRC6 candidates and existing focal verdicts preserved as in prior17:37 checkpoint; no promotion foreignbranch. Original Pfourproducts/historical3218 remainMERGED, do not recreate/requery closedfacts. 2020/C1scope,2514twoCodeQLHIGH,3107conditionalMED/R2, oldP3135qualifications unchanged pending focusednewhead. 3245priorP5819357634+proof6726131218 clean exact3c307; Uqueue report notPmergecert.
+
+FULLchannel refresh dca817484cd0c809e38db139d988ee5156794e8b/FULL6770736 preserves ownRES6748740 EXACT, delta21996 indexedALL13headers; directed N1935, M1935RES, C6newreservations, C4-1939 FULLread. C4 confirms same3263twoMED, C6reserves community-files/upload ACKs separately, do not take them. N3135pending-access and allotherC2/C3/C4/C6/M/H2/T/S/V/G/N/U/J/Z claims respected. No claim full peer payloads read. Final freshFULL append/readback will record PONTO CXP-20261108-1946-C1-1; no duplicate after success.
+
+Project ongoing, serialMediumZEROagents/quotaUNKNOWN/smalldirectedqueries, no Actionsloop/CIqueryretrycancel/queue/merge/pushproduct/newunit/price/limit/commission/flags/account/paidIO/PII/reservationdoc/automation changes. Existing continuity unchanged, no background watcher. Next: owner C6 focusedreturn3263 after correctivehead; received V2892/C23135 require fresh preflight/claims before source, not historical approval transfer. C1 financial3160/author3107disposition preserved.

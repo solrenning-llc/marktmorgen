@@ -547,11 +547,12 @@ function monthlyKept(listed: BackupListedObject[]): Set<string> {
  * be known; one that does not begin as a manifest is not one. Reads at most backupKeptObjects objects (Class B, priced
  * in lib/backup-cost.ts).
  */
-async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[]): Promise<Set<string>> {
+async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[], months: Set<string>): Promise<Set<string>> {
   const keep = new Set<string>();
   for (const object of listed) {
-    // A month's mark is empty and never a manifest: not read.
-    if (object.bytes > manifestBound(MAX_PARTS) || BACKUP_MONTH_MARK.test(object.id)) continue;
+    // A month's mark is empty and never a manifest, and the 3 months' copies are kept by name (monthlyKept), so
+    // neither is read: a month's copy older than the previous key's days does not stop the run.
+    if (object.bytes > manifestBound(MAX_PARTS) || BACKUP_MONTH_MARK.test(object.id) || months.has(object.id)) continue;
     if (timeLeft() <= 0) throw new RangeError("cutoff");
     let bytes: Uint8Array;
     try {
@@ -596,15 +597,16 @@ async function makeRoom(
     let count = listed.length;
     const fits = () => bytes + need <= review.maxStoredBytes && count + objects <= most;
     if (fits()) return { ok: true, deleted: 0, lost, listed };
+    const months = monthlyKept(listed);
     let keep: Set<string>;
     try {
       keep = await lastVerified(store, key, listed, readMark);
     } catch (error) {
       if (!(error instanceof LostLastGood)) throw error;
       lost = true;
-      keep = await verifiedInBucket(store, key, listed);
+      keep = await verifiedInBucket(store, key, listed, months);
     }
-    for (const id of monthlyKept(listed)) keep.add(id);
+    for (const id of months) keep.add(id);
     const oldest = listed.filter((o) => !keep.has(o.id)).sort((a, b) => a.writtenAt - b.writtenAt || (a.id < b.id ? -1 : 1));
     // Never asked for inside the bucket lock (inbox C4-35): such an object is left, and counted as the reason.
     const line = lockLine(now);

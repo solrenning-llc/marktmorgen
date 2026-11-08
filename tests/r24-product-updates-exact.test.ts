@@ -233,3 +233,30 @@ test("2.2 controls: the latest update is read, and a product never updated has n
   } finally { r.restore(); }
 });
 
+// ---- 2.3: the send's lock
+
+test("2.3 a run whose lock ran out and was taken by another run never lets go of the other run's lock", async () => {
+  const r = await setup();
+  const lock = `nl:upd:job:${r.job.id}:lock`;
+  const seen: unknown[] = [];
+  r.during.push(() => {
+    seen.push(redis.run(["GET", lock]));
+    // The first run is held up past its 90 s; the next run takes the lock.
+    redis.run(["SET", lock, "next-run-value", "EX", 90]);
+  });
+  try {
+    const sent = await advanceUpdate(r.job.id, storeForHandle, Date.now() + 20000);
+    assert.deepEqual([sent?.status, sent?.sent], ["sent", 1]);
+    assert.notEqual(seen[0], "1", "the lock holds a value only this run writes");
+    assert.equal(typeof seen[0], "string");
+    assert.equal(redis.run(["GET", lock]), "next-run-value", "the other run's lock is left alone");
+  } finally { r.restore(); }
+});
+
+test("2.3 control: a run lets go of its own lock when it is done", async () => {
+  const r = await setup();
+  try {
+    await advanceUpdate(r.job.id, storeForHandle, Date.now() + 20000);
+    assert.equal(redis.run(["GET", `nl:upd:job:${r.job.id}:lock`]), null);
+  } finally { r.restore(); }
+});

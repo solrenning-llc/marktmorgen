@@ -24,13 +24,27 @@ const mail = installSesMailFixture();
 type Cmd = (string | number)[];
 const original = redis.pipeline.bind(redis);
 const isMark = (cmd: Cmd) => cmd[0] === "SET" && String(cmd[1]).includes(":dripmail:") && cmd.includes("NX");
-const isUndo = (cmd: Cmd) => cmd[0] === "DEL" && String(cmd[1]).includes(":dripmail:");
+/** The mark taken back after a send that did not go: the compare-and-delete script (lib/claim-mark.ts, releaseMark). */
+const isUndo = (cmd: Cmd) => cmd[0] === "EVAL" && String(cmd[1]).startsWith("-- marktmorgen:release:v1\n") && String(cmd[3]).includes(":dripmail:");
+/** The drip mark whose next read-back (a GET of it alone) throws, as a second timeout would. */
+let readBackFails: string | null = null;
+/** A mark written over by somebody else just before this pass takes its own back (on the DEL or the script). */
+let swapBeforeUndo: string | null = null;
 /**
  * How the drip mark's SET NX (or its undoing DEL) answers: "landed" runs it and answers `reply`; "lost" runs
  * nothing and answers `reply`; "short" runs nothing and the pipeline answers no replies at all.
  */
 let mode: { pick: (cmd: Cmd) => boolean; how: "landed" | "lost" | "short"; reply?: unknown } | null = null;
 redis.pipeline = (async (commands: Cmd[]) => {
+  if (readBackFails && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === readBackFails) {
+    readBackFails = null;
+    throw new Error("synthetic: the read-back timed out");
+  }
+  const swap = swapBeforeUndo;
+  if (swap && commands.some((cmd) => cmd.map(String).includes(swap) && (cmd[0] === "DEL" || cmd[0] === "EVAL"))) {
+    swapBeforeUndo = null;
+    await original([["SET", swap, "somebody-elses-mark", "EX", 400 * 86_400]]);
+  }
   const m = mode;
   if (!m || !commands.some(m.pick)) return original(commands);
   if (m.how === "short") return [];
@@ -119,14 +133,34 @@ async function main(): Promise<void> {
   await run();
   is("sent once by the next pass", to(failed), 1);
 
-  part("A failed send whose undoing DEL answers in another shape: the pass ends, and nothing is sent twice");
+  part("A failed send whose taking back does not run: nothing is sent twice");
   const undone = await student();
   mail.setSesOutcome(["refused"]);
   mode = { pick: isUndo, how: "lost", reply: "QUEUED" };
-  is("the pass ends without counting it sent", (await run()).sent, 0);
+  is("the pass goes on without counting it sent", (await run()).sent, 0);
   mode = null;
   await run();
   is("its mark stays, so it is never sent twice (at worst not at all)", [to(undone), typeof (await original([["GET", markOf(undone)]]))[0]], [0, "string"]);
+
+  part("Claude 2 on #3276, finding 1: the mark landed, its reply lost and its read-back failed: unknown, then sent once");
+  const unread = await student();
+  mode = { pick: isMark, how: "landed", reply: undefined };
+  readBackFails = markOf(unread);
+  await run();
+  mode = null;
+  is("the read-back did fail", readBackFails, null);
+  is("unknown: not sent this pass", to(unread), 0);
+  is("and our own mark taken back, so a later pass is not told it went", (await original([["GET", markOf(unread)]]))[0], null);
+  for (let pass = 0; pass < 3; pass += 1) await run();
+  is("a later pass with Redis well sends it once", to(unread), 1);
+
+  part("Claude 2 on #3276, low finding 3: a refused send takes back only its own mark (compare-and-delete)");
+  const other = await student();
+  mail.setSesOutcome(["refused"]);
+  swapBeforeUndo = markOf(other);
+  await run();
+  swapBeforeUndo = null;
+  is("a mark that is no longer ours is never taken back", (await original([["GET", markOf(other)]]))[0], "somebody-elses-mark");
 
   done();
 }

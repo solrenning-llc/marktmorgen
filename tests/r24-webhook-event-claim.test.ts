@@ -47,8 +47,14 @@ const isMark = (cmd: Cmd) => cmd[0] === "SET" && String(cmd[1]).startsWith("nl:h
  * `reply`; "short" writes nothing and the pipeline answers no replies at all. Everything else as Redis runs it.
  */
 let markMode: { how: "landed" | "lost" | "short"; reply?: unknown } | null = null;
+/** The event mark whose next read-back (a GET of it alone) throws, as a second timeout would. */
+let readBackFails: string | null = null;
 redis.pipeline = (async (commands: Cmd[]) => {
   const [only] = commands;
+  if (readBackFails && commands.length === 1 && only[0] === "GET" && only[1] === readBackFails) {
+    readBackFails = null;
+    throw new Error("synthetic: the read-back timed out");
+  }
   // The queue's lease (LEASE_SCRIPT), as Redis runs it (as in tests/r24-webhook-store-read.test.ts).
   if (commands.length === 1 && only[0] === "EVAL" && String(only[1]).includes('redis.call("ZSCORE", KEYS[1], ARGV[1])')) {
     const [, , , key, member, now, until] = only.map(String);
@@ -125,6 +131,16 @@ async function main(): Promise<void> {
   markMode = { how: "lost", reply: 1 };
   is("a number in place of OK is not ours either", [await attempt(() => emitEvent(store, "sale.completed", "cs_claim_old", { amount_cents: 6900 })), received.length], ["returned 0", 4]);
   markMode = null;
+
+  part("Claude 2 on #3276, finding 1: the mark landed, its reply lost and its read-back failed: unknown, and the caller's retry sends it once");
+  markMode = { how: "landed", reply: undefined };
+  readBackFails = markOf("cs_claim_unread");
+  is("unknown: it throws, and the endpoint is not called", [await attempt(() => emitEvent(store, "sale.completed", "cs_claim_unread", { amount_cents: 6900 })), received.length], ["UnknownReplyError", 4]);
+  markMode = null;
+  is("the read-back did fail", readBackFails, null);
+  is("our own mark taken back, so the retry is not told it went", (await original([["GET", markOf("cs_claim_unread")]]))[0], null);
+  is("the caller's retry sends it once", [await attempt(() => emitEvent(store, "sale.completed", "cs_claim_unread", { amount_cents: 6900 })), received.length], ["returned 1", 5]);
+  is("and not again", [await attempt(() => emitEvent(store, "sale.completed", "cs_claim_unread", { amount_cents: 6900 })), received.length], ["returned 0", 5]);
 
   server.close();
   done();

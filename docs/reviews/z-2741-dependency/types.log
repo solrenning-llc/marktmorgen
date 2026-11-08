@@ -1,0 +1,3 @@
+{"roots":3,"sources":782,"target":"ES2017","strict":true,"moduleResolution":"Bundler","diagnostics":0}
+
+Z_CHECK {"exit": 0, "seconds": 6.116, "capSeconds": 120, "heapMiB": 1024}

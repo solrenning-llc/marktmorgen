@@ -1,0 +1,489 @@
+
+FILE chat-counter-admission.test.ts
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown missing refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown null refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown object refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown empty refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown partial refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown unknown SET refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown null count refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown text count refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown zero refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown negative refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown NaN refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown infinite refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown fraction refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown unsafe refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown extra refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown sparse refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown inherited refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS unknown getter refuses before chat POST/write
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS counter timeout refuses before actual chat POST/write
+{"status":429,"counterCommands":0,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS missing counter configuration refuses without commands
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS lost acknowledgement retains the committed counter
+PASS confirmed counter posts and seals once after exactly two counter commands
+PASS ten confirmed saves succeed and the eleventh refuses
+{"status":429,"counterCommands":2,"posts":0,"postBytes":0,"settingCommands":0,"settingBytes":0}
+PASS confirmed exceeded counter keeps its refusal
+PASS sales toggle remains outside provider-test counter
+PASS authorization refusal precedes counter and provider
+PASS invalid provider URL retains known refusal
+PASS confirmed removal deletes the sealed address without a provider POST
+28 passed; 0 failed
+Z_VOLUME {"runs":71,"mocks":20,"over":false}
+
+Z_STATUS 0 null
+
+FILE essential-studio-allowance.test.ts
+
+Essential allowance requires its own finite committed acknowledgement
+  ok    unknown committed allowance refuses 0
+  ok    no retry or readback 0
+  ok    the committed count stays consumed 0
+  ok    unknown committed allowance refuses 1
+  ok    no retry or readback 1
+  ok    the committed count stays consumed 1
+  ok    unknown committed allowance refuses 2
+  ok    no retry or readback 2
+  ok    the committed count stays consumed 2
+  ok    unknown committed allowance refuses 3
+  ok    no retry or readback 3
+  ok    the committed count stays consumed 3
+  ok    unknown committed allowance refuses 4
+  ok    no retry or readback 4
+  ok    the committed count stays consumed 4
+  ok    unknown committed allowance refuses 5
+  ok    no retry or readback 5
+  ok    the committed count stays consumed 5
+  ok    unknown committed allowance refuses 6
+  ok    no retry or readback 6
+  ok    the committed count stays consumed 6
+  ok    unknown committed allowance refuses 7
+  ok    no retry or readback 7
+  ok    the committed count stays consumed 7
+  ok    unknown committed allowance refuses 8
+  ok    no retry or readback 8
+  ok    the committed count stays consumed 8
+  ok    unknown committed allowance refuses 9
+  ok    no retry or readback 9
+  ok    the committed count stays consumed 9
+  ok    unknown committed allowance refuses 10
+  ok    no retry or readback 10
+  ok    the committed count stays consumed 10
+  ok    unknown committed allowance refuses 11
+  ok    no retry or readback 11
+  ok    the committed count stays consumed 11
+  ok    computed count never executes
+  ok    essential failure refuses
+  ok    ordinary public guard behavior remains
+  ok    only first ten confirmed increments pass 1
+  ok    only first ten confirmed increments pass 2
+  ok    only first ten confirmed increments pass 3
+  ok    only first ten confirmed increments pass 4
+  ok    only first ten confirmed increments pass 5
+  ok    only first ten confirmed increments pass 6
+  ok    only first ten confirmed increments pass 7
+  ok    only first ten confirmed increments pass 8
+  ok    only first ten confirmed increments pass 9
+  ok    only first ten confirmed increments pass 10
+  ok    only first ten confirmed increments pass 11
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    invalid limit refuses
+  ok    actual essential studio admission refuses lost ACK
+  ok    actual essential admission never retries
+  ok    actual essential studio admission accepts next confirmed count
+
+58 checks, all passing.
+Z_VOLUME {"runs":62,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE numbers-six.test.ts
+
+Why members leave
+  ok    the member's own reason and words are read from Stripe, the words on one line
+  ok    a membership with a set number of payments ending is not somebody leaving
+  ok    those who chose to leave in the last year, and those who said why
+  ok    reasons summed, the most first, with what they paid a month
+  ok    a payment that never went through is said apart, not counted as a choice
+  ok    their words, the latest first, with no name or address
+
+The next three months
+  ok    no forecast from fewer than five members paying 90 days ago
+  ok    losing one of eleven in 90 days is about 3% a month
+  ok    gaining one $10 member in 90 days is $3.33 a month
+  ok    each month keeps its share and adds its gain
+  ok    a member who joined and left inside the 90 days gained nothing
+  ok    nor one whose first payment never went through
+  ok    a trial that ended unpaid never paid
+
+A checkout Stripe would not open
+  ok    a refusal is counted and the creator told
+  ok    in Stripe's own words, saying what to look at
+  ok    a second on the same day is counted, not emailed
+  ok    Stripe being down is counted, never emailed
+  ok    nor a refusal of our own making, which is not Stripe's
+  ok    the studio reads the week's count and the last words
+  ok    and nothing a week later
+  ok    the next day's first refusal is emailed again
+
+Spend more, keep or cut
+  ok    below the floor, nothing is said
+  ok    2 back for each 1 is spend more, under 1 is cut, between is keep
+
+When ads paid back
+  ok    counted from the first day of spend, to the day the money covered it
+  ok    not yet, with how much has come back
+  ok    and nothing for a channel nobody spent on
+  ok    a renewal is put on its channel's day, so payback counts it
+
+Buyers for ad audiences
+  ok    only buyers who agreed and are still on the list, one address a line
+  ok    an empty file still has its header
+
+The month's goal
+  ok    a goal is a whole positive amount, or 0 for none
+  ok    kept for the store, with the month it was set in
+  ok    and not read as a goal in another currency
+  ok    every channel's money on a day added up
+  ok    this month only, with what a day must bring for the days left
+  ok    and the day it was reached
+  ok    no goal, nothing to show
+
+Records
+  ok    a new store's first sales are not called records
+  ok    a best day of the last 90, set this week
+  ok    a best day long ago is no news
+
+Said in words
+  ok    a channel's recorded payments less costs, not a budget instruction
+  ok    a channel with spend and no payments discloses the negative result
+  ok    no direction to scale or cut follows from gross attributed sales
+  ok    and the record, said as of the last 90 days
+  ok    the Monday email carries the goal
+  ok    the month just ended is the one before today
+  ok    a goal set on the 1st is not held against the month before it, only against its own and after
+  ok    the month's email: its visitors set beside the month before, its money, its best day and the goal
+  ok    a month with nobody and nothing says nothing
+
+Slack and Discord
+  ok    only a Slack or Discord webhook address is taken
+  ok    anything else is refused before a request is made
+  ok    an address the chat will not post to is not kept
+  ok    one that took a first message is kept
+  ok    sealed, never as given
+  ok    Slack's marks escaped, so a name cannot ping a channel
+  ok    Discord pings nobody and stays under its length
+  ok    the email's lines about stopping it are not posted
+  ok    kept by the store, not by its address, so another store with the same handle never reaches the channel
+  ok    forgotten when emptied
+
+58 checks, all passing.
+Z_VOLUME {"runs":90,"mocks":4,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-alerts.test.ts
+
+Chance, as counts have it
+  ok    none when about one is usual is ordinary
+  ok    3 when 30 are usual is not
+  ok    6 refunds when half of one is usual is not
+
+Visits that fell away
+  ok    said, with the numbers
+  ok    not for a store with a handful a day
+  ok    today, still going, does not count
+
+Sales from visits that fell, while visits held
+  ok    said when the last 7 days sold none at a rate of 3 a day
+  ok    with the rate before and after
+  ok    not when sales dipped by chance
+
+Refunds piling up
+  ok    6 in a week, where 2 in a season is usual
+  ok    not 3 where 3 a week is usual
+
+Unavailable payment readings
+  ok    missing sales do not imply a conversion drop
+  ok    traffic remains available without money readings
+  ok    unknown historical refunds do not imply a spike
+  ok    unknown recent refunds do not imply zero
+  ok    confirmed empty readings stay zero
+  ok    capped purchase reading blocks conversion and refunds
+  ok    failed refunds preserve complete purchase figures
+  ok    missing refund records stay unavailable
+  ok    incomplete renewals block refund comparison
+  ok    legacy unconfirmed coverage blocks refunds
+
+The month's goal
+  ok    off pace on the 20th
+  ok    reached
+  ok    nothing before the 10th
+
+Said once, where the creator asked for it
+  ok    the goal reached, said once
+  ok    by email
+  ok    and in the chat
+  ok    once a day
+  ok    and once a month
+  ok    never by email once the numbers emails are stopped
+
+Each sale in the chat
+  ok    the amount, what and from where, never who
+  ok    once
+  ok    not when switched off
+
+33 checks, all passing.
+Z_VOLUME {"runs":933,"mocks":20,"over":false}
+
+Z_STATUS 0 null
+
+FILE url-field.test.ts
+
+The check
+  ok    empty is fine in an optional field
+  ok    a good address is fine
+  ok    missing https://: said, with the address offered back with it
+  ok    http://: offered back as https://
+  ok    spaces around it are not a problem
+  ok    something no prefix can save: the server's own words, no fix
+  ok    a local address: why it is refused, never offered back
+  ok    a password in it: the server's words
+  ok    another kind of address (mailto:) is not taken for a password
+  ok    a port is not a scheme: offered back with https://
+  ok    too long is said, never cut
+  ok    the server reads one past the length kept, so too long is refused, not cut
+  ok    "notion.so/x": passes here exactly when the server keeps it
+  ok    "notion.so/x": what is offered is kept by the server
+  ok    "http://example.com": passes here exactly when the server keeps it
+  ok    "http://example.com": what is offered is kept by the server
+  ok    "https://example.com": passes here exactly when the server keeps it
+  ok    "my course": passes here exactly when the server keeps it
+  ok    "https://10.0.0.1/a": passes here exactly when the server keeps it
+  ok    "ftp://example.com": passes here exactly when the server keeps it
+  ok    "https://me:pw@example.com": passes here exactly when the server keeps it
+  ok    "": passes here exactly when the server keeps it
+
+The field
+  ok    said when the field is left or its form is sent, never while typing
+  ok    while typing, a message only goes away, when the address is right; a new one waits for the next leave
+  ok    tied to the field, and marked invalid only while said
+  ok    the fix is a button at least 44 px tall that puts the address in, offered only for the address it came from
+  ok    after the fix the focus goes back to the field, never to the page
+  ok    no browser bubble in other words, and no silent cut of a long address
+  ok    the message is announced
+  ok    the message has an icon beside its words, so it is not told by color alone
+  ok    the lesson link uses it, with a visible label tied by its id
+  ok    a product's link uses it too, with its help tied to it
+  ok    and its route refuses a long link rather than cutting it
+  ok    a store link uses it too, with its help tied to it
+  ok    and its route refuses a long link rather than cutting it
+
+A meeting link, by the reading calls and events keep
+  ok    a good room is fine, empty too
+  ok    missing https://: offered back, as cleanRoom keeps it
+  ok    anything else: the editor's own words, no fix
+  ok    "zoom.us/j/1": passes here exactly when cleanRoom keeps it
+  ok    "zoom.us/j/1": what is offered, cleanRoom keeps
+  ok    "http://whereby.com/me": passes here exactly when cleanRoom keeps it
+  ok    "http://whereby.com/me": what is offered, cleanRoom keeps
+  ok    "https://meet.google.com/x": passes here exactly when cleanRoom keeps it
+  ok    "zoom": passes here exactly when cleanRoom keeps it
+  ok    "ftp://x.com": passes here exactly when cleanRoom keeps it
+  ok    "https://zoom.us/j/1?pwd=abc": passes here exactly when cleanRoom keeps it
+  ok    a room longer than the server keeps whole is said too long before it is cut
+  ok    measured as stored too: letters written out longer can take it past the length
+  ok    the server's reading of stored links is left as it was
+  ok    a call's meeting links use it, each with a visible label tied by id
+  ok    a community event's link uses it
+  ok    and an empty one is said there, since it is required
+
+A notice's page address, by the reading the notice is held to
+  ok    the report form's page address uses it, required, with its help tied to it
+  ok    a notice whose address the field refuses is not sent, and the focus goes to the field
+  ok    the server refuses an address longer than it keeps, never cuts it
+  ok    it is held to the same pattern as readReport
+
+A chat's webhook address, by the reading the server posts with
+  ok    a Slack address missing https:// is offered back
+  ok    another address is the editor's words, nothing offered
+  ok    the longest address either chat takes fits
+  ok    the chat summary's address uses it, by chatKind, never kept by the browser
+  ok    neither an empty address (it would stop the posting) nor one the server refuses is sent: each try counts in the hour
+  ok    the chat is named by the same reading, never by a word in the address
+  ok    its buttons line up with the field, not with the message under it
+  ok    the server reads it with the same function
+
+A public review page, by the reading the server keeps
+  ok    a Trustpilot page missing https:// is offered back as the server keeps it
+  ok    a page elsewhere is the editor's words, nothing offered
+  ok    a refused review page is said once, beside the field, with the focus taken there
+  ok    the review page field uses it, optional, with its note tied to it
+
+68 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE service-refusals.test.ts
+
+Why, said as it is
+  ok    the short window: tries
+  ok    the trial's figure used: its own words, for this trial
+  ok    the JSON answer carries the words; a page's code names the reason
+  ok    the page's words for each code
+  ok    a database that does not answer: unknown, never tries
+
+The routes
+  ok    each creator-facing route says why, with withinServiceWhy
+  ok    a paid period not reserved is funding, never too many tries
+  ok    the pages word funding and each allowance code
+  ok    the Zoom host link refused here is not called Zoom's
+  ok    outreach: the day's limit before the month's figure, under its own words
+
+The components show the server's words where it gave them
+  ok    each one
+  ok    uploads claim no reason they cannot know
+
+12 checks, all passing.
+Z_VOLUME {"runs":120,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 133.9 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (117.070126ms)
+✔ each family is bounded one way at least, and what it says can be checked (41.841558ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (4.00978ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (0.930066ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.602461ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (6.308224ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.295256ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 188.405109
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE person-data-registry.test.ts
+
+Every file that keeps something per person is in the registry
+  ok    the scan finds the files it should
+  ok    each is in lib/person-data.ts (add a line saying what deleting a person does to it)
+  ok    each file named exists
+
+Erased means erased by the erasure itself
+  ok    every erased line names a module the erasure runs
+  ok    every module the erasure runs has an erased line
+  ok    no module runs twice
+  ok    each forget function the erasure imports is exported by its module
+  ok    and each is one of the modules it runs
+  ok    the list's own row is the last thing forgotten, after the modules that read it
+  ok    the fingerprint is written before any eraser runs
+  ok    each community module said to be erased through lib/community-erasure.ts is called from it
+
+What the confirmation reads
+  ok    there is something deleted, a fingerprint and kept lines
+  ok    every kept line says why
+  ok    every expiring line says within how many days
+  ok    in US English, and never the word the owner forbids
+
+The pages say so, and send a deletion to the page that does it
+  ok    the privacy policy has the deletion section
+  ok    and no longer sends a deletion to an email address
+  ok    the person's page posts to the route that deletes
+  ok    every store's page links to it
+  ok    the help says how
+
+20 checks, all passing.
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (27.735368ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (79.481686ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (33.372969ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (3.180427ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.14499ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.115134ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.444111ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (64.324628ms)
+✔ every store figure taken in the code is a kind a line prices (43.141403ms)
+✔ every email sent names a meter, and each file only the meters it may use (78.132376ms)
+✔ the units a figure is taken in cost at least what they stand for (11.111924ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (3.690678ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.259362ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.480456ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.111919ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.12528ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.498664ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.207784ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.812748ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.210758ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.136199ms)
+✔ Path push fits its reserved studio requests (0.080602ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.053441ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.08582ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.096676ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (30.715773ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 399.18975
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z2741dep-b0Mxh3

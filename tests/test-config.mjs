@@ -85,7 +85,9 @@ function centralAliases(file,root,here){
  if(file==='host-calendar-removal.test.ts')aliases['@/lib/host-calendar']=join(here,'host-calendar-removal-world.ts');
  if(file==='outreach-counter-admission.test.ts')for(const name of ['redis','store-request','outreach','metered-limits'])aliases['@/lib/'+name]=join(here,'outreach-counter-admission-world.ts');
  if(file==='ai-report-counter-admission.test.ts')for(const name of ['redis','store-request','review-ai-summary','stats-report','numbers-ask','person-agenda-read','ai'])aliases['@/lib/'+name]=join(here,'ai-report-counter-admission-world.ts');
+ if(file==='cron-checks-exact.test.ts')for(const name of ['email','verify-mail','verify-stripe'])aliases['@/lib/'+name]=join(here,'cron-checks-exact-world.ts');
  if(file==='mail-check-route.test.ts')for(const name of ['request-guard','email','verify-mail'])aliases['@/lib/'+name]=join(here,'mail-check-route-world.ts');
+ if(file==='numbers-email-claim.test.ts')for(const name of ['request-guard','email','traffic','usage-billing','numbers-ask','ai','team','stats'])aliases['@/lib/'+name]=join(here,'numbers-email-claim-world.ts');
  if(file==='plan-break-off-cron.test.ts')for(const name of ['request-guard','billing-reminders','trial-nudges','payment-requests'])aliases['@/lib/'+name]=join(here,'plan-break-off-cron-world.ts');
  if(file==='plan-refund-route.test.ts')aliases['@/lib/studio-route']=join(here,'plan-refund-route-world.ts');
  if(file==='plan-refund-page.test.ts'){
@@ -112,10 +114,10 @@ function centralAliases(file,root,here){
  if(file==='path-growth-facts.test.ts')for(const name of ['redis','catalog','broadcasts','reviews'])aliases['@/lib/'+name]=join(here,'path-growth-world.ts');
  if(file==='path-reminder-push.test.ts')aliases['@/lib/web-push']=join(here,'path-push-world.ts');
  if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
- if(file==='cart-physical.test.ts'||file==='cart-soon-unknown.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='cart-physical.test.ts'||file==='cart-soon-unknown.test.ts'||file==='cart-soon-get.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-stock.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
- if(file==='orders-open.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='orders-open.test.ts'||file==='kb9-withdrawal.test.ts'||file==='n-2827-withdrawal-flow.test.ts'||file==='kb9-2827-c5-review.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-page-bounds.test.ts'){aliases['next/server']=join(here,'next-server-after-world.ts');aliases['next/link']=join(here,'next-link-world.tsx');}
  if(file==='deals-board-pipelines-render.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='unnamed-buyer-notes.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
@@ -202,6 +204,7 @@ function centralAliases(file,root,here){
   for(const name of ['contract-restart-activation','contract-funding-rules','commercial-margin','redis','store','plan-standing','free-pool-rules','platform-share'])aliases['@/lib/'+name]=join(here,'restart-publication-ack-world.ts');
  }
  if(file==='buyer-actions.test.ts')aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');
+ if(file==='task-hand-in-kept.test.ts'){aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');aliases['next/headers']=join(here,'security/next-headers.ts');}
  if(file==='task-room-unknown.test.ts'){aliases['@/lib/blob']=join(here,'buyer-actions-blob.ts');aliases['next/headers']=join(here,'security/next-headers.ts');}
  if(file==='dispute-purchase-review.test.ts')for(const name of ['store','stripe-account','contract-resource-window','store-allowance'])aliases['@/lib/'+name]=join(here,'dispute-review-world.ts');
  if(file==='dispute-review-route.test.ts')for(const name of ['store-request','dispute-purchase-review','dispute-preorder-review'])aliases['@/lib/'+name]=join(here,'dispute-review-route-world.ts');
@@ -240,6 +243,7 @@ function centralAliases(file,root,here){
  if(file==='eu-who-answers.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='assistant-counter-admission.test.ts')for(const name of ['redis','store','store-assistant','metered-limits'])aliases['@/lib/'+name]=join(here,'assistant-counter-admission-world.ts');
  if(file==='a8-stock-unknown.proof.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
+ if(file==='email-platform-target-evidence.test.ts')aliases['@/lib/safe-fetch']=join(here,'email-platform-target-world.ts');
  return aliases;
 }
 export function testEnvironment(env){return{...env,DEMO_STUDIO_ADMIN:'operator@example.test',STRIPE_DEMO_ACCOUNT_ID:'acct_fixtureDemo',NIMBUS_DATA_KEY:env.NIMBUS_DATA_KEY??'tests-only-not-a-real-deployment-secret'};}

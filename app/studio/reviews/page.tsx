@@ -52,7 +52,10 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
   const { store } = view;
 
   // The writing help, for a reply drafted from a review (lib/ai.ts, replyToReview).
-  const ai = aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  // An allowance that could not be read is said in words by the AI boxes, never shown as 0 (rule 24, VR item 2).
+  const ai = aiAvailableFor(store)
+    ? await aiLeft(store).then((left) => ({ on: true, left }), () => ({ on: true, left: 0, known: false as const }))
+    : { on: false, left: 0 };
   const queue = query.view !== "all";
   const asked = Number(typeof query.page === "string" ? query.page : "1");
   const page = Number.isInteger(asked) && asked >= 1 ? asked : 1;

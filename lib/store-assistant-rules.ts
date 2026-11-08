@@ -51,7 +51,7 @@ import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, PROVIDER_CHARGES_BPS, UPSTASH
 import { assessCustomerWorstCase, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
 import { captureCustomerTaxInput, customerTaxCeiling, type CustomerTaxInput } from "@/lib/customer-tax-review";
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
-import { CONFUSABLE_LATIN_SOURCES } from "@/lib/confusables-latin";
+import { CONFUSABLE_LATIN_SOURCES, LOOKALIKES_BEFORE_GATE_RANGE } from "@/lib/confusables-latin";
 import { PAGE_GOES_ON } from "@/lib/answers-rules";
 import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_CORRECT_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf } from "@/lib/receiving-costs";
 
@@ -556,7 +556,22 @@ function lookalike(sign: string, stroke: "l" | "i"): string {
 const SPECIAL_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/u;
 /** A line break that ends a sentence ("Pro.\nMost") or comes before a capital ("Pro\nMonthly"): read as a space, never joined. */
 const SENTENCE_BREAK = /(?:[.!?:;][\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])|[\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])[\t ]*(?=[\p{Lu}\p{Lt}]))/gu;
-const MAY_LOOK_ALIKE = /[\u00B5\u0250-\u1FFF\u2070-\uFFFF\u{10000}-\u{10FFFF}]/u;
+/**
+ * The signs that may be or become a look-alike: the micro sign (NFKC makes it
+ * Greek mu), every look-alike of the table before U+0180, listed by the
+ * generator (lib/confusables-latin.ts), and every sign from U+0180 on except
+ * general punctuation. Made from the table, never typed: before Claude 5's
+ * review of #2579 it began at U+0250 with eight letters by hand, and 51 of the
+ * table's own letters below it ("Ra\u0180att") were never read.
+ * Marked pure so a page that never folds text (the buyer's chat reads only two
+ * constants of these rules) leaves the table out of its bundle
+ * (tests/client-bundles.mjs, KEPT_OUT).
+ */
+export const MAY_LOOK_ALIKE = /* @__PURE__ */ gateOf(LOOKALIKES_BEFORE_GATE_RANGE);
+/** The gate from the table's look-alikes before U+0180 (MAY_LOOK_ALIKE). */
+function gateOf(before: readonly number[]): RegExp {
+  return new RegExp(`[\\u00B5${before.map((code) => `\\u{${code.toString(16)}}`).join("")}\\u0180-\\u1FFF\\u2070-\\uFFFF\\u{10000}-\\u{10FFFF}]`, "u");
+}
 /**
  * Text folded to the one form it is matched in, never shown: compatibility
  * forms as their plain letter and digit (fullwidth, mathematical bold, a
@@ -633,7 +648,7 @@ class Readings {
     if (value === undefined) this.made.set(name, (value = make()));
     return value;
   }
-  /** Only a text with a sign that may be or become a look-alike (from the micro sign on, past Latin-1 and Latin Extended) is folded again. */
+  /** Only a text with a sign that may be or become a look-alike (MAY_LOOK_ALIKE) is folded again. */
   private get lookalikes() { return MAY_LOOK_ALIKE.test(this.text); }
   private get splits() { return SPECIAL_SPACES.test(this.text) || /[\n\r\v\f\u0085\u2028\u2029]/u.test(this.text); }
   get plain() { return this.once("plain", () => plainText(this.text)); }

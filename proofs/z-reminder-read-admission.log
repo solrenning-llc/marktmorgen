@@ -1,0 +1,69 @@
+{
+  "observations": [
+    {
+      "mode": "refused-before-count",
+      "events": [
+        "GET+TTL",
+        "admit:4"
+      ],
+      "commands": 2,
+      "chargedPublicUnitsInStandIn": 0,
+      "admissionCalls": 1,
+      "stripeStandInCalls": 0,
+      "requestBytes": 103,
+      "replyBytes": 142,
+      "outcome": "skip",
+      "pass": false
+    },
+    {
+      "mode": "unknown",
+      "events": [
+        "GET+TTL",
+        "admit:4"
+      ],
+      "commands": 2,
+      "chargedPublicUnitsInStandIn": 0,
+      "admissionCalls": 1,
+      "stripeStandInCalls": 0,
+      "requestBytes": 103,
+      "replyBytes": 142,
+      "outcome": "Synthetic unknown admission",
+      "pass": false
+    },
+    {
+      "mode": "missing-consent",
+      "events": [
+        "GET+TTL"
+      ],
+      "commands": 2,
+      "chargedPublicUnitsInStandIn": 0,
+      "admissionCalls": 0,
+      "stripeStandInCalls": 0,
+      "requestBytes": 103,
+      "replyBytes": 9,
+      "outcome": "skip",
+      "pass": false
+    },
+    {
+      "mode": "healthy",
+      "events": [
+        "GET+TTL",
+        "admit:4",
+        "Stripe stand-in"
+      ],
+      "commands": 2,
+      "chargedPublicUnitsInStandIn": 4,
+      "admissionCalls": 1,
+      "stripeStandInCalls": 1,
+      "requestBytes": 103,
+      "replyBytes": 142,
+      "outcome": "skip",
+      "pass": true
+    }
+  ],
+  "commands": 8,
+  "admissions": 3,
+  "checks": 4,
+  "failures": 3,
+  "externalCalls": 0
+}

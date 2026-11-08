@@ -1,0 +1,68 @@
+{
+  "observations": [
+    {
+      "mode": "refused-before-count",
+      "events": [
+        "GET+TTL",
+        "admit:() => {\n  throw Error(\"Unexpected boundary ASSIST_REMIND_REQUEST_UNITS\");\n}"
+      ],
+      "commands": 2,
+      "chargedPublicUnitsInStandIn": 0,
+      "admissionCalls": 1,
+      "stripeStandInCalls": 0,
+      "requestBytes": 103,
+      "replyBytes": 142,
+      "outcome": "Unexpected request units",
+      "pass": false
+    },
+    {
+      "mode": "unknown",
+      "events": [
+        "GET+TTL",
+        "admit:() => {\n  throw Error(\"Unexpected boundary ASSIST_REMIND_REQUEST_UNITS\");\n}"
+      ],
+      "commands": 2,
+      "chargedPublicUnitsInStandIn": 0,
+      "admissionCalls": 1,
+      "stripeStandInCalls": 0,
+      "requestBytes": 103,
+      "replyBytes": 142,
+      "outcome": "Unexpected request units",
+      "pass": false
+    },
+    {
+      "mode": "missing-consent",
+      "events": [
+        "GET+TTL"
+      ],
+      "commands": 2,
+      "chargedPublicUnitsInStandIn": 0,
+      "admissionCalls": 0,
+      "stripeStandInCalls": 0,
+      "requestBytes": 103,
+      "replyBytes": 9,
+      "outcome": "skip",
+      "pass": false
+    },
+    {
+      "mode": "healthy",
+      "events": [
+        "GET+TTL",
+        "admit:() => {\n  throw Error(\"Unexpected boundary ASSIST_REMIND_REQUEST_UNITS\");\n}"
+      ],
+      "commands": 2,
+      "chargedPublicUnitsInStandIn": 0,
+      "admissionCalls": 1,
+      "stripeStandInCalls": 0,
+      "requestBytes": 103,
+      "replyBytes": 142,
+      "outcome": "Unexpected request units",
+      "pass": false
+    }
+  ],
+  "commands": 8,
+  "admissions": 3,
+  "checks": 4,
+  "failures": 4,
+  "externalCalls": 0
+}

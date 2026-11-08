@@ -377,10 +377,11 @@ async function giveBack(store: Store, n: number): Promise<void> {
  * places at once: only one holds the send at a time.
  */
 export async function advanceUpdate(id: string, load: (handle: string) => Promise<Store | null>, deadline: number): Promise<UpdateJob | null> {
-  // Held only on an exact "OK" (rule 24): any other reply leaves the send for
-  // the next run and lets go of nothing, since the lock may not be ours.
-  const got = repliesFor(await redisPipeline([["SET", lockKey(id), "1", "NX", "EX", 90]]), 1);
-  if (!got || got[0] !== "OK") return null;
+  // Held only when it is ours (rule 24, lib/claim-mark.ts): a value only this run writes, taken on an exact "OK" or
+  // read back as ours; taken or unknown leaves the send for the next run and lets go of nothing. Let go only while it
+  // still holds this run's value, so a run held up past its 90 s never frees the next run's lock (r24 2.3).
+  const mine = claimValue();
+  if ((await claimMark(lockKey(id), 90, mine)) !== "ours") return null;
   try {
     // Unknown evidence must not dequeue a real job or overwrite its payload.
     // Keep it for the next automatic read; only a confirmed null is absent.
@@ -501,7 +502,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
     if (job.status === "sent" || job.status === "failed") await redisPipeline([["SREM", QUEUE, id]]);
     return job;
   } finally {
-    await redisPipeline([["DEL", lockKey(id)]]).catch(() => {});
+    await releaseMark(lockKey(id), mine);
   }
 }
 

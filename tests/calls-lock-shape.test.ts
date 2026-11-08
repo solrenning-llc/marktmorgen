@@ -65,7 +65,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 /**
  * Replies put in place of the real ones, while set: the SET NX of a call's
- * lock, its GET, its plain SET (a take-over), and the HGETALL of a diary after
+ * lock, its GET, its take-over (a plain SET before, the swap script now), and the HGETALL of a diary after
  * `skipDiary` readings of it. Every command still runs on the in-memory Redis.
  */
 const swap: { nx?: { value: unknown }; get?: { value: unknown }; set?: { value: unknown }; diary?: { value: unknown }; skipDiary?: number } = {};
@@ -81,6 +81,8 @@ redis.pipeline = async (commands) => {
       if (c[0] === "SET" && !c.includes("NX") && swap.set) return swap.set.value;
       if (c[0] === "GET" && swap.get) return swap.get.value;
     }
+    // The take-over is a swap of the old value in one script since the lock has an owner (tests/calls-lock-owner.test.ts).
+    if (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:call-lock-swap:v1\n") && swap.set) return swap.set.value;
     if (c[0] === "HGETALL" && key.startsWith("nl:call:busy:") && swap.diary) {
       if ((swap.skipDiary ?? 0) > 0) {
         swap.skipDiary = (swap.skipDiary ?? 0) - 1;

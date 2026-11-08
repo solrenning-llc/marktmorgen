@@ -21,6 +21,7 @@ import { editCourse, emptyCourse, newItemId, saveBody, saveCourse } from "@/lib/
 import { type Quiz, saveQuiz } from "@/lib/quiz";
 import { saveTask } from "@/lib/assignment";
 import { countDepth } from "@/lib/page-depth";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -44,13 +45,14 @@ redis.pipeline = (async (batch: Command[]) => {
   return batch.map(() => 42);
 }) as typeof redis.pipeline;
 
-async function odd<T>(keys: string, run: () => Promise<T>): Promise<{ value?: T; failed: boolean; twisted: number }> {
+async function odd<T>(keys: string, run: () => Promise<T>): Promise<{ value?: T; failed: boolean; twisted: number; error?: string }> {
   prefix = keys;
   twisted = 0;
   try {
     return { value: await run(), failed: false, twisted };
-  } catch {
-    return { failed: true, twisted };
+  } catch (error) {
+    // Which error: only UnknownReplyError says "not known"; a ReferenceError or a TypeError is a defect (Codex T on #3225).
+    return { failed: true, twisted, error: error instanceof UnknownReplyError ? "UnknownReplyError" : error instanceof Error ? error.name : "thrown" };
   } finally {
     prefix = "";
   }
@@ -95,17 +97,17 @@ async function main(): Promise<void> {
 
   const body = await odd(lessonKey("body", full), () => readLessonTool(store, product, full, charge) as Promise<Lesson>);
   is("the text's read is really answered in another shape", body.twisted > 0, true);
-  is("a text that could not be read fails, never \"\"", [body.failed, body.value?.text ?? "not given"], [true, "not given"]);
+  is("a text that could not be read fails, never \"\"", [body.failed, body.value?.text ?? "not given", body.error], [true, "not given", "UnknownReplyError"]);
   const quiz = await odd(lessonKey("quiz", quizzed), () => readLessonTool(store, product, quizzed, charge) as Promise<Lesson>);
   is("the quiz's read is really answered in another shape", quiz.twisted > 0, true);
-  is("a quiz that could not be read fails, never \"no quiz\"", [quiz.failed, quiz.value?.quiz === undefined ? "not given" : quiz.value.quiz], [true, "not given"]);
+  is("a quiz that could not be read fails, never \"no quiz\"", [quiz.failed, quiz.value?.quiz === undefined ? "not given" : quiz.value.quiz, quiz.error], [true, "not given", "UnknownReplyError"]);
   const task = await odd(lessonKey("task", full), () => readLessonTool(store, product, full, charge) as Promise<Lesson>);
   is("the task's read is really answered in another shape", task.twisted > 0, true);
-  is("a task that could not be read fails, never \"no task\"", [task.failed, task.value?.task === undefined ? "not given" : task.value.task], [true, "not given"]);
+  is("a task that could not be read fails, never \"no task\"", [task.failed, task.value?.task === undefined ? "not given" : task.value.task, task.error], [true, "not given", "UnknownReplyError"]);
   // A record that is there but does not read as a quiz or a task is not "none" either.
   await realPipeline([["SET", lessonKey("quiz", bare), "{not json"], ["SET", lessonKey("task", bare), JSON.stringify({ prompt: "" })]]);
   const broken = await odd("nothing-twisted", () => readLessonTool(store, product, bare, charge) as Promise<Lesson>);
-  is("a quiz or task record that does not read fails, never none", broken.failed, true);
+  is("a quiz or task record that does not read fails, never none", [broken.failed, broken.error], [true, "UnknownReplyError"]);
   await realPipeline([["DEL", lessonKey("quiz", bare), lessonKey("task", bare)]]);
 
   part("readPageReadingTool: a depth record in another shape is not zero visitors");
@@ -120,6 +122,10 @@ async function main(): Promise<void> {
   await realPipeline([["HSET", `nl:depth:${store.statsId}:${product}`, "blok0003", "many"]]);
   const garbled = (await readPageReadingTool(store, product, charge)) as Reading;
   is("a depth count that is not a whole number is an error, never skipped", [garbled?.visitors_measured ?? "not given", typeof garbled?.error], ["not given", "string"]);
+  // A count HINCRBY never leaves below zero (Codex T on #3225, LOW): not a count, so not read as none counted.
+  await realPipeline([["DEL", `nl:depth:${store.statsId}:${product}`], ["HSET", `nl:depth:${store.statsId}:${product}`, "blok0001", "-1"]]);
+  const negative = (await readPageReadingTool(store, product, charge)) as Reading;
+  is("a depth count below zero is an error, never 0 visitors", [negative?.visitors_measured ?? "not given", typeof negative?.error], ["not given", "string"]);
 }
 
 main().then(done, (error) => {

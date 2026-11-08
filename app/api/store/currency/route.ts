@@ -1,11 +1,11 @@
 import { type NextRequest, after } from "next/server";
-import { UnknownReplyError } from "@/lib/redis-reply";
 import { StoreFullError, chargesBelow, pricedProducts, setCurrency } from "@/lib/store";
 import { readProducts } from "@/lib/catalog";
 import { currencyRule, isCurrency } from "@/lib/money";
 import { chargeableCurrencies, runningSubscriptions } from "@/lib/payment-methods";
 import { noticeCreator } from "@/lib/account-notice";
-import { runningSeries } from "@/lib/call-series-open";
+import { runningSeries, seriesUnknownResponse } from "@/lib/call-series-open";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite, text } from "@/lib/store-request";
 
 /**
@@ -27,7 +27,8 @@ import { guardStoreWrite, text } from "@/lib/store-request";
  *   - a series of calls is still running ("series", with how many): each is
  *     charged in the currency it was booked in until its last session
  *     (lib/call-series-open.ts), so the change waits until the last one is
- *     over or canceled;
+ *     over or canceled; a count Redis answered in an unknown shape is not
+ *     "none": the change is refused ("unavailable", 503), nothing changed;
  *   - the store has prices and the creator has not yet agreed that every
  *     saved amount keeps its number ("confirm", with how many products).
  */
@@ -66,7 +67,11 @@ export async function POST(request: NextRequest) {
       if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
     }
 
-    const series = await runningSeries(store);
+    const series = await runningSeries(store).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    });
+    if (series === null) return seriesUnknownResponse();
     if (series > 0) return Response.json({ ok: false, error: "series", running: series }, { status: 409 });
 
     if (priced > 0 && guarded.body.confirm !== true) {
@@ -86,8 +91,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
     console.error("changing the store currency failed", error);
-    // A count read in no shape Redis gives (lib/call-series-open.ts, runningSeries): nothing changed, try again.
-    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

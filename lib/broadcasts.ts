@@ -285,7 +285,13 @@ async function readBroadcastForWork(id: string): Promise<Broadcast | null> {
 }
 
 /** A studio snapshot is all-or-unavailable; missing rows must not look like no campaigns. */
-export async function listBroadcastsStrict(listId: string | null, limit = 30): Promise<Broadcast[]> {
+/**
+ * With `expired: "skip"`, an id whose record Redis answers as its own nil is left out: the record is written before
+ * its id enters the list (createBroadcast) and lives RECORD_DAYS under its own EXPIRE while the list never expires, so
+ * nil is a campaign that is gone, known. Every other answer still throws (rule 24). Without it, one missing record
+ * withholds the whole list, as before.
+ */
+export async function listBroadcastsStrict(listId: string | null, limit = 30, options: { expired?: "skip" } = {}): Promise<Broadcast[]> {
   if (!listId) return [];
   if (!isRedisConfigured()) throw new Error("Campaign storage is unavailable");
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Invalid campaign history limit");
@@ -296,7 +302,12 @@ export async function listBroadcastsStrict(listId: string | null, limit = 30): P
   if (!ids.length) return [];
   const rows = await redisPipeline(ids.map(id => ["GET", bcKey(id as string)]));
   if (!Array.isArray(rows) || rows.length !== ids.length) throw new Error("Campaign records are incomplete");
-  return ids.map((id, i) => parseStoredBroadcast(rows[i], id as string, listId));
+  const out: Broadcast[] = [];
+  for (let i = 0; i < ids.length; i += 1) {
+    if (options.expired === "skip" && rows[i] === null) continue;
+    out.push(parseStoredBroadcast(rows[i], ids[i] as string, listId));
+  }
+  return out;
 }
 
 /**

@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -645,13 +646,34 @@ export async function listingsNamed(store: Store, meta: Record<string, string | 
 
 // ---- Reading ----------------------------------------------------------------
 
-/** Many GETs, in pipelines of a few hundred sent side by side. */
+/**
+ * Many GETs, in pipelines of a few hundred sent side by side: one reply for each key, in its own envelope, or
+ * UnknownReplyError (CX-123 rule 24), never a list cut short whose missing replies would read as "no record".
+ */
 async function getMany(keys: string[]): Promise<unknown[]> {
   if (keys.length === 0) return [];
   const chunks: string[][] = [];
   for (let i = 0; i < keys.length; i += 400) chunks.push(keys.slice(i, i + 400));
-  const answers = await Promise.all(chunks.map((chunk) => redisPipeline(chunk.map((key) => ["GET", key]))));
+  const answers = await Promise.all(
+    chunks.map(async (chunk) => {
+      const replies = repliesFor(await redisPipeline(chunk.map((key) => ["GET", key])), chunk.length);
+      if (!replies) throw new UnknownReplyError("a store's product records");
+      return replies;
+    }),
+  );
   return answers.flat();
+}
+
+/**
+ * One product's listing as GET answered it: null only for an explicit nil (no record). A reply of another type, a
+ * record that is not JSON, not a listing, or another product's throws UnknownReplyError (CX-123 rule 24; Claude 5's
+ * ALTO on PayPal hand-over), never "the store has no such product".
+ */
+function listingRead(raw: unknown, id: string): Listing | null {
+  if (raw === null) return null;
+  const listing = typeof raw === "string" ? parseListing(parseJson(raw)) : null;
+  if (!listing || listing.id !== id) throw new UnknownReplyError("a product's listing");
+  return listing;
 }
 
 function parseJson(raw: unknown): unknown {
@@ -676,8 +698,10 @@ function wanted(store: Store, ids: Iterable<string> | undefined): string[] {
 
 /**
  * Listings, in the order asked (every product in the creator's order when no
- * ids are given). Ids the store does not have are left out. Whatever the head
- * holds is not read again.
+ * ids are given). Ids the store does not have are left out, and so is one
+ * whose record Redis answers is not there; a record or reply that does not
+ * read throws UnknownReplyError (listingRead). Whatever the head holds is not
+ * read again.
  */
 export async function readListings(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
   return (await readListingsMeasured(store, ids)).listings;
@@ -699,8 +723,8 @@ export async function readListingsMeasured(store: Store, ids?: Iterable<string>)
     const raws = await getMany(missing.map((id) => listingKey(catalog.id!, id)));
     bytes = raws.reduce<number>((sum, raw) => sum + (typeof raw === "string" ? Buffer.byteLength(raw, "utf8") : 0), 0);
     missing.forEach((id, i) => {
-      const listing = parseListing(parseJson(raws[i]));
-      if (listing && listing.id === id) found.set(id, listing);
+      const listing = listingRead(raws[i], id);
+      if (listing) found.set(id, listing);
     });
   }
   return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
@@ -728,6 +752,27 @@ export async function listingSizes(store: Store, ids: string[]): Promise<number[
 export async function readListing(store: Store, id: string | null | undefined): Promise<Listing | null> {
   if (typeof id !== "string" || !id) return null;
   return (await readListings(store, [id]))[0] ?? null;
+}
+
+/**
+ * One listing read exactly (CX-123 rule 24; Claude 3 on #2910): null only when the store has no such product or its
+ * own record is confirmed absent (an exact null), "unknown" when that record answered anything but one record of this
+ * very product (no reply, a number, a list, text that is not a listing, another product's). A request that fails
+ * throws, as readListing does. What the store record holds whole (inline, or in the head) is not read again.
+ */
+export async function readListingExactly(store: Store, id: string | null | undefined): Promise<Listing | null | "unknown"> {
+  if (typeof id !== "string" || !id) return null;
+  const catalog = store.catalog;
+  if (catalog.inline || !productIds(store).includes(id)) return readListing(store, id);
+  const inHead = catalog.head.find((listing) => listing.id === id);
+  if (inHead) return inHead;
+  // A store record that names a product held elsewhere, but no place to read it from, cannot say it is gone.
+  if (!catalog.id || !isRedisConfigured()) return "unknown";
+  const replies = repliesFor(await redisPipeline([["GET", listingKey(catalog.id, id)]]), 1);
+  if (!replies) return "unknown";
+  if (replies[0] === null) return null;
+  const listing = typeof replies[0] === "string" && replies[0] ? parseListing(parseJson(replies[0])) : null;
+  return listing && listing.id === id ? listing : "unknown";
 }
 
 /** One listing when it is a course, or null; a store of null answers null. */
@@ -783,6 +828,56 @@ export function listingFinder(store: Store): (id: string | undefined) => Promise
 /** Listings of every product of one kind, in the creator's order. */
 export async function readKind(store: Store, kind: Kind): Promise<Listing[]> {
   return readListings(store, idsOfKind(store, kind));
+}
+
+/**
+ * readListings for code that must not take a product unread for no product
+ * (rule 24): the same listings, but a product the store record lists whose
+ * listing record answers missing, garbled or for another id, or a reply not
+ * one per key asked, throws UnknownReplyError instead of leaving it out.
+ * What the store record holds (inline, or in the head) is not read again.
+ */
+export async function readListingsExact(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+  }
+  if (asked.length === 0) return [];
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a catalog's listings: no catalog to read");
+    const keys = missing.map((id) => listingKey(catalog.id!, id));
+    const chunks: string[][] = [];
+    for (let i = 0; i < keys.length; i += 400) chunks.push(keys.slice(i, i + 400));
+    const answers = await Promise.all(chunks.map((chunk) => redisPipeline(chunk.map((key) => ["GET", key]))));
+    const raws: unknown[] = [];
+    answers.forEach((answer, i) => {
+      const replies = repliesFor(answer, chunks[i].length);
+      if (!replies) throw new UnknownReplyError("a catalog's listings: not one reply per product");
+      raws.push(...replies);
+    });
+    missing.forEach((id, i) => {
+      const raw = raws[i];
+      // Redis's own null: the listing is confirmed not there, so the product is left out, as getMany does. Only that
+      // exact null; any other reply that is not this product's listing is unknown and throws.
+      if (raw === null) return;
+      const listing = typeof raw === "string" ? parseListing(parseJson(raw)) : null;
+      if (!listing || listing.id !== id) throw new UnknownReplyError("a catalog's listing of a product it lists");
+      found.set(id, listing);
+    });
+  }
+  return asked.flatMap((id) => {
+    const listing = found.get(id);
+    return listing ? [listing] : [];
+  });
+}
+
+/** readKind, read exactly (readListingsExact): a product of that kind that could not be read throws, never drops out; one Redis confirms is not there is left out. */
+export async function readKindExact(store: Store, kind: Kind): Promise<Listing[]> {
+  return readListingsExact(store, idsOfKind(store, kind));
 }
 
 /** The product a delivery id names, and the option when it is one. */

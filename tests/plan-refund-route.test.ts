@@ -22,7 +22,7 @@ import { CLOSING_DAYS } from "@/lib/plan-closing-rules";
 import { REFUND_DAYS } from "@/lib/plan";
 import { REFUND_DONE, SUPPORT_ADDRESS, planRefundLetter, refundEffects, refusalWords } from "@/lib/plan-refund-words";
 import { who } from "./plan-refund-route-world";
-import { paidShop, world } from "./plan-refund-stripe-world";
+import { NOW, paidShop, world } from "./plan-refund-stripe-world";
 
 const post = async (review: string) => {
   const response = await POST(new NextRequest("https://local.example/api/billing/refund", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: `review=${encodeURIComponent(review)}` }));
@@ -67,7 +67,7 @@ async function main() {
   is("an older copy of the page, once a newer one was opened: refused", [(await post(newer)).done, b.refunds().length], ["review", 0]);
 
   part("Not owed");
-  const late = await paidShop({ at: Math.floor(Date.UTC(2026, 11, 2) / 1000) - 400 * 86_400 });
+  const late = await paidShop({ at: NOW - 400 * 86_400 });
   who.store = await late.store();
   is("outside the window: told why on the review page, nothing changed", [(await post(await issueReview(who.store.sid, 6_900))).done, late.refunds().length, late.sub().cancel_at_period_end], ["none", 0, false]);
 

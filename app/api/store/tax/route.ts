@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
-import { UnknownReplyError } from "@/lib/redis-reply";
 import { setTax, storeForEmail } from "@/lib/store";
 import { taxStatus } from "@/lib/tax";
 import { guardStoreWrite } from "@/lib/store-request";
-import { runningSeries } from "@/lib/call-series-open";
+import { runningSeries, seriesUnknownResponse } from "@/lib/call-series-open";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * Switches Stripe Tax on or off for the store's checkouts. On only once
@@ -11,8 +11,10 @@ import { runningSeries } from "@/lib/call-series-open";
  * of calls is running ("series", with how many; C2-94): its later sessions
  * are charged without a checkout, so Stripe Tax would not add the tax to
  * them while the rest of the store charges it on top
- * (lib/call-series-billing.ts, seriesBillingProblem). Switching it off, or
- * the tax number box and invoices, stays free.
+ * (lib/call-series-billing.ts, seriesBillingProblem). A count Redis
+ * answered in an unknown shape is not "none": switching on is refused
+ * ("unavailable", 503) with nothing saved. Switching it off, or the tax
+ * number box and invoices, stays free.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings");
@@ -30,7 +32,11 @@ export async function POST(request: NextRequest) {
       const store = await storeForEmail(guarded.ref);
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
       if (!store.tax.enabled) {
-        const running = await runningSeries(store);
+        const running = await runningSeries(store).catch((error: unknown) => {
+          if (error instanceof UnknownReplyError) return null;
+          throw error;
+        });
+        if (running === null) return seriesUnknownResponse();
         if (running > 0) return Response.json({ ok: false, error: "series", running }, { status: 409 });
       }
       if (!store.stripeAccountId) return Response.json({ ok: false, error: "stripe" }, { status: 400 });
@@ -47,8 +53,6 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, tax: result.store.tax });
   } catch (error) {
     console.error("saving the tax setting failed", error);
-    // A count read in no shape Redis gives (lib/call-series-open.ts, runningSeries): nothing changed, try again.
-    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

@@ -33,8 +33,15 @@ let hook: (() => Promise<void>) | null = null;
 let hookOn = "";
 /** Every pipeline the code sends, in order, so the order of accept's two writes can be checked. */
 const sent: Command[][] = [];
+/** Runs once, just before the follow-up's read of the recipient's inbox for this pair (after its write). */
+let hookAfterWrite: { on: string; run: () => Promise<void> } | null = null;
 redis.pipeline = (async (commands: Command[]) => {
   sent.push(commands);
+  if (hookAfterWrite && commands.length === 1 && commands[0]?.[0] === "ZSCORE" && String(commands[0]?.[1]).includes(":dm:i:") && commands[0]?.[2] === hookAfterWrite.on) {
+    const run = hookAfterWrite.run;
+    hookAfterWrite = null;
+    await run();
+  }
   if (hook && commands[0]?.[0] === "LLEN" && String(commands[0]?.[1]).includes(hookOn)) {
     const run = hook;
     hook = null;
@@ -69,6 +76,26 @@ async function main(): Promise<void> {
     is("fay's conversations list eli", (await inbox(id, "fay")).some((c) => c.other === "eli"), true);
     is("the thread holds both messages and is not pending", [(await thread(id, "fay", "eli.fay"))?.messages.map((m) => m.text), (await thread(id, "fay", "eli.fay"))?.pending], [["hello fay", "are you there?"], false]);
     is("fay's data copy calls it a conversation, not a request", (await conversationsOf(id, "fay")).map((c) => c.request), [false]);
+  }
+
+  part("The yes lands after the follow-up's write and before its read (the other half of the order)");
+  {
+    redis.clear();
+    tick();
+    await send(id, setting, "kit", "lou", "hello lou", ROOM);
+    // Run lou's accept when the follow-up reads her inbox for the pair, so its ZADD NX already put the line back.
+    hookAfterWrite = { on: "kit.lou", run: async () => {
+      tick();
+      is("lou accepts once kit's second message is written", await accept(id, "lou", "kit.lou"), true);
+    } };
+    tick();
+    is("kit is told it went into the conversation", await send(id, setting, "kit", "lou", "still there?", ROOM), { ok: true, asked: false });
+    const [line, listed] = await redis.pipeline([
+      ["ZSCORE", `nl:cm:${id}:dm:q:lou`, "kit.lou"],
+      ["ZSCORE", `nl:cm:${id}:dm:i:lou`, "kit.lou"],
+    ]);
+    is("no request line is left, and the pair is in her inbox", [line, typeof listed === "string"], [null, true]);
+    is("lou's request count is 0", await requestCount(id, "lou"), 0);
   }
 
   part("accept writes the inbox line before it takes the request line out");

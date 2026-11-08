@@ -1,0 +1,86 @@
+[
+  {
+    "file": "r24-affiliate-lead-exact.test.ts",
+    "custom": null,
+    "tests": 10,
+    "pass": 10,
+    "fail": 0,
+    "volume": {
+      "runs": 89,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "z-3295-paid-room.proof.ts",
+    "custom": null,
+    "tests": 17,
+    "pass": 17,
+    "fail": 0,
+    "volume": {
+      "runs": 212,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "affiliate-leads.test.ts",
+    "custom": "68 checks, all passing.",
+    "tests": null,
+    "pass": null,
+    "fail": null,
+    "volume": {
+      "runs": 242,
+      "mocks": 1,
+      "over": false
+    }
+  },
+  {
+    "file": "affiliate-leads-read-unknown.test.ts",
+    "custom": "54 checks, all passing.",
+    "tests": null,
+    "pass": null,
+    "fail": null,
+    "volume": {
+      "runs": 308,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "affiliate-contact-credit.test.ts",
+    "custom": "55 checks, all passing.",
+    "tests": null,
+    "pass": null,
+    "fail": null,
+    "volume": {
+      "runs": 419,
+      "mocks": 63,
+      "over": false
+    }
+  },
+  {
+    "file": "plan-cost-registry.test.ts",
+    "custom": null,
+    "tests": 26,
+    "pass": 26,
+    "fail": 0,
+    "volume": {
+      "runs": 0,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "store-data-registry.test.ts",
+    "custom": null,
+    "tests": 7,
+    "pass": 7,
+    "fail": 0,
+    "volume": {
+      "runs": 0,
+      "mocks": 0,
+      "over": false
+    }
+  }
+]

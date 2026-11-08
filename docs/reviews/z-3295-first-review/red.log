@@ -1,0 +1,528 @@
+
+FILE r24-affiliate-lead-exact.test.ts
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers the text "1" (20.947572ms)
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers true (0.795451ms)
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers nil (1.09329ms)
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers an undefined slot (0.905387ms)
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers no slot (0.718125ms)
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers two slots (0.58936ms)
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers 2 (0.747108ms)
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers a list (0.713838ms)
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers a pipeline that is not a list (0.630683ms)
+✔ a new lead is still recorded and counted, and the same person again is a duplicate whose room is given back (control) (1.820007ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 1
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 37.065625
+
+✖ failing tests:
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers the text "1" (20.947572ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'recorded'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'recorded',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers true (0.795451ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'recorded'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'recorded',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers nil (1.09329ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers an undefined slot (0.905387ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers no slot (0.718125ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers two slots (0.58936ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'recorded'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'recorded',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers 2 (0.747108ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers a list (0.713838ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'recorded'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'recorded',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47517:32
+✖ recordLead keeps the room and answers "unavailable" when HSETNX answers a pipeline that is not a list (0.630683ms)
+  AssertionError [ERR_ASSERTION]: never "duplicate" on a write that may have landed
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47529:27)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":85,"mocks":0,"over":false}
+
+Z_STATUS 1 null
+
+FILE z-3295-paid-room.proof.ts
+Z_CASE {"label":"empty","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6230,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt empty (23.712737ms)
+Z_CASE {"label":"nil","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6230,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt nil (1.374896ms)
+Z_CASE {"label":"extra","result":"recorded","slotDelta":432,"totalDelta":496,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt extra (0.942182ms)
+Z_CASE {"label":"hole","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6230,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt hole (1.105299ms)
+Z_CASE {"label":"inherited","result":"recorded","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt inherited (0.923264ms)
+Z_CASE {"label":"getter","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt getter (0.895582ms)
+Z_CASE {"label":"frozen bad","result":"recorded","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt frozen bad (0.741459ms)
+Z_CASE {"label":"fraction","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6230,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt fraction (0.996615ms)
+Z_CASE {"label":"negative","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6230,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt negative (1.015713ms)
+Z_CASE {"label":"NaN","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6231,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt NaN (0.958858ms)
+Z_CASE {"label":"infinity","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6231,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt infinity (0.882933ms)
+Z_CASE {"label":"unsafe","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6231,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt unsafe (0.680547ms)
+Z_CASE {"label":"object","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6231,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt object (0.690843ms)
+Z_CASE {"label":"false","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6231,"nestedRedis":5,"mockHttp":0}
+✖ real committed HSETNX, unknown receipt false (0.616861ms)
+Z_CASE {"label":"throw after commit","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3353,"nestedRedis":4,"mockHttp":0}
+✔ lost ACK after actual write retains room (0.55655ms)
+Z_CASE {"label":"no write unknown","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":false,"admittedDelta":432,"wanted":432,"rowBytes":0,"actualReply":null,"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6231,"nestedRedis":4,"mockHttp":0}
+✖ unknown ACK without a committed write safely retains room (0.549089ms)
+Z_CASE {"label":"frozen1","result":"recorded","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":264,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3361,"nestedRedis":4,"mockHttp":0}
+Z_CASE {"label":"frozen0","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":264,"actualReply":[0],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6239,"nestedRedis":5,"mockHttp":0}
+✔ confirmed frozen1 writes once, frozen0 returns only duplicate reservation (0.949594ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 3
+ℹ fail 14
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 45.613409
+
+✖ failing tests:
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt empty (23.712737ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt nil (1.374896ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt extra (0.942182ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'recorded'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'recorded',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt hole (1.105299ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt inherited (0.923264ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'recorded'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'recorded',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt frozen bad (0.741459ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'recorded'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'recorded',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt fraction (0.996615ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt negative (1.015713ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt NaN (0.958858ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt infinity (0.882933ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt unsafe (0.680547ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt object (0.690843ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47461:64
+✖ real committed HSETNX, unknown receipt false (0.616861ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47465:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at [stdin]:47477:27
+✖ unknown ACK without a committed write safely retains room (0.549089ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'duplicate'
+  - 'unavailable'
+
+      at TestContext.<anonymous> ([stdin]:47479:25)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'duplicate',
+    expected: 'unavailable',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+Z_VOLUME {"runs":223,"mocks":0,"over":false}
+recording an affiliate's lead failed Error: getter executed
+    at Array.get ([stdin]:47403:11)
+    at Array Iterator.next (<anonymous>)
+    at recordLead ([stdin]:47327:12)
+    at async observe ([stdin]:47438:14)
+    at async TestContext.<anonymous> ([stdin]:47462:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed Error: synthetic lost ACK after real lead write
+    at store.pipeline ([stdin]:47430:29)
+    at async recordLead ([stdin]:47327:19)
+    at async observe ([stdin]:47438:14)
+    at async TestContext.<anonymous> ([stdin]:47471:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 1 null
+Z_LOG_DIR /tmp/z3295-E0clhK

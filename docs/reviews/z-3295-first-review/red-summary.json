@@ -1,0 +1,26 @@
+[
+  {
+    "file": "r24-affiliate-lead-exact.test.ts",
+    "custom": null,
+    "tests": 10,
+    "pass": 1,
+    "fail": 9,
+    "volume": {
+      "runs": 85,
+      "mocks": 0,
+      "over": false
+    }
+  },
+  {
+    "file": "z-3295-paid-room.proof.ts",
+    "custom": null,
+    "tests": 17,
+    "pass": 3,
+    "fail": 14,
+    "volume": {
+      "runs": 223,
+      "mocks": 0,
+      "over": false
+    }
+  }
+]

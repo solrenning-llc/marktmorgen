@@ -1,0 +1,599 @@
+
+FILE r24-affiliate-lead-exact.test.ts
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers the text "1" (19.116107ms)
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers true (0.744524ms)
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers nil (0.678755ms)
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers an undefined slot (0.495458ms)
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers no slot (0.559314ms)
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers two slots (0.60898ms)
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers 2 (0.454335ms)
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers a list (0.535688ms)
+✔ recordLead keeps the room and answers "unavailable" when HSETNX answers a pipeline that is not a list (0.560557ms)
+✔ a new lead is still recorded and counted, and the same person again is a duplicate whose room is given back (control) (1.495898ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 37.775464
+Z_VOLUME {"runs":89,"mocks":0,"over":false}
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47412:26)
+    at async TestContext.<anonymous> ([stdin]:47528:16)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE z-3295-paid-room.proof.ts
+Z_CASE {"label":"empty","result":"unavailable","slotDelta":432,"totalDelta":496,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt empty (26.288784ms)
+Z_CASE {"label":"nil","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt nil (4.093629ms)
+Z_CASE {"label":"extra","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt extra (0.756522ms)
+Z_CASE {"label":"hole","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt hole (0.805516ms)
+Z_CASE {"label":"inherited","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt inherited (1.678284ms)
+Z_CASE {"label":"getter","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt getter (0.825306ms)
+Z_CASE {"label":"frozen bad","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt frozen bad (1.115954ms)
+Z_CASE {"label":"fraction","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt fraction (0.655259ms)
+Z_CASE {"label":"negative","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":255,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3352,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt negative (0.631833ms)
+Z_CASE {"label":"NaN","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3353,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt NaN (0.704794ms)
+Z_CASE {"label":"infinity","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3353,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt infinity (0.751745ms)
+Z_CASE {"label":"unsafe","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3353,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt unsafe (1.034351ms)
+Z_CASE {"label":"object","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3353,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt object (0.588849ms)
+Z_CASE {"label":"false","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3353,"nestedRedis":4,"mockHttp":0}
+✔ real committed HSETNX, unknown receipt false (0.579865ms)
+Z_CASE {"label":"throw after commit","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":256,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3353,"nestedRedis":4,"mockHttp":0}
+✔ lost ACK after actual write retains room (0.419954ms)
+Z_CASE {"label":"no write unknown","result":"unavailable","slotDelta":432,"totalDelta":432,"stored":false,"admittedDelta":432,"wanted":432,"rowBytes":0,"actualReply":null,"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3353,"nestedRedis":3,"mockHttp":0}
+✔ unknown ACK without a committed write safely retains room (0.48364ms)
+Z_CASE {"label":"frozen1","result":"recorded","slotDelta":432,"totalDelta":432,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":264,"actualReply":[1],"commands":["HGET","EVAL","HSETNX"],"jsonPipelineBytes":3361,"nestedRedis":4,"mockHttp":0}
+Z_CASE {"label":"frozen0","result":"duplicate","slotDelta":0,"totalDelta":0,"stored":true,"admittedDelta":432,"wanted":432,"rowBytes":264,"actualReply":[0],"commands":["HGET","EVAL","HSETNX","EVAL"],"jsonPipelineBytes":6239,"nestedRedis":5,"mockHttp":0}
+✔ confirmed frozen1 writes once, frozen0 returns only duplicate reservation (0.912597ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 53.6748
+Z_VOLUME {"runs":212,"mocks":0,"over":false}
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47466:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed Error: synthetic lost ACK after real lead write
+    at store.pipeline ([stdin]:47434:29)
+    at async recordLead ([stdin]:47330:36)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47475:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+recording an affiliate's lead failed UnknownReplyError: Redis answered an affiliate lead's write in an unknown shape
+    at recordLead ([stdin]:47335:26)
+    at async observe ([stdin]:47442:14)
+    at async TestContext.<anonymous> ([stdin]:47482:13)
+    at async Test.run (node:internal/test_runner/test:1409:7)
+    at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+Z_STATUS 0 null
+
+FILE affiliate-leads.test.ts
+
+The terms
+  ok    none until a creator chooses, on every program saved before
+  ok    a choice is kept
+  ok    a hold shorter than a week is not kept
+  ok    out of range is refused, with the reason, not replaced
+  ok    an hour holds a quarter of the day, at least one
+
+How each lead stands
+  ok    inside its hold it earns and waits
+  ok    after it, it needs the creator's approval
+  ok    approved, it is payable
+  ok    reversed, it earns nothing
+  ok    past the daily cap a lead is listed and earns nothing
+  ok    and past the hour's share of it, even under the day's
+  ok    another affiliate's leads use their own day
+  ok    the monthly budget is the whole program's
+  ok    each lead is judged by the budget of its own day
+  ok    a lead reversed frees its place for the next
+  ok    a booking waits for its call, and its hold counts from the call's end
+  ok    a move is read: a call its buyer moved earlier holds from its new end
+  ok    refunded in full, it is reversed whatever it was
+  ok    a partial refund leaves it
+  ok    an affiliate sees the address as its first letter and its domain
+
+A program that pays per sign-up
+  ok    the visit through Ana's link credits Ana
+  ok    not a pending affiliate
+  ok    not her own address, written another way, nor the creator's
+  ok    not a kind the program does not pay
+  ok    not a click past the window
+  ok    asked to join
+  ok    the link carries Ana, and nothing is recorded before it is pressed
+  ok    confirmed, new to the list
+  ok    the route credits only a confirmed address new to the list, counted as a request first
+  ok    credited
+  ok    its write, with the request it takes, stays inside a later page's commands
+  ok    and the store's request was counted
+  ok    kept with the terms of its day and the person's address
+  ok    its id is a fingerprint of the address in this program
+
+One lead per person, never their own
+  ok    the same person, written another way, is not a second lead
+  ok    Ana's own address is refused
+  ok    so is the PayPal address she is paid at
+  ok    and the creator's own
+  ok    an affiliate not approved earns no lead
+  ok    a kind the program does not pay is not recorded
+  ok    still one lead
+
+The book
+  ok    a lead line beside the sales, with its amount
+  ok    earned and owed, but waiting and not payable, and not a sale
+  ok    approving inside the hold is refused
+  ok    past its hold it needs the creator
+  ok    approved, it is payable
+  ok    a reversal needs a reason
+  ok    reversed: nothing owed, and the affiliate sees why
+  ok    undone, it waits for approval again
+  ok    in the spreadsheet as a lead
+  ok    Ana's own page has her lead
+  ok    held with everything else when flagged
+
+A free product, and a booking
+  ok    credited for a free product claimed
+  ok    the free download credits only the first time that address got the product
+  ok    a booking's checkout carries the lead whatever the share, never from a package
+  ok    the booking route carries it only where the store pays per booking
+
+Deleting a person
+  ok    their address comes off the lead
+  ok    the lead stays, as the affiliate's record
+  ok    and the same person joining again is not a new lead
+  ok    the erasure runs it, and says so
+
+What affiliates are told, in every language
+  ok    en: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    es: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    fr: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    de: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    it: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    nl: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    pt: the terms name the amount, the hold, the cap and the budget, and the disclosure is there
+  ok    no word the owner forbids
+
+68 checks, all passing.
+Z_VOLUME {"runs":242,"mocks":1,"over":false}
+
+Z_STATUS 0 null
+
+FILE affiliate-leads-read-unknown.test.ts
+
+Controls: the exact empty list, healthy leads, and the budget and the cap reached by healthy leads
+  ok    no leads kept: the exact empty list is none
+  ok    no leads kept: a decision on a lead that is not there is unknown
+  ok    healthy leads read whole
+  ok    one approved ($5 of $10): the new lead is approved
+  ok    two approved reach the $10 budget: the new lead is refused
+  ok    two approved reach the cap of two a day: the new lead is refused
+
+1. An approved lead that does not read never drops out of the budget or the cap
+  ok    budget, the second approved lead with broken JSON: readLeads throws UnknownReplyError
+  ok    budget, broken JSON: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its amount as text: readLeads throws UnknownReplyError
+  ok    budget, its amount as text: the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its currency in capitals (a euro lead read as dollars): readLeads throws UnknownReplyError
+  ok    budget, its currency in capitals (a euro lead read as dollars): the approval answers 503 unavailable and the new lead stays open
+  ok    budget, the second approved lead with its state of another shape: readLeads throws UnknownReplyError
+  ok    budget, its state of another shape: the approval answers 503 unavailable and the new lead stays open
+  ok    cap, the second approved lead with its time as text: readLeads throws UnknownReplyError
+  ok    cap, its time as text: the approval answers 503 unavailable and the new lead stays open
+
+1b. A HGETALL reply of another shape is never an empty or a partial list
+  ok    leads-object: readLeads throws UnknownReplyError
+  ok    leads-object: the approval answers 503 unavailable
+  ok    leads-queued: readLeads throws UnknownReplyError
+  ok    leads-queued: the approval answers 503 unavailable
+  ok    leads-odd: readLeads throws UnknownReplyError
+  ok    leads-odd: the approval answers 503 unavailable
+  ok    the new lead was never approved on a reply of another shape
+
+2. The person's copy never comes out complete with a lead missing
+  ok    healthy: the person's own lead is copied
+  ok    no leads kept: nothing to copy, exactly
+  ok    leads-object: the copier throws, never an empty copy
+  ok    leads-queued: the copier throws, never an empty copy
+  ok    leads-null: the copier throws, never an empty copy
+  ok    their own lead unreadable: the copier throws, never a copy without it
+
+2b. Another person's unreadable lead never blocks a person's copy (Art. 15); their own still does
+  ok    B's lead with an amount as text: A's copy is A's lead, whole
+  ok    B's lead with an amount as text: B's own copy throws, never a copy without it
+  ok    B's lead with an amount as text: the program's leads still do not read for a decision
+  ok    B's lead with an amount as text: a person with no lead gets an empty copy, exactly
+  ok    B's lead with broken JSON: A's copy is A's lead, whole
+  ok    B's lead with broken JSON: B's own copy throws, never a copy without it
+  ok    B's lead with broken JSON: the program's leads still do not read for a decision
+  ok    B's lead with broken JSON: a person with no lead gets an empty copy, exactly
+  ok    A's own lead with an amount as text: A's copy throws, never a copy without it
+  ok    A's own lead with an amount as text: B's copy is B's lead, whole
+  ok    A's own lead with broken JSON: A's copy throws, never a copy without it
+  ok    A's own lead with broken JSON: B's copy is B's lead, whole
+  ok    A's own lead with a state of another shape: A's copy throws, never a copy without it
+  ok    A's own lead with a state of another shape: B's copy is B's lead, whole
+  ok    the address asked for written in capitals: the same person's lead
+  ok    a lead whose address already came off (deleted person): nothing to copy
+
+3. The sibling readers: deleting a person, and the contact credit
+  ok    no lead for the person: nothing to forget
+  ok    their lead unreadable, the address maybe in it: the deletion throws and is tried again
+  ok    and the record is left as it was
+  ok    a healthy lead: the address comes off
+  ok    an amount of another type: the address comes off, and the amount is written back as kept, never a readable 0
+  ok    so the program's leads still do not read after the deletion
+  ok    an address of another type: the deletion throws and is tried again
+  ok    control: a healthy lead before the checkout credits its affiliate
+  ok    a reversal whose state no longer reads never credits the affiliate
+
+54 checks, all passing.
+Z_VOLUME {"runs":308,"mocks":0,"over":false}
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:52765:23)
+    at async [stdin]:52796:19
+    at async withLock ([stdin]:8946:12)
+    at async decideLeads ([stdin]:52795:12)
+    at async POST ([stdin]:67126:21)
+    at async approve ([stdin]:67381:22)
+    at async main ([stdin]:67437:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:52765:23)
+    at async [stdin]:52796:19
+    at async withLock ([stdin]:8946:12)
+    at async decideLeads ([stdin]:52795:12)
+    at async POST ([stdin]:67126:21)
+    at async approve ([stdin]:67381:22)
+    at async main ([stdin]:67437:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:52765:23)
+    at async [stdin]:52796:19
+    at async withLock ([stdin]:8946:12)
+    at async decideLeads ([stdin]:52795:12)
+    at async POST ([stdin]:67126:21)
+    at async approve ([stdin]:67381:22)
+    at async main ([stdin]:67437:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:52765:23)
+    at async [stdin]:52796:19
+    at async withLock ([stdin]:8946:12)
+    at async decideLeads ([stdin]:52795:12)
+    at async POST ([stdin]:67126:21)
+    at async approve ([stdin]:67381:22)
+    at async main ([stdin]:67437:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's lead in an unknown shape
+    at readLeads ([stdin]:52765:23)
+    at async [stdin]:52796:19
+    at async withLock ([stdin]:8946:12)
+    at async decideLeads ([stdin]:52795:12)
+    at async POST ([stdin]:67126:21)
+    at async approve ([stdin]:67381:22)
+    at async main ([stdin]:67437:97)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:52761:47)
+    at async [stdin]:52796:19
+    at async withLock ([stdin]:8946:12)
+    at async decideLeads ([stdin]:52795:12)
+    at async POST ([stdin]:67126:21)
+    at async approve ([stdin]:67381:22)
+    at async main ([stdin]:67444:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:52761:47)
+    at async [stdin]:52796:19
+    at async withLock ([stdin]:8946:12)
+    at async decideLeads ([stdin]:52795:12)
+    at async POST ([stdin]:67126:21)
+    at async approve ([stdin]:67381:22)
+    at async main ([stdin]:67444:60)
+changing the affiliate programme stopped on an unknown reply UnknownReplyError: Redis answered an affiliate program's leads in an unknown shape
+    at readLeads ([stdin]:52761:47)
+    at async [stdin]:52796:19
+    at async withLock ([stdin]:8946:12)
+    at async decideLeads ([stdin]:52795:12)
+    at async POST ([stdin]:67126:21)
+    at async approve ([stdin]:67381:22)
+    at async main ([stdin]:67444:60)
+
+Z_STATUS 0 null
+
+FILE affiliate-contact-credit.test.ts
+
+Off until the creator asks, and only while leads are paid
+  ok    missing: off
+  ok    "true" is not a yes
+  ok    1 is not a yes
+  ok    "yes" is not a yes
+  ok    {} is not a yes
+  ok    null is not a yes
+  ok    an explicit yes with leads paid: on
+  ok    a yes with no leads paid is kept off, so it cannot turn itself back on unseen
+  ok    the default program has it off
+  ok    a program switched off credits no contact
+  ok    on, enabled and paying leads: credits contacts
+
+What the affiliate reads
+  ok    off: the rule says nothing about leads who buy
+  ok    on: the rule ends with the contact sentence
+  ok    which says a link, a code and an earlier purchase come first
+  ok    and that the lead came before the purchase
+  ok    and promises no time limit it cannot keep
+  ok    every language has the sentence
+  ok    in English it is the same sentence the rule uses
+  ok    and every other language has its own words
+  ok    the affiliate page adds it only where the program credits contacts
+  ok    the studio shows the switch only while leads are paid
+  ok    and never sends it on with leads off
+
+A lead who buys later
+  ok    the switch survives the save
+  ok    Ana's lead confirmed through her link
+  ok    the contact reads back as Ana's for a later checkout
+  ok    never for a checkout opened before the lead was confirmed
+  ok    no link, no code: the sale goes to Ana at today's share, as a contact, the address written another way
+
+Only a lead that came before the purchase
+  ok    bought with nobody's link: credits nobody
+  ok    the same sale written down again after the person became a lead: still nobody's
+  ok    a paid booking's own lead
+  ok    never credits the very checkout that made it
+  ok    a later purchase by the same person does
+  ok    a lead still in its hold, not yet approved, counts from when it was confirmed
+
+A link, a code and a bond come first
+  ok    a link followed wins over the contact
+  ok    a code typed wins over the contact
+  ok    a buyer already bonded to somebody stays with them
+
+Never a lead that does not stand
+  ok    a lead reversed as not genuine credits nobody
+  ok    before the deletion it would credit Ana
+  ok    a person deleted from the store is not tied back to anybody
+  ok    so their next purchase credits nobody
+  ok    an affiliate removed since earns nothing through a contact
+  ok    nobody is their own lead
+  ok    so her own purchase is not a contact of hers
+  ok    somebody nobody brought credits nobody
+
+Switched off, or leads no longer paid
+  ok    switched off: the contact is not read
+  ok    and the sale credits nobody
+  ok    leads no longer paid: the switch is saved off
+  ok    and no contact is read
+
+Counted as a sale somebody brought
+  ok    the book keeps how it was credited
+  ok    and counts it among Ana's sales
+  ok    the promotion rows count it as a paid record
+  ok    the second tier counts it as a sale brought
+  ok    a contact is read only after a click, a code and a bond found nobody
+
+The privacy policy says so
+  ok    how a purchase was credited includes an earlier lead
+  ok    and how the lead is found, with nothing more kept
+
+55 checks, all passing.
+Z_VOLUME {"runs":419,"mocks":63,"over":false}
+
+Z_STATUS 0 null
+
+FILE plan-cost-registry.test.ts
+add-on store-assistant: collects $69.00, costs at most $11.50, $unknown allowed
+a collection of 8 products: 3 requests with its page ($0.000103 past it), 7 at the largest
+a community search: 6 requests with its page, 14 with the room and three conversations ($0.000627)
+a certificate's PDF: $0.000114 at most, counted as 2 requests at $0.000063
+next product after a purchase: $0.000174 at most, counted as 6 requests at $0.000063
+a Store assistant checkout reminder: $0.000187 at most besides its email and model, counted as 4 requests at $0.000063
+an affiliate program's book worked out: 36 requests for 50 affiliates and 1,000 sales ($0.001889), at most once a day; each other load 2 ($0.000076), 3 with codes; at $0.000063 a request
+a store's map: 2 requests for 20 products and 12 posts ($0.000055), 79 at the largest ($0.002630)
+a bundle's products: $0.000135 at most before its metered reads, counted as 3 requests
+a batch of older purchases: $0.000534 at most before its metered reads, counted as 10 requests
+a download's lookup of its purchase: $0.000074 at most before its metered reads, counted as 2 requests at $0.000063
+an opening of the orders page: $0.000964 at most before its metered reads, counted as 17 requests at $0.000063; 25 metered commands a request
+a recount of a store's tasks: 2864000 bytes at most, 58 studio requests at most, once a store
+a store that pays nothing, worst window: $5.3114
+API readings: a page of 200 students takes 15 more, the bookings 5 more, an empty program 2 more
+✔ every line has a unique id, a figure for every plan, and sources that hold what it names (85.71279ms)
+✔ every counter in the code is classified: counted in a line, an account or provider guard, or an open item (82.956561ms)
+✔ every exported limit or cost constant in lib/ is cited by a line, an open item or NOT_A_COST (30.929917ms)
+✔ every add-on is priced against what it collects, retains reviewed positive net or is not on sale, and its sources hold what it names (1.97435ms)
+✔ the features merged on October 17, 2026 are each a line of the worst month (0.141753ms)
+✔ lesson video's legacy invoice line stays out of reach: admission stops at every plan's hours first (0.208955ms)
+✔ nothing is billed for visits or orders: the daily job settles neither, and their meters owe nothing (0.418321ms)
+✔ a scope priced as a public request or a call out is counted in the store's window, not only per connection (73.483981ms)
+✔ every store figure taken in the code is a kind a line prices (45.439123ms)
+✔ every email sent names a meter, and each file only the meters it may use (71.660324ms)
+✔ the units a figure is taken in cost at least what they stand for (8.461819ms)
+✔ a store that pays nothing has less of everything than a free trial, and the trial's worst window is priced (2.740606ms)
+✔ the billing period and every figure the owner named on October 17, 2026 have left the open list (0.196587ms)
+✔ the uses the owner named on October 18, 2026 have left the open list, the database's bytes too, and it stays empty (0.339873ms)
+✔ Path page and its actual usage count fit its reserved studio page (0.104738ms)
+✔ a reading of the buyers from Stripe fits the studio requests counted before it, and no fewer would do (0.081983ms)
+✔ what the buyers' copy and the imported buyers weigh is counted a studio request a megabyte, and never left out (0.353404ms)
+✔ an affiliate change in bulk is paid a studio request for each share of its commands and bytes (lib/affiliates.ts bulkUnits) (0.137107ms)
+✔ a scheduled email's readings of the buyers are each paid in studio requests before they are read (scheduled-reads) (0.741329ms)
+✔ the tasks agenda at its most fits the studio requests it counts (0.08003ms)
+✔ the buyers page spends the fifty kilobytes its own request moves once, whatever its parts (C3-112 (2)) (2.255033ms)
+✔ Path push fits its reserved studio requests (0.076265ms)
+✔ studio Path invitation fits the same reserved page with one bounded record read (0.059129ms)
+✔ board join and essential privacy fit their pre-reserved requests (0.091959ms)
+✔ bounded post-sale evidence fits its separately reserved studio requests (0.159571ms)
+✔ an API reading that reads more than a page takes further requests that cover it, at every size, before it reads (33.771796ms)
+ℹ tests 26
+ℹ suites 0
+ℹ pass 26
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 468.707779
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+
+FILE store-data-registry.test.ts
+creator: room 18 MB; outside it 134.0 MB on average, 295.2 MB at once
+pro: room 135 MB; outside it 325.6 MB on average, 805.7 MB at once
+scale: room 250 MB; outside it 850.6 MB on average, 2477.5 MB at once
+✔ every key family in the code is in the registry, and every entry is in the code (96.353879ms)
+✔ each family is bounded one way at least, and what it says can be checked (53.978915ms)
+✔ what an order keeps for good is written where it is measured, and charged what it really adds (5.987286ms)
+✔ what an order can keep for good fits what every checkout holds before it opens (0.959668ms)
+✔ the room keeps space for its orders, and every plan's room is larger than a store that pays nothing (0.333534ms)
+✔ the arithmetic: an average never above what is kept at once, and every plan's total is finite (5.465869ms)
+✔ the cost registry prices the room and what is kept outside it, and keeps nothing open (0.199011ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 169.056532
+Z_VOLUME {"runs":0,"mocks":0,"over":false}
+
+Z_STATUS 0 null
+Z_LOG_DIR /tmp/z3295-0rk9j6

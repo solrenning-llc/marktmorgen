@@ -77,7 +77,7 @@ async function freshStore() {
   subs[sub] = subscription(sub);
   const email = `r24-yearly-${n}@example.com`;
   await claimHandle(email, `r24yearly${n}`, "A store", "");
-  await setStripeAccount(email, "acct_1TestR24Yearly01");
+  await setStripeAccount(email, "acct_1TestR24Yrly");
   await setSubscription(email, { subscriptionId: sub, active: true, tier: "creator", cycle: "month" });
   return (await storeForEmail(email))!;
 }

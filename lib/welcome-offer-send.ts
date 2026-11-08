@@ -120,13 +120,30 @@ type DueReminder = { s?: string; i?: string; h?: string; e?: string; t?: string;
 async function again(v: DueReminder, score: string): Promise<boolean> {
   const tries = retriesOf(v.a);
   if (tries >= REMINDER_RETRIES) return false;
+  // Whose it is: without the store's and the person's ids there is no mark to keep it by, so it is not put back.
+  if (typeof v.i !== "string" || !v.i || typeof v.e !== "string" || !v.e) return false;
+  const member = JSON.stringify({ ...v, a: tries + 1 });
   try {
-    const [added] = await redisPipeline([["ZADD", DUE_KEY, score, JSON.stringify({ ...v, a: tries + 1 })]]);
+    // Put back, then whether the person's mark is still there, in that order. An erasure deletes the mark before it
+    // looks for the reminder at its hour (forgetWelcomePerson), and the reminder is off the queue while its send is in
+    // flight. So the mark gone means the person was erased meanwhile, and the reminder, which holds their address,
+    // is taken out again; the mark still there means an erasure after this finds it at its hour (Claude 3 on #3214).
+    const replies = repliesFor(await redisPipeline([["ZADD", DUE_KEY, score, member], ["EXISTS", remindedKey(v.i, v.e)]]), 2);
+    const added = replies?.[0];
+    const kept = replies ? countOf(replies[1]) : null;
     // 1 put back; 0 one just like it already waits. Anything else is unknown: not counted as put back.
-    if (added === 1 || added === 0) return true;
-    console.error("putting a welcome offer reminder back answered in no known shape");
+    if ((added === 1 || added === 0) && kept === 1) return true;
+    if (kept !== 0) console.error("putting a welcome offer reminder back answered in no known shape");
   } catch (error) {
     console.error("putting a welcome offer reminder back failed", error);
+  }
+  // Not kept: the person was erased, or whether it went back (or whether they were) is unknown. Never left waiting
+  // with their address on a guess: taken out, and said when even that does not answer.
+  try {
+    const taken = countOf(repliesFor(await redisPipeline([["ZREM", DUE_KEY, member]]), 1)?.[0]);
+    if (taken === null || taken > 1) console.error("taking a welcome offer reminder back out answered in no known shape");
+  } catch (error) {
+    console.error("taking a welcome offer reminder back out failed", error);
   }
   return false;
 }

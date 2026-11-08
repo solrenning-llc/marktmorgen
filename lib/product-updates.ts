@@ -37,7 +37,7 @@ import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
@@ -338,15 +338,27 @@ function stopToken(statsId: string, email: string): string {
   return key ? createHmac("sha256", key).update(`${statsId}|${normaliseEmail(email)}`).digest("hex").slice(0, 40) : randomBytes(20).toString("hex");
 }
 
+/** noteForErasure's three replies, exactly: ZADD 0 or 1, ZREMRANGEBYSCORE a count, EXPIRE 1 (the set was just written). */
+function noted(replies: unknown[] | null): boolean {
+  return !!replies && replies.length === 3 && (replies[0] === 0 || replies[0] === 1) && countOf(replies[1]) !== null && replies[2] === 1;
+}
+
 async function stopLink(store: Store, email: string): Promise<string> {
   const token = stopToken(store.statsId ?? "", email);
   const grant = { s: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.mail?.fromName || store.name };
   // The link itself is counted in the store's room at what it really adds,
   // once an address (lib/order-data.ts); the note that finds it again for an
   // erasure is bounded on its own (lib/erasure-index.ts).
-  await orderWrite(store, [["SET", stopKey(token), JSON.stringify(grant), "EX", STOP_LINK_SECONDS]]);
+  // The note goes first and must be confirmed (rule 24, r24 product-updates 1.2): a record holding the buyer's
+  // address for 400 days is never written unless an erasure will find it. The note cannot ride in orderWrite's
+  // script (ZREMRANGEBYSCORE is not an order command, and the note is not the store's room), so it is its own step
+  // before the record; a note whose record then fails names a key that is not there, which an erasure deletes as
+  // nothing.
   const notes = noteForErasure(store.statsId, email, stopKey(token));
-  if (notes.length) await redisPipeline(notes);
+  if (notes.length && !noted(repliesFor(await redisPipeline(notes), notes.length))) {
+    throw new UnknownReplyError("the erasure note of an update's stop link");
+  }
+  await orderWrite(store, [["SET", stopKey(token), JSON.stringify(grant), "EX", STOP_LINK_SECONDS]]);
   return token;
 }
 

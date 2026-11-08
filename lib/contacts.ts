@@ -35,6 +35,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
@@ -770,13 +771,29 @@ export async function tokensFor(
   return out;
 }
 
-/** Who an unsubscribe link belongs to, without acting on it. */
+/**
+ * One GET or HGET read exactly (CX-123 rule 24): its text, or null only for an
+ * exact nil. Any other answer is unknown and throws, so a link that exists is
+ * never said to be one nobody made.
+ */
+async function textOrNil(command: (string | number)[], what: string): Promise<string | null> {
+  const replies = repliesFor(await redisPipeline([command]), 1);
+  const reply = replies?.[0];
+  if (!replies || (reply !== null && typeof reply !== "string")) throw new UnknownReplyError(what);
+  return reply;
+}
+
+/**
+ * Who an unsubscribe link belongs to, without acting on it. Null only when
+ * Redis said so exactly: no such link, or its row gone or holding another
+ * token. A reply in another shape throws UnknownReplyError.
+ */
 export async function readUnsubToken(
   token: string,
 ): Promise<{ listId: string; email: string; handle: string; contact: Contact } | null> {
   if (!UNSUB_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", tokenKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const raw = await textOrNil(["GET", tokenKey(token)], "an unsubscribe link");
+  if (raw === null) return null;
   // listId|address|handle — an address may itself hold a "|".
   const first = raw.indexOf("|");
   const last = raw.lastIndexOf("|");
@@ -785,12 +802,17 @@ export async function readUnsubToken(
   const email = raw.slice(first + 1, last);
   const handle = raw.slice(last + 1);
   if (!email) return null;
-  const [row] = await redisPipeline([["HGET", leadsKey(listId), email]]);
+  const row = await textOrNil(["HGET", leadsKey(listId), email], "the contact behind an unsubscribe link");
   const contact = parseContact(row);
   return contact && contact.t === token ? { listId, email, handle, contact } : null;
 }
 
-/** Takes an address off the list for good. Safe to press twice. */
+/**
+ * Takes an address off the list for good. Safe to press twice. Done only on
+ * the row's HSET answering exactly 0 or 1 (CX-123 rule 24); any other answer,
+ * or a read of the link in another shape, throws, and the door says "try
+ * again", never "Unsubscribed." (app/api/mail/unsubscribe).
+ */
 export async function unsubscribe(token: string): Promise<{ listId: string; email: string } | null> {
   const found = await readUnsubToken(token);
   if (!found) return null;
@@ -802,7 +824,9 @@ export async function unsubscribe(token: string): Promise<{ listId: string; emai
   const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
   const commands: (string | number)[][] = [["HSET", leadsKey(listId), email, JSON.stringify(next)]];
   if (contact.agreed) commands.push(["INCR", unsubKey(listId)]);
-  await redisPipeline(commands);
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const written = replies ? countOf(replies[0]) : null;
+  if (written === null || written > 1) throw new UnknownReplyError("an unsubscribe's write");
   return { listId, email };
 }
 

@@ -32,6 +32,8 @@ const unreadable = new Set<string>();
 const unreadableSets = new Set<string>();
 const teamIndexKey = (email: string) => "nl:team:of:" + createHash("sha256").update("nimbus-team-of:" + email).digest("hex").slice(0, 40);
 let unreadableParts: string[] = [];
+// The write of the walk's entry for a store (HSET BATCH_KEY) that fails, as a lost connection would.
+let batchWriteFails = false;
 // The move back a walk (ZADD XX) answered with nothing Redis would say: not known to have moved.
 let unconfirmedMoves = false;
 const realPipeline = redis.pipeline;
@@ -39,6 +41,7 @@ redis.pipeline = async (commands: (string | number)[][]) => {
   if (unconfirmedMoves && commands.length === 1 && commands[0][0] === "ZADD" && commands[0][2] === "XX") return [null];
   if (commands.some((c) => c[0] === "GET" && unreadable.has(String(c[1])))) throw new Error("Redis request timed out (test)");
   if (commands.some((c) => c[0] === "SMEMBERS" && unreadableSets.has(String(c[1])))) throw new Error("Redis request timed out (test)");
+  if (batchWriteFails && commands.some((c) => c[0] === "HSET" && c[1] === BATCH_KEY)) throw new Error("Redis request timed out (test)");
   // A read of what the store is made of (its team, its email sequences) that times out.
   if (commands.some((c) => c[0] === "GET" && unreadableParts.some((prefix) => String(c[1]).startsWith(prefix)))) throw new Error("Redis request timed out (test)");
   return realPipeline(commands);
@@ -157,6 +160,28 @@ async function main(): Promise<void> {
     const seen = await eraseClosed(Date.now() + 30_000, async () => {}, TP + WALK_GAP_MS + 1);
     is(`control: once ${what} reads, it is prepared and out of line`, [seen.stores, redis.run(["ZSCORE", DUE_KEY, owner])], [1, null]);
   }
+
+  // C6's other inherited LOW (review 6712309813): the record was closed before the walk's entry was written, so a
+  // failed write left a store that later read as gone (nil) and left the line with its keys never erased.
+  part("A store's walk entry that cannot be written leaves its record, so the walk can try again");
+  redis.clear();
+  const W = "batch-write@example.com";
+  await makeStore(W, "batchwrite");
+  const TW = Date.now();
+  await markDue(W, TW - 1000);
+  batchWriteFails = true;
+  let threw = false;
+  try {
+    await eraseClosed(Date.now() + 30_000, async () => {}, TW);
+  } catch {
+    threw = true;
+  }
+  batchWriteFails = false;
+  is("its record is still there", (await storeForEmail(W)) !== null, true);
+  is("it is still in line", redis.run(["ZSCORE", DUE_KEY, W]) !== null, true);
+  is("the run did not crash on it (the store waits a walk instead)", threw, false);
+  const again = await eraseClosed(Date.now() + 30_000, async () => {}, TW + WALK_GAP_MS + 1);
+  is("control: once the write works, it is prepared and out of line, its record closed", [again.stores, redis.run(["ZSCORE", DUE_KEY, W]), (await storeForEmail(W)) === null], [1, null, true]);
 
   done();
 }

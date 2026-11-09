@@ -46,6 +46,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
+import { REFUSED_MAX_SECONDS, REFUSED_TRIES, countRefusal } from "@/lib/refused-tries";
 import { formatMoney } from "@/lib/money";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { readListings } from "@/lib/catalog";
@@ -324,12 +325,24 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
       // countSent never throws, and a count not written never lets the mark go: the email went.
       await countSent(store.statsId, "failed");
     } else if (outcome === "refused") {
-      // Refused for certain: let go, so the next run tries again (only our own claim).
-      await releaseMark(key, value);
+      // Refused for certain: let go, so the next run tries again (only our own claim), up to REFUSED_TRIES; a refusal
+      // can come after the store's figure was taken, so past it the mark is kept and no run takes it again (rule 30).
+      await releaseOrKeep(key, value, "a failed-payment email", store.handle);
     }
     // Uncertain: the mark is kept (sendOnce said so in the log), so the member is never written to twice.
   }
   return sent;
+}
+
+/**
+ * After a certain refusal: the mark is let go while the email may be tried again (fewer than REFUSED_TRIES refusals,
+ * lib/refused-tries.ts), so the next daily run asks again; at the limit, or with a count that does not read, it is
+ * kept, since a refusal may come after the store's figure was taken (a stop before the request, a 4xx after it) and
+ * each run would take it again. Counted under the mark's own name, kept REFUSED_MAX_SECONDS: past three daily runs.
+ */
+async function releaseOrKeep(key: string, value: string, what: string, handle: string): Promise<void> {
+  if (await countRefusal(key, REFUSED_MAX_SECONDS)) await releaseMark(key, value);
+  else console.error(`${what} was refused for certain ${REFUSED_TRIES} times; its mark is kept and it is not tried again`, handle);
 }
 
 /**
@@ -500,8 +513,8 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
       sent += 1;
       await countSent(store.statsId, "cards");
     } else if (outcome === "refused") {
-      // Refused for certain: let go, so the next run tries again (only our own claim).
-      await releaseMark(key, value);
+      // Refused for certain: let go, so the next run tries again (only our own claim), up to REFUSED_TRIES.
+      await releaseOrKeep(key, value, "a card notice", store.handle);
     }
     // Uncertain: the mark is kept, so the member is never told twice about the same card.
   }

@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { discardTwoStep, moveTwoStep } from "@/lib/two-step";
 import { moveRecoveryAddress } from "@/lib/recovery-address";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
-import { originFrom } from "@/lib/request-origin";
+import { linkOrigin, originFrom } from "@/lib/request-origin";
 import {
   SessionsUnknownError,
   endAllSessions,
@@ -34,6 +34,7 @@ import { fromAnotherSite, limited } from "@/lib/request-guard";
  * the moment where a session left open somewhere else stops being harmless.
  */
 export async function POST(request: NextRequest) {
+  // Where this answer sends the browser back to: the host it asked. Links we email are another thing (below).
   const origin = originFrom(request);
 
   // Refused before anything else is read: another site, by Origin or by
@@ -81,7 +82,9 @@ export async function POST(request: NextRequest) {
   if (!(await markBrokenMove(from, to).then(() => true, () => false))) return away("/signin?status=move-error");
   let broken = false;
   try {
-    return await finishMove(from, to, origin, away, () => {
+    // The links in the notices are built by linkOrigin (lib/request-origin.ts): a request sent to one store's domain
+    // never puts that domain in an email, where the host it names could be one somebody else points elsewhere.
+    return await finishMove(from, to, linkOrigin(request), away, () => {
       broken = true;
     });
   } finally {
@@ -111,7 +114,7 @@ async function step(what: string, work: () => Promise<unknown>): Promise<boolean
  * that cannot be done, or where the store is cannot be told, `broke` is
  * called and the move is kept marked until it is repaired.
  */
-async function finishMove(from: string, to: string, origin: string, away: (path: string) => Response, broke: () => void): Promise<Response> {
+async function finishMove(from: string, to: string, link: string, away: (path: string) => Response, broke: () => void): Promise<Response> {
   let keysMoved = false;
   let appMoved = false;
   // A copy of two-step login that may have been left at `to` when moving it refused (lib/two-step.ts moveTwoStep).
@@ -178,7 +181,7 @@ async function finishMove(from: string, to: string, origin: string, away: (path:
       ),
       Promise.all([moveMemberships(from, to), moveDevices(from, to)]).catch((error) => console.error("moving what belongs to the account failed", error)),
     ]);
-    if (!carried) await tellRecoveryNotMoved(from, to, origin);
+    if (!carried) await tellRecoveryNotMoved(from, to, link);
     // Phones follow once the memberships have: an owner's stay the owner's,
     // a team member's become the new address's (lib/phone-alerts.ts).
     await movePhoneDevices(from, to).catch((error) => console.error("moving phone devices failed", error));
@@ -214,7 +217,7 @@ async function finishMove(from: string, to: string, origin: string, away: (path:
  * none now, and what to do. Best effort, like every account notice: the studio says the same on the page the move
  * lands on (`-no-recovery` in app/studio/page.tsx), which is the notice that cannot be lost.
  */
-async function tellRecoveryNotMoved(from: string, to: string, origin: string): Promise<void> {
+async function tellRecoveryNotMoved(from: string, to: string, link: string): Promise<void> {
   const when = new Date().toISOString().replace("T", " ").slice(0, 16);
   const send = (address: string, lines: string[]) =>
     sendEmail({
@@ -229,12 +232,12 @@ async function tellRecoveryNotMoved(from: string, to: string, origin: string): P
     send(to, [
       "Your Marktmorgen account now logs in with this address, but we could not carry its recovery address over. Your account may have no recovery address now.",
       "",
-      `Log in at ${origin}/signin, open your studio and add a recovery address again.`,
+      `Log in at ${link}/signin, open your studio and add a recovery address again.`,
     ]),
     send(from, [
       `The Marktmorgen account that logged in with this address now logs in with ${to}. We could not carry its recovery address over, so the account may have no recovery address now.`,
       "",
-      `Log in with ${to} at ${origin}/signin, open your studio and add a recovery address again.`,
+      `Log in with ${to} at ${link}/signin, open your studio and add a recovery address again.`,
     ]),
   ]);
 }

@@ -31,7 +31,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 /**
  * After a form is sent (app/api/store/form): the quiz's result when it has
  * one, with the creator's product for it, or the form's own thank-you; that
- * the list's email is on its way when they asked for it; and, on a step of a
+ * the list's email is on its way when they asked for it, or that nobody was
+ * added when the form did not show which address is theirs; and, on a step of a
  * funnel, the way on to the next one. Nothing here is personal: the result
  * is named in the address, and anyone who opens it sees what a quiz says
  * for that result, nothing of anybody's answers. A scored quiz's total
@@ -99,6 +100,7 @@ export default async function FormDonePage({ params, searchParams }: Params) {
             </>
           )}
           {pick(query.j) === "1" ? <p className="notice notice-success mt-6 text-sm">{w.confirmSent}</p> : null}
+          {pick(query.j) === "unknown" ? <p className="notice notice-info mt-6 text-sm" role="status">{w.listUnknown}</p> : null}
           <div className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
             {here?.next ? (
               <Link href={here.next} className="btn st-btn btn-lg">

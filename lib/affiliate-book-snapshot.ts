@@ -129,6 +129,20 @@ export function bookSlice(book: Book, id: string): Book {
 }
 
 /**
+ * What the affiliate's page tells them about a book Stripe was not all read
+ * for (app/[handle]/affiliates): "refunds" when refunds and disputes were not
+ * all checked, "invoices" when the membership and payment plan payments were
+ * not all read, past the book's ceiling or not (lib/paypal-payouts.ts,
+ * unsettledBook), so commissions on them may be missing from what is shown.
+ * Only `true` is whole: a kept part written before a field existed, or one
+ * that does not read, gets the notice. Each is said in the store's language,
+ * with no figure in it, and nothing more is read for it.
+ */
+export function bookUnchecked(book: Pick<Book, "refundsChecked" | "invoicesChecked">): ("refunds" | "invoices")[] {
+  return [...(book.refundsChecked === true ? [] : (["refunds"] as const)), ...(book.invoicesChecked === true ? [] : (["invoices"] as const))];
+}
+
+/**
  * What of a part is kept: only what the affiliate's page shows. A lead's
  * address masked as the page masks it; the affiliate's own address, PayPal
  * address and note left out (the page reads those from their record).

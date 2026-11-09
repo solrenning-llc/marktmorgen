@@ -1,6 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import { StoreResting } from "@/components/store-resting";
 import { admitAffiliatePage } from "@/lib/affiliate-page-admission";
+import { bookUnchecked } from "@/lib/affiliate-book-snapshot";
 import { SITE_URL } from "@/lib/site-url";
 import type { Metadata } from "next";
 import { readListings, recordListings } from "@/lib/catalog";
@@ -384,11 +385,11 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                       </p>
                     ) : null}
                   </div>
-                  {!book.refundsChecked ? (
-                    <p className="st-note mt-4 text-sm" role="status">
-                      {a.refundsUnchecked}
+                  {bookUnchecked(book).map((what) => (
+                    <p key={what} className="st-note mt-4 text-sm" role="status" data-book-unchecked={what}>
+                      {what === "refunds" ? a.refundsUnchecked : a.invoicesUnchecked}
                     </p>
-                  ) : null}
+                  ))}
 
                   <AffiliatePromotionResults book={book} />
                   {/* Each lead with where it stands (lib/affiliate-lead-rules.ts), the person's address masked. */}

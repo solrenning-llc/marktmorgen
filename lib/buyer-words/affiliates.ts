@@ -135,6 +135,8 @@ const en = {
   waitingNote: (amount: string) => `${amount} of what you are owed is still inside that wait, and is not payable yet.`,
   refundsUnchecked:
     "Refunds and chargebacks could not all be checked just now, so a sale refunded or disputed recently may still show as earning. It is corrected when these figures next refresh.",
+  /** When the membership and payment plan payments behind these figures were not all read (lib/affiliate-book-snapshot.ts, bookUnchecked). */
+  invoicesUnchecked: "Some payments on memberships and payment plans could not be checked, so commissions on them may be missing from these figures.",
   /** When an affiliate's figures were worked out (lib/affiliate-book-snapshot.ts): `when` arrives written in the store's language, in UTC. Then figuresDaily, or figuresShort for an incomplete book worked out again sooner. */
   figuresAsOf: (when: string) => `Figures as of ${when}, Coordinated Universal Time (UTC).`,
   figuresDaily: "They refresh at most once a day.",
@@ -462,6 +464,7 @@ const es: AffiliatesWords = {
   waitingNote: (amount) => `${amount} de lo que se te debe aún está dentro de ese plazo de espera, y todavía no se puede pagar.`,
   refundsUnchecked:
     "No se pudieron comprobar todos los reembolsos ahora mismo, así que una venta reembolsada hace poco puede seguir apareciendo como si generara ganancias. Se corrige cuando estas cifras se actualicen de nuevo.",
+  invoicesUnchecked: "No se pudieron comprobar algunos pagos de membresías y pagos a plazos, así que pueden faltar en estas cifras las comisiones de esos pagos.",
   figuresAsOf: (when: string) => `Cifras del ${when}, tiempo universal coordinado (UTC).`,
   figuresDaily: "Se actualizan como máximo una vez al día.",
   figuresShort: "Pueden actualizarse de nuevo pasados 15 minutos.",
@@ -749,6 +752,7 @@ const fr: AffiliatesWords = {
   nextPayment: (date) => `Prochain paiement${S}: ${date}.`,
   waitingNote: (amount) => `${amount} de ce qui vous est dû est encore dans ce délai d'attente et n'est pas encore payable.`,
   refundsUnchecked: `Tous les remboursements n'ont pas pu être vérifiés à l'instant${S}: une vente remboursée récemment peut donc encore apparaître comme rapportant de l'argent. C'est corrigé à la prochaine mise à jour de ces chiffres.`,
+  invoicesUnchecked: `Certains paiements d'abonnements et de paiements échelonnés n'ont pas pu être vérifiés${S}: les commissions sur ces paiements peuvent donc manquer dans ces chiffres.`,
   figuresAsOf: (when: string) => `Chiffres du ${when}, temps universel coordonné (UTC).`,
   figuresDaily: "Ils sont mis à jour au plus une fois par jour.",
   figuresShort: "Ils peuvent être mis à jour à nouveau après 15 minutes.",
@@ -1041,6 +1045,7 @@ const de: AffiliatesWords = {
   waitingNote: (amount) => `${amount} von dem, was Ihnen zusteht, liegt noch in dieser Wartezeit und ist noch nicht auszahlbar.`,
   refundsUnchecked:
     "Nicht alle Erstattungen konnten gerade geprüft werden, daher kann ein kürzlich erstatteter Verkauf noch so erscheinen, als bringe er etwas ein. Das wird bei der nächsten Aktualisierung dieser Zahlen korrigiert.",
+  invoicesUnchecked: "Einige Zahlungen für Mitgliedschaften und Ratenzahlungen konnten nicht geprüft werden, daher können Provisionen darauf in diesen Zahlen fehlen.",
   figuresAsOf: (when: string) => `Zahlen vom ${when}, koordinierte Weltzeit (UTC).`,
   figuresDaily: "Sie werden höchstens einmal am Tag aktualisiert.",
   figuresShort: "Sie können nach 15 Minuten erneut aktualisiert werden.",
@@ -1336,6 +1341,7 @@ const it: AffiliatesWords = {
   waitingNote: (amount) => `${amount} di quanto ti spetta è ancora in questo periodo di attesa, e non è ancora pagabile.`,
   refundsUnchecked:
     "Non è stato possibile controllare subito tutti i rimborsi, quindi una vendita rimborsata di recente potrebbe ancora risultare come guadagno. Viene corretto al prossimo aggiornamento di questi dati.",
+  invoicesUnchecked: "Non è stato possibile controllare alcuni pagamenti di abbonamenti e pagamenti rateali, quindi le commissioni su di essi potrebbero mancare da questi dati.",
   figuresAsOf: (when: string) => `Dati del ${when}, tempo coordinato universale (UTC).`,
   figuresDaily: "Si aggiornano al massimo una volta al giorno.",
   figuresShort: "Possono aggiornarsi di nuovo dopo 15 minuti.",
@@ -1627,6 +1633,7 @@ const nl: AffiliatesWords = {
   waitingNote: (amount) => `${amount} van wat je tegoed hebt, valt nog binnen die wachttijd en kan nog niet worden uitbetaald.`,
   refundsUnchecked:
     "Niet alle terugbetalingen konden zojuist worden gecontroleerd, dus een onlangs terugbetaalde verkoop kan nog als opbrengst worden getoond. Dat wordt rechtgezet bij de volgende bijwerking van deze cijfers.",
+  invoicesUnchecked: "Sommige betalingen voor lidmaatschappen en betalingen in termijnen konden niet worden gecontroleerd, dus commissies daarop kunnen in deze cijfers ontbreken.",
   figuresAsOf: (when: string) => `Cijfers van ${when}, gecoördineerde wereldtijd (UTC).`,
   figuresDaily: "Ze worden hoogstens één keer per dag bijgewerkt.",
   figuresShort: "Ze kunnen na 15 minuten opnieuw worden bijgewerkt.",
@@ -1924,6 +1931,7 @@ const pt: AffiliatesWords = {
   waitingNote: (amount) => `${amount} do que lhe é devido ainda está dentro desse prazo de espera e ainda não pode ser pago.`,
   refundsUnchecked:
     "Não foi possível verificar agora todos os reembolsos, por isso uma venda reembolsada recentemente pode ainda aparecer como se gerasse ganhos. Fica corrigido na próxima atualização destes números.",
+  invoicesUnchecked: "Não foi possível verificar alguns pagamentos de subscrições e de pagamentos em prestações, por isso as comissões sobre eles podem faltar nestes números.",
   figuresAsOf: (when: string) => `Números de ${when}, tempo universal coordenado (UTC).`,
   figuresDaily: "São atualizados no máximo uma vez por dia.",
   figuresShort: "Podem ser atualizados de novo após 15 minutos.",

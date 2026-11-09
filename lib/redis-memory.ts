@@ -1177,6 +1177,23 @@ export class MemoryRedis {
           this.run(["HSET", work, "calls", calls, "of", ending]);
           return 1;
         }
+        // lib/plan-closing.ts CLOSING_STATE_SAVE: a store's closing state written only over the state the run read, step for step.
+        if (key.startsWith("-- marktmorgen:closing-state-save:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, state, mode, expected, next] = args;
+          this.live(state);
+          const type = this.run(["TYPE", state]);
+          if (type !== "string" && type !== "none") return -1;
+          const was = this.run(["GET", state]);
+          if (mode === "none") {
+            if (was !== null) return 0;
+          } else if (mode === "is") {
+            if (was !== expected) return 0;
+          } else {
+            return -1;
+          }
+          this.run(["SET", state, next]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         if (key.startsWith("-- marktmorgen:recount-page:v1\n") && args[0] === "2") {

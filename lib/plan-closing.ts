@@ -747,6 +747,66 @@ export async function startClosing(folder: string, emails: number, calls: number
   throw new UnknownReplyError("a closing's start");
 }
 
+/**
+ * KEYS[1] a store's closing state (text); ARGV[1] "none" when the run read no
+ * state, or "is" when it read ARGV[2]; ARGV[3] the state to write. Writes it
+ * only over exactly the state the run read or last wrote (a compare-and-set):
+ * 1 when written, 0 when another run wrote or deleted it since (nothing
+ * written), -1 when the key is of another type or ARGV[1] is neither (nothing
+ * written). A plain SET, as closeOne wrote before, so no expiry is set or
+ * kept. lib/redis-memory.ts runs it the same way.
+ */
+export const CLOSING_STATE_SAVE = `-- marktmorgen:closing-state-save:v1
+local t = redis.call("TYPE", KEYS[1]).ok
+if t ~= "string" and t ~= "none" then return -1 end
+local was = redis.call("GET", KEYS[1])
+if ARGV[1] == "none" then
+  if was then return 0 end
+elseif ARGV[1] == "is" then
+  if was ~= ARGV[2] then return 0 end
+else
+  return -1
+end
+redis.call("SET", KEYS[1], ARGV[3])
+return 1`;
+
+/** Another run wrote a store's closing state after this run read it: this run stops for the store, writing nothing more. */
+class StaleClosingState extends Error {}
+
+/**
+ * closeOne's saves of a store's closing state, from `raw` (the state as it
+ * read it), each written only over the state it read or last wrote
+ * (CLOSING_STATE_SAVE): a run that read the state before another run
+ * advanced it (on a newer ending, or further on this one) never puts its
+ * stale snapshot back. `check` asks, before a run acts on its snapshot,
+ * whether the state is still the one it read. Either throws
+ * StaleClosingState when it is not (closeOne then answers held), and
+ * UnknownReplyError on any reply but the exact 1 or 0, or text or null for
+ * the check (CX-123 rule 24): nothing is written then, and the next day
+ * reads it afresh. A reply that was not text or null at the top is taken as
+ * no state read, so a save then writes only where there is none.
+ */
+function stateSaver(key: string, raw: unknown): ((next: State) => Promise<void>) & { check: () => Promise<void> } {
+  let seen: string | null = typeof raw === "string" ? raw : null;
+  const save = async (next: State): Promise<void> => {
+    const text = JSON.stringify(next);
+    const reply = repliesFor(await redisPipeline([["EVAL", CLOSING_STATE_SAVE, 1, stateKey(key), seen === null ? "none" : "is", seen ?? "", text]]), 1)?.[0];
+    if (reply === 1) {
+      seen = text;
+      return;
+    }
+    if (reply === 0) throw new StaleClosingState();
+    throw new UnknownReplyError("a store's closing state save");
+  };
+  const check = async (): Promise<void> => {
+    const replies = repliesFor(await redisPipeline([["GET", stateKey(key)]]), 1);
+    const now = replies?.[0];
+    if (!replies || (now !== null && typeof now !== "string")) throw new UnknownReplyError("a store's closing state");
+    if (now !== seen) throw new StaleClosingState();
+  };
+  return Object.assign(save, { check });
+}
+
 export type Closing = {
   key: string;
   /**
@@ -764,8 +824,21 @@ export type Closing = {
   coverage?: "unknown";
 };
 
-/** One store whose plan has ended, looked at for today. */
+/**
+ * One store whose plan has ended, looked at for today. A run that finds its
+ * snapshot of the store's closing state advanced by another run stops there
+ * with a held result, writing nothing more (stateSaver).
+ */
 export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY, mayObserve?: () => Promise<boolean>): Promise<Closing> {
+  try {
+    return await closeStore(key, now, hands, until, mayObserve);
+  } catch (error) {
+    if (error instanceof StaleClosingState) return { key, state: "held", note: "another run advanced this store's closing" };
+    throw error;
+  }
+}
+
+async function closeStore(key: string, now: number, hands: Hands, until: number, mayObserve?: () => Promise<boolean>): Promise<Closing> {
   const store = await storeForEmail(key);
   if (!store) {
     await redisPipeline([["ZREM", ENDED_INDEX, key], ["ZREM", FINAL_INDEX, key], ["DEL", stateKey(key)]]);
@@ -795,12 +868,12 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     if (final.removed) {
       if (!final.due) {
         await markDue(key, now);
-        await redisPipeline([["SET", stateKey(key), JSON.stringify({ ...final, due: now })]]);
+        await stateSaver(key, rawFinal)({ ...final, due: now });
       }
       return { key, state: "removed", note: "its records are deleted by the next walk" };
     }
     const folderFinal = await storeFolder(storeRef(store));
-    return closingDay(store, key, final, was, final.day ?? now, folderFinal, now, hands, until, (next) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]));
+    return closingDay(store, key, final, was, final.day ?? now, folderFinal, now, hands, until, stateSaver(key, rawFinal));
   }
   const endedAt = Date.parse(store.planEndedAt);
   if (standingOf(store, now / 1000) !== "ended" || !Number.isFinite(endedAt)) {
@@ -817,7 +890,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   const read = parseState(raw);
   // Notices about an earlier ending say nothing about this one.
   const state: State = read.of === endedAt ? read : { of: endedAt };
-  const save = (next: State) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]);
+  const save = stateSaver(key, raw);
   const closes = closesStore(endedAt);
   const send = async (kind: "ended" | "month" | "week" | "removed", day: number, held: number): Promise<boolean> => {
     const { subject, text } =
@@ -872,6 +945,11 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     if (start === "newer") return { key, state: "held", note: "a newer ending of this store already started" };
     Object.assign(state, { holdFrom: now });
     await save(state);
+  } else {
+    // A run that read the state before another run advanced it (a newer
+    // ending started, or this one went further) stops here, before it holds,
+    // tells or removes anything on its snapshot.
+    await save.check();
   }
   if (closes && !state.hold) {
     const hold = await holdCharges(store, endedAt, until).catch((error) => {

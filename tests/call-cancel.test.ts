@@ -125,7 +125,9 @@ async function main(): Promise<void> {
     true,
   );
   emails.length = 0;
-  sale = { id: "cs_test_cancel00000000002", status: "complete", payment_status: "paid", metadata: { kind: "call", store: "bela", product: listing.id, start: String(at), end: String(at + 3_600_000), cancel_hours: "72" } };
+  // Each stand-in sale carries its amount and currency, as every completed checkout session from Stripe does: a
+  // booking whose amount or currency cannot be read is unknown (lib/calls.ts callFromRow), never one paid 0.
+  sale = { id: "cs_test_cancel00000000002", status: "complete", payment_status: "paid", amount_total: 8000, currency: "usd", metadata: { kind: "call", store: "bela", product: listing.id, start: String(at), end: String(at + 3_600_000), cancel_hours: "72" } };
   await confirm("cs_test_cancel00000000002");
   is(
     "not handed it, the promise is read from the sale: 72 hours as paid, though the product now says 24",
@@ -133,7 +135,7 @@ async function main(): Promise<void> {
     true,
   );
   emails.length = 0;
-  sale = { id: "cs_test_cancel00000000005", status: "complete", payment_status: "paid", metadata: { kind: "call", store: "bela", product: listing.id, start: String(at), end: String(at + 3_600_000), cancel_hours: "48" } };
+  sale = { id: "cs_test_cancel00000000005", status: "complete", payment_status: "paid", amount_total: 8000, currency: "usd", metadata: { kind: "call", store: "bela", product: listing.id, start: String(at), end: String(at + 3_600_000), cancel_hours: "48" } };
   const turnedOff = { ...listing, call: { ...listing.call, cancelHours: undefined } } as CallListing;
   await confirmBooking({ store: shop, product: turnedOff, session: "cs_test_cancel00000000005", start: at, end: at + 3_600_000, buyerEmail: "ana@example.com", buyerTz: NY, amountCents: 8000, currency: "usd", origin: "https://marktmorgen.com" });
   is(
@@ -145,7 +147,7 @@ async function main(): Promise<void> {
   await confirm("cs_test_cancel00000000003", { hours: 24, late: true });
   is("a time booked inside the deadline is told so after paying too", [(emails.find((e) => e.to === "ana@example.com")?.text ?? "").includes(tooLate), (emails.find((e) => e.to !== "ana@example.com")?.text ?? "").includes("within the 24-hour cancellation deadline")], [true, true]);
   emails.length = 0;
-  sale = { id: "cs_test_cancel00000000004", status: "complete", payment_status: "paid", metadata: { kind: "call", store: "bela", product: listing.id, start: String(at), end: String(at + 3_600_000), package: "pkg1" } };
+  sale = { id: "cs_test_cancel00000000004", status: "complete", payment_status: "paid", amount_total: 0, currency: "usd", metadata: { kind: "call", store: "bela", product: listing.id, start: String(at), end: String(at + 3_600_000), package: "pkg1" } };
   await confirm("cs_test_cancel00000000004");
   is("a session from a package, whose sale promises nothing, says nothing", emails.some((e) => /cancel at least|Cancel at least|cancellation deadline/.test(e.text)), false);
   is("the team's host is told the store's owner makes the refund", creatorCancelLine({ hours: 24, late: false }, false).endsWith("A refund is made by the store's owner, in their Stripe dashboard."), true);

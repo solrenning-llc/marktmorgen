@@ -116,11 +116,16 @@ export async function readTip(store: Store, sessionId: string): Promise<TipOutco
     };
     const meta = session.metadata ?? {};
     if (meta.kind !== "tip" || !saleHandles(store).has(meta.store ?? "") || !isSettled(session)) return { state: "waiting" };
-    return {
-      state: "paid",
-      amount: typeof session.amount_total === "number" ? session.amount_total : 0,
-      currency: typeof session.currency === "string" && session.currency ? session.currency : store.currency,
-    };
+    // The amount Stripe took and its currency, as Stripe writes them (a whole number at or above zero, three
+    // lowercase letters). One it gave in another shape is not known: "waiting", which confirms nothing, never a
+    // thank-you for $0.00 or in the store's currency (CX-123 rule 24).
+    const amount = session.amount_total;
+    const currency = session.currency;
+    if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
+      console.error("a gift's amount or currency could not be read; its page says nothing was confirmed", store.handle, sessionId);
+      return { state: "waiting" };
+    }
+    return { state: "paid", amount, currency };
   } catch (error) {
     if (!(error instanceof StripeError && error.status === 404)) console.error("reading a gift's checkout failed", error);
     return { state: "waiting" };

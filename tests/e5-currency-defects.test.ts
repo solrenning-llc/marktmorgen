@@ -18,7 +18,10 @@ const flat = (file: string) => readFileSync(file, "utf8").replace(/\s+/g, " ");
 const calls = flat("lib/calls.ts");
 
 part("A paid call's currency");
-is("read from the checkout session, lowercased, empty when it says none", calls.includes('currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",'), true);
+// Rule 23: was "empty when it says none", read from `row.currency ? row.currency.toLowerCase() : ""`. Since the
+// amounts-unknown unit (tests/amounts-unknown-not-zero.test.ts), a session that says no currency, or one that is
+// not a currency, makes the reading unknown (StripeListUnreadable) instead of a booking said in the store's currency.
+is("read from the checkout session, lowercased; none, or one that is not a currency, is unknown", calls.includes('typeof currency !== "string" || !/^[a-zA-Z]{3}$/.test(currency)) { throw new StripeListUnreadable') && calls.includes("currency: currency.toLowerCase(),"), true);
 is("the phone alert says the amount in it", calls.includes("formatMoney(input.amountCents, input.currency || store.currency)"), true);
 is("the bookings API says it", flat("lib/api-read.ts").includes("currency: c.currency || store.currency,"), true);
 const confirmations = ["app/[handle]/thanks/page.tsx", "lib/calls.ts", "lib/call-reminders.ts"];

@@ -1266,6 +1266,14 @@ function wantsStripe(config: Pick<Config, "endpoints">): boolean {
 const iso = (seconds: unknown) => (typeof seconds === "number" && seconds > 0 ? new Date(seconds * 1000).toISOString() : null);
 const str = (value: unknown) => (typeof value === "string" && value ? value : null);
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+/**
+ * Money as Stripe writes it, in the currency's smallest unit: a whole number
+ * at or above zero, or null when it is not one. A currency: three lowercase
+ * letters (ISO 4217), or null. Never a guessed 0 or "usd" (CX-123 rule 24;
+ * /api/v1/sales reads a sale the same way, lib/api-sales.ts readSale).
+ */
+const cents = (value: unknown) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null);
+const currencyOf = (value: unknown) => (typeof value === "string" && /^[a-z]{3}$/.test(value) ? value : null);
 
 /**
  * Calls to the creator's Stripe account one store's run of the five-minute
@@ -1403,6 +1411,12 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     return { id: id ?? null, title: found?.title ?? (id === meta.product ? meta.title : null) ?? null };
   };
   const created = typeof event.created === "number" ? event.created * 1000 : Date.now();
+  // An amount or a currency this code cannot read: the event waits, as any our code cannot process, and is
+  // passed over with a line in the creator's log in the end (watchStore). Never sent as $0 or in a guessed currency.
+  const unreadable = (): Waits => {
+    console.error("OUR CODE FAILED reading a Stripe event's amount or currency (not a Stripe error); it is read again next run", store.handle, str(event.id), event.type);
+    return "ours";
+  };
 
   if (event.type === "checkout.session.completed") {
     if (!handles.has(meta.store ?? "") || !isSettled(object)) return true;
@@ -1412,7 +1426,13 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const buyer = { email: str(details.email) ?? str(object.customer_email), name: str(details.name) };
     const membership = object.mode === "subscription" && meta.kind !== "plan";
     const kind = meta.kind === "call" ? "call" : meta.kind === "plan" ? "payment_plan" : membership ? "membership" : "one_time";
-    const totals = (object.total_details ?? {}) as { amount_discount?: unknown };
+    const amount = cents(object.amount_total);
+    const currency = currencyOf(object.currency);
+    // No discount details from Stripe is a discount not known (null, as /api/v1/sales says it); details that
+    // cannot be read make the sale unknown.
+    const totals = object.total_details;
+    const discount = totals === null || totals === undefined ? null : cents((totals as { amount_discount?: unknown }).amount_discount);
+    if (amount === null || currency === null || (discount === null && totals !== null && totals !== undefined)) return unreadable();
     // A bundle names every product it handed over, from the list on the order.
     const inside = async (slot: BundleSlot) => {
       const ids = bundleFromMeta(meta, slot);
@@ -1431,9 +1451,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         const ticked = await Promise.all(bumpsFromMeta(meta).map(async ({ key, id }) => ({ ...(await product(id)), bundle_items: await inside(`${key}_bundle`) })));
         return { order_bump: ticked[0] ?? null, order_bumps: ticked };
       })()),
-      amount_cents: num(object.amount_total),
-      discount_cents: num(totals.amount_discount),
-      currency: str(object.currency) ?? "usd",
+      amount_cents: amount,
+      discount_cents: discount,
+      currency,
       buyer,
       paid_at: iso(event.created),
       // Where the sale came from, as the checkout wrote it on the order: the
@@ -1446,8 +1466,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         subscription: str(object.subscription),
         checkout_session: session,
         product: await product(meta.product),
-        amount_cents: num(object.amount_total),
-        currency: str(object.currency) ?? "usd",
+        amount_cents: amount,
+        currency,
         trial_days: Number(meta.trial_days) || 0,
         payments: Number(meta.ends_after) || null,
         buyer,
@@ -1460,6 +1480,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) return true;
     const intent = str(object.id);
     if (!intent) return true;
+    const amount = cents(object.amount);
+    const currency = currencyOf(object.currency);
+    if (amount === null || currency === null) return unreadable();
     await emitEvent(store, "sale.completed", intent, {
       payment_intent: intent,
       kind: "upsell",
@@ -1473,9 +1496,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         id: meta.step_id || meta.step || null,
         number: Number(meta.step_number) || (meta.step ? null : 1),
       },
-      amount_cents: num(object.amount),
+      amount_cents: amount,
       discount_cents: 0,
-      currency: str(object.currency) ?? "usd",
+      currency,
       buyer: { email: str(object.receipt_email), name: null },
       paid_at: iso(event.created),
     }, created);
@@ -1558,8 +1581,13 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     }
     if (!handles.has(meta.store ?? "")) return true;
     lookups.confirmed = str(event.id) ?? undefined;
-    const total = num(object.amount_refunded);
-    const before = num(previous.amount_refunded);
+    const total = cents(object.amount_refunded);
+    // What was refunded before this event, when Stripe says it changed; one it said in a shape this code cannot
+    // read is not taken as nothing, which would say the whole total was refunded now.
+    const before = previous.amount_refunded === undefined ? 0 : cents(previous.amount_refunded);
+    const amount = cents(object.amount);
+    const currency = currencyOf(object.currency);
+    if (total === null || before === null || amount === null || currency === null) return unreadable();
     const billing = (object.billing_details ?? {}) as { email?: unknown; name?: unknown };
     await emitEvent(store, "refund.issued", `${charge}|${total}`, {
       charge,
@@ -1567,9 +1595,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       product: await product(meta.product),
       amount_refunded_cents: Math.max(0, total - before),
       total_refunded_cents: total,
-      amount_cents: num(object.amount),
+      amount_cents: amount,
       fully_refunded: object.refunded === true,
-      currency: str(object.currency) ?? "usd",
+      currency,
       buyer: { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) },
       refunded_at: iso(event.created),
     }, created);
@@ -1591,6 +1619,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     meta = found;
     if (!handles.has(meta.store ?? "")) return true;
     lookups.confirmed = str(event.id) ?? undefined;
+    const amount = cents(object.amount);
+    const currency = currencyOf(object.currency);
+    if (amount === null || currency === null) return unreadable();
     const evidence = (object.evidence_details ?? {}) as { due_by?: unknown };
     await emitEvent(store, "dispute.opened", dispute, {
       dispute,
@@ -1598,8 +1629,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       payment_intent: intent,
       product: await product(meta.product),
       option: meta.option ?? null,
-      amount_cents: num(object.amount),
-      currency: str(object.currency) ?? "usd",
+      amount_cents: amount,
+      currency,
       reason: str(object.reason),
       status: str(object.status),
       evidence_due_by: iso(evidence.due_by),

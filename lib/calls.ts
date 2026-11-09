@@ -273,7 +273,7 @@ export async function paidCalls(store: Store): Promise<
     answers: Answer[];
     /** What was paid, in cents. */
     amount: number;
-    /** The currency it was paid in, as the checkout session says; empty when it says none, and readers fall back to the store's (22 [E5], unit 2b). */
+    /** The currency it was paid in, as the checkout session says, lowercased; a session that says none, or one that is not a currency, makes the reading unknown (callFromRow), never the store's. */
     currency: string;
     /** A team booking's hosts' ids and the claim on their time; empty for an ordinary call. */
     hosts: string[];
@@ -348,6 +348,14 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
   const end = Number(meta.end);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   if (refundedInFull(row.payment_intent)) return "refunded";
+  // What was paid and in what, as Stripe writes them: a whole number at or above zero and three letters (lowercased).
+  // One it gave in another shape, or none, makes the reading unknown (CX-123 rule 24), never a booking paid 0, which
+  // the creator's email reads as a package's session, nor one in the store's currency (lib/api-sales.ts readSale).
+  const amount = row.amount_total;
+  const currency = row.currency;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof currency !== "string" || !/^[a-zA-Z]{3}$/.test(currency)) {
+    throw new StripeListUnreadable("a paid booking's amount or currency could not be read");
+  }
   const email = row.customer_details?.email;
   const name = row.customer_details?.name;
   return {
@@ -361,8 +369,8 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     buyerTz: isTimeZone(meta.tz) ? meta.tz : "UTC",
     moves: 0,
     answers: readAnswers(row),
-    amount: typeof row.amount_total === "number" ? row.amount_total : 0,
-    currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",
+    amount,
+    currency: currency.toLowerCase(),
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),

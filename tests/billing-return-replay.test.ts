@@ -17,6 +17,11 @@
  * the way back never ends a paying store on a reading it cannot trust (a
  * subscription that could not be read comes back inactive). The route runs
  * whole, with a real studio session; Stripe is a stand-in.
+ *
+ * Two ways back can overlap (an old tab and the new checkout, or the daily
+ * job): the store may change after the route read it and before it writes.
+ * The write is held to the store the decision was made on, so a stale one
+ * never lands, and the old tab is told what the store holds now.
  */
 import { NextRequest } from "next/server";
 import { GET as back } from "@/app/api/billing/return/route";
@@ -35,6 +40,8 @@ type Reply = Record<string, unknown>;
 const sessions = new Map<string, Reply>();
 const subscriptions = new Map<string, Reply>();
 const unreadable = new Set<string>();
+/** Runs once while Stripe is being asked for that subscription: another writer's turn. */
+const meanwhile = new Map<string, () => Promise<void>>();
 let posts = 0;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -48,6 +55,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const sub = url.pathname.match(/^\/v1\/subscriptions\/(sub_\w+)$/);
   if (sub && method === "GET") {
     if (unreadable.has(sub[1])) return json({ error: { message: "synthetic outage" } }, 500);
+    const turn = meanwhile.get(sub[1]);
+    if (turn) { meanwhile.delete(sub[1]); await turn(); }
     return subscriptions.has(sub[1]) ? json(subscriptions.get(sub[1])) : json({ error: { message: "No such subscription" } }, 404);
   }
   return json({ error: { message: `no stand-in for ${method} ${url.pathname}` } }, 404);
@@ -172,6 +181,48 @@ async function main() {
     const answer = await s.come("cs_test_R18GoneSessn0007");
     const after = await s.read();
     is("a first session whose subscription is not paying is written as before, pending", [after.subscriptionId, after.subscriptionActive, billingOf(answer)], [GONE, false, "pending"]);
+  }
+  part("Two ways back at once: the store changes after the old tab read it and before it writes");
+  {
+    const s = await shop(8);
+    const OLD = "sub_R18OldPlan08", NEW = "sub_R18NewPlan08";
+    subscriptions.set(OLD, subscription(OLD, s.customer, s.handle, "canceled"));
+    subscriptions.set(NEW, subscription(NEW, s.customer, s.handle, "active"));
+    checkout("cs_test_R18OldSession0008", s.customer, OLD, s.handle);
+    checkout("cs_test_R18NewSession0008", s.customer, NEW, s.handle);
+    await setSubscription(s.owner, { customerId: s.customer, subscriptionId: OLD, active: true, tier: "creator", cycle: "month", period: paidPeriod() });
+    await setSubscription(s.owner, { active: false });
+    let fresh: string | null = null;
+    meanwhile.set(OLD, async () => { fresh = billingOf(await s.come("cs_test_R18NewSession0008")); });
+    const stale = await s.come("cs_test_R18OldSession0008");
+    is("the new paid checkout, back first, starts the plan", fresh, "on");
+    is("the old tab's write never lands: the store still runs sub_New, paid up", plan(await s.read()), [NEW, true, true, ""]);
+    is("the old tab is told the store already pays, never that its plan is pending", billingOf(stale), "already");
+  }
+  {
+    const s = await shop(9);
+    const OLD = "sub_R18OldPlan09", NEW = "sub_R18NewPlan09";
+    subscriptions.set(OLD, subscription(OLD, s.customer, s.handle, "canceled"));
+    checkout("cs_test_R18OldSession0009", s.customer, OLD, s.handle);
+    await setSubscription(s.owner, { customerId: s.customer, subscriptionId: OLD, active: true, tier: "creator", cycle: "month", period: paidPeriod() });
+    await setSubscription(s.owner, { active: false });
+    meanwhile.set(OLD, async () => {
+      await setSubscription(s.owner, { customerId: s.customer, subscriptionId: NEW, active: true, tier: "creator", cycle: "month", period: paidPeriod() });
+    });
+    const stale = await s.come("cs_test_R18OldSession0009");
+    is("the daily job adopts sub_New meanwhile: the old tab never writes over it", [plan(await s.read()), billingOf(stale)], [[NEW, true, true, ""], "already"]);
+  }
+  {
+    const s = await shop(10);
+    const OLD = "sub_R18OldPlan10", NEW = "sub_R18NewPlan10";
+    subscriptions.set(OLD, subscription(OLD, s.customer, s.handle, "canceled"));
+    checkout("cs_test_R18OldSession0010", s.customer, OLD, s.handle);
+    await setSubscription(s.owner, { customerId: s.customer, subscriptionId: OLD, active: true, tier: "creator", cycle: "month", period: paidPeriod() });
+    await setSubscription(s.owner, { active: false });
+    meanwhile.set(OLD, async () => { await setSubscription(s.owner, { customerId: s.customer, subscriptionId: NEW, active: false }); });
+    const stale = await s.come("cs_test_R18OldSession0010");
+    const after = await s.read();
+    is("a newer record that is not paying is kept too, and the old tab is told it is not confirmed", [after.subscriptionId, after.subscriptionActive, billingOf(stale)], [NEW, false, "unconfirmed"]);
   }
   is("the way back only reads Stripe: nothing was created, changed or canceled there", posts, 0);
   done();

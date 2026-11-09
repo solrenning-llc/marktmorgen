@@ -67,8 +67,8 @@ process.env.RESEND_API_KEY = "re_test_store_alerts_stand_in";
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 const OWNER = "plans-stuck-owner@example.com";
 const ACCOUNT = "acct_1TestPlans0001";
-const STUCK = "acct_1TestPlansStuck1";
-const FLAKY = "acct_1TestPlansFlaky1";
+const STUCK = "acct_1TestPlansStk1";
+const FLAKY = "acct_1TestPlansFlk1";
 const ANCHOR = Date.UTC(2026, 0, 31, 15, 0, 0) / 1000;
 const DAY = 86_400;
 const sessions: Record<string, Record<string, unknown>> = {};
@@ -337,7 +337,7 @@ async function main(): Promise<void> {
   const refusal = (plans as Record<string, unknown>).isAccountRefusal as ((error: unknown) => boolean) | undefined;
   is("a 403 from the account, a 401 or 403 naming the account, and account_invalid count", [
     new StripeError(403, "unknown", "no access"),
-    new StripeError(401, "unknown", "The provided key 'sk_test_***' does not have access to account 'acct_1TestPlansProof01' (or that account does not exist). Application access may have been revoked."),
+    new StripeError(401, "unknown", "The provided key 'sk_test_***' does not have access to account 'acct_1TestPlansPrf01' (or that account does not exist). Application access may have been revoked."),
     new StripeError(400, "account_invalid", "The account is invalid."),
   ].map((e) => refusal?.(e) ?? null), [true, true, true]);
   is("Stripe down, too many requests, our own key refused or short of a permission, a timeout, no key: none counts", [
@@ -345,11 +345,11 @@ async function main(): Promise<void> {
     new StripeError(429, "rate_limit_error", "Too many requests"),
     new StripeError(401, "unknown", "Invalid API Key provided: sk_test_****abcd"),
     new StripeError(401, "api_key_expired", "Expired API Key provided: sk_test_****abcd"),
-    new StripeError(403, "unknown", "The provided key 'rk_test_***' does not have the required permissions for this endpoint on account 'acct_1TestPlansProof01'."),
+    new StripeError(403, "unknown", "The provided key 'rk_test_***' does not have the required permissions for this endpoint on account 'acct_1TestPlansPrf01'."),
     new Error("Selling is not configured"),
     Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" }),
   ].map((e) => refusal?.(e) ?? null), [false, false, false, false, false, false, false]);
-  const PROOF = "acct_1TestPlansProof01";
+  const PROOF = "acct_1TestPlansPrf01";
   const failures: [string, { status: number; body: unknown } | null][] = [
     ["Stripe down (500)", { status: 500, body: { error: { message: "api down", type: "api_error" } } }],
     ["too many requests (429)", { status: 429, body: { error: { message: "Too many requests", type: "rate_limit_error" } } }],

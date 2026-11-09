@@ -36,7 +36,7 @@ const sessions: Record<string, Record<string, unknown>> = {};
 const subscriptions: Record<string, Record<string, unknown>> = {};
 const updates: { id: string; body: URLSearchParams }[] = [];
 /** A connected account that refuses every call, as one disconnected from the platform does. */
-const STUCK = "acct_1TestPlansStuck1";
+const STUCK = "acct_1TestPlansStk1";
 /** How many times each checkout was read, to see which plans a run looked at. */
 const reads: Record<string, number> = {};
 /** What Stripe answers to an update, when a case needs a reply other than the subscription. */

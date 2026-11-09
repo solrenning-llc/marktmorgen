@@ -13,6 +13,7 @@ import { CommunityPushToggle } from "@/components/community-push-toggle";
 import { CommunityBar, Face, authorName, storeWhen } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = { params: Promise<{ handle: string }> };
 
@@ -73,18 +74,13 @@ export default async function NotificationsPage({ params }: Params) {
         <CommunityPushToggle handle={store.handle} publicKey={publicKey()} devices={devices} words={w.push} />
 
         {notices.length === 0 ? (
-          <div className="st-note mt-6 text-center">
-            <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.nothingYet}</p>
-            <p className="mt-1 text-sm">
-              {/* The creator has no member record and no chosen name: their
-                  handle is @creator, in every community, always. */}
-              {viewer.owner
-                ? w.whenNamed("creator")
-                : viewer.member?.h
-                  ? w.whenNamed(viewer.member.h)
-                  : w.chooseNameToBeNamed}
-            </p>
-          </div>
+          <EmptyState
+            title={w.nothingYet}
+            /* The creator has no member record and no chosen name: their
+               handle is @creator, in every community, always. */
+            body={viewer.owner ? w.whenNamed("creator") : viewer.member?.h ? w.whenNamed(viewer.member.h) : w.chooseNameToBeNamed}
+            className="mt-6"
+          />
         ) : (
           <ul className="mt-6 space-y-2">
             {notices.map((notice, i) => {

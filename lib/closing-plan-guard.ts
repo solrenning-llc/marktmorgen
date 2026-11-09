@@ -13,10 +13,13 @@
  *   - it is put in line here (UNDO_KEY) before anything else is done, so a
  *     step that fails is tried again on every later run, never dropped;
  *   - the subscription is ended at once (no final bill, no proration);
- *   - its open invoices are voided and its drafts deleted;
+ *   - its unpaid open invoices are voided and its unpaid drafts deleted;
  *   - every payment made for it since the closing day began is refunded in
- *     full. The refund's idempotency key is the invoice and the number of
- *     refunds of that charge that have failed, so a retry of any caller
+ *     full, on any invoice that holds money (one paid in parts stays open or
+ *     is marked uncollectible, and a paid one can be paid in several
+ *     payments). The refund's idempotency key is the invoice (and, for one
+ *     paid in parts, the payment) and the number of refunds of that charge
+ *     that have failed, so a retry of any caller
  *     never refunds twice, and a refund the bank turned down is made again;
  *   - the creator is told, once, that the store had already closed and the
  *     payment was returned;
@@ -44,7 +47,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { formatMoney } from "@/lib/money";
-import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const UNDO_KEY = "nl:closing:undo";
 const SHUT_PREFIX = "nl:closing:shut:";
@@ -81,10 +84,10 @@ const OBJECT_ID = /^[a-z]{2,4}_[A-Za-z0-9]{6,128}$/;
  * what the list holds is then not known, and the caller keeps its step for the
  * next run instead of taking it as none.
  */
-async function allRows(path: string, query: URLSearchParams, legible: (row: Record<string, unknown>) => boolean, pages: number, idPattern?: RegExp): Promise<Record<string, unknown>[]> {
+async function allRows(path: string, query: URLSearchParams, legible: (row: Record<string, unknown>) => boolean, pages: number, idPattern?: RegExp, version = AT): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
   for (let page = 0; page < pages; page += 1) {
-    const read = readStripePage(await onPlatform("GET", `${path}?${query}`, undefined, { version: AT }), legible, idPattern);
+    const read = readStripePage(await onPlatform("GET", `${path}?${query}`, undefined, { version }), legible, idPattern);
     if (read.unreadable > 0) throw new StripeListUnreadable(`${read.unreadable} rows of ${path} could not be read`);
     rows.push(...read.rows);
     if (!read.hasMore) return rows;
@@ -101,19 +104,63 @@ const INVOICE_STATUSES: ReadonlySet<unknown> = new Set(["draft", "open", "paid",
 /** Every status Stripe gives a refund: another one is not known, never taken as "no refund". */
 const REFUND_STATUSES: ReadonlySet<unknown> = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
 /**
- * An invoice row read in its exact shape (CX-123 rule 24): its status, one of Stripe's own, and for a paid one every
- * field a refund is decided by. One that does not read is never taken as "no payment".
+ * An invoice row read in its exact shape (CX-123 rule 24): its status, one of Stripe's own; its `amount_paid`, a whole
+ * number whatever the status (Stripe lets an invoice be paid in parts, and money then sits on an `open` one, or on one
+ * marked `uncollectible`: docs.stripe.com/invoicing/partial-payments, read 08/11/2026); and for one that holds money
+ * (paid, or any status with `amount_paid` above zero) every field a refund is decided by. One that does not read is
+ * never taken as "no payment".
  */
 const invoiceKnown = (row: Record<string, unknown>) => {
   const status = ownField(row, "status");
   if (!INVOICE_STATUSES.has(status)) return false;
-  if (status !== "paid") return true;
+  const amountPaid = ownField(row, "amount_paid");
+  if (!wholeAtLeast(amountPaid, 0)) return false;
+  if (status !== "paid" && amountPaid === 0) return true;
   const transitions = ownField(row, "status_transitions");
   if (!plainObject(transitions)) return false;
   const paidAt = ownField(transitions, "paid_at");
   const intent = ownField(row, "payment_intent");
-  return wholeAtLeast(ownField(row, "amount_paid"), 0) && wholeAtLeast(ownField(row, "created"), 1) && (paidAt === null || wholeAtLeast(paidAt, 1)) && (intent === null || typeof intent === "string");
+  // Only a paid invoice's own `payment_intent` is ever refunded on; another's payments are read from its list.
+  return wholeAtLeast(ownField(row, "created"), 1) && (paidAt === null || wholeAtLeast(paidAt, 1)) && (status !== "paid" || intent === null || typeof intent === "string");
 };
+/** Every status Stripe gives an invoice payment: another one is not known, never taken as "not paid". */
+const INVOICE_PAYMENT_STATUSES: ReadonlySet<unknown> = new Set(["open", "paid", "canceled"]);
+const INVOICE_PAYMENT_ID = /^inpay_[A-Za-z0-9]{6,128}$/;
+/**
+ * One payment of this invoice read in its exact shape: this invoice's, its status one of Stripe's, and a paid one with
+ * its amount, its time and the payment intent that can be refunded. A paid one of another kind (a charge, a payment
+ * record) cannot be refunded here, so it does not read and the plan is kept in line.
+ */
+const invoicePaymentKnown = (invoiceId: string) => (row: Record<string, unknown>) => {
+  const status = ownField(row, "status");
+  if (ownField(row, "invoice") !== invoiceId || !INVOICE_PAYMENT_STATUSES.has(status)) return false;
+  if (status !== "paid") return true;
+  const transitions = ownField(row, "status_transitions");
+  const payment = ownField(row, "payment");
+  if (!plainObject(transitions) || !plainObject(payment)) return false;
+  const intent = ownField(payment, "payment_intent");
+  return wholeAtLeast(ownField(row, "amount_paid"), 1) && wholeAtLeast(ownField(transitions, "paid_at"), 1) && ownField(payment, "type") === "payment_intent" && typeof intent === "string" && OBJECT_ID.test(intent);
+};
+
+/**
+ * The payments that paid an invoice, from Stripe's own list of them (GET /v1/invoice_payments, `invoice` filter: "List
+ * all payments for an invoice"), read in full at STRIPE_LIST_VERSION, where the list exists. `paid` adds up to at least
+ * the invoice's `amount_paid`, or it throws: money not found is never taken as none. `pending`: a payment of it is
+ * still open, so more may yet be taken.
+ */
+async function paidParts(invoiceId: string, amountPaid: number): Promise<{ paid: { intent: string; paidAt: number }[]; pending: boolean }> {
+  const rows = await allRows("/invoice_payments", new URLSearchParams({ invoice: invoiceId, limit: "100" }), invoicePaymentKnown(invoiceId), 5, INVOICE_PAYMENT_ID, STRIPE_LIST_VERSION);
+  const paid = rows.filter((row) => row.status === "paid");
+  const sum = paid.reduce((total, row) => total + (row.amount_paid as number), 0);
+  if (sum < amountPaid) throw new Error(`the payments of ${invoiceId} add up to less than it was paid`);
+  // One entry per payment intent, at its latest payment: a charge is given back once, and counted once in the letter.
+  const byIntent = new Map<string, number>();
+  for (const row of paid) {
+    const intent = (row.payment as { payment_intent: string }).payment_intent;
+    byIntent.set(intent, Math.max(byIntent.get(intent) ?? 0, (row.status_transitions as { paid_at: number }).paid_at));
+  }
+  return { paid: [...byIntent].map(([intent, paidAt]) => ({ intent, paidAt })), pending: rows.some((row) => row.status === "open") };
+}
 const metadataKnown = (row: Record<string, unknown>) => {
   const meta = ownField(row, "metadata");
   return meta === null || plainObject(meta);
@@ -403,10 +450,12 @@ async function endIt(id: string): Promise<{ ended: boolean; created: number }> {
 
 type ChargeOutcome = { settled: boolean; returned: number; disputed: number; currency: string };
 
-/** Returns one paid invoice's charge in full. Settled when refunded in full, or when a dispute returns it. */
-async function giveBack(id: string, invoice: Record<string, unknown>): Promise<ChargeOutcome> {
-  const invoiceId = String(invoice.id);
-  const intent = typeof invoice.payment_intent === "string" ? invoice.payment_intent : "";
+/**
+ * Returns one payment of an invoice, its charge in full. Settled when refunded in full, or when a dispute returns it.
+ * `key` names the payment in the refund's idempotency key. Null, before anything is asked for, when the charge is
+ * less than `least`: another payment paid the rest, and the invoice's own list of payments is read instead.
+ */
+async function giveBack(id: string, key: string, intent: string, least = 1): Promise<ChargeOutcome | null> {
   if (!OBJECT_ID.test(intent)) return { settled: false, returned: 0, disputed: 0, currency: "" };
   const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
   const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
@@ -418,8 +467,9 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
   const isDisputed = ownField(charge, "disputed");
   const currency = ownField(charge, "currency");
   if (!wholeAtLeast(amount, 1) || !wholeAtLeast(onCharge, 0) || typeof isDisputed !== "boolean" || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
-    throw new Error(`Stripe answered the charge of ${invoiceId} in another shape`);
+    throw new Error(`Stripe answered the charge of ${key} in another shape`);
   }
+  if (amount < least) return null;
   // A disputed charge cannot be refunded: the bank's dispute takes it back to the creator.
   if (isDisputed) return { settled: true, returned: 0, disputed: amount, currency };
   // Read in full or not at all: a refund missed on an unknown list would be asked for twice (settleOne keeps it on the throw).
@@ -440,7 +490,7 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
     "POST",
     "/refunds",
     new URLSearchParams({ payment_intent: intent, amount: String(amount - succeeded), reason: "requested_by_customer", "metadata[closing_plan]": id }),
-    { version: AT, idempotencyKey: `closing-plan-refund:${invoiceId}:${failed}` },
+    { version: AT, idempotencyKey: `closing-plan-refund:${key}:${failed}` },
   );
   const now = made.status === "succeeded" ? succeeded + (Number(made.amount) || 0) : succeeded;
   return { settled: made.status === "succeeded" && now >= amount, returned: now, disputed: 0, currency };
@@ -491,26 +541,46 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     for (const invoice of invoices) {
       const invoiceId = typeof invoice.id === "string" ? invoice.id : "";
       if (!OBJECT_ID.test(invoiceId)) continue;
-      if (invoice.status === "open") {
-        await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/void`, new URLSearchParams(), { version: AT, idempotencyKey: `closing-plan-void:${invoiceId}` });
+      // Read by invoiceKnown: amount_paid is a whole number whatever the status.
+      const amountPaid = invoice.amount_paid as number;
+      if (amountPaid === 0) {
+        if (invoice.status === "open") {
+          await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/void`, new URLSearchParams(), { version: AT, idempotencyKey: `closing-plan-void:${invoiceId}` });
+        } else if (invoice.status === "draft") {
+          await onPlatform("DELETE", `/invoices/${encodeURIComponent(invoiceId)}`, undefined, { version: AT });
+        }
         continue;
       }
-      if (invoice.status === "draft") {
-        await onPlatform("DELETE", `/invoices/${encodeURIComponent(invoiceId)}`, undefined, { version: AT });
-        continue;
-      }
-      // Read by invoiceKnown: a paid one's amount and dates are whole numbers, its payment time null or one.
-      if (invoice.status !== "paid" || !((invoice.amount_paid as number) > 0)) continue;
-      const paidAt = ((invoice.status_transitions as { paid_at: number | null }).paid_at) ?? 0;
+      // Money on it, whatever its status: given back. (An open one paid in part is not voided: Stripe refuses an
+      // invoice with paid payments, and ending the subscription stopped its automatic collection.) Read by
+      // invoiceKnown: its dates are whole numbers, its payment time null or one.
+      let paidAt = ((invoice.status_transitions as { paid_at: number | null }).paid_at) ?? 0;
       const created = invoice.created as number;
       // Paid before the closing day began: a payment for a plan the store had, not this one.
-      if (Math.max(paidAt, created) * 1000 < cutoff) continue;
-      const outcome = await giveBack(id, invoice);
-      if (paidAt > 0 && paidAt * 1000 < entry.since && (outcome.returned > 0 || outcome.disputed > 0)) entry.e = 1;
-      returned += outcome.returned;
-      disputed += outcome.disputed;
-      if (outcome.currency) currency = outcome.currency;
-      if (!outcome.settled) settled = false;
+      if (invoice.status === "paid" && Math.max(paidAt, created) * 1000 < cutoff) continue;
+      const direct = invoice.status === "paid" && typeof invoice.payment_intent === "string" ? invoice.payment_intent : "";
+      // A paid invoice's own payment, as before, when its charge covers what the invoice was paid.
+      const first = direct ? await giveBack(id, invoiceId, direct, amountPaid) : null;
+      const outcomes: ChargeOutcome[] = [];
+      if (first) outcomes.push(first);
+      else {
+        // Paid in parts, or paid with no payment named: every payment of it, from its own list.
+        const parts = await paidParts(invoiceId, amountPaid);
+        paidAt = Math.max(paidAt, ...parts.paid.map((one) => one.paidAt));
+        if (Math.max(paidAt, created) * 1000 < cutoff) continue;
+        for (const one of parts.paid) {
+          const outcome = await giveBack(id, `${invoiceId}:${one.intent}`, one.intent);
+          if (outcome) outcomes.push(outcome);
+        }
+        if (parts.pending) settled = false;
+      }
+      for (const outcome of outcomes) {
+        if (paidAt > 0 && paidAt * 1000 < entry.since && (outcome.returned > 0 || outcome.disputed > 0)) entry.e = 1;
+        returned += outcome.returned;
+        disputed += outcome.disputed;
+        if (outcome.currency) currency = outcome.currency;
+        if (!outcome.settled) settled = false;
+      }
     }
     if (!settled) return keep("a refund is not made in full yet");
     if (entry.done) return true;

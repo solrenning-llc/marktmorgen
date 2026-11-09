@@ -400,7 +400,7 @@ async function main(): Promise<void> {
   const V = await endedAt(eve.email);
   for (const day of [0, M, W]) await closeOne(eve.email, V + day * DAY, hands);
   is("told three times, like anybody", mailTo(eve.email).map((m) => m.subject.slice(0, 7)), ["Eve Stu", "14 days", "7 days "]);
-  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] } });
+  running.set("eve", { id: "sub_eve0002", status: "active", created: 1_790_000_000, current_period_start: 1_790_000_000, current_period_end: 1_792_678_400, customer: { id: "cus_eve0001", email: eve.email }, metadata: { store: "eve" }, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, price: { currency: "usd", unit_amount: 9900, recurring: { interval: "month", interval_count: 1 } } }] } });
   const repaired = await closeOne(eve.email, V + C * DAY, hands);
   const eveNow = (await storeForEmail(eve.email))!;
   is("Stripe says the plan runs: nothing is removed and nobody is told it was", [repaired.state, repaired.note, objects.has((await readListing(eveNow, evesFile))!.file!.pathname), mailTo(eve.email).length], ["running", "Stripe says the plan runs", true, 3]);
@@ -413,7 +413,7 @@ async function main(): Promise<void> {
   await endPlan(kai.email);
   const K = await endedAt(kai.email);
   for (const day of [0, M, W]) await closeOne(kai.email, K + day * DAY, hands);
-  running.set("nobody-by-search", { id: "sub_kai0001", status: "trialing", created: 1_790_000_000, trial_end: 1_900_000_000, customer: "cus_kai0001", metadata: {}, items: { data: [{ price: { unit_amount: 2900, recurring: { interval: "month" } } }] } });
+  running.set("nobody-by-search", { id: "sub_kai0001", status: "trialing", created: 1_790_000_000, trial_end: 1_900_000_000, customer: "cus_kai0001", metadata: {}, cancel_at: null, cancel_at_period_end: false, items: { data: [{ price: { unit_amount: 2900, recurring: { interval: "month" } } }] } });
   const own = await closeOne(kai.email, K + C * DAY, hands);
   const kaiNow = (await storeForEmail(kai.email))!;
   is("asked about by its own number first: running, so nothing is removed", [own.state, own.note, kaiNow.subscriptionActive, kaiNow.planEndedAt, [...objects.keys()].filter((path) => path.startsWith(`vault/${kai.folder}/`)).length, mailTo(kai.email).length], ["running", "Stripe says the plan runs", true, "", 1, 3]);

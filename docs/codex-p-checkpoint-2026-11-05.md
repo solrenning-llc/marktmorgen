@@ -2500,3 +2500,62 @@ Onlyread/preflight/reconciliationthisrun: no source/test/diff/productedit/newRED
 ### Delivery receipt — 2026-11-08 22:43 Fortaleza
 
 PONTO CXP-20261108-2240-C1-1 DELIVERED93c9799c8d76daa33e94e8065f11ac50772d59ba/blob1ef412fafc97f4cb20a1832fc6d762694333cf84/FULL7082850, FULLreadbackEXACT. TwoCAS409NOWRITE, eachwait>=120s (01:37:18→01:39:24=126s;01:39:52→01:41:56=124s) thenfreshSHA/FULL/delta/dedup. Prefixes7067613→7074377→7076973 EXACT;6764+2596deltasFULLread G3299/C2FIRST3314/H2SECOND3314/Z2239, theirclaims/HOLDs/budgetrequests notPgrant. No nominalC1toP. P2832preflightmetadata+9FULLbodies done, no source/tests/claim/RES/opinion; availability requested toC1, no userpermissionneeded. Main dcf native/P24refs identities verified, noCIorqueuecertificate. Projectongoing/transient dependencies, no automationchange/backgroundwatch/duplicate reviews.
+
+
+## 2026-11-08 23:37 Fortaleza — #3107 interval-count focal delivered; coverage qualifications retained
+
+FIRST canonical4d3d6d61ef859e986815bbcc35ac58f3ba042722/blobcbfca1aa5985e1482e4f51f660aab2524e124fe7/FULL458361 and last ownPONTO2240 read. Freshchannel7117066 indexed19sections; ownSTOP/T2317/U2832RES fullread, other peer headers not blanket payload certificate. Fresh7117784 addedC6#3316security request, readFULL; not Pclaim. U has claimed/reserved2832; P availability from2240 superseded, no duplicate source/tests/opinion.
+
+IMPORTANT continuity correction: full #3107 discussion5bodies includes author6728075968, an older entry newly reconciled, not newlyposted. Prior four-body checkpoint observation missed that direct request. It asks P to close its conditional interval_count residual on1a00ef00327beb5f9fdf716606868fd6078a5be9. Pclaim6730810823 before source, channel RES CXP-20261108-2333-RES5fae72fb9c4d22c68fb548d05df0215b78262ecf/blob28461c1113e2cb74ff8af8069bf9a1641418be1f/FULL7118901 exactreadback before source/diff/tests, no409.
+
+# Codex P focal return: PR #3107 interval count
+
+Subject: 1a00ef00327beb5f9fdf716606868fd6078a5be9, tree 2fa57e9d10dca44b9c6aa7b4bb355593eed01cfb. Author request 6728075968, P claim 6730810823. Reservation CXP-20261108-2333-RES delivered in channel commit 5fae72fb9c4d22c68fb548d05df0215b78262ecf, blob 28461c1113e2cb74ff8af8069bf9a1641418be1f, FULL 7118901, exact full readback before source, diff, or tests. This request was an older discussion entry newly reconciled; the prior checkpoint's four-body discussion observation missed it. U owns the #2832 return; P does not duplicate it.
+
+Read the complete three-path corrective delta from HEAD^^ (before the RED-only commit) to HEAD. The predicate shared by listed and created prices now requires recurring.interval_count === 1, and POST explicitly writes recurring[interval_count]=1. Missing, string, zero and other counts do not satisfy strict equality. Uncertain created replies throw before assigning the module cache; the next independent call requests again. Amount, currency, product/key constants and commercial configuration are unchanged in this delta. The linked regression cases cover an incorrect count on creation, a missing count, an incorrect listed count followed by an unknown creation, and the healthy created/cached control.
+
+Original independent proof recovered from durable evidence comment 6717288516 without changing its bytes: Git blob 68edd99b2f42d8c58c949fa965e411e77b838b07. The runner resolves its relative check import from tests and selects the same official assistant-subscription-sync aliases; the test itself stays byte-identical. Final graph with ONLY lib/assistant-billing.ts overlaid from prior f609d7d79519104bdbbdf871d5a634b10064494d: frequency 2 reproduces 2 checks / 2 FAIL (wrong price returned and cached; 3 mock HTTP calls). Exact final: 2/2 PASS, both calls refused, 6 mock calls. Healthy frequency 1: 2/2 PASS on old overlay and final, 3 mock calls each. This is a causal module-overlay comparison, not execution of the whole older checkout graph.
+
+Linked final assistant-subscription-sync: 106 checks PASS, 695 nested MemoryRedis.run calls, 62 mock HTTP calls. subscription-checkout-version: 12 tests PASS, 802 nested Redis calls, 20 mock HTTP calls. Total 122 final passing observations, including the healthy original control, with overlapping assertions; not 122 unique scenarios. Expected logged provider refusal errors belong to the passing synthetic cases.
+
+Actual strict TypeScript semantic closure for the three changed roots: 988 sources, zero diagnostics, ES2017/Bundler. ESLint for all three changed files: exit 0, empty log. Public-data scanner: 4413 tracked files / zero findings. Corrective diff whitespace check: exit 0. Own artifact scanner results included separately. Exact-lock read-only dependency donor ee4ba5640d542cb07c7ed382f256c816b076026d739bbe30d906870f351e67df; no install.
+
+Predeclared per child: 120-second outer timeout, 512 MiB heap (types 1024), 256 KiB output, 20000 ALL nested MemoryRedis.run calls, 100 mock HTTP calls. Default external fetch and net/tls/http/https denied before imports, compilation and lint; mock counting occurs before invoking each fixture callback. Serial execution, zero agents. No cap reached, raised, reset, or replayed in this focal. Previously capped WHOLE verify-stripe-identity and yearly-fallback-edge graphs were NOT dispatched, divided, or rebranded green. Their earlier inconclusive qualifications remain; this is not a whole-PR second financial approval, native Redis/Lua certificate, provider verification, CI/queue/merge certificate, publication or global cost certification. Unknown cost remains unknown, never zero.
+
+Fresh metadata: OPEN, unmerged, exact subject unchanged; main advanced to 79f4aff3b4fb73cabdb30d5e5f1b46172e3f292f. Known 25 pull refs plus main recorded in heads.log. Normative AGENTS.md/CLAUDE.md/inbox diff between prior main dcf91e9191a1084d6a015eed3811ec6d64cc3d51 and 79f4 is empty; no new main integration into the review subject. Only own proof/docs are untracked; author product, branch and tests unchanged.
+
+Disposition to publish only AFTER complete evidence readback: the conditional interval_count residual is CLOSED on exact 1a00; no new HIGH/MEDIUM/LOW finding in this corrective delta. Prior qualified reviews and capped coverage remain credited with their limits. No blanket PODE ENTRAR or second financial approval implied.
+
+
+DELIVERED: evidence6730885508/FULL34078 exact readback BEFORE formal COMMENTreview5821065138, anchored exact1a00. Archive29artifacts/97626rawJSONbytes/SHA25694ae5733323e6fb3555b9cd155bc820af1fcd5c1df9e9af68c62073ff2eee7c2. Conditional interval_count residual CLOSED, no newH/M/L in corrective delta. Remaining whole-graph capped coverage is still INCONCLUSIVE; NO unconditional secondfinancialapproval/PODEENTRAR/queue/merge certificate. Freshdiscussion7bodies beforeopinion had no duplicate focal. C1/R2 must dispose remainingqualifiedcoverage. Do not repeatthisfocal without newdelta/request.
+
+Fresh native main+25pull refs:
+```
+79f4aff3b4fb73cabdb30d5e5f1b46172e3f292f	refs/heads/main
+96f620aa7afb84829ca9ce7e9c5e77a6f71f46ff	refs/pull/2020/head
+8635327e8c420bfb559a6e383106e505f2589242	refs/pull/2301/head
+e74d6cce39b3226090e1b206df505ebacb3080bc	refs/pull/2514/head
+87d3ecafb26c5d036ce6e8adb30d1bf4f467b419	refs/pull/2527/head
+427e9d81f5b507879fa4c14378d09702ff38a557	refs/pull/2794/head
+d8e871ad3ce54cd3dc708dacf7bf2bbfb0100341	refs/pull/2832/head
+daaf5306187d4aa43c9f47590d429dcb10656519	refs/pull/2843/head
+66dfd8a571a734d6b787b4552b7b53759d239a48	refs/pull/2868/head
+6c3077cdaefaac049ca0e12e836be68691bfd875	refs/pull/2892/head
+aae8fcf5f8ce7118007f58d371c2b6c722dd2d18	refs/pull/2922/head
+7463a1b38d0cd6cc69f807e021921d4b0f05026a	refs/pull/2928/head
+c5db63a1fffc5c79a5866831d54ddff01b3825fa	refs/pull/2999/head
+b5dd4dc3791ed83c60cdc59bd1a38e95f9420b1d	refs/pull/3014/head
+0cdb49725fbb78d341e648ae4758a5f0ab88f0f4	refs/pull/3034/head
+9e9b334ea6e2a4307fdd2a20b6f69b21783b4a5a	refs/pull/3035/head
+a7796836289c75a71c655bd55029bd267466133b	refs/pull/3054/head
+745ce60a03b3819d6dca6f530f48faaf9940ef72	refs/pull/3066/head
+442a057113c87b8728e1a23711510fa852bd0e6d	refs/pull/3067/head
+54712ae1006a04e9a36a9ca4144ddc58ce53d809	refs/pull/3077/head
+8015b59367dc6ddf1057ac4b1b792b89eb0024a4	refs/pull/3087/head
+1a00ef00327beb5f9fdf716606868fd6078a5be9	refs/pull/3107/head
+1b38fa1cf19813764fc9256c9b81808db7fc0c0d	refs/pull/3135/head
+0aca8bb46b902169b217c0ccd598fbc9fb2c02b7	refs/pull/3160/head
+3c307a42cd49ac5edb8d8f0a4254fb291de7a8af	refs/pull/3245/head
+b161d66edf6731426b8b55b379c89807529ce777	refs/pull/3263/head
+```
+OffPR2514candidate8a/fourC6candidates remainlast-known/unpromoted, notfreshlyreconfirmed. Main normdiffdcf91→79f4 empty forAGENTS/CLAUDE/inbox (native), current main MV(a) remainsapplicable. All own oldproductsMERGED preserved; no newproductwork. 2020/C1scope and2514CodeQLHIGH/HOLD preserved. 3135P5820457110/3263P5820210559/3245/3054 completedqualifiedreturns unchanged; authorqueue reports notPMERGEDcert. C6R12ALTOprivacy remainsnotPclosure. No foreignproduct/ref/edit, docsreservations, CIqueryretrycancel/Actionsloop/enqueue/merge/pushproduct/provider/commercial/account/PII/contact/subagent/automationchanges/backgroundwatch. SerialMedium/quotaUNKNOWN; ongoingproject/transientremainingcoverage notprojectcomplete. Publication state separate; finalPONTO afterfreshFULL/delta/dedup and exactreadback.

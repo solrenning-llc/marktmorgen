@@ -52,6 +52,7 @@ function centralAliases(file,root,here){
   aliases['next/navigation']=join(here,'blog-read-page-world.tsx');
  }
  if(file==='studio-today-trips.test.ts'||file==='studio-today-removal-order.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/navigation']=join(here,'studio-today-navigation.ts');aliases['next/server']=join(here,'studio-today-next-server.ts');}
+ if(file==='studio-passkeys-unread.test.ts'||file==='studio-lock-unread.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/navigation']=join(here,'studio-today-navigation.ts');aliases['next/server']=join(here,'studio-today-next-server.ts');}
  if(file==='service-counter-admission.test.ts')for(const name of ['redis','store-allowance','traffic'])aliases['@/lib/'+name]=join(here,'service-counter-admission-world.ts');
  if(file==='stream-hook-counter-admission.test.ts')for(const name of ['redis','stream','auto-captions'])aliases['@/lib/'+name]=join(here,'stream-hook-counter-admission-world.ts');
  if(file==='yearly-ask-read-evidence.test.ts')for(const name of ['redis','order-data','stripe-account','email','store','membership-manage','mail','contacts','purchase-email','catalog','store-checkout','auth','member-health','yearly-switch'])aliases['@/lib/'+name]=join(here,'yearly-ask-read-world.ts');

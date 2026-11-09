@@ -99,7 +99,8 @@
  *     opens in flight, each place lapsing by itself SHORT_LINK_FLIGHT_MS later (a give-back lost never holds the store).
  *     Past their sum the open is refused with nothing of the record read, the store marked resting a minute where it
  *     had no mark and kept so in this instance's memory, so the opens after it send nothing; except a store in the list
- *     of stores that pay with fewer than the figure's unpaid reads this hour, which pays each read (Claude 2's focal);
+ *     of stores that pay with fewer than the figure's unpaid reads this hour, which pays each read (Claude 2's focal),
+ *     each such read counted first in the resting hour and given back once paid (its re-review: a burst read 180 times);
  *   - a store without a paid plan that has rested SHORT_LINK_OFF_AFTER_MS without a gap (its record read at least once
  *     a SHORT_LINK_OFF_KEEP_SECONDS, saying so each time) has its links turned off: a short static page (410, kept by
  *     the CDN CACHE_SECONDS) that promises nothing, its record read again once a day at most, never renewed by the page,
@@ -416,7 +417,14 @@ async function payOpen(
   const hourKey = shortLinkStoreHourKey(link.sid, now);
   const place = `${now}:${randomBytes(6).toString("hex")}`;
   const capBack: (string | number)[][] = [["ZREM", flightKey, place]];
-  const kept: (string | number)[][] = [...capBack, ["INCR", hourKey], ["EXPIRE", hourKey, SHORT_LINK_UNPAID_KEY_SECONDS]];
+  // What every open gives back however it ends: its place in flight, and the resting hour's unit a paying store's read
+  // past its opens in flight reserved (set below). A read the store itself could not pay for is added to its hour's
+  // unpaid reads first (Claude 2's NIT: INCR before the place goes).
+  let back: (string | number)[][] = capBack;
+  // Whether this open is already counted in the resting hour (a paying store's read past its opens in flight): then a
+  // refusal of it keeps that unit as its count there, and is not counted again.
+  let restCounted = false;
+  const kept = (): (string | number)[][] => [["INCR", hourKey], ["EXPIRE", hourKey, SHORT_LINK_UNPAID_KEY_SECONDS], ...capBack];
   // An open the store does not pay for: back in the hour it was counted in, which its refund may have left, after
   // `first` (sent with it).
   const unpaid = async (first: (string | number)[][] = []): Promise<void> => {
@@ -426,7 +434,7 @@ async function payOpen(
   const unknown = async (): Promise<Response> => {
     remember(held, code, now + SHORT_LINK_TIRED_MS, SHORT_LINK_TIRED_KEPT);
     resting.delete(link.sid);
-    await unpaid(capBack);
+    await unpaid(back);
     return shortLinkRefusal({ state: "unknown", now });
   };
   const commands: (string | number)[][] = [
@@ -497,6 +505,21 @@ async function payOpen(
       outcome.kept = false;
       return restRefused(link.sid, code, now, mark === null ? "short" : null, capBack);
     }
+    // A paying store past its opens in flight: this read is counted before it is made, in the resting hour every
+    // instance shares (SHORT_LINK_REST_UNPAID_PER_HOUR, priced site-wide), and given back once the store pays for it.
+    // Past that hour's figure this open alone is refused, nothing read. So a burst on a paying store that has just
+    // run out of its own requests reads its record at most its own count and that hour's room (Claude 2's focal
+    // re-review on #3330: 180 reads at once, none counted before it).
+    const restKey = keyOf("rest", now);
+    const seen = now < pausedUntil.rest ? null : await count("rest", restKey, now);
+    if (seen === null || seen > LIMIT.rest) {
+      outcome.kept = false;
+      known.delete(code);
+      await redisPipeline(capBack).catch(() => {});
+      return shortLinkRefusal({ state: "tired", now, until: now + SHORT_LINK_TIRED_MS });
+    }
+    back = [...capBack, ["DECR", restKey], ["EXPIRE", restKey, SHORT_LINK_UNPAID_KEY_SECONDS]];
+    restCounted = true;
   }
   let checking = false;
   if (mark === "due") {
@@ -510,7 +533,7 @@ async function payOpen(
     // Another open is asking, or the check could not be taken: still resting, nothing read.
     if (took !== "OK") {
       outcome.kept = false;
-      return restRefused(link.sid, code, now, null, capBack);
+      return restRefused(link.sid, code, now, null, capBack, restCounted);
     }
     checking = true;
   }
@@ -525,7 +548,7 @@ async function payOpen(
   if (!store || store.statsId !== link.statsId) {
     resting.delete(link.sid);
     remember(ended, code, now + SHORT_LINK_ENDED_MS, SHORT_LINK_TIRED_KEPT);
-    await unpaid(capBack);
+    await unpaid(back);
     return null;
   }
   const why = await takePublicRequestWhy(store, "public", now, SHORT_LINK_OPEN_UNITS).catch(() => "unknown" as const);
@@ -536,14 +559,14 @@ async function payOpen(
     // Its place given back; a store that rested and pays again has its mark taken away too, so its links open on every
     // instance that does not remember it resting, and the studio is told when they had been turned off (best effort:
     // a place not given back lapses SHORT_LINK_FLIGHT_MS later, a mark left only asks the store again later).
-    await redisPipeline(checking ? [...capBack, ...backOnCommands(link.sid, turnedOffAt(replies[1], now), now)] : capBack).catch(() => {});
+    await redisPipeline(checking ? [...back, ...backOnCommands(link.sid, turnedOffAt(replies[1], now), now)] : back).catch(() => {});
     return store;
   }
   // Only the store's own refusal marks it resting and is kept in its hour's unpaid reads; best effort, a mark not
   // written is read again next time.
   if (why === "store") {
     outcome.kept = false;
-    return restRefused(link.sid, code, now, { store, before: read }, kept);
+    return restRefused(link.sid, code, now, { store, before: read }, kept(), restCounted);
   }
   if (why === "connection") {
     // That connection alone, for that store, until its share starts again: the day's end, or the store's window's
@@ -557,7 +580,7 @@ async function payOpen(
       // The day's end, then.
     }
     remember(refusedConnections, `${admission.address}|${link.sid}`, end, SHORT_LINK_TIRED_KEPT);
-    await unpaid(capBack);
+    await unpaid(back);
     return shortLinkRefusal({ state: "connection", now, until: end });
   }
   return unknown();
@@ -575,19 +598,25 @@ type MarkFrom = { store: Store; before: { since: number | null; read: number | n
  * is used; or "short", a store past its own counts with no mark, a minute on and only where none is (NX). A store
  * without a paid plan whose record says it has rested SHORT_LINK_OFF_AFTER_MS without a gap is answered turned off.
  */
-async function restRefused(sid: string, code: string, now: number, write: MarkFrom | null, first: (string | number)[][]): Promise<Response> {
+async function restRefused(
+  sid: string, code: string, now: number, write: MarkFrom | null, first: (string | number)[][], counted = false,
+): Promise<Response> {
   const restUsed = now < pausedUntil.rest;
   const markMs = restUsed ? SHORT_LINK_TIRED_MAX_MS : SHORT_LINK_TIRED_MS;
   const written = write === null ? null : write === "short"
     ? { command: ["SET", shortLinkRestKey(sid), String(now + SHORT_LINK_TIRED_MS), "NX", "EX", SHORT_LINK_UNPAID_KEY_SECONDS] as (string | number)[], off: false }
     : restMark(sid, write, now, markMs);
-  if (written?.off) return offRefused(sid, code, now, [...first, written.command]);
+  if (written?.off) return offRefused(sid, code, now, [...first, written.command], counted);
   const before = resting.get(sid);
   const wait = before && !before.off ? Math.min(before.wait * 2, SHORT_LINK_TIRED_MAX_MS) : SHORT_LINK_TIRED_MS;
   remember(resting, sid, { until: now + wait, wait }, SHORT_LINK_TIRED_KEPT);
   remember(owners, code, { sid, until: now + SHORT_LINK_RESTING_OWNER_MS }, SHORT_LINK_TIRED_KEPT);
   known.delete(code);
-  const used = await countResting(now, written ? [...first, written.command] : first);
+  const sends = written ? [...first, written.command] : first;
+  // Counted already (its read reserved in the resting hour): `first` alone is sent, that unit kept as its count.
+  let used = now < pausedUntil.rest;
+  if (counted) await redisPipeline(sends).catch(() => {});
+  else used = await countResting(now, sends);
   // The resting hour found used by this very count: the store rests the longer time too (best effort; a mark kept
   // the shorter time only asks the store again sooner, one open site-wide, inside its own counts).
   if (write !== null && write !== "short" && used && !restUsed) await redisPipeline([restMark(sid, write, now, SHORT_LINK_TIRED_MAX_MS).command]).catch(() => {});
@@ -633,11 +662,12 @@ function restMark(sid: string, { store, before }: Exclude<MarkFrom, "short">, no
  * SHORT_LINK_TIRED_MAX_MS, each link's store kept a day, the open counted in the resting hour after `first`. Its mark
  * is never kept longer for it: only a reading of the store's record does that.
  */
-async function offRefused(sid: string, code: string, now: number, first: (string | number)[][]): Promise<Response> {
+async function offRefused(sid: string, code: string, now: number, first: (string | number)[][], counted = false): Promise<Response> {
   remember(resting, sid, { until: now + SHORT_LINK_TIRED_MAX_MS, wait: SHORT_LINK_TIRED_MAX_MS, off: true }, SHORT_LINK_TIRED_KEPT);
   remember(owners, code, { sid, until: now + SHORT_LINK_RESTING_OWNER_MS }, SHORT_LINK_TIRED_KEPT);
   known.delete(code);
-  await countResting(now, first);
+  if (counted) await redisPipeline(first).catch(() => {});
+  else await countResting(now, first);
   return shortLinkRefusal({ state: "off", now });
 }
 

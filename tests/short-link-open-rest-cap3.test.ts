@@ -71,6 +71,12 @@ async function main() {
   console.log(`  MEDIUM 200 at once: ${recordReads} record reads, resting hour ${restUsed}`);
   is("MEDIUM: every open is refused, sent nowhere", burst.every((r) => r.status === 503 && r.to === null), true);
   is("MEDIUM: past its own count, every read was counted in the resting hour first: at most 20 + the resting hour's figure", recordReads <= SHORT_LINK_STORE_READS_PER_HOUR + SHORT_LINK_REST_UNPAID_PER_HOUR, true);
+  // Added with the fix: the resting hour keeps every read past the store's own count, and a second burst in the hour reads nothing more.
+  is("the resting hour holds every read past the store's own count", restUsed >= recordReads - SHORT_LINK_STORE_READS_PER_HOUR, true);
+  forgetShortLinkOpenMemory();
+  const before = recordReads;
+  await Promise.all(out.codes.map((c) => open(c)));
+  is("a second burst in the same hour reads the record no more", recordReads - before, 0);
 
   part("MEDIUM: the same burst with the resting hour used reads the record at most the store's own count");
   reset();

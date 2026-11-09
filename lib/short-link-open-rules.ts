@@ -140,6 +140,12 @@ export const SHORT_LINK_FLIGHT_MS = 120_000;
 export const SHORT_LINK_STORE_COUNT_COMMANDS = 5;
 /** Commands an open sends to give its place among the opens in flight back: one ZREM. */
 export const SHORT_LINK_STORE_REFUND_COMMANDS = 1;
+/**
+ * Commands a paying store's open past its opens in flight sends more (Claude 2's focal re-review on #3330): one
+ * SISMEMBER of the list of stores that pay, its read reserved in the resting hour (INCR and EXPIRE) and given back once
+ * the store pays (DECR and EXPIRE, with its place).
+ */
+export const SHORT_LINK_PAID_BURST_COMMANDS = 5;
 /** How long a store without a paid plan rests, without a gap, before its links are turned off (the owner's decision 14). */
 export const SHORT_LINK_OFF_AFTER_MS = 30 * 86_400_000;
 /**

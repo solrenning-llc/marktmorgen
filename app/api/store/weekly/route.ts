@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { normaliseHandle } from "@/lib/store";
+import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { limited } from "@/lib/request-guard";
 import { leaveWeeklyTeam, setWeeklyOff, weeklyMemberTokenOk, weeklyTokenOk } from "@/lib/stats-report";
 
@@ -8,6 +8,8 @@ import { leaveWeeklyTeam, setWeeklyOff, weeklyMemberTokenOk, weeklyTokenOk } fro
  * of the email itself (lib/stats-report.ts). The link carries the store and a
  * token signed for it, so nobody can stop somebody else's. A GET only shows
  * the button: mail apps open links to check them, and a stop must be a press.
+ * The stop is kept by the store's id (lib/store-stop.ts), so it holds after
+ * the store is renamed, and a link from before a rename still reaches it.
  */
 function page(title: string, body: string, status = 200): Response {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${title}</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;color:#1d1b29}button{font:inherit;padding:.6rem 1.1rem;border-radius:.6rem;border:0;background:#5b3fd6;color:#fff;cursor:pointer}</style></head><body>${body}</body></html>`;
@@ -60,7 +62,17 @@ export async function POST(request: NextRequest) {
   if (!asked) return page("Link not recognized", "<p>This link is not one we recognize.</p>", 400);
   const form = await limited(request, 2_000).then((r) => r.formData()).catch(() => null);
   const off = form?.get("do") !== "on";
-  await setWeeklyOff(asked.handle, off);
+  // The store the address leads to now: the same one under any address it still owns. An address it let go of
+  // leads nowhere, and is never written as a stop, or the next store to take it would be stopped by this link.
+  const store = await storeForHandle(asked.handle);
+  if (!store) {
+    return page(
+      "Store not found",
+      `<h1>Nothing was changed</h1><p>The address @${esc(asked.handle)} does not lead to a store anymore, so this link cannot change its emails. You can stop them with the link in a newer email, or by replying to one.</p>`,
+      404,
+    );
+  }
+  await setWeeklyOff(store, off);
   const action = `/api/store/weekly?h=${encodeURIComponent(asked.handle)}&t=${encodeURIComponent(asked.token)}`;
   return off
     ? page(

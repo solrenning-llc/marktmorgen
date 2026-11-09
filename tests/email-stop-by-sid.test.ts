@@ -56,6 +56,14 @@ async function paidStore(owner: string, handle: string, name: string): Promise<S
 
 const fresh = async (owner: string) => (await storeForEmail(owner))!;
 
+/** Replies the test puts in place of Redis's own, for the commands `when` picks. */
+let inject: { when: (command: (string | number)[]) => boolean; reply: () => unknown[] } | null = null;
+const pipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (inject && commands.length > 0 && commands.every((c) => inject!.when(c))) return inject.reply();
+  return pipeline(commands);
+}) as typeof redis.pipeline;
+
 /** The stop link at the foot of a numbers email, for the address it was sent under. */
 function stopLink(handle: string, what: "off" | "on"): NextRequest {
   const form = new URLSearchParams({ do: what });
@@ -122,6 +130,13 @@ async function main(): Promise<void> {
     is("renamed: the old stop is still read", await weeklyOff(store), true);
     is("renamed: no busy-day email", await busy(store), { said: false, emails: 0 });
     is("renamed: buyers are still not asked", await heardOff(store), true);
+    for (const [label, reply] of [["no reply", () => []], ["QUEUED", () => ["QUEUED", "QUEUED"]], ["a count of two", () => [2, 0]]] as [string, () => unknown[]][]) {
+      inject = { when: (c) => c[0] === "SISMEMBER", reply };
+      const refused = await releaseRoute(await studio(owner, store, "/api/store/release", { handle: "loaf" }));
+      inject = null;
+      is(`the old stop answered ${label}: the address is not let go`, [refused.status, await refused.json()], [503, { ok: false, error: "not_confirmed" }]);
+      is(`the old stop answered ${label}: the address is still the store's`, (await fresh(owner)).previousHandles.includes("loaf"), true);
+    }
     const release = await releaseRoute(await studio(owner, store, "/api/store/release", { handle: "loaf" }));
     is("the old address is let go", release.status, 200);
     store = await fresh(owner);
@@ -130,6 +145,9 @@ async function main(): Promise<void> {
     is("let go: no busy-day email", await busy(store), { said: false, emails: 0 });
     is("let go: buyers are still not asked", await heardOff(store), true);
     is("let go: an answer is not counted", await recordHeard(store, "cs_test_StopBySid00000001", "friend"), "off");
+    const stale = await weeklyRoute(stopLink("loaf", "on"));
+    is("a link under the address let go of changes nothing", [stale.status, /Nothing was changed/.test(await stale.text())], [404, true]);
+    is("and the store is still stopped", await weeklyOff(store), true);
 
     // Thirty days on, the address is free, and another creator takes it.
     await redis.pipeline([["DEL", "nl:store:handle:loaf"]]);

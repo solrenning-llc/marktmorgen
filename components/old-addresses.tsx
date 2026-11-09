@@ -12,6 +12,8 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing changed.",
+  // The stops kept under the address could not be moved to the store first (app/api/store/release/route.ts).
+  not_confirmed: "Nothing changed. We could not check your email settings just now. Try again in a moment.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

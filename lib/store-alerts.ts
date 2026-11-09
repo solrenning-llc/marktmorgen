@@ -217,7 +217,7 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
   });
   if (!alerts.length) return { said: 0, skipped: false };
 
-  const emailing = isSenderConfigured() && !(await weeklyOff(store.handle));
+  const emailing = isSenderConfigured() && !(await weeklyOff(store));
   const chat = store.chatSales ? await chatAddress(store.statsId).catch(() => null) : null;
   let said = 0;
   for (const alert of alerts) {

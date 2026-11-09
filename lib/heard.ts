@@ -18,19 +18,22 @@
  * A creator who would rather not ask switches it off; it is on otherwise,
  * because it costs the buyer one tap they can skip.
  *
- *   nl:heard:off              set of store handles that do not ask
+ *   nl:heard:off              set of stores that do not ask: "sid:<store id>", or the
+ *                             address an older switch was written under (lib/store-stop.ts)
  *   nl:heard:done:<session>   an order whose answer was counted (30 days)
  *   day record h:<answer>     answers; hc:<answer> the money of their sales
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
+import { type StopOwner, readStop, stopCommand } from "@/lib/store-stop";
 import { countHeard, saleChannel } from "@/lib/stats";
 import { isHeardAnswer } from "@/lib/heard-rules";
 
 const OFF = "nl:heard:off";
+/** The set of stores that do not ask, for the step that carries a switch before an address is let go (lib/store-stop.ts). */
+export const HEARD_OFF_SET = OFF;
 const doneKey = (session: string) => `nl:heard:done:${session}`;
 const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 /** An order is asked about on the page the buyer lands on; a month later it is not answered. */
@@ -40,26 +43,21 @@ const ANSWER_WITHIN_SECONDS = 30 * 86400;
  * Whether the store does not ask: true when its creator switched it off, and
  * also when the answer is in any other shape than 0 or 1 (CX-123 rule 24, as
  * weeklyOff in lib/stats-report.ts): an unknown answer is never "not off", so
- * the buyer is not asked this time, and it is said in the log.
+ * the buyer is not asked this time, and it is said in the log. Read by the
+ * store's id and the addresses it owns (lib/store-stop.ts), so a rename never
+ * loses the switch (finding 5 of the handles audit, Claude 5).
  */
-export async function heardOff(handle: string): Promise<boolean> {
+export async function heardOff(store: StopOwner): Promise<boolean> {
   if (!isRedisConfigured()) return true;
-  const off = await readHeardOff(handle);
+  const off = await readStop(OFF, store);
   if (off !== "unknown") return off;
   console.error("heard-off: whether the store asks where buyers heard about it is unknown; not asked this time");
   return true;
 }
 
-/** The mark read exactly: true or false only on a reply of 1 or 0, "unknown" on any other shape. */
-async function readHeardOff(handle: string): Promise<boolean | "unknown"> {
-  const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
-  const member = replies ? countOf(replies[0]) : null;
-  return member === 0 ? false : member === 1 ? true : "unknown";
-}
-
-export async function setHeardOff(handle: string, off: boolean): Promise<void> {
+export async function setHeardOff(store: StopOwner, off: boolean): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([[off ? "SADD" : "SREM", OFF, handle]]);
+  await redisPipeline([stopCommand(OFF, store, off)]);
 }
 
 export type HeardResult = "counted" | "already" | "invalid" | "off" | "unavailable";
@@ -72,7 +70,7 @@ export async function recordHeard(store: Store, sessionId: unknown, answer: unkn
   if (!isHeardAnswer(answer) || typeof sessionId !== "string" || !SESSION.test(sessionId)) return "invalid";
   if (!store.stripeAccountId || !store.statsId || !isRedisConfigured()) return "unavailable";
   // A mark that cannot be read is not "off" (Claude 6 on #3115): nothing is counted now and the reply says so.
-  const off = await readHeardOff(store.handle);
+  const off = await readStop(OFF, store);
   if (off === "unknown") {
     console.error("heard-off: whether the store asks where buyers heard about it is unknown; the answer is not counted now");
     return "unavailable";

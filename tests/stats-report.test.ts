@@ -83,10 +83,10 @@ async function main(): Promise<void> {
   is("claimed once a week", [await claimWeek("harbor", NOW), await claimWeek("harbor", NOW)], [true, false]);
   const token = weeklyToken("harbor");
   is("the stop link is the store's own", [weeklyTokenOk("harbor", token), weeklyTokenOk("other", token), weeklyTokenOk("harbor", "nope")], [true, false, false]);
-  await setWeeklyOff("harbor", true);
-  const off = await weeklyOff("harbor");
-  await setWeeklyOff("harbor", false);
-  is("stopped, and started again", [off, await weeklyOff("harbor")], [true, false]);
+  await setWeeklyOff(store, true);
+  const off = await weeklyOff(store);
+  await setWeeklyOff(store, false);
+  is("stopped, and started again", [off, await weeklyOff(store)], [true, false]);
 
   done();
 }

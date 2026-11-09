@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     ["readReview (thanks page: already reviewed?)", "HGET", () => readReview(statsId, product, review), [7, "{\"id\":", ["x"]]],
     ["searchRoom (community search, room tab)", "ZREVRANGE", () => searchRoom("a8community1", ["bread"]), ["x", 7]],
     ["readForm (form done page)", "HGET", () => readForm(statsId, "a8form0001"), [7, "{\"id\":", ["x"]]],
-    ["heardOff (thanks page question)", "SISMEMBER", () => heardOff(store.handle), ["yes", 2, ["x"]]],
+    ["heardOff (thanks page question)", "SMISMEMBER", () => heardOff(store), ["yes", 2, ["x"]]],
     ["isSoon (booking page open)", "SISMEMBER", () => isSoon(store, product), ["yes", 2, ["x"]]],
   ];
   for (const [name, command, read, replies] of readers) {

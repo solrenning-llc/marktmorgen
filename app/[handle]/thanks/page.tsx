@@ -742,7 +742,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
 
   const notice = order.state !== "paid" ? t.notices[order.state] : null;
   // Asked once a paid order is shown, unless the creator switched it off.
-  const askHeard = order.state === "paid" && Boolean(sessionId) && !booked && !(await heardOff(store.handle).catch(() => true));
+  const askHeard = order.state === "paid" && Boolean(sessionId) && !booked && !(await heardOff(store).catch(() => true));
   const upsellAnswer = typeof query.upsell === "string" && Object.hasOwn(UPSELL_NOTES, query.upsell) ? UPSELL_NOTES[query.upsell] : null;
   const upsellNote =
     order.state === "paid" && upsellAnswer && (upsellAnswer.always || (!funnel?.taken.length && !funnel?.notes.length))

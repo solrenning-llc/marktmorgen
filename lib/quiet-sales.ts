@@ -94,7 +94,7 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
   if (!isRedisConfigured() || !isSenderConfigured() || !store.stripeAccountId) return "skipped";
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return "skipped";
-  if (await weeklyOff(store.handle)) return "skipped";
+  if (await weeklyOff(store)) return "skipped";
   const day = new Date(now).toISOString().slice(0, 10);
   // The day's look and the email are ours only on an exact claim (lib/claim-mark.ts): an unknown answer
   // reads nothing and sends nothing this run, and lets nothing go.

@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   if (typeof guarded.body.ask !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   try {
-    await setHeardOff(guarded.store.handle, !guarded.body.ask);
+    await setHeardOff(guarded.store, !guarded.body.ask);
     return Response.json({ ok: true, ask: guarded.body.ask }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("changing the question after paying failed", error);

@@ -619,7 +619,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ab:@lib/headline-test.ts": room("A headline test's counts: counted with its page while it runs, and on their own after (AB_RECORD_BYTES)", "lib/sales-page-store.ts"),
   "nl:ab:paid:@lib/headline-test.ts": short("A checkout counted in a test", "order", 40, MARK),
   "nl:heard:done:@lib/heard.ts": short("A buyer asked how they heard", "order", 30, MARK),
-  "nl:heard:off@lib/heard.ts": company("Stores that switched the question off", "One set for every store."),
+  "nl:heard:off@lib/heard.ts": company("Stores that switched the question off: by the store's id (sid:<id>), or the address an older switch was written under (lib/store-stop.ts)", "One set for every store, one member a store; the closing walk takes the id's out (lib/closed-store-data.ts, index)."),
   "nl:hostcal:cfg:@lib/host-calendar.ts": { what: "Each host's calendar", parts: [capped((MAX_TEAM + 1) * 4 * KB, "One per host, the store's team.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:hostcal:err:@lib/host-calendar.ts": { what: "A host's last failure", parts: [capped((MAX_TEAM + 1) * KB, "One per host, seven days.")] },
   "nl:hostcal:good:@lib/host-calendar.ts": { what: "A host's last reading", parts: [capped((MAX_TEAM + 1) * READING_BYTES, "One per host, seven days: at most 2,000 busy times.", src("lib/team.ts", "MAX_TEAM"), src("lib/ics-parse.ts", "maxIntervals ?? 2000"))] },
@@ -901,7 +901,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stats:@lib/stats-notes.ts": { what: "Notes on the store's numbers", parts: [capped(MAX_NOTES * (MAX_STATS_NOTE * 3 + ENTRY_BYTES + 64), "MAX_NOTES notes.", src("lib/stats-notes.ts", "MAX_NOTES", "MAX_NOTE_LENGTH"))] },
   "nl:busy:@lib/stats-report.ts": company("A report being made", "The company's report to a creator, a day."),
   "nl:monthly:sent:@lib/stats-report.ts": company("A monthly report sent", "The company's email to a creator."),
-  "nl:weekly:off@lib/stats-report.ts": company("Creators who switched the weekly report off", "One set for every store."),
+  "nl:weekly:off@lib/stats-report.ts": company("Creators who switched the numbers emails off: by the store's id (sid:<id>), or the address an older stop was written under (lib/store-stop.ts)", "One set for every store, one member a store; the closing walk takes the id's out (lib/closed-store-data.ts, index)."),
   "nl:weekly:sent:@lib/stats-report.ts": company("A weekly report sent", "The company's email to a creator."),
   "nl:weekly:to:@lib/stats-report.ts": { what: "Who on the team gets the weekly report", parts: [capped((MAX_TEAM + 1) * KEY, "The team.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:stats:@lib/stats.ts": {

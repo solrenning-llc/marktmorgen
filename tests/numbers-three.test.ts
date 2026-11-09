@@ -114,9 +114,9 @@ async function main(): Promise<void> {
   await setSubscription(OWNER, { customerId: "cus_Busy00001", subscriptionId: "sub_Busy00001", active: true, period: paidPeriod() });
   store = (await storeForEmail(OWNER))!;
   is("only at 64, 128, 256…", await maybeBusyAlert(store, 65, TODAY), false);
-  await setWeeklyOff("harbor", true);
+  await setWeeklyOff(store, true);
   is("never after the creator stopped the emails", await maybeBusyAlert(store, 64, TODAY), false);
-  await setWeeklyOff("harbor", false);
+  await setWeeklyOff(store, false);
   is("written to once the day is busy", await maybeBusyAlert(store, 64, TODAY), true);
   is("to the creator, saying where they came from and how to stop it", [
     emails.length,

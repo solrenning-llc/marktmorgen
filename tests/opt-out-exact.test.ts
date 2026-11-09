@@ -11,7 +11,8 @@
  *    left as it was, and the run says the part is unknown.
  *
  * 3. The numbers emails (lib/stats-report.ts): whether the creator pressed
- *    "Stop" (weeklyOff, SISMEMBER) is read exactly, and an answer of another
+ *    "Stop" (weeklyOff, one SMISMEMBER by the store's id and addresses since
+ *    finding 5 of the handles audit) is read exactly, and an answer of another
  *    shape is never "not stopped": no email goes on it. The week's, the
  *    month's and the busy day's claims (SET NX) go through claimMark: an
  *    answer of another shape not read back as ours is never ours.
@@ -176,23 +177,26 @@ async function numbers(): Promise<void> {
   await setSubscription(owner, { customerId: "cus_OptOut00001", subscriptionId: "sub_OptOut00001", active: true, period: paidPeriod() });
   const store = (await storeForEmail(owner))!;
   const one = (command: string, reply: () => unknown[]) => ({ when: (c: (string | number)[]) => c[0] === command, reply });
-  // SISMEMBER answers 0 or 1: anything else is of another shape.
+  // SMISMEMBER answers one 0 or 1 for each member asked (the store's id and its address): anything else is of another shape.
   const STOP_MALFORMED: [string, () => unknown[]][] = [
     ["no reply at all", () => []],
     ["undefined", () => [undefined]],
     ["QUEUED", () => ["QUEUED"]],
     ["2", () => [2]],
     ["two replies", () => [0, 0]],
+    ["a flag of 2", () => [[2, 0]]],
+    ["one flag for two members", () => [[0]]],
+    ["a flag as text", () => [["0", 0]]],
   ];
 
   part("Numbers emails: the stop read exactly");
-  await setWeeklyOff(store.handle, true);
-  is("stopped (1): off", await weeklyOff(store.handle), true);
-  await setWeeklyOff(store.handle, false);
-  is("not stopped (0): on", await weeklyOff(store.handle), false);
+  await setWeeklyOff(store, true);
+  is("stopped (1): off", await weeklyOff(store), true);
+  await setWeeklyOff(store, false);
+  is("not stopped (0): on", await weeklyOff(store), false);
   for (const [label, reply] of STOP_MALFORMED) {
-    inject = one("SISMEMBER", reply);
-    is(`the stop answered ${label}: never read as "not stopped"`, await weeklyOff(store.handle), true);
+    inject = one("SMISMEMBER", reply);
+    is(`the stop answered ${label}: never read as "not stopped"`, await weeklyOff(store), true);
     inject = null;
   }
 
@@ -223,10 +227,10 @@ async function numbers(): Promise<void> {
     is(`the day claimed already, answered ${label}: nothing`, await busy(), { said: false, emails: 0 });
     inject = null;
   }
-  await setWeeklyOff(store.handle, true);
+  await setWeeklyOff(store, true);
   for (const [label, reply] of STOP_MALFORMED) {
     await pipeline([["DEL", `nl:busy:${new Date().toISOString().slice(0, 10)}:${store.handle}`]]);
-    inject = one("SISMEMBER", reply);
+    inject = one("SMISMEMBER", reply);
     is(`stopped, the stop answered ${label}: no busy-day email`, await busy(), { said: false, emails: 0 });
     inject = null;
   }

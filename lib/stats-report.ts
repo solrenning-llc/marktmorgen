@@ -18,11 +18,11 @@ import { dailyCashflowRows } from "@/lib/daily-cashflow";
 import { campaignResultsFrom } from "@/lib/campaign-results";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Store } from "@/lib/store";
+import { type StopOwner, readStop, stopCommand } from "@/lib/store-stop";
 import { type Ranked, type StatsData, readSales, readsSales, readStats, sourcesToday, studioStats, viewsBefore } from "@/lib/stats";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark } from "@/lib/claim-mark";
 import { deriveKey } from "@/lib/secret-box";
 import { formatMoney } from "@/lib/money";
@@ -290,25 +290,28 @@ export function weeklyTokenOk(handle: string, token: string): boolean {
   return timingSafeEqual(Buffer.from(want), Buffer.from(token));
 }
 
+/** The set of stopped stores, for the step that carries a stop before an address is let go (lib/store-stop.ts). */
+export const WEEKLY_OFF_SET = OFF;
+
 /**
  * Whether the numbers emails are stopped for a store: true when its creator
  * pressed "Stop", and also when the answer is in any other shape than 0 or 1
  * (CX-123 rule 24): an unknown answer is never "not stopped", so no numbers
  * email goes on it this time, and it is said in the log. Sweep A6 (Claude 5).
+ * Read by the store's id and the addresses it owns (lib/store-stop.ts), so a
+ * rename never loses the stop (finding 5 of the handles audit, Claude 5).
  */
-export async function weeklyOff(handle: string): Promise<boolean> {
+export async function weeklyOff(store: StopOwner): Promise<boolean> {
   if (!isRedisConfigured()) return false;
-  const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
-  const member = replies ? countOf(replies[0]) : null;
-  if (member === 0) return false;
-  if (member === 1) return true;
+  const stopped = await readStop(OFF, store);
+  if (stopped !== "unknown") return stopped;
   console.error("weekly-off: whether the numbers emails are stopped is unknown; no numbers email this time");
   return true;
 }
 
-export async function setWeeklyOff(handle: string, off: boolean): Promise<void> {
+export async function setWeeklyOff(store: StopOwner, off: boolean): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([[off ? "SADD" : "SREM", OFF, handle]]);
+  await redisPipeline([stopCommand(OFF, store, off)]);
 }
 
 // ---- The weekly email to the team (added 11 October 2026) ---------------------
@@ -611,7 +614,7 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
   if (!isRedisConfigured() || !isSenderConfigured()) return false;
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return false;
-  if (await weeklyOff(store.handle)) return false;
+  if (await weeklyOff(store)) return false;
   const verdict = isBusy(today, await viewsBefore(store, 14, now));
   if (!verdict.busy) return false;
   const day = new Date(now).toISOString().slice(0, 10);

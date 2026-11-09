@@ -148,11 +148,11 @@ async function main(): Promise<void> {
   is("once a day", (await checkAlerts(store)).skipped, true);
   is("and once a month", (await checkAlerts(store, Date.now() + DAY)).said, 0);
   await redis.pipeline([["DEL", `nl:alert:${store.statsId}:goal-reached:${new Date().toISOString().slice(0, 7)}`]]);
-  await setWeeklyOff(store.handle, true);
+  await setWeeklyOff(store, true);
   emails.length = 0;
   await checkAlerts(store, Date.now() + 2 * DAY);
   is("never by email once the numbers emails are stopped", emails.length, 0);
-  await setWeeklyOff(store.handle, false);
+  await setWeeklyOff(store, false);
 
   part("Each sale in the chat");
   posted.length = 0;

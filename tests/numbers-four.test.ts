@@ -256,9 +256,9 @@ async function main(): Promise<void> {
   is("nor for one that does not exist", await recordHeard(store, "cs_test_heard0000009", "friend"), "invalid");
   const heardData = studioStats(store, (await readStats(store))!, null, "none", []);
   is("the studio shows the answer and the money of its sale", heardData.heard.d7, [{ answer: "friend", buyers: 1, cents: 4900, unknownBuyers: 1, unknownCents: 4900 }]);
-  await setHeardOff("harbor", true);
-  is("a creator who stops asking is not counted for", [await heardOff("harbor"), await recordHeard(store, "cs_test_heard0000001", "tiktok")], [true, "off"]);
-  await setHeardOff("harbor", false);
+  await setHeardOff(store, true);
+  is("a creator who stops asking is not counted for", [await heardOff(store), await recordHeard(store, "cs_test_heard0000001", "tiktok")], [true, "off"]);
+  await setHeardOff(store, false);
   const kept = JSON.stringify(redis.keys().map((k) => redis.run(["HGETALL", k]) ?? redis.run(["GET", k])));
   is("nothing about the buyer is kept", /owner|example|cs_test_heard0000001"?\W*,\W*"?friend/.test(kept), false);
 
@@ -278,9 +278,9 @@ async function main(): Promise<void> {
   is("a store with no plan is not written to", await checkQuiet(store, NOW), "skipped");
   await setSubscription(OWNER, { customerId: "cus_Quiet00001", subscriptionId: "sub_Quiet00001", active: true, period: paidPeriod() });
   store = (await storeForEmail(OWNER))!;
-  await setWeeklyOff("harbor", true);
+  await setWeeklyOff(store, true);
   is("nor one whose creator stopped the emails", await checkQuiet(store, NOW), "skipped");
-  await setWeeklyOff("harbor", false);
+  await setWeeklyOff(store, false);
   is("written to once its sales have stopped", await checkQuiet(store, NOW + 3_600_000), "sent");
   is("saying so, and what to look at", [emails.length, emails[0]?.to, /no sales in 9 days/.test(emails[0]?.subject ?? ""), /Stripe dashboard/.test(emails[0]?.text ?? "")], [1, OWNER, true, true]);
   is("looked at once a day", await checkQuiet(store, NOW + 3_600_000), "seen");

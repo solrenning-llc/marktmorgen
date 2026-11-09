@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
         out.unpaid += 1;
         continue;
       }
-      const emailOff = await weeklyOff(store.handle);
+      const emailOff = await weeklyOff(store);
       // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
       const chat = await chatAddress(store.statsId).catch(() => undefined);
       if (chat === undefined) {

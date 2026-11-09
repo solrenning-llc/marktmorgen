@@ -24,12 +24,13 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
-type Sent = { to: string[] | string; subject: string; text: string };
+type Sent = { to: string[] | string; subject: string; text: string; key?: string };
 const sent: Sent[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
-    sent.push(JSON.parse(String(init?.body)) as Sent);
+    const headers = new Headers(init?.headers);
+    sent.push({ ...(JSON.parse(String(init?.body)) as Sent), key: headers.get("idempotency-key") ?? undefined });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
   }
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
   part("The kinds of notice");
   is("two more kinds", REPORT_KINDS.includes("child_safety" as never) && REPORT_KINDS.includes("intimate_image" as never), true);
   is("a child-safety report needs no name, signature or sworn statement", readReport({ ...CHILD, url }).ok, true);
+  is("it asks for no words about the content at all", readReport({ ...CHILD, url, work: "" }).ok, true);
   is("but it needs the address and an email to reply to", [readReport({ ...CHILD, url: "" }).ok, readReport({ ...CHILD, url, email: "" }).ok], [false, false]);
   is("an intimate-image request is signed by the person, with the statement that it is shared without consent", [readReport({ ...INTIMATE, url }).ok, readReport({ ...INTIMATE, url, signature: "" }).ok, readReport({ ...INTIMATE, url, goodFaith: false }).ok], [true, false, false]);
 
@@ -126,11 +128,39 @@ async function main(): Promise<void> {
   redis.pipeline = reading;
   is("a store that cannot be read: the owner is told it could not be confirmed, never that the address names nothing", [blind.status, sent.some((mail) => /^URGENT/.test(mail.subject) && mail.text.includes("could not be confirmed"))], [200, true]);
 
+  part("A product that cannot be read is said as such, never as an address that names nothing");
+  const many = [];
+  for (let n = 0; n < 26; n++) {
+    const extra = await addProduct(owner, `Item ${n}`, "On sale", "9", null);
+    if (extra.ok) many.push(extra.product.id);
+  }
+  redis.run(["DEL", ...redis.keys().filter((key) => key.startsWith("nl:csa:"))]);
+  const headNow = (await storeForEmail(owner))!.catalog.head.map((listing) => listing.id);
+  const deep = many.find((id) => !headNow.includes(id))!;
+  const reads = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command[0] === "GET" && String(command[1] ?? "").endsWith(`:l:${deep}`))) throw new Error("timed out");
+    return reads(commands);
+  }) as typeof redis.pipeline;
+  const blindProduct = await holdReported({ kind: "child_safety", url: `https://marktmorgen.com/@safetyshop/p/${deep}` }, (await storeForEmail(owner))!).catch(() => "threw");
+  redis.pipeline = reads;
+  is("a product read that times out is unknown", blindProduct, "unknown");
+
+  part("The urgent email is not sent twice for one retry, and says when the notice was not kept");
+  sent.length = 0;
+  await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18));
+  await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18, 0, 5));
+  is("the same address and kind on the same day carry the same key, so the provider sends one", sent.length === 2 && sent[0].key === sent[1].key && Boolean(sent[0].key), true);
+  sent.length = 0;
+  await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18), false);
+  is("a notice that was not kept is said, not pointed to", [sent.at(-1)?.text.includes("could not be confirmed as kept"), sent.at(-1)?.text.includes("is in the notice email")], [true, false]);
+
   part("Where people read it");
   const page = readFileSync("app/report/page.tsx", "utf8") + readFileSync("components/report-form.tsx", "utf8");
   is("the form offers both kinds and points to the CyberTipline", [page.includes("child_safety"), page.includes("intimate_image"), page.includes("report.cybertip.org")], [true, true, true]);
   is("it asks people not to send or describe the images", page.includes("Do not upload, attach or describe"), true);
   is("it does not promise more than is done: an intimate image is removed within 48 hours", [page.includes("we act on those at once"), page.includes("removed within 48")], [false, true]);
+  is("a child-safety report usually comes off at once, and is otherwise acted on by hand, in the intro and after sending", [page.includes("usually comes off the store at once"), page.match(/act on it\s+by hand/g)?.length ?? 0 >= 2], [true, true]);
   const terms = readFileSync("app/terms/page.tsx", "utf8");
   is("the Terms forbid it and say it is reported", [terms.includes('id="child-safety"'), terms.includes("Exploited Children (NCMEC)")], [true, true]);
   const procedure = readFileSync("docs/incident-response.md", "utf8");

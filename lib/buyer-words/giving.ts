@@ -61,6 +61,11 @@ const en = {
       title: "We could not send it just now",
       body: "Nothing was kept. Try again in a moment.",
     },
+    // Its send not known (lib/free.ts requestCopy): it may still arrive, so never said to have failed.
+    uncertain: {
+      title: "We could not confirm it was sent",
+      body: "It may still arrive. Check your inbox and spam folder before you ask for it again.",
+    },
   } as Record<string, Notice>,
   alsoFrom: (store: string) => `Also from ${store}`,
   freeFrom: (store: string) => `From ${store}. Press the button and it is yours.`,
@@ -414,6 +419,10 @@ const es: GivingWords = {
       title: "No hemos podido enviarlo ahora mismo",
       body: "No se ha guardado nada. Vuelve a intentarlo en un momento.",
     },
+    uncertain: {
+      title: "No hemos podido confirmar que se haya enviado",
+      body: "Puede que aún llegue. Revisa tu bandeja de entrada y la carpeta de spam antes de volver a pedirla.",
+    },
   },
   alsoFrom: (store) => `También de ${store}`,
   freeFrom: (store) => `De ${store}. Pulsa el botón y es tuyo.`,
@@ -742,6 +751,10 @@ const fr: GivingWords = {
       title: "Nous n'avons pas pu l'envoyer pour le moment",
       body: "Rien n'a été conservé. Réessayez dans un instant.",
     },
+    uncertain: {
+      title: "Nous n'avons pas pu confirmer l'envoi",
+      body: "Il peut encore arriver. Vérifiez votre boîte de réception et vos spams avant de le redemander.",
+    },
   },
   alsoFrom: (store) => `Également chez ${store}`,
   freeFrom: (store) => `De ${store}. Appuyez sur le bouton, et c'est à vous.`,
@@ -1067,6 +1080,10 @@ const de: GivingWords = {
       title: "Wir konnten es gerade nicht senden",
       body: "Es wurde nichts gespeichert. Versuchen Sie es gleich noch einmal.",
     },
+    uncertain: {
+      title: "Wir konnten den Versand nicht bestätigen",
+      body: "Die E-Mail kann noch ankommen. Sehen Sie in Ihrem Posteingang und im Spam-Ordner nach, bevor Sie das Exemplar erneut anfordern.",
+    },
   },
   alsoFrom: (store) => `Auch von ${store}`,
   freeFrom: (store) => `Von ${store}. Drücken Sie auf die Schaltfläche, und es gehört Ihnen.`,
@@ -1391,6 +1408,10 @@ const it: GivingWords = {
     error: {
       title: "Non siamo riusciti a inviarlo in questo momento",
       body: "Non è stato conservato nulla. Riprova tra un momento.",
+    },
+    uncertain: {
+      title: "Non siamo riusciti a confermare l'invio",
+      body: "L'email potrebbe arrivare comunque. Controlla la posta in arrivo e lo spam prima di richiedere di nuovo la copia.",
     },
   },
   alsoFrom: (store) => `Anche da ${store}`,
@@ -1721,6 +1742,10 @@ const nl: GivingWords = {
       title: "We konden het nu niet versturen",
       body: "Er is niets bewaard. Probeer het zo opnieuw.",
     },
+    uncertain: {
+      title: "We konden niet bevestigen dat het is verstuurd",
+      body: "De e-mail kan nog aankomen. Kijk in je inbox en je spam voordat je het exemplaar opnieuw aanvraagt.",
+    },
   },
   alsoFrom: (store) => `Ook van ${store}`,
   freeFrom: (store) => `Van ${store}. Druk op de knop en het is van jou.`,
@@ -2042,6 +2067,10 @@ const pt: GivingWords = {
     error: {
       title: "Não foi possível enviá-lo neste momento",
       body: "Nada foi guardado. Tente novamente daqui a pouco.",
+    },
+    uncertain: {
+      title: "Não foi possível confirmar o envio",
+      body: "O email ainda pode chegar. Verifique a caixa de entrada e a pasta de spam antes de pedir o exemplar novamente.",
     },
   },
   alsoFrom: (store) => `Também de ${store}`,

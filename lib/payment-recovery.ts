@@ -45,7 +45,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { formatMoney } from "@/lib/money";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { readListings } from "@/lib/catalog";
@@ -269,6 +269,7 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
     if ((await claimMark(key, SENT_SECONDS, value)) !== "ours") continue;
     written += 1;
 
+    let mail: ReturnType<typeof failedPaymentEmail>;
     try {
       // First, so the card that pays becomes the one the next renewal uses.
       // Without this the email would get this payment in and leave the next
@@ -285,7 +286,7 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
       const language = parseLanguage(store.language);
       const locale = LANGUAGES[language].locale;
       const next = typeof invoice?.next_payment_attempt === "number" && invoice.next_payment_attempt > 0 ? invoice.next_payment_attempt : 0;
-      const mail = failedPaymentEmail({
+      mail = failedPaymentEmail({
         storeName: store.name,
         title: titles.get(sub.metadata?.product ?? "") || null,
         amount: formatMoney(amount, typeof invoice?.currency === "string" ? invoice.currency : store.currency, locale),
@@ -301,27 +302,51 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
         language,
         reminder: step > 1,
       });
-      const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
-        from: fromStore(store),
-        to,
-        subject: mail.subject,
-        text: mail.text,
-        // A member with a question about their payment reaches the creator.
-        replyTo: store.email,
-        idempotencyKey: step === 1 ? `nimbus-dun:${account}:${invoiceId}` : `nimbus-dun:${account}:${invoiceId}:${step}`,
-      });
-      if (ok) {
-        sent += 1;
-        await countSent(store.statsId, "failed");
-      }
-      else await releaseMark(key, value);
     } catch (error) {
-      // Let go, so the next run tries this one again rather than never: only our own claim (Revisor 1 on #2719).
+      // Nothing was asked of the sender yet: let go, so the next run tries this one again rather than never; only
+      // our own claim (Revisor 1 on #2719).
       await releaseMark(key, value);
       console.error("writing about a failed renewal failed", store.handle, error);
+      continue;
     }
+    // The email is taken from the store's figure inside sendEmailOutcome, before the request (unchanged).
+    const outcome = await sendOnce({ meter: { by: "store", store: store, kind: "email" },
+      from: fromStore(store),
+      to,
+      subject: mail.subject,
+      text: mail.text,
+      // A member with a question about their payment reaches the creator.
+      replyTo: store.email,
+      idempotencyKey: step === 1 ? `nimbus-dun:${account}:${invoiceId}` : `nimbus-dun:${account}:${invoiceId}:${step}`,
+    }, "a failed-payment email", store.handle);
+    if (outcome === "sent") {
+      sent += 1;
+      // countSent never throws, and a count not written never lets the mark go: the email went.
+      await countSent(store.statsId, "failed");
+    } else if (outcome === "refused") {
+      // Refused for certain: let go, so the next run tries again (only our own claim).
+      await releaseMark(key, value);
+    }
+    // Uncertain: the mark is kept (sendOnce said so in the log), so the member is never written to twice.
   }
   return sent;
+}
+
+/**
+ * One member email that must go at most once (rule 30, as 283 [HG2]). A throw on the way counts as `uncertain`: the
+ * request may have reached the sender. Uncertain is logged here, and the caller keeps its mark on it: not sent
+ * again, and the store's figure not taken again for the same email.
+ */
+async function sendOnce(message: Parameters<typeof sendEmailOutcome>[0], what: string, handle: string): Promise<SendOutcome> {
+  let outcome: SendOutcome;
+  try {
+    outcome = await sendEmailOutcome(message);
+  } catch (error) {
+    console.error(`sending ${what} failed on the way`, handle, error);
+    outcome = "uncertain";
+  }
+  if (outcome === "uncertain") console.error(`${what} may have gone (the sender's answer is not known); its mark is kept, so it is not sent again`, handle);
+  return outcome;
 }
 
 type Card = { id: string; brand: string; last4: string; expMonth: number; expYear: number };
@@ -444,9 +469,10 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     const key = cardKey(account, subId, card.id);
     const value = claimValue();
     if ((await claimMark(key, CARD_SENT_SECONDS, value)) !== "ours") continue;
+    let mail: ReturnType<typeof cardNoticeEmail>;
     try {
       const token = await cardLink(account, customer, subId);
-      const mail = cardNoticeEmail({
+      mail = cardNoticeEmail({
         storeName: store.name,
         title: titles.get(sub.metadata?.product ?? "") || null,
         card: m.cardName(brandName(card.brand), card.last4),
@@ -456,23 +482,28 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
         isPlan: sub.metadata?.kind === "plan",
         language,
       });
-      const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
-        from: fromStore(store),
-        to: email,
-        subject: mail.subject,
-        text: mail.text,
-        replyTo: store.email,
-        idempotencyKey: `nimbus-card:${account}:${subId}:${card.id}`,
-      });
-      if (ok) {
-        sent += 1;
-        await countSent(store.statsId, "cards");
-      }
-      else await releaseMark(key, value);
     } catch (error) {
+      // Nothing was asked of the sender yet: let go, so the next run tries again (only our own claim).
       await releaseMark(key, value);
       console.error("writing about a card that stops working failed", store.handle, error);
+      continue;
     }
+    const outcome = await sendOnce({ meter: { by: "store", store: store, kind: "email" },
+      from: fromStore(store),
+      to: email,
+      subject: mail.subject,
+      text: mail.text,
+      replyTo: store.email,
+      idempotencyKey: `nimbus-card:${account}:${subId}:${card.id}`,
+    }, "a card notice", store.handle);
+    if (outcome === "sent") {
+      sent += 1;
+      await countSent(store.statsId, "cards");
+    } else if (outcome === "refused") {
+      // Refused for certain: let go, so the next run tries again (only our own claim).
+      await releaseMark(key, value);
+    }
+    // Uncertain: the mark is kept, so the member is never told twice about the same card.
   }
   return sent;
 }

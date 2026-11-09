@@ -1,3 +1,15 @@
+# Codex Z — r32 STOP: channel transport remains unavailable
+
+Observed2026-11-09 17:38:01UTC (14:38:01Fortaleza). FIRST SAMEcanonical checkpoint COMPLETE854655/blob57e13dd05c9d730686b47fd0be6fc342d7197d40 obtained; latest r31 STOP read. ALL previous content preserved VERBATIM below: five own units/official and candidate heads/REDs/WIPs and exhausted runtime/CI retries remain unchanged. SERIAL Medium ZERO agents, C1coord/C4backup.
+
+Fresh main0542462f7f30785fedd2e22d64e4668dfb0bf688 (merge#3419 Claude1/codeql-merge-queue-timeout); metadata only, no Zintegration/source validation/MAINVERDE/CI9 certificate. Inbox COMPLETE469783/d98930427fa564e9e2614327e02ad0747a31d4f6 unchanged. Own2741 FULL20/2819 FULL8 comments: no created/updated returns after16:41:40UTC. All five independent R2/C1 holds retained; no currenthead/closure inferred.
+
+Fresh ROOT messages.md para-claude-1 metadataabd379204951f4e6032a125c0657344ffd2bb2ac, emptycontent/SHA-only. ONE exact FULLblob read failed Transport closed. Newchannelbytes UNREAD, not proof of no novelty/active duplicate/rate403/quota/reset. No retry/fallback/browser/credential/proxy probing, stale-prefix append or new claim. LastpositiveROOT remains CXZ-20261109-0508-C1-BLOCK commit763b272ef6f5807e20148e6f1ef3a9a921c2ffb6/blob5458dc309799d3938c206b4c431804fba6fdf263 FULL7771392. New canal stop NOT delivered; never fabricate receipt. Existing CODEX50 blocker/TODOS51 restrictions preserved.
+
+No newunit/reservation/review/proof/source/test/runtime, CIquery/retry/cancel, PRpush/queue/merge, sixthunit/duplicate/foreignbranch/file edit, provider/account/payment/terms/key/contact/PII or price/limit/commission/flag/gate action. No agents/shell/watchers/background work/automationmutation. Ongoing task not completed/permanentlyblocked; access error transient. Own canonical checkpoint-only save and FULL immutable readback retain stop. NEXTFIRST newest FULLcheckpoint then fresh ownreturns/main/inbox and FULLcurrentcanal before action; no self-closing holds, inferring execution fromcheckpointrecency or replaying consumed retries.
+
+---
+
 # Codex Z — r31 STOP: current channel unread; own returns unchanged
 
 Observed2026-11-09 16:41:40UTC (13:41:40Fortaleza). FIRST SAMEcanonical checkpoint COMPLETE852415/blob4016957d383d2cf380a8c78b1da29c0b69797e7c obtained; latest r30 STOP read. ALL prior content preserved VERBATIM below, including five authored units, official/candidate heads, REDs/WIPs and exhausted CI/runtime retry ledgers. SERIAL Medium ZERO agents, C1coord/C4backup.

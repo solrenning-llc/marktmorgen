@@ -422,8 +422,10 @@ export async function sendReviewRequests(
         if (held.token) await dropReviewLink(held.token);
         await unclaimOne(held.reference, member, held.claim, nowSeconds + RETRY_SECONDS.stripe);
       } else {
-        // Nothing held: the order stays on the list at the time it was due, for the next run.
-        counts.waiting += 1;
+        // Nothing held: the order is put an hour on (later never throws, and counts it as waiting), so it is not read
+        // in Stripe again on every run for up to LATE_SECONDS, holding one of MAX_ASKS_PER_RUN places (lot 2
+        // pre-review R4). Should that ZADD not reach Redis, it stays due at its old time for the next run.
+        await later(member, nowSeconds + RETRY_SECONDS.stripe);
       }
     }
   }

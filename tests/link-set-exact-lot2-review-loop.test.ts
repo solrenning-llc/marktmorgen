@@ -13,8 +13,8 @@
  *   - a stop link whose write throws after the order was claimed lets the
  *     claim go and deletes the unsent review link, so the order is sent once an
  *     hour later, and the run's other orders are still sent;
- *   - a sent-mark read that throws leaves that order due for the next run, and
- *     the run's other orders are still sent;
+ *   - a sent-mark read that throws puts that order an hour on, when it is sent
+ *     once, and the run's other orders are still sent;
  *   - the write after a batch went that throws never makes the run throw: the
  *     emails went, are counted, and are never sent again.
  */
@@ -205,13 +205,16 @@ for (const landed of [true, false]) {
   }));
 }
 
-test("a sent-mark read that throws leaves that order for the next run, and the run's other order is sent", () => inWorld(async (w) => {
+test("a sent-mark read that throws puts that order an hour on, and the run's other order is sent", () => inWorld(async (w) => {
   const thrown = w.throwOnce((c) => c.length === 1 && c[0][0] === "GET" && String(c[0][1]).startsWith("nl:rev:ask:sent:"));
   const first = await w.run(w.now);
   redis.pipeline = w.original;
   assert.equal(thrown(), 1, "one read threw");
   assert.equal(first.sent, 1, "the other order is sent in the same run");
-  assert.equal((await w.run(w.now + 60)).sent, 1, "the one left goes next run");
+  // Altered 2026-11-09 (rule 23, lot 2 pre-review R4): an order whose call throws before its claim is put an hour on
+  // (RETRY_SECONDS.stripe), not left due for the next five-minute run, so it is not read again on every run.
+  assert.equal((await w.run(w.now + 60)).sent, 0, "the one left waits the hour");
+  assert.equal((await w.run(w.now + 3601)).sent, 1, "the one left goes once the hour is up");
   assert.deepEqual(w.sentTo().sort(), [A.email, B.email].sort(), "each order asked once");
 }));
 

@@ -21,7 +21,7 @@ import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consen
 import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -250,7 +250,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.winback.address } };
       const rendered = render(withAddress, mail.subject, mail.body, unsub);
       handed = true;
-      const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+      const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
         from: fromLine(withAddress),
         to: email,
         subject: rendered.subject,
@@ -259,13 +259,19 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         headers: rendered.headers,
         idempotencyKey: `nimbus-wb:${account}:${subId}`,
       });
-      if (ok) {
+      if (outcome === "sent") {
         sent += 1;
         await redisPipeline([["INCR", countKey(statsId)]]);
+      } else if (outcome === "refused") {
+        // Known not taken: no sender was asked (the store's email figure spent or not known, no sender) or one said no
+        // (lot 2 pre-review W2). This run's own marks and the offer's link go, so the next run, inside the same window,
+        // sends the offer once, instead of its being lost for 90 days.
+        console.error("a come-back offer was not sent; its marks are let go for the next run", store.handle);
+        await unclaimOffer(held, link);
       } else {
-        // false is refused or unknown alike (Amazon SES or Resend may have taken it and the reply been lost), so the
-        // marks and the offer's link are kept, as lib/trial-nudges.ts keeps its mark: the person is written to at most
-        // once, and the link in an email that may have arrived keeps working (CX-123 rule 24).
+        // Not known whether it went (Amazon SES or Resend may have taken it and the reply been lost), so the marks and
+        // the offer's link are kept, as lib/trial-nudges.ts keeps its mark: the person is written to at most once, and
+        // the link in an email that may have arrived keeps working (CX-123 rule 24).
         console.error("a come-back offer may not have gone; kept as sent", store.handle);
       }
     } catch (error) {

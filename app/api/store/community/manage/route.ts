@@ -15,7 +15,6 @@ import {
   moderateMember,
   newItemId,
   parseTarget,
-  readConfig,
   readConfigExact,
   readReportedTarget,
   saveConfig,
@@ -126,8 +125,12 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, on, config });
     }
 
+    // The same exact read for every other action: a lost or off-shape reply
+    // refuses as unavailable, and only an exact absence is "not set up".
     const id = store.community?.id;
-    const config = id ? await readConfig(id) : null;
+    const read = id ? await exactSetup(id) : { config: null };
+    if (!read) return fail("setup_read_unavailable", 503);
+    const config = read.config;
     if (!id || !config) return fail("not_set_up");
     const save = async (next: CommunityConfig) => {
       await saveConfig(id, next);

@@ -311,6 +311,7 @@ function ProductForm({
   onCancel,
   product,
   loadingAbout = false,
+  aboutUnread = false,
   ownHosts = [],
   preview = null,
 }: {
@@ -325,6 +326,8 @@ function ProductForm({
   product?: Product;
   /** Whether the long description is still being read. */
   loadingAbout?: boolean;
+  /** Whether the long description could not be read, so the form does not hold it. */
+  aboutUnread?: boolean;
   /** The store's own hosts besides its marktmorgen.com address (its own domain), not warned as "another site". */
   ownHosts?: string[];
   /** The store's look and language, so the product's own words are previewed as buyers see them (487 [IT4], pattern 7). */
@@ -432,6 +435,7 @@ function ProductForm({
         <ProductPdfAssist
           productId={product.id}
           fields={{ title: draft.title, summary: draft.summary, about: draft.about }}
+          aboutState={loadingAbout ? "loading" : aboutUnread ? "unread" : "ready"}
           onChange={(next) => setDraft({ ...draft, ...next })}
         />
       ) : null}
@@ -2275,6 +2279,7 @@ export function ProductEditor({
                 submitLabel="Save"
                 product={product}
                 loadingAbout={loadingAbout}
+                aboutUnread={aboutUnread}
                 onSubmit={() => {
                   if (loadingAbout) return;
                   if (priceChanged && priceReview !== product.id) {

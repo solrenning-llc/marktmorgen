@@ -63,7 +63,12 @@ export const PDF_ASSIST_COPY = {
   keptTitle: "The name was not changed: the suggested one did not stick to what the PDF says.",
   keptSummary: "The short description was not changed: the suggested one did not stick to what the PDF says.",
   tooLong: "The benefits did not fit in the full description, so it was not changed. Shorten it, then try again.",
+  aboutLoading: "Suggestions from your PDF open once your full description has been read.",
+  aboutUnread: "Suggestions from your PDF are off here: your full description could not be read just now, and they would be put in front of it. Close this product and open it again to try.",
 } as const;
+
+/** Whether the form holds the creator's full description: suggestions are put in front of it only when it does. */
+export type AboutState = "ready" | "loading" | "unread";
 
 /**
  * The full description with the benefits in front of it: the heading, one
@@ -72,9 +77,26 @@ export const PDF_ASSIST_COPY = {
  * nothing is put in and nothing is cut.
  */
 export function withBenefits(about: string, benefits: readonly string[], max: number): string | null {
-  const list = [BENEFITS_HEADING, ...benefits.map((b) => `- ${b}`)].join("\n");
+  const list = benefitsList(benefits);
   const next = about.trim() ? `${list}\n\n${about}` : list;
   return next.length <= max ? next : null;
+}
+
+/** The list put in front of the full description: the heading, then one line per benefit starting with "- ". */
+export function benefitsList(benefits: readonly string[]): string {
+  return [BENEFITS_HEADING, ...benefits.map((b) => `- ${b}`)].join("\n");
+}
+
+/**
+ * The full description without the list this box put in front of it, when
+ * it is still there exactly as put; otherwise unchanged (a list the creator
+ * changed is theirs). A second suggestion replaces the first one's list
+ * rather than adding a second.
+ */
+export function withoutList(about: string, list: string | null): string {
+  if (!list) return about;
+  if (about === list) return "";
+  return about.startsWith(`${list}\n\n`) ? about.slice(list.length + 2) : about;
 }
 
 const fits = (value: unknown, max: number): value is string => typeof value === "string" && value.trim().length > 0 && value.length <= max;

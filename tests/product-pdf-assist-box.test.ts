@@ -75,7 +75,9 @@ async function main(): Promise<void> {
     part("Put back what was there");
     const said = status(b.mounted.tree());
     let focused = 0;
-    (said?.props as { ref?: { current: unknown } } | undefined)?.ref && ((said!.props as { ref: { current: unknown } }).ref.current = { focus: () => (focused += 1) });
+    // The runner draws no element, so the paragraph's ref is given one that counts focus calls.
+    const ref = (said?.props as { ref?: { current: unknown } } | undefined)?.ref;
+    if (ref) ref.current = { focus: () => (focused += 1) };
     click(button(b.mounted.tree(), PDF_ASSIST_COPY.undo));
     await b.mounted.settle();
     is("the three boxes are as they were before the first suggestion", b.fields, ORIGINAL);

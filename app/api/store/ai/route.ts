@@ -2,11 +2,11 @@ import { cleanTag } from "@/lib/flow-rules";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { readFileWhole } from "@/lib/file-store";
-import { READ_PDF_PAGES } from "@/lib/ai-rules";
+import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import { firstPages } from "@/lib/pdf-preview";
 import { MAX_STAMP_BYTES, readableFile } from "@/lib/product-file";
 import { withinEssentialLimit } from "@/lib/request-guard";
-import { markAiStop, describePicture, fillBlock, reviewPage, rewriteBlock, writeTestHeadline, replyToReview, translatePage, writeBio, writeKitPitch, writeStoreFaq, writeStoreSetup, writeBlogPost, writeEmail, writePosts, writeOutline, writePage, writeProduct, writeQuiz, writeSequence, writeFeedback } from "@/lib/ai";
+import { aiJobRefusal, markAiStop, describePicture, fillBlock, reviewPage, rewriteBlock, writeTestHeadline, replyToReview, translatePage, writeBio, writeKitPitch, writeStoreFaq, writeStoreSetup, writeBlogPost, writeEmail, writePosts, writeOutline, writePage, writeProduct, writeQuiz, writeSequence, writeFeedback } from "@/lib/ai";
 import { readTaskFor, submissionOf } from "@/lib/assignment";
 import { SOCIALS, type SocialNetwork, isSocialNetwork } from "@/lib/store-socials";
 import { isRewriteStyle } from "@/lib/block-rewrite-rules";
@@ -104,6 +104,9 @@ export async function POST(request: NextRequest) {
     // The product's own PDF, its first pages only, when the creator asked for it to be read (lib/ai.ts, readPdfFacts).
     let pdf: Uint8Array | null = null;
     if (body.readFile === true) {
+      // Nothing is read from storage for a job that could not be admitted (read only, nothing reserved).
+      const refused = aiJobRefusal(store, 1 + READ_PDF_JOBS);
+      if (refused) return fail(refused);
       pdf = await pdfPagesOf(product);
       if (!pdf) return fail("file");
     }
@@ -126,6 +129,8 @@ export async function POST(request: NextRequest) {
     // store's own record, never taken from the browser.
     const product = await readListing(store, text(body.product, 40));
     if (!product) return fail("unknown", 404);
+    const refused = aiJobRefusal(store, 1 + READ_PDF_JOBS);
+    if (refused) return fail(refused);
     const pdf = await pdfPagesOf(product);
     if (!pdf) return fail("file");
     const about = product.about ? await readAbout(store.statsId, product.id) : "";

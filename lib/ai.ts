@@ -132,6 +132,20 @@ export function aiAllowance(store: Store, now = Date.now()): number {
   return AI_MONTHLY[store.tier];
 }
 
+/**
+ * Whether a job of `jobs` could be admitted at all, read only: nothing is
+ * reserved or counted. Checked before work that costs time and transfer
+ * ahead of the job's own admission (a product's PDF read from storage), so
+ * a plan without enough writing jobs, or a deployment without the writing
+ * help, never pays for it. Null when it may go on to counted's own check.
+ */
+export function aiJobRefusal(store: Store, jobs: number, now = Date.now()): "off" | "used" | null {
+  if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return "off";
+  const allowance = aiAllowance(store, now);
+  if (!Number.isSafeInteger(allowance) || allowance < 0) return "off";
+  return jobs > allowance ? "used" : null;
+}
+
 /** What is left of this month's writing jobs. */
 export async function aiLeft(store: Store, now = Date.now()): Promise<number> {
   const key = monthKey(store, new Date(now));

@@ -39,8 +39,8 @@ import type { Store } from "@/lib/store";
 const encoder = new TextEncoder();
 const bytes = (text: string) => encoder.encode(text).byteLength;
 
-/** What was written cannot close the quote it is in. */
-const quoteSafe = (text: string) => text.replace(/</g, "‹").replace(/>/g, "›");
+/** What was written cannot close the quote it is in: no angle bracket and no straight quote of it goes as written. */
+const quoteSafe = (text: string) => text.replace(/</g, "‹").replace(/>/g, "›").replace(/"/g, "”");
 
 /** One line, short, with addresses, links and phone numbers out, quote-safe. */
 const clean = (value: unknown, max: number) => quoteSafe(cleanVoice(typeof value === "string" ? value : "", max));
@@ -91,7 +91,7 @@ export function pdfAssistRequest(store: Store, words: Words, fileFacts: string):
     `"title": the product's name, at most ${MAX_PDF_TITLE} characters. "summary": one sentence, at most ${MAX_PDF_SUMMARY} characters, saying plainly what the buyer gets. "benefits": ${PDF_BENEFITS_MIN} to ${PDF_BENEFITS_MAX} different things the buyer gets, each at most ${MAX_PDF_BENEFIT} characters, each one fact from the PDF.`,
   ].join("\n\n");
   if (bytes(system) > PDF_ASSIST_SYSTEM_BYTES) return null;
-  const head = [`Store name: "${clean(store.name, 60)}"`, `What the first pages of the product's PDF show: """${clipBytes(facts, PDF_ASSIST_PROMPT_BYTES - 1_024)}"""`].join("\n\n");
+  const head = [`Store name: "${clean(store.name, 60)}"`, `What the first pages of the product's PDF show: """${clipBytes(quoteSafe(facts), PDF_ASSIST_PROMPT_BYTES - 1_024)}"""`].join("\n\n");
   const parts = [
     ["Its name now", clean(words.title, 120)],
     ["Its short description now", clean(words.summary, 300)],

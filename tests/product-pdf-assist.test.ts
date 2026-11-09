@@ -354,7 +354,7 @@ async function main(): Promise<void> {
     /<ProductPdfAssist\b[^>]*aboutState=\{loadingAbout \? "loading" : aboutUnread \? "unread" : "ready"\}/.test(editor),
     true,
   );
-  is("the form that changes a product is told when the description could not be read", /<ProductForm\b[^>]*aboutUnread=\{aboutUnread\}/.test(editor), true);
+  is("the form that changes a product is told when the description could not be read", /product=\{product\} loadingAbout=\{loadingAbout\} aboutUnread=\{aboutUnread\}/.test(editor), true);
 
   done();
 }

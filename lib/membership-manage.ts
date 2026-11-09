@@ -38,6 +38,8 @@ import { isOwnReasonId, offers } from "@/lib/leave-rules";
 import { countLeave } from "@/lib/leave-flow";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
+import { afterAnswer } from "@/lib/after-answer";
+import { repliesFor as linkSetReplies } from "@/lib/redis-reply";
 
 /** How long the emailed link keeps working. */
 export const MANAGE_LINK_SECONDS = 60 * 60;
@@ -186,8 +188,12 @@ export type Grant = {
 /**
  * Emails a way in to the address typed, when it has a membership here.
  *
- * "sent" is returned whether or not a membership was found. The only person
- * who learns the difference is whoever reads that inbox.
+ * "sent" is returned whether or not a membership was found, and at once,
+ * right after the limits: the Stripe search, the link and its email run only
+ * after the answer is sent (lib/after-answer.ts), so neither the answer's
+ * words nor its time tell a member from anybody else, and an email that could
+ * not go out is said only in the server's log. The only person who learns the
+ * difference is whoever reads that inbox.
  */
 export async function requestManageLink(input: {
   store: Store;
@@ -204,35 +210,61 @@ export async function requestManageLink(input: {
   if (!(await within(await ipKey(ip, store.handle), IP_LIMIT))) return "limited";
   if (!(await within(await addressKey(email), ADDRESS_LIMIT))) return "limited";
 
+  // From here the answer is "sent" whatever happens, and at once: the search
+  // for a membership, the link and its email are all after it.
+  afterAnswer("sending a membership link", () => sendManageLink(store, email, origin));
+  return "sent";
+}
+
+/** The link itself, for an address with a membership here; nothing for one without. */
+async function sendManageLink(store: Store, email: string, origin: string): Promise<void> {
   const customer = await findMember(store, email);
-  if (!customer) return "sent";
+  if (!customer) return;
 
   const token = randomToken();
+  const key = await tokenKey(token);
   const grant: Grant = { a: store.stripeAccountId as string, c: customer, h: store.handle };
-  await redisPipeline([
-    ["SET", await tokenKey(token), JSON.stringify(grant), "EX", MANAGE_LINK_SECONDS],
-  ]);
+  let sent = false;
+  try {
+    // A paid email only with a link Redis said it stored (rule 24): any other answer sends nothing, and the link,
+    // in case it did land, is removed below like any unsent one. The answer was already "sent" for every address.
+    const saved = linkSetReplies(await redisPipeline([
+      ["SET", key, JSON.stringify(grant), "EX", MANAGE_LINK_SECONDS],
+    ]), 1);
+    if (saved?.[0] !== "OK") {
+      console.error("a membership link was not stored, so no email was sent");
+      return;
+    }
 
-  const name = store.name;
-  const link = `${origin}/@${store.handle}/manage?token=${token}`;
-  const m = membershipWords(store.language);
-  const sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
-    from: `"${m.fromName(displayName(name))}" <${senderAddress()}>`,
-    to: email,
-    subject: m.membershipWith(name),
-    text: [
-      m.linkIntro(name),
-      "",
-      link,
-      "",
-      store.tiers.length ? m.linkTiers : m.linkNoTiers,
-      "",
-      m.linkWorks,
-      "",
-      m.linkFooter(name),
-    ].join("\n"),
-  });
-  return sent ? "sent" : "error";
+    const name = store.name;
+    const link = `${origin}/@${store.handle}/manage?token=${token}`;
+    const m = membershipWords(store.language);
+    sent = await sendEmail({ meter: { by: "store", store: store, kind: "transactional" },
+      from: `"${m.fromName(displayName(name))}" <${senderAddress()}>`,
+      to: email,
+      subject: m.membershipWith(name),
+      text: [
+        m.linkIntro(name),
+        "",
+        link,
+        "",
+        store.tiers.length ? m.linkTiers : m.linkNoTiers,
+        "",
+        m.linkWorks,
+        "",
+        m.linkFooter(name),
+      ].join("\n"),
+    });
+  } finally {
+    // A link whose email did not go out opens nothing: it is removed at once,
+    // not left for the hour. When the send's outcome was unknown, an email that
+    // did arrive then holds a link that no longer opens, and asking again sends
+    // a new one. Removal is best effort: the hour's expiry still ends it.
+    if (!sent) {
+      await redisPipeline([["DEL", key]]).catch((error) => console.error("removing an unsent membership link failed", error));
+    }
+  }
+  if (!sent) console.error("a membership link was not sent");
 }
 
 function parseGrant(raw: unknown): Grant | null {

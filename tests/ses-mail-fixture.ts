@@ -21,7 +21,8 @@ type FetchFallback = (input: FetchInput, init?: RequestInit) => Response | Promi
 
 export type SesMailFixtureOptions = {
   fallback?: FetchFallback;
-  onSes?: (message: CapturedMail, input: FetchInput, init?: RequestInit) => Response | Promise<Response> | undefined;
+  // Awaited below: a promise that settles with undefined (a slow provider that then answers as set) is the default outcome too.
+  onSes?: (message: CapturedMail, input: FetchInput, init?: RequestInit) => Response | Promise<Response | undefined> | undefined;
   onResend?: (
     messages: CapturedMail[],
     input: FetchInput,

@@ -18,7 +18,9 @@
  *     (no reply, a word, a 2) as well as failed; a library link whose
  *     address did not read said it had expired (libraryOwner); and asking
  *     for a link said "on its way" with nothing sent when no store read
- *     (requestLibraryLink).
+ *     (requestLibraryLink). Since the uniform reply the answer is "sent" for
+ *     every address before any store is read, and such a request makes no
+ *     link and sends nothing (tests/access-link-uniform-reply.test.ts).
  *   - Since Codex J's focal return on #2910: a store whose address or id
  *     answered out of shape (no reply, a number), or whose record behind it
  *     did not read, was taken for a store that is not there by the tolerant
@@ -51,6 +53,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { answering } from "./security/next-headers";
+import { runAfterTasks } from "./next-server-after-world";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
@@ -272,14 +275,20 @@ async function main(): Promise<void> {
     return watched(batch);
   }) as typeof redis.pipeline;
   process.env.RESEND_API_KEY = "re_test_embed_library_stand_in";
-  const ask = (email: string, ip: string) => requestLibraryLink({ email, ip, origin: "https://marktmorgen.com" });
+  // Since the uniform reply (tests/access-link-uniform-reply.test.ts) the answer is "sent" for every address at once, and the
+  // stores are read, and the link made, only after it: run that here, while the injected reply still stands.
+  const ask = async (email: string, ip: string) => {
+    const answer = await requestLibraryLink({ email, ip, origin: "https://marktmorgen.com" });
+    await runAfterTasks();
+    return answer;
+  };
   await ask(buyer, "203.0.113.21");
   is("control: a store that reads: a link is made for its buyer", made.length, 1);
   is("control: an address that bought nothing: the same answer, and no link", [await ask("nobody-here@example.test", "203.0.113.22"), made.length], ["sent", 1]);
   inject = { when: getOf("nl:store:id:"), reply: failed };
   const unreadAsk = await ask(buyer, "203.0.113.23");
   inject = null;
-  is("a store whose record could not be read: never says a link is on its way", unreadAsk, "error");
+  is("a store whose record could not be read: the same answer as every address, said before any store is read", unreadAsk, "sent");
   is("a store whose record could not be read: and makes no link", made.length, 1);
   for (const [name, when, reply, ip] of [
     ["no reply for its id", getOf("nl:store:id:"), () => [], "203.0.113.24"],
@@ -289,7 +298,7 @@ async function main(): Promise<void> {
     inject = { when, reply };
     const result = await ask(buyer, ip);
     inject = null;
-    is(`a store with ${name}: never says a link is on its way`, result, "error");
+    is(`a store with ${name}: the same answer as every address`, result, "sent");
     is(`a store with ${name}: and makes no link`, made.length, 1);
   }
   // Another buyer of the same store, so the address's own hourly limit is not what answers.

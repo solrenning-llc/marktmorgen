@@ -18,6 +18,9 @@ for (const code of LANGUAGE_CODES) {
 }
 part("The sent result must not disclose access or certify inbox delivery");
 const source = readFileSync("lib/podcast-access.ts", "utf8");
-is("no access still returns the same sent result without sending", source.includes('if (!(await mayListen(store, product.id, raw))) return "sent";'), true);
-is("the sending path maps acceptance to sent or error", source.includes('return sent ? "sent" : "error";'), true);
+// Since the uniform reply (tests/access-link-uniform-reply.test.ts) the answer is "sent" for every address at once,
+// and whether it may listen, the feed and its email are all decided after it (lib/after-answer.ts).
+is("every address gets the same sent result, before anything about it is read", source.includes('afterAnswer("sending a podcast feed link", () => sendFeedEmail(store, product, raw, input.base, input.from));\n  return "sent";'), true);
+is("no access sends nothing", source.includes("if (!(await mayListen(store, product.id, raw))) return;"), true);
+is("an email that did not go out is said only to the server's log", source.includes('if (!sent) console.error("a podcast feed link was not sent");'), true);
 done();

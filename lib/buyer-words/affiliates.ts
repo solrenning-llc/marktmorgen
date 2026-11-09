@@ -77,7 +77,7 @@ const en = {
   openMyPage: "Open my affiliate page",
   checkInbox: "Check your inbox",
   sentBody: (store: string) =>
-    `The link is on its way. It comes from ${store} via Marktmorgen and usually arrives within a minute. If it is not there, look in spam.`,
+    `We tried to email you the link. It comes from ${store} via Marktmorgen. If nothing arrives in a few minutes, check your spam folder, then ask again.`,
 
   // ---- Just arrived ---------------------------------------------------------------
   appliedTitle: "Your application is in",
@@ -408,7 +408,7 @@ const es: AffiliatesWords = {
   openMyPage: "Abrir mi página de afiliado",
   checkInbox: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
-    `El enlace va en camino. Llega de ${store} a través de Marktmorgen y suele tardar menos de un minuto. Si no está, mira en spam.`,
+    `Intentamos enviarte el enlace por email. Llega de ${store} a través de Marktmorgen. Si no llega nada en unos minutos, revisa la carpeta de spam y luego vuelve a pedirlo.`,
 
   appliedTitle: "Tu solicitud está enviada",
   joinedTitle: "Tu enlace está listo",
@@ -696,7 +696,7 @@ const fr: AffiliatesWords = {
   openMyPage: "Ouvrir ma page d'affilié",
   checkInbox: "Consultez votre boîte de réception",
   sentBody: (store) =>
-    `Le lien est en route. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute. S'il n'est pas là, regardez dans les spams.`,
+    `Nous avons essayé de vous envoyer le lien par e-mail. Il vient de ${store} via Marktmorgen. Si rien n'arrive d'ici quelques minutes, regardez dans les spams, puis redemandez-le.`,
 
   appliedTitle: "Votre candidature est envoyée",
   joinedTitle: "Votre lien est prêt",
@@ -986,7 +986,7 @@ const de: AffiliatesWords = {
   openMyPage: "Meine Affiliate-Seite öffnen",
   checkInbox: "Sehen Sie in Ihren Posteingang",
   sentBody: (store) =>
-    `Der Link ist unterwegs. Er kommt von ${store} über Marktmorgen und ist meist innerhalb einer Minute da. Wenn nicht, sehen Sie im Spam-Ordner nach.`,
+    `Wir haben versucht, Ihnen den Link per E-Mail zu senden. Er kommt von ${store} über Marktmorgen. Wenn in ein paar Minuten nichts ankommt, sehen Sie im Spam-Ordner nach und fragen Sie dann erneut.`,
 
   appliedTitle: "Ihre Bewerbung ist eingegangen",
   joinedTitle: "Ihr Link ist bereit",
@@ -1283,7 +1283,7 @@ const it: AffiliatesWords = {
   openMyPage: "Apri la mia pagina di affiliato",
   checkInbox: "Controlla la tua casella di posta",
   sentBody: (store) =>
-    `Il link è in arrivo. Viene da ${store} tramite Marktmorgen e di solito arriva entro un minuto. Se non c'è, guarda nello spam.`,
+    `Abbiamo provato a inviarti il link via email. Viene da ${store} tramite Marktmorgen. Se tra qualche minuto non arriva nulla, guarda nello spam, poi richiedilo.`,
 
   appliedTitle: "La tua candidatura è stata inviata",
   joinedTitle: "Il tuo link è pronto",
@@ -1574,7 +1574,7 @@ const nl: AffiliatesWords = {
   openMyPage: "Mijn affiliatepagina openen",
   checkInbox: "Kijk in je inbox",
   sentBody: (store) =>
-    `De link is onderweg. Hij komt van ${store} via Marktmorgen en is er meestal binnen een minuut. Staat hij er niet, kijk dan in je spam.`,
+    `We hebben geprobeerd je de link te mailen. Hij komt van ${store} via Marktmorgen. Komt er binnen een paar minuten niets aan, kijk dan in je spam en vraag hem daarna opnieuw.`,
 
   appliedTitle: "Je aanmelding is binnen",
   joinedTitle: "Je link staat klaar",
@@ -1870,7 +1870,7 @@ const pt: AffiliatesWords = {
   openMyPage: "Abrir a minha página de afiliado",
   checkInbox: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
-    `A ligação está a caminho. Vem de ${store} através da Marktmorgen e costuma chegar em menos de um minuto. Se não estiver lá, veja no spam.`,
+    `Tentámos enviar-lhe a ligação por email. Vem de ${store} através da Marktmorgen. Se nada chegar dentro de alguns minutos, veja no spam e depois volte a pedir.`,
 
   appliedTitle: "A sua candidatura foi enviada",
   joinedTitle: "A sua ligação está pronta",

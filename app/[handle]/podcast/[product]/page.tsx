@@ -61,7 +61,8 @@ export default async function PodcastPage({ params, searchParams }: Params) {
   // from their orders page, which lists their feeds.
   if (product.hidden && !mine && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const feed = mine ? `${SITE_URL}/api/store/podcast/feed/${mine}.xml` : null;
-  const notice = w.podcastNotices[status];
+  // Only the notices the page has: a word such as "constructor" is not one of them.
+  const notice = Object.hasOwn(w.podcastNotices, status) ? w.podcastNotices[status] : undefined;
 
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>

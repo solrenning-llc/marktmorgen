@@ -92,7 +92,7 @@ const en = {
     `If that address has a membership with ${store}, we try to email a link to it. It works for ${hours === 1 ? "one hour" : `${hours} hours`}. We say the same thing whether or not it does, so nobody can use this page to find out who is a member.`,
   checkInbox: "Check your inbox",
   sentBody: (store: string) =>
-    `If that address has a membership with ${store}, the link is on its way. It comes from ${store} via Marktmorgen. If it is not there, look in spam.`,
+    `If that address has a membership with ${store}, we tried to email it the link. It comes from ${store} via Marktmorgen. If nothing arrives in a few minutes, check your spam folder, then ask again.`,
   tryOther: "Nothing arrived? You may pay with a different address: the one you typed when you joined. Try that one below.",
 
   // ---- Managing: the memberships behind the link -----------------------------------
@@ -453,7 +453,7 @@ const es: MembershipWords = {
     `Si esa dirección tiene una membresía en ${store}, intentamos enviarle un enlace por email. Funciona durante ${hours === 1 ? "una hora" : `${hours} horas`}. Decimos lo mismo tanto si la tiene como si no, para que nadie pueda usar esta página para averiguar quién es miembro.`,
   checkInbox: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
-    `Si esa dirección tiene una membresía en ${store}, el enlace va de camino. Lo envía ${store} a través de Marktmorgen. Si no está, mira en la carpeta de spam.`,
+    `Si esa dirección tiene una membresía en ${store}, intentamos enviarle el enlace por email. Lo envía ${store} a través de Marktmorgen. Si no llega nada en unos minutos, mira en la carpeta de spam y luego vuelve a pedirlo.`,
   tryOther: "¿No llegó nada? Puede que pagues con otra dirección: la que escribiste al hacerte miembro. Prueba con esa abajo.",
 
   yourMemberships: "Tus membresías",
@@ -799,7 +799,7 @@ const fr: MembershipWords = {
     `Si cette adresse a un abonnement chez ${store}, nous essayons de lui envoyer un lien par e-mail. Il fonctionne pendant ${hours < 2 ? "une heure" : `${hours}${S}heures`}. Nous affichons le même message dans tous les cas, pour que personne ne puisse utiliser cette page pour savoir qui est membre.`,
   checkInbox: "Consultez votre boîte de réception",
   sentBody: (store) =>
-    `Si cette adresse a un abonnement chez ${store}, le lien est en route. Il vient de ${store} via Marktmorgen. S'il n'y est pas, regardez dans les spams.`,
+    `Si cette adresse a un abonnement chez ${store}, nous avons essayé de lui envoyer le lien par e-mail. Il vient de ${store} via Marktmorgen. Si rien n'arrive d'ici quelques minutes, regardez dans les spams, puis redemandez-le.`,
   tryOther: `Rien reçu${S}? Vous payez peut-être avec une autre adresse${S}: celle que vous avez saisie lors de votre inscription. Essayez-la ci-dessous.`,
 
   yourMemberships: "Vos abonnements",
@@ -1155,7 +1155,7 @@ const de: MembershipWords = {
     `Wenn diese Adresse eine Mitgliedschaft bei ${store} hat, versuchen wir, einen Link dorthin per E-Mail zu senden. Er funktioniert ${hours === 1 ? "eine Stunde" : `${hours} Stunden`} lang. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand mit dieser Seite herausfinden kann, wer Mitglied ist.`,
   checkInbox: "Sehen Sie in Ihrem Posteingang nach",
   sentBody: (store) =>
-    `Wenn diese Adresse eine Mitgliedschaft bei ${store} hat, ist der Link unterwegs. Er kommt von ${store} über Marktmorgen. Falls er nicht da ist, sehen Sie im Spam-Ordner nach.`,
+    `Wenn diese Adresse eine Mitgliedschaft bei ${store} hat, haben wir versucht, ihr den Link per E-Mail zu senden. Er kommt von ${store} über Marktmorgen. Wenn in ein paar Minuten nichts ankommt, sehen Sie im Spam-Ordner nach und fragen Sie dann erneut.`,
   tryOther:
     "Nichts angekommen? Vielleicht bezahlen Sie mit einer anderen Adresse: der, die Sie beim Beitritt eingegeben haben. Versuchen Sie es unten mit dieser.",
 
@@ -1522,7 +1522,7 @@ const it: MembershipWords = {
     `Se quell'indirizzo ha un abbonamento con ${store}, proviamo a inviare un link via email. Funziona per ${hours === 1 ? "un'ora" : `${hours} ore`}. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi è membro.`,
   checkInbox: "Controlla la tua casella di posta",
   sentBody: (store) =>
-    `Se quell'indirizzo ha un abbonamento con ${store}, il link è in arrivo. Lo invia ${store} tramite Marktmorgen. Se non c'è, guarda nella cartella spam.`,
+    `Se quell'indirizzo ha un abbonamento con ${store}, abbiamo provato a inviargli il link via email. Lo invia ${store} tramite Marktmorgen. Se tra qualche minuto non arriva nulla, guarda nella cartella spam, poi richiedilo.`,
   tryOther:
     "Non è arrivato nulla? Forse paghi con un altro indirizzo: quello che hai inserito al momento dell'iscrizione. Prova con quello qui sotto.",
 
@@ -1874,7 +1874,7 @@ const nl: MembershipWords = {
     `Als dat adres een lidmaatschap bij ${store} heeft, proberen we er per e-mail een link naartoe te sturen. Die werkt ${hours === 1 ? "een uur" : `${hours} uur`}. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie lid is.`,
   checkInbox: "Kijk in je inbox",
   sentBody: (store) =>
-    `Als dat adres een lidmaatschap bij ${store} heeft, is de link onderweg. Hij komt van ${store} via Marktmorgen. Staat hij er niet, kijk dan in je spam.`,
+    `Als dat adres een lidmaatschap bij ${store} heeft, hebben we geprobeerd er de link naartoe te mailen. Hij komt van ${store} via Marktmorgen. Komt er binnen een paar minuten niets aan, kijk dan in je spam en vraag hem daarna opnieuw.`,
   tryOther: "Niets ontvangen? Misschien betaal je met een ander adres: het adres dat je invulde toen je lid werd. Probeer dat hieronder.",
 
   yourMemberships: "Je lidmaatschappen",
@@ -2223,7 +2223,7 @@ const pt: MembershipWords = {
     `Se esse endereço tiver uma subscrição com ${store}, tentamos enviar-lhe uma ligação por email. Funciona durante ${hours === 1 ? "uma hora" : `${hours} horas`}. Dizemos o mesmo quer tenha quer não, para que ninguém possa usar esta página para descobrir quem é membro.`,
   checkInbox: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
-    `Se esse endereço tiver uma subscrição com ${store}, a ligação está a caminho. É enviada por ${store} através da Marktmorgen. Se não estiver lá, veja na pasta de spam.`,
+    `Se esse endereço tiver uma subscrição com ${store}, tentámos enviar-lhe a ligação por email. É enviada por ${store} através da Marktmorgen. Se nada chegar dentro de alguns minutos, veja na pasta de spam e depois volte a pedir.`,
   tryOther: "Não chegou nada? Talvez pague com outro endereço: o que introduziu quando aderiu. Experimente esse abaixo.",
 
   yourMemberships: "As suas subscrições",

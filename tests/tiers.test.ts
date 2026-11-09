@@ -25,6 +25,7 @@ import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
+import { runAfterTasks } from "./next-server-after-world";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -157,7 +158,11 @@ async function main(): Promise<void> {
   const tiers = await liveTiers(store);
   is("both on sale", tiers.map((t) => t.title), ["Basic", "Pro"]);
 
-  is("the link is emailed", await requestManageLink({ store, email: "dana@example.com", ip: "203.0.113.9", origin: "https://marktmorgen.com" }), "sent");
+  const linkAsked = await requestManageLink({ store, email: "dana@example.com", ip: "203.0.113.9", origin: "https://marktmorgen.com" });
+  // The membership search, the link and its email run after the answer since 07/11/2026 (lib/after-answer.ts, the
+  // membership-link timing fix): run before the email is looked at.
+  await runAfterTasks();
+  is("the link is emailed", linkAsked, "sent");
   const link = emails.at(-1)!;
   is("which says switching is there", link.text.includes("switch to another plan"), true);
   const token = /token=([0-9a-f]{64})/.exec(link.text)![1];

@@ -55,7 +55,10 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const w = communityWords(store.language);
   const lang = LANGUAGES[store.language].locale;
   const notices = communityNotices(store.language);
-  const notice = notices[word] ?? null;
+  // Only the notices the page has: a word such as "constructor" is not one of them.
+  const notice = Object.hasOwn(notices, word) ? notices[word] : null;
+  const asked = typeof query.link === "string" ? query.link : "";
+  const links = linkNotices(store.language);
 
   if (viewer.state !== "in") {
     const products = (await accessProducts(store, viewer.config)).map((p) => ({ id: p.id, title: p.title, kind: ticketKind(store, p) }));
@@ -69,7 +72,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
             state={viewer.state}
             email={viewer.state === "out" ? null : viewer.email}
             products={products}
-            link={linkNotices(store.language)[typeof query.link === "string" ? query.link : ""] ?? (word === "out" ? w.sessionEnded : null)}
+            link={Object.hasOwn(links, asked) ? links[asked] : word === "out" ? w.sessionEnded : null}
           />
         </main>
       </div>

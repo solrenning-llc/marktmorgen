@@ -120,6 +120,9 @@ function centralAliases(file,root,here){
  if(file==='cart-stock.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-open.test.ts'||file==='kb9-withdrawal.test.ts'||file==='n-2827-withdrawal-flow.test.ts'||file==='kb9-2827-c5-review.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(['access-link-uniform-reply.test.ts','buyer-library.test.ts','number-gates-c.test.ts','embed-library-unknown.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(['oracle-siblings-uniform-reply.test.ts','tiers.test.ts','yearly-switch.test.ts','membership-pause.test.ts','buyer-help-promises.test.ts','cx1-review-2764-charge-reply.test.ts','cx1-review-2764-invoice.test.ts','cx1-review-2764-stripe-version.test.ts','cx1-review-2764-transport.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(['hub-link-uniform-reply.test.ts','signin-link-set-exact.test.ts','affiliate-hub.test.ts','honest-affiliate-hub.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='orders-page-bounds.test.ts'){aliases['next/server']=join(here,'next-server-after-world.ts');aliases['next/link']=join(here,'next-link-world.tsx');}
  if(file==='deals-board-pipelines-render.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='unnamed-buyer-notes.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');

@@ -27,7 +27,7 @@ export const metadata: Metadata = {
 type Params = { searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
 const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
-  sent: { tone: "ok", text: "If that address bought anything here, a link to your library is on its way to it. Open it on this device or any other; it works for 24 hours." },
+  sent: { tone: "ok", text: "If that address bought anything here, we tried to email it a link to your library. Open it on this device or any other; it works for 24 hours. If nothing arrives in a few minutes, check your spam folder, then ask again." },
   email: { tone: "error", text: "That does not look like an email address. Type the one you paid with." },
   limited: { tone: "error", text: "Too many tries for now. Wait an hour and ask again." },
   error: { tone: "error", text: "The email could not be sent just now. Try again in a moment." },
@@ -41,7 +41,8 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
 export default async function LibraryPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
-  const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
+  // Only the notices the page has: a word such as "constructor" is not one of them.
+  const status = typeof query.status === "string" && Object.hasOwn(STATUS, query.status) ? STATUS[query.status] : undefined;
   // A link whose address could not be read is said so, never "expired" (CX-123 rule 24; Claude 5 on #2910).
   const owner = token ? await libraryOwner(token).then((email) => ({ email }), () => null) : { email: null };
   const email = owner?.email ?? null;

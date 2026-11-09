@@ -38,13 +38,20 @@
  *       nothing and takes the order off the list; a person deleted before they pay again is handed the new order; a
  *       deletion that completes during a try, after its check, takes the order off the list in that try; a deletion
  *       mark whose reply is not exact writes nothing and keeps the order owed.
+ *   M:  which deletion it was (second independent review of #3449, probes P1 to P4): a deletion by the store's team
+ *       keeps the purchase, so an order still owed is handed over (P1, P2); a deletion the person asked for that
+ *       completes during a try takes back what that try wrote of them (P3); an affiliate's commission on a sale paid
+ *       and handed over is credited although the person was deleted afterward (P4); a refund told to the webhooks
+ *       after the person's own deletion does not carry their address.
  */
 import { createHash } from "node:crypto";
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { claimHandle, ensureStatsId, addProduct, editProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, ensureStatsId, addProduct, editProduct, setProductLink, setSubscription, setPayPalSeller, setAffiliateSetting, storeForEmail, type Store } from "@/lib/store";
 import { forgetNoted, noteForErasure } from "@/lib/erasure-index";
 import { importedKey } from "@/lib/imported-purchases";
 import { storesBoughtFrom } from "@/lib/buyer-library";
+import { NO_AFFILIATES } from "@/lib/affiliate-setting";
+import { addEndpoint } from "@/lib/webhooks";
 import { erasePerson } from "@/lib/person-erasure";
 import { type Listing, readListing } from "@/lib/catalog";
 import { openOrder } from "@/lib/paypal-sales";
@@ -65,6 +72,8 @@ const DAY_MS = 86_400_000;
 const orders = new Map<string, Record<string, unknown>>();
 let made = 0;
 let buyerFor = "buyer@example.com";
+/** Captures PayPal answers as refunded in full (part M). */
+const refundedCaptures = new Set<string>();
 const orderId = (n: number) => `6P290127TN36471${String(n).padStart(2, "0")}`;
 /** What Resend answers: accepted, a 503 (its answer not known to be a refusal), a 422 (a refusal) or a 429 (slow down). */
 let resendMode: "up" | "503" | "422" | "429" = "up";
@@ -105,7 +114,7 @@ async function paypal(input: string | URL | Request, init?: RequestInit): Promis
   const read = /^\/v2\/checkout\/orders\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
   if (read && method === "GET") return orders.has(read) ? json(orders.get(read)) : json({ name: "RESOURCE_NOT_FOUND" }, 404);
   const cap = /^\/v2\/payments\/captures\/([A-Z0-9]+)$/.exec(url.pathname)?.[1];
-  if (cap && method === "GET") return json({ id: cap, status: "COMPLETED" });
+  if (cap && method === "GET") return json({ id: cap, status: refundedCaptures.has(cap) ? "REFUNDED" : "COMPLETED" });
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);
 }
 
@@ -763,6 +772,129 @@ async function main(): Promise<void> {
   }
   await sweep(6 / 60);
   is("read exactly at the next sweep: nothing written, and the order leaves the list", [redis.run(["EXISTS", importedKey(statsId, buyerL4)]), (await listed()).includes(l4)], [0, false]);
+
+  part("M: P1 control: a deletion by the store's team keeps a purchase already handed over");
+  startOfNextDay();
+  resendMode = "up";
+  const buyerM1 = "team-kept@example.com";
+  const m1 = await pay(23, buyerM1);
+  is("handed over, its receipt sent", [redis.run(["EXISTS", importedKey(statsId, buyerM1)]), copies(buyerM1).length, (await listed()).includes(m1)], [1, 1, false]);
+  const teamM1 = await erasePerson(await fresh(), buyerM1, { kind: "team", who: "owner@example.com", role: "owner" });
+  is("the team's deletion completes", teamM1.ok, true);
+  is("and keeps the purchase", redis.run(["EXISTS", importedKey(statsId, buyerM1)]), 1);
+
+  /** Throws a synthetic Upstash failure on the first pipeline that writes a purchase, once. */
+  const writesPurchase = (c: (string | number)[]) => c.some((arg) => String(arg).startsWith("nl:imp:buy:"));
+  const failOnce = (when: (command: (string | number)[]) => boolean) => {
+    const pipeline = redis.pipeline.bind(redis);
+    let fired = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (fired || !commands.some(when)) return pipeline(commands);
+      fired = true;
+      throw new Error("synthetic Upstash failure");
+    }) as typeof redis.pipeline;
+    return () => { redis.pipeline = pipeline; };
+  };
+
+  part("M: P2: the team deletes the person before the first hand-over: the order is still handed over");
+  startOfNextDay();
+  resendMode = "up";
+  const buyerM2 = "team-before-hand-over@example.com";
+  const undoM2 = failOnce(writesPurchase);
+  const m2 = await pay(24, buyerM2);
+  undoM2();
+  is("control: the return route's try wrote no purchase and sent nothing", [redis.run(["EXISTS", importedKey(statsId, buyerM2)]), copies(buyerM2).length], [0, 0]);
+  is("control: the order is still owed", (await listed()).includes(m2), true);
+  const teamM2 = await erasePerson(await fresh(), buyerM2, { kind: "team", who: "owner@example.com", role: "owner" });
+  is("the team's deletion completes", teamM2.ok, true);
+  await sweep(11 / 60);
+  is("the next try hands the purchase over: they paid, and a team's deletion keeps purchases", redis.run(["EXISTS", importedKey(statsId, buyerM2)]), 1);
+  is("no receipt is sent to an address the store deleted", copies(buyerM2).length, 0);
+  is("and the order leaves the list", (await listed()).includes(m2), false);
+
+  part("M: P3: the person's own deletion completes during the first try, after its check: what that try wrote is taken back");
+  startOfNextDay();
+  resendMode = "up";
+  const buyerM3 = "erased-mid-hand-over@example.com";
+  {
+    // Holds the try's purchase write until the person's own deletion completes.
+    const pipeline = redis.pipeline.bind(redis);
+    let entered!: () => void;
+    let release!: () => void;
+    const reached = new Promise<void>((resolve) => (entered = resolve));
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (held || !commands.some(writesPurchase)) return pipeline(commands);
+      held = true;
+      entered();
+      await released;
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    const paying = pay(25, buyerM3);
+    await reached;
+    const erasedM3 = await erasePerson(await fresh(), buyerM3, { kind: "person" });
+    is("the deletion completes", erasedM3.ok, true);
+    release();
+    const m3 = await paying;
+    redis.pipeline = pipeline;
+    is("nothing was sent to them", copies(buyerM3).length, 0);
+    is("the purchase that try wrote is taken back", redis.run(["EXISTS", importedKey(statsId, buyerM3)]), 0);
+    is("and so is the store in their library", (await storesBoughtFrom(buyerM3)).includes(store.sid), false);
+    is("the order leaves the list", (await listed()).includes(m3), false);
+    await sweeps(2);
+    is("later sweeps write nothing of them", [redis.run(["EXISTS", importedKey(statsId, buyerM3)]), copies(buyerM3).length], [0, 0]);
+  }
+
+  part("M: P4: the person deleted after a try that handed the purchase over: the affiliate is still credited");
+  startOfNextDay();
+  resendMode = "up";
+  const AFF = "0a1b2c3d4e5f";
+  await setAffiliateSetting("owner@example.com", { ...NO_AFFILIATES, enabled: true, percent: 30 });
+  redis.run(["HSET", `nl:aff:${statsId}:people`, AFF, JSON.stringify({ id: AFF, email: "sara@example.com", code: "sara", status: "approved", appliedAt: 1, decidedAt: 1, note: "" })]);
+  const buyerM4 = "erased-after-grant@example.com";
+  buyerFor = buyerM4;
+  const openedM4 = await openOrder(await fresh(), product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT, via: { aff: AFF, rate: 30 } });
+  if (!openedM4.ok) throw new Error(openedM4.reason);
+  const m4 = openedM4.order;
+  const undoM4 = after((c) => c[0] === "SET" && String(c[1]).startsWith("nl:orders:link:"), () => ["QUEUED"]);
+  await paypalReturn(new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=harbor&token=${m4}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.26" } }));
+  undoM4();
+  is("control: that try handed the purchase over, then stopped before crediting the sale", [redis.run(["EXISTS", importedKey(statsId, buyerM4)]), redis.run(["HEXISTS", `nl:aff:${statsId}:sales`, `paypal:${m4}`])], [1, 0]);
+  is("control: the order is still owed", (await listed()).includes(m4), true);
+  const erasedM4 = await erasePerson(await fresh(), buyerM4, { kind: "person" });
+  is("the person's own deletion completes", erasedM4.ok, true);
+  await sweep(11 / 60);
+  is("the next try credits the affiliate for the sale paid and handed over", redis.run(["HEXISTS", `nl:aff:${statsId}:sales`, `paypal:${m4}`]), 1);
+  is("without handing anything over to the deleted person again", redis.run(["EXISTS", importedKey(statsId, buyerM4)]), 0);
+  is("nothing was sent to them", copies(buyerM4).length, 0);
+  is("and the order leaves the list", (await listed()).includes(m4), false);
+
+  part("M: a refund told to the webhooks after the person's own deletion does not carry their address");
+  startOfNextDay();
+  resendMode = "up";
+  const hooked = await addEndpoint(await fresh(), "https://hooks.example.com/marktmorgen", ["refund.issued"]);
+  is("control: the store listens for refunds", hooked.ok, true);
+  const refundBodies = async () => {
+    const [log] = await redis.pipeline([["LRANGE", `nl:hooks:log:${statsId}`, 0, -1]]);
+    const all = await Promise.all((log as string[]).map(async (id) => JSON.parse(String((await redis.pipeline([["GET", `nl:hooks:d:${id}`]]))[0])) as { type: string; body: string }));
+    return all.filter((d) => d.type === "refund.issued").map((d) => JSON.parse(d.body).data as { paypal_capture: string; buyer: { email: string | null } });
+  };
+  const refundOf = async (order: string) => (await refundBodies()).find((d) => d.paypal_capture === `4D679366HH9087${order.slice(-2)}`);
+  const buyerM5 = "erased-then-refunded@example.com";
+  const buyerM6 = "refunded@example.com";
+  const m5 = await pay(27, buyerM5);
+  const m6 = await pay(28, buyerM6);
+  is("control: both handed over and receipted", [copies(buyerM5).length, copies(buyerM6).length], [1, 1]);
+  const erasedM5 = await erasePerson(await fresh(), buyerM5, { kind: "person" });
+  is("the person's own deletion completes", erasedM5.ok, true);
+  for (const order of [m5, m6]) {
+    refundedCaptures.add(`4D679366HH9087${order.slice(-2)}`);
+    redis.run(["ZADD", `nl:ppsell:watch:${statsId}`, "0", order]);
+  }
+  await sweep(6 / 60);
+  is("control: a buyer not deleted is named in their refund's event", (await refundOf(m6))?.buyer.email, buyerM6);
+  is("the refund of a person deleted at their own request is told without their address", (await refundOf(m5))?.buyer, { email: null, name: null });
 
   done();
 }

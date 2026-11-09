@@ -31,6 +31,12 @@
  *     (the review's item 3).
  *   - P4: a run stops at the deadline it is given, and every plan it did not
  *     reach is still in its line; the cron route passes it one.
+ *   - The review of #3367 (Claude 2, 09/11/2026): (1) under the run's
+ *     deadline the plans due again and the new ones are taken in turn, the
+ *     one due first first, so new checkouts cannot keep a due plan waiting;
+ *     (2) a stuck plan whose notice email could not be sent is logged; (3) a
+ *     plan whose own end is already past is ended at once, never sent a
+ *     cancel_at in the past (which Stripe documents as a future time).
  *   - Item 6: a reply of unknown shape is not an empty line: the run throws
  *     UnknownReplyError, so the route answers not ok.
  *   - A run's cost is the one tests/plan-cost-registry.ts declares
@@ -85,6 +91,10 @@ const refusing = new Set<string>([STUCK]);
 let platform: { status: number; body: unknown } | null = null;
 const emails: { to: string; subject: string; text: string }[] = [];
 let resendFails = false;
+/** Every checkout session read, in order: which plans a run reached (the review of #3367, item 1). */
+const sessionReads: string[] = [];
+/** Subscriptions ended at once (DELETE), with the time on the test clock. */
+const cancels: { id: string; at: number }[] = [];
 const realNow = Date.now;
 let clock = Math.floor(realNow() / 1000) * 1000;
 const setClock = (seconds: number) => {
@@ -112,12 +122,23 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (on && refusing.has(on)) return answer({ error: { message: "no access" } }, 403);
   if (on === FLAKY && flakyDown) return answer({ error: { message: "try later" } }, 500);
   const session = /^\/checkout\/sessions\/(cs_test_[A-Za-z0-9]+)$/.exec(path);
+  if (session) sessionReads.push(session[1]);
   if (session) return sessions[session[1]] ? answer(sessions[session[1]]) : answer({ error: { message: "No such checkout" } }, 404);
   const sub = /^\/subscriptions\/(sub_[A-Za-z0-9]+)$/.exec(path);
   if (sub && method === "GET") return answer(subscriptions[sub[1]] ?? {});
+  if (sub && method === "DELETE") {
+    cancels.push({ id: sub[1], at: Math.floor(Date.now() / 1000) });
+    subscriptions[sub[1]] = { ...subscriptions[sub[1]], status: "canceled" };
+    return answer(subscriptions[sub[1]]);
+  }
   if (sub && method === "POST") {
     const body = new URLSearchParams(String(init?.body));
+    // Stripe documents cancel_at as a future time (docs.stripe.com/billing/subscriptions/cancel): one already past is
+    // refused here, the case the review of #3367 (item 3) asked about.
     updates.push({ id: sub[1], body, at: Math.floor(Date.now() / 1000) });
+    if (Number(body.get("cancel_at")) <= Math.floor(Date.now() / 1000)) {
+      return answer({ error: { type: "invalid_request_error", message: "cancel_at must be in the future" } }, 400);
+    }
     subscriptions[sub[1]] = { ...subscriptions[sub[1]], cancel_at: Number(body.get("cancel_at")) };
     return answer(subscriptions[sub[1]]);
   }
@@ -309,6 +330,8 @@ async function main(): Promise<void> {
     if (emails.length > sent) mailedOn.push(d);
   }
   is("an email that could not be sent on day 30 is sent at the next weekly try, once", mailedOn, [37]);
+  // Rule 23: new assertion, red at d62a81f1 (the review of #3367, item 2: an unsent notice left no log line at all).
+  is("the stuck plan whose email could not be sent is logged, not let go in silence", logged.filter((line) => line.includes("could not be emailed now")).length >= 1, true);
 
   redis.clear();
   setClock(ANCHOR + DAY);
@@ -397,6 +420,48 @@ async function main(): Promise<void> {
   is("every plan is still in one of the two lines", still.filter(Boolean).length, 250);
   const route = readFileSync("app/api/cron/plans/route.ts", "utf8");
   is("the cron route gives the plans a deadline of their own", /settlePlans\(PLANS_PER_RUN, Math\.min\(deadline, Date\.now\(\) \+ PLANS_MS\)\)/.test(route), true);
+
+  part("The review of #3367, item 1: under the run's deadline, the plans due again are not kept waiting by new ones");
+  redis.clear();
+  setClock(Math.floor(realNow() / 1000));
+  const newIds = Array.from({ length: 6 }, (_, i) => `cs_test_new${String(i).padStart(9, "0")}`);
+  const dueIds = Array.from({ length: 6 }, (_, i) => `cs_test_due${String(i).padStart(9, "0")}`);
+  for (const id of [...newIds, ...dueIds]) sessions[id] = checkout(id, { kind: "plan", plan_payments: "3", plan_interval: "month" }, { status: "open", subscription: null });
+  for (const id of newIds) await rememberPlan(ACCOUNT, id);
+  const nowS = Math.floor(clock / 1000);
+  await redis.pipeline(dueIds.map((id, i) => ["ZADD", "nl:plans:retry", nowS - 60 + i, `${ACCOUNT}|${id}|${nowS - 5 * DAY}`]));
+  sessionReads.length = 0;
+  callMs = 1000;
+  // A second a Stripe call, one call a plan here, and 4.5 s: five plans are reached, of the twelve.
+  await (settlePlans as (limit?: number, deadline?: number) => ReturnType<typeof settlePlans>)(200, clock + 4_500);
+  callMs = 0;
+  const reachedDue = sessionReads.filter((id) => dueIds.includes(id));
+  const reachedNew = sessionReads.filter((id) => newIds.includes(id));
+  // Rule 23: new assertions, red at d62a81f1 (all six new plans first, no due plan reached before the deadline).
+  is("the plan due first is the first reached", sessionReads[0], dueIds[0]);
+  is("both lines are reached, taken in turn: at least two of each in five", [reachedDue.length >= 2, reachedNew.length >= 2, sessionReads.length], [true, true, 5]);
+
+  part("The review of #3367, item 3: a plan whose own end is already past is ended at once, never given an end in the past");
+  for (const [name, payments, interval, ago, cancelAt] of [
+    ["a weekly plan of 2 payments, stuck past its end", "2", "week", 30, 0],
+    ["a monthly plan of 2 payments, past its end", "2", "month", 70, 0],
+    ["a plan past its end with a later end set by hand", "3", "month", 100, 1],
+  ] as const) {
+    redis.clear();
+    updates.length = 0;
+    cancels.length = 0;
+    setClock(Math.floor(realNow() / 1000));
+    const id = `cs_test_past${name.length.toString().padStart(8, "0")}`;
+    const anchorAt = Math.floor(clock / 1000) - ago * DAY;
+    const own = addPeriods(anchorAt, interval, Number(payments));
+    sessions[id] = checkout(id, { kind: "plan", plan_payments: payments, plan_interval: interval });
+    subscriptions[`sub_${id.slice(8)}`] = { id: `sub_${id.slice(8)}`, status: "active", billing_cycle_anchor: anchorAt, ...(cancelAt ? { cancel_at: own + 60 * DAY } : {}) };
+    await rememberPlan(ACCOUNT, id);
+    const run = await settlePlans();
+    // Rule 23: new assertions, red at d62a81f1 (a cancel_at in the past is sent, refused, and the plan tried every day).
+    is(`${name}: no end at or before now is sent`, updates.filter((u) => Number(u.body.get("cancel_at")) <= u.at).length, 0);
+    is(`${name}: the subscription is ended at once, the plan settled and out of its lines`, [cancels.map((c) => c.id), run.done, await inALine(ACCOUNT, id)], [[`sub_${id.slice(8)}`], 1, false]);
+  }
 
   part("Item 6: a reply of unknown shape is not an empty line");
   redis.clear();

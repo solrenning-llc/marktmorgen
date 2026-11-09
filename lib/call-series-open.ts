@@ -21,6 +21,7 @@
  * is charged in another currency even then.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite, releaseOrderData } from "@/lib/order-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
@@ -47,11 +48,23 @@ async function tidy(store: Store & { callsId: string }, now: number): Promise<vo
   await releaseOrderData(store, (Number(gone) || 0) * seriesReleaseBytes());
 }
 
-/** How many series of the store have a session not yet over at `now` (their last session ends after it). */
+/**
+ * How many series of the store have a session not yet over at `now` (their last session ends after it). The count is
+ * read only in its exact shape (lib/redis-reply.ts, CX-123 rule 24): a reply that is missing, cut short or of another
+ * shape is not "none running", since the guards that read it would then change the store's currency or switch sales
+ * tax on while a series runs; it throws UnknownReplyError, and those routes refuse with nothing changed.
+ */
 export async function runningSeries(store: Pick<Store, "callsId">, now = Date.now()): Promise<number> {
   if (!store.callsId) return 0;
-  const [count] = await redisPipeline([["ZCOUNT", seriesOpenKey(store.callsId), `(${now}`, "+inf"]]);
-  return Number(count) || 0;
+  const replies = repliesFor(await redisPipeline([["ZCOUNT", seriesOpenKey(store.callsId), `(${now}`, "+inf"]]), 1);
+  const count = replies ? countOf(replies[0]) : null;
+  if (count === null) throw new UnknownReplyError("the count of running call series");
+  return count;
+}
+
+/** The refusal a route answers when the count of running series could not be read: nothing was changed (503). */
+export function seriesUnknownResponse(): Response {
+  return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
 }
 
 /**

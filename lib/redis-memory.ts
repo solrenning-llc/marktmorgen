@@ -202,6 +202,17 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
+        if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
+          const [, sub, files, waiting, all, expected, json, path, bytes, review, at, member] = args;
+          const now = this.run(["GET", sub]);
+          if ((typeof now === "string" ? now : "") !== expected) return 0;
+          this.run(["SET", sub, json]);
+          if (path !== "") this.run(["HSET", files, path, bytes]);
+          this.run(review === "1" ? ["ZADD", waiting, at, member] : ["ZREM", waiting, member]);
+          this.run(["ZADD", all, at, member]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

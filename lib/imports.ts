@@ -244,6 +244,21 @@ const KEEP_SECONDS = 14 * 86_400;
 export const RAW_DAYS = 3;
 /** An upload that stops before its last batch is given up after this long. */
 const RECEIVING_MS = 2 * 60 * 60 * 1000;
+/**
+ * A members upload that holds the month's emails (ImportJob.held) takes no more rows, and is not finished, from this
+ * long after it started: ten minutes before the five-minute job can give it up and give its hold back (advanceImports,
+ * past RECEIVING_MS), longer than a request runs (app/api/store/import/route.ts, maxDuration 60). So a batch or a
+ * finish read before then is written before the upload can be given up, and what it held is never sent after it was
+ * given back.
+ */
+const HELD_UPLOAD_CLOSES_MS = RECEIVING_MS - 10 * 60 * 1000;
+/**
+ * What an upload holding the month's emails costs the five-minute job until it is given up (priced per start in
+ * tests/plan-cost-registry.ts): its SADD to the active set when it starts, one GET each pass while it receives
+ * (every five minutes for RECEIVING_MS, and one more), and the give-up at its ceiling of commands (the lock, the
+ * read, the save, the store's read, the give-back and the slot).
+ */
+export const HELD_UPLOAD_SWEEP_COMMANDS = 1 + (Math.ceil(RECEIVING_MS / (5 * 60_000)) + 1) + 16;
 const LOCK_SECONDS = 70;
 const LIST_SIZE = 10;
 
@@ -516,7 +531,14 @@ export async function startImport(
     finishedAt: 0,
     ...(held ? { held } : {}),
   };
-  await redisPipeline([saveJob(job), ["LPUSH", listKey(store.sid), id], ["LTRIM", listKey(store.sid), 0, LIST_SIZE - 1]]);
+  // An upload that holds the month's emails is on the active set from the start, so the five-minute job gives it up,
+  // and gives back what it held, if it is never finished nor canceled (review on #3384).
+  await redisPipeline([
+    saveJob(job),
+    ["LPUSH", listKey(store.sid), id],
+    ["LTRIM", listKey(store.sid), 0, LIST_SIZE - 1],
+    ...(held ? [["SADD", ACTIVE_KEY, id]] : []),
+  ]);
   return { ok: true, job };
 }
 
@@ -552,7 +574,7 @@ export type RowsProblem = "unknown" | "state" | "too_many";
 export async function addRows(store: Store, id: string, rows: string[][]): Promise<{ ok: true; job: ImportJob } | { ok: false; reason: RowsProblem }> {
   const job = await jobOf(store, id);
   if (!job) return { ok: false, reason: "unknown" };
-  if (job.state !== "receiving") return { ok: false, reason: "state" };
+  if (job.state !== "receiving" || closedUpload(job)) return { ok: false, reason: "state" };
   if (job.total + rows.length > Math.min(job.expected, IMPORT_LIMITS[job.kind])) return { ok: false, reason: "too_many" };
   job.total += rows.length;
   await redisPipeline([
@@ -567,12 +589,11 @@ export async function addRows(store: Store, id: string, rows: string[][]): Promi
 export async function finishUpload(store: Store, id: string): Promise<{ ok: true; job: ImportJob } | { ok: false; reason: RowsProblem }> {
   const job = await jobOf(store, id);
   if (!job) return { ok: false, reason: "unknown" };
-  if (job.state !== "receiving") return { ok: false, reason: "state" };
+  if (job.state !== "receiving" || closedUpload(job)) return { ok: false, reason: "state" };
   job.state = job.total > 0 ? "queued" : "done";
   if (job.state === "done") job.finishedAt = Date.now();
   const back = job.state === "done" ? heldLeft(job) : undefined;
-  await redisPipeline([saveJob(job), ...(job.state === "queued" ? [["SADD", ACTIVE_KEY, id]] : [])]);
-  await giveBackHeld(job.sid, back, store);
+  await saveThenGiveBack([saveJob(job), ...(job.state === "queued" ? [["SADD", ACTIVE_KEY, id]] : [])], job.sid, back, store);
   if (job.state === "done") await releaseBusy(job);
   // Past buyers are looked for on the list of purchases from now on.
   if (job.kind === "purchases" && job.state === "queued" && !store.pastBuyers) await setPastBuyers(storeRef(store));
@@ -584,10 +605,27 @@ async function cancelJob(job: ImportJob): Promise<ImportJob> {
   job.state = "canceled";
   job.finishedAt = Date.now();
   const back = heldLeft(job);
-  await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, job.id], ["DEL", rowsKey(job.id), seenKey(job.id), mailKey(job.id)]]);
-  await giveBackHeld(job.sid, back);
+  await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, job.id], ["DEL", rowsKey(job.id), seenKey(job.id), mailKey(job.id)]], job.sid, back);
   await releaseBusy(job);
   return job;
+}
+
+/** A members upload holding the month's emails, too near the time it can be given up to take rows or be finished. */
+function closedUpload(job: ImportJob): boolean {
+  return job.held !== undefined && Date.now() - job.at > HELD_UPLOAD_CLOSES_MS;
+}
+
+/**
+ * Saves an ended import (its SET first in `commands`) and only then gives back what it held (heldLeft), once that
+ * save is confirmed in its exact shape (CX-123 rule 24): any other reply throws UnknownReplyError and nothing is
+ * given back, since the job may still hold it; it stays counted, the conservative side.
+ */
+async function saveThenGiveBack(commands: Command[], sid: string, back: ImportJob["held"], store?: Store | null): Promise<void> {
+  const replies = await redisPipeline(commands);
+  if (!back) return;
+  const exact = repliesFor(replies, commands.length);
+  if (!exact || exact[0] !== "OK") throw new UnknownReplyError("an import saved without the emails it held");
+  await giveBackHeld(sid, back, store);
 }
 
 /**
@@ -1455,8 +1493,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             job.state = "failed";
             job.finishedAt = Date.now();
             const back = heldLeft(job);
-            await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]]);
-            await giveBackHeld(job.sid, back, store);
+            await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]], job.sid, back, store);
             await releaseBusy(job);
             return job;
           }
@@ -1500,8 +1537,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
             job.state = "failed";
             job.finishedAt = Date.now();
             const back = heldLeft(job);
-            await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]]);
-            await giveBackHeld(job.sid, back, store);
+            await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]], job.sid, back, store);
             await releaseBusy(job);
             return job;
           }
@@ -1524,8 +1560,7 @@ export async function runImport(id: string, deadline: number): Promise<ImportJob
     if (job.state === "done") {
       job.finishedAt = Date.now();
       const back = heldLeft(job);
-      await redisPipeline([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]]);
-      await giveBackHeld(job.sid, back, store);
+      await saveThenGiveBack([saveJob(job), ["SREM", ACTIVE_KEY, id], ["DEL", rowsKey(id), mailKey(id)]], job.sid, back, store);
       await releaseBusy(job);
     }
     return job;
@@ -1566,6 +1601,9 @@ export async function advanceImports(deadline: number): Promise<{ worked: number
   jobs.sort((a, b) => a.at - b.at);
   for (const job of jobs) {
     if (Date.now() >= deadline) break;
+    // An upload that holds the month's emails is on the list from its start: left alone while it may still be under
+    // way, given up by runImport once it is past RECEIVING_MS, which saves it without the hold and then gives it back.
+    if (job.state === "receiving" && Date.now() - job.at <= RECEIVING_MS) continue;
     try {
       const after = await runImport(job.id, deadline);
       counts.worked += 1;

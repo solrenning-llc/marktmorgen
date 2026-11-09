@@ -20,8 +20,20 @@ export function isAiBudgetConfigured(policy: AiSpendPolicy | null = currentAiSpe
  * validate everything before writing. Missing/corrupt/expiring ledgers deny.
  * This script never creates a ledger; OPEN_AI_SPEND_LEDGER opens the
  * automatic policy's month once and never recreates it.
+ *
+ * A plan switched inside the window (v2, R32 finding 1): Stripe keeps the
+ * period on a switch (lib/billing.ts, proration "always_invoice"), so the
+ * window and its field stay the same. The field keeps the window's one total
+ * and moves under the plan the store is on now: every reservation is checked
+ * against the current plan's ceiling minus everything the window spent under
+ * any plan. An upgrade gets the new ceiling minus what was spent; a downgrade
+ * past the lower ceiling is refused with no write. The new tier's funded
+ * allocation is claimed once per window (`held:<tier>:<field>` remembers each
+ * tier the field claimed); the old one is never handed back, because a
+ * changed policy may have clamped its count and a give-back could fund more
+ * stores than the policy does. A scope or marker in any other shape refuses.
  */
-export const RESERVE_AI_SPEND = `
+export const RESERVE_AI_SPEND = `-- marktmorgen:ai-spend-reserve:v2
 local function amount(value)
   if not value or not string.match(value, '^%d+$') or (#value > 1 and string.sub(value, 1, 1) == '0') then return nil end
   local n = tonumber(value)
@@ -33,24 +45,34 @@ if redis.call('TTL', KEYS[1]) ~= -1 then return 0 end
 if redis.call('HGET', KEYS[1], 'review') ~= ARGV[1] then return 0 end
 if redis.call('HGET', KEYS[1], 'policy') ~= ARGV[6] then return 0 end
 local company = amount(redis.call('HGET', KEYS[1], 'company'))
+local tiers = {creator = true, pro = true, scale = true, trial = true, setup = true, ended = true}
+if not tiers[ARGV[7]] then return 0 end
 local raw = redis.call('HGET', KEYS[1], ARGV[2])
 local scopeField = 'tier:' .. ARGV[2]
 local scope = redis.call('HGET', KEYS[1], scopeField)
-if scope and (scope ~= ARGV[7] or not raw) then return 0 end
+if scope and (not tiers[scope] or not raw) then return 0 end
 if not scope and raw then return 0 end
 local store = raw and amount(raw) or 0
 if raw and not amount(raw) then return 0 end
+local held = redis.call('HGET', KEYS[1], 'held:' .. ARGV[7] .. ':' .. ARGV[2])
+if held and (held ~= '1' or not scope) then return 0 end
+local switched = scope and scope ~= ARGV[7]
+local leftField = switched and ('held:' .. scope .. ':' .. ARGV[2]) or nil
+if leftField then
+  local left = redis.call('HGET', KEYS[1], leftField)
+  if left and left ~= '1' then return 0 end
+end
+local claim = not scope or (switched and not held)
 local funded = amount(ARGV[8])
 local slotsField = 'slots:' .. ARGV[7]
 local slots = amount(redis.call('HGET', KEYS[1], slotsField))
-if not funded or not slots or slots > funded or (not scope and slots <= 0) then return 0 end
+if not funded or not slots or slots > funded or (claim and slots <= 0) then return 0 end
 local charge, storeLimit, companyLimit = amount(ARGV[3]), amount(ARGV[4]), amount(ARGV[5])
 if not company or not charge or charge <= 0 or not storeLimit or not companyLimit then return 0 end
 if store > company or store > storeLimit or company > companyLimit or charge > storeLimit - store or charge > companyLimit - company then return 0 end
-if not scope then
-  redis.call('HINCRBY', KEYS[1], slotsField, -1)
-  redis.call('HSET', KEYS[1], scopeField, ARGV[7])
-end
+if claim then redis.call('HINCRBY', KEYS[1], slotsField, -1) end
+if leftField then redis.call('HSET', KEYS[1], leftField, '1') end
+if not scope or switched then redis.call('HSET', KEYS[1], scopeField, ARGV[7]) end
 redis.call('HINCRBY', KEYS[1], ARGV[2], ARGV[3])
 redis.call('HINCRBY', KEYS[1], 'company', ARGV[3])
 return 1

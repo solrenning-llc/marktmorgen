@@ -1002,6 +1002,26 @@ export class MemoryRedis {
           });
           return out;
         }
+        // lib/community.ts TOGGLE_LIKE: whether the member liked it, the like and its trace entry, their room and the point, in one step.
+        if (key.startsWith("-- marktmorgen:community-like:v1\n")) {
+          if (args[0] !== "3" || args.length !== 12) return [-1, 0, 0];
+          const [, room, likes, trace, limit, month, who, ref, likeSlot, traceSlot, likeRaw, traceRaw] = args;
+          if (!/^[1-9][0-9]{0,8}$/.test(likeRaw) || !/^[1-9][0-9]{0,8}$/.test(traceRaw)) return [-1, 0, 0];
+          const likeBytes = Number(likeRaw);
+          const traceBytes = Number(traceRaw);
+          // Redis's own SISMEMBER fails on a key of another type before anything is written.
+          for (const k of [likes, trace]) if (!["set", "none"].includes(this.typeOf(k))) throw new Error("WRONGTYPE");
+          const held = this.run(["SISMEMBER", likes, who]);
+          const traced = this.run(["SISMEMBER", trace, ref]);
+          const sign = held === 1 ? -1 : 1;
+          const changes = ["a", likeSlot, String(sign * likeBytes)];
+          // The trace entry is counted only when it is written or taken out here.
+          if (held === traced) changes.push("a", traceSlot, String(sign * traceBytes));
+          const taken = this.storeData([room, limit, held === 1 ? "1" : "0", month, ...changes]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return Array.isArray(taken) ? [taken[0], taken[1], 0] : taken;
+          for (const [k, m] of [[likes, who], [trace, ref]]) this.run([held === 1 ? "SREM" : "SADD", k, m]);
+          return [1, taken[1], sign];
+        }
         // lib/creator-card.ts SAVE_CARD and DROP_CARD: the card and its data-room slot in one step.
         if (key.startsWith("-- marktmorgen:card-save:v1\n") && args[0] === "2" && args.length === 7) {
           const [, room, target, limit, month, size, json] = args;
@@ -1812,7 +1832,8 @@ export class MemoryRedis {
   private storeData(args: string[]): unknown {
     const [target, rawLimit, always, month, ...rest] = args;
     this.live(target);
-    const limit = Number(rawLimit);
+    // Lua's tonumber reads an empty or blank limit as nil, never as 0.
+    const limit = (rawLimit ?? "").trim() === "" ? Number.NaN : Number(rawLimit);
     if (!Number.isFinite(limit) || limit < 0 || !/^\d{4}-\d{2}$/.test(month ?? "") || rest.length % 3 !== 0) return [-1, 0];
     const held = this.data.get(target);
     if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");

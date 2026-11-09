@@ -334,8 +334,9 @@ export async function POST(request: NextRequest) {
     // the one who gives it: liking your own post is allowed and earns nothing.
     if (action === "like") {
       if (!owner && !(await within(id, key, "like"))) return back(fromPage, "slow", `post-${post.id}`);
-      const added = await toggleLike(id, post.id, key, store);
-      if (post.a !== key) await award(id, post.a, added ? 1 : -1, store);
+      // The point is the one the like's own step answered (lib/community.ts TOGGLE_LIKE), never deduced from a yes or a no.
+      const like = await toggleLike(id, post.id, key, store);
+      if (post.a !== key) await award(id, post.a, like.points, store);
       return back(fromPage, "liked", `post-${post.id}`);
     }
 
@@ -343,8 +344,8 @@ export async function POST(request: NextRequest) {
       const comment = await readComment(id, post.id, field("comment", 12));
       if (!comment || (comment.hid && !owner)) return back(postPage, "gone");
       if (!owner && !(await within(id, key, "like"))) return back(postPage, "slow", `comment-${comment.id}`);
-      const added = await toggleCommentLike(id, post.id, comment.id, key, store);
-      if (comment.a !== key) await award(id, comment.a, added ? 1 : -1, store);
+      const like = await toggleCommentLike(id, post.id, comment.id, key, store);
+      if (comment.a !== key) await award(id, comment.a, like.points, store);
       return back(postPage, "liked", `comment-${comment.id}`);
     }
 

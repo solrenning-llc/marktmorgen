@@ -76,8 +76,8 @@ import {
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-search";
 import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
-import { type DataStore, needData, giveData } from "@/lib/store-data";
-import { dataBytes } from "@/lib/store-data-rules";
+import { type DataStore, DataRoomError, TAKE_DATA, dataKey, dataTakenOf, giveData, monthOf, needData } from "@/lib/store-data";
+import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
 import { indexMember } from "@/lib/community-index";
 import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
@@ -1041,26 +1041,90 @@ export async function postNumbers(
   return out;
 }
 
+/** What a press of a like did: whether the member likes it now, and the author's point that goes with it. */
+export type LikeToggle = { liked: boolean; points: 1 | -1 };
+
 /** One like per member per post: a second press takes it back. */
-export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean> {
+export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<LikeToggle> {
   return toggleIn(id, likesKey(id, post), `l:${post}`, post, who, room);
 }
 
-/** Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after. */
-async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean> {
-  const [held] = await redisPipeline([["SISMEMBER", key, who]]);
-  // The like and its entry in the member's trace (traceKey) take their room first.
-  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
-  const [added] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
-  if (Number(added) === 1) return true;
-  await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
-  const times = Number(held) === 1 ? 1 : 2;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
-  return false;
+/**
+ * KEYS[1] the store's data room, KEYS[2] the set of likes, KEYS[3] the
+ * member's trace. ARGV[1] how far the room may grow, ARGV[2] this month,
+ * ARGV[3] the member, ARGV[4] the trace reference, ARGV[5] the post's slot,
+ * ARGV[6] the trace's slot, ARGV[7] a like's bytes, ARGV[8] a trace entry's.
+ * One step: whether the member liked it, the like and its trace entry
+ * written or taken out, and their room (TAKE_DATA) taken or given back for
+ * exactly what is written or taken out, so no other press can land in
+ * between. A new like takes its room first and writes nothing when it does
+ * not fit; one taken back always gives it back. Answers {state, total,
+ * point}: {1, total, 1} liked, {1, total, -1} taken back, {0, total, 0}
+ * full (nothing written), {-1, total, 0} what it cannot read (nothing
+ * written). Modelled by lib/redis-memory.ts.
+ */
+export const TOGGLE_LIKE = `-- marktmorgen:community-like:v1
+local function likeRoom(limit, always, month, changes)
+  local KEYS = {KEYS[1]}
+  local ARGV = {limit, always, month}
+  for _, v in ipairs(changes) do ARGV[#ARGV + 1] = v end
+${TAKE_DATA}
+end
+-- A like's and a trace entry's bytes: whole numbers from 1 to 999,999,999, written plainly.
+if #KEYS ~= 3 or #ARGV ~= 8 or not string.match(ARGV[7], '^[1-9]%d?%d?%d?%d?%d?%d?%d?%d?$') or not string.match(ARGV[8], '^[1-9]%d?%d?%d?%d?%d?%d?%d?%d?$') then return {-1, 0, 0} end
+local likeBytes = tonumber(ARGV[7])
+local traceBytes = tonumber(ARGV[8])
+local held = redis.call('SISMEMBER', KEYS[2], ARGV[3])
+local traced = redis.call('SISMEMBER', KEYS[3], ARGV[4])
+local sign = 1
+if held == 1 then sign = -1 end
+-- The trace entry is counted only when it is written or taken out here.
+local changes = {'a', ARGV[5], sign * likeBytes}
+if held == traced then
+  changes[4] = 'a'
+  changes[5] = ARGV[6]
+  changes[6] = sign * traceBytes
+end
+local always = '0'
+if held == 1 then always = '1' end
+local taken = likeRoom(ARGV[1], always, ARGV[2], changes)
+if taken[1] ~= 1 then return {taken[1], taken[2], 0} end
+if held == 1 then
+  redis.call('SREM', KEYS[2], ARGV[3])
+  redis.call('SREM', KEYS[3], ARGV[4])
+else
+  redis.call('SADD', KEYS[2], ARGV[3])
+  redis.call('SADD', KEYS[3], ARGV[4])
+end
+return {1, taken[2], sign}`;
+
+/**
+ * Adds `who` to a set of likes, or takes them out when they were in it, in
+ * one TOGGLE_LIKE: what it answers is exactly what happened, and the point
+ * the author gets for it is the script's own, never deduced. A reply in any
+ * other shape throws UnknownReplyError (CX-123 rule 24) and the caller
+ * applies nothing; what the script did is read by the next press. A new
+ * like past the room throws DataRoomError with nothing written.
+ */
+async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<LikeToggle> {
+  const roomKey = dataKey(room);
+  if (!roomKey) throw new UnknownReplyError("a store's data room");
+  const now = Date.now() / 1000;
+  const replies = repliesFor(await redisPipeline([[
+    "EVAL", TOGGLE_LIKE, 3, roomKey, key, traceKey(id, who),
+    contentRoomFor(room, now), monthOf(now * 1000), who, ref, POST_SLOT(post), TRACE_ENTRY.slot, SET_ENTRY_BYTES, TRACE_ENTRY.bytes,
+  ]]), 1);
+  const reply = replies?.[0];
+  if (!Array.isArray(reply) || reply.length !== 3 || (reply[2] !== 1 && reply[2] !== -1 && reply[2] !== 0)) throw new UnknownReplyError("a like");
+  const point = reply[2] as 1 | -1 | 0;
+  const taken = dataTakenOf(room, [reply[0], reply[1]], now);
+  if (taken.ok && point !== 0) return { liked: point === 1, points: point };
+  if (!taken.ok && taken.reason === "full" && point === 0) throw new DataRoomError(taken);
+  throw new UnknownReplyError("a like");
 }
 
 /** The same for a comment: one like per member, a second press takes it back. */
-export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean> {
+export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<LikeToggle> {
   return toggleIn(id, commentLikesKey(id, post, comment), `lc:${post}:${comment}`, post, who, room);
 }
 

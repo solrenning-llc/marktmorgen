@@ -21,10 +21,11 @@ export function isAiBudgetConfigured(policy: AiSpendPolicy | null = currentAiSpe
  * This script never creates a ledger; OPEN_AI_SPEND_LEDGER opens the
  * automatic policy's month once and never recreates it.
  *
- * A plan switched inside the window (v2, R32 finding 1): Stripe keeps the
- * period on a switch (lib/billing.ts, proration "always_invoice"), so the
- * window and its field stay the same. The field keeps the window's one total
- * and moves under the plan the store is on now: every reservation is checked
+ * A plan switched inside the window (v2, R32 finding 1): a switch that keeps
+ * the interval keeps Stripe's period (lib/billing.ts, proration
+ * "always_invoice"), so the window and its field stay the same. The field
+ * keeps the window's one total and moves under the plan the store is on now:
+ * every reservation is checked
  * against the current plan's ceiling minus everything the window spent under
  * any plan. An upgrade gets the new ceiling minus what was spent; a downgrade
  * past the lower ceiling is refused with no write. The new tier's funded

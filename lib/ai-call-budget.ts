@@ -11,7 +11,9 @@ export function consumeAiCallBudget(storeId: string): boolean {
   return true;
 }
 /** Called once a call's money is reserved, right before the provider is
- * asked: from here the attempt may be billed. False once the job is over,
+ * asked: from here the attempt may be billed. Also called right before other
+ * costly work inside the job (the creator's page read, lib/source-page.ts),
+ * so that job keeps its count with no provider call. False once the job is over,
  * so detached work never reaches the provider after its job was settled. */
 export function noteAiDispatch(storeId: string): boolean {
   const budget = context.getStore();

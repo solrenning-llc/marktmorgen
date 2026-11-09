@@ -660,6 +660,8 @@ export async function writeStoreSetup(store: Store, input: { about: string; sell
   if (!about && !link) return { ok: false, reason: "notes" };
   return counted(store, now, async () => {
     // The page is read inside this job, so each read is one of the month's writing jobs, counted first.
+    // The read is work of its own: noted like a provider call, so the job keeps its count without one.
+    if (link && !noteAiDispatch(store.statsId ?? "")) return null;
     const source = link ? await readSourcePage(link, sourceHooks) : null;
     const page = source?.ok ? source : null;
     if (!about && !page) return null;

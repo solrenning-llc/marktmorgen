@@ -562,6 +562,12 @@ export const FAMILIES: Record<string, Family> = {
       per("own", 401, MARK, "A link in one of the store's own emails noted."),
       per("access", 401, MARK, "A link in an access email noted."),
       per("monthly", 401, MARK, "A link in a monthly email noted."),
+      // A confirmed Path lead's mark (lib/path-lead.ts) is noted beside the link that carried it (13 [D10], review M1 of #3431).
+      per("access", 401, MARK, "A Path lead's mark noted: a sign-up link used.", MAIL("join")),
+      per("order", 401, MARK, "A Path lead's mark noted: a free copy's link used.", KIND("free")),
+      // A waitlist email notes its confirm and leave links (lib/waitlist.ts), and its confirmation the Path lead's mark.
+      per("store", 401, 2 * MARK, "A waitlist email's confirm and leave links noted.", MAIL("waitlist")),
+      per("store", 401, MARK, "A Path lead's mark noted: a waitlist link used.", MAIL("waitlist")),
     ],
   },
   "nl:transparency:@lib/transparency.ts": company("The public transparency page's counts: notices received and acted on, year by year (624 [SZ8](47))", "The company's: one hash and one set of notice ids a year, nothing about any store or person."),

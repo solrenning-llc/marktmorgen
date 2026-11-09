@@ -225,6 +225,9 @@ import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { AppCodeInvite } from "@/components/app-code-invite";
 import { showAppCodeInvite } from "@/lib/app-code-invite-words";
+import { TwoStepAsk } from "@/components/two-step-ask";
+import { noSecondStep, showTwoStepAsk } from "@/lib/two-step-ask-rules";
+import { firstSaleKnown } from "@/lib/two-step-ask";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
@@ -852,7 +855,7 @@ export default async function StudioPage({
   const mayAdd = email ? early(mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : null;
   const liveStep = email ? early(liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : null;
   const afterRemoval = <T,>(read: () => Promise<T>): Promise<T> => early((removing ?? Promise.resolve(null)).then(read));
-  const passkeysLeft = early(Promise.all([removing, mayAdd, liveStep]).then(() => (email ? listPasskeys(email).catch(() => []) : [])));
+  const passkeysLeft = early(Promise.all([removing, mayAdd, liveStep]).then(() => (email ? listPasskeys(email).catch(() => null) : [])));
   const firstReads = {
     folder: early(store ? storeFolder(ref) : Promise.resolve("")),
     pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
@@ -1230,11 +1233,16 @@ export default async function StudioPage({
   const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
-  const [passkeys, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  const [passkeysRead, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  // Passkeys not read just now (null) are shown as none, as before, but never taken for "no second step" (757 [STN4] unit 3).
+  const passkeys = passkeysRead ?? [];
   // Not read just now (null) is not "none": the recovery section says so in place of its manager (rule 24).
   const recoveryShown = recoveryRead ?? "";
   // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
   const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
+  // 757 [STN4] unit 3: the store's first sale, read exactly and only for an account with no second step at all, so a
+  // protected one costs nothing; null (unknown) never asks (lib/two-step-ask.ts).
+  const soldFirstAt = store && noSecondStep({ appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedTill > 0 }) ? await firstSaleKnown(store) : null;
   const connectReady = isConnectConfigured();
   const billingReadyForSteps = isBillingConfigured();
   // The first steps of a store, each ticked from what the store really has.
@@ -1360,6 +1368,9 @@ export default async function StudioPage({
 
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
         {store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
+
+        {/* After the store's first sale, an account with no second step is asked to turn one on; dismissible, never blocking a sale (757 [STN4] unit 3). */}
+        {store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedTill > 0 }) ? <TwoStepAsk sid={store.sid} /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}

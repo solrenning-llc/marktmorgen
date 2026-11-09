@@ -124,7 +124,7 @@ async function main() {
 
   part("Nothing is drawn on the server, so it never guesses");
   const markup = renderToStaticMarkup(createElement(TwoStepAsk, { sid: SID }));
-  is("server markup is only the empty status region", markup, '<div role="status" class="contents"></div>');
+  is("server markup is only the empty status region", markup, '<div role="status"></div>');
 
   part("Words: what to do and why, in plain US English");
   const w = TWO_STEP_ASK_WORDS;

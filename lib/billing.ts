@@ -603,6 +603,12 @@ export function retryLeft(subscription: Record<string, unknown>): "yes" | "no" |
   return "unread";
 }
 
+/** Whether Stripe's collection of the subscription is paused (`pause_collection` set): nothing is collected. */
+function collectionPaused(subscription: Record<string, unknown>): boolean {
+  const pause = subscription.pause_collection;
+  return pause !== undefined && pause !== null;
+}
+
 /** Whether the subscription's latest invoice, when expanded, was voided: its period was never paid. */
 function latestInvoiceVoided(subscription: Record<string, unknown>): boolean {
   const invoice = subscription.latest_invoice;
@@ -682,8 +688,11 @@ export function stateOf(subscription: Record<string, unknown>): SubscriptionStat
     ...planOf(subscription),
     changePending: Boolean(subscription.pending_update),
     // A renewal voided unpaid (a cancel while it was unpaid, cancelAndStopUnpaidRenewal)
-    // leaves its period unpaid however Stripe then reads the subscription.
-    renewalUnpaid: status === "past_due" || latestInvoiceVoided(subscription),
+    // leaves its period unpaid however Stripe then reads the subscription; and
+    // collection paused at Stripe (only its dashboard sets it, lib/plan-pause.ts)
+    // collects nothing while the subscription stays active. Either way what
+    // costs us to run is paused, as for any period not paid; nothing closes.
+    renewalUnpaid: status === "past_due" || latestInvoiceVoided(subscription) || collectionPaused(subscription),
     period: periodOf(subscription, trialing, subscription.cancel_at_period_end === true || cancelAt > 0),
   };
 }

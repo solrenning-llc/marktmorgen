@@ -1186,6 +1186,12 @@
       ]
     },
     {
+      "source": "app/studio/privacy/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/privacy",
+      "parameters": []
+    },
+    {
       "source": "app/studio/refund/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/refund",
@@ -1596,6 +1602,7 @@
     "components/studio-app.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
+    "components/studio-privacy.tsx",
     "components/studio-screens.tsx",
     "components/studio-start.tsx",
     "components/studio-store-pin.tsx",
@@ -2064,6 +2071,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

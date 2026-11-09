@@ -112,6 +112,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   card: "The business card, one address with a Save contact button, opened from Your pages.",
   tax: "The tax registrations active on the store's Stripe account, read from Stripe: a report for the owner, not a part of the store.",
   devices: "Logs out the person's other devices after asking first, an account action rather than a part of the store.",
+  privacy: "The person's own data, logins and deleting, gathered for their account, not a part of the store.",
 };
 
 /** What the page knows about the person, the store and the deployment. */

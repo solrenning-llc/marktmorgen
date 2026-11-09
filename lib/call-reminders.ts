@@ -22,7 +22,9 @@
  */
 import { placeLine } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { type EmailMeter, isSenderConfigured, sendEmail } from "@/lib/email";
+import { allowanceUsedExact } from "@/lib/store-allowance";
+import { allowanceFor } from "@/lib/store-allowance-rules";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder } from "@/lib/catalog";
 import { readableTime, seatsAt, zoneName, isTimeZone } from "@/lib/call-setup";
@@ -58,6 +60,29 @@ function stillUseful(mark: "24" | "1", start: number, now: number): boolean {
   return mark === "24" ? now < start - 3600_000 : now < start;
 }
 
+/**
+ * What a reminder is counted by. A booked call is CALL_ORDER_UNITS orders (lib/order-rules.ts), which pay for four
+ * emails: its two confirmations (lib/calls.ts, confirmBooking) and the buyer's two reminders for the time it was
+ * booked at. The host's reminders, and the buyer's for a time the booking was moved to (each move plans them again,
+ * and the day-before one may already be out), are taken from the store's own emails as they go, as the move notices
+ * are (lib/calls.ts, tellMoved): up to ten emails a booking with MAX_MOVES moves, never more than four on the order
+ * (Claude 5 email audit, 9 November 2026). A move count that is not a plain 0 is taken as moved.
+ */
+export function reminderMeter(store: Store, call: Pick<PaidCall, "moves">, to: "buyer" | "host"): EmailMeter {
+  return to === "buyer" && call.moves === 0 ? { by: "order" } : { by: "store", store, kind: "email" };
+}
+
+/**
+ * Whether the store's emails are used up for its window, read exactly: one GET, made only after a reminder taken
+ * from them did not go. A reminder refused for that is let go rather than tried again every five minutes until it
+ * is too late; a count that cannot be read is not "used up", and the reminder is tried again as any failed send is.
+ */
+async function storeEmailsUsedUp(store: Store): Promise<boolean> {
+  const now = Date.now();
+  const used = await allowanceUsedExact(store, "email", now).catch(() => null);
+  return used !== null && used >= allowanceFor(store, "email", now / 1000);
+}
+
 function when(mark: "24" | "1"): string {
   return mark === "24" ? "Tomorrow" : "In 1 hour";
 }
@@ -73,7 +98,7 @@ async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark:
   const b = bookingWords(store.language);
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
   const isDay = mark === "24";
-  return sendEmail({ meter: { by: "order" },
+  return sendEmail({ meter: reminderMeter(store, call, "buyer"),
     from: storeSender(store),
     to: call.email,
     subject: b.reminderSubject(isDay, product.title, store.name),
@@ -103,7 +128,7 @@ async function remindCreator(store: Store, product: Listing, paid: PaidCall[], c
   const emails = people.map((c) => c.email ?? "a buyer who gave no address");
   const seats = seatsAt(setup, call.start);
   const group = setup.kind === "live" || seats > 1;
-  return sendEmail({ meter: { by: "order" },
+  return sendEmail({ meter: reminderMeter(store, call, "host"),
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: store.email,
     subject: `${when(mark)}: ${product.title}, ${readableTime(call.start, setup.tz)}`,
@@ -244,17 +269,20 @@ export async function sendCallReminders(
         ]);
         // A send that did not go (the mail service down for a moment) is
         // tried again on the next run, while the reminder is still of use.
+        // One taken from the store's emails when they are used up is let go,
+        // its key kept, so the next run does not ask again (reminderMeter).
+        const retry = async (to: "buyer" | "host") => reminderMeter(store, call, to).by !== "store" || !(await storeEmailsUsedUp(store));
         let again = false;
         if (fresh !== null) {
           if (await remindBuyer(store, product, call, item.mark, origin)) counts.reminded += 1;
-          else if (call.email) {
+          else if (call.email && (await retry("buyer"))) {
             await redisPipeline([["DEL", sentKey(call.session, call.start, item.mark)]]);
             again = true;
           }
         }
         // A booking found on its own is counted among the people booked, too.
         const booked = paid.some((c) => c.session === call.session) ? paid : [...paid, call];
-        if (freshCreator !== null && !(await remindCreator(store, product, booked, call, item.mark))) {
+        if (freshCreator !== null && !(await remindCreator(store, product, booked, call, item.mark)) && (await retry("host"))) {
           await redisPipeline([["DEL", creatorKey(callsId, call.product, call.start, item.mark)]]);
           again = true;
         }

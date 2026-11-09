@@ -14,7 +14,9 @@
  *     adds to them.
  *   - Their email and video cost stays inside the worst case the plan already
  *     covers. A paid booking is CALL_ORDER_UNITS orders, which pay for its four
- *     emails (two confirmations, two reminders; tests/plan-cost-registry.ts,
+ *     emails (two confirmations, the buyer's two reminders; the host's
+ *     reminders and those after a move come from the store's own emails,
+ *     lib/call-reminders.ts, reminderMeter; tests/plan-cost-registry.ts,
  *     ORDER_COST is two emails). A free call sends more: the link that
  *     confirms it and, when the creator approves each one, a note to approve.
  *     So it is taken from the plan's own orders as FREE_CALL_ORDER_UNITS,
@@ -49,8 +51,10 @@ export const FREE_CALL_HOLD_SECONDS = 15 * 60;
 export const FREE_CALLS_PER_ADDRESS = 1;
 
 /**
- * Orders one free call is taken as: a paid booking's four emails, the link
- * that confirms it and a note to approve it, six emails, three orders' worth.
+ * Orders one free call is taken as: a paid booking's four emails (its
+ * confirmations and the buyer's two reminders; the host's reminders are the
+ * store's own emails, lib/call-reminders.ts), the link that confirms it and a
+ * note to approve it, six emails, three orders' worth.
  */
 export const FREE_CALL_ORDER_UNITS = CALL_ORDER_UNITS + 1;
 

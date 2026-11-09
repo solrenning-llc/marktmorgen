@@ -982,8 +982,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
+      // A booked call's reminders past its order's four emails (9 November 2026), and the one read made when such a reminder did not go.
+      { file: "lib/call-reminders.ts", names: ["reminderMeter", "storeEmailsUsedUp"] },
     ],
-    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them. Since 9 November 2026 a booked call's host reminders and the reminders for a time it was moved to are taken from them (lib/call-reminders.ts, reminderMeter), as the move notices always were; a reminder they no longer have room for is let go after one GET of the store's count (storeEmailsUsedUp), instead of being refused again every five minutes until it is too late, so a used-up figure costs a reminder one refused take and one read, once.",
   },
   {
     id: "ai",
@@ -1760,7 +1762,9 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "app/api/store/mail/route.ts": MONTHLY, "lib/api-write.ts": MONTHLY, "lib/community-mail.ts": MONTHLY, "lib/flows.ts": MONTHLY,
   "lib/imports.ts": MONTHLY, "lib/product-updates.ts": MONTHLY, "lib/review-requests.ts": MONTHLY,
   "lib/mail.ts": ["monthly", "company"],
-  "lib/call-packages.ts": ORDER, "lib/call-reminders.ts": ORDER, "lib/free.ts": ORDER, "lib/gifts.ts": ORDER, "lib/group-buy.ts": ["order", "store"],
+  "lib/call-packages.ts": ORDER, "lib/free.ts": ORDER,
+  // A booked call's order pays for its confirmations and the buyer's two reminders at the time it was booked at; the host's reminders and those for a time it was moved to are the store's own emails (reminderMeter, 9 November 2026).
+  "lib/call-reminders.ts": ["order", "store"], "lib/gifts.ts": ORDER, "lib/group-buy.ts": ["order", "store"],
   // Active shipment delivery uses sendQueuedShipmentMail in lib/email.ts.
   // The never-activated deployment retains its original one-shot ORDER sender.
   "lib/paypal-sales.ts": ORDER, "lib/preorders.ts": ORDER, "lib/shipments.ts": ORDER,

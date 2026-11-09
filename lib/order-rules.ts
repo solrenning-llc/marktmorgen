@@ -119,9 +119,14 @@ export function paidOrdersLimitFor(store: PlanFields & { tier?: Tier }, nowSecon
 /**
  * Orders one booked call is counted as (since 17 October 2026, when calls
  * stopped being outside every count): its confirmation to the buyer and to
- * the host, and the two reminders before it, are four emails, two orders'
- * worth (tests/plan-cost-registry.ts, ORDER_COST). Admitted before the
- * checkout opens, as any order is (lib/order-admission.ts, lib/calls.ts).
+ * the host, and the buyer's two reminders before the time it was booked at,
+ * are four emails, two orders' worth (tests/plan-cost-registry.ts,
+ * ORDER_COST). The host's reminders and those for a time the booking was
+ * moved to are taken from the store's own emails as they go, as the move
+ * notices are (lib/call-reminders.ts, reminderMeter; 9 November 2026: before,
+ * they were sent on this order too, six emails and up to ten with moves).
+ * Admitted before the checkout opens, as any order is
+ * (lib/order-admission.ts, lib/calls.ts).
  */
 export const CALL_ORDER_UNITS = 2;
 

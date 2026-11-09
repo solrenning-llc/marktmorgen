@@ -235,7 +235,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // A page of sales read through the API is API_SALES_UNITS requests: more than its wait on Stripe, its reads and its answer cost (lib/api-sales.ts).
   // With room: at least 5% more than that worst page.
   assert.ok(API_SALES_UNITS * UNIT_COST.api >= 1.05 * API_SALES_READ, `${API_SALES_UNITS} x ${UNIT_COST.api} < 1.05 x ${API_SALES_READ}`);
-  // A booked call is CALL_ORDER_UNITS orders: its confirmation to buyer and host and its two reminders are four emails.
+  // A booked call is CALL_ORDER_UNITS orders: its confirmation to buyer and host and the buyer's two reminders are four
+  // emails; the host's reminders and those after a move are the store's own (lib/call-reminders.ts, reminderMeter),
+  // measured against the real job in tests/call-order-mail-units.test.ts (9 November 2026; the comment only changed).
   assert.ok(CALL_ORDER_UNITS * 2 >= 4);
   // A community picture is PICTURE_REQUEST_UNITS public requests, each priced as a later page: more than its megabyte through us costs.
   assert.ok(PICTURE_REQUEST_UNITS * laterPageCost() >= PICTURE_READ, `${PICTURE_REQUEST_UNITS} x ${laterPageCost()} < ${PICTURE_READ}`);

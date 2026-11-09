@@ -97,17 +97,26 @@
  * BACKUP_SHRINK_LIMIT_PERCENT, nothing is deleted ("prune_shrunk") and the base
  * stays the earlier, larger set, so the next days hold the prune too, and the
  * shrunk copy is never marked as its month's copy. With no
- * mark at all while the bucket holds copies other than the one just written
- * (the marks went with the database), or a mark without a base, nothing is
- * deleted either ("prune_unverified") and no base is written. Accepting a
+ * mark at all, the copy is compared the same way with the largest verified
+ * set the bucket holds (its manifest's rows and sizes; Claude 6's N1): fallen
+ * further (the marks went with a wiped database), nothing is deleted
+ * ("prune_shrunk") and that set becomes the base, so the hold ends once the
+ * database is back to its size; a bucket read that fails deletes nothing and
+ * writes no mark. A mark without a base deletes nothing either
+ * ("prune_unverified") and no base is written. Accepting a
  * smaller database as the new base is not built: it is the owner's decision.
  * While the prune is held, the mark keeps the moment the hold began
  * (heldSince), and step 1 makes room only from objects written since then (the
  * held copies, the newest too), never from an older, good set; when those
- * cannot make room it writes nothing ("room_shrunk"). A mark that could not be read is left as it
- * is, never rewritten without its base; a first copy with no mark is the base
- * when no other set in the bucket opens as a verified one (a failed try's
- * leftover is no copy).
+ * cannot make room it writes nothing ("room_shrunk"). The newest held copy is
+ * one of those, so on a rotation day step 1 may delete it before the day's
+ * copy is verified; if that copy then fails, only the pre-shrink sets remain
+ * until a held copy is verified again (a trade-off of the retention + 2 sets
+ * ceiling, Claude 6's N2, recorded in docs/backup.md for the owner). A mark
+ * that could not be read is left as it is, never rewritten without its base;
+ * a first copy with no mark is the base when no other set in the bucket opens
+ * as a verified one (a failed try's leftover is no copy) or none is more than
+ * the limit larger.
  *
  * Called by app/api/cron/backup/route.ts, scheduled in vercel.json twice a
  * day (the day's run and its new try); off while BACKUP_COST_REVIEW is null,
@@ -579,7 +588,16 @@ function monthlyKept(listed: BackupListedObject[]): Set<string> {
  * in lib/backup-cost.ts).
  */
 async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[], months: Set<string>): Promise<Set<string>> {
+  return (await setsInBucket(store, key, listed, months)).keep;
+}
+
+/**
+ * verifiedInBucket's reads, with each verified set's keys and bytes as its run counted them (the manifest's rows; its
+ * parts' sizes and the manifest's own), so a copy with no mark can be compared with them (Claude 6's N1).
+ */
+async function setsInBucket(store: BackupBucket, key: Uint8Array[], listed: BackupListedObject[], months: Set<string>): Promise<{ keep: Set<string>; sets: BackupBase[] }> {
   const keep = new Set<string>();
+  const sets: BackupBase[] = [];
   for (const object of listed) {
     // A month's mark is empty and never a manifest, and the 3 months' copies are kept by name (monthlyKept), so
     // neither is read: a month's copy older than the previous key's days does not stop the run.
@@ -595,12 +613,13 @@ async function verifiedInBucket(store: BackupBucket, key: Uint8Array[], listed: 
       const manifest = openManifest(bytes, key);
       keep.add(object.id);
       for (const part of manifest.parts) keep.add(folderOf(object.id) + part.id);
+      sets.push({ keys: manifest.rows, bytes: manifest.parts.reduce((n, part) => n + part.bytes, 0) + bytes.byteLength });
     } catch {
       if (isManifestEnvelope(bytes)) throw new Unverified();
       // Not a manifest at all: a part, or a failed run's leftover.
     }
   }
-  return keep;
+  return { keep, sets };
 }
 
 /**
@@ -751,14 +770,26 @@ async function prune(
     const listed = await listAll(review, store);
     if (!listed) return { deleted, state: "prune_pages", mark };
     if (check.state === "none") {
-      // No mark, and another verified set in the bucket: the marks went with the database, so this copy is no base
-      // and the prune is held from now on. A failed try's leftover (no set opens) is no copy: this one is the base
-      // (Claude 6's MEDIUM 2, case b). These reads replace step 1's: with no mark it read none (lastVerified). A
-      // month's mark is written only past a verified set, so any month's mark listed is such a set too.
+      // No mark: the copy is compared with the largest verified set the bucket holds, its keys and its bytes each
+      // (Claude 6's N1, 9 November 2026), by the same 20% rule as against a mark's base. Fallen further (the marks
+      // went with a wiped database): the prune is held from now on, with that largest set as the base, so the hold
+      // ends once the database is back to its size and never stays for good. Not fallen (a first day's failed try,
+      // a prune or an outcome write that failed once): this copy is the base. A failed try's leftover (no set opens)
+      // is no copy. A bucket read that fails throws Unverified: nothing deleted and the mark left unwritten, so the
+      // next run decides again. These reads replace step 1's: with no mark it read none (lastVerified). The months'
+      // copies are kept by name and not read (a month's copy older than the previous key's days must not stop the
+      // run); with no other set to compare with, they are read for the comparison, and a month's mark (written only
+      // past a verified set) with no set that opens is unknown: nothing deleted, no mark written.
       if (listed.length > copied.parts + 1) {
-        if (listed.some((o) => BACKUP_MONTH_MARK.test(o.id))) return { deleted, state: "prune_unverified", mark: { base: null, heldSince: now } };
-        const others = await verifiedInBucket(store, key, listed.filter((o) => o.id !== copied.id), monthlyKept(listed));
-        if (others.size > 0) return { deleted, state: "prune_unverified", mark: { base: null, heldSince: now } };
+        const others = listed.filter((o) => o.id !== copied.id);
+        const months = monthlyKept(others);
+        let { sets } = await setsInBucket(store, key, others, months);
+        if (sets.length === 0 && months.size > 0) ({ sets } = await setsInBucket(store, key, others.filter((o) => months.has(o.id)), new Set()));
+        if (sets.length === 0 && others.some((o) => BACKUP_MONTH_MARK.test(o.id))) throw new Unverified();
+        if (sets.length > 0) {
+          const largest = { keys: Math.max(...sets.map((set) => set.keys)), bytes: Math.max(...sets.map((set) => set.bytes)) };
+          if (shrank(copied.keys, largest.keys) || shrank(copied.bytes, largest.bytes)) return { deleted, state: "prune_shrunk", mark: { base: largest, heldSince: now } };
+        }
       }
       mark = { base: check.base, heldSince: null };
     }

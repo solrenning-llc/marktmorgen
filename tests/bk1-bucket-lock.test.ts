@@ -15,7 +15,9 @@
  *     (Claude 2's HIGH 6727145967, Claude 6's MEDIUM 1 5819683734); one unknown read of the mark, or a first day's
  *     leftover object, holding every later prune for good (Claude 6's MEDIUM 2); a retention the bucket lock outlives
  *     admitted (Claude 2's MEDIUM, Claude 6's LOW 1); step 1 deleting objects before it knows room can be made
- *     (Claude 6's LOW 2).
+ *     (Claude 6's LOW 2); (9 November 2026, second round) a first day's transient fault (a manifest read-back, a
+ *     prune listing or an outcome write that failed once) holding every later prune for good, and a wiped database
+ *     never released once restored (Claude 6's N1).
  * The route, the schedule and the alarm are held by tests/bk1-backup-route.test.ts.
  */
 import {
@@ -267,10 +269,19 @@ async function main(): Promise<void> {
     wipe();
     seed(1);
     const blind = await runBackup({ now: clock, review: short, store, key });
-    is("no mark of the last good copy while the bucket holds others: prune held (prune_unverified)", [blind.ok && blind.prune, objects.has(stale)], ["prune_unverified", true]);
+    // No mark: the copy is compared with the largest verified set the bucket holds (Claude 6's N1, 9 November 2026),
+    // whose manifest carries its rows and part sizes; a wiped database fell far below it, so the prune is held with
+    // that set as the base.
+    is("no mark of the last good copy, the copy far below the bucket's verified set: prune held (prune_shrunk)", [blind.ok && blind.prune, objects.has(stale)], ["prune_shrunk", true]);
     at(T0 + 702 * DAY);
     const next = await runBackup({ now: clock, review: short, store, key });
-    is("and still held the day after: the blind copy is not a base", [next.ok && next.prune, objects.has(stale)], ["prune_unverified", true]);
+    is("and still held the day after: the blind copy is not a base", [next.ok && next.prune, objects.has(stale)], ["prune_shrunk", true]);
+    // The database restored to its size (ten keys again): the hold ends, never kept for good.
+    wipe();
+    seed(10);
+    at(T0 + 703 * DAY);
+    const back = await runBackup({ now: clock, review: short, store, key });
+    is("the database restored: the hold ends and the prune runs (never held for good)", [back.ok && back.prune, objects.has(stale)], ["done", false]);
   }
   {
     reset();
@@ -336,7 +347,7 @@ async function main(): Promise<void> {
       wipe();
       seed(1);
     }, 20);
-    is("every blind run holds the prune, or writes nothing when only good sets could make room", [states[0], states.every((s) => s === "prune_unverified" || s === "room_shrunk")], ["prune_unverified", true]);
+    is("every blind run holds the prune, or writes nothing when only good sets could make room", [states[0], states.every((s) => s === "prune_shrunk" || s === "room_shrunk")], ["prune_shrunk", true]);
     is("every good pre-wipe object is still in the bucket, none asked for", [good.filter((id) => !objects.has(id)), good.filter((id) => asked.includes(id))], [[], []]);
   }
 
@@ -385,6 +396,125 @@ async function main(): Promise<void> {
       first.push(ran(await runBackup({ now: clock, review: nine, store, key })));
     }
     is("no other verified set in the bucket: the first copy is the base, and every day prunes", first, ["done", "done", "done", "done"]);
+  }
+
+  part("A first day's transient fault never holds the prune for good (Claude 6 N1, 9 November 2026)");
+  {
+    // P2c: try 1 writes its manifest and its read-back fails, so a valid manifest is left in the bucket; try 2 six
+    // hours later finds it with no mark.
+    reset();
+    wipe();
+    seed(10);
+    const start = T0 + 1_250 * DAY;
+    let puts = 0;
+    let failRead: string | null = null;
+    const flaky: BackupBucket = {
+      ...store,
+      putNew: async (id, bytes) => {
+        await store.putNew(id, bytes);
+        puts += 1;
+        // The second object of the first try is its manifest (one part, then the manifest).
+        if (puts === 2) failRead = id;
+      },
+      read: async (id, cap) => {
+        if (id === failRead) {
+          failRead = null;
+          throw new Error("a transient read-back failure");
+        }
+        return store.read(id, cap);
+      },
+    };
+    at(start);
+    const tryOne = ran(await runBackup({ now: clock, review: nine, store: flaky, key }));
+    at(start + 6 * HOUR);
+    const tryTwo = ran(await runBackup({ now: clock, review: nine, store: flaky, key }));
+    const later: string[] = [];
+    for (let d = 1; d <= 25; d += 1) {
+      at(start + d * DAY);
+      later.push(ran(await runBackup({ now: clock, review: nine, store: flaky, key })));
+    }
+    is("P2c: try 1's manifest read-back fails (verify), try 2 finds it with no mark and prunes", [tryOne, tryTwo], ["verify", "done"]);
+    is("P2c: and every one of the next 25 days prunes", later.filter((s) => s !== "done"), []);
+  }
+  {
+    // P2d: on day 0 the prune's listing fails once, so no mark is written; day 1 finds day 0's set with no mark.
+    reset();
+    wipe();
+    seed(10);
+    const start = T0 + 1_260 * DAY;
+    let lists = 0;
+    const flaky: BackupBucket = {
+      ...store,
+      list: async (next) => {
+        lists += 1;
+        // Step 1's listing is the first of the run; the prune's is the second.
+        if (lists === 2) throw new Error("a transient listing failure");
+        return store.list(next);
+      },
+    };
+    at(start);
+    const dayZero = ran(await runBackup({ now: clock, review: nine, store: flaky, key }));
+    const later: string[] = [];
+    for (let d = 1; d <= 20; d += 1) {
+      at(start + d * DAY);
+      later.push(ran(await runBackup({ now: clock, review: nine, store: flaky, key })));
+    }
+    is("P2d: day 0's prune listing fails once (prune_error)", dayZero, "prune_error");
+    is("P2d: every one of the next 20 days prunes", later.filter((s) => s !== "done"), []);
+  }
+  {
+    // Day 0's outcome write fails (mark_error's path: the mark never written), with no new try that day.
+    reset();
+    wipe();
+    seed(10);
+    const start = T0 + 1_270 * DAY;
+    const plain = redis.pipeline.bind(redis);
+    let fail = 1;
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = (async (commands: (string | number)[][]) => {
+      if (fail > 0 && commands.some((c) => c[0] === "SET" && c[1] === "nl:backup:last-ok")) {
+        fail -= 1;
+        throw new Error("a transient database error");
+      }
+      return plain(commands);
+    }) as typeof redis.pipeline;
+    at(start);
+    const dayZero = ran(await runBackup({ now: clock, review: nine, store, key }));
+    (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = plain;
+    is("day 0: the copy verified, its mark not written", [dayZero, redis.run(["GET", "nl:backup:last-ok"])], ["done", null]);
+    const later: string[] = [];
+    for (let d = 1; d <= 20; d += 1) {
+      at(start + d * DAY);
+      later.push(ran(await runBackup({ now: clock, review: nine, store, key })));
+    }
+    is("every one of the next 20 days prunes", later.filter((s) => s !== "done"), []);
+  }
+  {
+    // Healthy control: a bucket read that fails while the run looks for a base with no mark deletes nothing and
+    // writes no mark, so the next run decides again (rule 24: unknown is never "no other set").
+    reset();
+    wipe();
+    seed(10);
+    const start = T0 + 1_280 * DAY;
+    at(start);
+    await runBackup({ now: clock, review: nine, store, key });
+    redis.run(["DEL", "nl:backup:last-ok"]);
+    const before = new Set(objects.keys());
+    let failNext = true;
+    const flaky: BackupBucket = {
+      ...store,
+      read: async (id, cap) => {
+        if (failNext && before.has(id)) {
+          failNext = false;
+          throw new Error("a transient read failure");
+        }
+        return store.read(id, cap);
+      },
+    };
+    at(start + DAY);
+    const unread = ran(await runBackup({ now: clock, review: nine, store: flaky, key }));
+    is("no mark and a bucket read that fails: prune_unverified, nothing deleted, no mark written", [unread, [...before].every((id) => objects.has(id)), redis.run(["GET", "nl:backup:last-ok"])], ["prune_unverified", true, null]);
+    at(start + 2 * DAY);
+    is("the next day decides again and prunes", ran(await runBackup({ now: clock, review: nine, store, key })), "done");
   }
 
   part("A retention the bucket lock outlives is refused (Claude 2 MEDIUM, Claude 6 LOW 1)");

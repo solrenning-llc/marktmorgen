@@ -254,7 +254,15 @@ async function main(): Promise<void> {
     wipe();
     seed(1);
     const blind = await runBackup({ now: clock, review, store, key });
-    is("prune_unverified, no January mark, nothing deleted", [blind.ok && blind.prune, marked().map((m) => m.month), objects.has(stale)], ["prune_unverified", ["2026-12"], true]);
+    // Claude 6's N1 (#3273, 9 November 2026): with no mark, the copy is compared with the largest verified set in the
+    // bucket, here December's copy (the months' copies are read for it when no other set is there): fallen far below
+    // it, the prune is held with that set as the base.
+    is("prune_shrunk, no January mark, nothing deleted", [blind.ok && blind.prune, marked().map((m) => m.month), objects.has(stale)], ["prune_shrunk", ["2026-12"], true]);
+    at(Date.parse("2027-01-02T03:00:00Z"));
+    wipe();
+    seed(10);
+    const back = await runBackup({ now: clock, review, store, key });
+    is("the database restored the next day: the hold ends, January's copy marked, the prune done", [back.ok && back.prune, marked().map((m) => m.month), objects.has(stale)], ["done", ["2027-01", "2026-12"], false]);
   }
 
   part("The last good copy lost, a month's copy sealed under a key the run no longer holds: kept by name, never a stop");

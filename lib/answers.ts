@@ -21,6 +21,7 @@ import { windowId } from "@/lib/allowance-window";
 import { SHIP_REGIONS, activeShipping } from "@/lib/shipping";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { aiAvailableFor, answerModel, askModel, jsonIn } from "@/lib/ai";
 import { inTrial } from "@/lib/mail";
 import { formatMoney } from "@/lib/money";
@@ -453,18 +454,35 @@ export const STORE_PAGE = "@store";
 
 export type Missed = { productId: string; question: string; at: number };
 
-/** The newest questions this store's pages did not answer, for the studio. */
+/** One kept row, as keepAnswer and answerQuestion write it, or null when it is not one. Pure. */
+function missedRow(row: string): { p: string; q: string; at: number } | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(row);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { p, q, at } = value as { p?: unknown; q?: unknown; at?: unknown };
+  return typeof p === "string" && typeof q === "string" && typeof at === "number" && Number.isFinite(at) ? { p, q, at } : null;
+}
+
+/**
+ * The newest questions this store's pages did not answer, for the studio. A
+ * list that is not there is none; a reply in any other shape, or a row that
+ * is not one of ours, throws UnknownReplyError (rule 24), never read as "no
+ * questions". A question too short for today's rules is left out, as before.
+ */
 export async function missedQuestions(store: Store, limit = 20): Promise<Missed[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]);
-  if (!Array.isArray(rows)) return [];
+  const rows = stringList(repliesFor(await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]), 1)?.[0]);
+  if (!rows) throw new UnknownReplyError("the questions a store's pages could not answer");
   const out: Missed[] = [];
   for (const row of rows) {
-    try {
-      const value = JSON.parse(String(row)) as { p?: unknown; q?: unknown; at?: unknown };
-      const question = readQuestion(value.q);
-      if (typeof value.p === "string" && question) out.push({ productId: value.p, question, at: typeof value.at === "number" ? value.at : 0 });
-    } catch {}
+    const value = missedRow(row);
+    if (!value) throw new UnknownReplyError("a question a store's page could not answer");
+    const question = readQuestion(value.q);
+    if (question) out.push({ productId: value.p, question, at: value.at });
   }
   return out;
 }

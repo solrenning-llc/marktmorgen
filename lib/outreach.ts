@@ -57,7 +57,7 @@ import {
 import { storeBase } from "@/lib/purchase-email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -443,16 +443,25 @@ export async function dropPitch(store: Store, id: string): Promise<boolean> {
 
 type StopLink = { s: string; id: string; d: string; n: string };
 
+/**
+ * A stop link, read exactly (Claude 5 on #2968, rule 24): null only for a key that is not one (Redis nil); a reply
+ * in another shape, or text that is not a link this code writes, throws, never "not one we know", so the page keeps
+ * both stop buttons and a press answers done=0.
+ */
 async function readLink(token: string): Promise<StopLink | null> {
-  if (!STOP_LINK.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
-  if (typeof raw !== "string") return null;
+  if (!STOP_LINK.test(token)) return null;
+  if (!isRedisConfigured()) throw new UnknownReplyError("a stop link (no store to read it from)");
+  const raw = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1)?.[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a stop link");
+  let v: Partial<StopLink>;
   try {
-    const v = JSON.parse(raw) as Partial<StopLink>;
-    return typeof v.s === "string" && typeof v.id === "string" && typeof v.d === "string" ? { s: v.s, id: v.id, d: v.d, n: typeof v.n === "string" ? v.n : "" } : null;
+    v = JSON.parse(raw) as Partial<StopLink>;
   } catch {
-    return null;
+    throw new UnknownReplyError("a stop link");
   }
+  if (!v || typeof v !== "object" || typeof v.s !== "string" || typeof v.id !== "string" || typeof v.d !== "string") throw new UnknownReplyError("a stop link");
+  return { s: v.s, id: v.id, d: v.d, n: typeof v.n === "string" ? v.n : "" };
 }
 
 /** What the page behind a stop link says: who wrote, to which business, and what is already closed. */

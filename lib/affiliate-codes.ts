@@ -37,6 +37,7 @@
  *   nl:aff:<id>:promo   hash  Stripe promotion code id -> affiliate id
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
@@ -46,39 +47,45 @@ export const PROMO_ID_PATTERN = /^promo_[A-Za-z0-9]{10,80}$/;
 
 const promoKey = (statsId: string) => `nl:aff:${statsId}:promo`;
 
-/** How many codes are given to affiliates, counted with one command before the page reads them (lib/affiliate-page-admission.ts). */
+/**
+ * How many codes are given to affiliates, counted with one command before the page reads them
+ * (lib/affiliate-page-admission.ts). Read exactly (CX-123 rule 24): one whole number from zero up for the one
+ * command, or null, which the page takes as refused; a null, "", false or "2" reply is never a count of 0.
+ */
 export async function codeOwnerCount(store: Store): Promise<number | null> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   try {
-    const [n] = await redisPipeline([["HLEN", promoKey(store.statsId)]]);
-    const count = Number(n);
-    return Number.isSafeInteger(count) && count >= 0 ? count : null;
+    return countOf(repliesFor(await redisPipeline([["HLEN", promoKey(store.statsId)]]), 1)?.[0]);
   } catch {
     return null;
   }
 }
 
-/** A Redis hash reply, as pairs, in either shape a client returns it. */
-function pairs(reply: unknown): [string, string][] {
+/**
+ * The HGETALL reply as pairs, read exactly (CX-123 rule 24): one reply for the one command, a list of strings with
+ * an even count, or UnknownReplyError. HGETALL answers an empty list for a hash with nothing in it, so a reply
+ * missing, cut short or of another shape is never "no code given to anybody" (audit R24 round 5, finding 2).
+ */
+function pairsExact(replies: unknown): [string, string][] {
+  const list = stringList(repliesFor(replies, 1)?.[0]);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError("the codes given to affiliates");
   const out: [string, string][] = [];
-  if (Array.isArray(reply)) {
-    const list = reply.map(String);
-    for (let i = 0; i + 1 < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  } else if (reply && typeof reply === "object") {
-    for (const [k, v] of Object.entries(reply as Record<string, unknown>)) out.push([k, String(v)]);
-  }
+  for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
   return out;
 }
 
 /**
  * Which affiliate each of this store's codes was given to, by Stripe's
  * promotion code id. Empty for a store that has given none away, which is
- * every store until its creator does.
+ * every store until its creator does. Throws UnknownReplyError when the codes
+ * could not be read exactly: a sale made with a code must not fall through to
+ * the buyer's bond or a lead (written once, for ever) on a reply nobody
+ * understood, so it waits for a pass that reads them.
  */
 export async function codeOwners(store: Store): Promise<Map<string, string>> {
   if (!store.statsId || !isRedisConfigured()) return new Map();
-  const [reply] = await redisPipeline([["HGETALL", promoKey(store.statsId)]]);
-  return new Map(pairs(reply).filter(([id]) => PROMO_ID_PATTERN.test(id)));
+  const pairs = pairsExact(await redisPipeline([["HGETALL", promoKey(store.statsId)]]));
+  return new Map(pairs.filter(([id]) => PROMO_ID_PATTERN.test(id)));
 }
 
 /**

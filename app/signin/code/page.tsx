@@ -34,7 +34,7 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
   const email = await heldFor(held);
   if (!email) redirect("/signin?status=expired");
   const status = typeof params.status === "string" ? params.status : "";
-  const notice = NOTICES[status] ?? null;
+  const notice = Object.hasOwn(NOTICES, status) ? NOTICES[status] : null;
   // A request to turn it off without a code, waiting its days (lib/two-step.ts askReset).
   const { reset, backup } = await twoStepStatus(email);
   const resetDay = reset ? new Date(reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }) : "";

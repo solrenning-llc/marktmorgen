@@ -138,7 +138,8 @@ async function sendLibraryLink(email: string, origin: string): Promise<void> {
   const stores: string[] = [];
   let charged: Store | null = null;
   // A store whose record could not be read, or answered out of shape, is not a closed one (CX-123 rule 24): when none
-  // read and one did not, nothing was sent, so the page never says a link is on its way (Claude 5 and Codex J on #2910).
+  // read and one did not, no link goes out. The page already gave every address the same "sent" (an "error" here would
+  // tell who bought), so the failure is said only to the server's log, below.
   let unread = 0;
   for (const sid of await storesBoughtFrom(email)) {
     const store = await storeForIdExactly(sid).catch(() => "unknown" as const);

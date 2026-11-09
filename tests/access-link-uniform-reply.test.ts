@@ -560,6 +560,8 @@ for (const how of ["throw", "shape"] as const) {
 // ---- What the page says ----------------------------------------------------------------------------
 
 // The notices before this fix promised a link "on its way" to an address that holds the thing.
+// Italian is matched as "in arrivo" except after "posta": "posta in arrivo" is the inbox ("Controlla la posta in
+// arrivo"), which the honest notice may name; it promises nothing.
 const PROMISED = [
   /on its way/i, /(en|de) camino/i, /est en route/i, /unterwegs/i, /(?<!posta )in arrivo/i, /onderweg/i, /a caminho/i,
 ];

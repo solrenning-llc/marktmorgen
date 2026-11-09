@@ -708,7 +708,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
     return review === "unknown" ? null : (review ?? null);
   };
   const giving = givingWords(store.language);
-  const reviewStatus = typeof query.review === "string" && REVIEW_NOTICES[query.review] ? query.review : "";
+  const reviewStatus = typeof query.review === "string" && Object.hasOwn(REVIEW_NOTICES, query.review) ? query.review : "";
   const reviewProduct = typeof query.product === "string" ? query.product : "";
 
   // One bundle's products, each with its own download, link or course, and key.

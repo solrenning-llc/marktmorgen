@@ -57,7 +57,7 @@ export default async function StudioDiscordPage({ searchParams }: Params) {
   ]);
   // The store's calls to connected services used, no place this month, or not counted (lib/metered-limits.ts).
   const allowance = typeof query.discord === "string" ? serviceAllowanceWords(store, query.discord) : null;
-  const notice = allowance ? { tone: "error" as const, text: allowance } : typeof query.discord === "string" ? NOTICES[query.discord] ?? null : null;
+  const notice = allowance ? { tone: "error" as const, text: allowance } : typeof query.discord === "string" && Object.hasOwn(NOTICES, query.discord) ? NOTICES[query.discord] ?? null : null;
 
   return (
     <div className="min-h-screen bg-paper text-ink">

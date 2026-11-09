@@ -144,7 +144,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
       : [];
   // The next day the creator said they pay, or null when they promised none.
   const due = nextPayday(terms.payday);
-  const notice = token && !linkFor ? a.notices.expired : a.notices[status] ?? null;
+  const notice = token && !linkFor ? a.notices.expired : Object.hasOwn(a.notices, status) ? a.notices[status] : null;
   // Products that earn differently from the store-wide share, by name.
   // Only products with a rate of their own can differ, so only those are read.
   // The products an approved affiliate may have posts drafted about (lib/affiliate-kit.ts).

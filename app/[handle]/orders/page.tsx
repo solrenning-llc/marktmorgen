@@ -207,7 +207,7 @@ export default async function OrdersPage({ params, searchParams }: Params) {
     }
   }
   const NOTICES = words.notices;
-  const notice = token && !admitted ? NOTICES.busy : token && !email ? NOTICES.expired : failed ? NOTICES.error : NOTICES[status] ?? null;
+  const notice = token && !admitted ? NOTICES.busy : token && !email ? NOTICES.expired : failed ? NOTICES.error : Object.hasOwn(NOTICES, status) ? NOTICES[status] : null;
 
   // An unchecked older purchase may be the one that gives a role. Keep the
   // entry available; the Discord callback still checks what this buyer holds

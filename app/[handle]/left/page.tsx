@@ -75,7 +75,7 @@ export default async function LeftPage({ params, searchParams }: Params) {
         <p className="st-muted mt-4 text-sm">{m.onlyEmail}</p>
       </>
     );
-  } else if (status && notices[status]) {
+  } else if (status && Object.hasOwn(notices, status)) {
     body = (
       <>
         <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{notices[status].title}</h1>
@@ -159,7 +159,7 @@ function leftCart(store: Store, items: Listing[], status: string) {
         <p className="st-muted mt-4 text-sm">{m.onlyEmail}</p>
       </>
     );
-  } else if (status && notices[status]) {
+  } else if (status && Object.hasOwn(notices, status)) {
     body = (
       <>
         <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{notices[status].title}</h1>

@@ -22,7 +22,7 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
 /** The tab's title says the outcome, so it is heard when the page opens after a confirmation (WCAG 2.4.2, 4.1.3). */
 export async function generateMetadata({ searchParams }: Params): Promise<Metadata> {
   const query = await searchParams;
-  const done = typeof query.done === "string" ? REFUND_DONE[query.done] : undefined;
+  const done = typeof query.done === "string" && Object.hasOwn(REFUND_DONE, query.done) ? REFUND_DONE[query.done] : undefined;
   const withdrew = withdrawNoticeOf(query.withdraw);
   return { title: `${done ? done.title : withdrew ? withdrew.title : "Refund your payment"} — Marktmorgen`, robots: { index: false, follow: false } };
 }
@@ -69,7 +69,7 @@ export default async function StudioRefundPage({ searchParams }: Params) {
   const name = store.name || store.handle;
   const back = `${studioPath(store)}#billing`;
   const owner = view.role === "owner";
-  const done = !owner ? REFUND_DONE.owner : typeof query.done === "string" ? REFUND_DONE[query.done] : undefined;
+  const done = !owner ? REFUND_DONE.owner : typeof query.done === "string" && Object.hasOwn(REFUND_DONE, query.done) ? REFUND_DONE[query.done] : undefined;
   const finished = query.done === "refunded" || query.done === "ending";
   // A refund still being settled: no new confirmation until it is decided.
   const underway = owner && !finished ? await refundUnderway(store.sid).catch(() => true) : false;

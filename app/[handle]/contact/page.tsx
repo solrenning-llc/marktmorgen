@@ -81,7 +81,7 @@ export default async function ContactPage({ params, searchParams }: Params) {
       </div>
     );
   }
-  const notice = status === "sent" ? { title: w.sentTitle, body: w.sentBody(store.name) } : (w.notices[status] ?? w.notices.error);
+  const notice = status === "sent" ? { title: w.sentTitle, body: w.sentBody(store.name) } : ((Object.hasOwn(w.notices, status) ? w.notices[status] : undefined) ?? w.notices.error);
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">

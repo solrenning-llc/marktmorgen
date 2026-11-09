@@ -81,7 +81,7 @@ export default async function JoinPage({ params, searchParams }: Params) {
       </>
     );
   } else {
-    const notice = w.notices[status] ?? w.notices.error;
+    const notice = (Object.hasOwn(w.notices, status) ? w.notices[status] : undefined) ?? w.notices.error;
     body = (
       <>
         <h1 className={title}>{notice.title}</h1>

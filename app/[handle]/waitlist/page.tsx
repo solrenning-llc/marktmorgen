@@ -116,7 +116,7 @@ export default async function WaitlistPage({ params, searchParams }: Params) {
       </>
     );
   } else {
-    const notice = g.waitNotices[status] ?? g.waitNotices.error;
+    const notice = (Object.hasOwn(g.waitNotices, status) ? g.waitNotices[status] : undefined) ?? g.waitNotices.error;
     body = (
       <>
         <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{notice.title}</h1>

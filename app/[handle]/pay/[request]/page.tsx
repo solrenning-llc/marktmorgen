@@ -64,7 +64,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
   const status = statusOf(request, now);
   const said = speechFor(store.language, request.currency);
   const w = requestWords(store.language);
-  const notice = typeof query.notice === "string" ? w.notices[query.notice] : undefined;
+  const notice = typeof query.notice === "string" && Object.hasOwn(w.notices, query.notice) ? w.notices[query.notice] : undefined;
   const day = (d: string) => said.date(Date.parse(`${d}T12:00:00Z`));
   const total = said.money(request.total);
   const payable = status === "open" && requestsOpen(store);

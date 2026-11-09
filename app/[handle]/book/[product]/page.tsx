@@ -407,7 +407,7 @@ async function MovePage({
   const locale = lang.locale;
   const room = await roomOf(store.callsId, { product: product.id, setup, session, start: booking.start, end: booking.end });
   const moved = status === "moved";
-  const notice = moved ? null : b.moveNotices[status] ?? null;
+  const notice = moved || !Object.hasOwn(b.moveNotices, status) ? null : b.moveNotices[status] ?? null;
   const blocked = whyNotMove(setup, booking.start, booking.moves);
   // A paid booking of a length no call may have is never moved at a guess (moveBooking refuses it): said as such,
   // never as times that could not be read, which a refresh would not change.

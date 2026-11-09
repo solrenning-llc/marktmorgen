@@ -55,7 +55,7 @@ export default async function DeletePage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" && ERASE_TOKEN.test(query.token) ? query.token : "";
   const statusKey = typeof query.status === "string" ? query.status : "";
-  const status = STATUS[statusKey];
+  const status = Object.hasOwn(STATUS, statusKey) ? STATUS[statusKey] : undefined;
   // With "full": the day the link can be asked for again (lib/erasure-request.ts), when it was given and reads as one.
   const opensAt = typeof query.opens === "string" && /^\d{4}-\d{2}-\d{2}$/.test(query.opens) ? new Date(`${query.opens}T00:00:00Z`) : null;
   const opensOn = opensAt && !Number.isNaN(opensAt.getTime()) ? opensAt.toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }) : "";

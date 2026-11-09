@@ -1542,7 +1542,7 @@ export const BOOKING_WORDS: Record<LanguageCode, BookingWords> = { en, es, fr, d
  * notice says so rather than ask for a choice the page does not show.
  */
 export function bookingNotice(words: BookingWords, status: string, offered: readonly unknown[], ownMinutes: number): Notice | null {
-  const notice = words.notices[status] ?? null;
+  const notice = Object.hasOwn(words.notices, status) ? words.notices[status] : null;
   if (status === "length-gone" && notice && offered.length === 0) return { title: notice.title, body: words.lengthGoneOwn(ownMinutes) };
   return notice;
 }

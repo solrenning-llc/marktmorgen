@@ -41,7 +41,7 @@ export default async function DiscordPage({ params, searchParams }: Params) {
   const status = typeof query.status === "string" ? query.status : "";
   const server = typeof query.server === "string" && SNOWFLAKE.test(query.server) ? query.server : null;
   const joined = status === "joined";
-  const notice = joined ? null : (w.notices[status as keyof typeof w.notices] ?? w.notices.expired);
+  const notice = joined ? null : ((Object.hasOwn(w.notices, status) ? w.notices[status as keyof typeof w.notices] : undefined) ?? w.notices.expired);
 
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>

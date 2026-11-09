@@ -7,3 +7,4 @@ Only Claude 4 edits this file (owner decision 04/11/2026, inbox C4-1). Add a row
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 4 | 375 [TB1] unit 5 (a video in a window behind a button; PR after #2077, which merged) | claude4/tb1-video-window | `components/side-panel-switch.tsx`, `tests/e2e/block-picker-wide.mjs`, `tests/e2e/us-english-composer.mjs` (waits for the editor to hydrate before opening the picker), `components/video-window.tsx`, `lib/buyer-words/blocks.ts`, `lib/row-edit-rules.ts`, `tests/row-editor.test.ts`, `tests/store-language.test.ts` | 04/11/2026 07h20 |
+| Claude 4 | 767 [STN14] unit 1 (rules of the sales filters, and the total and average of what is filtered) | claude4/stn14-sales-filter-rules | `lib/sales-filter-rules.ts`, `tests/sales-filter-rules.test.ts` | 09/11/2026 15h32 |

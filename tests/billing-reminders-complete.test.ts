@@ -263,3 +263,42 @@ test("with fewer than a run's pages, every run reads every subscription from the
   const again = await logged(() => sendReminders(NOW + DAY, FAR()));
   assert.deepEqual([again.result.sent, again.result.seen], [0, 3], "the next run reads all again and sends nothing twice");
 });
+
+test("a claim not known mid-lap ends the pass with the cursor before that subscription, so the next run reads it again", async () => {
+  const oldest = id("Year", 8);
+  reset({ active: fiveThousandAndOne((i) => monthly(id("Month", i)), yearly(oldest, 20)), trialing: [] });
+  await logged(() => sendReminders(NOW, FAR()));
+  const original = redis.pipeline.bind(redis);
+  // Redis does not answer the claim of the oldest plan's notice (lib/claim-mark.ts reads it as "unknown").
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command[0] === "SET" && String(command[1]).startsWith(`nl:remind:renewal:${oldest}:`))) throw new Error("synthetic timeout");
+    return original(commands);
+  }) as typeof redis.pipeline;
+  let stopped: Awaited<ReturnType<typeof sendReminders>>;
+  try {
+    stopped = (await logged(() => sendReminders(NOW + DAY, FAR()))).result;
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.deepEqual([stopped.sent, stopped.failed, sentTo(oldest)], [0, 1, 0], "nothing sent on a claim not known");
+  assert.match(String((await redis.pipeline([["GET", "nl:remind:cursor:active"]]))[0]), new RegExp(`^${id("Month", 4_999)} \\d+$`), "the cursor stays on the one before it");
+  await logged(() => sendReminders(NOW + 2 * DAY, FAR()));
+  assert.equal(sentTo(oldest), 1, "the next run reads it again and sends it, once");
+});
+
+test("a lap that takes longer than its notices allow is said, with how long it took", async () => {
+  reset({ active: fiveThousandAndOne((i) => monthly(id("Month", i)), monthly(id("Month", 9_999))), trialing: [] });
+  // A lap begun 20 days ago, stopped at the 4,000th: a yearly renewal reached now may be told fewer than 15 days before.
+  await redis.pipeline([["SET", "nl:remind:cursor:active", `${id("Month", 3_999)} ${NOW - 20 * DAY}`]]);
+  const { lines } = await logged(() => sendReminders(NOW, FAR()));
+  assert.ok(lines.some((line) => line.includes("active") && line.includes("20 days") && line.includes("later than its rule")), lines.join(" | "));
+});
+
+test("the declared ceiling: 50 pages a status a run, and the job's runs a day are vercel.json's (rule 24)", async () => {
+  const { REMINDER_PAGES_PER_RUN, REMINDER_RUNS_PER_DAY } = await import("@/lib/billing-reminders");
+  const { readFileSync } = await import("node:fs");
+  const crons = (JSON.parse(readFileSync("vercel.json", "utf8")) as { crons: { path: string; schedule: string }[] }).crons;
+  const runs = crons.filter((cron) => cron.path === "/api/cron/reminders");
+  assert.deepEqual(runs.map((cron) => cron.schedule), ["0 10 * * *"], "once a day; a new schedule changes REMINDER_RUNS_PER_DAY");
+  assert.deepEqual([REMINDER_PAGES_PER_RUN, REMINDER_RUNS_PER_DAY], [50, 1]);
+});

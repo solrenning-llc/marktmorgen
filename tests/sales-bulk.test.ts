@@ -15,6 +15,9 @@
  *     back, and the words say so where it cannot.
  */
 import { NextRequest } from "next/server";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { SalesBulkActions } from "@/components/sales-bulk-actions";
 import { POST } from "@/app/api/store/sales-bulk/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
@@ -121,6 +124,17 @@ async function main(): Promise<void> {
   is("a header and one line a row, ended", [lines[0], lines.length], ['"paid_at_utc","stripe_id","product","kind","amount","currency","buyer_email"', 4]);
   is("a row", lines[1], `"2026-11-02T15:00:00.000Z","${ref(1)}","Course","product","27.00","USD","jane@example.com"`);
   is("a formula kept as text, an unknown amount left blank", lines[2], `"2026-11-02T15:00:00.000Z","${ref(2)}","'=SUM(1)","trial","","USD",""`);
+
+  part("The screen: a table to choose in, a live count, only the actions the role allows, none that moves money");
+  const screen = (canLabel: boolean, canExport: boolean) => renderToStaticMarkup(createElement(SalesBulkActions, { sales: [row(), row({ reference: ref(2), email: null })], canLabel, canExport }));
+  const full = screen(true, true);
+  is("a table with a caption, column and row headers, a box per order with its own name", [full.includes("<caption"), full.includes('scope="col"'), full.includes('scope="row"'), full.includes("Choose Course, jane@example.com,"), full.includes("Choose Course, no email address,")], [true, true, true, true, true]);
+  is("the count of chosen orders, live", full.includes('role="status" class="mt-2 text-sm font-semibold text-ink">0 of 2 orders chosen'), true);
+  is("every action the role allows", ["Send their purchase email again", "Add a label to their contacts", "Take a label off their contacts", "Download these orders as a file"].map((w) => full.includes(w)), [true, true, true, true]);
+  const support = screen(false, false);
+  is("support: only the email again, no label, no file", ["Send their purchase email again", "Add a label", "Download these orders"].map((w) => support.includes(w)), [true, false, false]);
+  is("no refund, no charge", /refund it|charge it|Refund these|Charge these/i.test(full), false);
+  is("nothing happens before a confirmation", [full.includes("Check what will happen"), full.includes(">Confirm<")], [true, false]);
 
   part("Sending again: counted first, then each one as alone (lib/sales-bulk.ts)");
   const store = { sid: "s1", handle: "shop", statsId: "st1", tier: "creator", period: paidPeriod() } as unknown as Parameters<typeof bulkResend>[0];

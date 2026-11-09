@@ -2,10 +2,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { withinLimit } from "@/lib/request-guard";
 import { resendPurchase } from "@/lib/purchase-email";
-
-/** How often one sale's email may be sent again in a day, and one store's in an hour. */
-const PER_SALE_PER_DAY = 3;
-const PER_STORE_PER_HOUR = 30;
+import { RESEND_PER_SALE_PER_DAY as PER_SALE_PER_DAY, RESEND_PER_STORE_PER_HOUR as PER_STORE_PER_HOUR } from "@/lib/resend-limits";
 
 const ANSWERS: Record<string, number> = { unknown: 404, call: 400, refunded: 409, failed: 502 };
 

@@ -58,6 +58,7 @@
  * delivered as a link to somewhere else — once the buyer has the address,
  * only the creator can close it there.
  */
+import { disputeMoneyGone } from "@/lib/retained-revenue";
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
 
@@ -171,7 +172,11 @@ function closingKnown(event: unknown): boolean {
 /**
  * Whether the bank took this payment back from the creator for good: a
  * dispute on its charge that Stripe has closed as lost, whatever its amount
- * (the owner's rule of 4 November 2026; the header says why). Takes what
+ * (the owner's rule of 4 November 2026; the header says why), or closed as
+ * prevented by a resolution whose own balance transactions took the money
+ * and did not put it back (disputeMoneyGone, lib/retained-revenue.ts; a
+ * block, which leaves the money with the creator, is not lost, and money
+ * that cannot be read is neither, so this throws). Takes what
  * refundedInFull() takes. Stripe marks a disputed charge with `disputed` but
  * no longer sends the dispute with it, and nothing can expand it, so only
  * for a charge marked disputed (rare) is Stripe asked for that charge's
@@ -193,14 +198,26 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
   // Rule 30: only this charge's own rows, in a list, decide; anything else throws, as Stripe not answering does.
   if (listed === null || typeof listed !== "object" || !Array.isArray((listed as { data?: unknown }).data)) throw new Error("this charge's disputes could not be read");
   let lost = false;
+  let unread = false;
   for (const row of (listed as { data: unknown[] }).data) {
     if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("a dispute listed for this charge could not be read");
     // Another charge's lost dispute, or one naming none, would close the doors on a buyer who paid.
     if (idOf((row as { charge?: unknown }).charge) !== id) throw new Error("Stripe listed another charge's dispute");
-    if ((row as { status?: unknown }).status === "lost") lost = true;
+    const status = (row as { status?: unknown }).status;
+    if (status === "lost") lost = true;
+    else if (status === "prevented") {
+      // A resolution gave the money back to the buyer, as a lost dispute does; a block left it with the creator.
+      // Read by the dispute's own money (disputeMoneyGone): taken and not put back is lost, nothing taken or all
+      // of it put back is not, and money that cannot be read is neither (rule 24).
+      const gone = disputeMoneyGone(row);
+      if (gone === true) lost = true;
+      else if (gone === null) unread = true;
+    }
   }
-  // Its own lost dispute is lost whatever else there is; "not lost" only from a list that says, exactly, there is no more.
+  // Its own lost dispute is lost whatever else there is; "not lost" only from a list that says, exactly, there is
+  // no more, and in which every prevented dispute's money was read.
   if (lost) return true;
+  if (unread) throw new Error("a prevented dispute's money on this charge could not be read");
   if ((listed as { has_more?: unknown }).has_more !== false) throw new Error("this charge's disputes were not read whole");
   return false;
 }

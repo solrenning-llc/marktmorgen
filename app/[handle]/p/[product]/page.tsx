@@ -323,11 +323,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // And when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays. A record
     // that cannot be read here shows no line, as it shows no video total; the course's own page and the learner's
     // gate read it exactly (lib/learn.ts courseAccess).
-    product.course
-      ? readCourse(product.course.id)
-          .then(async (course) => (course ? { facts: await readCourseFacts(course), accessEndLine: accessEndFact(course, store.language) } : null))
-          .catch(() => null)
-      : Promise.resolve(null),
+    product.course ? readCourse(product.course.id).then(async (course) => (course ? { facts: await readCourseFacts(course), accessEndLine: accessEndFact(course, store.language) } : null)).catch(() => null) : Promise.resolve(null),
   ]);
   const videoLine = courseFacts?.facts.videoSeconds != null ? videoTotalLine(courseFacts.facts.videoSeconds, store.language) : null;
   const accessEndLine = courseFacts?.accessEndLine ?? null;

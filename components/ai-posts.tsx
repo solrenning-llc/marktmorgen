@@ -1,8 +1,8 @@
 "use client";
 
-import { useContext, useState } from "react";
+import { useContext, useId, useState } from "react";
 import { Icon } from "@/components/icons";
-import { AiOn } from "@/components/ai-assist";
+import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import { toast } from "@/components/toast";
 import { taggedFor } from "@/lib/share-links";
 import type { SalesPage } from "@/lib/sales-page";
@@ -22,7 +22,8 @@ export function AiPosts({ productId, url, page, what = "page" }: { productId?: s
   const [posts, setPosts] = useState<Posts | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [left, setLeft] = useState(ai.left);
+  const [left, setLeft] = useState(allowanceOf(ai));
+  const allowanceId = useId();
   if (!ai.on) return null;
 
   async function write() {
@@ -81,10 +82,10 @@ export function AiPosts({ productId, url, page, what = "page" }: { productId?: s
         {`One for X, an Instagram caption and one for LinkedIn, from what ${what === "store" ? "your store sells" : "this page says"}, in your store's language. Nothing is posted for you: change them, then copy.`}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void write()} disabled={busy || left <= 0} aria-busy={busy}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void write()} disabled={busy || left === null || left <= 0} aria-busy={busy} aria-describedby={allowanceId}>
           {busy ? "Writing…" : posts ? "Write three more" : "Write three posts"}
         </button>
-        <span className="text-xs text-ink-soft">{`${left} left this month. Started attempts count, even if they fail.`}</span>
+        <span id={allowanceId} className="text-xs text-ink-soft">{left === null ? AI_ALLOWANCE_UNKNOWN : `${left} left this month. Started attempts count, even if they fail.`}</span>
       </div>
       {note ? (
         <p className="notice notice-error mt-2 text-sm" role="alert">

@@ -92,7 +92,12 @@ export default async function BookPage({ params, searchParams }: Params) {
   // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
   if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const pkgState = pkg ? await packageState(pkg.bought) : null;
-  const open = canSellProduct(store, product) && !(await isSoon(store, product.id).catch(() => false));
+  // Coming soon or not (lib/waitlist.ts): a state that could not be read is unknown, never "launched" (rule 24), so the
+  // calendar books and sells nothing then and says the times could not be read, as when the times themselves cannot be.
+  const soon = await isSoon(store, product.id).catch(() => null);
+  const sellable = canSellProduct(store, product);
+  const open = sellable && soon === false;
+  const unread = sellable && soon === null;
   // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".
   const withKey = typeof query.with === "string" && /^[0-5]$/.test(query.with) ? query.with : "";
   // One of a call's lengths, each with its price (lib/call-lengths.ts): asked for by its link; the times are read at it,
@@ -192,7 +197,7 @@ export default async function BookPage({ params, searchParams }: Params) {
               </div>
             ) : null}
 
-            {!open ? (
+            {!open && !unread ? (
               <div className="st-note mt-6">
                 <p className="font-bold" style={{ color: "var(--st-text)" }}>{b.notices.unavailable.title}</p>
                 <p className="mt-1 text-sm">{b.closedBody(store.name)}</p>

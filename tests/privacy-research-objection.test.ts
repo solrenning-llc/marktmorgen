@@ -27,7 +27,10 @@ test("research outreach: objecting does not depend on a reply keyword nothing re
 
 test("research outreach: objecting names the support address the policy already prints", () => {
   const text = paragraph("Research outreach");
-  assert.match(text, /You can object at any time by emailing us at/);
+  // Rule 23: was /You can object at any time by emailing us at/. Since the do-not-contact list exists
+  // (lib/research-do-not-contact.ts, owner's decision 13), the policy names its page first and the
+  // support address beside it; the address is still a way that works.
+  assert.match(text, /You can object at any time on our\b.*do-not-contact page.*or by emailing us at/);
   assert.ok(text.includes(`href="mailto:${SUPPORT_EMAIL}"`), "the address is a mail link");
   assert.ok(text.includes(`> ${SUPPORT_EMAIL} </a>`), "the address is shown in full");
   assert.match(text, /we will not contact you again\./);

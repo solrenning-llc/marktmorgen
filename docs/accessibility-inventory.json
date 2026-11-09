@@ -859,6 +859,12 @@
       "parameters": []
     },
     {
+      "source": "app/privacy/do-not-contact/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/privacy/do-not-contact",
+      "parameters": []
+    },
+    {
       "source": "app/privacy/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/privacy",
@@ -1704,6 +1710,7 @@
     "app/api/operator/search-console/route.ts",
     "app/api/outreach/stop/route.ts",
     "app/api/photo/[id]/route.ts",
+    "app/api/privacy/do-not-contact/route.ts",
     "app/api/privacy/erase/route.ts",
     "app/api/report/route.ts",
     "app/api/store/ab/route.ts",
@@ -2057,6 +2064,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 141
+    "pageTemplates": 142
   }
 }

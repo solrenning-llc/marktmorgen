@@ -497,6 +497,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ref:mycode:@lib/creator-invites.ts": company("A creator's code", "The company's program for creators."),
   "nl:ref:owed@lib/creator-invites.ts": company("Credits owed", "The company's program for creators."),
   "nl:creators:responses@lib/creator-research-store.ts": company("Answers to the creators' survey", "The company's own research."),
+  // Owner's decision 13 (9 November 2026): the do-not-contact list the privacy policy promises for research outreach.
+  "nl:research:dnc@lib/research-do-not-contact.ts": company("Marktmorgen's own research do-not-contact list: a field a normalized contact detail, its value the name given or nothing", "One hash for the company, no store's: at most RESEARCH_DO_NOT_CONTACT_MAX (10,000) fields, each a contact detail of at most 305 bytes and a name of at most 80 characters, about 600 bytes with what Redis keeps beside it, so at most about 6 MB; a place is counted before a field is written (nl:research:dnc:n), kept for good by design, as the privacy policy says."),
+  "nl:research:dnc:n@lib/research-do-not-contact.ts": company("The count of places taken on the research do-not-contact list", "One small key for the company, a count never above RESEARCH_DO_NOT_CONTACT_MAX plus the requests in flight, each giving its place back when it is not used."),
   "nl:crm:deals:@lib/crm.ts": { what: "Deals: one slot a deal, at what it weighs, at most MAX_DEALS", room: ["lib/crm.ts"] },
   "nl:crm:tasks:@lib/crm.ts": {
     what: "Tasks about a person, at what they weigh, at most MAX_STORE_TASKS, and the store's count of them (TASK_COUNT_WEIGHT)",

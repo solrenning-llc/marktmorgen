@@ -164,6 +164,8 @@ export const PERSON_DATA: PersonData[] = [
 
   // ---------------------------------------------------------------- not a store's people
   { file: "app/api/creators/route.ts", how: "account", what: "Answers creators send to Marktmorgen's own research, with their own retention" },
+  // Owner's decision 13 (9 November 2026): Marktmorgen's own list, never a store's people; a legitimate exception to erasure.
+  { file: "lib/research-do-not-contact.ts", how: "account", what: "Marktmorgen's own do-not-contact list for its research outreach: only the contact detail a person gave and, if they gave it, their name, kept when they ask to be deleted, because it is what stops us from contacting them again, and used for nothing else" },
   { file: "lib/auth.ts", how: "account", what: "Sign-in sessions, links and devices of an account" },
   { file: "lib/passkeys.ts", how: "account", what: "An account's passkeys" },
   { file: "lib/two-step.ts", how: "account", what: "An account's two-step sign-in" },

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { isValidElement, type ReactNode } from "react";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/privacy/do-not-contact/route";
+import DoNotContactPage from "@/app/privacy/do-not-contact/page";
 import {
   DO_NOT_CONTACT_COUNT_KEY,
   DO_NOT_CONTACT_KEY,
@@ -14,6 +16,7 @@ import {
   normalizeResearchContact,
 } from "@/lib/research-do-not-contact";
 import { PERSON_DATA } from "@/lib/person-data";
+import { UPSTASH_MICRO_USD_PER_GB_MONTH } from "@/lib/spend-cost-table";
 import { store as redis } from "./redis-stub";
 
 // The privacy policy promises that a person who asks Marktmorgen to stop its
@@ -110,6 +113,9 @@ test("the list has a fixed ceiling, so what it costs the company is bounded", as
   assert.equal(redis.run(["HLEN", DO_NOT_CONTACT_KEY]), 0, "nothing written past the ceiling");
   assert.equal(redis.run(["GET", DO_NOT_CONTACT_COUNT_KEY]), String(RESEARCH_DO_NOT_CONTACT_MAX), "the place taken is given back");
   assert.ok(RESEARCH_DO_NOT_CONTACT_MAX > 0 && RESEARCH_DO_NOT_CONTACT_MAX <= 20_000);
+  // About 600 bytes an entry with what Redis keeps beside it (tests/store-data-registry.ts, nl:research:dnc).
+  const monthlyUsd = (RESEARCH_DO_NOT_CONTACT_MAX * 600 / 1e9) * (UPSTASH_MICRO_USD_PER_GB_MONTH / 1e6);
+  assert.ok(monthlyUsd > 0 && monthlyUsd < 0.002, `the full list kept a month: $${monthlyUsd}`);
 });
 
 test("the public form adds a person without an account, and refuses what it should", async () => {
@@ -149,6 +155,35 @@ test("the privacy policy names the page that does it and says exactly what is ke
   assert.match(kept, /only the contact detail you gave us and, if you gave it, your name/);
   assert.match(kept, /even if you ask us to delete your data/);
   assert.doesNotMatch(kept, /we keep only your name and contact detail on a do-not-contact list/, "the old wording, which no code kept");
+});
+
+type Props = { id?: string; role?: string; children?: ReactNode; "aria-invalid"?: boolean; "aria-describedby"?: string; action?: string; htmlFor?: string };
+function find(node: ReactNode, match: (p: Props, type: unknown) => boolean, out: Props[] = []): Props[] {
+  if (Array.isArray(node)) {
+    for (const child of node) find(child, match, out);
+    return out;
+  }
+  if (!isValidElement<Props>(node)) return out;
+  if (match(node.props, node.type)) out.push(node.props);
+  find(node.props.children, match, out);
+  return out;
+}
+
+test("the page labels each field, says a wrong entry as an alert tied to its field, and posts to the route", async () => {
+  const show = async (status?: string) => DoNotContactPage({ searchParams: Promise.resolve(status ? { status } : {}) });
+  const plain = await show();
+  assert.equal(find(plain, (p, t) => t === "form" && p.action === "/api/privacy/do-not-contact").length, 1);
+  assert.equal(find(plain, (p, t) => t === "label" && p.htmlFor === "dnc-contact").length, 1);
+  assert.equal(find(plain, (p, t) => t === "label" && p.htmlFor === "dnc-name").length, 1);
+  assert.equal(find(plain, (p) => p.id === "dnc-contact")[0]["aria-invalid"], undefined);
+  assert.equal(find(plain, (p, t) => t === "nav").length, 1, "a breadcrumb says where the page is");
+  const wrong = await show("contact");
+  assert.equal(find(wrong, (p) => p.role === "alert" && p.id === "dnc-status").length, 1);
+  const field = find(wrong, (p) => p.id === "dnc-contact")[0];
+  assert.equal(field["aria-invalid"], true);
+  assert.equal(field["aria-describedby"], "dnc-contact-hint dnc-status");
+  assert.equal(find(await show("done"), (p) => p.role === "status").length, 1);
+  assert.equal(find(await show("made-up"), (p) => p.role === "alert" || p.role === "status").length, 0);
 });
 
 test("the list is in the registry of what is kept about people, as Marktmorgen's own", () => {

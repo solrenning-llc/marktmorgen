@@ -1597,7 +1597,7 @@ export default function PrivacyPage() {
           To limit abuse, we also keep a one-way hash of your IP address for
           one hour; we do not store the IP address itself with your answers.
         </p>
-        <p>
+        <p id="research-outreach">
           <strong className="text-black">Research outreach.</strong> If we
           contacted you first to ask about your experience as a creator, we
           used business contact details you had made public: your name, your
@@ -1606,14 +1606,23 @@ export default function PrivacyPage() {
           Companies House register. We use them only to send that research message and to
           continue the conversation if you reply. Our legal basis is our
           legitimate interest in understanding what creators need before we
-          build a product. You can object at any time by emailing us at{" "}
+          build a product. You can object at any time on our{" "}
+          <Link
+            href="/privacy/do-not-contact"
+            className="text-black underline underline-offset-2 hover:no-underline"
+          >
+            do-not-contact page
+          </Link>
+          , with no account, or by emailing us at{" "}
           <a
             href="mailto:support@marktmorgen.com"
             className="text-black underline underline-offset-2 hover:no-underline"
           >
             support@marktmorgen.com
           </a>
-          , and we will not contact you again.
+          , and we will not contact you again. Before we send any research
+          message, we check it against that list, and we do not send it to
+          anyone on the list.
         </p>
         <p>
           <strong className="text-black">Outreach by creators.</strong> A
@@ -2113,8 +2122,12 @@ export default function PrivacyPage() {
         <p>
           Research outreach records (who we contacted, when, and any reply) are
           kept for up to 24 months from the last contact. If you ask us to
-          stop, we keep only your name and contact detail on a do-not-contact
-          list, so that we can respect your request.
+          stop, we keep only the contact detail you gave us and, if you gave
+          it, your name, on our do-not-contact list, so that we can respect
+          your request. We keep that entry even if you ask us to delete your
+          data, because it is what stops us from contacting you again. It is
+          stored with our database provider (Upstash) and used for nothing
+          else.
         </p>
         <p>
           A creator&apos;s Outreach records are kept while their store exists,

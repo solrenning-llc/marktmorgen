@@ -222,6 +222,9 @@ async function main() {
     is("the walk stops there", outcome, "LockBusyError");
     is("the store runs", Boolean(current?.subscriptionActive), true);
     is("nothing of the store that runs again is deleted or changed", [...running.keys()].filter((key) => now.get(key) !== running.get(key)), []);
+    // Nor is anything written for it once the lock ran out, such as a walk entry (nl:closed:batch) that did not exist
+    // before (Claude 5 on #3156): the census above only compares keys that were already there.
+    is("nothing is written for it either", [...now.keys()].filter((key) => !running.has(key)), []);
   }
   part("The record's last step: what the walk sends closes the record exactly as lib/store.ts's closeStoreRecord does");
   redis.pipeline = original;

@@ -97,6 +97,32 @@ async function main(): Promise<void> {
   part("Read again once it reads, it is written once, at its share");
   is("the same order, its share read, is written at 20", [await outcome(() => noteSession(store, session("cs_badmissing", { via_rate: "20" }), new Map(), [])), (await sale("cs_badmissing"))?.rate], ["written", 20]);
 
+  // The sibling (Claude 5's pre-review of round 30): each product ticked at checkout carries its own share
+  // (`metadata[<bump>_rate]`) and what it was charged (`metadata[<bump>_cents]`), written beside the bump by every
+  // writer (lib/store-checkout.ts, lib/cart-checkout.ts). One that does not read was skipped in silence, so its part
+  // of the order was weighed at the front product's share and written down for good (HSETNX): a bump at 30% behind a
+  // front product at 0% earned nothing. It follows the same rule as via_rate: nothing written, the commission waits.
+  part("A product ticked at checkout: its share and its price read, or nothing is written");
+  // 10,000 cents in all, 4,000 of them the bump: 60% at the front share, 40% at the bump's.
+  const bumped = (id: string, extra: Record<string, string>) => session(id, { via_rate: "20", bump: "ebook", ...extra });
+  is("a bump at 30 behind a front at 20 is weighed: 20 × 0.6 + 30 × 0.4 = 24", [await outcome(() => noteSession(store, bumped("cs_bump30", { bump_cents: "4000", bump_rate: "30" }), new Map(), [])), (await sale("cs_bump30"))?.rate], ["written", 24]);
+  is("a bump the creator left out (0) earns nothing on its part: 20 × 0.6 = 12", [await outcome(() => noteSession(store, bumped("cs_bump0", { bump_cents: "4000", bump_rate: "0" }), new Map(), [])), (await sale("cs_bump0"))?.rate], ["written", 12]);
+  is("a free bump (0 cents) has no part to weigh: the front share stands", [await outcome(() => noteSession(store, bumped("cs_bumpfree", { bump_cents: "0", bump_rate: "30" }), new Map(), [])), (await sale("cs_bumpfree"))?.rate], ["written", 20]);
+  const badBump: [string, Record<string, string>][] = [
+    ["share missing", { bump_cents: "4000" }],
+    ["share in words", { bump_cents: "4000", bump_rate: "thirty" }],
+    ["share past the most", { bump_cents: "4000", bump_rate: "91" }],
+    ["share negative", { bump_cents: "4000", bump_rate: "-30" }],
+    ["price missing", { bump_rate: "30" }],
+    ["price in words", { bump_cents: "forty", bump_rate: "30" }],
+    ["price negative", { bump_cents: "-4000", bump_rate: "30" }],
+    ["price not whole", { bump_cents: "40.5", bump_rate: "30" }],
+  ];
+  for (const [what, meta] of badBump) {
+    const ref = `cs_bb${what.replace(/[^a-z]/g, "").slice(0, 16)}`;
+    is(`a bump's ${what}: thrown, and no sale on the book at the front share`, [await outcome(() => noteSession(store, bumped(ref, meta), new Map(), [])), await sale(ref)], ["thrown", null]);
+  }
+
   done();
 }
 

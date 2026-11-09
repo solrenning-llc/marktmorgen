@@ -10,7 +10,11 @@
  * - Switching a discount code off (DELETE /api/v1/codes), which reads the
  *   store's codes on Stripe and sends them back, waits while the plan's
  *   renewal is unpaid or disputed, as making one does, before any of the month
- *   is taken.
+ *   is taken, and the sentence it answers with says so.
+ * - A key past its minute, paused or live, costs only the lookup of its hash
+ *   and the minute's counter (KEY_PAST_MINUTE_COMMANDS) before it hears 429:
+ *   the key's record, hold, last use and the team are not read. A counter
+ *   that cannot be read refuses the key the same way, with 503, never 429.
  *
  * Synthetic store and keys, Redis in memory; no outside request.
  */
@@ -26,6 +30,15 @@ import { API_WRITE_PAUSED_WORDS } from "@/lib/integration-pause";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+/**
+ * What a key past its minute may cost before it hears 429, measured: the GET
+ * of its hash's lookup and the minute's SET NX + INCR. Before the counter
+ * moved into resolveKey it was 7 for a paused key (the four reads of its
+ * record, hold, last use and team came first). tests/plan-cost-registry.ts
+ * (rest-api) carries the same figure for the refused traffic.
+ */
+const KEY_PAST_MINUTE_COMMANDS = 3;
 
 type Body = { error?: string; message?: string; result?: unknown };
 
@@ -101,6 +114,53 @@ async function main(): Promise<void> {
     const pausedStop = await ask(codeStop, writer.key, "/api/v1/codes?id=promo_Synthetic1", "DELETE");
     is("unpaid: refused with the pause's sentence", [pausedStop.status, pausedStop.body.error, pausedStop.body.message], [409, "paused_unpaid", API_WRITE_PAUSED_WORDS.paused_unpaid]);
     is("and nothing of the month is taken", await usedCodes(), before);
+    part("Making or switching off a discount code is named in the pause's sentence");
+    is("both sentences name discount codes", Object.values(API_WRITE_PAUSED_WORDS).map((w) => /making or switching off discount codes/.test(w)), [true, true]);
+
+    part("A key past its minute costs only its lookup and the counter, paused or live");
+    const fourth = await storeOf("guard-limits-cost@example.com", "guard-limits-cost", "GuardLimitsCost");
+    const gone = await makeKey(fourth.sid, "Gone sync", Date.now(), false, "none", { owner: false, by: "", step: false, left: true });
+    const live = await makeKey(fourth.sid, "Live sync", Date.now(), false);
+    if (!gone.ok || !live.ok) throw new Error("No synthetic key");
+    const realPipeline = redis.pipeline.bind(redis);
+    let sent: string[] = [];
+    let counterDown = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent.push(...commands.map((c) => String(c[0])));
+      if (counterDown && commands.length === 2 && commands[0]?.[0] === "SET" && commands[1]?.[0] === "INCR") throw new Error("Synthetic counter out of reach");
+      return realPipeline(commands);
+    }) as typeof redis.pipeline;
+    try {
+      const costOf = async (key: string) => {
+        sent = [];
+        const answer = await ask(products, key, "/api/v1/products");
+        return { status: answer.status, error: answer.body.error, commands: sent.length, sent: [...sent] };
+      };
+      const pausedCost = await costOf(gone.key);
+      is("control: a paused key inside its minute is told it is paused", [pausedCost.status, pausedCost.error], [403, "key_paused"]);
+      for (let i = 1; i < API_RATE; i += 1) await ask(products, gone.key, "/api/v1/products");
+      const pausedPast = await costOf(gone.key);
+      is("a paused key past its minute hears 429", [pausedPast.status, pausedPast.error], [429, "rate_limited"]);
+      // Measured: on 658ce32c00 a paused key past its minute cost 7 commands (GET, the four reads, SET, INCR).
+      is(`and costs at most ${KEY_PAST_MINUTE_COMMANDS} commands: the lookup and the counter`, [pausedPast.commands <= KEY_PAST_MINUTE_COMMANDS, pausedPast.sent], [true, ["GET", "SET", "INCR"]]);
+      for (let i = 0; i < API_RATE; i += 1) await ask(products, live.key, "/api/v1/products");
+      const livePast = await costOf(live.key);
+      is("a live key past its minute hears 429", [livePast.status, livePast.error], [429, "rate_limited"]);
+      is(`and costs at most ${KEY_PAST_MINUTE_COMMANDS} commands too`, [livePast.commands <= KEY_PAST_MINUTE_COMMANDS, livePast.sent], [true, ["GET", "SET", "INCR"]]);
+      const unknownKey = await costOf(`${gone.key.slice(0, -1)}${gone.key.endsWith("0") ? "1" : "0"}`);
+      is("an unknown key still hears 401 after its lookup alone", [unknownKey.status, unknownKey.error, unknownKey.sent], [401, "unauthorized", ["GET"]]);
+      redis.advance(61_000);
+      counterDown = true;
+      const unread = await costOf(gone.key);
+      counterDown = false;
+      is("a counter that cannot be read refuses the paused key with 503, not 429 or its pause", [unread.status, unread.error], [503, "unavailable"]);
+      is("after the lookup and the counter, nothing more is read", unread.sent, ["GET", "SET", "INCR"]);
+      const back = await costOf(gone.key);
+      is("with the counter back, the paused key is told it is paused", [back.status, back.error], [403, "key_paused"]);
+    } finally {
+      redis.pipeline = realPipeline;
+    }
+
     // Last, since the stand-in's clock stays where it is moved.
     redis.advance(61_000);
     is("a minute later the paused key is told it is paused again", (await ask(products, left.key, "/api/v1/products")).body.error, "key_paused");

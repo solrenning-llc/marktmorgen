@@ -791,6 +791,30 @@ export class MemoryRedis {
           }
           return changed;
         }
+        // lib/quiz.ts QUIZ_TRY: one try checked against the state the caller read, counted, charged to the store and written at once.
+        if (key.startsWith("-- marktmorgen:quiz-try:v1\n") && (args[0] === "3" || args[0] === "4") && args.length === 1 + Number(args[0]) + 8) {
+          const n = Number(args[0]);
+          const [tries, last, passes, usage] = args.slice(1, 1 + n);
+          const [seenTries, seenLast, rawMost, json, lessonId, passed, rawAllowance, keepSeconds] = args.slice(1 + n);
+          const triesNow = this.run(["GET", tries]);
+          const lastNow = this.run(["GET", last]);
+          if ((triesNow ?? "") !== seenTries || (lastNow ?? "") !== seenLast) return ["stale", 0];
+          const used = seenTries === "" ? 0 : Number(seenTries);
+          const most = Number(rawMost);
+          if (most > 0 && used >= most) return ["no_tries", used];
+          if (n === 4) {
+            const spent = this.run(["GET", usage]);
+            const count = spent === null || spent === undefined ? 0 : Number(spent);
+            if (!Number.isSafeInteger(count) || count < 0) return ["unavailable", 0];
+            if (count >= Number(rawAllowance)) return ["usage_limit", used];
+            this.run(["INCR", usage]);
+            this.run(["EXPIRE", usage, keepSeconds]);
+          }
+          const now = this.run(["INCR", tries]);
+          this.run(["SET", last, json]);
+          if (passed === "1") this.run(["SADD", passes, lessonId]);
+          return ["ok", now];
+        }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
           this.live(args[1]);
           const n = Number(this.data.get(args[1]) ?? "0") || 0;

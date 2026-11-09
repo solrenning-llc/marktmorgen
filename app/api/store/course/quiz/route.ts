@@ -9,7 +9,9 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
 import { MAX_QUESTIONS, heldBack, passedForGate, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
-import { limited } from "@/lib/request-guard";
+import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
+import { QUIZ_TRIES_PER_CONNECTION_MINUTE, QUIZ_TRIES_PER_STUDENT_HOUR } from "@/lib/quiz-usage-rules";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
 
@@ -21,6 +23,10 @@ import { noteIfFinished } from "@/lib/course-finish";
  * at their own course is shown the answers instead of being marked. Passing
  * marks the lesson done, which is what the course's progress and its
  * certificate count.
+ *
+ * A try is limited per connection before the student's access is read, and
+ * per student before it takes one of the store's buyer actions
+ * (lib/buyer-actions.ts); a stranger without access spends none of them.
  */
 export async function POST(request: NextRequest) {
   const origin = originFrom(request);
@@ -40,6 +46,9 @@ export async function POST(request: NextRequest) {
   if (!store || !product?.course) return new Response("Not found.", { status: 404 });
   const base = `${origin}/@${store.handle}/course/${product.id}`;
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: path, "Cache-Control": "no-store" } });
+  // Nothing was counted; the answer says how long to wait before sending it again.
+  const slow = (wait: string, seconds: number) => new Response(`Too many quiz answers were sent. Nothing was counted. Please wait ${wait} and send your answers again.`, { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(seconds) } });
+  if (!(await withinLimit("quiz-connection", `${store.sid}|${clientAddress(request)}`, QUIZ_TRIES_PER_CONNECTION_MINUTE, 60))) return slow("one minute", 60);
 
   const access = await courseAccess(store, product, await cookies());
   const course = await readCourse(product.course.id);
@@ -48,6 +57,9 @@ export async function POST(request: NextRequest) {
   if (access.learner.owner) return away(`${base}/${lessonId}#quiz`);
 
   const who = emailKey(access.learner.email);
+  if (!(await withinLimit("quiz-student", `${store.sid}|${who}`, QUIZ_TRIES_PER_STUDENT_HOUR, 3_600))) return slow("one hour", 3_600);
+  // A try is one of the store's buyer actions, taken before anything of the quiz is read or written.
+  if (!(await takeBuyerAction(store))) return restingAway(origin, store);
   // A lesson a required quiz still holds shut cannot be answered from here either.
   if (heldBack(course, await passedForGate(course.id, who)).has(lessonId)) return away(base);
   const quiz = await readQuizFor(course.id, lessonId);

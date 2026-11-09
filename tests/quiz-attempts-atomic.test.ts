@@ -39,7 +39,7 @@ async function main() {
   is("three tries are marked", a.filter((r) => r.ok).length, 3);
   is("the store's allowance lost only the three tries marked", await spent(), 3);
   is("the student's count is three", await tries("lesson000001", "student-a"), "3");
-  is("every other try is refused without being counted", a.filter((r) => !r.ok).every((r) => !r.ok && (r.reason === "no_tries" || r.reason === "stale")), true);
+  is("every other try is refused without being counted", a.filter((r) => !r.ok).every((r) => !r.ok && (r.reason === "no_tries" || r.reason === "unavailable")), true);
 
   part("A burst against the creator's wait between tries");
   redis.clear();
@@ -77,6 +77,47 @@ async function main() {
   is("the student's tries were never counted", await tries("lesson000005", "student-b"), null);
   is("the data room is where it was", (await dataUsed(ROOM))!.used, before);
   is("the allowance did not move past its figure", await spent(), QUIZ_MONTHLY_SUBMISSIONS);
+
+  part("A try whose answer cannot be read is unavailable, counts nothing here and keeps its room");
+  const original = redis.pipeline.bind(redis);
+  const unreadable: (() => unknown)[] = [
+    () => [["ok", "1"]], () => [["ok", 1, 2]], () => [["maybe", 1]], () => [["ok", 1.5]], () => [["ok", 0]],
+    () => [], () => [null], () => [["ok", 1], "extra"], () => { throw Error("network"); },
+  ];
+  for (const [i, answer] of unreadable.entries()) {
+    redis.clear();
+    const roomBefore = (await dataUsed(ROOM))!.used;
+    redis.pipeline = (async (batch) => (batch[0]?.[0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:quiz-try:") ? answer() : original(batch))) as typeof redis.pipeline;
+    let result: Awaited<ReturnType<typeof submitQuiz>>;
+    try {
+      result = await submitQuiz(course, "lesson000006", "student-x", three, wrongFor(three), sid, undefined, ROOM);
+    } finally {
+      redis.pipeline = original;
+    }
+    is(`unreadable answer ${i}: unavailable`, result.ok ? "ok" : result.reason, "unavailable");
+    is(`unreadable answer ${i}: the room it took stays taken`, (await dataUsed(ROOM))!.used > roomBefore, true);
+  }
+
+  part("A try that keeps losing the race is unavailable after its rounds, and gives back every round's room");
+  redis.clear();
+  {
+    const roomBefore = (await dataUsed(ROOM))!.used;
+    let evals = 0;
+    redis.pipeline = (async (batch) => {
+      if (batch[0]?.[0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:quiz-try:")) { evals += 1; return [["stale", 0]]; }
+      return original(batch);
+    }) as typeof redis.pipeline;
+    let result: Awaited<ReturnType<typeof submitQuiz>>;
+    try {
+      result = await submitQuiz(course, "lesson000007", "student-y", three, wrongFor(three), sid, undefined, ROOM);
+    } finally {
+      redis.pipeline = original;
+    }
+    is("unavailable, nothing counted", result.ok ? "ok" : result.reason, "unavailable");
+    is("three rounds", evals, 3);
+    is("the data room is where it was", (await dataUsed(ROOM))!.used, roomBefore);
+    is("nothing spent", await spent(), 0);
+  }
 
   part("The route: a limit per connection before access, a limit per student and a buyer action before the try");
   const route = readFileSync("app/api/store/course/quiz/route.ts", "utf8");

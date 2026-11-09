@@ -48,7 +48,7 @@ let calls = 0;
 let book: Uint8Array = new Uint8Array();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const host = new URL(String(input)).hostname;
-  if (host.endsWith(".r2.cloudflarestorage.com")) return new Response(book, { status: 200, headers: { "content-length": String(book.length) } });
+  if (host.endsWith(".r2.cloudflarestorage.com")) return new Response(new Blob([book.slice()]), { status: 200, headers: { "content-length": String(book.length) } });
   if (host !== "api.anthropic.com") return new Response("{}", { status: 404 });
   calls += 1;
   // The reading is the call that carries the PDF; any other is the writing.

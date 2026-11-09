@@ -41,10 +41,13 @@ import { paidPeriod } from "./billing-period-fixture";
 
 type Sent = { to: string[] | string; subject: string; text: string };
 const sent: Sent[] = [];
+/** When true, the stand-in takes the email and still answers an error, as a timeout after delivery would look. */
+let deliveredButFailed = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     sent.push(JSON.parse(String(init?.body)) as Sent);
+    if (deliveredButFailed) return new Response(JSON.stringify({ message: "stand-in server error" }), { status: 500 });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
   }
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
@@ -65,6 +68,22 @@ async function answering<T>(match: (command: Commands[number]) => boolean, reply
   redis.pipeline = (async (commands: Commands) => {
     const real = (await original.call(redis, commands)) as unknown[];
     return commands.map((command, i) => (match(command) ? reply : real[i]));
+  }) as Pipeline;
+  try {
+    return await work();
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+/** Runs `work` with every command `match` picks never reaching Redis and answered `reply`: a write that did not happen. */
+async function dropping<T>(match: (command: Commands[number]) => boolean, reply: unknown, work: () => Promise<T>): Promise<T> {
+  const original: Pipeline = redis.pipeline;
+  redis.pipeline = (async (commands: Commands) => {
+    const kept = commands.filter((command) => !match(command));
+    const real = (await original.call(redis, kept)) as unknown[];
+    let at = 0;
+    return commands.map((command) => (match(command) ? reply : real[at++]));
   }) as Pipeline;
   try {
     return await work();
@@ -222,6 +241,47 @@ async function main(): Promise<void> {
     return sent[0]?.text ?? "";
   });
   is("opening an alert unconfirmed: the urgent email still goes, says reminders could not be set up", [LINK.test(openOdd), /could not be set up/i.test(openOdd)], [false, true]);
+
+  part("A reminder's link works even when its send or its write-back is not confirmed (Claude 3, LOW 1 on #3486)");
+  redis.clear();
+  sent.length = 0;
+  const dead = Date.UTC(2026, 10, 4, 9, 0);
+  await alertOwner({ kind: "child_safety", url }, "held", dead);
+  const deadId = idOf(tokenOf(sent[0]));
+  sent.length = 0;
+  // The email goes, but the write-back after it never happens and answers off its shape (the record still says one email went).
+  const afterSend = (c: Commands[number]) => c[0] === "SET" && String(c[1]).startsWith("nl:csa:alert:") && (JSON.parse(String(c[2])) as { sends?: number }).sends === 2;
+  await dropping(afterSend, "QUEUED", () => sendDueAlerts(dead + DAY + 60_000));
+  const sentLink = tokenOf(sent[sent.length - 1]);
+  is("the reminder went with its link", [sentLink.length, idOf(sentLink)], [96, deadId]);
+  is("and that link closes the report, though the write-back was not confirmed", await closeAlert(sentLink), "closed");
+  redis.clear();
+  sent.length = 0;
+  await alertOwner({ kind: "child_safety", url }, "held", dead);
+  sent.length = 0;
+  deliveredButFailed = true;
+  const failedRun = await sendDueAlerts(dead + DAY + 60_000).finally(() => {
+    deliveredButFailed = false;
+  });
+  const deliveredLink = tokenOf(sent[sent.length - 1]);
+  is("a send said failed that was in fact delivered: counted failed", [failedRun.sent, failedRun.failed, deliveredLink.length], [0, 1, 96]);
+  is("and the link the owner holds still closes the report", await closeAlert(deliveredLink), "closed");
+
+  part("Reports that cannot be read do not block the others (Claude 3, LOW 2 on #3486)");
+  redis.clear();
+  sent.length = 0;
+  const stuck = Date.UTC(2026, 10, 5, 9, 0);
+  await alertOwner({ kind: "child_safety", url }, "held", stuck + HOUR);
+  sent.length = 0;
+  const unreadable = Array.from({ length: ALERT_BATCH }, (_, n) => (0xabc000 + n).toString(16).padStart(32, "0"));
+  for (const id of unreadable) {
+    redis.run(["ZADD", ALERTS_DUE, stuck, id]);
+    redis.run(["SET", alertKey(id), "{not json"]);
+  }
+  const blocked = await sendDueAlerts(stuck + HOUR + DAY + 60_000);
+  is("a run that meets a full batch of unreadable reports sends none of them", [blocked.sent, blocked.unknown], [0, ALERT_BATCH]);
+  is("the next hour's run reaches the report behind them", (await sendDueAlerts(stuck + 2 * HOUR + DAY + 2 * 60_000)).sent, 1);
+  is("and the unreadable ones are still on the list, never dropped", unreadable.every((id) => redis.run(["ZSCORE", ALERTS_DUE, id]) !== null), true);
 
   part("Wired into a cron that runs every hour, and documented");
   const quiet = readFileSync("app/api/cron/quiet/route.ts", "utf8");

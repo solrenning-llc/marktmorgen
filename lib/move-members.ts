@@ -25,6 +25,8 @@ import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { onAccount } from "@/lib/stripe-account";
+import { customersOfAddress } from "@/lib/address-customers";
+import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { storeBase } from "@/lib/purchase-email";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { moveWords } from "@/lib/buyer-words/move";
@@ -41,6 +43,10 @@ const INVITES_SLOT = "mv";
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const FIELD_PATTERN = /^[0-9a-f]{32}:[A-Za-z0-9_-]{1,64}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
+/** The customers one address may have on the creator's account, both spellings together, before the answer is unknown. */
+export const KEPT_CUSTOMERS_MAX = 10;
+const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
+const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 
 /** One member invited to keep their membership here. */
 export type Invite = {
@@ -214,17 +220,46 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
   return { to: invite.e, subject: m.reminderSubject(product.title).slice(0, 200), text };
 }
 
-/** Whether this address has a live membership to this product on the creator's account now. */
+/** Whether a moved member kept their membership could not be read whole: nothing may be said either way. */
+export class KeptUnknown extends Error {
+  constructor(what: string) {
+    super(`Whether the member kept their membership could not be read: ${what}`);
+    this.name = "KeptUnknown";
+  }
+}
+
+/** A subscription row as Stripe gives it: its status in text and its metadata object. */
+const legibleSub = (row: Record<string, unknown>): boolean => typeof ownField(row, "status") === "string" && plainObject(ownField(row, "metadata"));
+
+/**
+ * Whether this address has a live membership to this product on the
+ * creator's account now. Stripe keeps the address as the buyer typed it and
+ * its customer filter is case-sensitive, so the address is read as given and
+ * in small letters (lib/address-customers.ts, one read when they are the
+ * same), within KEPT_CUSTOMERS_MAX customers; a customer counts only when its
+ * own address is this one, ignoring capitals. A live membership on a
+ * readable row is "kept". "Not kept" is said only of lists read whole with
+ * every row readable; anything else (a row of another address or none, the
+ * ceiling passed, more pages, a row or page that does not read) throws
+ * KeptUnknown or StripeListUnreadable, and sendMoveReminders puts the
+ * reminder back instead of asking somebody who pays to pay again.
+ */
 export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
-  const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
-  for (const customer of (Array.isArray(customers.data) ? customers.data : []) as { id?: unknown }[]) {
-    if (typeof customer.id !== "string") continue;
-    const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
-    const list = (Array.isArray(subs.data) ? subs.data : []) as { status?: unknown; metadata?: Record<string, string> | null }[];
-    if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
+  const customers = await customersOfAddress(
+    email,
+    KEPT_CUSTOMERS_MAX,
+    (spelling) => onAccount("GET", account, `/customers?${new URLSearchParams({ email: spelling, limit: String(KEPT_CUSTOMERS_MAX) })}`),
+    CUSTOMER_PATTERN,
+  );
+  let unknown = customers.unknown;
+  for (const customer of customers.rows) {
+    const subs = readStripePage(await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=100`), legibleSub, SUB_PATTERN);
+    if (subs.rows.some((s) => LIVE.has(String(ownField(s, "status"))) && ownField(ownField(s, "metadata") as Record<string, unknown>, "product") === productId)) return true;
+    if (subs.unreadable > 0 || subs.hasMore) unknown = true;
   }
+  if (unknown) throw new KeptUnknown("the address's customers or their subscriptions were not read whole");
   return false;
 }
 

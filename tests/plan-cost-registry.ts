@@ -1027,6 +1027,11 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES", "IMPORT_WORST_COMMANDS_PER_ROW", "IMPORT_WORST_BYTES_PER_ROW", "IMPORT_MIN_ROWS_PER_UPLOAD"] },
       { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS"] },
+      // A moved member's one reminder asks first whether they kept it (keptAlready, in the imports job, a company fixed cost bounded by its
+      // schedule): their customers are read as given and in small letters (one read when they are the same; Stripe's filter is
+      // case-sensitive), both within KEPT_CUSTOMERS_MAX: one more Stripe list at most, no API charge, no store command or byte; the email's
+      // own cost unchanged (9 November 2026).
+      { file: "lib/move-members.ts", names: ["KEPT_CUSTOMERS_MAX = 10", "customersOfAddress("] },
       { file: "app/api/store/import/route.ts", names: ["import-start-month", "import-step-month", "import-report-month"] },
     ],
     basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails).",

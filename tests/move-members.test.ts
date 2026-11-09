@@ -34,7 +34,7 @@ type Sent = { to: string | string[]; subject: string; text: string };
 const emails: Sent[] = [];
 const checkouts: URLSearchParams[] = [];
 const customersByEmail = new Map<string, string>();
-const liveSubs = new Map<string, { status: string; metadata: Record<string, string> }[]>();
+const liveSubs = new Map<string, { id: string; status: string; metadata: Record<string, string> }[]>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -47,8 +47,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   const answer = (body: unknown) => new Response(JSON.stringify(body));
   if (path === "/customers" && method === "GET") {
-    const id = customersByEmail.get(url.searchParams.get("email") ?? "");
-    return answer({ object: "list", data: id ? [{ id }] : [], has_more: false });
+    const email = url.searchParams.get("email") ?? "";
+    const id = customersByEmail.get(email);
+    // Each row with its own address, the one asked for, as Stripe's exact filter gives it (lib/address-customers.ts).
+    return answer({ object: "list", data: id ? [{ id, email }] : [], has_more: false });
   }
   if (path === "/subscriptions") return answer({ object: "list", data: liveSubs.get(url.searchParams.get("customer") ?? "") ?? [], has_more: false });
   if (path === "/checkout/sessions" && method === "POST") {
@@ -178,7 +180,7 @@ async function main(): Promise<void> {
 
   part("One reminder, never to somebody who kept it");
   customersByEmail.set("hal@example.com", "cus_Hal000001");
-  liveSubs.set("cus_Hal000001", [{ status: "trialing", metadata: { store: "harbor", product: club.product.id } }]);
+  liveSubs.set("cus_Hal000001", [{ id: "sub_Hal000001", status: "trialing", metadata: { store: "harbor", product: club.product.id } }]);
   const sentBefore = emails.length;
   // From the renewal date itself, so the hour the test runs at changes nothing.
   const early = await sendMoveReminders(Date.now() + 30_000, (in20 - 4 * DAY) * 1000);

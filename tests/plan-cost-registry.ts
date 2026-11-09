@@ -101,7 +101,8 @@ import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, REFUND_TELL_TRIES_AT_MOST } from "@/lib/paypal-sales";
+import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
@@ -588,9 +589,32 @@ export const LOCKED_UNTIL_STAR_EXTRA = request("studio", 20 + TAKE_COMMANDS + LO
  * only a message too large to keep, which writes its line instead of a try, reads it with none. A read with no answer
  * takes the event's mark back: a Stripe event is read again next run, as the watcher's other lookups are (one event
  * waits a store a run, inside the five-minute job's own schedule, STRIPE_WAIT_RUNS in lib/webhooks.ts); PayPal's
- * refund, whose telling is not tried again (lib/paypal-sales.ts), is then not sent.
+ * refund is told again an hour later, at most REFUND_TELL_TRIES_AT_MOST times (PAYPAL_REFUND_TELL_RETRY).
  */
 export const WEBHOOK_ERASED_READ_COMMANDS = 1;
+/**
+ * PayPal's refund.issued told again when telling it failed (lib/paypal-sales.ts watchPayPal, REFUND_TELL_RETRY_SECONDS;
+ * Claude 5's L4 on #3491), in Redis commands, each held to what the real sweep sends by
+ * tests/paypal-refund-told-retry.test.ts:
+ * - triesAtMost: one telling an hour, the first included, for REFUND_TELL_RETRY_SECONDS (REFUND_TELL_TRIES_AT_MOST);
+ * - ownCommandsPerFailedTry: a failed try's own commands: the SET NX and GET of the first failure's time
+ *   (nl:ppsell:tell:) and the ZADD that keeps the order watched an hour (none at the last try, which goes on);
+ * - lookCommandsPerFailedTry: each try after the first looks at the order again: the GET of its paid record and the
+ *   ZADD and EXPIRE of its refund mark, besides one read of the capture from PayPal, which bills no API call; and
+ *   emitEvent up to the read that failed, inside the webhook unit's own commands (UNIT_COST.webhook);
+ * - notSentCommandsAtMost: once, at the last try, the "Not sent" lines (lib/webhooks.ts notSentLines): the SET NX of
+ *   the event's mark, one SET of a line a live endpoint (MAX_ENDPOINTS at most), the log's LRANGE when a line was
+ *   already there, one LPUSH a line and the LTRIM, besides the configuration read emitEvent makes too.
+ * A telling that works writes none of them. The work is the five-minute job's sweep, bounded by the tries a refunded
+ * order: a company fixed cost like NOT_A_COST.HAND_OVER_BATCH, not a plan's allowance; like the job's other per-store
+ * work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.
+ */
+export const PAYPAL_REFUND_TELL_RETRY = {
+  triesAtMost: REFUND_TELL_TRIES_AT_MOST,
+  ownCommandsPerFailedTry: 3,
+  lookCommandsPerFailedTry: 3,
+  notSentCommandsAtMost: 1 + 2 * MAX_ENDPOINTS + 2,
+} as const;
 /** One unit of each store figure, at the most it costs (lib/store-allowance-rules.ts). */
 export const UNIT_COST: Record<AllowanceKind, number> = {
   // A studio request at its shape, its twenty commands and fifty kilobytes through the database, and lockedUntil's

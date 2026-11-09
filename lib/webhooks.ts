@@ -779,6 +779,43 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
 }
 
 /**
+ * When an event of ours could not be made after its tries (PayPal's refund.issued, lib/paypal-sales.ts watchPayPal;
+ * Claude 5's L4 on #3491): a line in the store's delivery log for each live endpoint that hears it, which the studio
+ * shows "Not sent", with `words`, so the creator knows to look. The event's mark is taken first (SET NX), as
+ * emitEvent does: an event already sent, or already said not sent, writes nothing, and once said it is never sent
+ * after. Each line's id is the one emitEvent gives that event's delivery to that endpoint, so a delivery written
+ * before is shown as it is (SET NX) and put in the log only when it is not there yet. Every reply read in its exact
+ * shape (CX-123 rule 24): anything else throws, and the mark is taken back when it was ours. No message is made, no
+ * endpoint is called and none of the month's deliveries is taken. Returns how many lines were written.
+ */
+export async function notSentLines(store: Store, type: WebhookEvent, seed: string, words: string, now = Date.now()): Promise<number> {
+  if (!store.statsId || !isRedisConfigured()) return 0;
+  const statsId = store.statsId;
+  const config = await readConfig(statsId);
+  const listening = await liveEndpoints(store, config?.endpoints.filter((e) => e.events.includes(type)) ?? [], true);
+  if (!listening.length) return 0;
+  const eventId = eventIdFor(statsId, type, seed);
+  const claimed = repliesFor(await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]), 1);
+  if (!claimed || (claimed[0] !== "OK" && claimed[0] !== null)) throw new UnknownReplyError("an event's sent mark");
+  if (claimed[0] === null) return 0;
+  const lines = listening.map((endpoint) => noticeLine(
+    `dlv_${createHash("sha256").update(`${eventId}|${endpoint.id}`).digest("hex").slice(0, 24)}`,
+    statsId, endpoint.id, eventId, type, words, now,
+  ));
+  try {
+    const written = repliesFor(await redisPipeline(lines.map((line) => ["SET", deliveryKey(line.id), JSON.stringify(line), "NX", "EX", DELIVERY_SECONDS])), lines.length);
+    if (!written || !written.every((reply) => reply === "OK" || reply === null)) throw new UnknownReplyError("a webhook log line not sent");
+    await pushMissing(statsId, lines.filter((_, at) => written[at] === null).map((line) => line.id), lines.filter((_, at) => written[at] === "OK").map((line) => line.id));
+  } catch (error) {
+    // As emitEvent: without its lines the event would leave no trace; the mark goes, so the next look says it again.
+    await redisPipeline([["DEL", eventKey(eventId)]]).catch((lost) =>
+      console.error("WEBHOOK EVENT LOST: its not-sent lines could not be written and its sent mark could not be taken back", statsId, type, eventId, lost));
+    throw error;
+  }
+  return lines.length;
+}
+
+/**
  * Tries every delivery that is due, for the five-minute job: at most
  * MAX_RETRIES_PER_RUN, ten at a time, and none started after the deadline.
  */

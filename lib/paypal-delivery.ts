@@ -9,13 +9,13 @@
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
-import { type Paid, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
+import { type Paid, REFUND_TELL_TRIES_AT_MOST, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import type { Store } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
-import { emitEvent } from "@/lib/webhooks";
+import { emitEvent, notSentLines } from "@/lib/webhooks";
 
 /**
  * Paid PayPal orders still owed their hand-over (handOverKey in lib/paypal-sales.ts): settle puts each one there with
@@ -133,6 +133,9 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
   return handed;
 }
 
+/** What the store's webhook log says of a PayPal refund whose event could not be made after its tries. */
+const REFUND_NOT_SENT_WORDS = `We could not prepare the event for this PayPal refund, so it was skipped after ${REFUND_TELL_TRIES_AT_MOST} tries. Look up the refund in your PayPal account.`;
+
 /**
  * The checkout sweep's PayPal part for one store: pending payments cleared, refunds taken back, and paid orders
  * whose product could not be read handed over (counted as cleared).
@@ -164,6 +167,10 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
         refunded_at: new Date().toISOString(),
         // Nobody the store deleted at or after the payment is named (R38, rule 30; review of #3491).
       }, Date.now(), { email: paid.email, paidAt: paid.at });
+    },
+    // Telling failed for REFUND_TELL_RETRY_SECONDS (lib/paypal-sales.ts): the store's webhook log says so, once.
+    notTold: async (paid) => {
+      await notSentLines(store, "refund.issued", `paypal:${paid.capture}`, REFUND_NOT_SENT_WORDS);
     },
   });
   done.cleared += await handOverAgain(store, deadline);

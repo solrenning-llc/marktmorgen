@@ -17,6 +17,7 @@ import * as hooks from "@/lib/webhooks";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { PAYPAL_REFUND_TELL_RETRY } from "./plan-cost-registry";
 
 const { captureOrder, openOrder } = sales;
 const { addEndpoint, recentMessages, setSendHooksForTests, webhooksView } = hooks;
@@ -129,7 +130,8 @@ async function main(): Promise<void> {
     const [score] = await redis.pipeline([["ZSCORE", watch, order]]);
     return score === null ? null : Number(score);
   };
-  const holds = async (email: string) => (await importedFor(store, email)).length;
+  // Read through the store as it is now: the purchases' read needs the store's mark of buyers, set by the first one.
+  const holds = async (email: string) => (await importedFor((await storeForEmail(OWNER))!, email)).length;
   const sweep = () => sweepPayPal(store, Date.now() + 10_000);
 
   part("The bound is named and finite");
@@ -170,13 +172,29 @@ async function main(): Promise<void> {
   const lost = await paidThenRefunded("pp-lost@example.com");
   failing = true;
   let tries = 0;
+  const own: number[] = [];
+  const looks: number[] = [];
+  let lineCommands = -1;
+  const keyOf = (c: (string | number)[]) => String(c[1] ?? "");
   for (let look = 0; look < 48 && (await watchedAt(lost.order)) !== null; look += 1) {
     const before = sent.length;
     await sweep();
-    if (sent.slice(before).some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:erased:"))) tries += 1;
+    const pass = sent.slice(before);
+    if (pass.some((c) => c[0] === "HGET" && keyOf(c).startsWith("nl:erased:"))) tries += 1;
+    const lineAt = pass.findIndex((c) => c[0] === "SET" && keyOf(c).startsWith("nl:hooks:evt:") && pass.some((d) => d[0] === "SET" && keyOf(d).startsWith("nl:hooks:d:") && d.includes("NX")));
+    own.push(pass.filter((c) => keyOf(c).startsWith("nl:ppsell:tell:") || (c[0] === "ZADD" && keyOf(c) === watch && c[3] === lost.order && Number(c[2]) > 0)).length);
+    looks.push(pass.filter((c) => (c[0] === "GET" && keyOf(c) === `nl:ppsell:paid:${lost.order}`) || ((c[0] === "ZADD" || c[0] === "EXPIRE") && keyOf(c) === `nl:ppsell:refunded:${statsId}`)).length);
+    // The last pass: what the "Not sent" lines took, from the event's mark taken for them to the log's LTRIM.
+    const lastEvt = pass.map((c, at) => (c[0] === "SET" && keyOf(c).startsWith("nl:hooks:evt:") ? at : -1)).filter((at) => at >= 0).pop();
+    const trim = pass.findIndex((c) => c[0] === "LTRIM" && keyOf(c).startsWith("nl:hooks:log:"));
+    if (lineAt >= 0 && lastEvt !== undefined && trim > lastEvt) lineCommands = pass.slice(lastEvt, trim + 1).filter((c) => keyOf(c).startsWith("nl:hooks:evt:") || keyOf(c).startsWith("nl:hooks:d:") || keyOf(c).startsWith("nl:hooks:log:")).length;
     hour();
   }
   is("tried at most REFUND_TELL_TRIES_AT_MOST times, an hour apart", tries, triesAtMost);
+  is("the registry's triesAtMost is that bound (PAYPAL_REFUND_TELL_RETRY)", PAYPAL_REFUND_TELL_RETRY.triesAtMost, triesAtMost);
+  is("each failed try's own commands as the registry prices them, none more at the last", own, [...Array(tries - 1).fill(PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry), PAYPAL_REFUND_TELL_RETRY.ownCommandsPerFailedTry - 1]);
+  is("each try looks at the order with the commands the registry prices", looks.every((n) => n === PAYPAL_REFUND_TELL_RETRY.lookCommandsPerFailedTry), true);
+  is("the not-sent lines take no more than the registry prices", lineCommands > 0 && lineCommands <= PAYPAL_REFUND_TELL_RETRY.notSentCommandsAtMost, true);
   is("never told", await told(lost.capture), 0);
   const lines = await notSent();
   is("one line in the store's webhook log, for the endpoint that hears refunds", lines.length, 1);

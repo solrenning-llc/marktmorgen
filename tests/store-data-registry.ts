@@ -603,6 +603,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:forms:@lib/funnel-form-review.ts": { what: "Forms read for a funnel's review", parts: [capped(0, "Read only: counted with lib/form-store.ts.")] },
   "nl:product:page:@lib/funnel-form-review.ts": { what: "Pages read for a funnel's review", parts: [capped(0, "Read only: counted with lib/sales-page-store.ts.")] },
   "nl:dpv:@lib/draft-preview.ts": short("A draft's private preview link, seven days: one live per draft, each made from the studio", "studio", 7, 512),
+  "nl:dpv:down:@lib/draft-preview.ts": short("A product taken down after a notice gets no preview link until it is published again, at most 400 days", "studio", 400, 128),
   "nl:dpv:p:@lib/draft-preview.ts": short("Which preview link a draft has now, seven days", "studio", 7, 256),
   "nl:fshare:@lib/funnel-share-store.ts": { what: "Share links and their snapshots", line: "funnel-share" },
   "nl:fshare:n:@lib/funnel-share-store.ts": short("A link's reads counted a month", "day", 62, 128),

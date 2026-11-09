@@ -10,6 +10,7 @@ import { CommunityBar, communityNotices } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EventCard } from "@/components/community-events";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -94,10 +95,7 @@ export default async function CommunityEventsPage({ params, searchParams }: Para
             {upcoming.length ? (
               <ul className="mt-3 space-y-3">{upcoming.map(card)}</ul>
             ) : (
-              <div className="st-note mt-3 text-center">
-                <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.nothingScheduled}</p>
-                <p className="mt-1 text-sm">{viewer.owner ? w.ownerScheduleNote : w.whenScheduled(store.name)}</p>
-              </div>
+              <EmptyState level={3} title={w.nothingScheduled} body={viewer.owner ? w.ownerScheduleNote : w.whenScheduled(store.name)} className="mt-3" />
             )}
           </section>
         ) : null}

@@ -32,9 +32,11 @@
  * fingerprint of the address, so nothing but their own yes, given again,
  * puts them back on as someone who may be written to (forgetContactPerson).
  */
+import { stringList } from "@/lib/redis-reply";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
@@ -222,13 +224,22 @@ export async function upsertContact(
   const email = normaliseEmail(rawEmail);
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return none;
   const key = leadsKey(listId);
-  const [raw, size, erased] = await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["HGET", key, email],
     ["HLEN", key],
     suppressedCommand(listId, email),
-  ]);
+  ]), 3);
+  // HGET answers text or nothing, HLEN a count, HEXISTS 0 or 1. Any other shape, or fewer replies than commands, is
+  // unknown (CX-123 rule 24): never "not on the list" (which wrote someone who unsubscribed back as a new contact who
+  // agreed, without why they were taken off or their link's token), never room on a full list, never "not deleted".
+  const raw = replies?.[0];
+  const size = countOf(replies?.[1]);
+  const erased = countOf(replies?.[2]);
+  if (!replies || (raw !== null && typeof raw !== "string") || size === null || erased === null || erased > 1) {
+    throw new UnknownReplyError("a contact's row, the list's size or whether the address was deleted");
+  }
   const before = parseContact(raw);
-  if (!before && Number(size) >= MAX_LEADS) return { ...none, full: true };
+  if (!before && size >= MAX_LEADS) return { ...none, full: true };
 
   const now = new Date().toISOString();
   const wasMailable = before ? mailable(before) : false;
@@ -592,6 +603,8 @@ const sha1 = (value: string) => createHash("sha1").update(value).digest("hex");
 
 /** Sets each field only if it still holds what was read (by its SHA-1, "" for none); one step on the Redis side. */
 const CAS_HSET = [
+  // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
+  "-- marktmorgen:contact-cas-hset:v1",
   "local out = {}",
   "for i = 1, #ARGV, 3 do",
   '  local cur = redis.call("HGET", KEYS[1], ARGV[i])',
@@ -609,28 +622,38 @@ const CAS_HSET = [
 
 /**
  * Writes each field that still holds what was read; says which were written.
- * Upstash runs the script; where a Redis does not (the local stand-ins), the
- * same check is made as a read just before the write, which keeps the rule
- * and only narrows the gap rather than closing it. A field that already holds
- * what was to be written counts as written: the script ran and only its
- * answer was lost, and reporting it as lost would leave that write out of
- * what its caller answers (and of an undo).
+ * The check and the write are one step, the script's, and never anything else:
+ * when it fails or its answer is unknown, nothing is written here. A read and
+ * then a plain HSET would not be one step, so an unsubscribe made between them
+ * would be written over and the person written to again (Codex G, #3116).
+ * When every field already holds what was to be written, the script ran and
+ * only its answer was lost: written, and answered so (an undo needs it). Any
+ * other read-back is unknown and throws UnknownReplyError, never "not written".
  */
 async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
   try {
     const [result] = await redisPipeline([["EVAL", CAS_HSET, 1, key, ...writes.flatMap((w) => [w.email, w.was, w.value])]]);
-    if (Array.isArray(result) && result.length === writes.length) return result.map((v) => Number(v) === 1);
+    // Each one exactly 1 (written) or 0 (changed meanwhile); anything else is read back below, never "not written".
+    const each = repliesFor(result, writes.length);
+    if (each && each.every((v) => v === 0 || v === 1)) return each.map((v) => v === 1);
     throw new Error("unexpected answer");
   } catch {
-    const [now] = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]);
-    const read = writes.map((_, i) => (Array.isArray(now) ? now[i] : null));
-    // A field that already holds what was to be written was written (the script ran and its answer was lost): not written again, never reported as lost.
-    const landed = writes.map((w, i) => read[i] === w.value);
-    const same = writes.map((w, i) => !landed[i] && (typeof read[i] === "string" ? sha1(read[i] as string) : "") === w.was);
-    const pairs = writes.flatMap((w, i) => (same[i] ? [w.email, w.value] : []));
-    if (pairs.length) await redisPipeline([["HSET", key, ...pairs]]);
-    return writes.map((_, i) => landed[i] || same[i]);
+    // Read back only in its exact shape (CX-123 rule 24): one text or nothing for each. Anything else is unknown and
+    // throws, never "not written": a caller that undoes what it wrote alongside (tokensFor's token record) must not.
+    const read = fieldsOf((await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)]]))[0], writes.length, "a contact write's read-back");
+    // Every field holding what was to be written: the script ran and its answer was lost; written, never reported as lost.
+    if (writes.every((w, i) => read[i] === w.value)) return writes.map(() => true);
+    // Anything else: whether the script ran is not known, and nothing is written without its check (an unsubscribe
+    // made since this read would be written over). The caller answers "not known" and tries again later.
+    throw new UnknownReplyError("a contact write");
   }
+}
+
+/** An HMGET's answer for `count` fields, each its text or nothing; any other shape throws UnknownReplyError. */
+function fieldsOf(reply: unknown, count: number, what: string): (string | null)[] {
+  const each = repliesFor(reply, count);
+  if (!each || each.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError(what);
+  return each as (string | null)[];
 }
 
 /**
@@ -738,8 +761,9 @@ export async function tokensFor(
   // A row changed between the read and the write (a purchase noted, a name
   // added) is read again and tried again; one that left meanwhile is dropped.
   for (let round = 0; round < 3 && pending.length; round += 1) {
-    const [rows] = await redisPipeline([["HMGET", key, ...pending]]);
-    const found = Array.isArray(rows) ? rows : [];
+    // Read only in its exact shape (CX-123 rule 24): an unknown answer is unknown, never "everyone left the list",
+    // so a send counts nobody as gone on it (lib/mail.ts sendTo stops for a retry).
+    const found = fieldsOf((await redisPipeline([["HMGET", key, ...pending]]))[0], pending.length, "the contacts for unsubscribe links");
     const writes: { email: string; value: string; was: string; token: string }[] = [];
     pending.forEach((email, i) => {
       const raw = found[i];
@@ -758,7 +782,14 @@ export async function tokensFor(
     // nowhere; then each contact only if it is still as it was read, so an
     // unsubscribe made meanwhile is never written over, and two sends at
     // once keep one token between them.
-    await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
+    // Each record answered exactly "OK", or no token is handed out nor kept on a contact: a token whose record may not
+    // exist would put a link and a one-click header leading nowhere into this email and every later one (rule 24).
+    const records = await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
+    const set = repliesFor(records, writes.length);
+    if (!set || set.some((reply) => reply !== "OK")) {
+      await redisPipeline(writes.map((w) => ["DEL", tokenKey(w.token)])).catch(() => null);
+      throw new UnknownReplyError("an unsubscribe link's record");
+    }
     const done = await casWrite(key, writes);
     writes.forEach((w, i) => {
       if (done[i]) out.set(w.email, w.token);
@@ -770,13 +801,29 @@ export async function tokensFor(
   return out;
 }
 
-/** Who an unsubscribe link belongs to, without acting on it. */
+/**
+ * One GET or HGET read exactly (CX-123 rule 24): its text, or null only for an
+ * exact nil. Any other answer is unknown and throws, so a link that exists is
+ * never said to be one nobody made.
+ */
+async function textOrNil(command: (string | number)[], what: string): Promise<string | null> {
+  const replies = repliesFor(await redisPipeline([command]), 1);
+  const reply = replies?.[0];
+  if (!replies || (reply !== null && typeof reply !== "string")) throw new UnknownReplyError(what);
+  return reply;
+}
+
+/**
+ * Who an unsubscribe link belongs to, without acting on it. Null only when
+ * Redis said so exactly: no such link, or its row gone or holding another
+ * token. A reply in another shape throws UnknownReplyError.
+ */
 export async function readUnsubToken(
   token: string,
 ): Promise<{ listId: string; email: string; handle: string; contact: Contact } | null> {
   if (!UNSUB_TOKEN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", tokenKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const raw = await textOrNil(["GET", tokenKey(token)], "an unsubscribe link");
+  if (raw === null) return null;
   // listId|address|handle — an address may itself hold a "|".
   const first = raw.indexOf("|");
   const last = raw.lastIndexOf("|");
@@ -785,12 +832,17 @@ export async function readUnsubToken(
   const email = raw.slice(first + 1, last);
   const handle = raw.slice(last + 1);
   if (!email) return null;
-  const [row] = await redisPipeline([["HGET", leadsKey(listId), email]]);
+  const row = await textOrNil(["HGET", leadsKey(listId), email], "the contact behind an unsubscribe link");
   const contact = parseContact(row);
   return contact && contact.t === token ? { listId, email, handle, contact } : null;
 }
 
-/** Takes an address off the list for good. Safe to press twice. */
+/**
+ * Takes an address off the list for good. Safe to press twice. Done only on
+ * the row's HSET answering exactly 0 or 1 (CX-123 rule 24); any other answer,
+ * or a read of the link in another shape, throws, and the door says "try
+ * again", never "Unsubscribed." (app/api/mail/unsubscribe).
+ */
 export async function unsubscribe(token: string): Promise<{ listId: string; email: string } | null> {
   const found = await readUnsubToken(token);
   if (!found) return null;
@@ -802,7 +854,9 @@ export async function unsubscribe(token: string): Promise<{ listId: string; emai
   const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
   const commands: (string | number)[][] = [["HSET", leadsKey(listId), email, JSON.stringify(next)]];
   if (contact.agreed) commands.push(["INCR", unsubKey(listId)]);
-  await redisPipeline(commands);
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const written = replies ? countOf(replies[0]) : null;
+  if (written === null || written > 1) throw new UnknownReplyError("an unsubscribe's write");
   return { listId, email };
 }
 
@@ -822,7 +876,11 @@ export async function stopWriting(listId: string, rawEmail: string, why: "bounce
   // Written only if the address still holds what was read: a purchase noted,
   // or their own unsubscribe, in the same moment is not written over.
   for (let round = 0; round < 3; round += 1) {
-    const [raw] = await redisPipeline([["HGET", key, email]]);
+    const replies = repliesFor(await redisPipeline([["HGET", key, email]]), 1);
+    const raw = replies?.[0];
+    // HGET answers text or nothing: any other shape is unknown (CX-123 rule 24), never "not on the list", so the
+    // sender's notice is not dropped while the address keeps being written to; thrown, it is heard again.
+    if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a contact's row before it is taken off");
     const contact = parseContact(raw);
     if (!contact || contact.unsub || typeof raw !== "string") return false;
     const { clicks: _left, ...kept } = contact;
@@ -863,16 +921,22 @@ export async function forEachContact(
   const key = leadsKey(listId);
   let cursor = "0";
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
-    const [reply] = await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]);
-    if (!Array.isArray(reply) || reply.length < 2) break;
-    cursor = String(reply[0]);
-    const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+    // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
+    // list, so an email is never sent to part of it as if to all, nor an export cut short as if whole.
+    const reply = repliesFor(repliesFor(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]), 1)?.[0], 2);
+    const next = reply?.[0];
+    const flat = stringList(reply?.[1]);
+    const nextCursor = typeof next === "string" && /^\d+$/.test(next) ? next : countOf(next) !== null ? String(next) : null;
+    if (!reply || nextCursor === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
+    cursor = nextCursor;
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const contact = parseContact(flat[i + 1]);
-      if (contact) each(String(flat[i]), contact);
+      if (contact) each(flat[i], contact);
     }
-    if (cursor === "0") break;
+    if (cursor === "0") return;
   }
+  // More pages than a full list can take: never read as the whole list.
+  throw new UnknownReplyError("a store's list that did not end");
 }
 
 /**

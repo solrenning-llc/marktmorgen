@@ -38,7 +38,7 @@ async function main() {
     let saved = false, hit = 0;
     redis.pipeline = async commands => {
       const command = commands[0];
-      if (!saved && commands.length === 1 && command[0] === "SET" && command[1] === key && !command.includes("NX")) {
+      if (!saved && commands.length === 1 && command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:agreement-save:v1") && command[4] === key) {
         if (name !== "known unapplied control") await pipeline(commands);
         saved = true;
         return []; // The record may have been saved; the receipt was lost.

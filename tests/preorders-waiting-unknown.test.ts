@@ -71,6 +71,14 @@ const SHAPES: [string, unknown][] = [
   ["a list with text that is not a pre-order", ["not json"]],
 ];
 
+/**
+ * Merge with main (#2991): main's waitingCount counts a record that does not read as waiting ("it may be a paid
+ * one") instead of throwing, so for this shape the count is known and above zero. Still never "nobody waits": the
+ * removal is refused 409 "preorders" and the empty product stays coming soon (400 "empty"). Only the expected answer
+ * changes, never the safety each check holds.
+ */
+const COUNTED = "a list with text that is not a pre-order";
+
 async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, HANDLE, "Pre Shop", "");
@@ -126,19 +134,22 @@ async function main(): Promise<void> {
     {
       const { pid, key } = await setUp(`Course W ${label}`, true);
       const shop = await store();
-      is(`(${label}) waitingCount says it does not know`, await withBent("HVALS", key, reply, () => rejection(() => waitingCount(shop, pid))), "UnknownReplyError");
+      // Assertion changed in the merge with main (#2991, COUNTED above): an unread record counts as one waiting.
+      is(`(${label}) waitingCount says it does not know, or counts the unread record as waiting`, await withBent("HVALS", key, reply, () => (label === COUNTED ? waitingCount(shop, pid) : rejection(() => waitingCount(shop, pid)))), label === COUNTED ? 1 : "UnknownReplyError");
     }
     {
       const { pid, key } = await setUp(`Course D ${label}`, true);
       const removed = await withBent("HVALS", key, reply, () => post(productRoute, "product", session, { action: "remove", id: pid }));
-      is(`(${label}) removal answers 503 "unavailable"`, await answer(removed), [503, "unavailable"]);
+      // Assertion changed in the merge with main (#2991, COUNTED above): counted as waiting, the removal is refused 409.
+      is(`(${label}) removal is refused, 503 "unavailable" (or 409 "preorders" when counted)`, await answer(removed), label === COUNTED ? [409, "preorders"] : [503, "unavailable"]);
       is(`(${label}) the product is kept`, Boolean(await readListing(await store(), pid)), true);
       is(`(${label}) and its buyer who paid still waits for it`, await waitingCount(await store(), pid), 1);
     }
     {
       const { pid, key } = await setUp(`Course E ${label}`, false);
       const released = await withBent("HVALS", key, reply, () => post(waitlistRoute, "waitlist", session, { action: "soon", id: pid, on: false }));
-      is(`(${label}) taking the EMPTY product off coming soon is refused, 503 "unavailable"`, await answer(released), [503, "unavailable"]);
+      // Assertion changed in the merge with main (#2991, COUNTED above): counted as waiting, refused 400 "empty".
+      is(`(${label}) taking the EMPTY product off coming soon is refused, 503 "unavailable" (or 400 "empty" when counted)`, await answer(released), label === COUNTED ? [400, "empty"] : [503, "unavailable"]);
       is(`(${label}) it stays coming soon (no buy button on an empty product)`, await isSoon(await store(), pid), true);
     }
     {

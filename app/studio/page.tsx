@@ -6,7 +6,7 @@ import { costsPaused } from "@/lib/plan-standing";
 import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pause";
 import { PlanDisputeNotice } from "@/components/plan-dispute-notice";
 import { planDisputed } from "@/lib/plan-dispute-rules";
-import { RenewalUnpaidNotice } from "@/components/renewal-unpaid-notice";
+import { PlanDueSoonNotice, PlanUnconfirmedNotice, RenewalUnpaidNotice, planAmountWords, planDueSoon } from "@/components/renewal-unpaid-notice";
 import { funnelLaunchChecklist } from "@/lib/funnel-launch-checklist";
 import { activationTiming } from "@/lib/store-activation";
 import { PathStudioReminder } from "@/components/path-studio-reminder";
@@ -1042,10 +1042,10 @@ export default async function StudioPage({
   // Whether a larger plan can be had now (lib/larger-plan.ts): none above Scale, none while Pro is not sold, nothing while no plan is on sale.
   const largerOnSale = PLANS_ON_SALE && planAboveSold(tier);
   const domainNow = planReads.domainNow ? await planReads.domainNow : null;
-  const billedNow =
-    live?.state === "active" && live.amountCents > 0
-      ? `$${live.amountCents % 100 ? (live.amountCents / 100).toFixed(2) : live.amountCents / 100} a ${live.cycle}`
-      : priceWords(tier, billedYearly ? "year" : "month");
+  // The amount Stripe confirmed on this load, or null: never the price list's figure in its place (VR item 2).
+  const billedNow = live?.state === "active" && live.amountCents > 0 ? planAmountWords(live.amountCents, live.cycle) : null;
+  // A trial ending or a yearly renewal within seven days, from the same read (no new call to Stripe).
+  const planDue = planDueSoon(live, nowSeconds());
   const changePending = live?.state === "active" && live.changePending;
   // The way to the plan refund's review page (305 [SY1]): for the owner of a paid plan that may have one today, a
   // yearly plan or a period begun within the guarantee's days. The page itself reads the exact amount, or says why
@@ -1362,6 +1362,7 @@ export default async function StudioPage({
         {store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
+        {billingReady && may("billing") && planDue ? <PlanDueSoonNotice due={planDue} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
 
         {notice ? (
@@ -2962,11 +2963,15 @@ export default async function StudioPage({
                   </>
                 ) : paid ? (
                   <>
-                    <p className="mt-5 notice notice-success font-semibold">
-                      {trialing
-                        ? `You are in the ${TRIAL_DAYS}-day trial. No card has been charged yet. After it: ${billedNow}${endsOn ? `, first charged on ${endsOn}` : ""}.`
-                        : `Subscribed at ${billedNow}.${endsOn ? ` Next charge on ${endsOn}.` : ""}`}
-                    </p>
+                    {billedNow === null ? (
+                      <PlanUnconfirmedNotice />
+                    ) : (
+                      <p className="mt-5 notice notice-success font-semibold">
+                        {trialing
+                          ? `You are in the ${TRIAL_DAYS}-day trial. No card has been charged yet. After it: ${billedNow}${endsOn ? `, first charged on ${endsOn}` : ""}.`
+                          : `Subscribed at ${billedNow}.${endsOn ? ` Next charge on ${endsOn}.` : ""}`}
+                      </p>
+                    )}
                     {changePending ? (
                       <p className="mt-3 notice notice-warn">
                         A change of billing is waiting for your bank to let the

@@ -202,12 +202,26 @@ async function intentOf(account: string, invoice: string, count: () => void): Pr
   return "";
 }
 
-/** The account's available balance, by currency, in the smallest unit. */
+/** Stripe's currency codes: three lowercase letters (https://docs.stripe.com/currencies). */
+const CURRENCY = /^[a-z]{3}$/;
+
+/**
+ * The account's available balance, by currency, in the smallest unit, read exactly (CX-123 rule 24; audit R24 round 6,
+ * finding 1; https://docs.stripe.com/api/balance/balance_object): only Stripe's balance object, whose `available` is a
+ * list of rows, each one currency with a whole amount. Another shape, a row that does not read, or a currency listed
+ * twice throws, so the run counts its members failed and tries again; it is never an empty balance, which on the
+ * closing day would record every member as a final "short" and tell them the creator's balance did not cover it.
+ */
 async function available(account: string): Promise<Map<string, number>> {
-  const balance = await onAccount("GET", account, "/balance");
+  const balance = objectOf(await onAccount("GET", account, "/balance"));
+  if (!balance || balance.object !== "balance" || !Array.isArray(balance.available)) throw new Error("the account's balance did not read");
   const out = new Map<string, number>();
-  for (const row of Array.isArray(balance.available) ? (balance.available as { amount?: unknown; currency?: unknown }[]) : []) {
-    if (typeof row.currency === "string" && typeof row.amount === "number") out.set(row.currency.toLowerCase(), (out.get(row.currency.toLowerCase()) ?? 0) + row.amount);
+  for (const item of balance.available) {
+    const row = objectOf(item);
+    if (!row || !Number.isSafeInteger(row.amount) || typeof row.currency !== "string" || !CURRENCY.test(row.currency) || out.has(row.currency)) {
+      throw new Error("a row of the account's balance did not read");
+    }
+    out.set(row.currency, row.amount as number);
   }
   return out;
 }
@@ -217,13 +231,28 @@ async function available(account: string): Promise<Map<string, number>> {
  * balance, in the currency the charge settled in: an account in Europe or
  * Canada that sold in dollars holds euros or Canadian dollars. Read from the
  * charge's balance transaction, rounded up; the charge's own currency when
- * Stripe names none.
+ * Stripe names none (null).
+ *
+ * Read exactly (CX-123 rule 24; audit R24 round 6, finding 1): a balance
+ * transaction that is neither null nor an object with a whole positive amount
+ * and a currency (missing, an id Stripe did not expand, an amount that does
+ * not read), or a charge whose amount or currency does not read, throws, so
+ * the member is tried again; the cost is never weighed in another currency.
  */
 export function settledCost(give: number, charge: { amount?: unknown; currency?: unknown; balance_transaction?: unknown }): { cur: string; amount: number } {
-  const bt = charge.balance_transaction && typeof charge.balance_transaction === "object" ? (charge.balance_transaction as { amount?: unknown; currency?: unknown }) : null;
-  const paid = Number(charge.amount);
-  if (bt && typeof bt.currency === "string" && Number(bt.amount) > 0 && paid > 0) return { cur: bt.currency.toLowerCase(), amount: Math.ceil((give * Number(bt.amount)) / paid) };
-  return { cur: typeof charge.currency === "string" ? charge.currency.toLowerCase() : "", amount: give };
+  const paid = charge.amount;
+  if (!Number.isSafeInteger(paid) || (paid as number) <= 0) throw new Error("what this payment's charge took could not be read");
+  if (!Object.hasOwn(charge, "balance_transaction")) throw new Error("this payment's charge did not say what it settled as");
+  const bt = charge.balance_transaction;
+  if (bt === null) {
+    if (typeof charge.currency !== "string" || !CURRENCY.test(charge.currency)) throw new Error("this payment's charge currency could not be read");
+    return { cur: charge.currency, amount: give };
+  }
+  const row = objectOf(bt);
+  if (!row || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0 || typeof row.currency !== "string" || !CURRENCY.test(row.currency)) {
+    throw new Error("what this payment's charge settled as could not be read");
+  }
+  return { cur: row.currency, amount: Math.ceil((give * (row.amount as number)) / (paid as number)) };
 }
 
 /**

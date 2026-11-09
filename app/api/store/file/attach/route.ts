@@ -8,6 +8,7 @@ import { deliveredFile, readDelivery } from "@/lib/catalog";
 import { audioPlayedBy } from "@/lib/podcast";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * Puts the file that was just uploaded onto the product, or takes it off.
@@ -39,6 +40,10 @@ export async function POST(request: NextRequest) {
     if (!store) {
       return Response.json({ ok: false, error: "none" }, { status: 400 });
     }
+    // A product kept for a child-safety report (lib/child-safety.ts), or a price option of it, keeps its file:
+    // neither replaced nor taken off while the hold lasts, and a hold that cannot be read refuses too.
+    const held = await heldRefusal(store, id);
+    if (held) return held;
 
     // A new file deletes the one there, with the buyers' stamped copies: not from a session let in
     // without its second step (lib/two-step.ts). The id may name a price option, whose file is its

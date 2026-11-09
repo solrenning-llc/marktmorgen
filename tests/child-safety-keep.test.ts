@@ -46,11 +46,11 @@ async function main(): Promise<void> {
 
   part("While held, the creator cannot remove, edit or publish it");
   const removed = await send({ action: "remove", id: held.product.id });
-  is("remove is refused", [removed.status, removed.body.error], [409, "held_for_report"]);
+  is("remove is refused", [removed.status, removed.body.error], [409, "on_hold"]);
   const published = await send({ action: "visibility", id: held.product.id, hidden: false });
-  is("publishing again is refused", [published.status, published.body.error], [409, "held_for_report"]);
+  is("publishing again is refused", [published.status, published.body.error], [409, "on_hold"]);
   const edited = await send({ action: "edit", id: held.product.id, title: "Renamed", summary: "x", price: "19" });
-  is("editing is refused", [edited.status, edited.body.error], [409, "held_for_report"]);
+  is("editing is refused", [edited.status, edited.body.error], [409, "on_hold"]);
   const after = await readListing((await storeForEmail(owner))!, held.product.id);
   is("the product is still there, as it was, off the store", [after?.title, after?.hidden], ["Held Product", true]);
   const other = await send({ action: "remove", id: free.product.id });
@@ -64,8 +64,9 @@ async function main(): Promise<void> {
   is("503", unread.status, 503);
 
   part("What the creator reads");
+  const messages = readFileSync("lib/studio-messages.ts", "utf8");
   const editor = readFileSync("components/product-editor.tsx", "utf8");
-  is("the studio says it plainly, without naming the report", editor.includes("held_for_report:"), true);
+  is("the studio says it plainly, without naming the report", [messages.includes("on_hold:"), editor.includes("...STUDIO_MESSAGES")], [true, true]);
 
   done();
 }

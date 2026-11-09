@@ -1027,15 +1027,18 @@ export const COST_LINES: CostLine[] = [
       // A step's one give-back (its end, or a send tried again) never below zero.
       const steps = a.steps * request("step", 10 + GIVE_BACK_FLOOR_EXTRA_COMMANDS);
       const reports = a.reports * request("light", 4, MAX_REPORT_ROWS * 400);
-      // Each email to somebody brought over, Store's own or (Studio, Scale) one of the monthly emails, with the list's
-      // rows, the stop mark and its own stop link read and written before it goes (MOVED_EMAIL_EXTRA_COMMANDS).
+      // Each email to somebody brought over, Store's own or (Studio, Scale) one of the monthly emails, with the store's
+      // deleted people, the list's rows, the stop mark and its own stop link read and written before it goes
+      // (MOVED_EMAIL_EXTRA_COMMANDS).
       const movedExtra = Math.max(a.movedEmails, monthlyEmails(tier)) * MOVED_EMAIL_EXTRA_COMMANDS * COMMAND;
       return rows + uploads + starts + steps + reports + a.movedEmails * PER_EMAIL + movedExtra;
     },
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES", "IMPORT_WORST_COMMANDS_PER_ROW", "IMPORT_WORST_BYTES_PER_ROW", "IMPORT_MIN_ROWS_PER_UPLOAD"] },
       { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS", "HELD_UPLOAD_SWEEP_COMMANDS", "JOB_WRITE_IF_EXTRA_COMMANDS", "IMPORT_END_EXTRA_COMMANDS", "MOVED_EMAIL_EXTRA_COMMANDS"] },
-      // The list's rows, the stop mark and the stop link read and written before each email to somebody brought over.
+      // The store's deleted people, the list's rows, the stop mark and the stop link read and written before each email
+      // to somebody brought over.
+      { file: "lib/suppression.ts", names: ["suppressedAmong"] },
       { file: "lib/contacts.ts", names: ["leftListAmong"] },
       { file: "lib/checkout-recovery.ts", names: ["moveStopLink", "remindersStoppedAmong"] },
       { file: "lib/mail.ts", names: ["GIVE_BACK_FLOOR_EXTRA_COMMANDS"] },
@@ -1044,7 +1047,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/imported-purchases.ts", names: ["GRANT_UNLESS_ERASED", "grantUnlessErased"] },
       { file: "lib/move-members.ts", names: ["INVITE_UNLESS_ERASED"] },
     ],
-    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId). Before each email to somebody brought over, the creator's list's rows are read (one HMGET a portion), and before each member's email or reminder the stop mark is read and, once the day and the month have room for it, its stop link written with its three erasure notes (one link a store and address, the same on every email and every pass: lib/checkout-recovery.ts moveStopLink): MOVED_EMAIL_EXTRA_COMMANDS an email at the most, priced on every one of Store's own and, on Studio and Scale, on every monthly email (the most of those a month can be to people brought over); the mark a stop link may leave is taken in the store's data room with each invitation (RECOVER_TRACE_BYTES), and the link itself is a reminder email's key (tests/store-data-registry.ts).",
+    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId). Before each email to somebody brought over, the store's deleted people and the creator's list's rows are read (one HMGET each a portion: suppressedAmong, leftListAmong), and before each member's email or reminder the stop mark is read and, once the day and the month have room for it, its stop link written with its three erasure notes (one link a store and address, the same on every email and every pass: lib/checkout-recovery.ts moveStopLink): MOVED_EMAIL_EXTRA_COMMANDS an email at the most, priced on every one of Store's own and, on Studio and Scale, on every monthly email (the most of those a month can be to people brought over); the mark a stop link may leave is taken in the store's data room with each invitation (RECOVER_TRACE_BYTES), and the link itself is a reminder email's key (tests/store-data-registry.ts).",
   },
   {
     id: "clickfunnels",

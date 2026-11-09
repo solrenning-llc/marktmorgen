@@ -268,13 +268,15 @@ const END_TRIES = 2;
  */
 export const IMPORT_END_EXTRA_COMMANDS = END_TRIES * (1 + JOB_WRITE_IF_EXTRA_COMMANDS) - 1 + (END_TRIES - 1) + GIVE_BACK_FLOOR_EXTRA_COMMANDS;
 /**
- * The most each email to somebody brought over costs in commands beside what it did before: the creator's list's rows
- * read (one HMGET a portion, at most one an email: leftListAmong), and for a member's email or reminder the stop mark
- * read (one EXISTS: remindersStoppedAmong) and its stop link, one a store and address, written with its erasure notes
- * once the day and the month have room for the email (three, then one SET:
- * lib/checkout-recovery.ts moveStopLink, lib/erasure-index.ts noteForErasure).
+ * The most each email to somebody brought over costs in commands beside what it did before: the store's deleted people
+ * read (one HMGET a portion, at most one an email: deletedAmong, lib/suppression.ts suppressedAmong; review of #3476,
+ * cost MEDIUM 1), the creator's list's rows read (one HMGET a portion, at most one an email: leftListAmong), and for a
+ * member's email or reminder the stop mark read (one EXISTS: remindersStoppedAmong) and its stop link, one a store and
+ * address, written with its erasure notes once the day and the month have room for the email (three, then one SET:
+ * lib/checkout-recovery.ts moveStopLink, lib/erasure-index.ts noteForErasure). Held, command by command, on a member's
+ * email and reminder in tests/import-moved-email-commands.test.ts.
  */
-export const MOVED_EMAIL_EXTRA_COMMANDS = 1 + 1 + 1 + 3;
+export const MOVED_EMAIL_EXTRA_COMMANDS = 1 + 1 + 1 + 1 + 3;
 /**
  * What an upload holding the month's emails costs the five-minute job until it is given up (priced per start in
  * tests/plan-cost-registry.ts): its SADD to the active set when it starts, one GET each pass while it receives

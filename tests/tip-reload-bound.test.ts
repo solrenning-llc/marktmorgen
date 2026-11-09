@@ -61,7 +61,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const paid = (id: string, amount = 500, currency = "usd") => ({ id, status: "complete", payment_status: "paid", amount_total: amount, currency, metadata: { store: HANDLE, kind: "tip" } });
 
 /** Every command lib/store-tip-checkout.ts sends about a tip mark, and the mark's key. */
-let markCommands: string[][] = [];
+const markCommands: string[][] = [];
 const original = redis.pipeline.bind(redis);
 redis.pipeline = async (list) => {
   for (const c of list) if (String(c[1] ?? "").startsWith("nl:tip:co:")) markCommands.push(c.map(String));

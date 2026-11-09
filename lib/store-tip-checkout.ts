@@ -12,7 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Store } from "@/lib/store";
-import { saleHandles, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, saleHandles, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
@@ -23,6 +23,8 @@ import { isHouseStore } from "@/lib/house-store";
 import { tipsWords } from "@/lib/buyer-words/tips";
 import { MAX_TIP_MESSAGE, tipInRange } from "@/lib/store-tips";
 import { applyShare } from "@/lib/platform-share";
+
+export type TipOutcome = { state: "paid"; amount: number; currency: string } | { state: "waiting" };
 
 /** What the creator's list of sales calls it, in the studio's English. */
 export const TIP_TITLE = "Support";
@@ -39,26 +41,63 @@ const DISPLAY_NAME = "branding_settings[display_name]";
 export const TIP_MARK_SECONDS = 2 * 86_400;
 
 /**
- * The mark one gift's checkout leaves: named by a hash of the store's key and
- * the session id, so it is short, names neither, and another store's mark is
- * never this one's.
+ * The mark one gift's checkout leaves: named by a hash of the store's own id
+ * (its key when it has none yet) and the session id, so it is short, names
+ * neither, another store's mark is never this one's, and a supporter coming
+ * back after the owner changed their login address still finds it.
  */
 function tipMarkKey(store: Store, sessionId: string): string {
-  return `nl:tip:co:${createHash("sha256").update(`${storeRef(store)}|${sessionId}`).digest("hex")}`;
+  const owner = STORE_ID_PATTERN.test(store.sid) ? `#${store.sid}` : storeRef(store);
+  return `nl:tip:co:${createHash("sha256").update(`${owner}|${sessionId}`).digest("hex")}`;
 }
 
 /**
- * Whether this store's own tip checkout opened this session, read exactly
- * (CX-123 rule 24): the one reply is the "1" written, true; a confirmed
- * absence (null), false; any other shape throws UnknownReplyError, which the
- * caller takes as not recorded, so an unknown never reaches Stripe.
+ * What the mark holds once Stripe said the gift was paid: the amount and the
+ * currency it took, so a reload of the page thanks the supporter without
+ * asking Stripe again (review of #3331, Claude 5, LOW 1).
  */
-async function openedHere(store: Store, sessionId: string): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
+const PAID_MARK = /^paid:(0|[1-9][0-9]{0,14}):([a-z]{3})$/;
+
+type Mark = "opened" | "absent" | Extract<TipOutcome, { state: "paid" }>;
+
+/**
+ * What the mark of this session says, read exactly (CX-123 rule 24): the "1"
+ * the checkout wrote, opened here; a paid answer remembered from Stripe, that
+ * answer; a confirmed absence (null), absent; any other shape throws
+ * UnknownReplyError, which the caller takes as not recorded, so an unknown
+ * never reaches Stripe and never shows a payment.
+ */
+async function markOf(store: Store, sessionId: string): Promise<Mark> {
+  if (!isRedisConfigured()) return "absent";
   const reply = repliesFor(await redisPipeline([["GET", tipMarkKey(store, sessionId)]]), 1);
-  if (reply && reply[0] === "1") return true;
-  if (reply && reply[0] === null) return false;
+  if (reply && reply[0] === "1") return "opened";
+  if (reply && reply[0] === null) return "absent";
+  const paid = reply && typeof reply[0] === "string" ? PAID_MARK.exec(reply[0]) : null;
+  if (paid) return { state: "paid", amount: Number(paid[1]), currency: paid[2] };
   throw new UnknownReplyError("a gift's checkout mark");
+}
+
+/**
+ * Keeps Stripe's paid answer in the session's mark, for what is left of its
+ * two days and never longer: the time left is read first and the answer
+ * written only over the mark still there (XX) with exactly that time. A time
+ * left or a write Redis does not confirm leaves the mark as it was, and the
+ * next reload asks Stripe as before; what this page shows now does not depend
+ * on it, Stripe having just said so.
+ */
+async function rememberPaid(store: Store, sessionId: string, outcome: Extract<TipOutcome, { state: "paid" }>): Promise<void> {
+  const value = `paid:${outcome.amount}:${outcome.currency}`;
+  if (!PAID_MARK.test(value)) return;
+  const key = tipMarkKey(store, sessionId);
+  try {
+    const left = repliesFor(await redisPipeline([["TTL", key]]), 1);
+    const seconds = left ? left[0] : undefined;
+    if (typeof seconds !== "number" || !Number.isSafeInteger(seconds) || seconds < 1 || seconds > TIP_MARK_SECONDS) return;
+    const written = repliesFor(await redisPipeline([["SET", key, value, "XX", "EX", seconds]]), 1);
+    if (!written || (written[0] !== "OK" && written[0] !== null)) console.error("remembering a paid gift answered in an unknown shape");
+  } catch (error) {
+    console.error("remembering a paid gift failed", error);
+  }
 }
 
 /** Whether this store's page shows the box and can take what is given: switched on, and a till that works. */
@@ -138,7 +177,6 @@ export async function createTipCheckout(
   return { url: session.url, id: session.id };
 }
 
-export type TipOutcome = { state: "paid"; amount: number; currency: string } | { state: "waiting" };
 
 /**
  * What the page a visitor comes back to says: paid, with the amount Stripe
@@ -149,12 +187,16 @@ export type TipOutcome = { state: "paid"; amount: number; currency: string } | {
  * Stripe is asked only about a session this store's tip checkout recorded
  * (createTipCheckout), so a made-up id in the address costs no call on the
  * creator's account (R20 finding 3); a mark that is missing, expired or not
- * read exactly is "waiting" too.
+ * read exactly is "waiting" too. Once Stripe said a gift was paid, the mark
+ * keeps that answer (rememberPaid) and a reload is thanked from it, with no
+ * second call; "paid" is never shown before Stripe said so once.
  */
 export async function readTip(store: Store, sessionId: string): Promise<TipOutcome> {
   if (!store.stripeAccountId || !SESSION_ID_PATTERN.test(sessionId)) return { state: "waiting" };
   try {
-    if (!(await openedHere(store, sessionId))) return { state: "waiting" };
+    const mark = await markOf(store, sessionId);
+    if (mark === "absent") return { state: "waiting" };
+    if (mark !== "opened") return mark;
   } catch (error) {
     console.error("reading a gift's checkout mark failed", error);
     return { state: "waiting" };
@@ -169,11 +211,13 @@ export async function readTip(store: Store, sessionId: string): Promise<TipOutco
     };
     const meta = session.metadata ?? {};
     if (meta.kind !== "tip" || !saleHandles(store).has(meta.store ?? "") || !isSettled(session)) return { state: "waiting" };
-    return {
-      state: "paid",
+    const outcome = {
+      state: "paid" as const,
       amount: typeof session.amount_total === "number" ? session.amount_total : 0,
       currency: typeof session.currency === "string" && session.currency ? session.currency : store.currency,
     };
+    await rememberPaid(store, sessionId, outcome);
+    return outcome;
   } catch (error) {
     if (!(error instanceof StripeError && error.status === 404)) console.error("reading a gift's checkout failed", error);
     return { state: "waiting" };

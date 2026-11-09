@@ -76,14 +76,15 @@ async function main(): Promise<void> {
 
   part("The page a supporter comes back to");
   const id = `cs_test_${"t".repeat(24)}`;
-  session = { id, status: "complete", payment_status: "paid", amount_total: 500, currency: "usd", metadata: { store: "tipshop", kind: "tip" } };
-  is("paid, to this store: thanked, with what Stripe took", await readTip(store, id), { state: "paid", amount: 500, currency: "usd" });
-  session = { ...session, payment_status: "unpaid", status: "open" };
+  // The paid answer comes last: once Stripe said a gift was paid, the page remembers it for that session.
+  session = { id, status: "open", payment_status: "unpaid", amount_total: 500, currency: "usd", metadata: { store: "tipshop", kind: "tip" } };
   is("not paid: nothing confirmed", (await readTip(store, id)).state, "waiting");
   session = { id, status: "complete", payment_status: "paid", amount_total: 900, currency: "usd", metadata: { store: "tipshop", product: "abc" } };
   is("a product's checkout is not a gift", (await readTip(store, id)).state, "waiting");
   session = { id, status: "complete", payment_status: "paid", amount_total: 900, currency: "usd", metadata: { store: "othershop", kind: "tip" } };
   is("nor is another store's", (await readTip(store, id)).state, "waiting");
+  session = { id, status: "complete", payment_status: "paid", amount_total: 500, currency: "usd", metadata: { store: "tipshop", kind: "tip" } };
+  is("paid, to this store: thanked, with what Stripe took", await readTip(store, id), { state: "paid", amount: 500, currency: "usd" });
   is("and an id that is not one is not even asked about", (await readTip(store, "../account")).state, "waiting");
   done();
 }

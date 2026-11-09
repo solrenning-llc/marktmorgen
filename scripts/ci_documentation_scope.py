@@ -55,7 +55,7 @@ if __name__ == "__main__":
                          os.environ.get("CI_HEAD", ""), git_diff)
     if full and can_reuse_main():
         full = False
-        print("Reused complete PR coverage for identical Git tree")
+        print("Reused complete coverage of the identical code: the merge queue on this commit, or the PR of this tree")
     value = "true" if full else "false"
     print("Full coverage required: " + value)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

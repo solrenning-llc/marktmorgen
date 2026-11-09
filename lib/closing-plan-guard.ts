@@ -44,6 +44,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { formatMoney } from "@/lib/money";
+import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const UNDO_KEY = "nl:closing:undo";
 const SHUT_PREFIX = "nl:closing:shut:";
@@ -72,6 +73,51 @@ export function lastPlanMoment(day: number): number {
 const AT = "2024-06-20";
 const SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const OBJECT_ID = /^[a-z]{2,4}_[A-Za-z0-9]{6,128}$/;
+
+/**
+ * Every row of one Stripe list on our account, each page read in its exact
+ * shape (CX-123 rule 24, lib/stripe-list.ts). A page in another shape, a row
+ * that cannot be read, or more pages than `pages` throws StripeListUnreadable:
+ * what the list holds is then not known, and the caller keeps its step for the
+ * next run instead of taking it as none.
+ */
+async function allRows(path: string, query: URLSearchParams, legible: (row: Record<string, unknown>) => boolean, pages: number, idPattern?: RegExp): Promise<Record<string, unknown>[]> {
+  const rows: Record<string, unknown>[] = [];
+  for (let page = 0; page < pages; page += 1) {
+    const read = readStripePage(await onPlatform("GET", `${path}?${query}`, undefined, { version: AT }), legible, idPattern);
+    if (read.unreadable > 0) throw new StripeListUnreadable(`${read.unreadable} rows of ${path} could not be read`);
+    rows.push(...read.rows);
+    if (!read.hasMore) return rows;
+    if (!read.lastId) throw new StripeListUnreadable(`${path} has more pages and no row to read them from`);
+    query.set("starting_after", read.lastId);
+  }
+  throw new StripeListUnreadable(`${path} has more than ${pages} pages`);
+}
+
+const textField = (row: Record<string, unknown>, name: string) => typeof ownField(row, name) === "string";
+const wholeAtLeast = (value: unknown, least: number): value is number => Number.isSafeInteger(value) && (value as number) >= least;
+/** Every status Stripe gives an invoice: another one is not known, never taken as "no payment". */
+const INVOICE_STATUSES: ReadonlySet<unknown> = new Set(["draft", "open", "paid", "uncollectible", "void"]);
+/** Every status Stripe gives a refund: another one is not known, never taken as "no refund". */
+const REFUND_STATUSES: ReadonlySet<unknown> = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+/**
+ * An invoice row read in its exact shape (CX-123 rule 24): its status, one of Stripe's own, and for a paid one every
+ * field a refund is decided by. One that does not read is never taken as "no payment".
+ */
+const invoiceKnown = (row: Record<string, unknown>) => {
+  const status = ownField(row, "status");
+  if (!INVOICE_STATUSES.has(status)) return false;
+  if (status !== "paid") return true;
+  const transitions = ownField(row, "status_transitions");
+  if (!plainObject(transitions)) return false;
+  const paidAt = ownField(transitions, "paid_at");
+  const intent = ownField(row, "payment_intent");
+  return wholeAtLeast(ownField(row, "amount_paid"), 0) && wholeAtLeast(ownField(row, "created"), 1) && (paidAt === null || wholeAtLeast(paidAt, 1)) && (intent === null || typeof intent === "string");
+};
+const metadataKnown = (row: Record<string, unknown>) => {
+  const meta = ownField(row, "metadata");
+  return meta === null || plainObject(meta);
+};
 
 /** One plan subscription to undo. */
 export type Undo = {
@@ -253,8 +299,9 @@ async function expireSession(id: string): Promise<boolean> {
     const done = await onPlatform("POST", `/checkout/sessions/${encodeURIComponent(id)}/expire`, new URLSearchParams(), { version: AT, idempotencyKey: `closing-expire:${id}` });
     return done.status === "expired";
   } catch (error) {
+    // Stripe failing or not answering is not "it was not open": thrown, so the closing day tries it again.
+    if (!(error instanceof BillingError) || error.status >= 500 || error.status === 429) throw error;
     // Only an open session can be expired: one finished meanwhile is undone when it comes to light.
-    if (!(error instanceof BillingError) || error.status >= 500) console.error("expiring a closing store's plan checkout failed", error);
     return false;
   }
 }
@@ -269,31 +316,49 @@ export async function expirePlanCheckouts(store: Store, customerIds: string[]): 
   if (!isBillingConfigured()) return 0;
   const handles = saleHandles(store);
   let expired = 0;
+  // Not known in full (a list in another shape, a row that cannot be read, more pages than read, Stripe not
+  // answering): what could be read is still expired, then the step is refused so the closing day tries it again.
+  let unknown: unknown = null;
   for (const customer of [...new Set(customerIds)].filter((id) => CUSTOMER_PATTERN.test(id))) {
     let after = "";
+    let complete = false;
     // Open checkouts last a day at most; a customer has a handful at once.
     for (let page = 0; page < 3; page += 1) {
       const query = new URLSearchParams({ status: "open", customer, limit: "100" });
       if (after) query.set("starting_after", after);
-      let listed: Record<string, unknown>;
+      let listed: ReturnType<typeof readStripePage>;
       try {
-        listed = await onPlatform("GET", `/checkout/sessions?${query}`, undefined, { version: AT });
+        listed = readStripePage(await onPlatform("GET", `/checkout/sessions?${query}`, undefined, { version: AT }), (row) => textField(row, "mode") && metadataKnown(row));
       } catch (error) {
         console.error("listing a closing store's open plan checkouts failed", error);
+        unknown = error;
         break;
       }
-      const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-      for (const row of rows) {
+      for (const row of listed.rows) {
         const meta = row.metadata as Record<string, string> | null | undefined;
-        const id = typeof row.id === "string" ? row.id : "";
+        const id = row.id;
         if (row.mode !== "subscription" || !SESSION.test(id) || typeof meta?.store !== "string" || !handles.has(meta.store)) continue;
-        if (await expireSession(id)) expired += 1;
+        try {
+          if (await expireSession(id)) expired += 1;
+        } catch (error) {
+          console.error("expiring a closing store's plan checkout failed", error);
+          unknown = error;
+        }
       }
-      const last = rows[rows.length - 1]?.id;
-      if (listed.has_more !== true || typeof last !== "string") break;
-      after = last;
+      if (listed.unreadable > 0) {
+        unknown = new StripeListUnreadable(`${listed.unreadable} open checkouts could not be read`);
+        break;
+      }
+      if (!listed.hasMore) {
+        complete = true;
+        break;
+      }
+      if (!listed.lastId) break;
+      after = listed.lastId;
     }
+    if (!complete && !unknown) unknown = new StripeListUnreadable("the open checkouts were not read to their end");
   }
+  if (unknown) throw unknown;
   return expired;
 }
 
@@ -344,12 +409,21 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
   const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
   const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
   if (!charge || typeof charge.id !== "string" || !OBJECT_ID.test(charge.id)) return { settled: false, returned: 0, disputed: 0, currency: "" };
-  const amount = Number(charge.amount) || 0;
-  const currency = typeof charge.currency === "string" ? charge.currency : "usd";
+  // Each field the refund is decided by, in its exact shape (CX-123 rule 24): one that does not read throws, and
+  // settleOne keeps the plan in line, never settled as refunded with nothing given back.
+  const amount = ownField(charge, "amount");
+  const onCharge = ownField(charge, "amount_refunded");
+  const isDisputed = ownField(charge, "disputed");
+  const currency = ownField(charge, "currency");
+  if (!wholeAtLeast(amount, 1) || !wholeAtLeast(onCharge, 0) || typeof isDisputed !== "boolean" || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) {
+    throw new Error(`Stripe answered the charge of ${invoiceId} in another shape`);
+  }
   // A disputed charge cannot be refunded: the bank's dispute takes it back to the creator.
-  if (charge.disputed === true) return { settled: true, returned: 0, disputed: amount, currency };
-  const listed = await onPlatform("GET", `/refunds?${new URLSearchParams({ charge: charge.id, limit: "100" })}`, undefined, { version: AT });
-  const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+  if (isDisputed) return { settled: true, returned: 0, disputed: amount, currency };
+  // Read in full or not at all: a refund missed on an unknown list would be asked for twice (settleOne keeps it on the throw).
+  // Each row in Stripe's own domain: a refund's amount is above zero and its status one of Stripe's. A negative one
+  // would ask for more than was paid, an unknown one for a second refund: either throws before anything is asked for.
+  const refunds = await allRows("/refunds", new URLSearchParams({ charge: charge.id, limit: "100" }), (row) => REFUND_STATUSES.has(ownField(row, "status")) && wholeAtLeast(ownField(row, "amount"), 1), 5);
   const sum = (status: string) => refunds.filter((row) => row.status === status).reduce((total, row) => total + (Number(row.amount) || 0), 0);
   const succeeded = sum("succeeded");
   const pending = sum("pending") + sum("requires_action");
@@ -359,7 +433,6 @@ async function giveBack(id: string, invoice: Record<string, unknown>): Promise<C
   if (pending > 0) return { settled: false, returned: succeeded, disputed: 0, currency };
   // The charge itself says it was refunded although the list does not show it yet: never a second one. (Only
   // while no refund of it has failed: a failed refund's amount goes back, and the list is then what counts.)
-  const onCharge = Number(charge.amount_refunded) || 0;
   if (failed === 0 && onCharge >= amount) return { settled: false, returned: succeeded, disputed: 0, currency };
   const made = await onPlatform(
     "POST",
@@ -406,8 +479,9 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     // store's own plan from before that end gives back only what it was paid since the closing day began.
     const before = plan.created > 0 && (entry.ended ? plan.created * 1000 < entry.ended : plan.created * 1000 < entry.since);
     const cutoff = before ? entry.since : (entry.ended ?? entry.since);
-    const listed = await onPlatform("GET", `/invoices?${new URLSearchParams({ subscription: id, limit: "100" })}`, undefined, { version: AT });
-    const invoices = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // Every page read before anything is voided, deleted or refunded; a list not known in full throws, and the
+    // plan is kept in line (catch below), never settled as having had no payment.
+    const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), invoiceKnown, 10, OBJECT_ID);
     let settled = true;
     let returned = 0;
     let disputed = 0;
@@ -423,9 +497,10 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
         await onPlatform("DELETE", `/invoices/${encodeURIComponent(invoiceId)}`, undefined, { version: AT });
         continue;
       }
-      if (invoice.status !== "paid" || !(Number(invoice.amount_paid) > 0)) continue;
-      const paidAt = Number((invoice.status_transitions as { paid_at?: unknown } | null | undefined)?.paid_at) || 0;
-      const created = Number(invoice.created) || 0;
+      // Read by invoiceKnown: a paid one's amount and dates are whole numbers, its payment time null or one.
+      if (invoice.status !== "paid" || !((invoice.amount_paid as number) > 0)) continue;
+      const paidAt = ((invoice.status_transitions as { paid_at: number | null }).paid_at) ?? 0;
+      const created = invoice.created as number;
       // Paid before the closing day began: a payment for a plan the store had, not this one.
       if (Math.max(paidAt, created) * 1000 < cutoff) continue;
       const outcome = await giveBack(id, invoice);

@@ -27,7 +27,7 @@ import { shareBps } from "@/lib/platform-share";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
-import { type Admission, orderConfirmationAdmission, orderConfirmationHoldKeys } from "@/lib/order-admission";
+import { type Admission, countHeldOrders, holdUncountedOrder, orderConfirmationAdmission, orderConfirmationHoldKeys } from "@/lib/order-admission";
 
 const seenKey = (reference: string) => `nl:orders:seen:${createHash("sha256").update(reference).digest("hex").slice(0, 32)}`;
 const countKey = (folder: string, month: string) => `nl:orders:n:${folder}:${month}`;
@@ -343,20 +343,34 @@ export async function countOrder(store: Store, reference: string, paidCents: num
     if (coveredByShare(store, paidCents, now / 1000)) return false;
     const owner = storeRef(store);
     const folder = await storeFolder(owner);
-    // Counted in the store's window (lib/allowance-window.ts). An order paid
-    // for when no window is known (its checkout was opened before) still
-    // counts, in the calendar month, rather than nowhere.
-    const window = (allowanceWindow(store, now) ?? calendarWindow(now)).id;
+    // Counted in the store's window (lib/allowance-window.ts): a store with no
+    // plan's is the calendar month. A paying store's order paid for when its
+    // billing window is unknown (its checkout was admitted before) is held,
+    // never counted in the calendar month, which its admission never reads
+    // (rule 30): it is counted in the window once that is known, by the next
+    // admission or order (lib/order-admission.ts, countHeldOrders).
+    const known = allowanceWindow(store, now);
+    if (!known) {
+      await holdUncountedOrder(folder);
+      return true;
+    }
+    const window = known.id;
     const month = calendarWindow(now).id;
+    // Those held while it was unknown first; a failure leaves them held for the next.
+    const held = await countHeldOrders(folder, window).catch((error) => {
+      console.error("could not count the orders held for an unknown window; counted next time", error);
+      return 0;
+    });
     const [count] = await redisPipeline([
       ["INCR", countKey(folder, window)],
       ["EXPIRE", countKey(folder, window), KEEP_SECONDS],
     ]);
     // Written with the month's first order, and again at every hundredth, so
     // one write lost to a bad moment mends itself long before a bill could be
-    // made from the count: no plan covers fewer than a hundred orders.
+    // made from the count: no plan covers fewer than a hundred orders. Held
+    // orders counted now may pass either, so they write it too.
     const n = Number(count);
-    if (n === 1 || n % 100 === 0) {
+    if (n === 1 || n % 100 === 0 || held > 0) {
       await redisPipeline([
         ["SADD", foldersKey(month), folder],
         ["EXPIRE", foldersKey(month), KEEP_SECONDS],
@@ -384,9 +398,16 @@ export async function ordersIn(folder: string, month = calendarWindow().id): Pro
   }
 }
 
-/** The orders a store has had in its window (its billing month when it pays), by the store. */
-export async function storeOrdersThisMonth(store: Store, now = Date.now()): Promise<number> {
-  return ordersIn(await storeFolder(storeRef(store)), (allowanceWindow(store, now) ?? calendarWindow(now)).id);
+/**
+ * The orders a store has had in its window (its billing month when it pays,
+ * the calendar month when it has no plan), by the store. Null when it pays
+ * and its billing window is unknown: never the calendar month's (rule 30),
+ * and nothing counted against it may start.
+ */
+export async function storeOrdersThisMonth(store: Store, now = Date.now()): Promise<number | null> {
+  const window = allowanceWindow(store, now);
+  if (!window) return null;
+  return ordersIn(await storeFolder(storeRef(store)), window.id);
 }
 
 /** The stores that had any order counted in a month. */

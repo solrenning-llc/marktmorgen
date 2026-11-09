@@ -10,6 +10,7 @@
  *   nl:tasks:bytes:<store key>                    what the store's students keep handed in, in bytes
  *   nl:tasks:taken:<hash of a file's path>        the bytes one file took of that room, for an hour (undoTakeRoom)
  *   nl:tasks:doors                                files a student was let upload, by when: handed in, or deleted after a day
+ *   nl:tasks:held                                 names a hand-in took, by when: deleted after a day unless the work keeps them
  *   nl:course:<course>:tasks:told                 the creator was told of new work this hour
  *
  * Done is what the rest of the course already reads: the lesson marked done
@@ -48,6 +49,8 @@ const takenKey = (path: string) => `nl:tasks:taken:${createHash("sha256").update
 /** How long a file's mark of the room it took is kept: long enough for the route to give it back at once. */
 const TAKEN_SECONDS = 60 * 60;
 const DOORS_KEY = "nl:tasks:doors";
+/** Names a hand-in took, by when: swept a day on unless the student's work keeps the file (takeTaskUpload). */
+const HELD_KEY = "nl:tasks:held";
 /** A file uploaded and not handed in within this long is deleted. */
 export const DOOR_SECONDS = 24 * 60 * 60;
 const WHO = /^[0-9a-f]{16,64}$/;
@@ -536,35 +539,27 @@ export async function dropTaskDoor(path: string): Promise<void> {
   await redisPipeline([["ZREM", DOORS_KEY, path]]);
 }
 
-/** Whether this file was let in through the door and not handed in yet; it is then taken. */
-export async function takeTaskUpload(path: string): Promise<boolean> {
+/**
+ * Whether this file was let in through the door and not handed in yet; it is then taken. The name is held for the
+ * sweep (HELD_KEY) before it comes off the doors' list, so whatever becomes of the hand-in that took it (refused, its
+ * write lost, or the function stopped by its time limit before it wrote anything) the file is never kept for ever
+ * outside the sweep and the room: a day on, the sweep deletes it unless the student's work keeps it (the second
+ * pre-review of 9 November 2026). A hold this call wrote for a name it did not take is taken back. A hand-in that
+ * keeps its file lets go of the hold (releaseTaskHold), so the sweep has nothing to read for it.
+ */
+export async function takeTaskUpload(path: string, now = Date.now()): Promise<boolean> {
+  const [added] = await redisPipeline([["ZADD", HELD_KEY, Math.floor(now / 1000), path]]);
   const [removed] = await redisPipeline([["ZREM", DOORS_KEY, path]]);
-  return Number(removed) === 1;
+  if (Number(removed) === 1) return true;
+  if (Number(added) === 1) await redisPipeline([["ZREM", HELD_KEY, path]]).catch(() => null);
+  return false;
 }
 
-/**
- * Deletes, with `remove`, the files uploaded more than a day ago and never
- * handed in: the student closed the page, or chose another file, or the file
- * was a deleted person's that the file store did not answer for
- * (lib/person-erasure.ts). A few hundred a run at most; answers the paths
- * deleted.
- *
- * Each path is taken off the list by its own ZREM, and only one this run
- * removed itself (exactly 1) is deleted: a hand-in that took the door
- * (takeTaskUpload) after the list was read keeps its file (Claude 5 on
- * #2836). Each won path is deleted on its own, and only a path whose deletion
- * failed is put back, so one that keeps failing never holds the others
- * (Claude 5 on #3045; as lib/community-files.ts does). The list, the pipeline
- * and each ZREM are read in their exact shape (CX-123 rule 24): anything else
- * deletes nothing it cannot prove was this run's own, is logged, and the paths
- * deleted are still answered, so the cron counts them.
- *
- * The ZREMs go TAKE_BATCH to a pipeline: a reply lost after they ran (a
- * timeout, a cut connection) leaves those doors off the list with nothing
- * deleted, and putting them back blind is not safe (a hand-in may have won
- * them), so a lost reply costs at most TAKE_BATCH files kept, not the run's
- * whole list.
- */
+/** Lets go of a taken name's hold once the work keeps its file (takeTaskUpload). Best effort: the sweep reads the work anyway. */
+export async function releaseTaskHold(path: string): Promise<void> {
+  await redisPipeline([["ZREM", HELD_KEY, path]]).catch((error: unknown) => console.error("letting go of a handed-in file's hold failed", error));
+}
+
 /** The course, lesson and student a path in a store's assignment folders names (lib/assignment-rules.ts, taskFolder). */
 function handedInWorkOf(path: string): { courseId: string; lessonId: string; who: string } | null {
   const parts = path.split("/");
@@ -575,10 +570,49 @@ function handedInWorkOf(path: string): { courseId: string; lessonId: string; who
 /** How many doors a pipeline of ZREMs takes off the list at most (see sweepTaskUploads). */
 const TAKE_BATCH = 25;
 
+/**
+ * Deletes, with `remove`, the files uploaded more than a day ago and never
+ * handed in: the student closed the page, or chose another file, or the file
+ * was a deleted person's that the file store did not answer for
+ * (lib/person-erasure.ts). A few hundred a run at most from each list;
+ * answers the paths deleted.
+ *
+ * Two lists: the doors never taken by a hand-in (DOORS_KEY), and the names a
+ * hand-in took more than a day ago (HELD_KEY, takeTaskUpload): whatever became
+ * of that hand-in (refused, cut off by its time limit, its write lost), the
+ * file is deleted unless the student's work keeps it (the second pre-review of
+ * 9 November 2026). A held name listed again among the doors is left to them.
+ *
+ * Each path is taken off its list by its own ZREM, and only one this run
+ * removed itself (exactly 1) is deleted: a hand-in that took the door
+ * (takeTaskUpload) after the list was read keeps its file (Claude 5 on
+ * #2836). A file that is a student's handed-in work is never deleted, whatever
+ * the list says: read from the work itself, by the course, lesson and student
+ * its path names; work that cannot be read keeps the file and puts it back.
+ * Each won path is deleted on its own, and only a path whose deletion failed
+ * is put back, so one that keeps failing never holds the others (Claude 5 on
+ * #3045; as lib/community-files.ts does). The lists, the pipelines and each
+ * ZREM are read in their exact shape (CX-123 rule 24): anything else deletes
+ * nothing it cannot prove was this run's own, is logged, and the paths
+ * deleted are still answered, so the cron counts them.
+ *
+ * The ZREMs go TAKE_BATCH to a pipeline: a reply lost after they ran (a
+ * timeout, a cut connection) leaves those names off their list with nothing
+ * deleted, and putting them back blind is not safe (a hand-in may have won
+ * them), so a lost reply costs at most TAKE_BATCH files kept, not the run's
+ * whole list.
+ */
 export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void>, now = Date.now(), limit = 300): Promise<string[]> {
   if (!isRedisConfigured()) return [];
   const before = Math.floor(now / 1000) - DOOR_SECONDS;
-  const found = repliesFor(await redisPipeline([["ZRANGEBYSCORE", DOORS_KEY, 0, before, "LIMIT", 0, limit]]), 1)?.[0];
+  const doors = await sweepList(DOORS_KEY, remove, before, limit);
+  const holds = await sweepList(HELD_KEY, remove, before, limit);
+  return [...doors, ...holds];
+}
+
+/** One list of sweepTaskUploads: its names before `before`, each taken off it, and deleted unless work keeps it. */
+async function sweepList(key: string, remove: (paths: string[]) => Promise<void>, before: number, limit: number): Promise<string[]> {
+  const found = repliesFor(await redisPipeline([["ZRANGEBYSCORE", key, 0, before, "LIMIT", 0, limit]]), 1)?.[0];
   const listed = Array.isArray(found) ? repliesFor(found, found.length) : null;
   if (!listed || !listed.every((p): p is string => typeof p === "string")) throw new UnknownReplyError("the uploads never handed in");
   if (!listed.length) return [];
@@ -588,7 +622,7 @@ export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void
     const batch = listed.slice(at, at + TAKE_BATCH);
     let takes: unknown[] | null;
     try {
-      takes = repliesFor(await redisPipeline(batch.map((p) => ["ZREM", DOORS_KEY, p])), batch.length);
+      takes = repliesFor(await redisPipeline(batch.map((p) => ["ZREM", key, p])), batch.length);
     } catch (error) {
       console.error(`taking ${batch.length} unused assignment uploads off their list: no reply, their files are kept`, error);
       unknown += batch.length;
@@ -606,20 +640,11 @@ export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void
   const deleted: string[] = [];
   const failed: string[] = [];
   for (const p of won) {
-    // A file that is a student's handed-in work is never deleted, whatever the list says (the pre-review of 9 November
-    // 2026): read from the work itself, by the course, lesson and student its path names. Work that cannot be read
-    // keeps the file and puts it back for the next run; a path that names no work is a door's file as before.
-    const work = handedInWorkOf(p);
-    if (work) {
-      const held = await submissionOf(work.courseId, work.lessonId, work.who).then(
-        (found) => found?.file?.path === p,
-        (error: unknown) => (console.error("reading the work an unused assignment upload may belong to failed; kept for the next run", error), null),
-      );
-      if (held === true) continue;
-      if (held === null) {
-        failed.push(p);
-        continue;
-      }
+    const kept = await keptByWork(p, key === HELD_KEY);
+    if (kept === true) continue;
+    if (kept === null) {
+      failed.push(p);
+      continue;
     }
     try {
       await remove([p]);
@@ -630,11 +655,32 @@ export async function sweepTaskUploads(remove: (paths: string[]) => Promise<void
     }
   }
   if (failed.length) {
-    const back = repliesFor(await redisPipeline([["ZADD", DOORS_KEY, ...failed.flatMap((p) => [before, p])]]), 1)?.[0];
+    const back = repliesFor(await redisPipeline([["ZADD", key, ...failed.flatMap((p) => [before, p])]]), 1)?.[0];
     if (countOf(back) === null) console.error(`putting back ${failed.length} unused assignment uploads: unknown reply, they may be left`);
   }
   if (unknown) console.error(`${unknown} unused assignment uploads: whether they were taken off their list came back in an unknown shape; their files are kept`);
   return deleted;
+}
+
+/**
+ * Whether a swept path must stay: true when the student's work keeps it (or, for a held name, when a door lists it
+ * again: the doors' sweep has it), false when nothing does, null when that cannot be read (kept, put back). A path
+ * that names no work is a door's file as before.
+ */
+async function keptByWork(path: string, held: boolean): Promise<boolean | null> {
+  try {
+    if (held) {
+      const door = repliesFor(await redisPipeline([["ZSCORE", DOORS_KEY, path]]), 1);
+      if (!door) return null;
+      if (door[0] !== null) return true;
+    }
+    const work = handedInWorkOf(path);
+    if (!work) return false;
+    return (await submissionOf(work.courseId, work.lessonId, work.who))?.file?.path === path;
+  } catch (error) {
+    console.error("reading the work an unused assignment upload may belong to failed; kept for the next run", error);
+    return null;
+  }
 }
 
 /**

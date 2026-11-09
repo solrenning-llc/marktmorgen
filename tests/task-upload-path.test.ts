@@ -31,7 +31,7 @@ import { POST as HAND_IN } from "@/app/api/store/course/task/route";
 import * as rules from "@/lib/assignment-rules";
 import { ownsTaskPath, taskFolder } from "@/lib/assignment-rules";
 import { storeFolder, storeRef } from "@/lib/store";
-import { noteTaskUpload, submissionOf, sweepTaskUploads, takeTaskUpload } from "@/lib/assignment";
+import { noteTaskUpload, releaseTaskHold, submissionOf, sweepTaskUploads, takeTaskUpload } from "@/lib/assignment";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import * as registry from "./plan-cost-registry";
@@ -169,6 +169,8 @@ async function main(): Promise<void> {
   is("its door opens", (await ask(handed)).status, 200);
   store(handed);
   is("it is handed in (taken off the list)", await takeTaskUpload(handed), true);
+  // As the hand-in does once its work keeps the file (app/api/store/course/task).
+  await releaseTaskHold(handed);
   is("a door for the handed-in file's name is refused", await ask(handed), { status: 400, error: "invalid" });
   is("and it is not put back on the sweep's list", await listed(handed), false);
   const swept = await sweepTaskUploads(deleteFile, Date.now() + DAY_MS + 3_600_000);

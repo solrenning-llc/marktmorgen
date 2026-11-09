@@ -1853,6 +1853,16 @@ a.chip {
     transform: scaleX(1);
   }
 }
+/* 654 [WG14] (b1): the line under a Path milestone's heading (components/path-milestone.tsx). Complete by default, which is
+   what a creator who asks for less motion sees; drawn once, left to right, only when motion is welcome. */
+.mm-milestone-line {
+  transform-origin: left;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mm-milestone-line {
+    animation: nb-draw 480ms ease-out 1 both;
+  }
+}
 @keyframes nb-spin {
   to {
     transform: rotate(360deg);
@@ -5178,3 +5188,29 @@ html:has([data-product-editor]) {
 .st-measure p.rounded-2xl {
   padding-inline-end: max(1rem, calc(100% - 34ch - 1rem));
 }
+/* 654 [WG14] payment received */
+/* The mark beside "Payment received" (components/payment-received.tsx): complete by default, which is what a buyer who
+   asks for less motion sees; drawn once, 600 ms in all, only when motion is welcome. Only the stroke moves,
+   and only once. */
+.mm-paid-ring,
+.mm-paid-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+@keyframes mm-check-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mm-paid-ring {
+    animation: mm-check-draw 360ms ease-out 1 both;
+  }
+  .mm-paid-check {
+    animation: mm-check-draw 240ms ease-out 360ms 1 both;
+  }
+}
+/* end 654 [WG14] */

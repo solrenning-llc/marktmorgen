@@ -69,6 +69,7 @@ import { type BundleContents, contentsOf, offerableAfterPaying } from "@/lib/bun
 import { applyShareToPayment } from "@/lib/platform-share";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, validConsent } from "@/lib/digital-consent";
 import { cartOfferFrom, ownedBeforeCart } from "@/lib/cart-offers";
+import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const UPSELL_COOKIE = "nl_upsell";
@@ -230,6 +231,14 @@ export function offerOpen(createdSeconds: number, secret: string | undefined, ke
   return Date.now() / 1000 - createdSeconds <= UPSELL_WINDOW_SECONDS;
 }
 
+/**
+ * The listings an offer after paying may lead to: only what the store could
+ * sell on its own right now (lib/store-checkout.ts, canSellProduct), so a
+ * product that is a draft again or has nothing to hand over is passed over
+ * as if it were gone, on the thanks page and when the answer is taken alike.
+ */
+const sellableTargets = (store: Store, listings: Listing[]) => listings.filter((p) => canSellProduct(store, p));
+
 const toAnswers = (records: Map<string, UpsellRecord>) =>
   new Map<string, StepAnswer>([...records].map(([slot, record]) => [slot, record.state]));
 
@@ -257,13 +266,16 @@ export async function takeUpsell(input: {
   consent?: DigitalConsent | null;
 }): Promise<TakeResult> {
   const { store, session, secret, origin, answer } = input;
-  if (!store.stripeAccountId || !isRedisConfigured()) return { kind: "unavailable" };
+  // A store that cannot sell (lib/store-checkout.ts, canSell: switched off
+  // after notices, plan not paid, Stripe not cleared) takes no offer: refused
+  // before Stripe is asked anything and before anything is written.
+  if (!store.stripeAccountId || !isRedisConfigured() || !canSell(store)) return { kind: "unavailable" };
   const found = await paidSession(store, session);
   if (!found) return { kind: "unavailable" };
   const { view, product, cart } = found;
   // A one-click charge cannot carry Stripe Tax, so with tax on there is none.
   // A bundle that holds a course is never offered here (lib/bundles.ts).
-  const offered = await offerableAfterPaying(store, await readListings(store, funnelProductIds(product.funnel)));
+  const offered = sellableTargets(store, await offerableAfterPaying(store, await readListings(store, funnelProductIds(product.funnel))));
   const funnel = store.tax.enabled ? null : activeFunnel(offered, product);
   if (!funnel) return { kind: "unavailable" };
   const created = typeof view.created === "number" ? view.created : 0;
@@ -721,10 +733,12 @@ export async function funnelView(input: {
   }
 
   // The funnel and what it names are read only when an offer could follow.
-  const open = input.eligible && !store.tax.enabled && offerOpen(input.created, input.secret, input.upsellKey ?? undefined);
+  // Never shown where the answer would be refused (takeUpsell): a store that cannot sell, a product that cannot be sold.
+  const open = input.eligible && !store.tax.enabled && canSell(store) && offerOpen(input.created, input.secret, input.upsellKey ?? undefined);
   const owner = input.cart ? input.cart.offerFrom : product.id;
   const full = open && owner ? await readProduct(store, owner) : null;
-  const offered = full ? await offerableAfterPaying(store, await readListings(store, funnelProductIds(full.funnel))) : [];
+  const listed = full ? await offerableAfterPaying(store, await readListings(store, funnelProductIds(full.funnel))) : [];
+  const offered = sellableTargets(store, listed);
   const funnel = full ? activeFunnel(offered, full) : null;
   if (!funnel) return { offer: null, taken, notes, declined };
   // After a cart, what was turned down in this order is passed over too, as on the server (takeUpsell).
@@ -740,7 +754,7 @@ export async function funnelView(input: {
   }
   if (position.kind !== "offer") return { offer: null, taken, notes, declined };
   const { step, target } = position;
-  const pictured = step.imageFrom ? offered.find((p) => p.id === step.imageFrom) ?? null : null;
+  const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom) ?? null : null;
   const afterNo = funnel.steps.some((s) => s.no === step.id && records.get(stepSlot(funnel, s))?.state === "declined");
   return {
     offer: {

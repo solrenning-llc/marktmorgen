@@ -53,7 +53,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:",
-  "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
+  "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dpv:", "nl:dpv:p:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:flow-rotate:", "nl:forms:", "nl:free:claim:",
@@ -262,6 +262,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:flow-rotate:": X(1),
   "nl:form:r:": E, "nl:forms:": E,
   "nl:free:claim:": T("nl:erase:ix:", 7), "nl:free:in:": Cr(62), "nl:free:n:": C, "nl:free:uses:": X(7),
+  "nl:dpv:": X(7), "nl:dpv:p:": X(7),
   "nl:fshare:": T("nl:fshares:"), "nl:fshare:n:": X(62), "nl:fshares:": E, "nl:fuse:": E, "nl:fuse:m:": E,
   // ---------------------------------------------------------------- g-l
   "nl:gift:": er(400), "nl:gift:pi:": X(400),

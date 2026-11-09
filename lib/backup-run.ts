@@ -316,8 +316,13 @@ export function backupKey(): Uint8Array | null {
   return keyFrom(process.env.BACKUP_ENCRYPTION_KEY);
 }
 
-/** Days after a rotation that the previous key still opens copies (inbox C4-36 item 3): the retention's 30, twice. */
-export const BACKUP_KEY_PREVIOUS_DAYS = 60;
+/**
+ * Days after a rotation that the previous key still opens copies: the 120-day cap, BACKUP_MAX_COPY_DAYS
+ * (C1-20261109-0025-C4-47 item 1; 60 before, inbox C4-36 item 3). The bucket's rule keeps any object up to that cap,
+ * and the lost path must open every manifest it may still list, or it stops at room_unverified. A key rotated because
+ * it leaked is removed from the deployment at once instead (docs/backup.md), whatever this says.
+ */
+export const BACKUP_KEY_PREVIOUS_DAYS = BACKUP_MAX_COPY_DAYS;
 
 /**
  * The keys a run uses (inbox C4-36 item 3): the current key (BACKUP_ENCRYPTION_KEY) writes and reads; after a

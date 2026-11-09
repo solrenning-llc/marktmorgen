@@ -68,7 +68,7 @@ import { observeStoreSubscriptions, isBillingConfigured, readSubscription } from
 import { readAllListings } from "@/lib/catalog";
 import { editCourse, filesInCourse, readCourse, saveCourse } from "@/lib/course";
 import { bytesWords } from "@/lib/delivery";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { deleteFile, listFiles } from "@/lib/file-store";
 import { CLOSING_DAYS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, RECHECK_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS, closesStore, keptRoomFor } from "@/lib/plan-closing-rules";
 import { type Batched, deleteSalesTraces, markDue, stopRenewals, unmarkDue } from "@/lib/closed-store-data";
@@ -762,11 +762,15 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // The same notice asked for twice in a day is sent once (a record that
     // could not be written after it went out).
     const idempotencyKey = `${stateKey(key)}:${endedAt}:${kind}`;
-    const sent = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: store.email, replyTo: SUPPORT_EMAIL, subject, text, idempotencyKey }).catch((error) => {
+    // True also when the notice may have gone (a timeout, a server error, a throw after the request): it is then
+    // written down as sent and never sent again, since its key holds only a day (rule 30, as 283 [HG2]). Only a
+    // certain refusal holds it for the next run.
+    const outcome = await sendEmailOutcome({ meter: { by: "company" }, from: NIMBUS_FROM, to: store.email, replyTo: SUPPORT_EMAIL, subject, text, idempotencyKey }).catch((error) => {
       console.error("sending a notice about an ended plan's files failed", error);
-      return false;
+      return "uncertain" as const;
     });
-    return sent !== false;
+    if (outcome === "uncertain") console.error(`plan-closing: the ${kind} notice may have gone; written down as sent, not sent again`);
+    return outcome !== "refused";
   };
 
   if (state.removed) {

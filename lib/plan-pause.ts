@@ -54,7 +54,7 @@ import {
   subscriptionRecord,
 } from "@/lib/billing";
 import { addPeriods } from "@/lib/plans";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_NAMES, PLAN_PRICES, type Tier, parseTier } from "@/lib/plan";
@@ -594,11 +594,21 @@ function legacyNoticeAdmitted(store: Store, record: PauseRecord): boolean {
   } catch { return false; }
 }
 
-async function tell(store: Store, kind: "set" | "soon" | "restarted" | "failed" | "unconfirmed", record: PauseRecord): Promise<boolean> {
-  if (!legacyNoticeAdmitted(store, record)) return false;
-  if (!isSenderConfigured() || !store.email) return false;
+/**
+ * Sends one notice, telling a certain refusal from an answer that is not
+ * known (SendOutcome): a notice that may have gone is never sent again by a
+ * job that writes once (rule 30, as 283 [HG2]). Nothing asked of the sender
+ * (not admitted, no sender, no address) is a refusal; a throw from the send
+ * may follow the request, so it is uncertain.
+ */
+async function tell(store: Store, kind: "set" | "soon" | "restarted" | "failed" | "unconfirmed", record: PauseRecord): Promise<SendOutcome> {
+  if (!legacyNoticeAdmitted(store, record)) return "refused";
+  if (!isSenderConfigured() || !store.email) return "refused";
   const { subject, text } = pauseEmail(kind, record);
-  return sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: store.email, subject, text, replyTo: SUPPORT_EMAIL });
+  return sendEmailOutcome({ meter: { by: "company" }, from: NIMBUS_FROM, to: store.email, subject, text, replyTo: SUPPORT_EMAIL }).catch((error) => {
+    console.error("a break notice may have gone; it is not sent again", kind, error);
+    return "uncertain" as const;
+  });
 }
 
 /** Tells the creator what they just set. Never fails the request that set it. */
@@ -709,7 +719,12 @@ export async function runBreaks(nowSeconds = Math.floor(Date.now() / 1000)): Pro
     }
     if (record.until > nowSeconds) {
       if (!record.told && !knownNoticeSource(stored.raw)) { counts.failed += 1; continue; }
-      if (!record.told && (await tell(store, "soon", record).catch(() => false))) {
+      // Told on a send that may have gone too: the notice has no key of its own,
+      // so the next daily run would write it a second time (rule 30). Only a
+      // certain refusal leaves it for the next run.
+      const soon = record.told ? null : await tell(store, "soon", record).catch(() => "refused" as const);
+      if (soon === "uncertain") console.error("plan-pause: the notice that a break ends may have gone; marked told, not sent again", ref);
+      if (soon === "sent" || soon === "uncertain") {
         if (!(await markObservedNotice(ref, stored.raw, record, nowSeconds))) { counts.failed += 1; continue; }
         counts.told += 1;
       }

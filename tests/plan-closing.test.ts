@@ -614,7 +614,9 @@ async function main(): Promise<void> {
   const unknownFirst = await closeOne(unknownOwner.email, unknownEnd + 60_000, hands);
   mail = "up";
   const unknownRetry = await closeOne(unknownOwner.email, unknownEnd + 120_000, hands);
-  is("a server error may follow acceptance: hold the notice without another POST", [unknownFirst.state, unknownRetry.state, mailAttempts - attemptsBefore, sent.length - sentBefore], ["held", "held", 1, 0]);
+  // Rule 23 (uncertain-send-auto): was ["held", "held", 1, 0]. A held notice was sent again by the daily job once its
+  // key's day had passed; a notice that may have gone is now written down as sent, and nothing more is asked.
+  is("a server error may follow acceptance: the notice is written down as sent, without another POST", [unknownFirst.state, unknownRetry.state, mailAttempts - attemptsBefore, sent.length - sentBefore], ["told", "waiting", 1, 0]);
   is("the ended-plan source and recovery entry remain available", [await endedAt(unknownOwner.email), await inLine(unknownOwner.email), (await storeForEmail(unknownOwner.email))?.handle], [unknownEnd, unknownEnd, unknownOwner.handle]);
 
   done();

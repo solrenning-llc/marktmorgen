@@ -67,7 +67,7 @@ import {
   swapHolds,
 } from "@/lib/api-keys";
 import { MAKER_FORMER, MAKER_UNMATCHED, MAKER_UNRECORDED, type PauseLine, type PausePreview, type ShownKey } from "@/lib/api-key-rules";
-import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, headerText, sendEmail, sendEmailOutcome } from "@/lib/email";
 import type { Store } from "@/lib/store";
 import { readTeam, roleIn, withTeamLock } from "@/lib/team";
 import { type Role, can } from "@/lib/team-roles";
@@ -525,8 +525,11 @@ export async function revokeChecked(store: Store, role: Role, id: string): Promi
  * are claimed together, in one step, before the email (paused to told), so
  * two presses at once never email anybody twice, and never mark a key told
  * that was turned back on or left meanwhile; when the email cannot go, they
- * are put back for the next press. Returns who was written to and how many
- * keys still wait for theirs.
+ * are put back for the next press. An email that may have gone (a timeout,
+ * a server error, a throw after the request) leaves them told: it has no key
+ * of its own, so the next press would write twice (rule 30, as 283 [HG2]);
+ * that person is counted as neither emailed nor waiting. Returns who was
+ * written to and how many keys still wait for theirs.
  */
 export async function tellPaused(store: Store, origin: string): Promise<{ emailed: string[]; waiting: number }> {
   if (!store.sid) return { emailed: [], waiting: 0 };
@@ -548,7 +551,7 @@ export async function tellPaused(store: Store, origin: string): Promise<{ emaile
     const names = theirs.filter((k) => claimed.has(k.id)).map((k) => k.name);
     if (!names.length) continue;
     const one = names.length === 1;
-    const ok = await sendEmail({
+    const outcome = await sendEmailOutcome({
       meter: { by: "store", store, kind: "email" },
       from: NIMBUS_FROM,
       to: email,
@@ -568,8 +571,9 @@ export async function tellPaused(store: Store, origin: string): Promise<{ emaile
         "",
         "If you no longer need a key, you can revoke it there instead.",
       ].join("\n"),
-    }).catch(() => false);
-    if (ok) emailed.push(email);
+    }).catch(() => "uncertain" as const);
+    if (outcome === "sent") emailed.push(email);
+    else if (outcome === "uncertain") console.error("an email about paused API keys may have gone; the keys stay told, not emailed again", store.handle);
     else {
       // Put back for the next press, only where still told by this one.
       waiting += (await swapHolds(store.sid, [...claimed], "paused", ["told"])).length;

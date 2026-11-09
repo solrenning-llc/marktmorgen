@@ -37,7 +37,7 @@
  */
 import { createHash } from "node:crypto";
 import { BillingError, type StartedSubscription, isBillingConfigured, onPlatform, ownedBy, startedFromObservedSubscription } from "@/lib/billing";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -561,10 +561,15 @@ async function tell(id: string, entry: Undo, returned: number, disputed: number,
   }
   if (!isSenderConfigured()) return false;
   const { subject, text } = planReturnedLetter(entry.name, returned, disputed, currency, entry.e === 1);
-  return sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: address, replyTo: SUPPORT_EMAIL, subject, text, idempotencyKey: `closing-plan-told:${id}` }).catch((error) => {
+  // True also when the letter may have gone (a timeout, a server error, a throw after the request): the creator is
+  // then marked told and never written twice, since its key holds only a day (rule 30, as 283 [HG2]). Only a
+  // certain refusal keeps the plan in line for its letter.
+  const outcome = await sendEmailOutcome({ meter: { by: "company" }, from: NIMBUS_FROM, to: address, replyTo: SUPPORT_EMAIL, subject, text, idempotencyKey: `closing-plan-told:${id}` }).catch((error) => {
     console.error("telling a creator their plan payment was returned failed", error);
-    return false;
+    return "uncertain" as const;
   });
+  if (outcome === "uncertain") console.error(`closing-plan-guard: the letter for ${id} may have gone; marked told, not sent again`);
+  return outcome !== "refused";
 }
 
 /** The closing job: every subscription still in line, tried again until `deadline` (ms). */

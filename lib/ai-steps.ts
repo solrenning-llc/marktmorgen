@@ -15,6 +15,11 @@
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 
 export type AiStepId = "read" | "write";
+
+/** RED stub (758 [STN5] unit 3): a file's parts as steps come in the next commit. */
+export function isStepId(_value: unknown): boolean {
+  return false;
+}
 export type AiStep = { id: AiStepId; label: string; jobs: number };
 export type AiStepState = "started" | "done";
 

@@ -259,6 +259,7 @@ export const nl: BuyerWords = {
   reviewRules: (title, store) =>
     `Alleen wie ${title} hier heeft gekocht, kan het beoordelen, en elke beoordeling wordt gecontroleerd aan de hand van de bestelling. ${store} kan reageren en een beoordeling verbergen, maar niet wijzigen; verborgen beoordelingen tellen nog steeds mee in het gemiddelde.`,
   hiddenByCreator: (count) => `${count} ${plural(count, "beoordeling", "beoordelingen")} verborgen door de maker`,
+  reviewsUnreadKept: (count) => `${count} ${plural(count, "beoordeling kon", "beoordelingen konden")} niet worden gelezen`,
   refundedOrders: (count) => `${count} van ${plural(count, "een terugbetaalde bestelling", "terugbetaalde bestellingen")}, telt niet mee`,
   noReviewsYet: "Beoordelingen van kopers verschijnen hier zodra iemand die betaald heeft er een schrijft.",
   seeAllReviews: (written) => `Alle ${written} beoordelingen bekijken`,

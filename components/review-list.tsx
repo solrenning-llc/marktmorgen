@@ -192,9 +192,10 @@ export function ReviewsSection({
       <p className="st-muted mt-4 text-sm">
         {w.reviewRules(productTitle, storeName)}
       </p>
-      {hidden || summary.refunded ? (
+      {hidden || summary.refunded || summary.unread ? (
         <p className="mt-2 text-sm font-semibold">
-          {[hidden, summary.refunded ? w.refundedOrders(summary.refunded) : ""]
+          {/* Records that could not be read are said, never left out in silence (lib/reviews.ts, REVIEW_UNREAD_SHOWN_AFTER_DAYS). */}
+          {[hidden, summary.refunded ? w.refundedOrders(summary.refunded) : "", summary.unread ? w.reviewsUnreadKept(summary.unread) : ""]
             .filter(Boolean)
             .join(" · ")}
         </p>

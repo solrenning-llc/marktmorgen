@@ -73,7 +73,9 @@ function mangleOnce(matches: (commands: Command[]) => boolean, mangle: (replies:
 // key of its own before the pre-review of a8737e12a6). Same request, same checks.
 const readsReviews = (commands: Command[]) =>
   commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith(`nl:rev:${STATS}:`)) &&
-  commands.every((c) => c[0] === "HGET" && (String(c[1]).startsWith(`nl:rev:${STATS}:`) || String(c[1]).startsWith(`nl:rev:bad:${STATS}:`)));
+  commands.every((c) => (c[0] === "HGET" && String(c[1]).startsWith(`nl:rev:${STATS}:`)) || (c[0] === "HMGET" && String(c[1]).startsWith(`nl:rev:bad:${STATS}:`)));
+// Rule 23 (second pre-review of fc75f6a256): the records set aside are read with one HMGET of every field a review's
+// records may have (its id, then <id>:1 ... <id>:9), no longer one HGET.
 const readsPay = (commands: Command[]) => commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === payKey;
 const writesPay = (commands: Command[]) => commands.length === 1 && (commands[0][0] === "HSET" || commands[0][0] === "HDEL") && commands[0][1] === payKey;
 const deletesReview = (commands: Command[]) => commands.some((c) => c[0] === "HDEL" && String(c[1]).startsWith(`nl:rev:${STATS}:`));

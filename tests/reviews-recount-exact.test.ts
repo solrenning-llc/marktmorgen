@@ -123,7 +123,9 @@ async function main(): Promise<void> {
   ];
   for (const [label, reply] of offShape(first.ids, first.rows)) {
     const { ids, sum } = await seed();
-    const read = swap("HGETALL", RECORDS, reply);
+    // Rule 23 (second pre-review of fc75f6a256): the recount reads, in the same request as the records, since when too
+    // many did not read (one HGET of the set-aside hash): an answer of one reply to the records carries that one (nil).
+    const read = swap("HGETALL", RECORDS, Array.isArray(reply) && reply.length === 1 ? [...reply, null] : reply);
     const { result, logged } = await outcome(() => setHidden(STATS, PRODUCT, ids[0], true, REASON));
     is(`${label}: the hide itself is written`, typeof result === "object" && result !== null && (result as Review).hidden === true, true);
     is(`${label}: the recount read it`, read.hit(), true);
@@ -169,7 +171,7 @@ async function main(): Promise<void> {
   {
     // Only an exact empty hash is no reviews: the numbers go.
     const { ids } = await seed();
-    swap("HGETALL", RECORDS, [[]]);
+    swap("HGETALL", RECORDS, [[], null]); // Rule 23: with the set-aside hash's nil (see above).
     const { logged } = await outcome(() => setHidden(STATS, PRODUCT, ids[0], true, REASON));
     is("an exact empty read deletes the numbers", await raw(["HGET", SUM, PRODUCT]), null);
     is("without a log line", logged, 0);

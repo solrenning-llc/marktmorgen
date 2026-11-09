@@ -260,6 +260,7 @@ export const it: BuyerWords = {
   reviewRules: (title, store) =>
     `Solo chi ha acquistato ${title} qui può recensirlo, e ogni recensione viene verificata con il suo ordine. ${store} può rispondere e nascondere una recensione, ma non modificarla; le recensioni nascoste contano comunque nella media.`,
   hiddenByCreator: (count) => `${count} ${plural(count, "recensione nascosta", "recensioni nascoste")} dal creatore`,
+  reviewsUnreadKept: (count) => `${count} ${plural(count, "recensione non è stata letta", "recensioni non sono state lette")}`,
   refundedOrders: (count) => `${count} da ${plural(count, "un ordine rimborsato, non conteggiata", "ordini rimborsati, non conteggiate")}`,
   noReviewsYet: "Le recensioni degli acquirenti appariranno qui quando qualcuno che ha pagato ne scriverà una.",
   seeAllReviews: (written) => `Vedi tutte le ${written} recensioni`,

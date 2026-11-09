@@ -82,7 +82,7 @@ def main():
         records, aside, vis, every, queue = keys
 
         def set_aside(*pairs):
-            return redis.command("EVAL", set_aside_if, 5, *keys, "prod0009", *pairs)
+            return redis.command("EVAL", set_aside_if, 5, *keys, "prod0009", 10, *pairs)
 
         redis.command("HSET", records, "a" * 24, "{not json", "b" * 24, '{"fresh":1}', "c" * 24, '{"ok":1}')
         redis.command("ZADD", vis, 1, "a" * 24, 2, "b" * 24, 3, "c" * 24)
@@ -100,6 +100,18 @@ def main():
 
         assert set_aside("a" * 24, "{not json") == 0 and redis.command("HGET", aside, "a" * 24) == "{not json"
         print("PASS: moving again finds nothing and changes nothing")
+
+        # v2 (second pre-review of fc75f6a256): a second record of the same review goes to a field of its own.
+        redis.command("HSET", records, "a" * 24, "{damaged again")
+        assert set_aside("a" * 24, "{damaged again") == 1
+        assert redis.command("HGET", aside, "a" * 24) == "{not json"
+        assert redis.command("HGET", aside, "a" * 24 + ":1") == "{damaged again"
+        for n in range(2, 10):
+            redis.command("HSET", aside, "a" * 24 + ":" + str(n), "older")
+        redis.command("HSET", records, "a" * 24, "{one too many")
+        assert set_aside("a" * 24, "{one too many") == 0
+        assert redis.command("HGET", records, "a" * 24) == "{one too many" and redis.command("HLEN", aside) == 10
+        print("PASS: each record of a review set aside keeps its own field, never over another; none free, not moved")
     finally:
         for key in [numbers, *made]:
             redis.command("DEL", key)

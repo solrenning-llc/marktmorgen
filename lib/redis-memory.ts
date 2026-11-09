@@ -214,15 +214,24 @@ export class MemoryRedis {
         }
         // lib/reviews.ts SET_ASIDE_IF: each damaged record moved into its product's set-aside hash, and out of the
         // records and their three lists, only while it is still the text read; answers how many were moved.
-        if (key.startsWith("-- marktmorgen:review-set-aside:v1\n") && args[0] === "5" && args.length >= 8 && (args.length - 7) % 2 === 0) {
-          const [, records, aside, visible, all, queue, product] = args;
+        // v2: each into the first free field of <id>, <id>:1 ... below ARGV[2], never over another; none free, not moved.
+        if (key.startsWith("-- marktmorgen:review-set-aside:v2\n") && args[0] === "5" && args.length >= 9 && (args.length - 8) % 2 === 0) {
+          const [, records, aside, visible, all, queue, product, most] = args;
           let moved = 0;
-          for (let i = 7; i < args.length; i += 2) {
+          for (let i = 8; i < args.length; i += 2) {
             const [id, text] = [args[i], args[i + 1]];
             this.scriptCalls += 1;
             if (this.run(["HGET", records, id]) !== text) continue;
+            let field: string | null = id;
+            for (let n = 0; field !== null && this.run(["HEXISTS", aside, field]) === 1; ) {
+              this.scriptCalls += 1;
+              n += 1;
+              field = n >= Number(most) ? null : `${id}:${n}`;
+            }
+            this.scriptCalls += 1;
+            if (field === null) continue;
             this.scriptCalls += 5;
-            this.run(["HSET", aside, id, text]);
+            this.run(["HSET", aside, field, text]);
             this.run(["HDEL", records, id]);
             this.run(["ZREM", visible, id]);
             this.run(["ZREM", all, `${product}|${id}`]);

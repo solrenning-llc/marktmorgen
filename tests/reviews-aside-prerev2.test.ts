@@ -19,7 +19,7 @@ import * as reviews from "@/lib/reviews";
 import { reviewId, saveReview, setHidden, setReviewPhoto, summaries, HIDE_REASONS, UNREAD_NUMBERS } from "@/lib/reviews";
 import { reviewPhotoPath } from "@/lib/review-photo";
 import { dataUsed } from "@/lib/store-data";
-import { GIVING_WORDS } from "@/lib/buyer-words/giving";
+import { wordsIn } from "@/lib/buyer-words";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 
@@ -101,7 +101,7 @@ test("X1b: the buyer's own delete finds every record of theirs set aside and ans
   await quiet(() => setHidden(STATS, P1, idC, false, REASON));
   const done = (await quiet(() => deleteOwnReview(STATS, P1, idA, ROOM))) as { photo: string | null; alsoPhotos?: string[] };
   assert.deepEqual([done.photo, ...(done.alsoPhotos ?? [])].sort(), [fresh, old].sort(), JSON.stringify(done));
-  assert.equal(redis.run(["EXISTS", asideKey]), 0);
+  assert.equal(redis.run(["HLEN", asideKey]), 0, "none left (the stand-in keeps an emptied hash; Redis drops it)");
 });
 
 test("X2: a record set aside that its buyer deletes gives no room back", async () => {
@@ -145,9 +145,9 @@ test("X3: too many records that do not read: unread for a week, then the readabl
   }
   assert.equal(redis.run(["HGET", productKey, reviewId(STATS, P1, emails[0])]), "{broken", "the records that do not read stay where they are");
   assert.equal(redis.run(["HLEN", asideKey]) ?? 0, 1, "only the time it began is kept beside them");
-  assert.equal(GIVING_WORDS.en.reviewsUnreadKept(4), "4 reviews could not be read");
-  assert.equal(GIVING_WORDS.en.reviewsUnreadKept(1), "1 review could not be read");
-  for (const [language, words] of Object.entries(GIVING_WORDS)) assert.equal(typeof words.reviewsUnreadKept(2), "string", language);
+  assert.equal(wordsIn("en").reviewsUnreadKept(4), "4 reviews could not be read");
+  assert.equal(wordsIn("en").reviewsUnreadKept(1), "1 review could not be read");
+  for (const language of ["de", "es", "fr", "it", "nl", "pt"] as const) assert.match(wordsIn(language).reviewsUnreadKept(2), /^2\b/, language);
   assert.match(readFileSync("components/review-list.tsx", "utf8"), /w\.reviewsUnreadKept\(summary\.unread\)/);
 });
 

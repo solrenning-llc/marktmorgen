@@ -261,6 +261,7 @@ export const pt: BuyerWords = {
   reviewRules: (title, store) =>
     `Só quem comprou ${title} aqui o pode avaliar, e cada avaliação é verificada com a respetiva encomenda. ${store} pode responder e ocultar uma avaliação, mas não a pode alterar; as avaliações ocultas continuam a contar na média.`,
   hiddenByCreator: (count) => `${count} ${plural(count, "avaliação ocultada", "avaliações ocultadas")} pelo criador`,
+  reviewsUnreadKept: (count) => `${count} ${plural(count, "avaliação não pôde ser lida", "avaliações não puderam ser lidas")}`,
   refundedOrders: (count) => `${count} de ${plural(count, "uma encomenda reembolsada, não conta", "encomendas reembolsadas, não contam")}`,
   noReviewsYet: "As avaliações dos compradores aparecem aqui quando alguém que pagou escrever uma.",
   seeAllReviews: (written) => `Ver as ${written} avaliações`,

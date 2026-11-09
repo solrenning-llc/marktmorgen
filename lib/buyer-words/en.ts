@@ -291,6 +291,7 @@ export const en = {
   reviewRules: (title: string, store: string) =>
     `Only people who bought ${title} here can review it, and every review is checked against its order. ${store} can reply and can hide a review, but cannot change one; hidden reviews still count in the average.`,
   hiddenByCreator: (count: number) => `${count} ${plural(count, "review", "reviews")} hidden by the creator`,
+  reviewsUnreadKept: (count: number) => `${count} ${plural(count, "review", "reviews")} could not be read`,
   refundedOrders: (count: number) => `${count} from refunded ${plural(count, "order", "orders")}, not counted`,
   noReviewsYet: "Buyers' reviews appear here once somebody who paid writes one.",
   seeAllReviews: (written: string) => `See all ${written} reviews`,

@@ -233,7 +233,7 @@ function exactSummary(raw: string): Summary | null {
     return null;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const { count, stars, visible, hidden, refunded, dist } = value as Record<string, unknown>;
+  const { count, stars, visible, hidden, refunded, dist, unread } = value as Record<string, unknown>;
   const whole = (x: unknown): x is number => typeof x === "number" && Number.isSafeInteger(x) && x >= 0;
   if (!Array.isArray(dist) || dist.length !== 5 || !dist.every(whole)) return null;
   if (!whole(count) || !whole(stars) || !whole(visible) || !whole(hidden) || !whole(refunded)) return null;
@@ -241,7 +241,9 @@ function exactSummary(raw: string): Summary | null {
   if (spread.reduce((sum, n) => sum + n, 0) !== count) return null;
   if (spread.reduce((sum, n, i) => sum + n * (i + 1), 0) !== stars) return null;
   if (visible + hidden !== count + refunded) return null;
-  return { count, stars, visible, hidden, refunded, dist: [spread[0], spread[1], spread[2], spread[3], spread[4]] };
+  // Records that could not be read, counted beside the numbers once a week has passed (recount): a whole number from 1.
+  if (unread !== undefined && !(whole(unread) && unread > 0)) return null;
+  return { count, stars, visible, hidden, refunded, dist: [spread[0], spread[1], spread[2], spread[3], spread[4]], ...(typeof unread === "number" ? { unread } : {}) };
 }
 
 /**
@@ -395,24 +397,54 @@ function recordsOf(reply: unknown, productId: string): { ids: string[]; reviews:
 export const REVIEW_ASIDE_MOST = 3;
 
 /**
+ * How many records of one review (the same buyer's, under its id) its product keeps set aside: the first under the
+ * id, the next under <id>:1 ... <id>:9 (second pre-review of fc75f6a256: a second record set aside never writes over
+ * the first, whose photo would be lost). A buyer's delete and erasure read them all in one HMGET (asideFields).
+ */
+export const REVIEW_ASIDE_PER_REVIEW = 10;
+const asideFields = (id: string): string[] => [id, ...Array.from({ length: REVIEW_ASIDE_PER_REVIEW - 1 }, (_, i) => `${id}:${i + 1}`)];
+/** A field of the set-aside hash: a review's id, or its id and the record's number. */
+const ASIDE_FIELD_PATTERN = /^([0-9a-f]{24})(?::[1-9])?$/;
+
+/**
+ * Days a product may wait with more records that do not read than may be set aside (REVIEW_ASIDE_MOST), before its
+ * stars are counted from the records that read, with "N reviews could not be read" beside them (second pre-review of
+ * fc75f6a256): an honest way out, bounded in time, that moves and deletes nothing. When it began is kept in its
+ * set-aside hash (ASIDE_SINCE), and goes once its records read again or are few enough to set aside.
+ */
+export const REVIEW_UNREAD_SHOWN_AFTER_DAYS = 7;
+const ASIDE_SINCE = "~since";
+
+/**
  * Moves damaged review records out of their product, in one step (lib/redis-memory.ts models it; run on a real Redis
  * by scripts/test_review_recount_redis.py). KEYS: the product's records, its records set aside, its page list, the
  * studio list, the creator's queue. ARGV: the product's id, then each record's id and the text it was read as. A record
  * is moved only while it is still exactly that text: written into the set-aside hash as it was, then taken out of the
  * records and of the three lists. A review written into the field meanwhile (a lock that ran out under a slow request)
- * is never moved or deleted. Answers how many were moved. Upstash bills the EVAL and every call it runs.
+ * is never moved or deleted. ARGV[2] is REVIEW_ASIDE_PER_REVIEW: each goes into the first of <id>, <id>:1 ... free,
+ * never over another (v2, second pre-review of fc75f6a256); one with none free is not moved. Answers how many were
+ * moved. Upstash bills the EVAL and every call it runs.
  */
-export const SET_ASIDE_IF = `-- marktmorgen:review-set-aside:v1
+export const SET_ASIDE_IF = `-- marktmorgen:review-set-aside:v2
 local moved = 0
-for i = 2, #ARGV, 2 do
+for i = 3, #ARGV, 2 do
   local id = ARGV[i]
   if redis.call('HGET', KEYS[1], id) == ARGV[i + 1] then
-    redis.call('HSET', KEYS[2], id, ARGV[i + 1])
-    redis.call('HDEL', KEYS[1], id)
-    redis.call('ZREM', KEYS[3], id)
-    redis.call('ZREM', KEYS[4], ARGV[1] .. '|' .. id)
-    redis.call('ZREM', KEYS[5], ARGV[1] .. '|' .. id)
-    moved = moved + 1
+    local field = id
+    local n = 0
+    while redis.call('HEXISTS', KEYS[2], field) == 1 do
+      n = n + 1
+      if n >= tonumber(ARGV[2]) then field = nil break end
+      field = id .. ':' .. n
+    end
+    if field then
+      redis.call('HSET', KEYS[2], field, ARGV[i + 1])
+      redis.call('HDEL', KEYS[1], id)
+      redis.call('ZREM', KEYS[3], id)
+      redis.call('ZREM', KEYS[4], ARGV[1] .. '|' .. id)
+      redis.call('ZREM', KEYS[5], ARGV[1] .. '|' .. id)
+      moved = moved + 1
+    end
   end
 end
 return moved`;
@@ -432,7 +464,7 @@ async function setAside(statsId: string, productId: string, damaged: [string, st
   const summary = summaryGone(statsId, productId, 0);
   if (!exactWriteReplies(await redisPipeline(summary), summary)) return false;
   const keys = [productKey(statsId, productId), asideKey(statsId, productId), visibleKey(statsId, productId), allKey(statsId), newKey(statsId)];
-  const moved = repliesFor(await redisPipeline([["EVAL", SET_ASIDE_IF, keys.length, ...keys, productId, ...damaged.flat()]]), 1);
+  const moved = repliesFor(await redisPipeline([["EVAL", SET_ASIDE_IF, keys.length, ...keys, productId, REVIEW_ASIDE_PER_REVIEW, ...damaged.flat()]]), 1);
   const n = moved ? countOf(moved[0]) : null;
   const members = damaged.map(([id]) => `${productId}|${id}`);
   if (n !== damaged.length) {
@@ -458,27 +490,48 @@ async function setAside(statsId: string, productId: string, damaged: [string, st
  * that change's own recount, or the daily pass, counts them.
  */
 async function recount(statsId: string, productId: string, mark: string): Promise<Summary | "unsure"> {
-  const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1);
+  // The records, and since when too many of them did not read (ASIDE_SINCE), in one request.
+  const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)], ["HGET", asideKey(statsId, productId), ASIDE_SINCE]]), 2);
   const records = read ? recordsOf(read[0], productId) : null;
-  if (!records) {
+  const sinceRaw = read?.[1];
+  const since = sinceRaw === null ? null : typeof sinceRaw === "string" && /^\d{1,15}$/.test(sinceRaw) ? Number(sinceRaw) : Number.NaN;
+  if (!records || Number.isNaN(since)) {
     console.error(`reviews: the numbers of product ${productId} were not counted again (its reviews read in an unknown shape); left waiting for the daily recount or its next change`);
     return "unsure";
   }
   // A damaged record (text that does not read as its review) never changes by waiting: it is set aside, and the
   // product is counted from the others (owner's decision 11). Set aside unconfirmed leaves the product unread.
-  // More than REVIEW_ASIDE_MOST, or more than half of the product's records (one alone may be), is not moved at all.
+  // More than REVIEW_ASIDE_MOST, or more than half of the product's records (one alone may be), is not moved at all:
+  // the product is unread for REVIEW_UNREAD_SHOWN_AFTER_DAYS from the first recount that found it so, then counted
+  // from the records that read, said with how many could not ("unread"), and nothing is moved or deleted.
+  let unread = 0;
   if (records.damaged.length > REVIEW_ASIDE_MOST || records.damaged.length * 2 > Math.max(records.ids.length, 2)) {
-    console.error(`reviews: ${records.damaged.length} of the ${records.ids.length} review records of product ${productId} do not read; too many to set aside, its numbers are left waiting`);
-    return "unsure";
-  }
-  if (records.damaged.length && !(await setAside(statsId, productId, records.damaged))) {
-    console.error(`reviews: the damaged review records of product ${productId} could not be set aside (an answer in an unknown shape); its numbers are left waiting`);
-    return "unsure";
+    const waited = since === null ? 0 : Date.now() - since;
+    if (since === null) {
+      const begin: (string | number)[][] = [["HSETNX", asideKey(statsId, productId), ASIDE_SINCE, Date.now()]];
+      if (!repliesFor(await redisPipeline(begin), 1)) console.error(`reviews: when product ${productId} began to have too many records that do not read could not be written; tried again at its next recount`);
+    }
+    if (since === null || waited < REVIEW_UNREAD_SHOWN_AFTER_DAYS * 86_400_000) {
+      console.error(`reviews: ${records.damaged.length} of the ${records.ids.length} review records of product ${productId} do not read; too many to set aside, its numbers are left waiting`);
+      return "unsure";
+    }
+    unread = records.damaged.length;
+    console.error(`reviews: ${unread} of the ${records.ids.length} review records of product ${productId} have not read for ${REVIEW_UNREAD_SHOWN_AFTER_DAYS} days; its stars are counted from the others and said with how many could not be read`);
+  } else {
+    if (records.damaged.length && !(await setAside(statsId, productId, records.damaged))) {
+      console.error(`reviews: the damaged review records of product ${productId} could not be set aside (an answer in an unknown shape); its numbers are left waiting`);
+      return "unsure";
+    }
+    if (since !== null) {
+      // Few enough again: when it began goes, so a later case waits its own week.
+      const end: (string | number)[][] = [["HDEL", asideKey(statsId, productId), ASIDE_SINCE]];
+      if (!exactWriteReplies(await redisPipeline(end), end)) console.error(`reviews: when product ${productId} had too many records that do not read could not be taken off; taken off at its next recount`);
+    }
   }
   const reviews = records.reviews;
-  const summary = summarise(reviews);
+  const summary: Summary = { ...summarise(reviews), ...(unread ? { unread } : {}) };
   const written = repliesFor(
-    await redisPipeline([["EVAL", WRITE_NUMBERS_IF, 1, summaryKey(statsId), productId, mark, reviews.length ? JSON.stringify(summary) : ""]]),
+    await redisPipeline([["EVAL", WRITE_NUMBERS_IF, 1, summaryKey(statsId), productId, mark, reviews.length || unread ? JSON.stringify(summary) : ""]]),
     1,
   );
   if (written?.[0] === 0) {
@@ -695,16 +748,17 @@ function ownRecord(raw: unknown, productId: string, id: string, what: string): O
  * numbers were counted again. `alsoPhoto` is a second photo, only when an older record of the same buyer set aside as
  * damaged had one of its own (pre-review of a8737e12a6): the caller drops both.
  */
-export type OwnDeletion = { state: "deleted"; photo: string | null; photoFound: boolean; damaged: boolean; recounted: boolean; alsoPhoto?: string };
+export type OwnDeletion = { state: "deleted"; photo: string | null; photoFound: boolean; damaged: boolean; recounted: boolean; alsoPhotos?: string[] };
 
-/** The room a record set aside holds, as a review's was taken (reviewBytes): given back when it is deleted. */
-const asideBytes = (raw: string) => dataBytes([raw], 5);
-
-/** The photos of a buyer's record and of their older record set aside, each once, the first as `photo`. */
-function photosOf(own: OwnRecord | null, aside: OwnRecord | null): { photo: string | null; photoFound: boolean; alsoPhoto?: string } {
-  const paths = [...new Set([own?.photo, aside?.photo].filter((path): path is string => typeof path === "string"))];
-  const found = (own ? own.photo !== undefined : true) && (aside ? aside.photo !== undefined : true);
-  return { photo: paths[0] ?? null, photoFound: found, ...(paths[1] ? { alsoPhoto: paths[1] } : {}) };
+/**
+ * The photos of a buyer's record and of their older records set aside, each once, the first as `photo`, the others as
+ * `alsoPhotos` (only when there are any). A record set aside gives no room back when deleted: its size as stored is
+ * the damaged text's, not what its review took (second pre-review of fc75f6a256), so it stays counted.
+ */
+function photosOf(records: OwnRecord[]): { photo: string | null; photoFound: boolean; alsoPhotos?: string[] } {
+  const paths = [...new Set(records.map((r) => r.photo).filter((path): path is string => typeof path === "string"))];
+  const found = records.every((r) => r.photo !== undefined);
+  return { photo: paths[0] ?? null, photoFound: found, ...(paths.length > 1 ? { alsoPhotos: paths.slice(1) } : {}) };
 }
 
 /** Deletes a buyer's own review. Its stars leave the average with it. */
@@ -727,22 +781,23 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
     // Read exactly (CX-123 rule 24): only a confirmed absent field is "missing". A reply in another shape throws, so the
     // review is kept and its deletion is never said as done. A damaged record is deleted (ownRecord), in the product's
     // hash or where a recount set it aside (setAside, owner's decision 11): read in the same request, deleted with it.
-    const read = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id], ["HGET", asideKey(statsId, productId), id]]), 2);
-    if (!read) throw new UnknownReplyError(what);
-    const aside = ownRecord(read[1], productId, id, what);
+    const fields = asideFields(id);
+    const read = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id], ["HMGET", asideKey(statsId, productId), ...fields]]), 2);
+    const kept = read ? repliesFor(read[1], fields.length) : null;
+    if (!read || !kept) throw new UnknownReplyError(what);
+    // Every record of this buyer set aside (each under a field of its own), as a damaged record of theirs is read.
+    const asideFound = fields.flatMap((field, i) => {
+      const record = ownRecord(kept[i], productId, id, what);
+      return record ? [{ field, record }] : [];
+    });
+    const asides = asideFound.map((found) => found.record);
+    const asideDrop: (string | number)[][] = asideFound.length ? [["HDEL", asideKey(statsId, productId), ...asideFound.map((found) => found.field)]] : [];
     const own = ownRecord(read[0], productId, id, what);
-    // Its room given back once its own HDEL answered that it removed it (as a review's, never twice).
-    const asideRoom = async (removed: unknown) => {
-      if (aside && removed === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: asideBytes(read[1] as string) }]);
-    };
-    if (!own && aside) {
-      // Only the record set aside: it was never counted since, so the numbers stay as they are (counted without it).
-      const drop: (string | number)[][] = [["HDEL", asideKey(statsId, productId), id]];
-      const dropped = exactWriteReplies(await redisPipeline(drop), drop);
-      if (!dropped) throw new UnknownReplyError(what);
-      await asideRoom(dropped[0]);
-      console.error(`reviews: a damaged review record set aside (${productId}|${id}) was deleted for its buyer${aside.photo === undefined ? "; its photo could not be found" : ""}`);
-      return { state: "deleted" as const, ...photosOf(null, aside), damaged: true, recounted: true };
+    if (!own && asides.length) {
+      // Only records set aside: never counted since, so the numbers stay as they are (counted without them).
+      if (!exactWriteReplies(await redisPipeline(asideDrop), asideDrop)) throw new UnknownReplyError(what);
+      console.error(`reviews: ${asides.length} damaged review record(s) set aside (${productId}|${id}) deleted for their buyer; their room stays counted${asides.some((r) => r.photo === undefined) ? "; a photo could not be found" : ""}`);
+      return { state: "deleted" as const, ...photosOf(asides), damaged: true, recounted: true };
     }
     if (!own) return "missing" as const;
     const gone = own.review;
@@ -757,8 +812,8 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
       ...(!gone ? summaryGone(statsId, productId, 0) : counted(gone) ? summaryGone(statsId, productId, gone.createdAt) : []),
       // Its numbers wait for their recount from the same request: never shown counting the review just deleted.
       numbersPending(statsId, productId, mark),
-      // An older record of the same buyer set aside as damaged goes with it (its photo is answered too).
-      ...(aside ? [["HDEL", asideKey(statsId, productId), id]] : []),
+      // Older records of the same buyer set aside as damaged go with it (their photos are answered too).
+      ...asideDrop,
     ];
     // Every reply in its exact shape, or the deletion is unknown: no room given back, and the field is read again
     // (below) before it is said as deleted or thrown.
@@ -767,7 +822,6 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
     // deletions racing. A request that failed may still have run the HDEL (an error on another command); the room
     // then stays counted, more than is used, never less. A damaged record's size is unknown: it stays counted.
     if (gone && replies?.[0] === 1) await giveData(room, [{ slot: REVIEWS_SLOT(productId), bytes: reviewBytes(gone) }]);
-    if (aside) await asideRoom(replies?.[deletion.length - 1]);
     // Replies in an unknown shape: the field is read again, exactly. Confirmed absent means its HDEL ran, so the review
     // is deleted (the caller drops or hands over its photo; its room stays counted, as above). Still there, or read
     // again in another shape, throws.
@@ -781,7 +835,7 @@ export async function deleteOwnReview(statsId: string, productId: string, id: st
     if (!gone) {
       console.error(`reviews: a damaged review record (${productId}|${id}) was deleted for its buyer; its room stays counted${own.photo === undefined ? "; its photo could not be found" : ""}`);
     }
-    return { state: "deleted" as const, ...photosOf(own, aside), damaged: !gone, recounted };
+    return { state: "deleted" as const, ...photosOf([own, ...asides]), damaged: !gone, recounted };
   });
   return result;
 }
@@ -1195,12 +1249,19 @@ export async function dropReviews(statsId: string | null, productId: string, tri
   const read = repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)], ["HGETALL", asideKey(statsId, productId)]]), 2);
   const records = read ? recordsOf(read[0], productId) : null;
   const asideFlat = read ? stringList(read[1]) : null;
-  if (!records || !asideFlat || asideFlat.length % 2 !== 0 || asideFlat.some((field, i) => i % 2 === 0 && !REVIEW_ID_PATTERN.test(field))) {
+  if (!records || !asideFlat || asideFlat.length % 2 !== 0 || asideFlat.some((field, i) => i % 2 === 0 && field !== ASIDE_SINCE && !ASIDE_FIELD_PATTERN.test(field))) {
     throw new UnknownReplyError("a removed product's reviews");
   }
+  // The photo each damaged record still names, set aside or still in the hash, where its text says whose it is
+  // (ownRecord, by the review's id): the same reading for both (second pre-review of fc75f6a256).
   const asidePhotos: string[] = [];
+  const damagedRecords: [string, string][] = [...records.damaged];
   for (let i = 0; i < asideFlat.length; i += 2) {
-    const photo = ownRecord(asideFlat[i + 1], productId, asideFlat[i], "a removed product's reviews set aside")?.photo;
+    const id = ASIDE_FIELD_PATTERN.exec(asideFlat[i])?.[1];
+    if (id) damagedRecords.push([id, asideFlat[i + 1]]);
+  }
+  for (const [id, raw] of damagedRecords) {
+    const photo = ownRecord(raw, productId, id, "a removed product's damaged reviews")?.photo;
     if (photo) asidePhotos.push(photo);
   }
   if (records.unreadable.length) {
@@ -1257,10 +1318,14 @@ export async function forgetReviewsPerson(
   // person's own id names, and erased with the review (deleteOwnReview finds it there): both, when the person wrote
   // again after it was set aside, each with its photo and its payment (pre-review of a8737e12a6).
   const raws = wanted.length
-    ? repliesFor(await redisPipeline([...wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]]), ...wanted.map((p, i) => ["HGET", asideKey(statsId, p), ids[i]])]), wanted.length * 2)
+    ? repliesFor(await redisPipeline([...wanted.map((p, i) => ["HGET", productKey(statsId, p), ids[i]]), ...wanted.map((p, i) => ["HMGET", asideKey(statsId, p), ...asideFields(ids[i])])]), wanted.length * 2)
     : [];
   if (!raws) throw new UnknownReplyError(what);
-  const found = wanted.map((p, i) => [ownRecord(raws[i], p, ids[i], what), ownRecord(raws[wanted.length + i], p, ids[i], what)].filter((r): r is OwnRecord => r !== null));
+  const found = wanted.map((p, i) => {
+    const kept = repliesFor(raws[wanted.length + i], REVIEW_ASIDE_PER_REVIEW);
+    if (!kept) throw new UnknownReplyError(what);
+    return [raws[i], ...kept].map((raw) => ownRecord(raw, p, ids[i], what)).filter((r): r is OwnRecord => r !== null);
+  });
   let records = 0;
   const photos: string[] = [];
   for (let i = 0; i < wanted.length; i += 1) {

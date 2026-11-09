@@ -8,7 +8,11 @@
  *   R3  a product removed takes its records set aside with it, and hands over their photos;
  *   R4  setting aside is one step that moves a record only while it is still the text read (a review written meanwhile stays);
  *   R5  more than REVIEW_ASIDE_MOST records, or more than half of a product's, that look damaged: nothing moved, unsure;
- *   R6  a record set aside that is deleted gives its room back.
+ *   R6  a record set aside that is deleted gives no room back (rule 23, second pre-review of fc75f6a256: it gave back
+ *       its damaged text's size, more than its review took; a damaged record's size is unknown: it stays counted).
+ * Rule 23 (second pre-review of fc75f6a256): R2b and R2c read the further photos as `alsoPhotos` (a list: each record
+ * set aside keeps a field of its own, so there may be several), and R5's first case finds the time the product began
+ * to have too many kept beside its records, but no record set aside.
  * Synthetic Redis only (tests/redis-stub.ts).
  */
 import assert from "node:assert/strict";
@@ -23,7 +27,7 @@ import { ROOM } from "./data-room";
 type Command = (string | number)[];
 const api = reviews as unknown as Record<string, unknown>;
 const forgetReviewsPerson = api.forgetReviewsPerson as (s: string, p: string[], email: string, room: typeof ROOM, files?: string[]) => Promise<{ records: number; photos: string[] }>;
-const deleteOwnReview = api.deleteOwnReview as (s: string, p: string, id: string, room: typeof ROOM) => Promise<{ photo: string | null; alsoPhoto?: string } | string>;
+const deleteOwnReview = api.deleteOwnReview as (s: string, p: string, id: string, room: typeof ROOM) => Promise<{ photo: string | null; alsoPhotos?: string[] } | string>;
 const STATS = "abcdef0123456789abcdef0123456789";
 const P1 = "qrnp1aaaaa";
 const A = "proof-a@example.test";
@@ -96,7 +100,7 @@ test("R2b: the buyer's own delete, with a new review and the old one set aside, 
   await save(A, 3, 1_700_000_009_000);
   const done = await quiet(() => deleteOwnReview(STATS, P1, idA, ROOM));
   assert.equal(typeof done, "object");
-  const photos = [(done as { photo: string | null }).photo, (done as { alsoPhoto?: string }).alsoPhoto].filter(Boolean);
+  const photos = [(done as { photo: string | null }).photo, ...((done as { alsoPhotos?: string[] }).alsoPhotos ?? [])].filter(Boolean);
   assert.deepEqual(photos, [path], JSON.stringify(done));
   assert.equal(aside(idA), null);
 });
@@ -106,8 +110,8 @@ test("R2c: the buyer's own delete with two photos answers both", async () => {
   await save(A, 3, 1_700_000_009_000);
   const fresh = await reviewPhotoPath("proof-owner@example.test", "image/jpeg");
   assert.equal(typeof (await setReviewPhoto(STATS, P1, idA, { path: fresh, width: 1200, height: 900 })), "object");
-  const done = (await quiet(() => deleteOwnReview(STATS, P1, idA, ROOM))) as { photo: string | null; alsoPhoto?: string };
-  assert.deepEqual([done.photo, done.alsoPhoto].sort(), [fresh, old].sort(), JSON.stringify(done));
+  const done = (await quiet(() => deleteOwnReview(STATS, P1, idA, ROOM))) as { photo: string | null; alsoPhotos?: string[] };
+  assert.deepEqual([done.photo, ...(done.alsoPhotos ?? [])].sort(), [fresh, old].sort(), JSON.stringify(done));
 });
 
 test("R3: a product removed takes its records set aside with it, and hands over their photos", async () => {
@@ -149,7 +153,7 @@ test("R5: too many records that look damaged: nothing is moved, the product is l
   redis.run(["HSET", productKey, idD, "{not json either"]);
   await quiet(() => setHidden(STATS, P1, idC, true, REASON));
   assert.equal(redis.run(["HGET", productKey, idA]), "{not json", "left in place");
-  assert.equal(redis.run(["EXISTS", asideKey]), 0, "nothing set aside");
+  assert.deepEqual(redis.run(["HKEYS", asideKey]), ["~since"], "nothing set aside, only when it began");
   assert.equal((await summaries(STATS)).get(P1), UNREAD_NUMBERS, "unread, never numbers from a guess");
   // More than REVIEW_ASIDE_MOST of a large product's records.
   redis.clear();
@@ -157,16 +161,15 @@ test("R5: too many records that look damaged: nothing is moved, the product is l
   for (const [i, email] of emails.entries()) await save(email, 4, 1_700_000_100_000 + i * 1000);
   for (const email of emails.slice(0, most + 1)) redis.run(["HSET", productKey, reviewId(STATS, P1, email), "{broken"]);
   await quiet(() => setHidden(STATS, P1, reviewId(STATS, P1, emails[emails.length - 1]), true, REASON));
-  assert.equal(redis.run(["EXISTS", asideKey]), 0, "nothing set aside");
+  assert.deepEqual(redis.run(["HKEYS", asideKey]), ["~since"], "nothing set aside, only when it began");
   assert.equal((await summaries(STATS)).get(P1), UNREAD_NUMBERS);
 });
 
-test("R6: a record set aside that its buyer deletes gives its room back", async () => {
+test("R6: a record set aside that its buyer deletes gives no room back", async () => {
   await asideWithPhoto();
   const before = (await dataUsed(ROOM))?.used as number;
   await quiet(() => deleteOwnReview(STATS, P1, idA, ROOM));
-  const after = (await dataUsed(ROOM))?.used as number;
-  assert.ok(after < before, `room given back: ${before} -> ${after}`);
+  assert.equal((await dataUsed(ROOM))?.used, before, "its size is unknown: it stays counted");
 });
 
 test("R7: another product's records are untouched by this one's removal", async () => {

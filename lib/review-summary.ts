@@ -98,6 +98,11 @@ export type Summary = {
   refunded: number;
   /** How many counted reviews gave 1, 2, 3, 4 and 5 stars. */
   dist: [number, number, number, number, number];
+  /**
+   * Records that could not be read and are not in these numbers, said beside them ("N reviews could not be read"):
+   * only once a product has had more than lib/reviews.ts may set aside for REVIEW_UNREAD_SHOWN_AFTER_DAYS.
+   */
+  unread?: number;
 };
 
 export const EMPTY_SUMMARY: Summary = { count: 0, stars: 0, visible: 0, hidden: 0, refunded: 0, dist: [0, 0, 0, 0, 0] };

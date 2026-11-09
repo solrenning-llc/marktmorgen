@@ -268,6 +268,7 @@ export const fr: BuyerWords = {
   reviewRules: (title, store) =>
     `Seules les personnes qui ont acheté ${title} ici peuvent donner leur avis, et chaque avis est vérifié par rapport à sa commande. ${store} peut répondre et masquer un avis, mais pas le modifier${S}; les avis masqués comptent toujours dans la moyenne.`,
   hiddenByCreator: (count) => `${count}${S}${plural(count, "avis masqué", "avis masqués")} par le créateur`,
+  reviewsUnreadKept: (count) => `${count}${S}${plural(count, "avis n’a pas pu", "avis n’ont pas pu")} être lu${count === 1 ? "" : "s"}`,
   refundedOrders: (count) => `${count}${S}${plural(count, "provenant d'une commande remboursée, non compté", "provenant de commandes remboursées, non comptés")}`,
   noReviewsYet: "Les avis des acheteurs apparaîtront ici dès qu'une personne ayant payé en écrira un.",
   seeAllReviews: (written) => `Voir les ${written}${S}avis`,

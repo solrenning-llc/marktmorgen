@@ -262,6 +262,7 @@ export const de: BuyerWords = {
   reviewRules: (title, store) =>
     `Nur wer ${title} hier gekauft hat, kann es bewerten, und jede Bewertung wird mit ihrer Bestellung abgeglichen. ${store} kann antworten und eine Bewertung ausblenden, aber keine ändern; ausgeblendete Bewertungen zählen weiterhin zum Durchschnitt.`,
   hiddenByCreator: (count) => `${count} ${plural(count, "Bewertung", "Bewertungen")} vom Ersteller ausgeblendet`,
+  reviewsUnreadKept: (count) => `${count} ${plural(count, "Bewertung konnte", "Bewertungen konnten")} nicht gelesen werden`,
   refundedOrders: (count) => `${count} aus ${plural(count, "einer erstatteten Bestellung", "erstatteten Bestellungen")}, nicht gezählt`,
   noReviewsYet: "Bewertungen von Käufern erscheinen hier, sobald jemand, der bezahlt hat, eine schreibt.",
   seeAllReviews: (written) => `Alle ${written} Bewertungen ansehen`,

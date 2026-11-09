@@ -108,10 +108,25 @@ function isHttps(address: string): boolean {
   }
 }
 
+/**
+ * Whether an address could name a buyer: a feed token or an email address, written plainly or %-escaped. Every store
+ * page is /@<handle>, so an "@" right after a slash names a store and is let through; an "@" anywhere else could be an
+ * email's and is not. An address whose escapes do not read is taken as naming somebody.
+ */
+function namesSomebody(address: string): boolean {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(address);
+  } catch {
+    return true;
+  }
+  return TOKEN_SHAPE.test(address) || TOKEN_SHAPE.test(decoded) || /(^|[^/])@/.test(address) || /(^|[^/])@/.test(decoded);
+}
+
 /** A public address: https, and nothing that could name a buyer (a feed token, an email address). */
 function publicAddress(address: unknown, what: string): string {
   if (typeof address !== "string" || !isHttps(address)) throw new PublicFeedError("not-https", `The ${what} address must start with https://.`);
-  if (TOKEN_SHAPE.test(address) || address.includes("@") || /%40/i.test(address)) {
+  if (namesSomebody(address)) {
     throw new PublicFeedError("buyer-data", `The ${what} address holds something that could name a buyer, so it is not published.`);
   }
   return address;

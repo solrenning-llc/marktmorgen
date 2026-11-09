@@ -113,12 +113,9 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/ad-events.ts` | PAST-SALE | 575/719: the session's or invoice's currency, else the store's | yes |
 | `lib/api-read.ts` | PAST-SALE | 189: the bookings API labels a paid call with the store's currency; 44/59 settings | no (189) |
 | `lib/course-paid-observation.ts` | PAST-SALE | 71–76: the paid session, line item, payment and charge must match the original receipt currency | yes: compares the paid currency with the frozen original, without conversion or borrowing the current store setting |
-| `lib/gifts.ts` | PAST-SALE | 198: the gift receipt in the session's currency | yes |
 | `lib/group-buy.ts` | PAST-SALE | 243: the group receipt in the session's currency | yes |
 | `lib/payment-recovery.ts` | PAST-SALE | 258: the failed-payment email in the invoice's currency | yes |
-| `lib/preorders.ts` | PAST-SALE | 253: the pre-order receipt in the session's currency | yes |
 | `lib/purchase-email.ts` | PAST-SALE | 230: the purchase email in the session's currency | yes |
-| `lib/sale-events.ts` | PAST-SALE | 71: sale notifications in the checkout's currency | yes |
 | `app/[handle]/affiliates/page.tsx` | SETTING | 249–250, 510–512: the creator's lead and bonus terms | no |
 | `lib/course-confirmation-origin.ts` | SETTING | 114–127: an unadmitted course candidate freezes the store currency with its original price and consent text | yes: this is an immutable original-setting snapshot, not proof of payment or an active charge; paid observation must separately match it |
 | `app/[handle]/p/[product]/page.tsx` | SETTING | 188–200: structured data priceCurrency and prices | no (unit 3: what the page says) |

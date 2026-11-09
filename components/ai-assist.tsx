@@ -78,7 +78,7 @@ export function AiAssist<T>({
   validateResult?: (value: unknown) => value is T;
   /**
    * Told whether the draft it filled in is checked (756 [STN3]): false as each
-   * new draft is filled, true once the creator ticks all three checks under it.
+   * new draft is filled, true once the creator checks all three boxes under it.
    * A form that saves the draft waits on it.
    */
   onReviewChange?: (reviewed: boolean) => void;
@@ -90,6 +90,9 @@ export function AiAssist<T>({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filled, setFilled] = useState(false);
+  // A confirmed draft sits in the fields (756 [STN3]). Only a new confirmed draft sets it, and
+  // nothing clears it: a later attempt that fails leaves that draft, and its checks, where they are.
+  const [drafted, setDrafted] = useState(false);
   // The three checks under the draft it filled in (756 [STN3]).
   const [checks, setChecks] = useState<boolean[]>(freshChecks);
   // What the draft is about that needs a reader who knows it (756 [STN3], unit 2), read from its own words.
@@ -128,11 +131,12 @@ export function AiAssist<T>({
         setReadOnce(true);
         if (validateResult && !validateResult(data.value)) { setError(MESSAGES.unconfirmed); return; }
         onResult(data.value as T);
-        // Every new draft is checked afresh, whatever was ticked for the one before.
+        // Every new draft is checked afresh, whatever was checked for the one before.
         setChecks(freshChecks());
         setTopics(sensitiveTopics(JSON.stringify(data.value)));
         setEstimates(unsourcedNumbers(draftStrings(data.value), `${notes}\n${JSON.stringify(sent)}`));
         onReviewChange?.(false);
+        setDrafted(true);
         setFilled(true);
         return;
       }
@@ -184,7 +188,7 @@ export function AiAssist<T>({
             {done}
           </p>
         ) : null}
-        {filled ? (
+        {drafted ? (
           <AiDraftReview
             checks={checks}
             topics={topics}

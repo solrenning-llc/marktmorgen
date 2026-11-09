@@ -25,7 +25,7 @@ import { DOWNLOAD_WINDOW_SECONDS, type Order, readOrder } from "@/lib/store-chec
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
-import { canMove, confirmBooking, moveLink, paidCall } from "@/lib/calls";
+import { canMove, chargedIn, confirmBooking, moveLink, paidCall } from "@/lib/calls";
 import { type DueInPerson, dueLines } from "@/lib/call-deposit";
 import type { CancelPromise } from "@/lib/call-setup";
 import { readableTime, zoneName } from "@/lib/call-setup";
@@ -56,7 +56,7 @@ import { saleClock } from "@/lib/store-sale";
 import { readListing } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { after } from "next/server";
-import { CONFIRM_WITHIN_SECONDS, canConfirm, confirmPurchase, fromStore, introOf, storeBase } from "@/lib/purchase-email";
+import { CONFIRM_WITHIN_SECONDS, canConfirm, confirmPurchase, firstChargeSaid, fromStore, introOf, storeBase, type SessionRecord } from "@/lib/purchase-email";
 import { readConfig } from "@/lib/community";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { renewPath } from "@/lib/membership-access";
@@ -443,7 +443,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       moves: order.call.moves,
       answers: order.answers,
       amountCents: order.amount,
-      currency: order.currency,
+      currency: order.record.currency,
       lead: order.call.lead,
       pi: order.call.pi,
       due,
@@ -631,6 +631,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const paidEvery = order.state === "paid" && order.product.recurring ? (((order.record.metadata ?? {}) as Record<string, string>).every === "year" ? "year" : order.product.recurring.interval) : "month";
   // A membership's introductory price, as its checkout carried it (lib/intro-price.ts).
   const introPaid = order.state === "paid" && order.product.recurring ? introOf((order.record.metadata ?? {}) as Record<string, string>) : null;
+  // A membership whose discount came off its first charge, said as the confirmation email says it, never "$10 a month"
+  // when only the first charge was $10 (rule 27; lib/purchase-email.ts, firstChargeSaid); "unread" names no price.
+  const firstChargeLine = order.state === "paid" && order.product.recurring && !introPaid ? firstChargeSaid(store, order.record as SessionRecord, order.product) : null;
+  // A paid call's amounts in person, only in the currency Stripe charged, read exactly (lib/calls.ts, chargedIn).
+  const dueIn = order.state === "paid" ? chargedIn(order.record.currency) : null;
 
   // Each license key this order earns: given here if the five-minute job
   // that sends the confirmation has not given it already. A sale only ever
@@ -822,7 +827,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   ? t.nothingChargedToday
                   : booked && order.record.metadata && (order.record.metadata as Record<string, string>).package
                     ? t.oneSessionOfPackage
-                  : t.forPrice(
+                  : firstChargeLine !== null ? "" : t.forPrice(
                       order.product.recurring
                         ? introPaid
                           ? speech(store).w.introThen(
@@ -860,6 +865,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     order.trialDays,
                     longDate(order.created + order.trialDays * 86400),
                   )}
+                </p>
+              ) : null}
+              {firstChargeLine && firstChargeLine !== "unread" && !ended ? (
+                <p
+                  className="mt-3 rounded-2xl px-4 py-3 text-sm"
+                  style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }}
+                  data-first-charge=""
+                >
+                  {firstChargeLine}
                 </p>
               ) : null}
               {order.plan ? (
@@ -937,7 +951,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     <p className="mt-5 text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(booked.setup.place))}</p>
                   ) : null}
                   {/* The code and what is left to pay in person, as Stripe's page said before paying (lib/call-deposit.ts). */}
-                  {dueLines(bookingWords(store.language), due ?? null, { currency: order.currency || store.currency, locale, storeName: store.name }).map((line) => (
+                  {(dueIn ? dueLines(bookingWords(store.language), due ?? null, { currency: dueIn, locale, storeName: store.name }) : []).map((line) => (
                     <p key={line} className="mt-2 text-sm" data-call-due="">{line}</p>
                   ))}
                   {/* The cancellation deadline promised when paying (lib/call-setup.ts, readCancelPromise). */}

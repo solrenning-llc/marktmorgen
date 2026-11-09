@@ -258,12 +258,37 @@ function firstChargeDiscount(session: SessionRecord): "none" | "once" | "every" 
   }
   const coupons = Array.isArray(session.discounts) ? session.discounts : [];
   const named = Boolean(meta.code || meta.sale || meta.welcome || meta.winback);
-  if ((details === undefined || details === null) && coupons.length === 0 && !named) return "none";
+  if ((details === undefined || details === null) && coupons.length === 0 && !named) {
+    // Stripe gave no total_details and nothing names a discount: what came off is read from the price before discounts.
+    // Above what was charged, something came off whose length does not read; a price before discounts that does not
+    // read is not taken for "nothing came off" (CX-123 rule 24).
+    const subtotal = session.amount_subtotal;
+    if (!Number.isSafeInteger(subtotal) || Number(subtotal) < 0 || !Number.isSafeInteger(session.amount_total)) return "unread";
+    return Number(subtotal) > Number(session.amount_total) ? "unsure" : "none";
+  }
   const durations = coupons.map(couponDuration);
   if (durations.length > 0 && durations.every((d) => d === "once")) return "once";
   if (durations.length > 0 && durations.every((d) => d === "forever")) return "every";
   if (durations.every((d) => d === null) && (meta.sale || meta.welcome) && !meta.code && !meta.winback) return "once";
   return "unsure";
+}
+
+/**
+ * For the thanks page (rule 27): a membership charged at checkout whose discount came off its first charge, said in
+ * the same words as the confirmation's "Paid:" line; "unread" when what was charged or what came off does not read, so
+ * the page names no price; null when the price is said as before (nothing off, every charge off, a free trial, a moved
+ * membership, a payment plan or an introductory price, which the page says itself).
+ */
+export function firstChargeSaid(store: Pick<Store, "language" | "tax">, session: SessionRecord, product: Listing): string | "unread" | null {
+  if (!product.recurring) return null;
+  const meta = session.metadata ?? {};
+  if (introOf(meta) || wholeNumber(meta.trial_days) > 0 || firstCharge(meta) || (meta.kind === "plan" && Number(meta.plan_payments) >= 2)) return null;
+  if (!chargeReads(session)) return "unread";
+  const discount = firstChargeDiscount(session);
+  if (discount === "unread") return "unread";
+  if (discount !== "once" && discount !== "unsure") return null;
+  const every = meta.every === "year" ? "year" : product.recurring.interval;
+  return paidLine(store, product, session.amount_total as number, session.currency as string, null, 0, wholeNumber(meta.ends_after), null, every, discount, regularOf(session, meta));
 }
 
 function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: number, keys: KeyLine[], listings: Listing[],

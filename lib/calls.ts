@@ -273,7 +273,7 @@ export async function paidCalls(store: Store): Promise<
     answers: Answer[];
     /** What was paid, in cents. */
     amount: number;
-    /** The currency it was paid in, as the checkout session says; empty when it says none, and readers fall back to the store's (22 [E5], unit 2b). */
+    /** The currency it was paid in, as the checkout session says (chargedIn); empty when it says none or another shape (22 [E5], unit 2b). */
     currency: string;
     /** A team booking's hosts' ids and the claim on their time; empty for an ordinary call. */
     hosts: string[];
@@ -362,7 +362,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     moves: 0,
     answers: readAnswers(row),
     amount: typeof row.amount_total === "number" ? row.amount_total : 0,
-    currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",
+    currency: chargedIn(row.currency) ?? "",
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),
@@ -375,6 +375,15 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
 export function paymentOf(raw: unknown): string {
   if (typeof raw === "string") return raw;
   return raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
+}
+
+/**
+ * The currency Stripe charged a booking in, read exactly (CX-123 rule 24; audit R48): three lowercase letters, as
+ * Stripe gives it. Anything else is null, and the booking's alert and emails leave its amounts out, never the
+ * store's own currency in its place (a store may have changed its currency since).
+ */
+export function chargedIn(raw: unknown): string | null {
+  return typeof raw === "string" && /^[a-z]{3}$/.test(raw) ? raw : null;
 }
 
 async function withMoves(found: CallRow[]): Promise<CallRow[]> {
@@ -1618,8 +1627,8 @@ export async function confirmBooking(input: {
   answers?: Answer[];
   /** What was paid, in cents, for the creator's phone; left out when not known. */
   amountCents?: number | null;
-  /** The currency it was paid in; the store's when not known (a store may have changed its currency since). */
-  currency?: string;
+  /** The currency Stripe charged it in, as Stripe gave it; read by chargedIn, and not known leaves every amount out. */
+  currency?: unknown;
   /** The affiliate a lead is credited to (metadata lead_via), and the booking's payment, which a refund is made against. */
   lead?: string;
   pi?: string;
@@ -1706,8 +1715,9 @@ export async function confirmBooking(input: {
   }).catch((error) => console.error("queueing the call.booked webhook failed", error));
   // The creator's phone, when a device of theirs asked for bookings
   // (lib/phone-alerts.ts): what, when in their own time zone, and what was paid.
-  // In the currency it was paid in: the store's own, unless the store changed its currency since.
-  const paid = typeof input.amountCents === "number" && input.amountCents > 0 ? formatMoney(input.amountCents, input.currency || store.currency) : "";
+  // In the currency Stripe charged it in, read exactly (chargedIn); not known, the amount is left out.
+  const paidIn = chargedIn(input.currency);
+  const paid = paidIn && Number.isSafeInteger(input.amountCents) && Number(input.amountCents) > 0 ? formatMoney(Number(input.amountCents), paidIn) : "";
   await alertCreator(
     store,
     "booking",
@@ -1735,7 +1745,6 @@ export async function confirmBooking(input: {
   const place = whereOf(setup).kind === "place" ? setup.place! : null;
   const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
-  const paidIn = input.currency || store.currency;
   const invite = (note: string, words?: BookingWords) =>
     Buffer.from(
       callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, place, note, sequence: (input.moves ?? 0) + (meeting?.updates ?? 0), words }),
@@ -1760,7 +1769,8 @@ export async function confirmBooking(input: {
         "",
         place ? b.whereAt(placeLine(place)) : room ? b.joinAtThatTime(room) : b.willSendLink(store.name),
         // The same sentences Stripe's page showed before paying: the code, and what is left to pay in person.
-        ...dueLines(b, due, { currency: paidIn, locale, storeName: store.name }),
+        // Their amounts only in the currency Stripe charged; not known, they are left out rather than said in the store's.
+        ...(paidIn ? dueLines(b, due, { currency: paidIn, locale, storeName: store.name }) : []),
         ...(video ? [b.videoRoomNote] : []),
         "",
         // The reminders planned above: each only while it is at least an hour away (lib/call-records.ts).

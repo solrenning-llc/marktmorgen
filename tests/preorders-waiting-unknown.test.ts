@@ -135,7 +135,8 @@ async function main(): Promise<void> {
       const { pid, key } = await setUp(`Course W ${label}`, true);
       const shop = await store();
       // Assertion changed in the merge with main (#2991, COUNTED above): an unread record counts as one waiting.
-      is(`(${label}) waitingCount says it does not know, or counts the unread record as waiting`, await withBent("HVALS", key, reply, () => (label === COUNTED ? waitingCount(shop, pid) : rejection(() => waitingCount(shop, pid)))), label === COUNTED ? 1 : "UnknownReplyError");
+      // Type-only fix (#2991): withBent is typed number | string, the two branches' results; what is asserted is unchanged.
+      is(`(${label}) waitingCount says it does not know, or counts the unread record as waiting`, await withBent<number | string>("HVALS", key, reply, () => (label === COUNTED ? waitingCount(shop, pid) : rejection(() => waitingCount(shop, pid)))), label === COUNTED ? 1 : "UnknownReplyError");
     }
     {
       const { pid, key } = await setUp(`Course D ${label}`, true);

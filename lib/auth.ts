@@ -315,8 +315,10 @@ export class SessionsUnknownError extends UnknownReplyError {
  * session making the change), which only loses its mark and stays logged in
  * as an emailed link would leave it. Answers how many were logged out.
  * Called when a passkey is removed ("passkey:<id>") and when the app is
- * turned off ("app" and "recovery"). Throws SessionsUnknownError, having
- * changed nothing, when the sessions or their marks cannot be read.
+ * turned off ("app" and "recovery"). Throws SessionsUnknownError when the
+ * sessions or their marks cannot be read (nothing changed then) or when the
+ * deletes' answers are not each 0 or 1 (some sessions may have been logged
+ * out then); either way it is never said as done.
  */
 export async function dropSecondStep(email: string, gone: (mark: string) => boolean, keep?: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
@@ -340,8 +342,15 @@ export async function dropSecondStep(email: string, gone: (mark: string) => bool
     commands.push(["DEL", key], ["SREM", owned, key]);
     ended += 1;
   });
-  if (commands.length) await redisPipeline(commands);
+  // Each delete answers 0 or 1; anything else is not read as logged out (CX-123 rule 24; tests/auth-sessions-exact.test.ts).
+  if (commands.length && !removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's sessions");
   return ended;
+}
+
+/** Whether a pipeline of single-key DEL and SREM commands answered each 0 or 1, in its exact shape. */
+function removedEach(replies: unknown, commands: number): boolean {
+  const answers = repliesFor(replies, commands);
+  return answers !== null && answers.every((answer) => countOf(answer) === 0 || countOf(answer) === 1);
 }
 
 const sessionsKey = async (email: string) =>
@@ -485,13 +494,23 @@ export async function openSession(email: string, second?: SecondStep, passkeyId?
   const id = randomToken();
   const opened = await sessionKey(id);
   const owned = await sessionsKey(normaliseEmail(email));
-  await redisPipeline([
+  const fresh = await freshKey(id);
+  const mark = await secondKey(id);
+  const writes: (string | number)[][] = [
     ["SET", opened, normaliseEmail(email), "EX", SESSION_TTL_SECONDS],
-    ["SET", await freshKey(id), "1", "EX", FRESH_LOGIN_SECONDS],
-    ...(second ? [["SET", await secondKey(id), second === "passkey" && passkeyId ? `passkey:${passkeyId}` : second, "EX", SESSION_TTL_SECONDS]] : []),
-    ["SADD", owned, opened],
-    ["EXPIRE", owned, SESSION_TTL_SECONDS + 86_400],
-  ]);
+    ["SET", fresh, "1", "EX", FRESH_LOGIN_SECONDS],
+    ...(second ? [["SET", mark, second === "passkey" && passkeyId ? `passkey:${passkeyId}` : second, "EX", SESSION_TTL_SECONDS]] : []),
+  ];
+  const replies = repliesFor(await redisPipeline([...writes, ["SADD", owned, opened], ["EXPIRE", owned, SESSION_TTL_SECONDS + 86_400]]), writes.length + 2);
+  // Every write answered "OK", and the account's set its 0 or 1 twice (CX-123 rule 24): a session the set may not
+  // hold is out of reach of "Log out of all devices", so it is taken back and the login fails, never opened
+  // (tests/auth-sessions-exact.test.ts). Its id was never given out and no cookie is set: lib/signin-finish.ts and
+  // the move route say the login failed; the other routes answer an error page, as a Redis error already did.
+  const counted = (reply: unknown) => countOf(reply) === 0 || countOf(reply) === 1;
+  if (!replies || !replies.slice(0, writes.length).every((reply) => reply === "OK") || !replies.slice(writes.length).every(counted)) {
+    await redisPipeline([["DEL", opened, fresh, mark], ["SREM", owned, opened]]).catch((error: unknown) => console.error("taking back a session that could not be opened failed", error));
+    throw new UnknownReplyError("a new session");
+  }
   return id;
 }
 
@@ -770,28 +789,54 @@ export async function spendSignInLink(token: string): Promise<string | null> {
   return email ? openSession(email) : null;
 }
 
+/**
+ * Whose session this is, read exactly (CX-123 rule 24): the address; null when the id is not a session's or the
+ * session is confirmed gone (GET null); UnknownReplyError for any other answer. For what says something was done
+ * with the session (app/api/auth/signout-all), where unknown must never be taken as "nobody's".
+ */
+export async function sessionEmail(id: string | undefined): Promise<string | null> {
+  if (!id || !isRedisConfigured()) return null;
+  if (!/^[0-9a-f]{64}$/.test(id)) return null;
+  const reply = repliesFor(await redisPipeline([["GET", await sessionKey(id)]]), 1);
+  if (!reply) throw new UnknownReplyError("a session");
+  if (reply[0] === null) return null;
+  if (typeof reply[0] !== "string" || !reply[0]) throw new UnknownReplyError("a session");
+  return reply[0];
+}
+
+/** Whose session this is, for a gate: unknown lets nobody in, so it is read as signed out (sessionEmail says which). */
 export async function emailForSession(
   id: string | undefined,
 ): Promise<string | null> {
-  if (!id || !isRedisConfigured()) return null;
-  if (!/^[0-9a-f]{64}$/.test(id)) return null;
-  const [email] = await redisPipeline([["GET", await sessionKey(id)]]);
-  return typeof email === "string" && email ? email : null;
+  return sessionEmail(id).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
 }
 
-export async function endSession(id: string | undefined): Promise<void> {
-  if (!id || !isRedisConfigured()) return;
-  if (!/^[0-9a-f]{64}$/.test(id)) return;
+/**
+ * Logs one session out at the server. True when it is known to be gone: its delete answered 0 or 1, or there was
+ * no session to close. False when it may still be open: a failure, or an answer in another shape (CX-123 rule 24),
+ * which the caller says as such, never as logged out (app/api/auth/signout; tests/auth-sessions-exact.test.ts).
+ * Never throws.
+ */
+export async function endSession(id: string | undefined): Promise<boolean> {
+  if (!id || !isRedisConfigured()) return true;
+  if (!/^[0-9a-f]{64}$/.test(id)) return true;
   try {
     const key = await sessionKey(id);
-    const [email] = await redisPipeline([["GET", key]]);
+    const email = repliesFor(await redisPipeline([["GET", key]]), 1)?.[0];
     const commands: (string | number)[][] = [["DEL", key], ["DEL", await secondKeyOf(key)]];
+    // The account's set is tidied when the owner was read; a key left in it names a session that is gone.
     if (typeof email === "string" && email) {
       commands.push(["SREM", await sessionsKey(email), key]);
     }
-    await redisPipeline(commands);
+    const done = repliesFor(await redisPipeline(commands), commands.length);
+    const gone = countOf(done?.[0]);
+    return gone === 0 || gone === 1;
   } catch (error) {
     console.error("sign-out failed", error);
+    return false;
   }
 }
 
@@ -811,11 +856,9 @@ export async function endAllSessions(email: string): Promise<number | null> {
     const keys = stringList(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");
     const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
-    await redisPipeline([
-      ...keys.map((key) => ["DEL", key] as (string | number)[]),
-      ...marks.map((mark) => ["DEL", mark] as (string | number)[]),
-      ["DEL", owned],
-    ]);
+    const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...marks.map((mark) => ["DEL", mark]), ["DEL", owned]];
+    // Each delete answers 0 or 1: an answer missing or in another shape is not a session closed (CX-123 rule 24).
+    if (!removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's sessions");
     return keys.length;
   } catch (error) {
     console.error("sign-out everywhere failed", error);

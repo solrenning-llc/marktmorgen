@@ -55,7 +55,11 @@ export const MAX_MEMBER_DEVICES = 5;
  * The longest endpoint a member's device is kept with, in bytes. No push service publishes a maximum: FCM, Mozilla
  * autopush, Apple and WNS hand out a short path and an opaque token, in practice under 500 bytes (a working figure,
  * not an official one; none is published). 640 leaves room above it and keeps twelve people's five devices inside
- * one buyer action's read (tests/plan-cost-registry.ts, COMMUNITY_DEVICES_READ). lib/web-push.ts isPushEndpoint
+ * one buyer action's read (tests/plan-cost-registry.ts, COMMUNITY_DEVICES_READ). Searched 9 November 2026: the only
+ * published length found is Microsoft's "up to 1024 characters" for the Windows Phone MPNS channel URI
+ * (HttpNotificationChannel.ChannelUri, learn.microsoft.com previous-versions ff403085), a retired service, not WNS;
+ * Microsoft's WNS pages call the channel URI an opaque string and give no length. So 640 is a working figure, and a
+ * browser refused for it is told so (components/community-push-toggle.tsx, "refused"). lib/web-push.ts isPushEndpoint
  * still allows 1,000 for the creator's own phone (lib/phone-alerts.ts); a member's device is held to this.
  */
 export const MAX_ENDPOINT_BYTES = 640;

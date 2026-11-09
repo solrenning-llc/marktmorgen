@@ -273,13 +273,13 @@ export async function findPlanRefund(sid: string, at: number, until: number): Pr
     const page = refundPage(listed);
     if (!page) return { kind: "unknown" };
     if (page.unreadable > 0 || page.rows.some((r) => oursFor(r, sid) && !REFUND_ID.test(r.id))) unreadable = true;
-    const ours = page.rows.find((r) => oursFor(r, sid) && REFUND_ID.test(r.id) && counts(r.status));
-    if (ours) {
+    const refund = page.rows.find((r) => oursFor(r, sid) && REFUND_ID.test(r.id) && counts(r.status));
+    if (refund) {
       // Ours, but its amount or currency does not read: not decided (rule 24), never ended on with a letter of $0.
-      const cents = refundCents(ours.amount);
-      const currency = refundCurrency(ours.currency);
+      const cents = refundCents(refund.amount);
+      const currency = refundCurrency(refund.currency);
       if (cents === null || currency === null) return { kind: "unknown" };
-      return { kind: "found", refund: ours, cents, currency, settled: ours.status === "succeeded" };
+      return { kind: "found", refund, cents, currency, settled: refund.status === "succeeded" };
     }
     // "None" only from a list read to its end with every row readable (lib/stripe-list.ts).
     if (!page.hasMore) return unreadable ? { kind: "unknown" } : { kind: "none" };

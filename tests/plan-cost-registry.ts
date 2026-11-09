@@ -688,7 +688,11 @@ export const BUYER_LEDGER_BYTES = 2 * ALL_TIME_PAGES * 100 * 320;
  * round 5, H1): ALL_TIME_PAGES pages of a hundred sales and PAYPAL_REFUNDS_READ
  * refunds, each record at MAX_PAID_BYTES, in two MGETs and their ranges,
  * besides BUYER_LEDGER. Counted by lib/segments.ts from how many are kept
- * (ledgerReadBytes), a studio request a megabyte.
+ * (ledgerReadBytes), a studio request a megabyte. A sale PayPal refunded in
+ * part is one more member of the same set (partlyRefundedMember; audit R13,
+ * MEDIUM 2), read by the same range and MGET inside the same
+ * PAYPAL_REFUNDS_READ, and counted by the same ZCARD before it is read, at a
+ * paid record's weight: no read and no command of its own.
  */
 export const PAYPAL_LEDGER_BYTES = (ALL_TIME_PAGES * 100 + PAYPAL_REFUNDS_READ) * MAX_PAID_BYTES;
 export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);

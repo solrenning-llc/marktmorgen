@@ -127,8 +127,9 @@ export const MAY_LEAVE_OUT: Readonly<Record<"stripe" | "paypal", readonly MoneyK
 /**
  * Kinds a provider's lists hold only in part, said on every month the
  * provider is read: PayPal's refunds are those refunded in full, the only
- * ones lib/paypal-sales.ts records (a capture PARTIALLY_REFUNDED is never
- * written down), so a partial PayPal refund is never taken off.
+ * ones lib/paypal-sales.ts records with an amount (a capture
+ * PARTIALLY_REFUNDED is written down without one: what PayPal gave back is
+ * not read), so a partial PayPal refund is never taken off.
  */
 export const PARTLY_READ: Readonly<Record<"stripe" | "paypal", readonly MoneyKind[]>> = {
   stripe: [],

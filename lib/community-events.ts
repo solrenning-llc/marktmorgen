@@ -73,6 +73,7 @@ import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { communityWords } from "@/lib/buyer-words/community";
+import { eventFileWords } from "@/lib/buyer-words/event-file";
 import { LANGUAGES } from "@/lib/store-language";
 import {
   EVENT_LENGTHS,
@@ -854,15 +855,17 @@ export function lengthWords(minutes: number): string {
  * The calendar file for an event: the page to join from, never the room —
  * the page asks who is opening it, a calendar cannot. Same UID for every
  * version, and a sequence that goes up with each move, so a calendar that
- * imports it again moves the event rather than adding a second one.
+ * imports it again moves the event rather than adding a second one. Its
+ * words are the store's language (lib/buyer-words/event-file.ts).
  */
-export function eventIcs(store: Pick<Store, "handle" | "name">, event: CommunityEvent, communityName: string): string {
+export function eventIcs(store: Pick<Store, "handle" | "name" | "language">, event: CommunityEvent, communityName: string): string {
   const page = eventAddress(store, event.id);
+  const w = eventFileWords(store.language);
   const description = [
     event.about,
     "",
-    `Join from the event page: ${page}`,
-    `The way in shows there ${JOIN_EARLY_MINUTES} minutes before the start.`,
+    w.joinFrom(page),
+    w.wayIn(JOIN_EARLY_MINUTES),
   ].join("\n").trim();
   const lines = [
     "BEGIN:VCALENDAR",
@@ -883,22 +886,25 @@ export function eventIcs(store: Pick<Store, "handle" | "name">, event: Community
     `STATUS:${event.cancelled ? "CANCELLED" : "CONFIRMED"}`,
     ...(event.cancelled
       ? []
-      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:${icsText(`${event.title} in 15 minutes`)}`, "END:VALARM"]),
+      : ["BEGIN:VALARM", "TRIGGER:-PT15M", "ACTION:DISPLAY", `DESCRIPTION:${icsText(w.alarm(event.title, 15))}`, "END:VALARM"]),
     "END:VEVENT",
     "END:VCALENDAR",
   ];
   return `${lines.map(fold).join("\r\n")}\r\n`;
 }
 
-/** The words for the feed post that announces an event, with the link to it. */
-export function announcementText(store: Pick<Store, "handle">, event: CommunityEvent): { title: string; text: string } {
+/** The words for the feed post that announces an event, with the link to it, in the store's language. */
+export function announcementText(store: Pick<Store, "handle" | "language">, event: CommunityEvent): { title: string; text: string } {
   const about = event.about.length > 600 ? `${event.about.slice(0, 600).replace(/\s+\S*$/, "")}…` : event.about;
+  const w = eventFileWords(store.language);
+  // A length that already ends in a period ("1 Std. 30 Min.") takes no second one.
+  const length = lengthIn(store, event.minutes);
   return {
-    title: cleanLine(`Live: ${event.title}`, 120),
+    title: cleanLine(w.liveTitle(event.title), 120),
     text: [
-      `${eventTime(event)}, ${lengthWords(event.minutes)}.`,
+      `${eventTimeIn(store, event)}, ${length}${length.endsWith(".") ? "" : "."}`,
       about,
-      `RSVP, add it to your calendar and join here: ${eventAddress(store, event.id)}`,
+      w.rsvpJoin(eventAddress(store, event.id)),
     ].filter(Boolean).join("\n\n"),
   };
 }

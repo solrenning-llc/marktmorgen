@@ -22,11 +22,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductImage, setProductLegal, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { catalogRecord, listingOf, parseCatalog, parseProduct, readListing, readProduct, readProductLegal } from "@/lib/catalog";
-import { parseShipping, shipsToWords } from "@/lib/shipping";
+import { activeShipping, parseShipping, shipsToWords } from "@/lib/shipping";
 import { GPSR_AREA, safetyGaps, unitWords } from "@/lib/physical-legal";
 import { deliveryWords } from "@/lib/answers";
 import { SHIPPING_WORDS } from "@/lib/buyer-words/shipping";
-import type { PhysicalLegal } from "@/lib/physical-legal-record";
+import { type PhysicalLegal, safetySummary } from "@/lib/physical-legal-record";
 import { shippingNow, shipsNowhere } from "@/lib/physical-legal-ship";
 import { cartItemOf, cartShipping } from "@/lib/cart-shipping";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
@@ -223,6 +223,45 @@ async function main(): Promise<void> {
   const editor = readFileSync("components/physical-legal-editor.tsx", "utf8");
   const legalRecord = readFileSync("lib/physical-legal-record.ts", "utf8");
   is("the summary of what keeps it from the EU/EEA", editor.includes("safetySummary(product.shipping.countries, ") && legalRecord.includes("gapSummary(safetyGaps(info, hasPicture))"), true);
+
+  // The checkout closes the EU/EEA (shippingNow above), so the studio must say so (VR 2): the creator is told
+  // that buyers there can't buy, only when the closing holds for that product, from the same rule.
+  const SOME_CANT = "Until these details are complete, buyers in the EU and EEA can't buy this product.";
+  const NO_ONE = "Until these details are complete, no one can buy this product, because it only ships to the EU and EEA.";
+  const filledSafety = {
+    manufacturer: { name: "Harbor Print Co.", postal: "1 Dock Rd", electronic: "https://harbor.example/contact", country: "DE" },
+    responsible: null,
+    productType: "Cookbook",
+    identifier: "",
+    warnings: "",
+    noWarnings: true,
+  };
+  const shipped = (shipping: unknown, safety: typeof filledSafety | null, image: boolean) => ({
+    ...parseProduct({ id: "s1", title: "Book", priceCents: 3500, shipping })!,
+    legal: safety ? { safety, prop65: "", quantities: [] } : null,
+    ...(image ? { image: "https://example.com/book.png" } : {}),
+  });
+  const said = (product: ReturnType<typeof shipped>) => safetySummary(product.shipping!.countries, product.legal?.safety ?? null, Boolean(product.image));
+  const studioWorld = shipped({ cents: 600, region: "world", note: "" }, null, false);
+  is("fields not filled, shipped worldwide: the checkout leaves out Germany", shippingNow(studioWorld)!.countries.includes("DE"), false);
+  is("and the studio says buyers in the EU and EEA can't buy it", said(studioWorld).endsWith(` ${SOME_CANT}`), true);
+  is("after the list of what is needed", said(studioWorld).startsWith("Needed before selling to buyers in the EU/EEA: "), true);
+  const studioEuOnly = shipped({ cents: 600, region: "eu", note: "" }, null, true);
+  is("shipped only to the EU/EEA: not sold at all", shipsNowhere(studioEuOnly), true);
+  is("and the studio says no one can buy it", said(studioEuOnly).endsWith(` ${NO_ONE}`), true);
+  const svalbard = shipped({ cents: 600, region: "custom", countries: ["SJ"], note: "" }, null, true);
+  is("Svalbard and Jan Mayen only: closed by the checkout, so the studio says so too", [shipsNowhere(svalbard), said(svalbard).endsWith(` ${NO_ONE}`)], [true, true]);
+  for (const [name, product] of [
+    ["filled, shipped worldwide", shipped({ cents: 600, region: "world", note: "" }, filledSafety, true)],
+    ["filled but no picture", shipped({ cents: 600, region: "world", note: "" }, filledSafety, false)],
+    ["not filled, shipped to the US only", shipped({ cents: 600, region: "us", note: "" }, null, false)],
+    ["not filled, shipped worldwide", studioWorld],
+    ["not filled, EU/EEA only", studioEuOnly],
+  ] as const) {
+    const closes = shippingNow(product)!.countries.length < activeShipping(product)!.countries.length;
+    is(`${name}: the studio says buyers can't buy exactly when the checkout closes a country`, /can't buy/.test(said(product)), closes);
+  }
+  is("the form shows the closing in the studio's notice style, from the same rule", /safetyClosed\(product\.shipping\.countries, /.test(editor) && /notice notice-warn/.test(editor), true);
 
   done();
 }

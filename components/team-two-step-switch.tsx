@@ -14,7 +14,7 @@ const ERRORS: Record<string, string> = {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-type Answer = { ok?: boolean; error?: string; preview?: PausePreview; paused?: number; emailed?: number; waiting?: number; uncertain?: number; undone?: boolean };
+type Answer = { ok?: boolean; error?: string; preview?: PausePreview; paused?: number; emailed?: number; waiting?: number; uncertain?: number; refused?: number; undone?: boolean };
 
 /** Emails that may have gone but were not confirmed: never left out, so the confirmed count is never read as everyone (VR item 2). */
 function unconfirmedWords(uncertain: number, others: number): string {
@@ -32,11 +32,19 @@ export function turnedOnWords(answer: Pick<Answer, "paused" | "emailed" | "uncer
     : `Turned on. Everyone on the team now logs in with a second step.${emailed ? ` ${plural(emailed, "person was", "people were")} emailed about their paused keys.` : ""}${unconfirmed}`;
 }
 
-/** What the page says when the rule is saved but not finished: who still waits, and any email not confirmed. */
-export function unfinishedWords(answer: Pick<Answer, "emailed" | "waiting" | "uncertain">): string {
+/**
+ * What the page says when the rule is saved but not finished: who still waits, and any email not confirmed. Keys whose
+ * maker's email was refused too often today (`refused`, lib/refused-tries.ts) are not tried again until tomorrow, so
+ * the page never says "now" for them (VR item 2).
+ */
+export function unfinishedWords(answer: Pick<Answer, "emailed" | "waiting" | "uncertain" | "refused">): string {
   const waiting = answer.waiting ?? 0;
+  const refused = Math.min(answer.refused ?? 0, waiting);
   const unconfirmed = unconfirmedWords(answer.uncertain ?? 0, waiting + (answer.emailed ?? 0));
-  return `Turned on, but not finished: ${waiting ? `${plural(waiting, "key's maker was", "keys' makers were")} not emailed yet` : "some keys may not be paused yet"}.${unconfirmed} Press Finish now to try again.`;
+  const again = !refused
+    ? " Press Finish now to try again."
+    : ` The email about ${plural(refused, "key", "keys")} could not be sent three times today, so it is tried again tomorrow: press Finish tomorrow${refused < waiting ? ", or now for the others" : ""}.`;
+  return `Turned on, but not finished: ${waiting ? `${plural(waiting, "key's maker was", "keys' makers were")} not emailed yet` : "some keys may not be paused yet"}.${unconfirmed}${again}`;
 }
 
 /**

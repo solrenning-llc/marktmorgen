@@ -68,6 +68,7 @@ import {
 } from "@/lib/api-keys";
 import { MAKER_FORMER, MAKER_UNMATCHED, MAKER_UNRECORDED, type PauseLine, type PausePreview, type ShownKey } from "@/lib/api-key-rules";
 import { NIMBUS_FROM, headerText, sendEmail, sendEmailOutcome } from "@/lib/email";
+import { countRefusal, refusedTooOften } from "@/lib/refused-tries";
 import type { Store } from "@/lib/store";
 import { readTeam, roleIn, withTeamLock } from "@/lib/team";
 import { type Role, can } from "@/lib/team-roles";
@@ -530,11 +531,14 @@ export async function revokeChecked(store: Store, role: Role, id: string): Promi
  * of its own, so the next press would write twice (rule 30, as 283 [HG2]);
  * that person is counted as neither emailed nor waiting, but as uncertain,
  * so the owner's page never calls the confirmed ones everyone (VR item 2).
- * Returns who was written to, how many keys still wait for theirs and how
- * many people's emails could not be confirmed.
+ * Returns who was written to, how many keys still wait for theirs, how
+ * many people's emails could not be confirmed, and how many of the waiting
+ * keys wait because their maker's email was refused for certain
+ * REFUSED_TRIES times today (lib/refused-tries.ts), so pressing again today
+ * does not try it.
  */
-export async function tellPaused(store: Store, origin: string): Promise<{ emailed: string[]; waiting: number; uncertain: number }> {
-  if (!store.sid) return { emailed: [], waiting: 0, uncertain: 0 };
+export async function tellPaused(store: Store, origin: string): Promise<{ emailed: string[]; waiting: number; uncertain: number; refused: number }> {
+  if (!store.sid) return { emailed: [], waiting: 0, uncertain: 0, refused: 0 };
   const [keys, members] = await Promise.all([keyRecords(store.sid), membersByPrint(store)]);
   const byPerson = new Map<string, KeyRecord[]>();
   const nobody: string[] = [];
@@ -549,7 +553,17 @@ export async function tellPaused(store: Store, origin: string): Promise<{ emaile
   const emailed: string[] = [];
   let waiting = 0;
   let uncertain = 0;
+  let refused = 0;
   for (const [email, theirs] of byPerson) {
+    // Refused for certain REFUSED_TRIES times today (lib/refused-tries.ts): not asked again until the count runs out,
+    // so a press takes nothing from the store's figure for them (a refusal can come after it was taken). Their keys
+    // stay paused and they wait; the page says when they are tried again (rule 30, VR 2).
+    const name = `keypause:${store.sid}:${email}`;
+    if (await refusedTooOften(name)) {
+      waiting += theirs.length;
+      refused += theirs.length;
+      continue;
+    }
     const claimed = new Set(await swapHolds(store.sid, theirs.map((k) => k.id), "told", ["paused"]));
     const names = theirs.filter((k) => claimed.has(k.id)).map((k) => k.name);
     if (!names.length) continue;
@@ -580,9 +594,11 @@ export async function tellPaused(store: Store, origin: string): Promise<{ emaile
       uncertain += 1;
       console.error("an email about paused API keys may have gone; the keys stay told, not emailed again", store.handle);
     } else {
-      // Put back for the next press, only where still told by this one.
-      waiting += (await swapHolds(store.sid, [...claimed], "paused", ["told"])).length;
+      // Put back for the next press, only where still told by this one; counted, so presses stop at REFUSED_TRIES a day.
+      const back = (await swapHolds(store.sid, [...claimed], "paused", ["told"])).length;
+      waiting += back;
+      if (!(await countRefusal(name))) refused += back;
     }
   }
-  return { emailed, waiting, uncertain };
+  return { emailed, waiting, uncertain, refused };
 }

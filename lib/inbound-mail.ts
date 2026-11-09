@@ -54,6 +54,7 @@
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmailOutcome } from "@/lib/email";
+import { REFUSED_TRIES, countRefusal } from "@/lib/refused-tries";
 import { creatorDomain } from "@/lib/mail-from";
 import { withinLimit } from "@/lib/request-guard";
 import { HANDLE_PATTERN, storeForHandle } from "@/lib/store";
@@ -240,8 +241,14 @@ async function files(id: string): Promise<{ sent: { filename: string; content: s
  *              the request): acknowledged like "sent", never made again, so
  *              the message is not sent on twice and no second email is taken
  *              from the store's figure (rule 30, as 283 [HG2])
+ *   "refused"  the sender refused it for certain REFUSED_TRIES times (or the
+ *              count does not read): acknowledged, so Resend stops making it
+ *              again. A refusal can come after the store's figure was taken
+ *              (a stop before the request, a 4xx after it), so each retry
+ *              would take one more (lib/refused-tries.ts). It stays in
+ *              Resend's received mail, not sent on.
  */
-export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "retry" | "uncertain"> {
+export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "retry" | "uncertain" | "refused"> {
   const target = forwardTarget();
   if (!target || !ID.test(id)) return "skipped";
 
@@ -337,5 +344,9 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
     return "uncertain" as const;
   });
   if (outcome === "uncertain") console.error("an inbound message may have been sent on; acknowledged, not sent on again", id);
-  return outcome === "sent" ? "sent" : outcome === "uncertain" ? "uncertain" : "retry";
+  if (outcome !== "refused") return outcome;
+  // Counted under the message's own id, a day: past Resend's retries of one announcement.
+  if (await countRefusal(`inbound:${id}`)) return "retry";
+  console.error(`an inbound message was refused for certain ${REFUSED_TRIES} times; acknowledged, not sent on`, id);
+  return "refused";
 }

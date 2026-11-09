@@ -195,7 +195,8 @@ async function finish(store: Parameters<typeof pauseForRule>[0], email: string, 
     if (paused) await logTeam(store.sid, { who: email, role, what: `Paused ${paused} API ${paused === 1 ? "key" : "keys"} made without a second step` });
     const told = await tellPaused(store, origin);
     // `uncertain`: emails that may have gone but were not confirmed, so the page never calls `emailed` everyone (VR item 2).
-    if (told.waiting) return Response.json({ ok: false, error: "incomplete", on: true, paused, emailed: told.emailed.length, waiting: told.waiting, uncertain: told.uncertain }, { status: 502 });
+    // `refused`: waiting keys whose maker's email was refused for certain too often today, so the page says tomorrow (rule 30).
+    if (told.waiting) return Response.json({ ok: false, error: "incomplete", on: true, paused, emailed: told.emailed.length, waiting: told.waiting, uncertain: told.uncertain, refused: told.refused }, { status: 502 });
     return Response.json({ ok: true, on: true, paused, emailed: told.emailed.length, uncertain: told.uncertain });
   } catch (error) {
     console.error("finishing the team's two-step rule failed; pressing again finishes it", error);

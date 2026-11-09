@@ -722,9 +722,11 @@ export async function dropTeam(store: Store): Promise<void> {
 /**
  * Carries a person's places on other stores' teams to their new address,
  * when they move their account (app/api/auth/move). Without it, moving
- * would quietly take them off every team they are on.
+ * would quietly take them off every team they are on. Answers the stores
+ * whose place stayed on the old address (its restrictions or API keys could
+ * not be carried), so the move can say so and take them off (dropMemberships).
  */
-export async function moveMemberships(from: string, to: string): Promise<void> {
+export async function moveMemberships(from: string, to: string): Promise<string[]> {
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
   const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
@@ -774,4 +776,39 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
   const moved = list.filter((sid) => !stayed.includes(sid));
   if (!stayed.length) await redisPipeline([["DEL", indexKey(before)]]);
   else if (moved.length) await redisPipeline([["SREM", indexKey(before), ...moved]]);
+  return stayed;
+}
+
+/**
+ * Takes an address an account moved away from off every other store's team it is still on, when the move could not
+ * carry those places (app/api/auth/move): left there, an account made at that address later would be on those
+ * teams. Each goes through removeMember, as any teammate taken off does: their API keys are paused, the owner is
+ * told of those, and the team's log says why. True only when the index and every store on it were read and settled;
+ * the person is told to ask each owner to invite the new address again.
+ */
+export async function dropMemberships(email: string): Promise<boolean> {
+  if (!isRedisConfigured()) return true;
+  const address = normaliseEmail(email);
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  let settled = true;
+  for (const sid of ids.filter((id) => STORE_ID_PATTERN.test(id))) {
+    try {
+      const store = await storeForId(sid);
+      // Not found, or not known: kept in the index for memberStores to drop on a confirmed absence, and said as unsettled.
+      if (!store) {
+        settled = false;
+        continue;
+      }
+      const role = await roleIn(store, address);
+      if (!role || role === "owner") continue;
+      if (await removeMember(store, address)) {
+        await logTeam(sid, { who: address, role, what: "Taken off the team: they moved their sign-in to another address, and their place could not go with it" });
+      }
+    } catch (error) {
+      console.error("taking a moved address off a team failed", error);
+      settled = false;
+    }
+  }
+  return settled;
 }

@@ -155,7 +155,8 @@ async function main() {
   is(
     "each status is a notice, and both say to check the recovery address and add one again",
     [
-      studio.includes("const flags = /^moved(-sessions-open)?(-no-recovery)?$/.exec(key);"),
+      // Changed (rule 23, finding 5): the statuses may also end in -no-teams.
+      studio.includes("const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?$/.exec(key);"),
       studio.includes('{ href: "#account-recovery", label: "Check your recovery address" }'),
       (studio.match(/We could not confirm that your recovery address came along\. Check it, and add one again if none is shown\./g) ?? []).length,
     ],

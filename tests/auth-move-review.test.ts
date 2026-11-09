@@ -16,7 +16,8 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { openSession, sendMoveLink } from "@/lib/auth";
 import { keepRecoveryAddress } from "@/lib/recovery-address";
-import { claimHandle, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
+import { memberStores, putMember, readLog, readTeam } from "@/lib/team";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -60,11 +61,21 @@ const unreadSessions: Fault = (commands) =>
 
 let n = 0;
 /** One move through the real route, with `faults` in place for the route alone. */
-async function move(recovery: string | null, faults: (from: string, to: string) => Fault[] = () => [], mailDown = false, host = "") {
+async function move(recovery: string | null, faults: (from: string, to: string, sid: string) => Fault[] = () => [], mailDown = false, host = "", onTeam = false) {
   n += 1;
   const from = `move-rec-from-${n}@example.com`;
   const to = `move-rec-to-${n}@example.com`;
   await claimHandle(from, `move-rec-${n}`, "Mover", "");
+  // Another store whose team the mover is on (finding 5).
+  let sid = "";
+  if (onTeam) {
+    const owner = `move-team-owner-${n}@example.com`;
+    await claimHandle(owner, `move-team-${n}`, "Team Shop", "");
+    await ensureStatsId(owner);
+    const other = (await ensureStoreId(owner))!;
+    sid = other.sid;
+    await putMember(other, from, "support");
+  }
   if (recovery) await keepRecoveryAddress(from, recovery);
   const asker = await openSession(from);
   mails.length = 0;
@@ -72,7 +83,7 @@ async function move(recovery: string | null, faults: (from: string, to: string) 
   const token = /confirm-move\?token=([0-9a-f]{64})/.exec(mails.find((m) => m.to === to)?.text ?? "")?.[1] ?? "";
   mails.length = 0;
   sending = !mailDown;
-  const active = faults(from, to);
+  const active = faults(from, to, sid);
   redis.pipeline = async (commands: Command[]) => {
     for (const fault of active) {
       const answer = fault(commands);
@@ -94,8 +105,12 @@ async function move(recovery: string | null, faults: (from: string, to: string) 
   const told = mails.filter((m) => m.subject === SUBJECT || (m.subject === FINISHED && m.to === from));
   const all = mails.map((m) => m.to);
   const fromKey = (await real([["GET", addressKey(from)]]))[0];
+  const members = sid ? (await readTeam(sid)).members.map((m) => m.email) : [];
   return {
-    all, fromKey,
+    all, fromKey, sid, members,
+    log: sid ? (await readLog(sid)).map((line) => line.what) : [],
+    fromTeams: sid ? (await memberStores(from)).length : 0,
+    mails: [...mails],
     location,
     moved: Boolean(await storeForEmail(to)) && !(await storeForEmail(from)),
     atTo: (await real([["GET", addressKey(to)]]))[0],
@@ -149,6 +164,35 @@ async function main() {
   const stuck = await move(RECOVERY, (from, to) => [refuseCarry(to), (commands) => (commands.some((c) => c[0] === "DEL" && c[1] === addressKey(from)) ? Promise.reject(new Error("refused")) : null)]);
   is("with the old record's delete refused too, the move still stands and is said, and the old address is still told", [stuck.location, stuck.all.includes(stuck.from)], ["https://marktmorgen.com/studio?address=moved-no-recovery", true]);
 
+  part("places on other stores' teams not carried: said, and nothing left under the old sign-in address");
+  const once = (hit: (commands: Command[]) => boolean): Fault => {
+    let spent = false;
+    return (commands) => (!spent && hit(commands) ? ((spent = true), Promise.reject(new Error("refused once"))) : null);
+  };
+  const teamHealthy = await move(null, () => [], false, "", true);
+  is("healthy: the place goes with the account, and nothing is said about teams", [teamHealthy.location, teamHealthy.members, teamHealthy.toldFrom.includes("teams")], ["https://marktmorgen.com/studio?address=moved", [teamHealthy.to], false]);
+  for (const [label, fault] of [
+    ["the place stayed on the old address (its restrictions could not be read)", () => [once((commands) => commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:crm:pacc:")))]],
+    ["the carry failed midway (the team could not be read)", (_f: string, _t: string, sid: string) => [once((commands) => commands.some((c) => c[0] === "GET" && c[1] === `nl:team:${sid}`))]],
+  ] as const) {
+    const out = await move(null, fault as (from: string, to: string, sid: string) => Fault[], false, "", true);
+    is(`${label}: the move stands and the studio says it`, [out.location, out.moved], ["https://marktmorgen.com/studio?address=moved-no-teams", true]);
+    is(`${label}: the old address is on no team any more, and its index is empty`, [out.members.includes(out.from), out.fromTeams], [false, 0]);
+    is(`${label}: the team's log says why`, out.log.some((what) => what.startsWith("Taken off the team: they moved their sign-in")), true);
+    const toTo = out.mails.find((m) => m.to === out.to);
+    is(
+      `${label}: both addresses are told to ask each owner to invite the new address again`,
+      [out.toldFrom.includes(`Ask each store's owner to invite ${out.to} again.`), toTo?.subject, toTo?.text.includes("Ask each store's owner to invite this address again.")],
+      [true, "Your places on other teams did not move with your account", true],
+    );
+  }
+  const teamAndRecovery = await move(RECOVERY, (_f, to) => [refuseCarry(to), once((commands) => commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:crm:pacc:")))], false, "", true);
+  is(
+    "with the recovery address too, both are said, still in two emails",
+    [teamAndRecovery.location, teamAndRecovery.mails.length, teamAndRecovery.mails.find((m) => m.to === teamAndRecovery.to)?.subject],
+    ["https://marktmorgen.com/studio?address=moved-no-recovery-no-teams", 2, "Your recovery address and team places did not move with your account"],
+  );
+
   part("the studio's notices that ask for action: a status, a heading, a link that says where it goes");
   const studio = readFileSync("app/studio/page.tsx", "utf8");
   const shown = studio.slice(studio.indexOf("{actionNotice ? ("), studio.indexOf(") : notice ? (", studio.indexOf("{actionNotice ? (")));
@@ -159,10 +203,11 @@ async function main() {
       shown.includes('<h2 id="action-notice-title"'),
       shown.includes("<a href={action.href}") && shown.includes("min-h-11"),
       studio.includes('{ href: "#account-recovery", label: "Check your recovery address" }'),
+      studio.includes("const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?$/.exec(key);"),
       studio.includes('id="account-recovery"') || readFileSync("components/recovery-address-manager.tsx", "utf8").includes('id="account-recovery"'),
       studio.includes('<form id="log-out-everywhere" action="/api/auth/signout-all"'),
     ],
-    [true, true, true, true, true, true],
+    [true, true, true, true, true, true, true],
   );
   is(
     "the notices from before keep their pattern",

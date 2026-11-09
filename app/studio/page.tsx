@@ -635,24 +635,36 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
 type ActionNotice = { title: string; body: string; actions: { href: string; label: string }[] };
 
 /**
- * Where a move lands when something did not come along (app/api/auth/move): "moved", then "-sessions-open" and
- * "-no-recovery", each only when it applies; "moved" and "moved-sessions-open" alone are ADDRESS_NOTICES below.
+ * Where a move lands when something did not come along (app/api/auth/move): "moved", then "-sessions-open",
+ * "-no-recovery" and "-no-teams", each only when it applies; "moved" and "moved-sessions-open" alone are
+ * ADDRESS_NOTICES below.
  * Both sign-in addresses are emailed too, but this is the notice that cannot be lost, so it says what to do and links
  * straight to where it is done (WCAG 2.4.9, 3.3.5: each link says its purpose by its own words).
  */
 function movedNotice(key: string): ActionNotice | undefined {
-  const flags = /^moved(-sessions-open)?(-no-recovery)?$/.exec(key);
-  if (!flags || !flags[2]) return undefined;
-  const sessionsOpen = Boolean(flags[1]);
-  const actions: ActionNotice["actions"] = [{ href: "#account-recovery", label: "Check your recovery address" }];
+  const flags = /^moved(-sessions-open)?(-no-recovery)?(-no-teams)?$/.exec(key);
+  if (!flags || !(flags[2] || flags[3])) return undefined;
+  const [sessionsOpen, recovery, teams] = [Boolean(flags[1]), Boolean(flags[2]), Boolean(flags[3])];
+  const actions: ActionNotice["actions"] = [];
+  if (recovery) actions.push({ href: "#account-recovery", label: "Check your recovery address" });
   if (sessionsOpen) actions.push({ href: "#log-out-everywhere", label: "Go to “Log out of all devices”" });
+  const needs = [sessionsOpen, recovery, teams].filter(Boolean).length;
   return {
-    title: sessionsOpen ? "Your account moved, but two things need you" : "Your account moved: check its recovery address",
+    title:
+      needs === 3
+        ? "Your account moved, but three things need you"
+        : needs === 2
+          ? "Your account moved, but two things need you"
+          : recovery
+            ? "Your account moved: check its recovery address"
+            : "Your account moved: ask to join your teams again",
     body: [
       "This address logs you in from now on.",
       sessionsOpen ? "We could not close every session that was open before the move, so log out of all devices." : "Every session the old one had open is closed.",
       // Not "may have none": a carry whose answer was lost may still have written it, and the section below shows it.
-      "We could not confirm that your recovery address came along. Check it, and add one again if none is shown.",
+      ...(recovery ? ["We could not confirm that your recovery address came along. Check it, and add one again if none is shown."] : []),
+      // Nothing to press here: only each store's owner can invite this address (lib/team.ts dropMemberships).
+      ...(teams ? ["We could not carry your places on other stores' teams. Ask each store's owner to invite this address again."] : []),
     ].join(" "),
     actions,
   };
@@ -1399,15 +1411,17 @@ export default async function StudioPage({
           <div className="notice notice-warn mt-6" role="status" aria-labelledby="action-notice-title">
             <h2 id="action-notice-title" className="font-bold text-ink">{actionNotice.title}</h2>
             <p className="mt-1 max-w-[80ch] text-sm text-ink-soft">{actionNotice.body}</p>
-            <ul className="mt-2 flex flex-wrap gap-x-6">
-              {actionNotice.actions.map((action) => (
-                <li key={action.href}>
-                  <a href={action.href} className="inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
-                    {action.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
+            {actionNotice.actions.length ? (
+              <ul className="mt-2 flex flex-wrap gap-x-6">
+                {actionNotice.actions.map((action) => (
+                  <li key={action.href}>
+                    <a href={action.href} className="inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
+                      {action.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </div>
         ) : notice ? (
           <div className="notice notice-warn mt-6">

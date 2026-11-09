@@ -35,7 +35,8 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isPaidUp } from "@/lib/billing";
 import { csvCell } from "@/lib/csv";
-import { type Listing, type Store, isFree } from "@/lib/store";
+import { type Listing, type Store } from "@/lib/store";
+import { offeredFree } from "@/lib/free-offer";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
   type AddResult,
@@ -112,10 +113,9 @@ const addressKey = async (email: string) =>
  */
 export function canGiveProduct(store: Store, product: Listing): boolean {
   return (
-    isFree(product) &&
-    // A draft is not given away until it is published.
-    !product.hidden &&
-    product.recurring === null &&
+    // Published, at no price, not a subscription (lib/free-offer.ts): a draft is not given away until it is
+    // published, nor a product taken down after a notice. The emailed link asks the same, with the store's state.
+    offeredFree(product) &&
     product.options.length === 0 &&
     (product.file !== null || product.link !== null) &&
     store.listId !== null &&

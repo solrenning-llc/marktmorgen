@@ -1,5 +1,6 @@
 import { type NextRequest, after } from "next/server";
-import { isFree, storeForHandle } from "@/lib/store";
+import { storeForHandle } from "@/lib/store";
+import { stillGivenFree } from "@/lib/free-offer";
 import { readClaim, recordLead, spendClaim } from "@/lib/free";
 import { recordLead as recordAffiliateLead } from "@/lib/affiliate-leads";
 import { scheduleReminder } from "@/lib/welcome-offer-send";
@@ -56,12 +57,22 @@ export async function POST(request: NextRequest) {
   // The same link names the same store; anything else is a link that changed under it.
   if (claim.h !== named.handle) return expired();
 
+  // A product that could not be read hands nothing over, and says so (CX-123 rule 24).
+  let product: Awaited<ReturnType<typeof readListing>>;
+  try {
+    product = await readListing(store, claim.p);
+  } catch (error) {
+    console.error("reading a free copy's product failed", error);
+    return plain(503, "This link could not be checked just now. Try again in a moment.");
+  }
+
   // Looked up again rather than trusted from the claim: a product the creator
-  // has since removed, or started charging for, is not handed out for free
-  // on the strength of an old email.
-  const product = await readListing(store, claim.p);
+  // has since removed, hidden (a draft, or taken down after a notice about its
+  // content) or started charging for, or a store switched off after notices
+  // (lib/takedown.ts), is not handed out for free on the strength of an old
+  // email. The same condition as the request for a copy (lib/free-offer.ts).
   const g = givingWords(store.language);
-  if (!product || !isFree(product)) {
+  if (!product || !stillGivenFree(store, product)) {
     return plain(410, g.freeGone);
   }
   if (!product.file && !product.link) {

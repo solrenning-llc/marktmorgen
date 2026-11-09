@@ -33,6 +33,7 @@ import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
@@ -111,6 +112,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
 
+  // What the code knows of the course, never what anyone typed (292 [SQ3], lib/course-facts.ts).
+  const facts = await readCourseFacts(course);
   const all = lessonsInOrder(course);
   const total = lessonCount(course);
   const doneCount = all.filter(({ lesson }) => done.has(lesson.id)).length;
@@ -157,7 +160,13 @@ export default async function CoursePage({ params, searchParams }: Params) {
           <h1 className="font-display mt-1 text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{product.title}</h1>
           {product.summary ? <p className="st-muted mt-3 leading-relaxed">{product.summary}</p> : null}
           <p className="st-muted mt-3 text-sm font-semibold">
-            {[w.outline(total, course.modules.length), course.certificate ? w.withCertificate : null].filter(Boolean).join(" · ")}
+            {[
+              w.outline(total, course.modules.length),
+              facts.videoSeconds !== null ? videoTotalLine(facts.videoSeconds, store.language) : null,
+              course.certificate ? w.withCertificate : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
 
           {notice ? (

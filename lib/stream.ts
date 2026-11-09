@@ -220,6 +220,26 @@ export async function streamStates(pathnames: string[]): Promise<Record<string, 
   return out;
 }
 
+/**
+ * The record key of the video a path names, for a caller that reads many of
+ * them in one MGET and reads the reply exactly (292 [SQ3], lib/course-facts.ts);
+ * null for a path that is not a video's.
+ */
+export function streamRecordKey(pathname: string): string | null {
+  const parts = readStreamPath(pathname);
+  return parts ? recordKey(parts.id) : null;
+}
+
+/**
+ * How long the video a path names runs, in seconds, from its record as stored
+ * (one MGET slot): only a video the service has made ready and measured, whose
+ * record is that path's own; null for anything else.
+ */
+export function readyStreamSeconds(pathname: string, raw: unknown): number | null {
+  const record = parseRecord(raw);
+  return record && record.path === pathname && record.state === "ready" && record.seconds > 0 ? record.seconds : null;
+}
+
 type Answer = { status: number; data: unknown };
 
 /** One question to the service. A status of 0 is a service that could not be reached. */

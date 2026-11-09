@@ -82,7 +82,6 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:pause:last:", "nl:pay:currencies:", "nl:taxreg:", "nl:payreq:lock:", "nl:payreq:stores", "nl:payreq:w:", "nl:person:find:", "nl:phone:cfg:", "nl:phone:seen:",
   "nl:held:stores", "nl:held:retry:", "nl:held:month:", "nl:held:walk",
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
-  "nl:mail:pin:", "nl:ppsell:receipt:",
   "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-withdraw:", "nl:plan:closing:",
   "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:lock", "nl:plans:pending",
   "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
@@ -119,6 +118,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
+  "nl:mail:pin:", "nl:ppsell:receipt:",
 ];
 
 /** Whether a key belongs to a family the room counts: the longest family name it starts with is one of COUNTED_FAMILIES. */

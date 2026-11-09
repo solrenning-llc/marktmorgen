@@ -114,7 +114,7 @@ async function buy(store: Store, productId: string, buyer: string, fault: Fault)
 async function main(): Promise<void> {
   redis.clear();
   console.error = () => {};
-  process.env.RESEND_API_KEY = "re_test_settle_atomic";
+  process.env.RESEND_API_KEY = "re_test_paypal_sales";
   delete process.env.PAYPAL_ENV;
   process.env.PAYPAL_PARTNER_CLIENT_ID = PARTNER_CLIENT;
   process.env.PAYPAL_PARTNER_SECRET = "EPpartnerSecret0123456789";

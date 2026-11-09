@@ -228,7 +228,7 @@ import { AppCodeInvite } from "@/components/app-code-invite";
 import { showAppCodeInvite } from "@/lib/app-code-invite-words";
 import { lockedUntil, twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
-import { RecoveryAddressManager } from "@/components/recovery-address-manager";
+import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
 import { ResendPurchase } from "@/components/resend-purchase";
 import { LeaveTeam } from "@/components/team-manager";
@@ -529,6 +529,10 @@ const BILLING_NOTICES: Record<string, { title: string; body: string }> = {
   "switch-error": {
     title: "Stripe did not answer",
     body: "Nothing changed and nothing was charged. Try again in a moment.",
+  },
+  "switch-unconfirmed": {
+    title: "We could not confirm the change",
+    body: "Stripe may have changed your plan and charged for it. Each time this page opens, it asks Stripe which plan you are on, and we check again every day. Look at your plan below before you try again.",
   },
   paused: {
     title: "Your break is set",
@@ -874,7 +878,7 @@ export default async function StudioPage({
         // null when it could not be read: never taken for "no request to turn it off" (Claude 4, C4-2980 on #2900).
         email ? twoStepStatus(email).catch(() => null) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
         // The person's recovery address, partly hidden (lib/recovery-address.ts).
-        email ? recoveryAddress(email).then((a) => (a ? hideAddress(a) : "")).catch(() => "") : Promise.resolve(""),
+        email ? recoveryAddress(email).then((a) => (a ? hideAddress(a) : "")).catch(() => null) : Promise.resolve(""),
       ]),
     ),
   };
@@ -1229,7 +1233,9 @@ export default async function StudioPage({
   const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
-  const [passkeys, team, freshLogin, lockedTill, twoStepRead, recoveryShown] = await firstReads.person;
+  const [passkeys, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  // Not read just now (null) is not "none": the recovery section says so in place of its manager (rule 24).
+  const recoveryShown = recoveryRead ?? "";
   // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
   const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
   const connectReady = isConnectConfigured();
@@ -3488,8 +3494,8 @@ export default async function StudioPage({
                 removals={passkeyRemovals}
                 removalDays={REMOVAL_DAYS}
               />
-              <RecoveryAddressManager shown={recoveryShown} />
-              <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
+              {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
+              <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
 
               {role !== "owner" ? (
                 <section aria-labelledby="leave-title" className="mt-8 border-t border-line pt-6">
@@ -3578,8 +3584,8 @@ export default async function StudioPage({
                   removals={passkeyRemovals}
                   removalDays={REMOVAL_DAYS}
                 />
-                <RecoveryAddressManager shown={recoveryShown} />
-                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
+                {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
+                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
                 <p className="text-sm text-ink-soft">
                   <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
                     Once it is set up, log in again with it

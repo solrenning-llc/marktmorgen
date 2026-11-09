@@ -277,6 +277,12 @@ export async function POST(request: NextRequest) {
     // Switching the community on is the one change here that writes to the
     // store record, and a record at its ceiling refuses to grow.
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // A member's record read or written in another shape (CX-123 rule 24, lib/community.ts patchMember):
+    // the change is not known to be made, and the member is not known to be gone.
+    if (error instanceof UnknownReplyError) {
+      console.error("changing a community could not be confirmed", action, error);
+      return fail("not_confirmed", 503);
+    }
     // The reported post or comment was not read in its exact shape: nothing
     // was changed and the report is still waiting.
     if (error instanceof ReportQueueReadError) return fail("report_read_unavailable", 503);

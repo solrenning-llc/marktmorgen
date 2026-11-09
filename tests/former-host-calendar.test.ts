@@ -41,6 +41,19 @@
  *   - a move that leaves the booking with no link at all: the owner's
  *     "Moved" email asks them to send one, as the confirmation does;
  *   - a collective call's other hosts are checked with one read of the team.
+ *
+ * Added after the second pre-review of bba63717b2:
+ *
+ *   - a list of bookings from Stripe that does not show the booking changes
+ *     nothing (unknown is never "nobody to tell");
+ *   - the store's own meeting that could not be made yet is not said to be
+ *     a link the owner never set;
+ *   - an email to the buyer that failed is sent again in a later run, and
+ *     the owner is told once it went;
+ *   - a removal is looked at in the next run, however many stores have
+ *     meetings (the store is marked when the host is taken off the team);
+ *   - a collective call's host who left, who is only a guest on another
+ *     host's event, is taken off its guest list.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import type { Product, Store } from "@/lib/store";
@@ -58,6 +71,8 @@ import { retryRecord } from "@/lib/meet-links";
 import { syncMeetings } from "@/lib/call-meetings";
 import { type MeetRecord, callScope, readRecord, writeRecord } from "@/lib/meet-records";
 import { roomOf } from "@/lib/call-rooms";
+import { MEET_STORES } from "@/lib/meet-links";
+import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -84,6 +99,9 @@ const checkouts = new Map<string, Record<string, string>>();
 const paidBy = new Map<string, string>();
 /** Google answers every write with a server error while this is on. */
 let googleDown = false;
+/** Google refuses the store's own new events, and Resend every email, while these are on. */
+let storeDown = false;
+let resendDown = false;
 
 function idToken(email: string): string {
   const piece = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
@@ -96,6 +114,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
     const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
+    if (resendDown) return answer({ message: "internal" }, 500);
     sent.push({ to: String([body.to].flat()[0]).toLowerCase(), subject: String(body.subject ?? ""), text: String(body.text ?? "") });
     return answer({ id: `email_${sent.length}` });
   }
@@ -117,6 +136,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
     const event = /^\/google\/calendar\/v3\/calendars\/([^/]+)\/events(?:\/([^/?]+))?$/.exec(path);
     if (event) {
+      if (storeDown && method === "POST" && token !== MAYA_TOKEN) return answer({ error: { code: 503, message: "backend error" } }, 503);
       if (googleDown && method !== "GET") return answer({ error: { code: 503, message: "backend error" } }, 503);
       if (method === "POST") {
         const body = JSON.parse(String(init?.body)) as { id: string };
@@ -211,6 +231,8 @@ async function connectGoogle(store: Store, email: string, asHost: boolean): Prom
     by: email,
     owner: { email: store.email, handle: store.handle },
     ...(asHost ? { host: taken.host } : {}),
+    // When the consent flow began, which finishConsent needs once #3333 is in (team-scheduling.test.ts does the same); nothing before.
+    ...({ startedAt: (taken as { at?: number }).at } as object),
   });
   return result.ok;
 }
@@ -507,6 +529,82 @@ async function main(): Promise<void> {
   const three = await reads(true, 1);
   is("both made on her calendar", [one.host, three.host], [hostId(MAYA), hostId(MAYA)]);
   is("three hosts read the team as often as one", three.reads, one.reads);
+
+  part("A list of bookings that does not show the booking changes nothing");
+  const alba = await teamStore("alba@example.com", "alba", "acct_1TestAlba00001", "google");
+  const ba = await booking(alba.store, alba.call, weekdayAt(14), "lia@example.com");
+  await ba.confirm();
+  paidBy.delete(ba.session);
+  await removeMember(alba.store, MAYA);
+  mark = google.length;
+  sentMark = sent.length;
+  await jobHour();
+  is("nothing deleted, made or sent", [onMaya(mark), onStore(mark), newLink(sentMark, "lia@example.com"), ownerMail(sentMark, "alba@example.com")], [[], [], [], []]);
+  is("and the record still names her, to be looked at again", (await readRecord(ba.scope))?.host, hostId(MAYA));
+
+  part("The store's own meeting cannot be made yet");
+  const brio = await teamStore("brio@example.com", "brio", "acct_1TestBrio00001", "google", "");
+  const bb = await booking(brio.store, brio.call, weekdayAt(15), "noa@example.com");
+  await bb.confirm();
+  await removeMember(brio.store, MAYA);
+  sentMark = sent.length;
+  storeDown = true;
+  try {
+    await jobHour();
+  } finally {
+    storeDown = false;
+  }
+  const brioOwner = ownerMail(sentMark, "brio@example.com").join("\n---\n");
+  is("the owner is not told they never set a link", /You have not set a meeting link/.test(brioOwner), false);
+  is("the owner is told it is tried again", /could not be made yet/.test(brioOwner), true);
+
+  part("An email to the buyer that failed is sent again");
+  const cala = await teamStore("cala@example.com", "cala", "acct_1TestCala00001", "google");
+  const bc = await booking(cala.store, cala.call, weekdayAt(16), "rui@example.com");
+  await bc.confirm();
+  await removeMember(cala.store, MAYA);
+  mark = google.length;
+  resendDown = true;
+  try {
+    await jobHour();
+  } finally {
+    resendDown = false;
+  }
+  is("her event was deleted while the email could not go", onMaya(mark), [`DELETE ${HOST_CALENDAR}`]);
+  sentMark = sent.length;
+  await jobHour();
+  await jobHour();
+  is("the buyer gets the new link in a later run, once", newLink(sentMark, "rui@example.com").length, 1);
+  is("and the owner is told, once", ownerMail(sentMark, "cala@example.com").filter((t) => t.includes("no longer on your team")).length, 1);
+
+  part("A removal is looked at in the next run, however many stores have meetings");
+  const dune = await teamStore("dune@example.com", "dune", "acct_1TestDune00001", "google");
+  const bd = await booking(dune.store, dune.call, weekdayAt(17), "eva@example.com");
+  await bd.confirm();
+  const soon = Date.now() + DAY;
+  await redisPipeline([["ZADD", MEET_STORES, ...Array.from({ length: 300 }, (_, i) => [soon + i, `cfake${i}|hfake${i}`]).flat()]]);
+  await removeMember(dune.store, MAYA);
+  mark = google.length;
+  {
+    const at = Date.now();
+    await syncMeetings(async (handle) => stores.get(handle) ?? null, at + 60_000, ORIGIN);
+  }
+  is("her event is deleted in the very next run", onMaya(mark), [`DELETE ${HOST_CALENDAR}`]);
+
+  part("A collective call's host who left is taken off another host's event");
+  const eira = await teamStore("eira@example.com", "eira", "acct_1TestEira00001", null);
+  for (const other of ["pat@example.com", "rio@example.com"]) await putMember(eira.store, other, "support");
+  await writeTeam(eira.store, eira.call.id, { mode: "collective", hosts: [host(MAYA), host("pat@example.com"), host("rio@example.com")], createdAt: "2026-10-06T00:00:00.000Z" });
+  const be = await booking(eira.store, eira.call, weekdayAt(18), "ivo@example.com");
+  await be.confirm();
+  const was = (await readRecord(be.scope)) as MeetRecord;
+  is("Pat is a guest on Maya's event", [was.host, was.guests.includes("pat@example.com")], [hostId(MAYA), true]);
+  await removeMember(eira.store, "pat@example.com");
+  mark = google.length;
+  await jobHour();
+  const now2 = (await readRecord(be.scope)) as MeetRecord;
+  is("Pat is taken off its guest list, and the buyer and Rio stay", [now2.guests.includes("pat@example.com"), now2.guests.includes("ivo@example.com"), now2.guests.includes("rio@example.com"), now2.host], [false, true, true, hostId(MAYA)]);
+  is("by a change of the guest list on Maya's event, nothing deleted", onMaya(mark), [`PATCH ${HOST_CALENDAR}`]);
 
   done();
 }

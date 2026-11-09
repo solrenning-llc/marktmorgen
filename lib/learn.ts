@@ -51,7 +51,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
 import { readKind, readListing } from "@/lib/catalog";
-import { type Course, type CourseModule, accessEndState, lessonsInOrder, opensAt, readCourse, readCourseExact, stampedAccessEnd } from "@/lib/course";
+import { type Course, type CourseModule, accessEndState, lessonsInOrder, opensAt, readCourse, readCourseExact, stampHolds, stampedAccessEnd } from "@/lib/course";
 import { accessEndStamp } from "@/lib/course-access-end";
 import { UnknownReply } from "@/lib/redis-exact";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
@@ -183,6 +183,24 @@ export async function recordEnrollment(store: Store, email: string, productId: s
   ]);
 }
 
+/**
+ * Written when a course is handed over with no end (24 [E7], C2's M-B on #3445): a group place or a PayPal sale,
+ * neither ever shown an end date. Beside the course's place in the ledger, a mark (`<productId>:open`) says this
+ * address has it with no end, which the gate reads first, most generous, whatever a stamped purchase says, and with
+ * no answer from Stripe needed. Counted in the store's room at what it adds (lib/order-data.ts), like the place itself.
+ */
+export async function recordOpenEnrollment(store: Store, email: string, productId: string, startSeconds: number): Promise<void> {
+  if (!isRedisConfigured()) return;
+  await orderWrite(store, [
+    ["HSETNX", ledgerKey(store, email), productId, String(Math.floor(startSeconds))],
+    ["HSET", ledgerKey(store, email), `${productId}${OPEN_MARK}`, "1"],
+    ["DEL", paidCacheKey(store, email)],
+  ]);
+}
+
+/** The ledger field's ending that marks a course held with no end (recordOpenEnrollment). */
+const OPEN_MARK = ":open";
+
 /** Forgets Stripe's answer for one address, so its next page asks again: a membership switched to another tier (lib/tier-switch.ts). */
 export async function forgetPaid(store: Store, email: string): Promise<void> {
   if (!isRedisConfigured()) return;
@@ -199,12 +217,13 @@ export async function dropEnrollment(store: Store, email: string, productId: str
   if (!isRedisConfigured()) return;
   const replies = repliesFor(
     await redisPipeline([
-      ["HDEL", ledgerKey(store, email), productId],
+      // The course's place and its "no end" mark (24 [E7]) go together.
+      ["HDEL", ledgerKey(store, email), productId, `${productId}${OPEN_MARK}`],
       ["DEL", paidCacheKey(store, email)],
     ]),
     2,
   );
-  if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("taking a course off a ledger");
+  if (!replies || !(replies[0] === 0 || replies[0] === 1 || replies[0] === 2) || !(replies[1] === 0 || replies[1] === 1)) throw new UnknownReplyError("taking a course off a ledger");
 }
 
 type Listed = { data?: unknown };
@@ -279,7 +298,10 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
         // The end this purchase's buyer was shown (24 [E7]): only on the course bought on its own page, never on a
         // course that came in a bundle or a ticked box, and never on a membership, which is open while it is paid.
         // With several purchases the most generous counts: one with no end means no end.
-        const stamp = product.id === meta.product && !product.recurring ? accessEndStamp(meta) : null;
+        // A checkout stays open up to 24 hours: a stamp counts only on a session made at least that long before it, so
+        // one paid after the end it was opened under has none (C2's M-A on #3445); an unreadable creation time, none.
+        const shown = product.id === meta.product && !product.recurring ? accessEndStamp(meta) : null;
+        const stamp = shown !== null && stampHolds(shown, typeof session.created === "number" ? session.created : null) ? shown : null;
         const had = ends.get(product.id);
         ends.set(product.id, had === undefined ? stamp : had === null || stamp === null ? null : Math.max(had, stamp));
       }
@@ -338,6 +360,15 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
 }
 
 /**
+ * The end the gate holds for this address's course (24 [E7]): the stamp, null for none, "unknown" when it cannot be
+ * told just now, or null for a course not theirs. For the start button (app/api/store/course/start), which keeps it on
+ * the student row so the drip emails stop with their access; the same reading the course page makes right after.
+ */
+export async function purchaseStamp(store: Store, email: string, productId: string): Promise<number | null | "unknown"> {
+  return (await courseLedger(store, email)).ends.get(productId) ?? null;
+}
+
+/**
  * Each open course's end (24 [E7]): null for none, the stamped end, or "unknown" when Stripe could not be asked just
  * now and the course stands on a sale written down here, whose stamp is only on the Stripe session.
  */
@@ -383,7 +414,14 @@ async function courseLedger(store: Store, email: string): Promise<Omit<Ledger, "
   } else if (ledger && typeof ledger === "object") {
     pairs.push(...Object.entries(ledger as Record<string, unknown>));
   }
+  // A course handed over with no end (recordOpenEnrollment): its mark is "1" exactly, or the ledger is unknown.
+  const openMarked = new Set<string>();
   for (const [field, value] of pairs) {
+    if (typeof field === "string" && field.endsWith(OPEN_MARK)) {
+      if (value !== "1" && value !== 1) throw new UnknownReplyError("the courses written down for an address");
+      openMarked.add(field.slice(0, -OPEN_MARK.length));
+      continue;
+    }
     const began = wholeSeconds(value);
     if (typeof field !== "string" || began === null) throw new UnknownReplyError("the courses written down for an address");
     recorded.set(field, began);
@@ -413,9 +451,12 @@ async function courseLedger(store: Store, email: string): Promise<Omit<Ledger, "
       // Its end (24 [E7]): only a Stripe purchase stamped at checkout has one. Brought over from another platform, or
       // written down here with no Stripe purchase of its own (a gift, a pre-order, a group place, a PayPal sale): none.
       const stamped = asked.ends.get(product.id);
+      // Handed over with no end here (a group place, a PayPal sale): none, read first and with no Stripe answer needed.
       ends.set(
         product.id,
-        given.has(product.id) && !product.recurring ? null : stamped !== undefined ? stamped : stripeUnread && recorded.has(product.id) ? "unknown" : null,
+        (openMarked.has(product.id) || given.has(product.id)) && !product.recurring
+          ? null
+          : stamped !== undefined ? stamped : stripeUnread && recorded.has(product.id) ? "unknown" : null,
       );
     }
   }
@@ -556,6 +597,35 @@ export async function touchStudent(courseId: string, email: string, startSeconds
     if (!(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes }])).ok) return;
   } else if (row.x !== undefined && had === undefined && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: STAMP_BYTES }])).ok) {
     delete row.x;
+  }
+  await redisPipeline([["HSET", key, field, JSON.stringify(row)]]);
+}
+
+/**
+ * Keeps the gate's stamp (24 [E7]) on a student row that already exists, leaving when they began and last came back as
+ * they are: the start button (app/api/store/course/start) after a purchase made elsewhere than this browser, so a
+ * learner who bought again with no end is emailed again before they next open the course. No row, nothing written: the
+ * course page writes it on their first visit. A stamp new to the row takes its bytes first, as touchStudent does.
+ */
+export async function noteStudentStamp(courseId: string, email: string, stamp: number | null, room: DataStore): Promise<void> {
+  if (!isRedisConfigured()) return;
+  const key = studentsKey(courseId);
+  const field = emailKey(email);
+  const [raw] = await redisPipeline([["HGET", key, field]]);
+  if (typeof raw !== "string") return;
+  let row: StudentRow;
+  try {
+    row = JSON.parse(raw) as StudentRow;
+  } catch {
+    return;
+  }
+  const had = stampOf(row.x);
+  const next = stamp === null ? null : stampOf(stamp);
+  if (had === next) return;
+  if (next === null) delete row.x;
+  else {
+    if (had === null && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: STAMP_BYTES }])).ok) return;
+    row.x = next;
   }
   await redisPipeline([["HSET", key, field, JSON.stringify(row)]]);
 }

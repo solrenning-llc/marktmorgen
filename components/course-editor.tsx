@@ -1663,8 +1663,9 @@ export function CourseAccessEnd({ productId, endsAt, passed, membership = false 
         Leave it empty and students keep this course with no end, which is how it works now. Set a day and access closes
         at the end of that day. The date applies only to people who buy this course on its own page, where it is shown
         before they pay. People who bought before, or through your store page, the cart, a bundle, a gift, a group or a
-        pre-order, keep the course with no end. You can move the date later or remove it, but not earlier. Moving it
-        later or removing it also gives access back to students whose access already ended.
+        pre-order, keep the course with no end. In the last 24 hours before the date, it is no longer shown, and people
+        who buy then keep the course with no end too. You can move the date later or remove it, but not earlier. Moving
+        it later or removing it also gives access back to students whose access already ended.
       </p>
       {endsAt !== null ? (
         <p className="mt-2 text-sm" role="status">

@@ -8,7 +8,9 @@ import {
   BUYER_COOKIE,
   buyerFingerprint,
   mintPass,
+  noteStudentStamp,
   passCookie,
+  purchaseStamp,
   recordEnrollment,
   sendCourseLink,
   touchStudent,
@@ -67,12 +69,16 @@ export async function POST(request: NextRequest) {
   if (!order.email) return away(`${path}?link=ask`);
 
   await recordEnrollment(store, order.email, product.id, order.created);
+  // The end the gate now holds for this learner (24 [E7]), kept on their student row so the drip emails follow it at
+  // once, without waiting for a visit to the course page; the course page reads the same answer, cached, right after.
+  const stamp = await purchaseStamp(store, order.email, product.id).catch(() => "unknown" as const);
   const secret = request.cookies.get(BUYER_COOKIE)?.value ?? "";
   if (secret && order.buyerKey && buyerFingerprint(secret) === order.buyerKey) {
-    await touchStudent(course.id, order.email, order.created, store);
+    await touchStudent(course.id, order.email, order.created, store, stamp === "unknown" ? undefined : stamp);
     const token = await mintPass(store, order.email, [course.id]);
     return away(path, passCookie(store, token, origin.startsWith("https://")));
   }
+  if (stamp !== "unknown") await noteStudentStamp(course.id, order.email, stamp, store).catch((error) => console.error("keeping a student's end failed", error));
   const sent = await sendCourseLink(store, product, order.email, linkOrigin(request, store));
   return away(`${path}?link=${sent ? "sent" : "error"}`);
 }

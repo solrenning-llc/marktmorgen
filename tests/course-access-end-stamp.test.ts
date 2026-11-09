@@ -297,6 +297,12 @@ async function main(): Promise<void> {
   is("the gate's stamp for a learner who bought again with no end: none", stampOf ? await stampOf(a.store, "lb-again@example.test", a.product.id) : "missing", null);
   listed = [session(a.store, { product: a.product.id, access_end: String(END) }, SET_AT + DAY)];
   is("and for a stamped learner: the stamp", stampOf ? await stampOf(a.store, "lb-stamped@example.test", a.product.id) : "missing", END);
+  const note = (learn as Record<string, unknown>).noteStudentStamp as ((courseId: string, email: string, stamp: number | null, room: Store) => Promise<void>) | undefined;
+  await touchStudent(d.courseId, "lb-row@example.test", SET_AT + DAY, d.store, SET_AT + 10 * DAY);
+  if (note) await note(d.courseId, "lb-row@example.test", null, d.store);
+  if (note) await note(d.courseId, "lb-none@example.test", SET_AT + 10 * DAY, d.store);
+  const rows = await redis.pipeline([["HGET", `nl:course:${d.courseId}:students`, emailKey("lb-row@example.test")], ["HGET", `nl:course:${d.courseId}:students`, emailKey("lb-none@example.test")]]);
+  is("bought again with no end: the row's end goes, the row stays; no row is made for a learner who never came", [typeof rows[0] === "string" && !("x" in JSON.parse(rows[0] as string)), rows[1]], [true, null]);
   const start = readFileSync("app/api/store/course/start/route.ts", "utf8");
   is("the start route keeps it on the student row", /purchaseStamp\(store, order\.email, product\.id\)/.test(start) && /noteStudentStamp\(/.test(start), true);
 

@@ -4,7 +4,7 @@
  * never moves when the page is read in another time zone.
  */
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
-import { type Course, accessEndAhead, readCourseExact } from "@/lib/course";
+import { type Course, accessEndForSale, readCourseExact } from "@/lib/course";
 import { UnknownReply } from "@/lib/redis-exact";
 import { coursesWords } from "@/lib/buyer-words/courses";
 
@@ -19,12 +19,12 @@ export function accessEndWhen(seconds: number, language: unknown): string {
 }
 
 /**
- * The line the sales page says under the title before anyone pays (24 [E7]): the course's end date while it is still
- * ahead, in the buyer's words, or null for no date and for a date already passed (whoever buys then is stamped with
- * none and has no end).
+ * The line the sales page says under the title before anyone pays (24 [E7]): the course's end date while it is more
+ * than a checkout's lifetime ahead (lib/course.ts accessEndForSale), in the buyer's words, or null for no date, a
+ * date already passed or one in its last 24 hours (whoever buys then is stamped with none and has no end).
  */
 export function accessEndFact(course: Pick<Course, "accessEndsAt"> | null, language: unknown, nowSeconds?: number): string | null {
-  const endsAt = course ? accessEndAhead(course, nowSeconds) : null;
+  const endsAt = course ? accessEndForSale(course, nowSeconds) : null;
   return endsAt === null ? null : coursesWords(language).accessEndsFact.replace("{when}", accessEndWhen(endsAt, language));
 }
 
@@ -35,9 +35,9 @@ export function accessEndFact(course: Pick<Course, "accessEndsAt"> | null, langu
  */
 export const ACCESS_END_FIELD = "access_end";
 
-/** What a buy form sends for the end it showed: "none", or the end. */
+/** What a buy form sends for the end it showed: "none", or the end (accessEndForSale). */
 export function shownAccessEnd(course: Pick<Course, "accessEndsAt">, nowSeconds?: number): string {
-  const end = accessEndAhead(course, nowSeconds);
+  const end = accessEndForSale(course, nowSeconds);
   return end === null ? "none" : String(end);
 }
 

@@ -17,7 +17,7 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { accessEndAhead, beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { accessEndForSale, beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { ACCESS_END_FIELD, accessEndWhen, shownAccessEnd } from "@/lib/course-access-end";
 import { courseAccess, doneLessonsOrUnknown, emailKey, touchStudent } from "@/lib/learn";
 import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
@@ -84,7 +84,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const open = access.state === "open";
   // When access ends (24 [E7]): this student's own end, or, to whoever has not bought, the date still ahead.
   // A membership never takes an end (24 [E7]): members keep the course while they pay, so none is said to them.
-  const endsAt = open ? access.endsAt : product.recurring ? null : accessEndAhead(course);
+  const endsAt = open ? access.endsAt : product.recurring ? null : accessEndForSale(course);
   // A student whose end has passed, or whose access could not be checked, already bought: no buy form for them.
   const settled = access.state === "expired" || access.state === "unchecked";
   // A draft is left off the store and its own page (lib/catalog.ts): its front

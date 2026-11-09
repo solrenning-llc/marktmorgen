@@ -8,7 +8,7 @@
  */
 import { ordersLinkFor } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
-import { dropEnrollment, recordEnrollment } from "@/lib/learn";
+import { dropEnrollment, recordOpenEnrollment } from "@/lib/learn";
 import { type Paid, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
@@ -66,7 +66,7 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
     from: fromStore(store),
     recordStart: async (email, productId, start) => {
       const course = productId === product.id ? product : bundled.get(productId);
-      if (course?.course) await recordEnrollment(store, email, productId, start);
+      if (course?.course) await recordOpenEnrollment(store, email, productId, start); // no end date was shown (24 [E7])
     },
     ordersLink: (email) => ordersLinkFor(store, email, base),
   });
@@ -147,7 +147,7 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
     // still there, and no email; only for a product that is a course, as handing over does.
     restoreStart: async (email, productId, start) => {
       const course = await readListing(store, productId);
-      if (course?.course) await recordEnrollment(store, email, productId, start);
+      if (course?.course) await recordOpenEnrollment(store, email, productId, start); // no end date was shown (24 [E7])
     },
     refunded: async (paid) => {
       const product = await readListing(store, paid.product).catch(() => null);

@@ -161,9 +161,30 @@ export type Course = {
 /** The furthest ahead an access end may be set: ten years. */
 export const MAX_ACCESS_END_SECONDS = 3_650 * 86_400;
 
-/** The end date to say to somebody who has not bought yet, or null: only one still ahead is said, and stamped. */
+/** The course's end date while it is still ahead, or null (the studio says a passed one as passed). */
 export function accessEndAhead(course: Pick<Course, "accessEndsAt">, nowSeconds = Date.now() / 1000): number | null {
   return course.accessEndsAt !== undefined && course.accessEndsAt > Math.floor(nowSeconds) ? course.accessEndsAt : null;
+}
+
+/**
+ * How long Stripe keeps a checkout open at most: 24 hours, its maximum (and default) session lifetime. A checkout
+ * opened before the end can be paid until then, after the end has passed (C2's M-A on #3445), so a stamp counts only
+ * on a session created at least this long before it (lib/learn.ts), and the store stops saying the date this long
+ * before it (accessEndForSale): whoever buys in that last day keeps the course with no end.
+ */
+export const CHECKOUT_OPEN_SECONDS = 24 * 3600;
+
+/**
+ * The end date to say, and stamp, to somebody who has not bought yet, or null: only one more than a checkout's
+ * lifetime ahead (CHECKOUT_OPEN_SECONDS), so nobody is charged after the end for access the date already closed.
+ */
+export function accessEndForSale(course: Pick<Course, "accessEndsAt">, nowSeconds = Date.now() / 1000): number | null {
+  return course.accessEndsAt !== undefined && course.accessEndsAt - Math.floor(nowSeconds) > CHECKOUT_OPEN_SECONDS ? course.accessEndsAt : null;
+}
+
+/** Whether a purchase made at `createdSeconds` (unknown: null) is held to the end it was stamped with. */
+export function stampHolds(stamp: number, createdSeconds: number | null): boolean {
+  return createdSeconds !== null && Number.isSafeInteger(createdSeconds) && createdSeconds <= stamp - CHECKOUT_OPEN_SECONDS;
 }
 
 /**

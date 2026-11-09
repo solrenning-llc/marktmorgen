@@ -171,8 +171,10 @@ export default function TermsPage() {
           pays, and the date applies only to people who buy the course there
           while it is shown. People who bought before it was set, or another
           way (your store page, the cart, a bundle, a gift, a group or a
-          pre-order), keep the course with no end. You can move the date later
-          or remove it, but not earlier, and doing either reaches everyone it
+          pre-order), keep the course with no end. In the last 24 hours
+          before the date, it is no longer shown, and people who buy then
+          keep the course with no end too. You can move the date later or
+          remove it, but not earlier, and doing either reaches everyone it
           applied to. A course sold as a membership has no end date: members
           keep it while they pay.
         </p>

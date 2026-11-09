@@ -37,7 +37,7 @@ import { assistReminderOffered, keepAssistReminder } from "@/lib/assistant-remin
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm, deliversDigitally } from "@/lib/digital-consent";
 import { ACCESS_END_FIELD, readCourseForSale, readShownAccessEnd } from "@/lib/course-access-end";
-import { accessEndAhead } from "@/lib/course";
+import { accessEndForSale } from "@/lib/course";
 
 /** The checkout this browser last opened for a limited product. */
 const HOLD_COOKIE = "nl_stock_hold";
@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
   if (shownEnd !== undefined && product.course && !product.recurring && !giftTo.trim() && !people.trim() && !preorder) {
     const read = await readCourseForSale(product.course.id);
     if (read.unread) return away(`/@${store.handle}?status=error`);
-    accessEnd = read.course ? accessEndAhead(read.course) : null;
+    accessEnd = read.course ? accessEndForSale(read.course) : null;
     if (accessEnd !== shownEnd) {
       return away(from === "course" ? `/@${store.handle}/course/${product.id}?terms=changed` : `/@${store.handle}/p/${product.id}?terms=changed#buy`);
     }

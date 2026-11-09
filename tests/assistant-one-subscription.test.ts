@@ -14,11 +14,26 @@
  * the same moment get the same page.
  *
  * Fake Stripe: a checkout paid makes an active add-on subscription; a POST with a key already used answers the same
- * session, as Stripe replays it.
+ * session, as Stripe replays it; a POST whose key is still in progress answers 409 idempotency_error, as Stripe does.
+ *
+ * Review of 4a1a249e6d (Claude 5): a store renamed (lib/store.ts renameHandle, the earlier name kept in
+ * previousHandles) still owns the add-on, the open page and the paid return made under its earlier name; the
+ * checkout key names the store by its id, which a rename does not change; a tab that meets another tab's request in
+ * progress reads the open pages again instead of failing; an add-on whose payment failed is not told "Stripe has not
+ * confirmed the payment yet".
  */
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { applyListedAssistant, readAssistantReturn, startAssistant, syncAssistant, type AssistantStart } from "@/lib/assistant-billing";
-import { claimHandle, ensureStatsId, setAssistantPlan, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { StoreAssistantEditor } from "@/components/store-assistant-editor";
+import { NO_ASSISTANT } from "@/lib/store-assistant-rules";
+import { NO_NEXT_OFFER } from "@/lib/next-offer-rules";
+import { NO_ASSIST_REMINDER } from "@/lib/assistant-reminder-rules";
+import { claimHandle, ensureStatsId, ensureStoreId, renameHandle, setAssistantPlan, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
+import { COST_LINES, PLATFORM_SUBSCRIPTION_SEARCH } from "./plan-cost-registry";
+import * as assistantRules from "@/lib/store-assistant-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -42,6 +57,9 @@ let subscriptionList: ((url: URL) => Response) | null = null;
 /** What the next list of the customer's open checkout pages answers, when not the real list. */
 let sessionList: ((url: URL) => Response) | null = null;
 let lists: string[] = [];
+/** How long a checkout POST stays in progress at the fake Stripe before its session exists. */
+let postDelayMs = 0;
+const IN_PROGRESS = "in-progress";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const period = paidPeriod(Date.now());
@@ -65,8 +83,10 @@ async function freshStore(): Promise<Store> {
   sessionReadFails = false;
   subscriptionList = null;
   sessionList = null;
+  postDelayMs = 0;
   await claimHandle(OWNER, HANDLE, "Synthetic store", "");
   await ensureStatsId(OWNER);
+  await ensureStoreId(OWNER);
   await setSubscription(OWNER, { customerId: CUSTOMER, subscriptionId: "sub_R23Plan00001", active: true, tier: "creator", trialEnds: 0, period });
   return (await storeForEmail(OWNER))!;
 }
@@ -93,8 +113,12 @@ function install(): void {
       const key = new Headers(init?.headers).get("Idempotency-Key");
       posts.push({ key });
       const replay = key ? keys.get(key) : undefined;
+      // Stripe does not replay a key whose first request is still running: it answers 409.
+      if (replay === IN_PROGRESS) return json({ error: { type: "idempotency_error", code: "idempotency_key_in_use", message: "There is currently another in-progress request using this idempotent key." } }, 409);
       const known = replay ? sessions.find((s) => s.id === replay) : undefined;
       if (known) return json(known);
+      if (key) keys.set(key, IN_PROGRESS);
+      if (postDelayMs) await new Promise((resolve) => setTimeout(resolve, postDelayMs));
       const id = `cs_test_R23Assist${String(sessions.length + 1).padStart(4, "0")}`;
       const body = new URLSearchParams(String(init?.body ?? ""));
       const made: Session = { id, url: `https://checkout.stripe.com/c/pay/${id}`, status: "open", mode: "subscription", customer: body.get("customer") ?? "", subscription: null, metadata: { addon: body.get("metadata[addon]") ?? "", assistant_for: body.get("metadata[assistant_for]") ?? "" } };
@@ -137,7 +161,7 @@ async function outcome(store: Store): Promise<string> {
   try {
     const started = await start(store, ORIGIN);
     if ("checkout" in started) return `checkout ${started.checkout}`;
-    if ("waiting" in started) return "waiting";
+    if ("waiting" in started) return `waiting ${started.waiting}`;
     return `already ${started.already.assistantPlan?.subscriptionId} active=${started.already.assistantPlan?.active} disputed=${Boolean(started.already.assistantPlan?.disputedAt)}`;
   } catch {
     return "refused";
@@ -185,6 +209,38 @@ async function main(): Promise<void> {
   for (const sub of subs) await applyListedAssistant({ ...sub });
   is("no add-on subscription renews after the plan lapsed", subs.filter((s) => s.status === "active" && !s.cancel_at_period_end).map((s) => s.id), []);
 
+  part("Renamed after paying (the way back unconfirmed): the add-on under the earlier name is adopted, no second checkout");
+  store = await freshStore();
+  const paidBefore = await start(store, ORIGIN);
+  pay((paidBefore as { checkout: string }).checkout);
+  is("the store is renamed", (await renameHandle(OWNER, "rtwothreenew")).ok, true);
+  store = (await storeForEmail(OWNER))!;
+  is("the store keeps its earlier name", [store.handle, store.previousHandles], ["rtwothreenew", [HANDLE]]);
+  is("the start adopts the add-on made under the earlier name", await outcome(store), "already sub_R23Assist0001 active=true disputed=false");
+  is("one checkout was ever created, after the rename too", posts.length, 1);
+
+  part("Renamed with a page open: the page made under the earlier name is given again");
+  store = await freshStore();
+  const openBefore = await outcome(store);
+  await renameHandle(OWNER, "rtwothreenew");
+  store = (await storeForEmail(OWNER))!;
+  is("the renamed store gets the page opened under its earlier name", await outcome(store), openBefore);
+  is("one checkout created before and after the rename", posts.length, 1);
+
+  part("Renamed before the way back: the paid return is still this store's");
+  store = await freshStore();
+  const returning = pay(((await start(store, ORIGIN)) as { checkout: string }).checkout);
+  await renameHandle(OWNER, "rtwothreenew");
+  store = (await storeForEmail(OWNER))!;
+  const returned = await readAssistantReturn(store, returning);
+  is("the return reads the add-on paid under the earlier name", [returned?.subscriptionId, returned?.active], ["sub_R23Assist0001", true]);
+
+  part("The checkout key names the store by its id, which a rename does not change");
+  store = await freshStore();
+  await outcome(store);
+  const key = posts[0]?.key ?? "";
+  is("the key carries the store's id and not its address", [store.sid.length > 0 && key.includes(store.sid), key.includes(HANDLE)], [true, false]);
+
   part("Two tabs: an open page for this store's add-on is given again, never a second one");
   store = await freshStore();
   const tabOne = await outcome(store);
@@ -194,17 +250,30 @@ async function main(): Promise<void> {
 
   part("Two tabs at the same moment: both POSTs carry the same Idempotency-Key, so Stripe gives one page");
   store = await freshStore();
+  // The first tab's POST is still running when the second's arrives: Stripe answers the second 409.
+  postDelayMs = 50;
   const both = await Promise.all([outcome(store), outcome(store)]);
   is("both tabs get the same page", both[0] === both[1] && both[0].startsWith("checkout "), true);
   is("every checkout POST carries a key, and the same one", [posts.length > 0, posts.every((p) => typeof p.key === "string" && p.key.length > 0), new Set(posts.map((p) => p.key)).size], [true, true, 1]);
   is("one session exists at Stripe", sessions.length, 1);
 
-  part("One Stripe may still charge for this store: nothing is opened beside it");
-  for (const status of ["incomplete", "past_due", "unpaid", "paused", "trialing"]) {
+  part("One Stripe may still charge for this store: nothing is opened beside it, and the notice says which");
+  const waits: [string, string][] = [["incomplete", "pending"], ["trialing", "pending"], ["past_due", "failed"], ["unpaid", "failed"], ["paused", "failed"]];
+  for (const [status, notice] of waits) {
     store = await freshStore();
     subs.push(addOn(1, status));
-    is(`an add-on ${status}: no checkout`, [await outcome(store), posts.length], ["waiting", 0]);
+    is(`an add-on ${status}: no checkout, notice ${notice}`, [await outcome(store), posts.length], [`waiting ${notice}`, 0]);
   }
+  const shown = (notice: string) =>
+    renderToStaticMarkup(
+      createElement(
+        AppRouterContext.Provider,
+        { value: {} as never },
+        createElement(StoreAssistantEditor, { setting: NO_ASSISTANT, next: NO_NEXT_OFFER, remind: NO_ASSIST_REMINDER, postal: true, plan: null, onSale: false, canBill: false, refusal: null, usage: null, missed: [], notice, pin: "" }),
+      ),
+    );
+  is("a failed payment is told it failed, never that Stripe has not confirmed it yet", [shown("failed").includes("A payment for the Store assistant on this store did not go through"), shown("failed").includes("has not confirmed the payment yet")], [true, false]);
+  is("a first payment still waiting keeps its notice (control)", shown("pending").includes("Stripe has not confirmed the payment yet."), true);
 
   part("A disputed live add-on found at Stripe: adopted, ended, and not sold again");
   store = await freshStore();
@@ -265,6 +334,19 @@ async function main(): Promise<void> {
   is("the subscriptions were read before the open pages, both before the POST", lists, ["subscriptions", "sessions"]);
   store = (await storeForEmail(OWNER))!;
   is("nothing is written down for the store", store.assistantPlan ?? null, null);
+
+  part("The start's Stripe calls are priced: every essential billing event may be an add-on start");
+  const startCalls = (assistantRules as Record<string, unknown>).ASSISTANT_START_STRIPE_CALLS;
+  const pages = (assistantRules as Record<string, unknown>).ASSISTANT_START_LIST_PAGES;
+  // Subscriptions, open pages, open pages read again after a 409, then the price read, the product read and write,
+  // the price write and the checkout POST.
+  is("the most calls a start makes", [typeof pages === "number" && pages > 0, startCalls === 3 * (pages as number) + 5], [true, true]);
+  const line = COST_LINES.find((row) => row.id === "assistant-start-reads");
+  is("a cost line cites the start and its count", Boolean(line?.sources.some((s) => s.file === "lib/assistant-billing.ts" && s.names.includes("startAssistant")) && line?.sources.some((s) => s.names.includes("ASSISTANT_START_STRIPE_CALLS"))), true);
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    const expected = ((startCalls as number) - PLATFORM_SUBSCRIPTION_SEARCH.maxGets) * PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet * PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow;
+    is(`${tier}: the calls past the two already priced, at every essential event of the month`, [line ? line.monthlyUsd(tier) : null, expected > 0], [expected, true]);
+  }
 
   part("Control: a store whose record already says on is refused locally, without asking Stripe");
   store = await freshStore();

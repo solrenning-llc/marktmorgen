@@ -14,14 +14,17 @@
  *   - that count is read exactly (CX-123 rule 24): any other reply refuses the start, with nothing started;
  *   - an upload left before its last batch gives its hold back once it is given up (the five-minute job, past
  *     RECEIVING_MS), exactly once, and takes no more rows near that time, so what it held is never used twice;
+ *   - every write of an import over another writer's goes only over the job it read (review on #3384, second
+ *     review, HIGH): a cancel between an upload's read and its write is never undone, what an import held is given
+ *     back exactly once, never used after it was given back, and no give-back takes a count below zero;
  *   - a reminder refused by a full month is tried once more when the month opens again, while that is still before
  *     the renewal date, and is never sent twice.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { addRows, advanceImports, cancelImport, finishUpload, reserveMoved, runImport, sendMoveReminders, startImport, storeImports } from "@/lib/imports";
+import { addRows, advanceImports, cancelImport, finishUpload, releaseMoved, reserveMoved, runImport, sendMoveReminders, startImport, storeImports } from "@/lib/imports";
 import { moveCounts } from "@/lib/move-members";
 import { allowanceWindow } from "@/lib/allowance-window";
-import { monthlyAllowance, takeFromMonth } from "@/lib/mail";
+import { giveBackToMonth, monthlyAllowance, takeFromMonth } from "@/lib/mail";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -74,6 +77,38 @@ async function withCountReply<T>(prefix: string, reply: unknown, fn: () => Promi
   } finally {
     redis.pipeline = pipeline;
   }
+}
+
+/**
+ * Runs `action` once, right after the first read of import `id` (its GET) that `fn` makes, before `fn` writes: the
+ * interleaving of two writers of the same import, in process.
+ */
+async function afterRead<T>(id: string, action: () => Promise<unknown>, fn: () => Promise<T>): Promise<T> {
+  const pipeline = redis.pipeline.bind(redis);
+  let armed = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = (await pipeline(commands)) as unknown[];
+    if (armed && commands.some((c) => String(c[0]).toUpperCase() === "GET" && String(c[1]) === `nl:import:${id}`)) {
+      armed = false;
+      await action();
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  try {
+    return await fn();
+  } finally {
+    redis.pipeline = pipeline;
+  }
+}
+
+/** The import's job written (a SET, or a script whose first key is the job). */
+const writesJob = (c: (string | number)[], id: string) =>
+  (String(c[0]).toUpperCase() === "SET" && String(c[1]) === `nl:import:${id}`) || (String(c[0]).toUpperCase() === "EVAL" && String(c[3]) === `nl:import:${id}`);
+
+/** The state stored for import `id`, read straight from the stand-in. */
+async function readJobState(id: string): Promise<string | undefined> {
+  const raw = (await redis.pipeline([["GET", `nl:import:${id}`]]))[0];
+  return typeof raw === "string" ? (JSON.parse(raw) as { state: string }).state : undefined;
 }
 
 async function run(id: string) {
@@ -270,7 +305,7 @@ async function main(): Promise<void> {
   setClock(storeLeftAt + 3 * 60 * 60_000);
   // The job's SET answered in another shape: the step is logged as failed (runImport), and what the upload held is
   // not given back, since the job may still hold it.
-  await withReply((c) => String(c[0]).toUpperCase() === "SET" && storeLeft.ok && String(c[1]) === `nl:import:${storeLeft.job.id}`, "QUEUED", () => advanceImports(Date.now() + 30_000)).catch(() => undefined);
+  await withReply((c) => storeLeft.ok && writesJob(c, storeLeft.job.id), "QUEUED", () => advanceImports(Date.now() + 30_000)).catch(() => undefined);
   is("Store: the give-up's save answering in another shape gives nothing back (rule 24)", await reserveMoved((await storeForEmail(LEFTSTORE))!, 1), 0);
   const sweptLeft = (await storeImports((await storeForEmail(LEFTSTORE))!))[0];
   is("Store: and the five-minute job did reach it", sweptLeft?.state, "canceled");
@@ -292,6 +327,95 @@ async function main(): Promise<void> {
   is("and none of its members was invited or emailed", [(await moveCounts((await storeForEmail(LEFTOK))!)).invited, emails.filter((e) => /^near/.test(to(e))).length], [0, 0]);
   // The clock runs on again from where it was, so the reminders below read the same day.
   Date.now = () => fixedStart + (realNow() - realStart);
+
+  part("Every write of an import goes only over the job it read (review on #3384, second review, HIGH)");
+  const movedNow = async (owner: string) => {
+    const s = (await storeForEmail(owner))!;
+    return (await redis.pipeline([["GET", `nl:imports:moved:${s.sid}:${allowanceWindow(s)!.id}`]]))[0];
+  };
+  const mailedTo = (prefix: string) => emails.filter((e) => new RegExp(`^${prefix}\\d`).test(to(e))).length;
+
+  // (A) A cancel between the finish's read and its write.
+  const PA = "r46e-probe-a@example.com";
+  await creatorStore(PA, "r46proba", { period: paidPeriod() });
+  const pa = await startImport((await storeForEmail(PA))!, PA, "members", { expected: 20, file: "patrons.csv", stopped: true });
+  const paId = pa.ok ? pa.job.id : "";
+  await addRows((await storeForEmail(PA))!, paId, memberRows(20, in10, "proba"));
+  const paFinish = await afterRead(paId, async () => cancelImport((await storeForEmail(PA))!, paId), async () => finishUpload((await storeForEmail(PA))!, paId));
+  const paJob = await run(paId);
+  is("A: a cancel during the finish is not undone: the finish is refused and the import stays canceled", [pa.ok, paFinish.ok, (paFinish as { reason?: string }).reason, paJob?.state], [true, false, "state", "canceled"]);
+  is("A: the 20 it held are given back exactly once: the count is 0, never below", await movedNow(PA), "0");
+  is("A: nobody of the file was emailed, and all 20 of the month can still go", [mailedTo("proba"), await reserveMoved((await storeForEmail(PA))!, 20)], [0, 20]);
+
+  // (A2) A cancel between a batch's read and its write, then the finish.
+  const PA2 = "r46e-probe-a2@example.com";
+  await creatorStore(PA2, "r46proba2", { period: paidPeriod() });
+  const pa2 = await startImport((await storeForEmail(PA2))!, PA2, "members", { expected: 20, file: "patrons.csv", stopped: true });
+  const pa2Id = pa2.ok ? pa2.job.id : "";
+  const pa2Rows = await afterRead(pa2Id, async () => cancelImport((await storeForEmail(PA2))!, pa2Id), async () => addRows((await storeForEmail(PA2))!, pa2Id, memberRows(20, in10, "probtwo")));
+  const pa2Finish = await finishUpload((await storeForEmail(PA2))!, pa2Id);
+  const pa2Job = await run(pa2Id);
+  is("A2: a cancel during a batch is not undone: the batch and the finish are refused", [pa2.ok, pa2Rows.ok, (pa2Rows as { reason?: string }).reason, pa2Finish.ok, pa2Job?.state], [true, false, "state", false, "canceled"]);
+  is("A2: what was given back is never used: nobody of the file is invited or emailed", [(await moveCounts((await storeForEmail(PA2))!)).invited, mailedTo("probtwo")], [0, 0]);
+  is("A2: the count is 0 and the month's 20 go once, not 40", [await movedNow(PA2), await reserveMoved((await storeForEmail(PA2))!, 20), await reserveMoved((await storeForEmail(PA2))!, 1)], ["0", 20, 0]);
+
+  // (B) A new start and the five-minute job both giving up the same old upload.
+  const PB = "r46e-probe-b@example.com";
+  await creatorStore(PB, "r46probb", { period: paidPeriod() });
+  const pbAt = Date.now();
+  const pb = await startImport((await storeForEmail(PB))!, PB, "members", { expected: 20, file: "patrons.csv", stopped: true });
+  const pbId = pb.ok ? pb.job.id : "";
+  await addRows((await storeForEmail(PB))!, pbId, memberRows(2, in10, "probb"));
+  setClock(pbAt + 3 * 60 * 60_000);
+  const pbNext = await afterRead(pbId, () => advanceImports(Date.now() + 30_000), async () => startImport((await storeForEmail(PB))!, PB, "members", { expected: 1, file: "one.csv", stopped: true }));
+  is("B: the old upload is given up once, and the new start holds its 1", [pb.ok, pbNext.ok, (await readJobState(pbId))], [true, true, "canceled"]);
+  is("B: the count is 1, the new start's, never below 0", await movedNow(PB), "1");
+  if (pbNext.ok) await cancelImport((await storeForEmail(PB))!, pbNext.job.id);
+  is("B: and the new one canceled gives its 1 back: 0", await movedNow(PB), "0");
+  Date.now = () => fixedStart + (realNow() - realStart);
+
+  part("A give-back never takes a count below zero, and reads it exactly");
+  const FLOOR = "r46e-floor@example.com";
+  const floorStore = await creatorStore(FLOOR, "r46floor", { period: paidPeriod() });
+  const floorKey = `nl:imports:moved:${floorStore.sid}:${allowanceWindow(floorStore)!.id}`;
+  await redis.pipeline([["SET", floorKey, "3"]]);
+  await releaseMoved((await storeForEmail(FLOOR))!, 5);
+  is("Store: giving back 5 of a count of 3 leaves 0, never -2", (await redis.pipeline([["GET", floorKey]]))[0], "0");
+  await releaseMoved((await storeForEmail(FLOOR))!, 5);
+  is("Store: giving back more of a count of 0 leaves 0", (await redis.pipeline([["GET", floorKey]]))[0], "0");
+  await redis.pipeline([["SET", floorKey, "7"]]);
+  await releaseMoved((await storeForEmail(FLOOR))!, 5);
+  is("Store control: giving back 5 of 7 leaves 2, as before", (await redis.pipeline([["GET", floorKey]]))[0], "2");
+  const FLOORSTUDIO = "r46e-floorstudio@example.com";
+  const floorStudio = await creatorStore(FLOORSTUDIO, "r46floors", { tier: "pro", period: paidPeriod() });
+  const floorList = (await ensureListId(FLOORSTUDIO))!.listId!;
+  const floorUsed = `nl:mail:used:${floorList}:${allowanceWindow(floorStudio)!.id}`;
+  await redis.pipeline([["SET", floorUsed, "2"]]);
+  await giveBackToMonth((await storeForEmail(FLOORSTUDIO))!, 5);
+  is("Studio: giving back 5 of the month's 2 used leaves 0, never -3, so no newsletter goes past the plan", (await redis.pipeline([["GET", floorUsed]]))[0], "0");
+  await redis.pipeline([["SET", floorUsed, "9"]]);
+  await giveBackToMonth((await storeForEmail(FLOORSTUDIO))!, 5);
+  is("Studio control: giving back 5 of 9 leaves 4, as before", (await redis.pipeline([["GET", floorUsed]]))[0], "4");
+  await redis.pipeline([["SET", floorUsed, "many"]]);
+  await giveBackToMonth((await storeForEmail(FLOORSTUDIO))!, 5).catch(() => undefined);
+  is("Studio: a count that is not a whole number is left as it is, nothing given back on it", (await redis.pipeline([["GET", floorUsed]]))[0], "many");
+
+  part("The save before a members send is confirmed before anything goes (second review, LOW 1)");
+  const SAVE = "r46e-save@example.com";
+  await creatorStore(SAVE, "r46save", { period: paidPeriod() });
+  const sv = await startImport((await storeForEmail(SAVE))!, SAVE, "members", { expected: 5, file: "patrons.csv", stopped: true });
+  const svId = sv.ok ? sv.job.id : "";
+  await addRows((await storeForEmail(SAVE))!, svId, memberRows(5, in10, "probsave"));
+  await finishUpload((await storeForEmail(SAVE))!, svId);
+  const preSend = (c: (string | number)[]) => {
+    if (!writesJob(c, svId) || String(c[0]).toUpperCase() !== "SET") return false;
+    const job = JSON.parse(String(c[2])) as { state: string; held?: { n: number }; counts: { mailed: number } };
+    return job.state === "mailing" && (job.held?.n ?? 5) < 5 && job.counts.mailed === 0;
+  };
+  await withReply(preSend, "QUEUED", () => runImport(svId, Date.now() + 30_000));
+  const svMail = (await redis.pipeline([["SCARD", `nl:import:${svId}:mail`]]))[0];
+  is("its save answering in another shape sends nothing, and every address stays queued", [sv.ok, mailedTo("probsave"), svMail], [true, 0, 5]);
+  is("and nothing is given back on it: the 5 stay counted", await movedNow(SAVE), "5");
 
   part("A reminder refused by a full month waits for the month to open again");
   const RE = "r46e-remind@example.com";

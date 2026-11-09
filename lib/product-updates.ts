@@ -562,10 +562,19 @@ export async function advanceUpdates(load: (handle: string) => Promise<Store | n
   const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", QUEUE]]), 1)?.[0]);
   if (!ids) throw new UnknownReplyError("the queue of product updates");
   let touched = 0;
+  // One send that throws (an unknown reply, rule 24) stays as it was for the next run and does not hold up the other
+  // sends of this run; the first such error is thrown at the end, so the mail job still logs this step as failed.
+  let failed: { error: unknown } | null = null;
   for (const id of ids) {
     if (Date.now() > deadline) break;
-    if (await advanceUpdate(id, load, deadline)) touched += 1;
+    try {
+      if (await advanceUpdate(id, load, deadline)) touched += 1;
+    } catch (error) {
+      console.error("moving a product update on failed; it is tried again next run", error);
+      failed ??= { error };
+    }
   }
+  if (failed) throw failed.error;
   return touched;
 }
 

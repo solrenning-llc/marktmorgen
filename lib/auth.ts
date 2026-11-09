@@ -273,6 +273,10 @@ export const MOVES_PER_STORE_PER_MONTH = 10;
  * Moves the company pays for in a calendar month (UTC), all stores together: the ceiling of the move's own work,
  * its EVAL (NOTE_MOVE_COPY) and the commands around it, taken before any of it (Claude 1's decision on #2271).
  */
+/** Moves a month for stores with a running paid plan, all together (#2271, Claude 5's focal review). */
+export const MOVES_PER_MONTH_PAID = 1_500;
+/** The same for every other store. */
+export const MOVES_PER_MONTH_UNPAID = 500;
 export const MOVES_PER_MONTH = 2_000;
 /** Kept past the end of any calendar month, so a count lapses only once its month is over. */
 const MOVE_ROOM_SECONDS = 32 * 86_400;

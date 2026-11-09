@@ -13,7 +13,8 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { NextRequest } from "next/server";
-import { MOVES_PER_MONTH, MOVES_PER_STORE_PER_MONTH, openSession } from "@/lib/auth";
+import { readFileSync } from "node:fs";
+import { MOVES_PER_MONTH, MOVES_PER_MONTH_PAID, MOVES_PER_MONTH_UNPAID, MOVES_PER_STORE_PER_MONTH, openSession } from "@/lib/auth";
 import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { StoreBusyError, claimHandle, createStore, moveAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -85,16 +86,45 @@ async function main(): Promise<void> {
     Date.now = clock;
   }
 
-  part("3. the company's room for the month, all stores together");
+  part("3. the company's rooms for the month: paying stores apart from the others (Claude 5's focal review)");
+  is("the two rooms make the company's month", MOVES_PER_MONTH_PAID + MOVES_PER_MONTH_UNPAID, MOVES_PER_MONTH);
   const month = new Date().toISOString().slice(0, 7);
-  await real([["SET", `nl:auth:move-room:${month}`, String(MOVES_PER_MONTH), "EX", 32 * 86_400]]);
+  // Stores made for free use up their room this month by moving back and forth, as anyone could: each store at its
+  // own count, until the company's room for them is gone (the stores of parts 1 and 2 took some of it already).
+  let free = 0;
+  for (let s = 0; free < MOVES_PER_MONTH && s < Math.ceil(MOVES_PER_MONTH / MOVES_PER_STORE_PER_MONTH) + 1; s += 1) {
+    const x = `room-free-${s}@example.com`;
+    const y = `room-free-${s}-b@example.com`;
+    await claimHandle(x, `room-free-${s}`, "Free", "");
+    let here = x;
+    for (let i = 0; i < MOVES_PER_STORE_PER_MONTH; i += 1) {
+      const there = here === x ? y : x;
+      if ((await move(here, there)) !== "moved") break;
+      here = there;
+      free += 1;
+    }
+  }
+  is("stores made for free move until their room is used up", free <= MOVES_PER_MONTH_UNPAID, true);
   const C = "room-c@example.com";
   const D = "room-d@example.com";
   await claimHandle(C, "room-other", "Other", "");
-  is("another store's move is refused as the company's month", await move(C, D), "move-paused");
+  is("a store without a paid plan is refused as the company's month", await move(C, D), "move-paused");
   is("nothing moved", [Boolean(await storeForEmail(C)), Boolean(await storeForEmail(D))], [true, false]);
   is("and the move's EVAL was never sent", noteSent(), false);
-  await real([["DEL", `nl:auth:move-room:${month}`]]);
+  const P = "room-p@example.com";
+  const Q = "room-q@example.com";
+  await claimHandle(P, "room-paid", "Paid", "");
+  await setSubscription(P, { subscriptionId: "sub_RoomPaid01", customerId: "cus_RoomPaid01", active: true, tier: "creator", cycle: "month", trialEnds: 0 });
+  is("a store that pays still moves: the free stores never use up its room", await move(P, Q), "moved");
+  await real([["SET", `nl:auth:move-room:${month}:paid`, String(MOVES_PER_MONTH_PAID), "EX", 32 * 86_400]]);
+  is("past the paying stores' own room, a paying store is refused too", await move(Q, P), "move-paused");
+  await real([["DEL", `nl:auth:move-room:${month}:unpaid`, `nl:auth:move-room:${month}:paid`, `nl:auth:move-room:${month}`]]);
+
+  part("3b. the words say what the code counts (rule 27)");
+  const words = readFileSync("app/signin/page.tsx", "utf8");
+  is("the month's words name the store's count", words.includes(`can change its sign-in address ${MOVES_PER_STORE_PER_MONTH} times a month`) && words.includes(`changed its sign-in address ${MOVES_PER_STORE_PER_MONTH} times this month`), true);
+  is("a move that did not finish says it may count", words.includes(`may still count toward the store's ${MOVES_PER_STORE_PER_MONTH} address changes this month`), true);
+  is("the month ends at midnight UTC, said with its name", (words.match(/from midnight UTC \(Coordinated Universal Time\) on the 1st/g) ?? []).length, 2);
 
   part("4. a count that does not read is a refusal, never room");
   const shapes: unknown[] = [null, "1", { 0: 1 }, -1, 1.5];

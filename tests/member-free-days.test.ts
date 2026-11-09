@@ -75,8 +75,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const path = url.pathname.replace(/^\/v1/, "");
   // Stripe's lists carry has_more: an answer without it is not one this code reads (rule 24).
-  if (path === "/customers") return answer({ object: "list", data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_member0001" }] : [], has_more: false });
-  if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: url.searchParams.get("customer") === "cus_member0001" ? subs : [], has_more: false });
+  // offrow@ has a customer row that is not one, offsub@ a subscription row that is not one (Codex S second review of #2912).
+  const email = url.searchParams.get("email");
+  if (path === "/customers") return answer({ object: "list", data: email === "member@example.com" ? [{ id: "cus_member0001" }] : email === "offrow@example.com" ? [{}] : email === "offsub@example.com" ? [{ id: "cus_offsub00001" }] : [], has_more: false });
+  const customer = url.searchParams.get("customer");
+  if (path === "/subscriptions" && (init?.method ?? "GET") === "GET") return answer({ object: "list", data: customer === "cus_member0001" ? subs : customer === "cus_offsub00001" ? [[]] : [], has_more: false });
   if (path.startsWith("/products")) return answer({ object: "list", data: [] });
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
@@ -153,6 +156,10 @@ async function main(): Promise<void> {
   is("one behind on a payment", await giveFreeDays(store, "member@example.com", "sub_behind0001", 7, 0, by), { ok: false, reason: "blocked", blocked: "behind" });
   is("no days, or more than the cap", [(await giveFreeDays(store, "member@example.com", "sub_live000001", 0, PERIOD_END, by)).ok, (await giveFreeDays(store, "member@example.com", "sub_live000001", 91, PERIOD_END, by)).ok], [false, false]);
   is("a next charge that is not the one the creator saw", await giveFreeDays(store, "member@example.com", "sub_live000001", 7, PERIOD_END - DAY, by), { ok: false, reason: "changed" });
+  // A row Stripe could not have sent is unknown: the studio says Stripe could not be read and the route answers 502, never "no running membership" (Codex S second review of #2912).
+  is("a customer or subscription row that is not one: the studio is told Stripe could not be read", [await freeDaysSubs(store, "offrow@example.com"), await freeDaysSubs(store, "offsub@example.com")], [null, null]);
+  is("and giving days says Stripe, never not a member", [await giveFreeDays(store, "offrow@example.com", "sub_live000001", 7, PERIOD_END, by), await giveFreeDays(store, "offsub@example.com", "sub_live000001", 7, PERIOD_END, by)], [{ ok: false, reason: "stripe" }, { ok: false, reason: "stripe" }]);
+  is("nobody under that address is still none", await freeDaysSubs(store, "nobody@example.com"), []);
   is("nothing was sent to Stripe for any of them", posted.length, 0);
 
   part("An answer that cannot be read records nothing as done");

@@ -277,7 +277,9 @@ async function main(): Promise<void> {
   const unknown = await POST(announce(uncertainId, { id: "msg_unknown" }));
   failSending = false;
   const unknownAgain = await POST(announce(uncertainId, { id: "msg_unknown" }));
-  is("a possibly accepted message remains an explicit failure without another POST", [unknown.status, unknownAgain.status, outboundPosts - postsBefore, sent.length - sentBefore], [500, 500, 1, 0]);
+  // Rule 23 (uncertain-send-auto): was [500, 500, 1, 0]. A 500 made Resend make the announcement again and, after the
+  // day its key is kept, send the message on twice; a possibly accepted one is now acknowledged and kept as heard.
+  is("a possibly accepted message is acknowledged, kept as heard, without another POST", [unknown.status, unknownAgain.status, outboundPosts - postsBefore, sent.length - sentBefore], [200, 200, 1, 0]);
   is("the original provider source remains available for reconciliation", (MAILS[uncertainId] as Record<string, unknown>).text, (MAILS[A] as Record<string, unknown>).text);
 
   part("Names and addresses");

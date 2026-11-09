@@ -42,7 +42,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
-import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
+import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, can, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
 export const MAX_TEAM = 5;
@@ -495,6 +495,14 @@ export async function setMemberRole(store: Store, email: string, rawRole: unknow
     // API keys the new role may not hand out wait for the owner (owner C3-100), paused before the role is
     // saved, under the same lock: if this fails, the role is not changed; if the save fails, the pause is undone.
     const paused = await roleChanged(store, address, role);
+    // The bookings calendar address goes with the "settings" permission, replaced before the role is saved.
+    let addressReplaced = false;
+    try {
+      if (can(member.role, "settings") && !can(role, "settings")) addressReplaced = await closeBookingsAddress(store);
+    } catch (error) {
+      await undoPause(store, paused).catch((undo: unknown) => console.error("undoing the API keys paused for a role change failed", undo));
+      throw error;
+    }
     try {
       await saveTeam(store.sid, {
         members: team.members.map((m) => (m.email === address ? { ...m, role } : m)),
@@ -504,11 +512,12 @@ export async function setMemberRole(store: Store, email: string, rawRole: unknow
       await undoPause(store, paused).catch((undo: unknown) => console.error("undoing the API keys paused for a role change failed", undo));
       throw error;
     }
-    return { ok: true as const, before: member.role, role, unrecorded: paused.filter((p) => p.kind === "unrecorded").map((p) => p.name), unmatched: paused.filter((p) => p.kind === "unmatched").map((p) => p.name) };
+    return { ok: true as const, before: member.role, role, addressReplaced, unrecorded: paused.filter((p) => p.kind === "unrecorded").map((p) => p.name), unmatched: paused.filter((p) => p.kind === "unmatched").map((p) => p.name) };
   }).then(async (result) => {
     // Keys nobody is recorded as making, paused as they may be this teammate's, may be the owner's own: told.
     if (!result.ok) return result;
-    const { unrecorded, unmatched, ...done } = result;
+    const { unrecorded, unmatched, addressReplaced, ...done } = result;
+    if (addressReplaced) await tellOwnerOfNewAddress(store, address, "role");
     if (unrecorded.length || unmatched.length) await tellOwnerOfRole(store, address, unrecorded, unmatched).catch((error: unknown) => console.error("telling the owner which API keys a role change paused failed", error));
     return done;
   });
@@ -547,6 +556,31 @@ export async function putMember(store: Store, email: string, role: TeamRole): Pr
 }
 
 /**
+ * The bookings calendar address names every booker ("Name <email>") and is shown in the studio to whoever holds the
+ * "settings" permission, so a teammate who loses it (taken off the team, or moved to a role without it) must not keep
+ * a live copy: the address is replaced, as their API keys are paused, and the owner is told to add the new one to their
+ * calendar app. Throws when the address could not be replaced, so the caller does not finish the change.
+ */
+async function closeBookingsAddress(store: Store): Promise<boolean> {
+  const { closeFeedAddress } = await import("@/lib/calendar-sync");
+  return closeFeedAddress(store);
+}
+
+async function tellOwnerOfNewAddress(store: Store, who: string, why: "left" | "role"): Promise<void> {
+  await sendEmail({
+    meter: { by: "store", store, kind: "email" },
+    from: NIMBUS_FROM,
+    to: store.email,
+    subject: headerText(`The bookings calendar address for ${store.name} changed`, 200),
+    text: [
+      why === "left" ? `${who} is no longer on the team of ${store.name}, and they could see the address of the store's bookings calendar.` : `The role of ${who} on the team of ${store.name} changed, and the new role cannot see the address of the store's bookings calendar.`,
+      "",
+      "So the address changed, and the old one no longer works. Add the new one to your calendar app: open the studio and look for the bookings calendar address in Settings.",
+    ].join("\n"),
+  }).catch((error: unknown) => console.error("telling the owner the bookings calendar address changed failed", error));
+}
+
+/**
  * A teammate was taken off the team but what they could reach was not all
  * closed after (their API keys paused, the store taken out of their index,
  * their pipeline access forgotten): the removal is to be repeated.
@@ -575,7 +609,8 @@ export async function removeMember(store: Store, email: string, options: { repea
   const address = normaliseEmail(email);
   // Somebody not on the team is swept only for a removal being repeated (the route reads that from the log):
   // a mistyped address pauses nothing and emails nobody.
-  if (!options.repeat && !(await readTeam(store.sid)).members.some((m) => m.email === address)) return false;
+  const before = (await readTeam(store.sid)).members.find((m) => m.email === address);
+  if (!options.repeat && !before) return false;
   // Loaded here, as lib/api-key-pause.ts reads the team through this file.
   const { leftTeam, tellOwnerOfExit, undoExit } = await import("@/lib/api-key-pause");
   const first = await leftTeam(store, address);
@@ -599,6 +634,18 @@ export async function removeMember(store: Store, email: string, options: { repea
   } catch (error) {
     console.error("pausing a former teammate's API keys after taking them off failed; the removal is to be repeated", error);
     throw new KeysNotSwept();
+  }
+  // They could see the bookings calendar address if they held "settings" (a repeat, with the role no longer known,
+  // replaces it again): it is replaced, and a failure is a removal to be repeated, like the sweep above.
+  if (removed || options.repeat) {
+    try {
+      if (!before || can(before.role, "settings")) {
+        if (await closeBookingsAddress(store)) await tellOwnerOfNewAddress(store, address, "left");
+      }
+    } catch (error) {
+      console.error("replacing the bookings calendar address after a teammate left failed; the removal is to be repeated", error);
+      throw new KeysNotSwept();
+    }
   }
   await tellOwnerOfExit(store, address, { left: [...first.left, ...second.left], unmatched: [...first.unmatched, ...second.unmatched], unrecorded: [...first.unrecorded, ...second.unrecorded] }).catch((error: unknown) =>
     console.error("telling the owner which API keys a teammate leaving paused failed", error),

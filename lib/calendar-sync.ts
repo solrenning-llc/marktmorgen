@@ -439,6 +439,19 @@ export async function newFeedToken(store: Store, keepStopped = false): Promise<C
   return calendarView(store);
 }
 
+/**
+ * Replaces the subscription address only if the store has one, so the old copy stops answering at once (a teammate
+ * who could see it has gone or lost the "settings" permission). Returns whether an address was replaced. A store with
+ * no address has nothing to close: the studio makes a fresh one the first time it needs it. Throws when unreadable.
+ */
+export async function closeFeedAddress(store: Store): Promise<boolean> {
+  if (!store.statsId || !isRedisConfigured()) return false;
+  const config = await readConfig(store);
+  if (!config?.token) return false;
+  await newFeedToken(store, true);
+  return true;
+}
+
 /** Makes the subscription address the first time the studio needs one. */
 export async function ensureFeedToken(store: Store): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;

@@ -6,7 +6,7 @@
  * happens to press "new address".
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { putMember, removeMember } from "@/lib/team";
+import { putMember, removeMember, setMemberRole } from "@/lib/team";
 import { calendarView, ensureFeedToken } from "@/lib/calendar-sync";
 import type { CallSetup } from "@/lib/call-setup";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
@@ -15,7 +15,12 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 let checkouts: Record<string, unknown>[] = [];
+const mails: { to: string[] | string; subject: string; text: string }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  if (new URL(String(input)).hostname === "api.resend.com") {
+    mails.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ id: "e" }), { status: 200 });
+  }
   const listing = String(input).includes("/checkout/sessions?") && (init?.method ?? "GET") === "GET";
   return new Response(JSON.stringify({ object: "list", data: listing ? checkouts : [], has_more: false }), { status: 200 });
 }) as typeof fetch;
@@ -28,6 +33,7 @@ const weekly = { kind: "weekly", minutes: 60, tz: "America/New_York", weekly: [[
 async function main(): Promise<void> {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_team_scheduling_only";
+  process.env.RESEND_API_KEY = "re_test_team_scheduling_only";
   await claimHandle(OWNER, "harbor", "Harbor studio", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, "acct_1TestHarbor0001", true);
@@ -60,6 +66,21 @@ async function main(): Promise<void> {
   // EXPECTED (safe): the address a former teammate copied stops, as their API keys do. ON MAIN: it still names the buyer.
   const after = await ask();
   is("the address the former admin copied no longer names the store's buyers", after.status === 200 && after.names, false);
+  is("the owner was told the address changed", mails.some((m) => String(m.to).includes(OWNER) && /bookings calendar address/.test(m.subject) && /Add the new one/.test(m.text)), true);
+
+  part("An admin moved to a role without settings, and an editor taken off");
+  const EDITOR = "editor@example.com";
+  const fresh = async () => (await storeForEmail(OWNER)) as Store;
+  const addressOf = async () => (await calendarView(await fresh())).subscribeUrl ?? "";
+  is("added as admin again", await putMember(await fresh(), ADMIN, "admin"), true);
+  await ensureFeedToken(await fresh());
+  const copied = await addressOf();
+  is("an admin moved to editor", (await setMemberRole(await fresh(), ADMIN, "editor")).ok, true);
+  const afterDemotion = await addressOf();
+  is("the address they could see was replaced", afterDemotion !== copied && afterDemotion !== "", true);
+  is("an editor added", await putMember(await fresh(), EDITOR, "editor"), true);
+  is("an editor taken off", await removeMember(await fresh(), EDITOR), true);
+  is("an address they never saw is left alone", await addressOf(), afterDemotion);
   done();
 }
 
